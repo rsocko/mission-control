@@ -3,6 +3,10 @@ import { createReadStream, statSync, type Stats } from 'node:fs';
 import path from 'node:path';
 import type { GitHubRecoveryBackupAttestation } from '@/db/persistence/github-recovery';
 import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import {
   BACKUP_ATTESTATION_MAX_AGE_MS,
   BACKUP_ATTESTATION_MAX_CLOCK_SKEW_MS,
 } from '@/db/persistence/github-recovery-values';
@@ -87,10 +91,23 @@ const sqliteVerifier: GitHubRepointBackupVerifier = {
 export function registerGitHubRepointBackupVerifier(
   next: GitHubRepointBackupVerifier,
 ): void {
+  assertCanRegisterGitHubRepointBackupVerifier(next);
   verifier = next;
 }
 
-export function clearGitHubRepointBackupVerifier(): void {
+export function assertCanRegisterGitHubRepointBackupVerifier(
+  next: GitHubRepointBackupVerifier,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  if (verifier && verifier !== next) {
+    throw new Error('GitHub repoint backup verifier is already selected');
+  }
+}
+
+export function clearGitHubRepointBackupVerifier(
+  expectedVerifier?: GitHubRepointBackupVerifier,
+): void {
+  if (expectedVerifier && verifier !== expectedVerifier) return;
   verifier = null;
 }
 
@@ -98,10 +115,19 @@ export function registerSqliteGitHubRepointBackupVerifier(): void {
   registerGitHubRepointBackupVerifier(sqliteVerifier);
 }
 
+export function assertCanRegisterSqliteGitHubRepointBackupVerifier(): void {
+  assertCanRegisterGitHubRepointBackupVerifier(sqliteVerifier);
+}
+
+export function clearSqliteGitHubRepointBackupVerifier(): void {
+  clearGitHubRepointBackupVerifier(sqliteVerifier);
+}
+
 export async function inspectGitHubRepointBackup(
   backupPath: string,
   now = new Date(),
 ): Promise<GitHubRecoveryBackupAttestation> {
+  assertPersistenceCompositionAccessAllowed();
   if (!verifier) {
     throw new Error('GitHub backup verification is unavailable for the selected backend');
   }

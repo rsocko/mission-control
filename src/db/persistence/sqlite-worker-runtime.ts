@@ -5,14 +5,30 @@ import type { CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import { financeInsightDigestV1 } from '@/lib/finance-insights/canonical';
 import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
 import {
+  assertCanRegisterSqliteGitHubRepointBackupVerifier,
+  clearSqliteGitHubRepointBackupVerifier,
   registerSqliteGitHubRepointBackupVerifier,
 } from '@/lib/connectors/github-issues/backup-verifier';
-import { registerFinanceTransactionQuery } from '@/lib/connectors/monarch-money/transaction-query';
-import { registerSqliteLegacySearchIndexingService } from './sqlite-legacy-search-indexing';
 import {
+  assertCanRegisterFinanceTransactionQuery,
+  clearFinanceTransactionQuery,
+  registerFinanceTransactionQuery,
+} from '@/lib/connectors/monarch-money/transaction-query';
+import {
+  assertCanRegisterSqliteLegacySearchIndexingService,
+  clearSqliteLegacySearchIndexingService,
+  registerSqliteLegacySearchIndexingService,
+} from './sqlite-legacy-search-indexing';
+import {
+  assertCanRegisterSqliteAIEnrichmentService,
+  clearSqliteAIEnrichmentService,
   registerSqliteAIEnrichmentService,
 } from '@/lib/notifications/enrichment/ai-enrichment';
-import { registerKeywordSearchRepository } from '@/lib/search/keyword-runtime';
+import {
+  assertCanRegisterKeywordSearchRepository,
+  clearKeywordSearchRepository,
+  registerKeywordSearchRepository,
+} from '@/lib/search/keyword-runtime';
 import { sqliteKeywordSearchRepository } from '@/lib/search/sqlite-fts-repository';
 import type { WorkerPersistenceRepositories } from './worker-repositories';
 import type { CorePersistenceRepositories } from './core-repositories';
@@ -47,12 +63,29 @@ import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-quer
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
+export function assertCanRegisterSqliteWorkerRuntimeServices(): void {
+  assertCanRegisterSqliteGitHubRepointBackupVerifier();
+  assertCanRegisterFinanceTransactionQuery(sqliteFinanceTransactionQuery);
+  assertCanRegisterSqliteLegacySearchIndexingService();
+  assertCanRegisterSqliteAIEnrichmentService();
+  assertCanRegisterKeywordSearchRepository(sqliteKeywordSearchRepository);
+}
+
 export function registerSqliteWorkerRuntimeServices(): void {
+  assertCanRegisterSqliteWorkerRuntimeServices();
   registerSqliteGitHubRepointBackupVerifier();
   registerFinanceTransactionQuery(sqliteFinanceTransactionQuery);
   registerSqliteLegacySearchIndexingService();
   registerSqliteAIEnrichmentService();
   registerKeywordSearchRepository(sqliteKeywordSearchRepository);
+}
+
+export function clearSqliteWorkerRuntimeServices(): void {
+  clearKeywordSearchRepository(sqliteKeywordSearchRepository);
+  clearSqliteAIEnrichmentService();
+  clearSqliteLegacySearchIndexingService();
+  clearFinanceTransactionQuery(sqliteFinanceTransactionQuery);
+  clearSqliteGitHubRepointBackupVerifier();
 }
 
 export function createSqliteWorkerPersistenceRepositories(

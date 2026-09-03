@@ -53,8 +53,9 @@ describe('Layer 7 triage worker persistence boundary', () => {
       'Worker persistence repositories must be registered before worker persistence is accessed',
     );
     expect(runtime).not.toContain('sqlite');
-    expect(source('src/db/runtime.ts')).toContain(
-      "import('./persistence/sqlite-worker-runtime')",
+    expect(source('src/db/runtime.ts')).toContain("import('./index')");
+    expect(source('src/db/index.ts')).toMatch(
+      /(?:from\s+|import\()['"]\.\/persistence\/sqlite-worker-runtime['"]/,
     );
   });
 

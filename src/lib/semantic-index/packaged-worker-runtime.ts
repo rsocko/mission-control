@@ -12,6 +12,9 @@ import type { AIRoutingPolicyConfig } from '@/lib/ai/types';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { buildEmbeddingConfig } from '@/lib/search/embedding-config';
 import {
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import {
   getPostgresSemanticIndexRepository,
   getPostgresSemanticSourcePort,
 } from '@/db/runtime';
@@ -212,6 +215,7 @@ export function startPackagedPostgresSemanticWorker(
 }
 
 export function resumePackagedPostgresSemanticRuntime(): void {
+  assertPersistenceCompositionPublicationAllowed();
   if (runtimeStopPromise || runtimePendingStop) {
     throw new Error('Packaged PostgreSQL semantic runtime is still stopping');
   }

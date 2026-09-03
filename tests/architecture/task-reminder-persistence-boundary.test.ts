@@ -53,8 +53,9 @@ describe('task reminder persistence boundary', () => {
       'Worker persistence repositories must be registered before worker persistence is accessed',
     );
     expect(runtime).not.toContain('sqlite');
-    expect(read('src/db/runtime.ts')).toContain(
-      "import('./persistence/sqlite-worker-runtime')",
+    expect(read('src/db/runtime.ts')).toContain("import('./index')");
+    expect(read('src/db/index.ts')).toMatch(
+      /(?:from\s+|import\()['"]\.\/persistence\/sqlite-worker-runtime['"]/,
     );
   });
 

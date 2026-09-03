@@ -1,5 +1,9 @@
 import type { SemanticSourceEntityType } from './source/contracts';
 import type { SemanticPublishResult } from './service';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
 
 export interface SemanticPublicationService {
   upsert(
@@ -17,6 +21,7 @@ let selectedService: SemanticPublicationService | null = null;
 export function registerSemanticPublicationService(
   service: SemanticPublicationService,
 ): void {
+  assertPersistenceCompositionPublicationAllowed();
   if (selectedService && selectedService !== service) {
     throw new Error('Semantic publication service is already selected');
   }
@@ -24,6 +29,7 @@ export function registerSemanticPublicationService(
 }
 
 function getService(): SemanticPublicationService {
+  assertPersistenceCompositionAccessAllowed();
   if (!selectedService) {
     throw new Error('Semantic publication service must be registered before publication');
   }

@@ -1,5 +1,9 @@
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import type { DurableAiRunRepository } from './repository';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
 
 let sqliteRepositoryPromise: Promise<DurableAiRunRepository> | null = null;
 let postgresRepository: DurableAiRunRepository | null = null;
@@ -7,17 +11,22 @@ let postgresRepository: DurableAiRunRepository | null = null;
 export function registerPostgresDurableAiRunRepository(
   repository: DurableAiRunRepository,
 ): void {
+  assertPersistenceCompositionPublicationAllowed();
   if (postgresRepository && postgresRepository !== repository) {
     throw new Error('PostgreSQL durable AI run repository is already registered');
   }
   postgresRepository = repository;
 }
 
-export function clearPostgresDurableAiRunRepository(): void {
+export function clearPostgresDurableAiRunRepository(
+  expectedRepository?: DurableAiRunRepository,
+): void {
+  if (expectedRepository && postgresRepository !== expectedRepository) return;
   postgresRepository = null;
 }
 
 export async function getDurableAiRunRepository(): Promise<DurableAiRunRepository> {
+  assertPersistenceCompositionAccessAllowed();
   if (resolveDatabaseBackend() === 'postgres') {
     if (!postgresRepository) {
       throw new Error('PostgreSQL durable AI run repository has not been registered');

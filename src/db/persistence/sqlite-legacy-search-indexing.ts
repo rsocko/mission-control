@@ -1,4 +1,6 @@
 import {
+  assertCanRegisterLegacySearchIndexingService,
+  clearLegacySearchIndexingService,
   registerLegacySearchIndexingService,
   type LegacySearchIndexingService,
 } from '@/lib/search/indexing-service';
@@ -29,4 +31,12 @@ const sqliteLegacySearchIndexingService: LegacySearchIndexingService = {
 
 export function registerSqliteLegacySearchIndexingService(): void {
   registerLegacySearchIndexingService(sqliteLegacySearchIndexingService);
+}
+
+export function assertCanRegisterSqliteLegacySearchIndexingService(): void {
+  assertCanRegisterLegacySearchIndexingService(sqliteLegacySearchIndexingService);
+}
+
+export function clearSqliteLegacySearchIndexingService(): void {
+  clearLegacySearchIndexingService(sqliteLegacySearchIndexingService);
 }

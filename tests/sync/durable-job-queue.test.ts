@@ -69,17 +69,7 @@ function startRetentionProcess(
   leaseMs: number,
   mode = 'hold',
 ): Promise<{ child: ChildProcess; acquired: boolean }> {
-  const child = fork(
-    join(process.cwd(), 'tests', 'sync', 'fixtures', 'connector-lock-process.ts'),
-    [connectorId, String(leaseMs), mode],
-    {
-      execArgv: ['--conditions', 'react-server', '--import', 'tsx'],
-      env: { ...process.env, MC_DB_PATH: process.env.MC_DB_PATH },
-      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
-    },
-  );
-  retentionProcesses.add(child);
-  child.once('exit', () => retentionProcesses.delete(child));
+  const child = createRetentionProcess(connectorId, leaseMs, mode);
   return new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('message', (message) => {
@@ -92,6 +82,61 @@ function startRetentionProcess(
       if (code && code !== 0) reject(new Error(`Retention process exited with code ${code}`));
     });
   });
+}
+
+function createRetentionProcess(
+  connectorId: string,
+  leaseMs: number,
+  mode: string,
+): ChildProcess {
+  const child = fork(
+    join(process.cwd(), 'tests', 'sync', 'fixtures', 'connector-lock-process.ts'),
+    [connectorId, String(leaseMs), mode],
+    {
+      execArgv: ['--conditions', 'react-server', '--import', 'tsx'],
+      env: { ...process.env, MC_DB_PATH: process.env.MC_DB_PATH },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    },
+  );
+  retentionProcesses.add(child);
+  child.once('exit', () => retentionProcesses.delete(child));
+  return child;
+}
+
+function startRetentionProbeProcess(
+  connectorId: string,
+  leaseMs: number,
+): Promise<ChildProcess> {
+  const child = createRetentionProcess(connectorId, leaseMs, 'probe');
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('message', (message) => {
+      if (!(message as { ready?: boolean }).ready) {
+        reject(new Error('Retention probe did not become ready'));
+        return;
+      }
+      resolve(child);
+    });
+    child.once('exit', (code) => {
+      if (code && code !== 0) reject(new Error(`Retention process exited with code ${code}`));
+    });
+  });
+}
+
+function probeRetentionProcess(child: ChildProcess): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('message', (message) => {
+      resolve((message as { acquired: boolean }).acquired);
+    });
+    child.send('probe');
+  });
+}
+
+async function stopRetentionProbeProcess(child: ChildProcess): Promise<void> {
+  const exited = once(child, 'exit');
+  child.send('exit');
+  await exited;
 }
 
 function releaseRetentionProcess(child: ChildProcess): Promise<void> {
@@ -581,19 +626,17 @@ describe('durable sync job queue', () => {
   });
 
   it('blocks retention in another process while durable sync is queued or running', async () => {
+    const retentionProbe = await startRetentionProbeProcess('github-1', 10_000);
     const queued = queue.enqueueSyncJob('github-1');
-    const queuedAttempt = await startRetentionProcess('github-1', 10_000);
-    expect(queuedAttempt.acquired).toBe(false);
+    expect(await probeRetentionProcess(retentionProbe)).toBe(false);
 
     const running = queue.claimNextSyncJob('worker-a');
     expect(running?.id).toBe(queued.id);
-    const runningAttempt = await startRetentionProcess('github-1', 10_000);
-    expect(runningAttempt.acquired).toBe(false);
+    expect(await probeRetentionProcess(retentionProbe)).toBe(false);
 
     queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
-    const afterSync = await startRetentionProcess('github-1', 10_000);
-    expect(afterSync.acquired).toBe(true);
-    await releaseRetentionProcess(afterSync.child);
+    expect(await probeRetentionProcess(retentionProbe)).toBe(true);
+    await stopRetentionProbeProcess(retentionProbe);
   });
 
   it('keeps a worker from claiming a connector leased by another process', async () => {

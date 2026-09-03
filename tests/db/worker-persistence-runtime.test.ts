@@ -83,10 +83,12 @@ describe('worker persistence runtime', () => {
     expect(databaseModule).not.toHaveBeenCalled();
   });
 
-  it('keeps the explicitly registered composition stable', async () => {
+  it('allows pre-access replacement and fences the selected composition after access', async () => {
     const runtime = await import('@/lib/persistence/worker-runtime');
+    const provisional = createWorkerRepositories();
     const selected = createWorkerRepositories();
 
+    runtime.registerWorkerPersistenceRepositories(provisional);
     runtime.registerWorkerPersistenceRepositories(selected);
 
     const [first, second] = await Promise.all([

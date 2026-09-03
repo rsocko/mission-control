@@ -19,7 +19,11 @@ import {
   type AIEnrichmentInput,
   type AIEnrichmentResult,
 } from './ai-enrichment-policy';
-import { registerAIEnrichmentService } from './ai-enrichment-service';
+import {
+  assertCanRegisterAIEnrichmentService,
+  clearAIEnrichmentService,
+  registerAIEnrichmentService,
+} from './ai-enrichment-service';
 
 export {
   buildEnrichmentPrompt,
@@ -89,4 +93,12 @@ const sqliteAIEnrichmentService = { enrich: enrichWithAI };
 
 export function registerSqliteAIEnrichmentService(): void {
   registerAIEnrichmentService(sqliteAIEnrichmentService);
+}
+
+export function assertCanRegisterSqliteAIEnrichmentService(): void {
+  assertCanRegisterAIEnrichmentService(sqliteAIEnrichmentService);
+}
+
+export function clearSqliteAIEnrichmentService(): void {
+  clearAIEnrichmentService(sqliteAIEnrichmentService);
 }

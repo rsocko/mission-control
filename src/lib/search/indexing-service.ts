@@ -1,3 +1,8 @@
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+
 export interface SearchIndexTask {
   id: string;
   title: string;
@@ -33,17 +38,28 @@ let selectedService: LegacySearchIndexingService | null = null;
 export function registerLegacySearchIndexingService(
   service: LegacySearchIndexingService,
 ): void {
-  if (selectedService && selectedService !== service) {
-    throw new Error('Legacy search indexing service is already selected');
-  }
+  assertCanRegisterLegacySearchIndexingService(service);
   selectedService = service;
 }
 
-export function clearLegacySearchIndexingService(): void {
+export function assertCanRegisterLegacySearchIndexingService(
+  service: LegacySearchIndexingService,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  if (selectedService && selectedService !== service) {
+    throw new Error('Legacy search indexing service is already selected');
+  }
+}
+
+export function clearLegacySearchIndexingService(
+  expectedService?: LegacySearchIndexingService,
+): void {
+  if (expectedService && selectedService !== expectedService) return;
   selectedService = null;
 }
 
 export function getLegacySearchIndexingService(): LegacySearchIndexingService {
+  assertPersistenceCompositionAccessAllowed();
   if (!selectedService) {
     throw new Error('Legacy search indexing service is unavailable for the selected backend');
   }

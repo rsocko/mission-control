@@ -50,8 +50,9 @@ describe('notification delivery persistence boundary', () => {
     expect(runtime).toContain(
       'notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite)',
     );
-    expect(read('src/db/runtime.ts')).toContain(
-      "import('./persistence/sqlite-worker-runtime')",
+    expect(read('src/db/runtime.ts')).toContain("import('./index')");
+    expect(read('src/db/index.ts')).toMatch(
+      /(?:from\s+|import\()['"]\.\/persistence\/sqlite-worker-runtime['"]/,
     );
     expect(read('src/lib/persistence/worker-runtime.ts')).not.toContain('sqlite');
 

@@ -5,6 +5,7 @@ import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repo
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
   const registerWorker = vi.fn();
+  const resumeSemantic = vi.fn();
   const stopSemantic = vi.fn(async () => undefined);
   const backend = {
     generation: 0,
@@ -65,6 +66,7 @@ const mocks = vi.hoisted(() => {
       return repository;
     }),
     registerWorker,
+    resumeSemantic,
     stopSemantic,
     workerRepositories,
     createWorker: vi.fn((_db, _pool, core: CorePersistenceRepositories) => {
@@ -137,6 +139,7 @@ vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: vi.fn(() => ({})),
 }));
 vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
+  resumePackagedPostgresSemanticRuntime: mocks.resumeSemantic,
   stopPackagedPostgresSemanticWorker: mocks.stopSemantic,
 }));
 
@@ -179,6 +182,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.backend.initialize).toHaveBeenCalledTimes(1);
     expect(mocks.registerCore).toHaveBeenCalledTimes(1);
     expect(mocks.registerWorker).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(1);
 
     await shutdownRuntimeDatabase();
     expect(mocks.stopSemantic).toHaveBeenCalledOnce();
@@ -190,6 +194,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.registerCore).toHaveBeenCalledTimes(2);
     expect(mocks.registerCore.mock.calls[1][0]).toBe(registeredComposition);
     expect(mocks.registerWorker.mock.calls[1][0]).toBe(registeredWorkerComposition);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(2);
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();

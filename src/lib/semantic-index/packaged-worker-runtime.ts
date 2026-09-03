@@ -89,6 +89,8 @@ export interface PackagedPostgresSemanticRuntime {
 let runtime: PackagedPostgresSemanticRuntime | null = null;
 let runtimePromise: Promise<PackagedPostgresSemanticRuntime> | null = null;
 let runtimeGeneration = 0;
+let runtimeSuspended = false;
+let runtimeStopPromise: Promise<void> | null = null;
 const activePublications = new Set<Promise<SemanticPublishResult>>();
 
 function parseRoutingPolicy(value: unknown): AIRoutingPolicyConfig {
@@ -117,6 +119,9 @@ function assertMethods<T extends object>(
 export async function createPackagedPostgresSemanticRuntime(
   isCapabilityActive: () => boolean = () => true,
 ): Promise<PackagedPostgresSemanticRuntime> {
+  if (runtimeSuspended) {
+    throw new Error('Packaged PostgreSQL semantic runtime is suspended');
+  }
   if (runtime) return runtime;
   if (!runtimePromise) {
     const compositionGeneration = runtimeGeneration;
@@ -205,15 +210,30 @@ export function startPackagedPostgresSemanticWorker(
   composed.worker.start();
 }
 
-export async function stopPackagedPostgresSemanticWorker(): Promise<void> {
-  runtimeGeneration++;
-  const pending = runtimePromise;
-  const current = runtime;
-  runtime = null;
-  if (pending) await pending.catch(() => undefined);
-  if (runtimePromise === pending) runtimePromise = null;
-  await Promise.allSettled(activePublications);
-  if (current) await current.worker.stop();
+export function resumePackagedPostgresSemanticRuntime(): void {
+  if (runtimeStopPromise) {
+    throw new Error('Packaged PostgreSQL semantic runtime is still stopping');
+  }
+  if (runtimeSuspended) runtimeGeneration++;
+  runtimeSuspended = false;
+}
+
+export function stopPackagedPostgresSemanticWorker(): Promise<void> {
+  if (runtimeStopPromise) return runtimeStopPromise;
+  runtimeStopPromise = (async () => {
+    runtimeSuspended = true;
+    runtimeGeneration++;
+    const pending = runtimePromise;
+    const current = runtime;
+    runtime = null;
+    if (pending) await pending.catch(() => undefined);
+    if (runtimePromise === pending) runtimePromise = null;
+    await Promise.allSettled(activePublications);
+    if (current) await current.worker.stop();
+  })().finally(() => {
+    runtimeStopPromise = null;
+  });
+  return runtimeStopPromise;
 }
 
 export async function publishPackagedPostgresSemanticEntity(
@@ -221,6 +241,9 @@ export async function publishPackagedPostgresSemanticEntity(
   entityType: SemanticSourceEntityType,
   entityId: string,
 ): Promise<SemanticPublishResult> {
+  if (runtimeSuspended) {
+    return { status: 'skipped', reason: 'runtime-shutdown' };
+  }
   const publicationGeneration = runtimeGeneration;
   const current = runtime ?? await createPackagedPostgresSemanticRuntime();
   if (

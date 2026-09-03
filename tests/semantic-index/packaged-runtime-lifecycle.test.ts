@@ -124,12 +124,23 @@ describe('packaged PostgreSQL semantic runtime lifecycle', () => {
     expect(mocks.publish).not.toHaveBeenCalled();
     expect(mocks.workerConstructed).toHaveBeenCalledTimes(1);
     expect(mocks.workerStop).toHaveBeenCalledTimes(1);
+    mocks.backendDisposed = true;
 
     await runtime.stopPackagedPostgresSemanticWorker();
     expect(mocks.workerStop).toHaveBeenCalledTimes(1);
+    await expect(
+      runtime.publishPackagedPostgresSemanticEntity(
+        'upsert',
+        'task',
+        'task-while-suspended',
+      ),
+    ).resolves.toEqual({ status: 'skipped', reason: 'runtime-shutdown' });
+    expect(mocks.workerConstructed).toHaveBeenCalledTimes(1);
 
     mocks.settingsGate = null;
     mocks.semanticEnabled = true;
+    mocks.backendDisposed = false;
+    runtime.resumePackagedPostgresSemanticRuntime();
     const rebuilt = await runtime.createPackagedPostgresSemanticRuntime();
     let releasePublication!: () => void;
     mocks.publishGate = new Promise<void>((resolve) => {
@@ -154,6 +165,14 @@ describe('packaged PostgreSQL semantic runtime lifecycle', () => {
     });
     await Promise.resolve();
     expect(finalShutdownComplete).toBe(false);
+    await expect(
+      runtime.publishPackagedPostgresSemanticEntity(
+        'upsert',
+        'task',
+        'task-during-shutdown',
+      ),
+    ).resolves.toEqual({ status: 'skipped', reason: 'runtime-shutdown' });
+    expect(mocks.workerConstructed).toHaveBeenCalledTimes(2);
 
     releasePublication();
     await expect(activePublication).resolves.toEqual({ status: 'published' });
@@ -165,5 +184,13 @@ describe('packaged PostgreSQL semantic runtime lifecycle', () => {
 
     await runtime.stopPackagedPostgresSemanticWorker();
     expect(mocks.workerStop).toHaveBeenCalledTimes(2);
+    await expect(
+      runtime.publishPackagedPostgresSemanticEntity(
+        'upsert',
+        'task',
+        'task-after-shutdown',
+      ),
+    ).resolves.toEqual({ status: 'skipped', reason: 'runtime-shutdown' });
+    expect(mocks.workerConstructed).toHaveBeenCalledTimes(2);
   });
 });

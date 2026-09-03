@@ -305,6 +305,10 @@ async function initializeRuntimeDatabaseOnce(): Promise<void> {
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
   postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
+  const { resumePackagedPostgresSemanticRuntime } = await import(
+    '@/lib/semantic-index/packaged-worker-runtime'
+  );
+  resumePackagedPostgresSemanticRuntime();
 }
 
 export function initializeRuntimeDatabase(): Promise<void> {

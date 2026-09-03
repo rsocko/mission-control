@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => {
   const pool = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) };
   const backendInitialize = vi.fn(async () => undefined);
   const backendShutdown = vi.fn(async () => undefined);
+  const resumeSemantic = vi.fn();
   const stopSemantic = vi.fn(async () => undefined);
   const core = {
     tasks: {},
@@ -51,6 +52,7 @@ const mocks = vi.hoisted(() => {
     pool,
     backendInitialize,
     backendShutdown,
+    resumeSemantic,
     stopSemantic,
     core,
     worker,
@@ -116,6 +118,7 @@ vi.mock('@/lib/notifications/enrichment/packaged-executor', () => ({
 }));
 vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
   publishPackagedPostgresSemanticEntity: mocks.publish,
+  resumePackagedPostgresSemanticRuntime: mocks.resumeSemantic,
   stopPackagedPostgresSemanticWorker: mocks.stopSemantic,
 }));
 vi.mock('@/lib/runtime/lifecycle', () => ({
@@ -210,6 +213,7 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
     ).resolves.toEqual({ status: 'skipped' });
     expect(mocks.backendInitialize).toHaveBeenCalledTimes(2);
     expect(mocks.backendShutdown).toHaveBeenCalledTimes(1);
+    expect(mocks.resumeSemantic).toHaveBeenCalledTimes(2);
     expect(mocks.stopSemantic).toHaveBeenCalledTimes(1);
     expect(mocks.sqliteTouch).not.toHaveBeenCalled();
   });

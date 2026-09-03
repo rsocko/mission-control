@@ -26,9 +26,9 @@ vi.mock('@/lib/search/semantic', () => ({
   rebuildEmbeddingIndex: vi.fn(async () => ({ status: 'scheduled' })),
 }));
 
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  publishSemanticUpsert: mocks.publishSemanticUpsert,
-  publishSemanticDelete: mocks.publishSemanticDelete,
+vi.mock('@/lib/semantic-index/publication', () => ({
+  publishSemanticEntityUpsert: mocks.publishSemanticUpsert,
+  publishSemanticEntityDelete: mocks.publishSemanticDelete,
 }));
 
 describe('search index publication', () => {

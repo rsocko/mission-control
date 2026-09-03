@@ -170,7 +170,7 @@ describe('Layer 5C finance persistence boundary', () => {
     expect(support).toContain(
       "throw new UnsupportedConnectorExecutionError('connector-owned domain state')",
     );
-    expect(support).toContain("return workflow === 'dependency-reconciliation'");
+    expect(support).toContain('return isPostgresBackendWorkflowSupported(workflow)');
     expect(support).toContain("workflow === 'notification-dispatcher'");
     expect(backfill.indexOf('repositories.execution.support.assertConfigSupported(input.config)'))
       .toBeGreaterThan(0);

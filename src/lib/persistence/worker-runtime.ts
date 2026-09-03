@@ -43,6 +43,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { createSqliteProjectAutomationRepository },
     { createSqliteEventDeliveryRepositories },
     { createSqliteNotificationEnrichmentRepository },
+    { createSqliteNotificationEntityLinkingRepository },
     { createSqliteFinanceWorkerPersistence },
     { createSqliteFinanceConnectionRecoveryPersistence },
     { createSqliteFinanceInsightPersistence },
@@ -72,6 +73,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-project-automation-repository'),
     import('@/db/persistence/sqlite-event-outbox-repository'),
     import('@/db/persistence/sqlite-notification-enrichment-repository'),
+    import('@/db/persistence/sqlite-notification-entity-linking-repository'),
     import('@/db/persistence/sqlite-finance-worker-repositories'),
     import('@/db/persistence/sqlite-finance-recovery-repository'),
     import('@/db/persistence/sqlite-finance-insights-repositories'),
@@ -159,6 +161,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     planningSignals: createSqlitePlanningSignalRepository(sqlite),
     projectAutomation: createSqliteProjectAutomationRepository(sqlite),
     eventDelivery: createSqliteEventDeliveryRepositories(sqlite),
+    notificationEntityLinking: createSqliteNotificationEntityLinkingRepository(sqlite),
     notificationEnrichment: createSqliteNotificationEnrichmentRepository(sqlite),
     finance,
   };

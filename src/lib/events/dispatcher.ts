@@ -264,6 +264,7 @@ export async function recoverStaleEventDeliveryLeases(
 
 export interface EventOutboxDispatcherOptions extends DispatchEventDeliveriesOptions {
   staleLeaseSweepMs?: number;
+  isEnabled?(): boolean;
 }
 
 /**
@@ -300,7 +301,7 @@ export class EventOutboxDispatcher {
   }
 
   private async sweep(): Promise<void> {
-    if (this.stopped) return;
+    if (this.stopped || this.options.isEnabled?.() === false) return;
     try {
       await recoverStaleEventDeliveryLeases({ repositories: this.options.repositories });
       await this.drain();
@@ -310,7 +311,7 @@ export class EventOutboxDispatcher {
   }
 
   async drain(): Promise<number> {
-    if (this.stopped) return 0;
+    if (this.stopped || this.options.isEnabled?.() === false) return 0;
     if (this.running) {
       await this.running;
       return this.stopped ? 0 : this.drain();

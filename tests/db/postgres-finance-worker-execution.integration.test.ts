@@ -646,6 +646,10 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
           MC_WORKER_INSTANCE_FILE: instancePath,
           MC_TELEMETRY_INTERVAL_MS: '100',
           MC_DEPLOYMENT_REVISION: 'postgres-final-worker-smoke',
+          AI_PROVIDER: 'ollama',
+          AI_BASE_URL: 'http://127.0.0.1:1/v1',
+          AI_MODEL: 'postgres-final-worker-smoke',
+          MC_AI_PROVIDER_SESSION_KEY: Buffer.alloc(32, 17).toString('base64'),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
@@ -658,7 +662,7 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
             throw new Error(logs || `Worker exited with code ${child.exitCode}`);
           }
           const instanceId = (await readFile(instancePath, 'utf8')).trim();
-          if (!instanceId || !logs.includes('triage auto-sync scheduler initialized')) {
+          if (!instanceId || !logs.includes('Triage auto-sync scheduler initialized')) {
             throw new Error(logs || 'Worker startup is incomplete');
           }
         }, 60_000);

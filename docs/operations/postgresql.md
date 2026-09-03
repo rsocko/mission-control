@@ -53,26 +53,28 @@ select PostgreSQL in production, change deployment configuration, establish
 complete web/API persistence parity, or perform the production cutover tracked
 by [#1155](https://github.com/rsocko/mission-control/issues/1155).
 
-### Gated semantic worker parity
+### Application workflow parity
 
-The packaged runtime also contains a test-only semantic worker harness for
-PostgreSQL parity verification. It composes the production PostgreSQL semantic
-repository and source adapter, the normal semantic service and worker loop, and
-the production `AIEmbeddingProvider` request/response path. The harness fails
-closed unless it is running in the test environment with its explicit harness
-token, a safe test PostgreSQL URL, and a loopback embedding endpoint.
-The guarded runtime proof terminates the packaged process after a durable
-backfill checkpoint and verifies lease-expiry recovery resumes from that cursor
-without duplicate intents, documents, or vectors. PostgreSQL semantic
-idempotency keys use an explicit storage-version discriminator: preexisting raw
-TEXT rows remain version 0, while arbitrary new contract strings use the
-injective version 1 encoding.
+The normal PostgreSQL web and packaged-worker compositions support planning
+signals, project automation, the durable event outbox, durable notification
+enrichment, the durable AI executor registry, and semantic indexing/search.
+The six-family capability is atomic: producers receive backend-selected
+PostgreSQL repositories, while the worker precomposes and validates all
+repositories, executor routes, semantic entities/intents, provider
+configuration, and stop handles before any consumer may claim work. Missing
+composition fails startup; it does not disable a family or fall back to SQLite.
 
-This artifact is evidence, not activation. Normal PostgreSQL semantic
-publication and the `src/sync-worker.ts` semantic entrypoint remain closed by
-the legacy-workflow gate. No packaged semantic test may select or evaluate
-SQLite, and enabling the test harness does not open any production runtime
-gate.
+Worker consumers remain dormant behind an instance-local latch until the full
+startup transaction completes. Readiness is published only after activation.
+Startup failure and normal shutdown revoke new claims before reverse-order
+drain and database close. The PostgreSQL import graph and packaged artifact are
+checked with SQLite poisoned.
+
+This is application capability availability, not production activation. It
+does not change the default backend, deployment or Homelab configuration,
+secrets, production data, or cutover status. Selecting PostgreSQL and performing
+a production cutover still require the separate operator audit, approval, data
+migration, and maintenance-window work tracked above.
 
 Keep SQLite databases and rollback artifacts until those separate activation
 and cutover steps are complete.

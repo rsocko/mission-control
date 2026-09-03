@@ -50,4 +50,12 @@ describe('sync worker dependency metadata', () => {
     expect(packaging).toContain('semanticWorkerHarnessEntry');
     expect(packaging).toContain('semantic-worker-harness.cjs');
   });
+
+  it('builds the guarded whole-worker launcher beside the production bootstrap', () => {
+    const build = readFileSync('scripts/build-sync-worker.mjs', 'utf8');
+    expect(build).toContain("['sync-worker.ts', 'sync-worker.cjs']");
+    expect(build).toContain(
+      "['sync-worker-integration.ts', 'sync-worker-integration.cjs']",
+    );
+  });
 });

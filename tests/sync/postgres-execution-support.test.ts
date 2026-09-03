@@ -47,17 +47,18 @@ describe('PostgreSQL generic connector execution support', () => {
     })).not.toThrow();
   });
 
-  it('enables only the portable dependency and notification workflows', () => {
+  it('exposes all portable Layer 7 workflows as one backend support set', () => {
     expect(support.allowsLegacyWorkflow('dependency-reconciliation')).toBe(true);
     expect(support.allowsLegacyWorkflow('notification-dispatcher')).toBe(true);
     for (const workflow of [
+      'durable-ai',
       'event-outbox',
       'notification-enrichment',
       'planning-signals',
       'project-automation',
       'semantic-search',
     ] as const) {
-      expect(support.allowsLegacyWorkflow(workflow)).toBe(false);
+      expect(support.allowsLegacyWorkflow(workflow)).toBe(true);
     }
   });
 

@@ -16,12 +16,25 @@ async function allowsSemanticSearch(): Promise<boolean> {
     .allowsLegacyWorkflow('semantic-search');
 }
 
+async function publishSemantic(
+  kind: 'upsert' | 'delete',
+  entityType: 'task' | 'alert',
+  entityId: string,
+): Promise<void> {
+  const {
+    publishSemanticEntityDelete,
+    publishSemanticEntityUpsert,
+  } = await import('@/lib/semantic-index/publication');
+  if (kind === 'upsert') await publishSemanticEntityUpsert(entityType, entityId);
+  else await publishSemanticEntityDelete(entityType, entityId);
+}
+
 /**
  * Pre-warm search indexes after sync completes.
  * Ensures the first Ctrl+K search has no cold-start delay.
  */
 export async function warmUpSearchAfterSync() {
-  if (!(await allowsSemanticSearch())) {
+  if (!(await allowsSemanticSearch()) || process.env.MC_DATABASE_BACKEND === 'postgres') {
     const { warmUpFTS } = await import('@/lib/search/fts');
     await warmUpFTS();
     return;
@@ -44,6 +57,12 @@ export type SearchableTask = {
 };
 
 export async function indexTaskForSearch(task: SearchableTask) {
+  if (process.env.MC_DATABASE_BACKEND === 'postgres') {
+    const { indexTask } = await import('@/lib/search/fts');
+    await indexTask(task);
+    await publishSemantic('upsert', 'task', task.id);
+    return;
+  }
   if (!(await allowsSemanticSearch())) {
     const { indexTask } = await import('@/lib/search/fts');
     await indexTask(task);
@@ -59,6 +78,18 @@ export async function indexTaskForSearch(task: SearchableTask) {
  */
 export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
   if (taskBatch.length === 0) return;
+  if (process.env.MC_DATABASE_BACKEND === 'postgres') {
+    const { indexTask } = await import('@/lib/search/fts');
+    for (const task of taskBatch) {
+      try {
+        await indexTask(task);
+        await publishSemantic('upsert', 'task', task.id);
+      } catch (error) {
+        syncLogger.error({ err: error, taskId: task.id }, 'indexTaskSearch failed');
+      }
+    }
+    return;
+  }
   if (!(await allowsSemanticSearch())) {
     const { indexTask } = await import('@/lib/search/fts');
     for (const task of taskBatch) {
@@ -87,6 +118,12 @@ export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
  * semantic projection only when that workflow is supported by the backend.
  */
 export async function removeTaskFromSearch(taskId: string) {
+  if (process.env.MC_DATABASE_BACKEND === 'postgres') {
+    const { removeTaskFromIndex } = await import('@/lib/search/fts');
+    await removeTaskFromIndex(taskId);
+    await publishSemantic('delete', 'task', taskId);
+    return;
+  }
   if (!(await allowsSemanticSearch())) {
     const { removeTaskFromIndex } = await import('@/lib/search/fts');
     await removeTaskFromIndex(taskId);
@@ -109,6 +146,12 @@ export async function indexAlertForSearch(alert: {
   connectorType?: string | null;
   receivedAt?: string | null;
 }) {
+  if (process.env.MC_DATABASE_BACKEND === 'postgres') {
+    const { indexAlert } = await import('@/lib/search/fts');
+    await indexAlert(alert);
+    await publishSemantic('upsert', 'alert', alert.id);
+    return;
+  }
   if (!(await allowsSemanticSearch())) {
     const { indexAlert } = await import('@/lib/search/fts');
     await indexAlert(alert);

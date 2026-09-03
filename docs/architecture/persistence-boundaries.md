@@ -423,21 +423,48 @@ The exact PostgreSQL worker support matrix after Layer 8 is:
 | Monarch connection-outage recovery (Layer 8) | Supported with episode fencing, bounded verification, escalation, and settlement |
 | Health snapshots, runtime telemetry, Houston retention, and cron scheduling | Supported without loading the SQLite singleton |
 
-The final guard starts at the real packaged entry, `src/sync-worker.ts`. It
+The packaging guard starts at the real packaged entry, `src/sync-worker.ts`. It
 walks the PostgreSQL source import graph, rejects eager Mission Control SQLite
 modules and drivers, asserts the exact legacy entry gates, and verifies every
 scheduler family is reachable. The bundle ratchet inspects
 `dist/sync-worker.cjs`, while the live PostgreSQL composition smoke poisons
 SQLite loading, executes representative queue/retry/recovery behavior, starts
 all registered schedulers, gracefully stops, restarts, and rechecks durable
-fences. These checks prove worker persistence parity; they do not assert web/API
-parity or production activation.
+fences.
+
+### Workflow-parity Layer 7 activation
+
+Workflow-parity Layer 7 adds one immutable PostgreSQL support contract for six
+families: planning signals, project automation, the event outbox, notification
+enrichment, durable AI, and semantic indexing/search. The support set is
+all-six-or-none. Web/API and sync execution producers consume backend-selected
+repositories in their own processes; they do not depend on mutable worker
+state. Planning and project automation run as sync post-processing and from
+their existing web routes. Outbox, enrichment, durable-AI, and semantic
+publication persist work through PostgreSQL adapters.
+
+The packaged worker separately owns an instance-local processing latch.
+Repositories, the exhaustive durable executor registry, all six semantic
+entity types and both intent kinds, provider configuration, and lifecycle stop
+handles are precomposed and validated while consumers are dormant. Startup then
+starts the complete component list in dependency order and opens the latch
+once, after which each consumer receives one wake. Failure stops the failing
+component defensively, unwinds started components in strict reverse order, and
+keeps readiness absent. Shutdown revokes new claims first, drains owned work,
+removes readiness and instance artifacts, then closes the database.
+
+This support contract is process-local immutable composition, not a
+cross-process activation signal. A backend-neutral configured-off feature has
+the same semantics on SQLite and PostgreSQL; missing PostgreSQL repositories,
+routes, providers, or lifecycle members are miscomposition and fail startup.
+PostgreSQL never imports or opens the SQLite compatibility runtime on these
+paths.
 
 Surfaces Layers 3A/3B deliberately do not migrate stay SQLite-only and fail
 closed under PostgreSQL *before* any remote effect: identity backfill and
 status, manual identity-exception mutation, unknown
-write-outcome resolution, interrupted write-cycle recovery, durable AI runs,
-semantic indexing, and project rule/planning automation. Connector-owned Work To Do bridge
+write-outcome resolution, and interrupted write-cycle recovery.
+Connector-owned Work To Do bridge
 state and Microsoft To Do hidden-list state are no longer in that list —
 Layer 4 migrates both. Historical task-transfer succession filtering is
 portable: both hierarchy adapters recompute a JSON-order-independent proof
@@ -454,10 +481,9 @@ domain state and non-GitHub connector dependency or project state before remote
 dispatch. SQLite continues to use its compatibility implementations for the
 remaining legacy workflows.
 Generic PostgreSQL runs use the backend-selected keyword search repository
-after commit. SQLite-only semantic enrichment, project-rule/planning
-post-processing, the legacy outbound-event outbox, and durable AI runs are not
-invoked from that path; their durable rows remain available for later
-backend-specific workers rather than falling back to SQLite.
+after commit. Semantic enrichment, project-rule/planning post-processing,
+outbound-event publication, and durable AI use their backend-selected
+repositories and never fall back to SQLite.
 
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health

@@ -26,8 +26,16 @@ const REQUIRED_FINAL_WORKER_TOKENS = [
   'createPostgresFinanceConnectionRecoveryPersistence',
   'financeConnectionEpisodeId',
   'Selected worker persistence composition is incomplete',
-  'legacy durable AI run worker is disabled on PostgreSQL',
-  'semantic index worker is disabled for this persistence backend',
+  'createPackagedDurableAiRuntime',
+  'createDurableAiExecutorRegistry',
+  'PostgresDurableAiRunRepository',
+  'createPackagedPostgresSemanticRuntime',
+  'createPackagedNotificationEnrichmentExecutor',
+  'composePostgresPackagedWorkflowCapability',
+  'PostgresWorkerProcessingLatch',
+  'processingLatch.activate',
+  'startAtomicWorkerComponents',
+  'PostgreSQL packaged workflow capability activation is invalid',
 ];
 
 const REQUIRED_EVENT_OUTBOX_WORKER_TOKENS = [
@@ -39,8 +47,18 @@ const REQUIRED_EVENT_OUTBOX_WORKER_TOKENS = [
   'Event delivery moved to dead letter',
 ];
 
-const REQUIRED_GATED_SEMANTIC_WORKER_TOKENS = [
-  'semantic index worker is disabled for this persistence backend',
+const REQUIRED_LAYER_7_FAMILIES = [
+  'planning-signals',
+  'project-automation',
+  'event-outbox',
+  'notification-enrichment',
+  'durable-ai',
+  'semantic-search',
+];
+
+const RETIRED_POSTGRES_DISABLE_MARKERS = [
+  'legacy durable AI run worker is disabled on PostgreSQL',
+  'PostgreSQL durable AI run persistence is unsupported in this release',
 ];
 
 export function assertSyncWorkerArtifact(source) {
@@ -79,15 +97,20 @@ export function assertSyncWorkerArtifact(source) {
       `Sync worker bundle omitted durable event outbox markers:\n${missingEventOutbox.join('\n')}`,
     );
   }
-  const missingSemanticGate = REQUIRED_GATED_SEMANTIC_WORKER_TOKENS.filter(
+  const missingLayer7Families = REQUIRED_LAYER_7_FAMILIES.filter(
     (token) => !source.includes(token),
   );
-  if (!/allowsLegacyWorkflow\((["'])semantic-search\1\)/.test(source)) {
-    missingSemanticGate.push('allowsLegacyWorkflow("semantic-search")');
-  }
-  if (missingSemanticGate.length > 0) {
+  if (missingLayer7Families.length > 0) {
     throw new Error(
-      `Sync worker bundle opened or omitted the semantic PostgreSQL gate:\n${missingSemanticGate.join('\n')}`,
+      `Sync worker bundle omitted PostgreSQL Layer 7 families:\n${missingLayer7Families.join('\n')}`,
+    );
+  }
+  const retiredMarkers = RETIRED_POSTGRES_DISABLE_MARKERS.filter((token) =>
+    source.includes(token)
+  );
+  if (retiredMarkers.length > 0) {
+    throw new Error(
+      `Sync worker bundle retained PostgreSQL Layer 7 disable markers:\n${retiredMarkers.join('\n')}`,
     );
   }
   if (

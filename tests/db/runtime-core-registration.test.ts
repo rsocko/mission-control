@@ -89,6 +89,8 @@ const mocks = vi.hoisted(() => {
         planningSignals: {} as WorkerPersistenceRepositories['planningSignals'],
         projectAutomation: {} as WorkerPersistenceRepositories['projectAutomation'],
         eventDelivery: {} as WorkerPersistenceRepositories['eventDelivery'],
+        notificationEntityLinking:
+          {} as WorkerPersistenceRepositories['notificationEntityLinking'],
         notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };

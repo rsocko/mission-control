@@ -7,6 +7,7 @@ const root = process.cwd();
 
 for (const [entry, output] of [
   ['sync-worker.ts', 'sync-worker.cjs'],
+  ['sync-worker-integration.ts', 'sync-worker-integration.cjs'],
   ['sync-worker-healthcheck.ts', 'sync-worker-healthcheck.cjs'],
   ['semantic-worker-harness.ts', 'semantic-worker-harness.cjs'],
 ]) {

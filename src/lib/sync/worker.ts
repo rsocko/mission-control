@@ -48,6 +48,8 @@ export class SyncWorker {
   private readonly execute: SyncJobExecutor;
   private readonly pollIntervalMs: number;
   private readonly abortGraceMs: number;
+  private readonly isEnabled: () => boolean;
+  private wakeWaiter: (() => void) | null = null;
   private stopping = false;
   private loopPromise: Promise<void> | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
@@ -66,7 +68,12 @@ export class SyncWorker {
 
   constructor(
     execute: SyncJobExecutor,
-    options: { ownerId?: string; pollIntervalMs?: number; abortGraceMs?: number } = {},
+    options: {
+      ownerId?: string;
+      pollIntervalMs?: number;
+      abortGraceMs?: number;
+      isEnabled?(): boolean;
+    } = {},
   ) {
     this.execute = execute;
     this.ownerId = options.ownerId ?? `${hostname()}:${process.pid}:${randomUUID()}`;
@@ -74,6 +81,7 @@ export class SyncWorker {
       ?? positiveInteger(process.env.MC_SYNC_WORKER_POLL_MS, 500);
     this.abortGraceMs = options.abortGraceMs
       ?? positiveInteger(process.env.MC_SYNC_WORKER_ABORT_GRACE_MS, 30_000);
+    this.isEnabled = options.isEnabled ?? (() => true);
   }
 
   start(): void {
@@ -95,6 +103,7 @@ export class SyncWorker {
     });
     const retentionDays = positiveInteger(process.env.MC_SYNC_JOB_RETENTION_DAYS, 14);
     const pruneOnce = () => {
+      if (!this.isEnabled()) return;
       void withDatabaseOperation('sync-job-finalize', () => getSyncJobRepository()
         .then((repository) => repository.prune(retentionDays)))
         .catch((error) => {
@@ -117,14 +126,20 @@ export class SyncWorker {
   private async runLoop(): Promise<void> {
     const repository = await getSyncJobRepository();
     while (!this.stopping) {
+      if (!this.isEnabled()) {
+        await this.delay(this.pollIntervalMs);
+        continue;
+      }
       const recoveredSchedules = await withDatabaseOperation(
         'sync-queue-schedule',
         () => repository.enqueueDueSchedules(),
       );
+      if (!this.isEnabled()) continue;
       const queuedCount = await withDatabaseOperation(
         'sync-queue-count',
         () => repository.countQueued(),
       );
+      if (!this.isEnabled()) continue;
       this.lastKnownQueuedCount = queuedCount;
       setQueuedExpensiveOperations(queuedCount);
       if (recoveredSchedules.length > 0) {
@@ -144,6 +159,10 @@ export class SyncWorker {
           new Set(this.abandoned.keys()),
         ),
       );
+      if (job && (!this.isEnabled() || this.stopping)) {
+        await repository.release(job.id, this.ownerId, 'worker_deactivated');
+        continue;
+      }
       if (!job) {
         await this.delay(this.pollIntervalMs);
         continue;
@@ -366,6 +385,7 @@ export class SyncWorker {
   async stop(graceMs = positiveInteger(process.env.MC_SYNC_WORKER_SHUTDOWN_GRACE_MS, 30_000)): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;
+    this.wake();
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
     const active = this.active;
@@ -398,6 +418,20 @@ export class SyncWorker {
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.wakeWaiter = null;
+        resolve();
+      }, ms);
+      this.wakeWaiter = () => {
+        clearTimeout(timer);
+        this.wakeWaiter = null;
+        resolve();
+      };
+    });
+  }
+
+  wake(): void {
+    this.wakeWaiter?.();
   }
 }

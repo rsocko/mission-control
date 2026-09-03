@@ -243,7 +243,7 @@ try {
     if (!logs.includes('"runtimeRelease":"smoke-worker"')) {
       throw new Error('Worker startup did not report its runtime release');
     }
-    if (!logs.includes('Sync worker: triage auto-sync scheduler initialized')) {
+    if (!logs.includes('Triage auto-sync scheduler initialized')) {
       throw new Error('Worker startup has not completed');
     }
   });

@@ -81,6 +81,27 @@ describe('SemanticIndexWorker', () => {
       expect(worker.isRunning).toBe(false);
       expect(await harness.repository.listIdentities()).toEqual([]);
     });
+
+    it('wakes once activated without waiting for the dormant poll interval', async () => {
+      harness.source.putTask(taskFixture({ id: 'task-activation' }));
+      let enabled = false;
+      const worker = createWorker({
+        isEnabled: () => enabled,
+        config: { pollIntervalMs: 60_000 },
+      });
+
+      worker.start();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect(await harness.repository.listIdentities()).toEqual([]);
+
+      enabled = true;
+      worker.wake();
+      worker.wake();
+      await vi.waitFor(async () => {
+        expect(await harness.repository.listIdentities()).toHaveLength(1);
+      });
+      await worker.stop();
+    });
   });
 
   describe('when no provider is configured', () => {

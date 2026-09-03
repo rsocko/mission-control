@@ -34,6 +34,9 @@ import { createPostgresPlanningSignalRepository } from './planning-signal-reposi
 import { createPostgresProjectAutomationRepository } from './project-automation-repository';
 import { createPostgresEventDeliveryRepositories } from './event-outbox-repository';
 import { createPostgresNotificationEnrichmentRepository } from './notification-enrichment-repository';
+import {
+  createPostgresNotificationEntityLinkingRepository,
+} from './notification-entity-linking-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -72,6 +75,9 @@ export {
 export {
   createPostgresNotificationEnrichmentRepository,
 } from './notification-enrichment-repository';
+export {
+  createPostgresNotificationEntityLinkingRepository,
+} from './notification-entity-linking-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -149,6 +155,7 @@ export function createPostgresWorkerPersistenceRepositories(
     planningSignals: createPostgresPlanningSignalRepository(pool),
     projectAutomation: createPostgresProjectAutomationRepository(pool),
     eventDelivery: createPostgresEventDeliveryRepositories(pool),
+    notificationEntityLinking: createPostgresNotificationEntityLinkingRepository(pool),
     notificationEnrichment: createPostgresNotificationEnrichmentRepository(pool),
     finance: {
       ...financeCore,

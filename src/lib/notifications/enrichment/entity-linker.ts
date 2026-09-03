@@ -10,9 +10,10 @@
  * - Task titles that match notification subjects
  */
 
-import db from '@/db';
-import { tasks as tasksTable } from '@/db/schema';
-import { eq, like, and, or, sql } from 'drizzle-orm';
+import type {
+  NotificationEntityLinkingRepository,
+} from '@/db/persistence/notification-entity-linking';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -70,55 +71,27 @@ function extractReferences(text: string): ExtractedReference[] {
  * GitHub tasks have sourceIds like "owner/repo:123"
  */
 async function findTaskBySourceReference(
+  persistence: NotificationEntityLinkingRepository,
   connectorInstanceId: string,
   repository: string,
   number: number,
-): Promise<{ id: string; projectId?: string | null } | null> {
-  // GitHub issue/PR source IDs follow the pattern "owner/repo:number"
-  const sourceId = `${repository}:${number}`;
-
-  const result = await db.select({
-    id: tasksTable.id,
-  })
-    .from(tasksTable)
-    .where(
-      and(
-        eq(tasksTable.connectorInstanceId, connectorInstanceId),
-        eq(tasksTable.sourceId, sourceId),
-      )
-    )
-    .limit(1);
-
-  if (result.length > 0) {
-    return { id: result[0].id };
-  }
-
-  // Fallback: try matching by source list + number pattern
-  const fallbackResult = await db.select({
-    id: tasksTable.id,
-  })
-    .from(tasksTable)
-    .where(
-      and(
-        eq(tasksTable.connectorInstanceId, connectorInstanceId),
-        like(tasksTable.sourceId, `%${repository}:${number}`),
-      )
-    )
-    .limit(1);
-
-  return fallbackResult.length > 0 ? { id: fallbackResult[0].id } : null;
+): Promise<{ id: string } | null> {
+  return persistence.findTaskBySourceReference({
+    connectorInstanceId,
+    repository,
+    number,
+  });
 }
 
 /**
  * Finds a project ID associated with a repository.
  * Looks up hub_projects that were created from GitHub Projects for this repo.
  */
-async function findProjectByRepository(repository: string): Promise<string | null> {
-  // Look for hub_projects with metadata matching this repository
-  const result = await db.all<{ id: string }>(
-    sql`SELECT id FROM hub_projects WHERE json_extract(metadata, '$.repository') = ${repository} LIMIT 1`
-  );
-  return result.length > 0 ? result[0].id : null;
+async function findProjectByRepository(
+  persistence: NotificationEntityLinkingRepository,
+  repository: string,
+): Promise<string | null> {
+  return persistence.findProjectByRepository(repository);
 }
 
 // ─── MAIN LINKER ────────────────────────────────────────────────────────────
@@ -128,6 +101,9 @@ async function findProjectByRepository(repository: string): Promise<string | nul
  * Returns fields to populate on the notification record.
  */
 export async function linkEntities(notification: LinkableNotification): Promise<EntityLinkResult> {
+  const persistence = (
+    await getWorkerPersistenceRepositories()
+  ).notificationEntityLinking;
   const result: EntityLinkResult = {
     relatedTaskId: null,
     relatedProjectId: null,
@@ -144,6 +120,7 @@ export async function linkEntities(notification: LinkableNotification): Promise<
   // Strategy 1: Direct match via pre-extracted entity number + repo
   if (repository && entityNumber) {
     const task = await findTaskBySourceReference(
+      persistence,
       notification.connectorInstanceId,
       repository,
       entityNumber,
@@ -168,6 +145,7 @@ export async function linkEntities(notification: LinkableNotification): Promise<
     if (!refRepo) continue;
 
     const task = await findTaskBySourceReference(
+      persistence,
       notification.connectorInstanceId,
       refRepo,
       ref.number,
@@ -183,7 +161,7 @@ export async function linkEntities(notification: LinkableNotification): Promise<
 
   // Strategy 3: Link to project by repository
   if (repository && !result.relatedProjectId) {
-    const projectId = await findProjectByRepository(repository);
+    const projectId = await findProjectByRepository(persistence, repository);
     if (projectId) {
       result.relatedProjectId = projectId;
       if (!result.navigationTarget) {

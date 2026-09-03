@@ -4,6 +4,13 @@ import {
 } from '../contracts/relative-reminder-timezone-repository.contract';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
+// This suite runs real and()/inArray()/gt()/sql`` query building against a
+// live PostgreSQL database. tests/setup.ts globally mocks 'drizzle-orm' for
+// unit tests; unmock it here so the repository's query builder calls produce
+// real SQL instead of test-double objects (matching every other
+// tests/db/postgres-*.integration.test.ts file).
+vi.unmock('drizzle-orm');
+
 vi.mock('@/db', () => {
   throw new Error(
     'SQLite database module must not be evaluated by the PostgreSQL relative reminder timezone repository',

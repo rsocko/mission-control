@@ -13,9 +13,11 @@ export function createSqliteRelativeReminderTimezoneRepository(
   return {
     async applyTimezoneRecompute({ now, recompute }) {
       const nowIso = now.toISOString();
+      // Match the original inline route's runTransaction() semantics: this is a
+      // read-then-write transaction, so it must take an immediate (RESERVED)
+      // lock up front rather than the default deferred behavior, to avoid a
+      // deferred-transaction write-lock upgrade failure under contention.
       return db.transaction((tx) => {
-        // NOTE: see the Postgres sibling repository for why null checks use raw
-        // `sql` fragments instead of drizzle's typed `isNotNull()` helper.
         const candidates = tx.select({
           id: tasks.id,
           dueDate: tasks.dueDate,
@@ -23,6 +25,9 @@ export function createSqliteRelativeReminderTimezoneRepository(
           reminderRelative: tasks.reminderRelative,
           reminderDueTime: tasks.reminderDueTime,
         }).from(tasks).where(and(
+          // Raw `sql` fragments (not drizzle's typed `isNotNull()` helper) to
+          // match this codebase's established IS NOT NULL convention -- see the
+          // Postgres sibling repository for the same note.
           sql`${tasks.reminderRelative} IS NOT NULL`,
           sql`${tasks.reminderAt} IS NOT NULL`,
           sql`${tasks.dueDate} IS NOT NULL`,
@@ -43,7 +48,7 @@ export function createSqliteRelativeReminderTimezoneRepository(
             .run();
         }
         return { invalidCount: 0 };
-      });
+      }, { behavior: 'immediate' });
     },
   };
 }

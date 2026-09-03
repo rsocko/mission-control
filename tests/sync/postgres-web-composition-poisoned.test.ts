@@ -3,6 +3,9 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => {
   const sqliteTouch = vi.fn();
   const pool = { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) };
+  const backendInitialize = vi.fn(async () => undefined);
+  const backendShutdown = vi.fn(async () => undefined);
+  const stopSemantic = vi.fn(async () => undefined);
   const core = {
     tasks: {},
     projects: {},
@@ -41,16 +44,21 @@ const mocks = vi.hoisted(() => {
     search: vi.fn(async () => []),
   };
   const enrich = vi.fn(async () => ({ summary: 'postgres' }));
+  const createEnrichmentExecutor = vi.fn(async () => enrich);
   const publish = vi.fn(async () => ({ status: 'skipped' as const }));
   return {
     sqliteTouch,
     pool,
+    backendInitialize,
+    backendShutdown,
+    stopSemantic,
     core,
     worker,
     queue,
     lease,
     keyword,
     enrich,
+    createEnrichmentExecutor,
     publish,
   };
 });
@@ -76,8 +84,8 @@ vi.mock('@/db/runtime-backend', () => ({
 }));
 vi.mock('@/db/postgres/runtime', () => ({
   PostgresPersistenceBackend: class {
-    initialize = vi.fn(async () => undefined);
-    shutdown = vi.fn(async () => undefined);
+    initialize = mocks.backendInitialize;
+    shutdown = mocks.backendShutdown;
     context = { db: {}, pool: mocks.pool, vector: {} };
   },
 }));
@@ -104,10 +112,11 @@ vi.mock('@/lib/ai/durable-runs/postgres-adapter', () => ({
   PostgresDurableAiRunRepository: class {},
 }));
 vi.mock('@/lib/notifications/enrichment/packaged-executor', () => ({
-  createPackagedNotificationEnrichmentExecutor: async () => mocks.enrich,
+  createPackagedNotificationEnrichmentExecutor: mocks.createEnrichmentExecutor,
 }));
 vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
   publishPackagedPostgresSemanticEntity: mocks.publish,
+  stopPackagedPostgresSemanticWorker: mocks.stopSemantic,
 }));
 vi.mock('@/lib/runtime/lifecycle', () => ({
   configureRuntimeLifecycle: vi.fn(),
@@ -199,7 +208,29 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
     await expect(
       publishSemanticEntityUpsert('task', 'task'),
     ).resolves.toEqual({ status: 'skipped' });
+    expect(mocks.backendInitialize).toHaveBeenCalledTimes(2);
+    expect(mocks.backendShutdown).toHaveBeenCalledTimes(1);
+    expect(mocks.stopSemantic).toHaveBeenCalledTimes(1);
     expect(mocks.sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  it('retries enrichment executor composition after a transient setup failure', async () => {
+    const { createPostgresAIEnrichmentService } = await import(
+      '@/db/postgres/sync/notification-enrichment-service'
+    );
+    const service = createPostgresAIEnrichmentService();
+    const input = {
+      notificationId: 'retry',
+      title: 'Review requested',
+      connectorType: 'github',
+      category: 'development',
+      metadata: {},
+      presentation: {},
+    };
+    mocks.createEnrichmentExecutor.mockRejectedValueOnce(new Error('transient setup failure'));
+
+    await expect(service.enrich(input)).rejects.toThrow('transient setup failure');
+    await expect(service.enrich(input)).resolves.toEqual({ summary: 'postgres' });
   });
 
   it('fails closed for documented optional SQLite-only services', async () => {

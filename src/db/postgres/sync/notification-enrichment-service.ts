@@ -15,7 +15,11 @@ export function createPostgresAIEnrichmentService(): AIEnrichmentService {
       const { createPackagedNotificationEnrichmentExecutor } = await import(
         '@/lib/notifications/enrichment/packaged-executor'
       );
-      executorPromise ??= createPackagedNotificationEnrichmentExecutor();
+      executorPromise ??= createPackagedNotificationEnrichmentExecutor()
+        .catch((error) => {
+          executorPromise = null;
+          throw error;
+        });
       const executor = await executorPromise;
       return executor(input, {
         signal: options?.signal ?? new AbortController().signal,

@@ -5,6 +5,7 @@ import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repo
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
   const registerWorker = vi.fn();
+  const stopSemantic = vi.fn(async () => undefined);
   const backend = {
     generation: 0,
     initialize: vi.fn(async () => {
@@ -64,6 +65,7 @@ const mocks = vi.hoisted(() => {
       return repository;
     }),
     registerWorker,
+    stopSemantic,
     workerRepositories,
     createWorker: vi.fn((_db, _pool, core: CorePersistenceRepositories) => {
       const repository: WorkerPersistenceRepositories = {
@@ -134,6 +136,9 @@ vi.mock('@/db/postgres/sync/connector-operation-lease-repository', () => ({
 vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: vi.fn(() => ({})),
 }));
+vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
+  stopPackagedPostgresSemanticWorker: mocks.stopSemantic,
+}));
 
 describe('PostgreSQL runtime core repository registration', () => {
   beforeEach(() => {
@@ -150,7 +155,10 @@ describe('PostgreSQL runtime core repository registration', () => {
       shutdownRuntimeDatabase,
     } = await import('@/db/runtime');
 
-    await initializeRuntimeDatabase();
+    await Promise.all([
+      initializeRuntimeDatabase(),
+      initializeRuntimeDatabase(),
+    ]);
     const registeredComposition = mocks.registerCore.mock.calls[0][0];
     const registeredWorkerComposition = mocks.registerWorker.mock.calls[0][0];
     await getPostgresCoreRepositories().tasks.get('task-1');
@@ -168,8 +176,15 @@ describe('PostgreSQL runtime core repository registration', () => {
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].reminders.cancelInvalidated).toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].triage.syncState.getAll).toHaveBeenCalledOnce();
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(1);
+    expect(mocks.registerCore).toHaveBeenCalledTimes(1);
+    expect(mocks.registerWorker).toHaveBeenCalledTimes(1);
 
     await shutdownRuntimeDatabase();
+    expect(mocks.stopSemantic).toHaveBeenCalledOnce();
+    expect(mocks.stopSemantic.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.backend.shutdown.mock.invocationCallOrder[0],
+    );
     await initializeRuntimeDatabase();
 
     expect(mocks.registerCore).toHaveBeenCalledTimes(2);

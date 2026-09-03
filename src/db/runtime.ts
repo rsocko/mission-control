@@ -50,6 +50,24 @@ let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
 let postgresSemanticIndexRepository: SemanticIndexRepository | null = null;
 let postgresSemanticSourcePort: SemanticSourcePort | null = null;
 let postgresDurableAiRunRepository: DurableAiRunRepository | null = null;
+let runtimeInitialized = false;
+let runtimeInitializationPromise: Promise<void> | null = null;
+let runtimeShutdownPromise: Promise<void> | null = null;
+
+function clearPostgresRuntimeComposition(): void {
+  postgresRepositories = null;
+  postgresWorkerRepositories = null;
+  postgresSyncJobRepository = null;
+  postgresConnectorOperationLeaseRepository = null;
+  postgresKeywordSearchRepository = null;
+  postgresSemanticIndexRepository = null;
+  postgresSemanticSourcePort = null;
+  postgresDurableAiRunRepository = null;
+  clearKeywordSearchRepository();
+  clearLegacySearchIndexingService();
+  clearAIEnrichmentService();
+  clearPostgresDurableAiRunRepository();
+}
 
 function requirePostgresRepositories(): CorePersistenceRepositories {
   if (!postgresRepositories) {
@@ -246,7 +264,7 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * siblings below are guaranteed to be populated as soon as this resolves.
  * SQLite initialization is untouched.
  */
-export async function initializeRuntimeDatabase(): Promise<void> {
+async function initializeRuntimeDatabaseOnce(): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
     const [
       { initializeDatabase },
@@ -267,6 +285,7 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   clearLegacySearchIndexingService();
   clearKeywordSearchRepository();
   clearAIEnrichmentService();
+  clearPostgresDurableAiRunRepository();
   await postgresBackend.initialize();
   const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
@@ -288,22 +307,50 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
 }
 
-export async function shutdownRuntimeDatabase(): Promise<void> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    await postgresBackend.shutdown();
-    postgresRepositories = null;
-    postgresWorkerRepositories = null;
-    postgresSyncJobRepository = null;
-    postgresConnectorOperationLeaseRepository = null;
-    postgresKeywordSearchRepository = null;
-    postgresSemanticIndexRepository = null;
-    postgresSemanticSourcePort = null;
-    postgresDurableAiRunRepository = null;
-    clearKeywordSearchRepository();
-    clearLegacySearchIndexingService();
-    clearAIEnrichmentService();
-    clearPostgresDurableAiRunRepository();
+export function initializeRuntimeDatabase(): Promise<void> {
+  if (runtimeShutdownPromise) {
+    return runtimeShutdownPromise.then(() => initializeRuntimeDatabase());
   }
+  if (runtimeInitialized) return Promise.resolve();
+  if (runtimeInitializationPromise) return runtimeInitializationPromise;
+
+  runtimeInitializationPromise = initializeRuntimeDatabaseOnce()
+    .then(() => {
+      runtimeInitialized = true;
+    })
+    .catch(async (error) => {
+      if (resolveDatabaseBackend() === 'postgres') {
+        await postgresBackend.shutdown();
+        clearPostgresRuntimeComposition();
+      }
+      throw error;
+    })
+    .finally(() => {
+      runtimeInitializationPromise = null;
+    });
+  return runtimeInitializationPromise;
+}
+
+export function shutdownRuntimeDatabase(): Promise<void> {
+  if (runtimeShutdownPromise) return runtimeShutdownPromise;
+
+  runtimeShutdownPromise = (async () => {
+    if (runtimeInitializationPromise) {
+      await runtimeInitializationPromise.catch(() => undefined);
+    }
+    if (resolveDatabaseBackend() === 'postgres') {
+      const { stopPackagedPostgresSemanticWorker } = await import(
+        '@/lib/semantic-index/packaged-worker-runtime'
+      );
+      await stopPackagedPostgresSemanticWorker();
+      await postgresBackend.shutdown();
+      clearPostgresRuntimeComposition();
+    }
+    runtimeInitialized = false;
+  })().finally(() => {
+    runtimeShutdownPromise = null;
+  });
+  return runtimeShutdownPromise;
 }
 
 export function getPostgresPersistenceBackend(): PostgresPersistenceBackend {

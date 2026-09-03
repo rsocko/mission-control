@@ -280,7 +280,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             },
             {
               id: `${prefix}/repo:42`,
-              title: `${prefix} semantic task`,
+              title: `${prefix} pipeline task`,
               status: 'todo',
               priority: 'normal',
               createdAt: '2034-01-01T00:00:00.000Z',
@@ -553,13 +553,15 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
            priority, due_date, created_at, updated_at, last_synced_at
          ) VALUES
            ($1, $1, 'custom-rest', $3, $1, 'todo', 'normal', '2035-01-01', $5, $5, $5),
-           ($2, $4, 'custom-rest', $3, $2, 'todo', 'normal', NULL, $5, $5, $5)`,
+           ($2, $4, 'custom-rest', $3, $2, 'todo', 'normal', NULL, $5, $5, $5),
+           ($6, $6, 'manual', $6, $6, 'todo', 'normal', NULL, $5, $5, $5)`,
         [
           `${prefix}:planning`,
-          `${prefix}:semantic`,
+          `${prefix}:pipeline-task`,
           `${prefix}:connector`,
           `${prefix}/repo:42`,
           now,
+          `${prefix}:semantic`,
         ],
       );
       await pool.query(
@@ -1038,6 +1040,14 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             FROM ai_runs WHERE id = $3) AS ai_lifecycle_revision,
            (SELECT attempt FROM semantic_intents WHERE id = $4) AS semantic_attempts,
            (SELECT count(*)::int
+            FROM semantic_intents sibling
+            INNER JOIN semantic_intents canary
+              ON canary.id = $4
+             AND sibling.index_id = canary.index_id
+             AND sibling.entity_type = canary.entity_type
+             AND sibling.entity_id = canary.entity_id
+             AND sibling.id <> canary.id) AS semantic_siblings,
+           (SELECT count(*)::int
             FROM semantic_documents document
             INNER JOIN semantic_intents intent
               ON intent.id = $4
@@ -1104,6 +1114,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         enrichment_attempts: 2,
         ai_attempts: 2,
         semantic_attempts: 2,
+        semantic_siblings: 0,
         documents: 1,
         vectors: 1,
         revoked_provider_sessions: 1,
@@ -1116,8 +1127,8 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         terminal_deliveries: 1,
         enrichment_summary: 'Durably enriched',
         pipeline_notifications: 1,
-        pipeline_related_task: `${prefix}:semantic`,
-        pipeline_navigation: `/tasks?selected=${prefix}:semantic`,
+        pipeline_related_task: `${prefix}:pipeline-task`,
+        pipeline_navigation: `/tasks?selected=${prefix}:pipeline-task`,
       });
       expect(evidence.rows[0].ai_lifecycle_revision).toBeGreaterThan(
         crashedLifecycleRevision,

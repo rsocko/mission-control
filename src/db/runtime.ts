@@ -72,6 +72,7 @@ let runtimeInitializationPromise: Promise<void> | null = null;
 let runtimeShutdownPromise: Promise<void> | null = null;
 let runtimePostShutdownInitializationPromise: Promise<void> | null = null;
 let runtimeCleanupRequired = false;
+let runtimeLifecycleGeneration = 0;
 
 function clearPostgresRuntimeComposition(): void {
   if (postgresWorkerRepositories) {
@@ -366,9 +367,11 @@ export function initializeRuntimeDatabase(): Promise<void> {
   if (runtimeInitialized) return Promise.resolve();
   if (runtimeInitializationPromise) return runtimeInitializationPromise;
 
+  const initializationGeneration = ++runtimeLifecycleGeneration;
   beginPersistenceCompositionInitialization();
   runtimeInitializationPromise = initializeRuntimeDatabaseOnce()
     .then(() => {
+      if (initializationGeneration !== runtimeLifecycleGeneration) return;
       completePersistenceCompositionInitialization();
       runtimeInitialized = true;
     })
@@ -434,6 +437,7 @@ function initializeRuntimeDatabaseAfterShutdown(shutdown: Promise<void>): Promis
 }
 
 export function shutdownRuntimeDatabase(): Promise<void> {
+  runtimeLifecycleGeneration += 1;
   blockPersistenceComposition();
   if (runtimeShutdownPromise) return runtimeShutdownPromise;
 

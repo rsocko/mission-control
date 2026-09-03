@@ -315,4 +315,39 @@ describe('PostgreSQL runtime core repository registration', () => {
     await expect(initializeRuntimeDatabase()).resolves.toBeUndefined();
     await shutdownRuntimeDatabase();
   });
+
+  it('keeps access fenced when shutdown overtakes initialization', async () => {
+    const {
+      getPostgresSyncJobRepository,
+      initializeRuntimeDatabase,
+      shutdownRuntimeDatabase,
+    } = await import('@/db/runtime');
+    let finishInitialization!: () => void;
+    let finishShutdown!: () => void;
+    mocks.backend.initialize.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishInitialization = resolve;
+    }));
+    mocks.backend.shutdown.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishShutdown = resolve;
+    }));
+
+    const initialization = initializeRuntimeDatabase();
+    await vi.waitFor(() => expect(finishInitialization).toBeTypeOf('function'));
+    const shutdown = shutdownRuntimeDatabase();
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+
+    finishInitialization();
+    await vi.waitFor(() => expect(finishShutdown).toBeTypeOf('function'));
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+
+    finishShutdown();
+    await Promise.all([initialization, shutdown]);
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
+  });
 });

@@ -319,14 +319,16 @@ async function registerStableRuntimeServices(): Promise<void> {
   registerSemanticPublicationService(semanticPublicationRuntimeService);
 }
 
-async function initializeRuntimeDatabaseOnce(): Promise<void> {
+async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
     const { initializeSqlitePersistenceComposition } = await import('./index');
     await initializeSqlitePersistenceComposition();
+    if (!isCurrentGeneration()) return;
     await registerStableRuntimeServices();
     return;
   }
   await postgresBackend.initialize();
+  if (!isCurrentGeneration()) return;
   const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
@@ -347,9 +349,11 @@ async function initializeRuntimeDatabaseOnce(): Promise<void> {
   postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
   await registerStableRuntimeServices();
+  if (!isCurrentGeneration()) return;
   const { resumePackagedPostgresSemanticRuntime } = await import(
     '@/lib/semantic-index/packaged-worker-runtime'
   );
+  if (!isCurrentGeneration()) return;
   resumePackagedPostgresSemanticRuntime();
 }
 
@@ -369,7 +373,9 @@ export function initializeRuntimeDatabase(): Promise<void> {
 
   const initializationGeneration = ++runtimeLifecycleGeneration;
   beginPersistenceCompositionInitialization();
-  runtimeInitializationPromise = initializeRuntimeDatabaseOnce()
+  runtimeInitializationPromise = initializeRuntimeDatabaseOnce(
+    () => initializationGeneration === runtimeLifecycleGeneration,
+  )
     .then(() => {
       if (initializationGeneration !== runtimeLifecycleGeneration) return;
       completePersistenceCompositionInitialization();

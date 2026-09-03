@@ -334,20 +334,29 @@ describe('PostgreSQL runtime core repository registration', () => {
     const initialization = initializeRuntimeDatabase();
     await vi.waitFor(() => expect(finishInitialization).toBeTypeOf('function'));
     const shutdown = shutdownRuntimeDatabase();
+    const queuedReinitialization = initializeRuntimeDatabase();
     expect(() => getPostgresSyncJobRepository()).toThrow(
       'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
     );
 
     finishInitialization();
     await vi.waitFor(() => expect(finishShutdown).toBeTypeOf('function'));
+    expect(mocks.registerCore).not.toHaveBeenCalled();
+    expect(mocks.registerWorker).not.toHaveBeenCalled();
+    expect(mocks.resumeSemantic).not.toHaveBeenCalled();
+    expect(mocks.backend.shutdown).toHaveBeenCalledOnce();
     expect(() => getPostgresSyncJobRepository()).toThrow(
       'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
     );
 
     finishShutdown();
-    await Promise.all([initialization, shutdown]);
-    expect(() => getPostgresSyncJobRepository()).toThrow(
-      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
-    );
+    await Promise.all([initialization, shutdown, queuedReinitialization]);
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(2);
+    expect(mocks.backend.shutdown).toHaveBeenCalledOnce();
+    expect(mocks.registerCore).toHaveBeenCalledOnce();
+    expect(mocks.registerWorker).toHaveBeenCalledOnce();
+    expect(mocks.resumeSemantic).toHaveBeenCalledOnce();
+    expect(() => getPostgresSyncJobRepository()).not.toThrow();
+    await shutdownRuntimeDatabase();
   });
 });

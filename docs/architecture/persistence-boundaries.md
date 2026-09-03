@@ -509,6 +509,143 @@ pattern should later be applied to canonical task moves, project hierarchy,
 notification writeback, connector configuration, and durable queue workflows.
 It is not a mandate to create repositories for every table.
 
+## Web/API PostgreSQL parity: Layer L01 (composition seams, transactions, codecs, ratchet)
+
+Layer L01 is the first of a 20-layer web/API application-parity plan
+(companion to the worker-side Layers 1-8 above); it adds no route or domain
+migration, only backend-neutral primitives and a machine-derived ratchet that
+later layers must shrink.
+
+**Composition seams.** No generic database/query facade, `select`/`where`/
+`orderBy` DSL, or dialect-schema leakage was introduced. `src/lib/persistence/
+runtime.ts`, `src/db/runtime.ts`, `CorePersistenceRepositories`, and
+`WorkerPersistenceRepositories` remain the extension points later domain
+repositories compose against, matching the pattern already established by the
+worker-side layers above.
+
+**Transactions: an honest sync/async capability split, not a portable
+callback.** `better-sqlite3` cannot hold a transaction open across a real
+`await`; PostgreSQL's queries are inherently network round trips and cannot be
+driven from a genuinely synchronous callback. `tests/contracts/
+transaction-runner.contract.ts` therefore exposes three separate, honestly
+typed contracts instead of one seam that claims parity it cannot deliver:
+
+- `describeSynchronousTransactionRunnerContract` - commit, rollback, and
+  no-partial-effect, shared verbatim by both backends' `SynchronousTransactionRunner`
+  (`SqliteTransactionRunner` and `PostgresPersistenceBackend.transactions`).
+  `SynchronousTransactionResult<TResult>` resolves to `never` for a
+  `PromiseLike`-returning candidate, so a genuinely async callback fails to
+  compile against this contract by construction.
+- `describeSynchronousRunnerRejectsAsyncWork` - SQLite-only. Proves the
+  runtime guard rejects a callback that returns a `Promise` (using the same
+  void-typed-variable escape hatch already established in
+  `sqlite-transaction-runner.test.ts` to construct an intentionally
+  mistyped candidate), rather than silently continuing outside the
+  transaction.
+- `describeAsyncTransactionRunnerContract` - PostgreSQL-only capability
+  (`PostgresPersistenceBackend.asyncTransactions`, typed `TransactionRunner<
+  PostgresTransaction>`). Proves real awaited work commits and rolls back
+  while holding the transaction open across the wire.
+
+No class or seam is exported that implements `TransactionRunner<TContext>`
+for SQLite: an earlier draft of this layer did exactly that (an
+`AsyncSqliteTransactionRunner` that type-checked identically to PostgreSQL's
+genuinely-async runner but silently rejected any real async work at runtime)
+and was reverted before landing, precisely because a generically-typed caller
+could pass real async work, compile successfully, and fail only at runtime.
+Later domain repositories that need atomicity across an `await` on SQLite own
+that atomicity themselves (e.g. sequencing synchronous sub-steps inside one
+`SynchronousTransactionRunner.run` call), rather than being handed a
+portable-looking async transaction primitive that SQLite cannot honor.
+
+**Canonical value codecs, extracted only where duplication was proven.**
+`src/db/persistence/value-codecs.ts` centralizes `canonicalJson`,
+`decodeLenientJsonObject`/`decodeLenientJsonArray`, `decodeStrictJsonObject`,
+`CanonicalJsonSlot` (`decodeCanonicalJsonSlot`/`encodeCanonicalJsonSlot`, which
+preserve SQL `NULL` versus JSON `null` as distinct states), and
+`decodeSqliteBoolean`/`encodeSqliteBoolean`. Conversion happens only at
+adapter/import boundaries; application code continues to see structured
+`PersistenceJson` and real `boolean`. Existing call sites were rewired to
+delegate to the shared codec only where two or more implementations were
+first proven byte-identical or behavior-preserving:
+`parseWorkTodoJsonObject`, `parseSavedAIProviderConfig` (`config-values.ts`),
+`normalizeProjectJsonCollections`, the "robust" of five `canonicalJson`
+variants (`execution-pipeline.ts` and `semantic-index/validation.ts`), and the
+shared strict-decode prefix of `parseEventOutboxPayload`,
+`parseNotificationDeliveryPayload`, and `parseNotificationEnrichmentPayload`
+(each file's own downstream field validation and error messages are
+untouched). Deliberately **not** touched in this layer, as documented
+extraction candidates for a future PR once a second real duplicate is found:
+the other four `canonicalJson` variants (looser or `undefined`-unsafe),
+`asRecord`/`asStringArray` in `github-recovery-values.ts`, the
+`sqlite-core-repositories.ts`/`sqlite-triage-repositories.ts` JSON helpers
+(51+ call sites), and the ~35 scattered SQLite boolean coercions elsewhere.
+Round-trip, SQL `NULL`, JSON `null`, malformed/legacy input, empty values,
+booleans, and double-encoded legacy cases are covered in
+`tests/db/value-codecs.test.ts`.
+
+**Machine-derived web/API taint ratchet.** `tests/architecture/
+web-persistence-graph.ts` is a pure Node-builtins static-import-graph census
+(no test-runner dependency, so it also runs under plain `node` to regenerate
+the baseline), ported from the approved plan's `tiers.mjs`. It classifies
+every `src/app/api/**/route.ts(x)` file as Tier A (fails at PostgreSQL
+*import* time - a static edge reaches `@/db` or a SQLite driver package),
+Tier B (fails only at *call* time - the only path is a dynamic `import()`/
+`require()`), or clean. `tests/architecture/web-persistence-baseline.json`
+commits the exact current sets and counts (266 routes, Tier A 221, Tier B 39,
+clean 6, tainted `src/lib` 123, tainted shared API helpers 6, total migration
+units 350 = Tier A + tainted-lib + tainted-helpers), plus a `finalTarget` of
+zero for every count. `tests/architecture/web-persistence-baseline.test.ts`
+recomputes the census from current source on every run and fails on: any set
+gaining an entry absent from the baseline, any count exceeding its baseline
+ceiling (`cleanRoutes` uses the same check inverted, as a floor), or the
+partition/total invariants no longer holding. Set-based (not count-only)
+comparison is deliberate and is itself covered by synthetic meta-tests in the
+same file: a later layer cannot pass the ratchet by swapping one allowed
+tainted file for a different, unlisted one at an unchanged count, or by
+"fixing" a Tier A route merely by turning its static import into a dynamic
+one (which would shrink Tier A but must simultaneously add a new,
+baseline-absent entry to Tier B, failing that tier's own independent
+ceiling). `LEGACY_RAW_SQLITE_IMPORTS` and other legacy allowlist entries from
+the ratchet in "Current dependency inventory" above are not grandfathered
+here: if reachable from a route, they correctly still count as Tier A/B
+taint. This ratchet is deliberately a separate file from
+`persistence-boundaries.test.ts`'s narrower raw-handle/driver-import
+allowlist ratchet (a different, adapter-boundary-scoped check carried over
+from the worker layers); neither duplicates the other.
+
+*Baseline provenance and a documented archived-generator defect.* The plan's
+committed Tier A count (221) and the 144-route "direct `@/db` import" figure
+both reproduce exactly against this layer's commit, using two different
+archived planning-session scripts (`tiers.mjs` and `reach2.mjs`
+respectively). The plan's companion "79 transitive-only" figure
+(`223 - 144`, where 223 is `reach2.mjs`'s own "static-tainted" count) does
+not equal `221 - 144`, because `reach2.mjs` has a genuine seed-gating defect:
+its taint-seed detection does not distinguish static from dynamic driver
+imports even in its nominally "static-only" reachability pass, so its
+223-route universe incorrectly includes two routes
+(`src/app/api/connectors/github-bulk-transfer/route.ts` and
+`src/app/api/sync/retained/resolve/route.ts`) whose only real taint path is
+via a dynamic-only source (`src/lib/connectors/github-issues/
+backup-verifier.ts`) and are correctly Tier B, not Tier A. All three
+historical figures (223/144/79) are preserved verbatim in the baseline JSON's
+`knownArchivedGeneratorDefect` block with the exact affected routes and root
+cause; only the corrected, self-consistent `directTaintSourceRoutes`/
+`transitiveOnlyTaintSourceRoutes` split (143/78, which sums exactly to 221 by
+construction) is used as a ratchet field.
+
+**Known limitation: no local validation was run for this layer.** The
+approved-registry npm restore failed on a `qs@6.16.0` 404 against
+`https://packagefeedproxy.microsoft.io/npm/`; per this repository's
+dependency restoration policy, the restore was not retried and no alternate
+registry was used, so `node_modules` remained broken and no local
+`tsc`/`eslint`/`vitest` run validated this layer's TypeScript. The ratchet's
+own numbers were independently verified by executing
+`computeWebPersistenceGraph` directly (Node 24's native TypeScript
+execution, no test runner required) against the current worktree and
+confirming an exact match with the committed baseline. CI is expected to run
+the full suite with a working install.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

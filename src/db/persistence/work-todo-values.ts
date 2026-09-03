@@ -5,6 +5,7 @@ import {
 } from '@/lib/tasks/relative-reminder';
 import { windowsToIanaTimezone } from '@/lib/mode';
 import type { TaskPriority, TaskStatus } from '@/types';
+import { decodeLenientJsonObject } from './value-codecs';
 import type { WorkTodoChangeOperation } from './work-todo';
 
 /**
@@ -285,16 +286,5 @@ export function buildWorkTodoOutboundChange(
 }
 
 export function parseWorkTodoJsonObject(value: unknown): Record<string, unknown> {
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed as Record<string, unknown>
-      : {};
-  } catch {
-    return {};
-  }
+  return decodeLenientJsonObject(value);
 }

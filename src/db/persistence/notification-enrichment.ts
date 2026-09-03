@@ -1,3 +1,5 @@
+import { decodeStrictJsonObject } from './value-codecs';
+
 export type NotificationEnrichmentJobStatus =
   | 'pending'
   | 'processing'
@@ -100,18 +102,10 @@ export function reconcileNotificationEnrichmentMetadata(
 export function parseNotificationEnrichmentPayload(
   value: unknown,
 ): NotificationEnrichmentPayload {
-  let parsed: unknown = value;
-  if (typeof value === 'string') {
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      throw new Error('Stored notification enrichment payload is not valid JSON');
-    }
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Stored notification enrichment payload must be an object');
-  }
-  const payload = parsed as Partial<NotificationEnrichmentPayload>;
+  const payload = decodeStrictJsonObject(value, {
+    invalidJson: 'Stored notification enrichment payload is not valid JSON',
+    notAnObject: 'Stored notification enrichment payload must be an object',
+  }) as Partial<NotificationEnrichmentPayload>;
   if (
     typeof payload.notificationId !== 'string'
     || typeof payload.title !== 'string'

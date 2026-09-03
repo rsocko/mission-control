@@ -20,6 +20,8 @@
  *   lowest-sequence non-terminal delivery for a webhook is claimable.
  */
 
+import { decodeStrictJsonObject } from './value-codecs';
+
 export type EventOutboxDeliveryStatus =
   | 'pending'
   | 'delivering'
@@ -170,18 +172,10 @@ export function parseEventTypes(value: unknown): string[] {
  * silently delivered as `{}`.
  */
 export function parseEventOutboxPayload(value: unknown): Record<string, unknown> {
-  let parsed: unknown = value;
-  if (typeof value === 'string') {
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      throw new Error('Stored event outbox payload is not valid JSON');
-    }
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Stored event outbox payload must be an object');
-  }
-  return parsed as Record<string, unknown>;
+  return decodeStrictJsonObject(value, {
+    invalidJson: 'Stored event outbox payload is not valid JSON',
+    notAnObject: 'Stored event outbox payload must be an object',
+  });
 }
 
 export function isTerminalEventDeliveryStatus(status: string): boolean {

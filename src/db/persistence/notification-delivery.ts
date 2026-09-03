@@ -3,6 +3,7 @@ import {
   type MissionControlPushPayload,
   type NotificationDeliveryChannel,
 } from '@/lib/notifications/push-payload';
+import { decodeStrictJsonObject } from './value-codecs';
 
 export type NotificationDeliverySuppressionReason =
   | 'channel_disabled'
@@ -96,18 +97,10 @@ export interface NotificationDeliveryRepository {
 }
 
 export function parseNotificationDeliveryPayload(value: unknown): MissionControlPushPayload {
-  let parsed: unknown = value;
-  if (typeof value === 'string') {
-    try {
-      parsed = JSON.parse(value);
-    } catch {
-      throw new Error('Stored push payload is not valid JSON');
-    }
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Stored push payload must be an object');
-  }
-  const payload = parsed as Record<string, unknown>;
+  const payload = decodeStrictJsonObject(value, {
+    invalidJson: 'Stored push payload is not valid JSON',
+    notAnObject: 'Stored push payload must be an object',
+  });
   if (
     typeof payload.notificationId !== 'string'
     || !payload.notificationId

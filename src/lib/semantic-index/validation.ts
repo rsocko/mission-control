@@ -21,6 +21,9 @@ import {
   type SemanticSensitivity,
   type SemanticVectorWrite,
 } from './contracts';
+import { canonicalJson } from '@/db/persistence/value-codecs';
+
+export { canonicalJson };
 
 // ─── Environment-tunable defaults ───────────────────────────────────────────
 
@@ -371,25 +374,6 @@ export function normalizeMetadataFilters(
 }
 
 // ─── Canonical JSON comparison ──────────────────────────────────────────────
-
-/**
- * Order-independent serialization of a JSON value.
- *
- * Object keys are sorted recursively; array order is preserved because order is
- * meaningful in a JSON array. Used to compare a stored document against an
- * incoming one without treating a re-ordering as a change.
- */
-export function canonicalJson(value: unknown): string {
-  if (value === undefined) return 'null';
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record)
-    .filter((key) => record[key] !== undefined)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
-    .join(',')}}`;
-}
 
 /**
  * True when two JSON values are the same document.

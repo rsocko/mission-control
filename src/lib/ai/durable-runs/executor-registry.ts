@@ -1,9 +1,5 @@
 import 'server-only';
 
-import {
-  COPILOT_EXECUTION_ROUTE,
-  COPILOT_PROVIDER,
-} from '../copilot-run-events';
 import type {
   CopilotRunSnapshot,
   CreateCopilotRunInput,
@@ -19,13 +15,17 @@ import type {
   DurableAiRunExecutionContext,
   DurableAiRunExecutor,
 } from './worker';
-
-export const DURABLE_AI_ENQUEUEABLE_ROUTES = [
+import {
   COPILOT_EXECUTION_ROUTE,
-] as const;
+  COPILOT_PROVIDER,
+  DURABLE_AI_ENQUEUEABLE_ROUTES,
+  type DurableAiEnqueueableRoute,
+} from './route-contract';
 
-export type DurableAiEnqueueableRoute =
-  (typeof DURABLE_AI_ENQUEUEABLE_ROUTES)[number];
+export {
+  DURABLE_AI_ENQUEUEABLE_ROUTES,
+  type DurableAiEnqueueableRoute,
+} from './route-contract';
 
 export interface DirectCopilotExecutorLifecycle {
   getRun(runId: string): Promise<CopilotRunSnapshot | undefined>;

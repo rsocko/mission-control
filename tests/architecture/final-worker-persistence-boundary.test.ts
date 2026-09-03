@@ -13,10 +13,12 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   COMPOSITION_ROOT,
   'src/db/runtime.ts',
   'src/lib/ai/durable-runs/runtime.ts',
+  'src/lib/semantic-index/embedding-provider.ts',
   'src/lib/connectors/github-issues/backup-verifier.ts',
   'src/lib/connectors/monarch-money/index.ts',
   'src/lib/connectors/rymessage/rymessage-client.ts',
   'src/lib/houston-memory/service.ts',
+  'src/lib/notifications/enrichment/ai-enrichment.ts',
   'src/lib/persistence/worker-runtime.ts',
   'src/lib/persistence/runtime.ts',
   'src/lib/search/fts.ts',
@@ -35,6 +37,12 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
 const POSTGRES_GUARDED_DYNAMIC_BARRELS = new Set([
   '@/lib/search',
   '@/lib/semantic-index/runtime',
+]);
+const POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES = new Set([
+  'src/lib/notifications/enrichment/ai-enrichment.ts -> @/lib/ai/provider-factory',
+  'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
+  'src/lib/semantic-index/publication.ts -> ./config',
+  'src/lib/semantic-index/publication.ts -> ./runtime',
 ]);
 const SQLITE_MODULE = /(?:^|\/)(?:db\/(?:index|schema)(?:\.ts|\/)|[^/]*sqlite[^/]*\.ts$)/;
 const SQLITE_PACKAGE = /^(?:better-sqlite3|drizzle-orm\/better-sqlite3)$/;
@@ -119,7 +127,9 @@ function postgresStartupGraph(): Set<string> {
         const resolved = resolveApplicationImport(path, specifier);
         const sqliteTarget = SQLITE_PACKAGE.test(specifier)
           || Boolean(resolved && SQLITE_MODULE.test(resolved));
-        return !sqliteTarget && !POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier);
+        return !sqliteTarget
+          && !POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier)
+          && !POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`);
       }),
     ]) {
       const resolved = resolveApplicationImport(path, specifier);
@@ -162,6 +172,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
           SQLITE_PACKAGE.test(specifier)
           || Boolean(resolved && SQLITE_MODULE.test(resolved))
           || POSTGRES_GUARDED_DYNAMIC_BARRELS.has(specifier)
+          || POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES.has(`${path} -> ${specifier}`)
         )
           ? [`${path} -> ${specifier}`]
           : [];
@@ -180,6 +191,25 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(guardedEdges).toContain(
       'src/lib/sync/search-indexer.ts -> @/lib/search',
     );
+    expect(guardedEdges).toContain(
+      'src/lib/notifications/enrichment/ai-enrichment.ts -> @/lib/ai/provider-factory',
+    );
+    expect(guardedEdges).toContain(
+      'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
+    );
+    expect(guardedEdges).toContain(
+      'src/lib/semantic-index/publication.ts -> ./config',
+    );
+    expect(guardedEdges).toContain(
+      'src/lib/semantic-index/publication.ts -> ./runtime',
+    );
+  });
+
+  it('keeps producer capability validation out of the native worker registry', () => {
+    const capability = source('src/lib/runtime/postgres-workflow-capability.ts');
+    expect(capability).toContain('@/lib/ai/durable-runs/route-contract');
+    expect(capability).not.toContain('@/lib/ai/durable-runs/executor-registry');
+    expect(capability).not.toContain('@github/copilot-sdk');
   });
 
   it('selects real PostgreSQL composition without retired disable branches', () => {

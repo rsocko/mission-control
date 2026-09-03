@@ -646,6 +646,9 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
           MC_WORKER_INSTANCE_FILE: instancePath,
           MC_TELEMETRY_INTERVAL_MS: '100',
           MC_DEPLOYMENT_REVISION: 'postgres-final-worker-smoke',
+          AI_PROVIDER: 'ollama',
+          AI_BASE_URL: 'http://127.0.0.1:1/v1',
+          AI_MODEL: 'postgres-final-worker-smoke',
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       });

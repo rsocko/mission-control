@@ -1,7 +1,7 @@
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
 import {
   DURABLE_AI_ENQUEUEABLE_ROUTES,
-} from '@/lib/ai/durable-runs/executor-registry';
+} from '@/lib/ai/durable-runs/route-contract';
 import {
   SEMANTIC_SOURCE_ENTITY_TYPES,
 } from '@/lib/semantic-index/source/contracts';

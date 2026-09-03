@@ -619,7 +619,7 @@ describe('DurableAiRunWorker', () => {
     const store = new durable.DurableAiRunStore();
     const durableRuns = repository(store);
     const { run } = enqueue(store, 'activation');
-    const claimNext = vi.spyOn(durableRuns, 'claimNext');
+    const claimNext = vi.spyOn(durableRuns, 'claimNextRun');
     let enabled = false;
     const execute = vi.fn(async () => undefined);
     const worker = new durable.DurableAiRunWorker(

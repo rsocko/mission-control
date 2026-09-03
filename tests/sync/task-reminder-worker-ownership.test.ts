@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 describe('task reminder runtime ownership', () => {
   it('runs reminders in the worker with an inline web fallback', () => {
     const workerSource = readFileSync(
-      path.join(process.cwd(), 'src', 'sync-worker.ts'),
+      path.join(process.cwd(), 'src', 'lib', 'runtime', 'packaged-sync-worker.ts'),
       'utf8',
     );
     const webSource = readFileSync(

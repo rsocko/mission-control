@@ -75,6 +75,7 @@ const postgresMocks = vi.hoisted(() => ({
     warmUp: vi.fn(async () => undefined),
     search: vi.fn(async () => []),
   },
+  publishSemanticEntityUpsert: vi.fn(async () => ({ status: 'published' as const })),
   workerRepositories: {
     connectors: {
       get: vi.fn(async () => null),
@@ -132,6 +133,10 @@ vi.mock('@/db/postgres/sync/job-repository', () => ({
 
 vi.mock('@/lib/persistence/worker-runtime', () => ({
   getWorkerPersistenceRepositories: async () => postgresMocks.workerRepositories,
+}));
+
+vi.mock('@/lib/semantic-index/publication', () => ({
+  publishSemanticEntityUpsert: postgresMocks.publishSemanticEntityUpsert,
 }));
 
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;
@@ -285,7 +290,7 @@ describe('PostgreSQL backend selection — keyword search', () => {
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 
-  it('uses keyword-only post-sync indexing without touching SQLite semantic state', async () => {
+  it('publishes keyword and semantic updates without touching SQLite state', async () => {
     const {
       indexAlertForSearch,
       indexTaskForSearch,
@@ -303,6 +308,14 @@ describe('PostgreSQL backend selection — keyword search', () => {
     );
     expect(postgresMocks.searchRepository.indexNotification).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'pg-notification-1' }),
+    );
+    expect(postgresMocks.publishSemanticEntityUpsert).toHaveBeenCalledWith(
+      'task',
+      'pg-task-2',
+    );
+    expect(postgresMocks.publishSemanticEntityUpsert).toHaveBeenCalledWith(
+      'alert',
+      'pg-notification-1',
     );
     expect(postgresMocks.searchRepository.warmUp).toHaveBeenCalled();
     expect(sqliteTouch).not.toHaveBeenCalled();

@@ -7,7 +7,7 @@ import {
   PostgresWorkerProcessingLatch,
   type PostgresPackagedWorkflowCapability,
 } from '@/lib/runtime/postgres-workflow-capability';
-import { DURABLE_AI_ENQUEUEABLE_ROUTES } from '@/lib/ai/durable-runs/executor-registry';
+import { DURABLE_AI_ENQUEUEABLE_ROUTES } from '@/lib/ai/durable-runs/route-contract';
 import { SEMANTIC_SOURCE_ENTITY_TYPES } from '@/lib/semantic-index/source/contracts';
 
 function persistence(): WorkerPersistenceRepositories {

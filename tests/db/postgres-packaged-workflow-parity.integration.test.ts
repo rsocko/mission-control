@@ -7,6 +7,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { PoolClient } from 'pg';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+
+vi.unmock('drizzle-orm');
 import type { ConnectorNotificationCommand } from '@/db/persistence/connector-execution';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 

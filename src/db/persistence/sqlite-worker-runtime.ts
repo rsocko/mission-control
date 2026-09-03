@@ -160,6 +160,7 @@ export function createSqliteWorkerPersistenceRepositories(
     github: {
       identity: githubIdentity.identity,
       writeFence: githubIdentity.writeFence,
+      transferIdentity: githubIdentity.transferIdentity,
       dependencies: createSqliteGitHubDependencyRepositories(sqlite, db),
       hierarchy: createSqliteGitHubHierarchyRepositories(sqlite, db),
       projects: createSqliteGitHubProjectRepositories(sqlite, db),

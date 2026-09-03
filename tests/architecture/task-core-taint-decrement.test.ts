@@ -10,11 +10,9 @@ import { computeWebPersistenceGraph } from './web-persistence-graph';
  * The generic ratchet in `web-persistence-baseline.test.ts` only guarantees
  * that the taint footprint never *grows*. This file pins what L04 actually
  * removed, file by file, from the exact 13-file owned set, and — for the one
- * owned file whose residual taint belongs to a different layer — pins the
- * exact remaining edge rather than accepting a prose deferral. Without this,
- * a later layer could quietly re-taint one of the migrated helpers while some
- * other file happened to be migrated in the same commit, and the
- * count-plus-subset ratchet alone would not notice.
+ * owned file whose residual taint belonged to a different layer — records the
+ * exact former edge rather than accepting a prose deferral. L06b resolves that
+ * edge; this suite now pins all 13 L04-owned files as clean.
  */
 
 /** The full L04-owned file set: every one of these must be persistence-clean. */
@@ -33,20 +31,6 @@ const OWNED = [
   'src/lib/tasks/task-move-write-through.ts',
   'src/lib/utils/resolve-task-list-names.ts',
 ] as const;
-
-/** Owned files that L04 removed from the Tier A taint sets outright. */
-const OWNED_UNTAINTED = OWNED.filter(
-  (file) => file !== 'src/lib/tasks/task-move-write-through.ts',
-);
-
-/**
- * `task-move-write-through.ts` has no persistence coupling of its own left,
- * but it stays in `taintedLibA` because it statically imports this L06-owned
- * external-identity module. This is recorded as an exact edge, and the test
- * below fails if the residual set ever differs from it — either because the
- * blocker was fixed (making this list stale) or because a new one appeared.
- */
-const FOREIGN_LAYER_BLOCKERS = ['src/lib/connectors/transfer-identity.ts'] as const;
 
 /**
  * The four helpers that still *compile Drizzle predicates* for the task
@@ -122,20 +106,22 @@ describe('L04 task-core taint decrement', () => {
   it('records the layer in the baseline decrement history with no deferrals', () => {
     const entry = baseline.decrementHistory?.find((record) => record.layer === 'L04');
     expect(entry, 'L04 must be recorded in web-persistence-baseline.json').toBeDefined();
-    expect(entry?.totalMigrationUnits.to).toBe(baseline.counts.totalMigrationUnits);
+    expect(entry?.totalMigrationUnits).toEqual({ from: 338, to: 325, delta: -13 });
     expect(entry?.tierBReclassifications).toEqual([]);
     // No file from the owned set may be parked as "not migrated".
     expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
     expect(
       entry?.removedTaintedApiHelpers.concat(entry.removedTaintedLibA).sort(),
-    ).toEqual([...OWNED_UNTAINTED].sort());
+    ).toEqual(OWNED.filter(
+      (file) => file !== 'src/lib/tasks/task-move-write-through.ts',
+    ).sort());
 
-    const residual = entry?.ownedFilesWithResidualForeignLayerTaint ?? [];
-    expect(residual.map((record) => record.file))
+    const historicalResidual = entry?.ownedFilesWithResidualForeignLayerTaint ?? [];
+    expect(historicalResidual.map((record) => record.file))
       .toEqual(['src/lib/tasks/task-move-write-through.ts']);
-    expect(residual[0].persistenceMigrated).toBe(true);
-    expect(residual[0].blockedBy).toEqual([...FOREIGN_LAYER_BLOCKERS]);
-    expect(residual[0].evidence.length).toBeGreaterThan(60);
+    expect(historicalResidual[0].persistenceMigrated).toBe(true);
+    expect(historicalResidual[0].blockedBy).toEqual(['src/lib/connectors/transfer-identity.ts']);
+    expect(historicalResidual[0].evidence.length).toBeGreaterThan(60);
   });
 
   it.each(OWNED)('%s evaluates no database handle or SQLite driver', (file) => {
@@ -158,23 +144,20 @@ describe('L04 task-core taint decrement', () => {
     ).toEqual([]);
   });
 
-  it.each(OWNED_UNTAINTED)('%s is no longer import-time SQLite-tainted', (file) => {
+  it.each(OWNED)('%s is no longer import-time SQLite-tainted', (file) => {
     expect(taintedA.has(file)).toBe(false);
   });
 
-  it('attributes the one residual taint to an exact, foreign-layer edge', () => {
+  it('confirms L06b resolved the recorded foreign-layer edge', () => {
     const file = 'src/lib/tasks/task-move-write-through.ts';
-    // Honest accounting: the census still counts it, because taint is transitive.
-    expect(taintedA.has(file)).toBe(true);
-
-    // ...and it is blocked by exactly the recorded module(s), nothing else.
+    expect(taintedA.has(file)).toBe(false);
     const source = readFileSync(join(process.cwd(), file), 'utf8');
     const blocking = valueImportSpecifiers(source)
       .map((specifier) => (specifier.startsWith('@/') ? `src/${specifier.slice(2)}` : null))
       .filter((base): base is string => base !== null)
       .flatMap((base) => [`${base}.ts`, `${base}/index.ts`])
       .filter((candidate) => taintedA.has(candidate));
-    expect([...new Set(blocking)].sort()).toEqual([...FOREIGN_LAYER_BLOCKERS].sort());
+    expect([...new Set(blocking)].sort()).toEqual([]);
   });
 
   it('un-taints the Scout hard-delete route without reclassifying it as deferred taint', () => {
@@ -206,12 +189,12 @@ describe('L04 task-core taint decrement', () => {
       cleanRoutes: current.cleanRoutes.length,
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
-      taintedLibA: 105,
+      taintedLibA: 103,
       taintedApiHelpers: 1,
       tierARoutes: 219,
       tierBRoutes: 26,
       cleanRoutes: 21,
-      totalMigrationUnits: 325,
+      totalMigrationUnits: 323,
     });
   });
 });

@@ -42,6 +42,10 @@ import {
   type PostgresCanonicalTaskFilterInputs,
 } from './task-core-filter';
 import {
+  reconcilePostgresTaskTransferIdentityRefreshInTransaction,
+  resolvePostgresTaskTransferIdentityTargets,
+} from './task-transfer-identity';
+import {
   CLOSED_TASK_STATUSES,
   type AvailableTaskTag,
   type InboxListEntry,
@@ -1548,32 +1552,7 @@ class PostgresTaskTransferIdentityRepository implements TaskTransferIdentityRepo
     taskMetadata: Record<string, unknown>;
     sourceLists: readonly { sourceId: string; localId: string }[];
   }> {
-    const orderedUniqueSourceIds = [...new Set(input.sourceListIds.filter(Boolean))];
-    const localIdBySourceId = new Map<string, string>();
-    if (orderedUniqueSourceIds.length > 0) {
-      const rows = await this.db.select({
-        sourceId: sourceLists.sourceId,
-        localId: sourceLists.id,
-      }).from(sourceLists).where(and(
-        eq(sourceLists.connectorInstanceId, input.connectorInstanceId),
-        inArray(sourceLists.sourceId, orderedUniqueSourceIds),
-      ));
-      for (const row of rows) localIdBySourceId.set(row.sourceId, row.localId);
-    }
-    const resolvedSourceLists = orderedUniqueSourceIds
-      .filter((sourceId) => localIdBySourceId.has(sourceId))
-      .map((sourceId) => ({ sourceId, localId: localIdBySourceId.get(sourceId)! }));
-
-    const [taskRow] = await this.db.select({ metadata: tasks.metadata })
-      .from(tasks)
-      .where(eq(tasks.id, input.taskId))
-      .limit(1);
-
-    return {
-      taskExists: Boolean(taskRow),
-      taskMetadata: taskRow ? asRecord(taskRow.metadata) : {},
-      sourceLists: resolvedSourceLists,
-    };
+    return resolvePostgresTaskTransferIdentityTargets(this.db, input);
   }
 
   async reconcileTaskRefresh(input: {
@@ -1587,43 +1566,9 @@ class PostgresTaskTransferIdentityRepository implements TaskTransferIdentityRepo
     };
     observedAt: string;
   }): Promise<boolean> {
-    return this.db.transaction(async (tx) => {
-      const [current] = await tx.select({ metadata: tasks.metadata })
-        .from(tasks)
-        .where(and(
-          eq(tasks.id, input.taskId),
-          eq(tasks.connectorInstanceId, input.connectorInstanceId),
-        ))
-        .limit(1)
-        .for('update');
-      if (!current) return false;
-      const metadata = {
-        ...asRecord(current.metadata),
-        ...input.task.metadata,
-      };
-      const updated = await tx.update(tasks).set({
-        sourceId: input.task.sourceId,
-        sourceListId: input.task.sourceListId,
-        sourceListName: input.task.sourceListName,
-        title: input.task.title,
-        description: input.task.description,
-        status: input.task.status,
-        statusReason: input.task.statusReason,
-        priority: input.task.priority,
-        effort: input.task.effort,
-        microStatus: input.task.microStatus,
-        assignee: input.task.assignee,
-        updatedAt: input.task.updatedAt,
-        completedAt: input.task.completedAt,
-        metadata,
-        syncStatus: 'synced',
-        lastSyncedAt: input.observedAt,
-      }).where(and(
-        eq(tasks.id, input.taskId),
-        eq(tasks.connectorInstanceId, input.connectorInstanceId),
-      )).returning({ id: tasks.id });
-      return updated.length === 1;
-    });
+    return this.db.transaction((tx) => (
+      reconcilePostgresTaskTransferIdentityRefreshInTransaction(tx, input)
+    ));
   }
 }
 

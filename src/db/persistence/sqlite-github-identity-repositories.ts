@@ -20,6 +20,7 @@ import {
 import type { ExternalEntityType } from '@/db/schema/external-identities';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 import {
+  assertExternalIdentityBatchWithinLimit,
   getCurrentExternalEntityLocatorInTransaction,
   getExternalEntityByKeyInTransaction,
   listExternalEntityLocatorHistoryInTransaction,
@@ -29,6 +30,19 @@ import {
   recordExternalIdentityCollisionInTransaction,
   upsertExternalEntityInTransaction,
 } from '@/lib/external-identities/service';
+import {
+  assertGitHubIdentityModeSnapshotInTransaction,
+  getGitHubIdentityModeSnapshotInTransaction,
+} from '@/lib/external-identities/identity-mode';
+import {
+  buildGitHubTransferIdentityWrites,
+  sourceListIdsForGitHubTransferIdentity,
+  type GitHubTransferIdentityPersistence,
+} from './github-transfer-identity';
+import {
+  reconcileSqliteTaskTransferIdentityRefreshInTransaction,
+  resolveSqliteTaskTransferIdentityTargetsInTransaction,
+} from './sqlite-task-transfer-identity';
 import type {
   GitHubAuthorizeSourceWriteResult,
   GitHubAuthorizeTaskWriteResult,
@@ -48,6 +62,7 @@ import type {
 
 type SqliteDatabase = Database.Database;
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
+type SqliteTransaction = Parameters<Parameters<SqliteDrizzle['transaction']>[0]>[0];
 
 /** Aborts a transaction while carrying the caller-visible result to return. */
 class RollbackSignal<R> extends Error {
@@ -79,8 +94,10 @@ function digestLocator(...values: Array<string | number | null>): string {
 export function createSqliteGitHubIdentityRepositories(
   sqlite: SqliteDatabase,
   db: SqliteDrizzle,
-): GitHubIdentityRepositories {
-  function runTx<R>(fn: (tx: SqliteDrizzle) => R): R {
+): GitHubIdentityRepositories & {
+  transferIdentity: GitHubTransferIdentityPersistence;
+} {
+  function runTx<R>(fn: (tx: SqliteTransaction) => R): R {
     try {
       return db.transaction(fn, { behavior: 'immediate' });
     } catch (error) {
@@ -378,9 +395,7 @@ export function createSqliteGitHubIdentityRepositories(
 
     async persistExternalIdentityBatch({ connectorInstanceId, modeSnapshot, writes }) {
       if (writes.length === 0) return [];
-      if (writes.length > 500) {
-        throw new Error('External identity batch exceeds the maximum of 500');
-      }
+      assertExternalIdentityBatchWithinLimit(writes);
       if (writes.some((write) => (
         write.target.connectorInstanceId !== connectorInstanceId
       ))) {
@@ -1632,5 +1647,36 @@ export function createSqliteGitHubIdentityRepositories(
     },
   };
 
-  return { identity, writeFence };
+  const transferIdentity: GitHubTransferIdentityPersistence = {
+    async persist(input) {
+      runTx((tx) => {
+        const targets = resolveSqliteTaskTransferIdentityTargetsInTransaction(tx, {
+          taskId: input.taskId,
+          connectorInstanceId: input.connectorInstanceId,
+          sourceListIds: sourceListIdsForGitHubTransferIdentity(input),
+        });
+        const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
+        assertExternalIdentityBatchWithinLimit(writes);
+        if (writes.length > 0) {
+          const modeSnapshot = getGitHubIdentityModeSnapshotInTransaction(
+            tx,
+            input.connectorInstanceId,
+            input.observedAt,
+          );
+          assertGitHubIdentityModeSnapshotInTransaction(tx, modeSnapshot);
+          persistExternalIdentityBatchInTransaction(tx, writes, true, 'active');
+        }
+        if (input.reconcileTask && !reconcileSqliteTaskTransferIdentityRefreshInTransaction(tx, {
+          taskId: input.taskId,
+          connectorInstanceId: input.connectorInstanceId,
+          task: input.reconcileTask,
+          observedAt: input.observedAt,
+        })) {
+          throw new Error('Task transfer identity refresh target was not found');
+        }
+      });
+    },
+  };
+
+  return { identity, writeFence, transferIdentity };
 }

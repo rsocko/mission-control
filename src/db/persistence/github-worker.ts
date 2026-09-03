@@ -7,6 +7,7 @@ import type { GitHubDependencyPersistence } from './github-dependencies';
 import type { GitHubHierarchyPersistence } from './github-hierarchy';
 import type { GitHubProjectPersistence } from './github-projects';
 import type { GitHubRecoveryPersistence } from './github-recovery';
+import type { GitHubTransferIdentityPersistence } from './github-transfer-identity';
 
 export { UnsupportedGitHubWorkerOperationError } from './github-worker-errors';
 
@@ -36,6 +37,7 @@ export { UnsupportedGitHubWorkerOperationError } from './github-worker-errors';
 export interface GitHubWorkerRepositories {
   readonly identity: GitHubIdentityPersistence;
   readonly writeFence: GitHubWriteFencePersistence;
+  readonly transferIdentity: GitHubTransferIdentityPersistence;
   readonly dependencies: GitHubDependencyPersistence;
   readonly hierarchy: GitHubHierarchyPersistence;
   readonly projects: GitHubProjectPersistence;

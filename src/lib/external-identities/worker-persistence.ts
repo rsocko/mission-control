@@ -3,6 +3,7 @@ import type {
   GitHubWriteFencePersistence,
 } from '@/db/persistence/github-identity';
 import type { GitHubIdentityOperatorPersistence } from '@/db/persistence/github-identity-operator';
+import type { GitHubTransferIdentityPersistence } from '@/db/persistence/github-transfer-identity';
 import type { GitHubWorkerRepositories } from '@/db/persistence/github-worker';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
@@ -27,6 +28,13 @@ export async function getGitHubWriteFenceRepository(): Promise<GitHubWriteFenceP
   return (await getGitHubWorkerRepositories()).writeFence;
 }
 
+/** Convenience accessor for the atomic task + identity transfer bridge. */
+export async function getGitHubTransferIdentityRepository(): (
+  Promise<GitHubTransferIdentityPersistence>
+) {
+  return (await getGitHubWorkerRepositories()).transferIdentity;
+}
+
 /**
  * Convenience accessor for the operator/recovery port covering identity
  * backfill/status, manual exception mutation, unknown-outcome resolution, and
@@ -39,4 +47,3 @@ export async function getGitHubIdentityOperatorRepository(): (
 ) {
   return (await getGitHubWorkerRepositories()).operator;
 }
-

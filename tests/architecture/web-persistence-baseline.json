@@ -2,7 +2,7 @@
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
   "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (plan.md at session-state 430296c8-f794-4625-b32f-abb04894e6d4). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-03",
-  "generatedFromCommit": "107bf7bd7b31e140ead70d49099a6726176f463d+L04",
+  "generatedFromCommit": "eeeeca38d152c4347751c529a8b32f622b56c18f+L06b",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -47,9 +47,9 @@
     "directTaintSourceRoutes": 142,
     "transitiveOnlyTaintSourceRoutes": 77,
     "directDbNamespaceRoutes": 143,
-    "taintedLibA": 105,
+    "taintedLibA": 103,
     "taintedApiHelpers": 1,
-    "totalMigrationUnits": 325
+    "totalMigrationUnits": 323
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -1009,7 +1009,6 @@
     "src/lib/connectors/monarch-money/identity-sqlite.ts",
     "src/lib/connectors/monarch-money/snapshot-sync.ts",
     "src/lib/connectors/scout/reconciliation-service.ts",
-    "src/lib/connectors/transfer-identity.ts",
     "src/lib/external-agents/http.ts",
     "src/lib/external-agents/policy.ts",
     "src/lib/external-agents/registry.ts",
@@ -1066,7 +1065,6 @@
     "src/lib/sync/sqlite-job-repository.ts",
     "src/lib/sync/sqlite-maintenance-lock.ts",
     "src/lib/tag-insights/service.ts",
-    "src/lib/tasks/task-move-write-through.ts",
     "src/lib/triage/actions.ts",
     "src/lib/triage/actions/ms-todo.ts",
     "src/lib/triage/capture.ts",
@@ -1123,10 +1121,29 @@
           "blockedBy": [
             "src/lib/connectors/transfer-identity.ts"
           ],
-          "evidence": "The file itself contains no @/db, @/db/schema, drizzle-orm or better-sqlite3 reference, and every one of its nine original transaction sites is now an adapter-owned task-core operation. It stays in taintedLibA only because it statically imports @/lib/connectors/transfer-identity, whose own @/db usage and whose @/lib/external-identities dependency are external-identity persistence owned by L06. tests/db/task-core-postgres-import-safety.test.ts stubs exactly that one module and then imports and executes the move under a poisoned @/db, which fails loudly if any SQLite coupling is ever reintroduced into the move itself; tests/architecture/task-core-taint-decrement.test.ts pins that this is the only remaining blocking edge. It is therefore residual taint attributable to another layer, not a deferral inside L04."
+          "evidence": "Resolved by L06b: src/lib/connectors/transfer-identity.ts now depends only on the backend-neutral worker persistence contract, releasing this transitive L04-owned caller from taintedLibA."
         }
       ],
-      "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the post-L06a worktree; entry-set diff shows zero additions to any taint set and zero Tier A -> Tier B reclassifications attributable to L04. L03a1 independently reduced tierBRoutes from 39 to 26 by moving 13 runtime-composition routes into cleanRoutes, and L06a independently removed nine external-identity modules from taintedLibA."
+      "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the post-L06b worktree; entry-set diff shows zero additions to any taint set and zero Tier A -> Tier B reclassifications attributable to L04. L06b resolved the one recorded foreign-layer blocker without changing L04's owned migration accounting."
+    },
+    {
+      "layer": "L06b",
+      "title": "atomic transfer-identity PostgreSQL web parity",
+      "totalMigrationUnits": {
+        "from": 325,
+        "to": 323,
+        "delta": -2
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/connectors/transfer-identity.ts",
+        "src/lib/tasks/task-move-write-through.ts"
+      ],
+      "removedTierARoutes": [],
+      "newlyCleanRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation removes only transfer-identity.ts and its transitive task-move-write-through.ts caller from taintedLibA (105 to 103), leaves routes at A219/B26/clean21, and reduces total migration units from 325 to 323."
     }
   ],
   "layerUpdates": [

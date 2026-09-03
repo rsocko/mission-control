@@ -757,7 +757,7 @@ search term could match a JSON number. `tests/contracts/
 notification-entity-linking.contract.ts` runs identically against both
 adapters (`tests/db/sqlite-notification-entity-linking-repository.contract.
 test.ts`, always-on; `tests/db/postgres-notification-entity-linking-
-repository.contract.test.ts`, guarded by `MC_TEST_POSTGRES_URL` and
+repository.integration.test.ts`, guarded by `MC_TEST_POSTGRES_URL` and
 `assertSafeIntegrationTestTarget`) and covers: exact match, unique suffix
 match, zero matches, ambiguous suffix match (2 rows → `null`, never an
 arbitrary pick), mixed-case ASCII suffix folding, a non-ASCII case pair

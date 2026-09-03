@@ -2,7 +2,7 @@
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
   "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (plan.md at session-state 430296c8-f794-4625-b32f-abb04894e6d4). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-03",
-  "generatedFromCommit": "2bda811253b8a438d918fca4f050b404ef144873+origin/main@17d8dea502ddab8ddafeb871222c6917f159866d",
+  "generatedFromCommit": "2bda811253b8a438d918fca4f050b404ef144873+origin/main@35226ed323074ce8e243a8929ffeb82bec3269c1+L06a",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -47,9 +47,9 @@
     "directTaintSourceRoutes": 142,
     "transitiveOnlyTaintSourceRoutes": 78,
     "directDbNamespaceRoutes": 143,
-    "taintedLibA": 121,
+    "taintedLibA": 112,
     "taintedApiHelpers": 6,
-    "totalMigrationUnits": 347
+    "totalMigrationUnits": 338
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -1016,15 +1016,6 @@
     "src/lib/external-agents/registry.ts",
     "src/lib/external-agents/service.ts",
     "src/lib/external-agents/transports.ts",
-    "src/lib/external-identities/github-backfill.ts",
-    "src/lib/external-identities/identity-exceptions.ts",
-    "src/lib/external-identities/identity-mode.ts",
-    "src/lib/external-identities/identity-status.ts",
-    "src/lib/external-identities/index.ts",
-    "src/lib/external-identities/service.ts",
-    "src/lib/external-identities/task-transfer-reconciliation.ts",
-    "src/lib/external-identities/write-cycle-reconciliation.ts",
-    "src/lib/external-identities/write-outcome-resolution.ts",
     "src/lib/finance-insights/cutover-operator.ts",
     "src/lib/finance-insights/cutover.ts",
     "src/lib/finance/houston-tools.ts",

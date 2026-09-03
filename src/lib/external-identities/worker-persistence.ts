@@ -2,6 +2,7 @@ import type {
   GitHubIdentityPersistence,
   GitHubWriteFencePersistence,
 } from '@/db/persistence/github-identity';
+import type { GitHubIdentityOperatorPersistence } from '@/db/persistence/github-identity-operator';
 import type { GitHubWorkerRepositories } from '@/db/persistence/github-worker';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
@@ -25,3 +26,17 @@ export async function getGitHubIdentityRepository(): Promise<GitHubIdentityPersi
 export async function getGitHubWriteFenceRepository(): Promise<GitHubWriteFencePersistence> {
   return (await getGitHubWorkerRepositories()).writeFence;
 }
+
+/**
+ * Convenience accessor for the operator/recovery port covering identity
+ * backfill/status, manual exception mutation, unknown-outcome resolution, and
+ * interrupted write-cycle recovery. These are pre-existing, previously audited
+ * worker exclusions: the PostgreSQL adapter fails closed with
+ * `UnsupportedGitHubWorkerOperationError` before any remote effect.
+ */
+export async function getGitHubIdentityOperatorRepository(): (
+  Promise<GitHubIdentityOperatorPersistence>
+) {
+  return (await getGitHubWorkerRepositories()).operator;
+}
+

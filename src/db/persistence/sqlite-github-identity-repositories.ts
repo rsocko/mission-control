@@ -20,7 +20,14 @@ import {
 import type { ExternalEntityType } from '@/db/schema/external-identities';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 import {
+  getCurrentExternalEntityLocatorInTransaction,
+  getExternalEntityByKeyInTransaction,
+  listExternalEntityLocatorHistoryInTransaction,
+  observeOperatorExternalEntityLocatorInTransaction,
   persistExternalIdentityBatchInTransaction,
+  preflightExternalEntityLocatorInTransaction,
+  recordExternalIdentityCollisionInTransaction,
+  upsertExternalEntityInTransaction,
 } from '@/lib/external-identities/service';
 import type {
   GitHubAuthorizeSourceWriteResult,
@@ -749,6 +756,34 @@ export function createSqliteGitHubIdentityRepositories(
         proofType: event.proofType,
         createdAt: event.createdAt,
       };
+    },
+
+    async getExternalEntityByKey(key) {
+      return getExternalEntityByKeyInTransaction(db, key);
+    },
+
+    async upsertExternalEntity(input) {
+      return runTx((tx) => upsertExternalEntityInTransaction(tx, input));
+    },
+
+    async getCurrentExternalEntityLocator(externalEntityId) {
+      return getCurrentExternalEntityLocatorInTransaction(db, externalEntityId);
+    },
+
+    async listExternalEntityLocatorHistory(externalEntityId) {
+      return listExternalEntityLocatorHistoryInTransaction(db, externalEntityId);
+    },
+
+    async preflightExternalEntityLocator(input) {
+      return preflightExternalEntityLocatorInTransaction(db, input);
+    },
+
+    async observeExternalEntityLocator(input) {
+      return runTx((tx) => observeOperatorExternalEntityLocatorInTransaction(tx, input));
+    },
+
+    async recordExternalIdentityCollision(input) {
+      return runTx((tx) => recordExternalIdentityCollisionInTransaction(tx, input));
     },
   };
 

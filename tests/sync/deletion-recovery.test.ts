@@ -483,7 +483,7 @@ describe('sync deletion recovery', () => {
     // A connector identity epoch bump must fence a recovery frozen at the old one.
     db.update(schema.githubIdentityControls).set({ modeRevision: 5, updatedAt: now })
       .where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-recovery')).run();
-    expect(identity.getGitHubIdentityModeSnapshot('github-recovery'))
+    expect(await identity.getGitHubIdentityModeSnapshot('github-recovery'))
       .toMatchObject({ modeRevision: 5 });
     await expect(restoreDeletionSnapshot(snapshot.id, 'local'))
       .rejects.toThrow('stale_mode_revision');

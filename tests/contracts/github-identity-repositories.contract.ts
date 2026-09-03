@@ -53,6 +53,7 @@ export interface GitHubIdentityHarness {
 }
 
 const NOW = GITHUB_IDENTITY_CONTRACT.taskVersion;
+const EARLIER = '2026-08-10T11:00:00.000Z';
 const LATER = '2026-08-10T12:05:00.000Z';
 const EXPIRES = '2026-08-10T12:30:00.000Z';
 
@@ -477,6 +478,264 @@ export function describeGitHubIdentityRepositoriesContract(
           category: 'terminal_inaccessible',
           action: 'accept',
         });
+      });
+    });
+
+    describe('external entity directory (operator + non-batch reads)', () => {
+      const repoIdentity = {
+        provider: 'github',
+        hostKey: 'github.com',
+        entityType: 'repository' as const,
+        stableId: GITHUB_IDENTITY_CONTRACT.repositoryStableId,
+      };
+      const issueIdentity = {
+        provider: 'github',
+        hostKey: 'github.com',
+        entityType: 'issue' as const,
+        stableId: GITHUB_IDENTITY_CONTRACT.issueStableId,
+      };
+
+      it('resolves a seeded entity by key and returns null for an unknown key', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const record = await identity.getExternalEntityByKey(issueIdentity);
+        expect(record).toMatchObject({ id: 'issue-entity', identity: issueIdentity });
+        expect(
+          await identity.getExternalEntityByKey({ ...issueIdentity, stableId: 'I_missing' }),
+        ).toBeNull();
+      });
+
+      it('upserts idempotently and only advances lastSeenAt forward', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const freshIdentity = {
+          provider: 'github',
+          hostKey: 'github.com',
+          entityType: 'repository' as const,
+          stableId: `R_fresh-${randomUUID()}`,
+        };
+        const created = await identity.upsertExternalEntity({
+          identity: freshIdentity,
+          observedAt: NOW,
+        });
+        expect(created).toMatchObject({
+          identity: freshIdentity,
+          firstSeenAt: NOW,
+          lastSeenAt: NOW,
+          nextLocatorRevision: 1,
+        });
+
+        const advanced = await identity.upsertExternalEntity({
+          identity: freshIdentity,
+          observedAt: LATER,
+        });
+        expect(advanced).toMatchObject({ id: created.id, firstSeenAt: NOW, lastSeenAt: LATER });
+
+        // An older observation must never move lastSeenAt backward.
+        const stale = await identity.upsertExternalEntity({
+          identity: freshIdentity,
+          observedAt: NOW,
+        });
+        expect(stale).toMatchObject({ id: created.id, firstSeenAt: NOW, lastSeenAt: LATER });
+      });
+
+      it('reads the current locator and returns null for an unknown entity', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const current = await identity.getCurrentExternalEntityLocator('repo-entity');
+        expect(current).toMatchObject({
+          externalEntityId: 'repo-entity',
+          owner: 'owner',
+          repository: 'repo',
+          locatorRevision: 1,
+          validTo: null,
+        });
+        expect(await identity.getCurrentExternalEntityLocator('missing-entity')).toBeNull();
+      });
+
+      it('previews an update without mutating and then durably applies it, retiring the prior revision', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const observation = {
+          entityId: 'repo-entity',
+          identity: repoIdentity,
+          locator: { owner: 'new-owner', repository: 'repo' },
+          observedAt: LATER,
+        };
+
+        const preflight = await identity.preflightExternalEntityLocator(observation);
+        expect(preflight.state).toBe('update');
+        expect(preflight.current).toMatchObject({ owner: 'owner', repository: 'repo', locatorRevision: 1 });
+        // Preflight is read-only: the durable locator must be untouched.
+        expect(await identity.getCurrentExternalEntityLocator('repo-entity'))
+          .toMatchObject({ owner: 'owner', locatorRevision: 1 });
+        expect(await identity.listExternalEntityLocatorHistory('repo-entity')).toHaveLength(1);
+
+        const observed = await identity.observeExternalEntityLocator(observation);
+        expect(observed.state).toBe('update');
+        expect(observed.locatorRecord).toMatchObject({
+          owner: 'new-owner',
+          repository: 'repo',
+          locatorRevision: 2,
+          validTo: null,
+        });
+
+        const history = await identity.listExternalEntityLocatorHistory('repo-entity');
+        expect(history).toHaveLength(2);
+        expect(history[0]).toMatchObject({ owner: 'owner', locatorRevision: 1, validTo: LATER });
+        expect(history[1]).toMatchObject({ owner: 'new-owner', locatorRevision: 2, validTo: null });
+        expect(await identity.getCurrentExternalEntityLocator('repo-entity'))
+          .toMatchObject({ owner: 'new-owner', locatorRevision: 2 });
+      });
+
+      it('treats a matching re-observation as unchanged and only refreshes lastSeenAt', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const observation = {
+          entityId: 'repo-entity',
+          identity: repoIdentity,
+          locator: { owner: 'owner', repository: 'repo' },
+          observedAt: LATER,
+        };
+
+        const preflight = await identity.preflightExternalEntityLocator(observation);
+        expect(preflight.state).toBe('unchanged');
+
+        const observed = await identity.observeExternalEntityLocator(observation);
+        expect(observed.state).toBe('unchanged');
+        expect(observed.locatorRecord).toMatchObject({ locatorRevision: 1, lastSeenAt: LATER });
+        // Unchanged observations never create a new locator revision.
+        expect(await identity.listExternalEntityLocatorHistory('repo-entity')).toHaveLength(1);
+      });
+
+      it('rejects evidence that predates the current locator without mutating it', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const observation = {
+          entityId: 'repo-entity',
+          identity: repoIdentity,
+          locator: { owner: 'stale-owner', repository: 'repo' },
+          observedAt: EARLIER,
+        };
+
+        const preflight = await identity.preflightExternalEntityLocator(observation);
+        expect(preflight).toMatchObject({
+          state: 'collision',
+          collisionCategory: 'locator_overlap_or_regression',
+          conflictingEntityId: 'repo-entity',
+        });
+
+        const observed = await identity.observeExternalEntityLocator(observation);
+        expect(observed).toMatchObject({ state: 'collision', locatorRecord: null });
+        expect(await identity.getCurrentExternalEntityLocator('repo-entity'))
+          .toMatchObject({ owner: 'owner', locatorRevision: 1 });
+      });
+
+      it('detects an active-path collision against another entity and performs no mutation', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const otherIdentity = {
+          provider: 'github',
+          hostKey: 'github.com',
+          entityType: 'repository' as const,
+          stableId: `R_other-${randomUUID()}`,
+        };
+        const otherEntity = await identity.upsertExternalEntity({
+          identity: otherIdentity,
+          observedAt: NOW,
+        });
+        await identity.observeExternalEntityLocator({
+          entityId: otherEntity.id,
+          identity: otherIdentity,
+          locator: { owner: 'other', repository: 'repo' },
+          observedAt: NOW,
+        });
+
+        const observation = {
+          entityId: 'repo-entity',
+          identity: repoIdentity,
+          locator: { owner: 'other', repository: 'repo' },
+          observedAt: LATER,
+        };
+        const preflight = await identity.preflightExternalEntityLocator(observation);
+        expect(preflight).toMatchObject({
+          state: 'collision',
+          collisionCategory: 'repository_path_replacement',
+          conflictingEntityId: otherEntity.id,
+        });
+
+        const observed = await identity.observeExternalEntityLocator(observation);
+        expect(observed).toMatchObject({
+          state: 'collision',
+          locatorRecord: null,
+          conflictingEntityId: otherEntity.id,
+        });
+        // No mutation: repo-entity keeps its original locator revision.
+        expect(await identity.getCurrentExternalEntityLocator('repo-entity'))
+          .toMatchObject({ owner: 'owner', locatorRevision: 1 });
+        expect(await identity.listExternalEntityLocatorHistory('repo-entity')).toHaveLength(1);
+      });
+
+      it('idempotently records a collision by fingerprint and marks affected bindings, without SQL null/JSON null ambiguity', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        const input = {
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          category: 'stable_legacy_disagree' as const,
+          bindingType: 'task' as const,
+          localIds: [GITHUB_IDENTITY_CONTRACT.taskId],
+          externalEntityIds: ['issue-entity'],
+          legacyIdentity: 'owner/repo:7',
+          observedAt: NOW,
+        };
+
+        const first = await identity.recordExternalIdentityCollision(input);
+        expect(first).toMatchObject({
+          connectorInstanceId: input.connectorInstanceId,
+          category: input.category,
+          bindingType: 'task',
+          state: 'open',
+          firstSeenAt: NOW,
+          lastSeenAt: NOW,
+          localIds: [GITHUB_IDENTITY_CONTRACT.taskId],
+          externalEntityIds: ['issue-entity'],
+        });
+        expect(first.legacyIdentityDigest).not.toBeNull();
+
+        const binding = await harness.primaryBinding({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          bindingType: 'task',
+          localId: GITHUB_IDENTITY_CONTRACT.taskId,
+        });
+        expect(binding).toMatchObject({ state: 'collision' });
+
+        // Same category/bindingType/localIds/externalEntityIds fingerprint must
+        // update the existing row in place (same id, refreshed lastSeenAt), not
+        // create a duplicate.
+        const second = await identity.recordExternalIdentityCollision({
+          ...input,
+          legacyIdentity: undefined,
+          observedAt: LATER,
+        });
+        expect(second.id).toBe(first.id);
+        expect(second.firstSeenAt).toBe(NOW);
+        expect(second.lastSeenAt).toBe(LATER);
+        // A collision recorded without a legacy identity must leave the digest
+        // as SQL NULL, distinct from an absent/empty JSON value.
+        expect(second.legacyIdentityDigest).toBeNull();
+      });
+
+      it('rejects an incomplete collision without recording anything', async () => {
+        await harness.seedBaseline(NOW);
+        const { identity } = harness.repositories;
+        await expect(identity.recordExternalIdentityCollision({
+          connectorInstanceId: GITHUB_IDENTITY_CONTRACT.connectorInstanceId,
+          category: 'stable_legacy_disagree',
+          bindingType: 'task',
+          localIds: [],
+          externalEntityIds: ['issue-entity'],
+          observedAt: NOW,
+        })).rejects.toThrow('local and entity IDs');
       });
     });
 

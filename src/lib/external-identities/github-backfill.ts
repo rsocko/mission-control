@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
+import type Database from 'better-sqlite3';
 import { and, asc, count, eq, gt, isNull, sql } from 'drizzle-orm';
-import db, { runTransaction, sqlite } from '@/db';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type * as schema from '@/db/schema';
 import {
   connectorConfigs,
   externalEntityBindings,
@@ -27,13 +29,14 @@ import {
 import {
   digestExternalIdentifier,
   persistExternalIdentityBatchInTransaction,
-  previewExternalIdentityBatch,
-  updateGitHubIdentityPhase,
+  updateGitHubIdentityPhaseInTransaction,
 } from './service';
+import { getGitHubIdentityOperatorRepository } from './worker-persistence';
 import type {
   ExternalIdentityEvidence,
   ExternalIdentityObservation,
   ExternalIdentityWrite,
+  ExternalIdentityWriteResult,
 } from './types';
 
 const DEFAULT_BATCH_SIZE = 100;
@@ -214,25 +217,73 @@ export class GitHubIdentityBackfillResolver implements GitHubIdentityResolver {
   }
 }
 
-export function getGitHubIdentityBackfillStatus(
+/**
+ * This module ("identity backfill/status") is one of the five pre-existing,
+ * previously audited GitHub worker operator/recovery surfaces (see
+ * `github-worker-errors.ts`): an operator-only tool with no normal
+ * HTTP/application caller. PostgreSQL does not implement it and fails closed
+ * via `UnsupportedGitHubWorkerOperationError` before any SQLite import,
+ * transaction, network effect, or durable mutation. The exact logic is
+ * preserved bit-for-bit in the `*Sync` functions below, which are the SQLite
+ * adapter's implementation (`sqlite-github-identity-operator-repositories.ts`);
+ * only the database handle sourcing changed from a module-level singleton
+ * import to injected parameters, so this file carries no SQLite/`@/db` import
+ * of its own.
+ */
+export async function getGitHubIdentityBackfillStatus(
+  connectorInstanceId: string,
+): Promise<GitHubIdentityBackfillStatus | null> {
+  return (await getGitHubIdentityOperatorRepository()).getBackfillStatus(connectorInstanceId);
+}
+
+export async function preflightGitHubIdentityBackfill(
+  connectorInstanceId: string,
+  persistCollisions = false,
+): Promise<GitHubIdentityPreflightResult> {
+  return (await getGitHubIdentityOperatorRepository())
+    .preflightBackfill(connectorInstanceId, persistCollisions);
+}
+
+export async function runGitHubIdentityBackfill(
+  options: GitHubIdentityBackfillOptions,
+): Promise<GitHubIdentityBackfillProgress> {
+  return (await getGitHubIdentityOperatorRepository()).runBackfill(options);
+}
+
+type BackfillDeps = { sqlite: Database.Database; db: BetterSQLite3Database<typeof schema> };
+
+/**
+ * SQLite-only synchronous implementation reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`. Must never be selected or
+ * imported under PostgreSQL.
+ */
+export function getGitHubIdentityBackfillStatusSync(
+  deps: BackfillDeps,
   connectorInstanceId: string,
 ): GitHubIdentityBackfillStatus | null {
-  return db.select()
+  return deps.db.select()
     .from(githubIdentityMigrations)
     .where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId))
     .limit(1)
     .get() ?? null;
 }
 
-export function preflightGitHubIdentityBackfill(
+/**
+ * SQLite-only synchronous implementation reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`. Must never be selected or
+ * imported under PostgreSQL.
+ */
+export function preflightGitHubIdentityBackfillSync(
+  deps: BackfillDeps,
   connectorInstanceId: string,
   persistCollisions = false,
 ): GitHubIdentityPreflightResult {
-  const config = loadGitHubConnectorConfig(connectorInstanceId);
+  const { sqlite, db } = deps;
+  const config = loadGitHubConnectorConfig(deps, connectorInstanceId);
   const client = createGitHubClient(config.token, config.apiOrigin);
-  const duplicateLegacyTasks = duplicateRows('tasks', connectorInstanceId);
-  const duplicateLegacyLists = duplicateRows('source_lists', connectorInstanceId);
-  const duplicateStableTasks = duplicateStableRows(connectorInstanceId);
+  const duplicateLegacyTasks = duplicateRows(sqlite, 'tasks', connectorInstanceId);
+  const duplicateLegacyLists = duplicateRows(sqlite, 'source_lists', connectorInstanceId);
+  const duplicateStableTasks = duplicateStableRows(sqlite, connectorInstanceId);
   const diagnostics: GitHubIdentityPreflightDiagnostic[] = [
     ...duplicateLegacyTasks.map((row) => ({
       bindingType: 'task' as const,
@@ -256,7 +307,7 @@ export function preflightGitHubIdentityBackfill(
 
   if (persistCollisions && diagnostics.length > 0) {
     const now = new Date().toISOString();
-    runTransaction((tx) => {
+    db.transaction((tx) => {
       for (const diagnostic of diagnostics) {
         const fingerprint = createHash('sha256').update(JSON.stringify(diagnostic)).digest('hex');
         tx.insert(githubIdentityCollisions).values({
@@ -282,7 +333,7 @@ export function preflightGitHubIdentityBackfill(
           set: { state: 'open', lastSeenAt: now, resolution: null, resolvedAt: null, resolvedBy: null },
         }).run();
       }
-    });
+    }, { behavior: 'immediate' });
   }
 
   const eligibleTasks = db.select({ value: count() }).from(tasks)
@@ -311,9 +362,18 @@ export function preflightGitHubIdentityBackfill(
   };
 }
 
-export async function runGitHubIdentityBackfill(
+/**
+ * SQLite-only synchronous-core implementation reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`. Must never be selected or
+ * imported under PostgreSQL. Remains genuinely `async` because it awaits
+ * external GitHub REST calls through `resolver`/`safeRestFetch` between
+ * synchronous, atomic SQLite transactions — exactly as the original code did.
+ */
+export async function runGitHubIdentityBackfillSync(
+  deps: BackfillDeps,
   options: GitHubIdentityBackfillOptions,
 ): Promise<GitHubIdentityBackfillProgress> {
+  const { sqlite, db } = deps;
   const batchSize = validateBatchSize(options.batchSize ?? DEFAULT_BATCH_SIZE);
   const maxBatches = options.maxBatches ?? Number.POSITIVE_INFINITY;
   if (
@@ -323,18 +383,19 @@ export async function runGitHubIdentityBackfill(
     throw new Error('maxBatches must be a positive integer');
   }
 
-  const config = loadGitHubConnectorConfig(options.connectorInstanceId);
+  const config = loadGitHubConnectorConfig(deps, options.connectorInstanceId);
   const resolver = options.resolver
     ?? new GitHubIdentityBackfillResolver(createGitHubClient(config.token, config.apiOrigin));
-  const preflight = preflightGitHubIdentityBackfill(
+  const preflight = preflightGitHubIdentityBackfillSync(
+    deps,
     options.connectorInstanceId,
     !options.dryRun,
   );
   if (preflight.collisionCount > 0 && !options.dryRun) {
-    return emptyProgress(options, 'collision_preflight_failed');
+    return emptyProgress(deps, options, 'collision_preflight_failed');
   }
 
-  let migration = getGitHubIdentityBackfillStatus(options.connectorInstanceId);
+  let migration = getGitHubIdentityBackfillStatusSync(deps, options.connectorInstanceId);
   if (!migration) {
     throw new Error('GitHub identity migration state is missing for this connector');
   }
@@ -342,8 +403,13 @@ export async function runGitHubIdentityBackfill(
     if (!['shadow_write', 'backfilling'].includes(migration.phase)) {
       throw new Error(`Backfill cannot run while identity phase is ${migration.phase}`);
     }
-    updateGitHubIdentityPhase(options.connectorInstanceId, 'backfilling');
-    migration = getGitHubIdentityBackfillStatus(options.connectorInstanceId)!;
+    updateGitHubIdentityPhaseInTransaction(
+      db,
+      options.connectorInstanceId,
+      'backfilling',
+      new Date().toISOString(),
+    );
+    migration = getGitHubIdentityBackfillStatusSync(deps, options.connectorInstanceId)!;
   }
 
   const progress: GitHubIdentityBackfillProgress = {
@@ -366,6 +432,7 @@ export async function runGitHubIdentityBackfill(
     const bindingType: ExternalBindingType = sourceListsComplete ? 'task' : 'source_list';
     const cursor = bindingType === 'task' ? progress.taskCursor : progress.sourceListCursor;
     const rows = selectBackfillBatch(
+      db,
       options.connectorInstanceId,
       bindingType,
       cursor,
@@ -413,7 +480,8 @@ export async function runGitHubIdentityBackfill(
     progress.processed += processedRows.length;
 
     if (options.dryRun) {
-      const previewResults = previewExternalIdentityBatch(
+      const previewResults = previewIdentityBatchSync(
+        db,
         writesForResolutions(
           options.connectorInstanceId,
           bindingType,
@@ -426,6 +494,7 @@ export async function runGitHubIdentityBackfill(
       progress.bound -= previewCollisions;
     } else {
       const persistedCollisions = commitBackfillBatch(
+        db,
         options.connectorInstanceId,
         bindingType,
         processedRows,
@@ -448,7 +517,11 @@ export async function runGitHubIdentityBackfill(
     await yieldToEventLoop();
   }
 
-  if (!options.dryRun && !progress.stoppedReason && backfillAntiJoinIsEmpty(options.connectorInstanceId)) {
+  if (
+    !options.dryRun
+    && !progress.stoppedReason
+    && backfillAntiJoinIsEmpty(db, options.connectorInstanceId)
+  ) {
     const pending = db.select({ value: count() }).from(githubIdentityBackfillItems)
       .where(and(
         eq(githubIdentityBackfillItems.connectorInstanceId, options.connectorInstanceId),
@@ -464,11 +537,40 @@ export async function runGitHubIdentityBackfill(
       progress.completed = true;
     }
   }
-  if (!options.dryRun) refreshMigrationCounters(options.connectorInstanceId, progress);
+  if (!options.dryRun) refreshMigrationCounters(deps, options.connectorInstanceId, progress);
   return progress;
 }
 
+/**
+ * SQLite-only synchronous dry-run preview reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`'s `previewIdentityBatch`
+ * port method. Must never be selected or imported under PostgreSQL. Computes
+ * the exact results a real write would produce by running the same write path
+ * inside a transaction that is always rolled back, never persisting any
+ * change — mirroring the prior Stage-1 backfill preview behavior exactly.
+ */
+export function previewIdentityBatchSync(
+  db: BetterSQLite3Database<typeof schema>,
+  writes: ExternalIdentityWrite[],
+): ExternalIdentityWriteResult[] {
+  if (writes.length === 0) return [];
+  class RollbackSignal {
+    constructor(public readonly results: ExternalIdentityWriteResult[]) {}
+  }
+  try {
+    db.transaction((tx) => {
+      const results = persistExternalIdentityBatchInTransaction(tx, writes, false);
+      throw new RollbackSignal(results);
+    }, { behavior: 'immediate' });
+    throw new Error('Preview transaction did not roll back as expected');
+  } catch (error) {
+    if (error instanceof RollbackSignal) return error.results;
+    throw error;
+  }
+}
+
 function commitBackfillBatch(
+  db: BetterSQLite3Database<typeof schema>,
   connectorInstanceId: string,
   bindingType: ExternalBindingType,
   rows: GitHubIdentityBackfillRow[],
@@ -476,7 +578,7 @@ function commitBackfillBatch(
   committedCursor: string | null,
   batchSize: number,
 ): number {
-  return runTransaction((tx) => {
+  return db.transaction((tx) => {
     const writes = writesForResolutions(connectorInstanceId, bindingType, rows, resolutions);
     const writeResults = persistExternalIdentityBatchInTransaction(tx, writes);
     const collisionCount = writeResults.filter((result) => result.state === 'collision').length;
@@ -533,7 +635,7 @@ function commitBackfillBatch(
       lastError: committedCursor ? null : 'Backfill batch has retryable items',
     }).where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId)).run();
     return collisionCount;
-  });
+  }, { behavior: 'immediate' });
 }
 
 function writesForResolutions(
@@ -560,6 +662,7 @@ function writesForResolutions(
 }
 
 function selectBackfillBatch(
+  db: BetterSQLite3Database<typeof schema>,
   connectorInstanceId: string,
   bindingType: ExternalBindingType,
   cursor: string | null,
@@ -609,7 +712,10 @@ function selectBackfillBatch(
     .all();
 }
 
-function backfillAntiJoinIsEmpty(connectorInstanceId: string): boolean {
+function backfillAntiJoinIsEmpty(
+  db: BetterSQLite3Database<typeof schema>,
+  connectorInstanceId: string,
+): boolean {
   const unprocessedTask = db.select({ id: tasks.id }).from(tasks)
     .leftJoin(externalEntityBindings, and(
       eq(externalEntityBindings.connectorInstanceId, connectorInstanceId),
@@ -648,9 +754,11 @@ function backfillAntiJoinIsEmpty(connectorInstanceId: string): boolean {
 }
 
 function refreshMigrationCounters(
+  deps: BackfillDeps,
   connectorInstanceId: string,
   progress: GitHubIdentityBackfillProgress,
 ): void {
+  const { db } = deps;
   const states = db.select({
     state: githubIdentityBackfillItems.state,
     value: count(),
@@ -663,7 +771,7 @@ function refreshMigrationCounters(
     .where(eq(tasks.connectorInstanceId, connectorInstanceId)).get()?.value ?? 0)
     + (db.select({ value: count() }).from(sourceLists)
       .where(eq(sourceLists.connectorInstanceId, connectorInstanceId)).get()?.value ?? 0);
-  const current = getGitHubIdentityBackfillStatus(connectorInstanceId);
+  const current = getGitHubIdentityBackfillStatusSync(deps, connectorInstanceId);
   const counters: GitHubIdentityCounters = {
     eligible,
     bound: values.get('bound') ?? 0,
@@ -690,9 +798,10 @@ function refreshMigrationCounters(
 }
 
 function loadGitHubConnectorConfig(
+  deps: BackfillDeps,
   connectorInstanceId: string,
 ): { token: string; apiOrigin?: string } {
-  const row = db.select().from(connectorConfigs)
+  const row = deps.db.select().from(connectorConfigs)
     .where(and(
       eq(connectorConfigs.id, connectorInstanceId),
       eq(connectorConfigs.type, 'github-issues'),
@@ -865,7 +974,7 @@ function parseMetadata(value: unknown): Record<string, unknown> {
   }
 }
 
-function duplicateRows(table: 'tasks' | 'source_lists', connectorInstanceId: string) {
+function duplicateRows(sqlite: Database.Database, table: 'tasks' | 'source_lists', connectorInstanceId: string) {
   return sqlite.prepare(`
     SELECT source_id AS identity, GROUP_CONCAT(id, ',') AS local_ids
     FROM ${table}
@@ -880,7 +989,7 @@ function duplicateRows(table: 'tasks' | 'source_lists', connectorInstanceId: str
   });
 }
 
-function duplicateStableRows(connectorInstanceId: string) {
+function duplicateStableRows(sqlite: Database.Database, connectorInstanceId: string) {
   return sqlite.prepare(`
     SELECT json_extract(metadata, '$.nodeId') AS identity, GROUP_CONCAT(id, ',') AS local_ids
     FROM tasks
@@ -918,10 +1027,11 @@ function applyProgress(
 }
 
 function emptyProgress(
+  deps: BackfillDeps,
   options: GitHubIdentityBackfillOptions,
   stoppedReason: string,
 ): GitHubIdentityBackfillProgress {
-  const status = getGitHubIdentityBackfillStatus(options.connectorInstanceId);
+  const status = getGitHubIdentityBackfillStatusSync(deps, options.connectorInstanceId);
   return {
     connectorInstanceId: options.connectorInstanceId,
     dryRun: options.dryRun ?? false,

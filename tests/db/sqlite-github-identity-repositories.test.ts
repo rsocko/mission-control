@@ -132,6 +132,8 @@ describeGitHubIdentityRepositoriesContract('SQLite', async (): Promise<GitHubIde
           stableId: 'R_repo',
           firstSeenAt: now,
           lastSeenAt: now,
+          // A locator at revision 1 is seeded below, so the next revision must be 2.
+          nextLocatorRevision: 2,
         },
         {
           id: 'issue-entity',
@@ -141,6 +143,8 @@ describeGitHubIdentityRepositoriesContract('SQLite', async (): Promise<GitHubIde
           stableId: 'I_issue',
           firstSeenAt: now,
           lastSeenAt: now,
+          // A locator at revision 1 is seeded below, so the next revision must be 2.
+          nextLocatorRevision: 2,
         },
       ]).run();
       db.insert(schema.externalEntityLocators).values([

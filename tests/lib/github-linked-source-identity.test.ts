@@ -47,7 +47,7 @@ describe('GitHub linked-source stable identity', () => {
     addTask('github-primary-1', 'github-a', 'owner/repo:1');
     addLinkedSource('linked-1', 'local-task-1', 'github-a', 'owner/repo:1');
     const evidence = issueEvidence('I_1', 'R_1', 'owner', 'repo', 1);
-    persistPrimary('github-a', 'github-primary-1', evidence);
+    await persistPrimary('github-a', 'github-primary-1', evidence);
 
     expect(await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-1',
@@ -98,8 +98,8 @@ describe('GitHub linked-source stable identity', () => {
       101,
       'github.example.com',
     );
-    persistPrimary('github-b', 'github-primary-b', githubEvidence);
-    persistPrimary('github-a', 'github-enterprise-primary', enterpriseEvidence);
+    await persistPrimary('github-b', 'github-primary-b', githubEvidence);
+    await persistPrimary('github-a', 'github-enterprise-primary', enterpriseEvidence);
     expect((await identity.persistGitHubLinkedSourceIdentityBatch('github-b', [{
       linkedSourceId: 'linked-2',
       sourceId: 'owner/repo:1',
@@ -128,7 +128,7 @@ describe('GitHub linked-source stable identity', () => {
       'duplicate',
       2,
     );
-    persistPrimary('github-a', 'github-primary-duplicate', duplicateEvidence);
+    await persistPrimary('github-a', 'github-primary-duplicate', duplicateEvidence);
     expect((await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-duplicate-a',
       sourceId: 'owner/duplicate:2',
@@ -152,7 +152,7 @@ describe('GitHub linked-source stable identity', () => {
   ] as const)('blocks on %s evidence without mutating the linked-source locator', async (state, outcome) => {
     const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
     const decision = (await runtime.resolveLinkedSourceBatch([{
@@ -181,7 +181,7 @@ describe('GitHub linked-source stable identity', () => {
     const renamedEvidence = issueEvidence('I_1', 'R_1', 'new-owner', 'new-repo', 1);
     const locatorRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
     expect((await locatorRuntime.resolveLinkedSourceBatch([{
@@ -196,7 +196,7 @@ describe('GitHub linked-source stable identity', () => {
     });
     locatorRuntime.complete('succeeded');
 
-    identity.upsertExternalEntity({
+    await identity.upsertExternalEntity({
       identity: {
         provider: 'github',
         hostKey: 'github.com',
@@ -207,7 +207,7 @@ describe('GitHub linked-source stable identity', () => {
     });
     const replacementRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
     expect((await replacementRuntime.resolveLinkedSourceBatch([{
@@ -317,12 +317,12 @@ function addLinkedSource(
   }).run();
 }
 
-function persistPrimary(
+async function persistPrimary(
   connectorInstanceId: string,
   localId: string,
   evidence: ReturnType<typeof issueEvidence>,
-): void {
-  identity.persistExternalIdentityBatch([{
+): Promise<void> {
+  await identity.persistExternalIdentityBatch([{
     target: {
       connectorInstanceId,
       bindingType: 'task',

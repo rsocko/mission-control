@@ -25,7 +25,7 @@ const backend = new PostgresPersistenceBackend({
         }),
       }
     : {}),
-  vectorMode: 'disabled',
+  vectorMode: 'optional',
 });
 
 function waitForExit(child: ChildProcess, timeoutMs = 30_000): Promise<number | null> {
@@ -182,7 +182,7 @@ describePostgres('packaged PostgreSQL semantic worker runtime', () => {
           MC_DATABASE_BACKEND: 'postgres',
           MC_POSTGRES_URL: connectionString!,
           MC_TEST_POSTGRES_URL: connectionString!,
-          MC_POSTGRES_VECTOR_MODE: 'disabled',
+          MC_POSTGRES_VECTOR_MODE: 'optional',
           MC_DB_PATH: sqlitePath,
           MC_SEMANTIC_PACKAGED_HARNESS: 'postgres-integration-test',
           MC_SEMANTIC_HARNESS_ENTITY_TYPES: 'task',

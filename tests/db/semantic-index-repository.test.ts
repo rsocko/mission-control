@@ -1466,10 +1466,13 @@ describe('SqliteSemanticIndexRepository', () => {
       const first = await repo.getRun('run-1');
       expect(first).toMatchObject({ attempt: 1, availableAt: computeSemanticRetryAt(T0, 1) });
 
-      await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: first!.availableAt });
-      await repo.failRun({ id: 'run-1', owner: 'w', attempt: 1, error: 'boom', now: T1 });
+      const secondAttemptAt = first!.availableAt;
+      await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: secondAttemptAt });
+      await repo.failRun({
+        id: 'run-1', owner: 'w', attempt: 1, error: 'boom', now: secondAttemptAt,
+      });
       expect(await repo.getRun('run-1')).toMatchObject({
-        attempt: 2, availableAt: computeSemanticRetryAt(T1, 2),
+        attempt: 2, availableAt: computeSemanticRetryAt(secondAttemptAt, 2),
       });
     });
 

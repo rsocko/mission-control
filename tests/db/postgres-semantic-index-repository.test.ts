@@ -162,6 +162,10 @@ function makeIntent(overrides: Partial<SemanticIntentEnqueue> = {}): SemanticInt
   };
 }
 
+function storedIdempotencyKey(value: string): string {
+  return `mc-semantic-key:v1:${Buffer.from(value, 'utf16le').toString('base64url')}`;
+}
+
 describe('PostgresSemanticIndexRepository', () => {
   let mock: MockPool;
 
@@ -311,7 +315,9 @@ describe('PostgresSemanticIndexRepository', () => {
       const repo = new PostgresSemanticIndexRepository(mock.pool);
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0, indexId: 'idx-1', kinds: ['backfill'] });
 
-      const claim = mock.find(/FOR UPDATE SKIP LOCKED/);
+      const claim = mock.find(
+        /WHERE index_id = \$1 AND kind = \$2 AND status = 'queued'.*FOR UPDATE SKIP LOCKED/,
+      );
       expect(claim).toContain('FOR UPDATE SKIP LOCKED');
       expect(claim).toContain("status = 'queued' AND available_at <= $3");
       const peek = mock.find(/FROM semantic_runs r/);
@@ -353,8 +359,9 @@ describe('PostgresSemanticIndexRepository', () => {
       )!;
       expect(advisory).toContain('hashtext($1), hashtext($2)');
       expect(recheck).toContain("status = 'running'");
-      expect(mock.sql()).toContain('ROLLBACK');
-      expect(mock.sql()).not.toContain('COMMIT');
+      const transactionTail = mock.sql().slice(mock.sql().lastIndexOf('BEGIN'));
+      expect(transactionTail).toContain('ROLLBACK');
+      expect(transactionTail).not.toContain('COMMIT');
     });
   });
 
@@ -399,7 +406,7 @@ describe('PostgresSemanticIndexRepository', () => {
             match: /INSERT INTO semantic_runs/,
             rows: [{
               id: 'run-2',
-              idempotencyKey: 'backfill:initial',
+              idempotencyKey: storedIdempotencyKey('backfill:initial'),
               idempotencyKeyVersion: 1,
               status: 'queued',
               attempt: 0,
@@ -491,7 +498,10 @@ describe('PostgresSemanticIndexRepository', () => {
         {
           match: /INSERT INTO semantic_intents/,
           rows: [{
-            id: 'intent-2', idempotencyKey: 'k1', idempotencyKeyVersion: 1, status: 'queued',
+            id: 'intent-2',
+            idempotencyKey: storedIdempotencyKey('k1'),
+            idempotencyKeyVersion: 1,
+            status: 'queued',
           }],
         },
       ]);
@@ -504,7 +514,7 @@ describe('PostgresSemanticIndexRepository', () => {
 
     it('encodes arbitrary keys only inside PostgreSQL and decodes returned rows', async () => {
       const key = 'idx-1\u0000task\u0000task-1';
-      const storedKey = `mc-semantic-key:v1:${Buffer.from(key, 'utf16le').toString('base64url')}`;
+      const storedKey = storedIdempotencyKey(key);
       mock = createMockPool([
         identityHandler(),
         {

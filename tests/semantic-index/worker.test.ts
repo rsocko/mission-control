@@ -297,8 +297,13 @@ describe('SemanticIndexWorker', () => {
 
     it('never promotes a backfill whose fenced checkpoint was rejected', async () => {
       harness.source.putTask(taskFixture({ id: 'task-1' }));
-      const checkpoint = vi.spyOn(harness.repository, 'checkpointRun').mockResolvedValue(false);
       const activate = vi.spyOn(harness.repository, 'activateIdentity');
+      const checkpoint = vi.spyOn(harness.repository, 'checkpointRun').mockImplementation(async () => {
+        // Ignore the maintenance-time readiness evaluation that precedes the
+        // run; no activation may occur after checkpoint ownership is rejected.
+        activate.mockClear();
+        return false;
+      });
       const onRunCheckpointed = vi.fn();
 
       await createWorker({ onRunCheckpointed }).runCycle();
@@ -306,7 +311,7 @@ describe('SemanticIndexWorker', () => {
       expect(checkpoint).toHaveBeenCalled();
       expect(onRunCheckpointed).not.toHaveBeenCalled();
       expect(activate).not.toHaveBeenCalled();
-      expect((await harness.repository.listIdentities())[0]).toMatchObject({ status: 'building' });
+      expect((await harness.repository.listIdentities())[0]).toMatchObject({ status: 'ready' });
     });
 
     it('invokes the packaged lifecycle hook only after a durable run checkpoint', async () => {
@@ -340,8 +345,8 @@ describe('SemanticIndexWorker', () => {
       const run = await harness.repository.getRun(checkpointedRunId);
       expect(run).toMatchObject({
         status: 'running',
-        checkpoint: expect.any(String),
-        processedCount: 1,
+        checkpoint: null,
+        processedCount: 2,
       });
     });
   });

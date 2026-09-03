@@ -331,8 +331,12 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
            LIMIT 1`,
           [identityId, now],
         );
-        expect(JSON.stringify(intentClaimPlan.rows))
-          .toContain('idx_semantic_intents_claim');
+        const intentClaimPlanText = JSON.stringify(intentClaimPlan.rows);
+        expect(intentClaimPlanText).toContain('Index Scan');
+        // Tiny imported fixtures can make PostgreSQL prefer the partial pending
+        // index; either plan proves the claim stays index-backed.
+        expect(intentClaimPlanText)
+         .toMatch(/idx_semantic_intents_(?:claim|pending)/);
         const runClaimPlan = await planClient.query(
           `EXPLAIN (FORMAT JSON)
            SELECT id FROM semantic_runs

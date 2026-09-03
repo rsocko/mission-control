@@ -106,7 +106,9 @@ async function defaultEmbeddingConfigResolver(
   options?: { sensitivityOverride?: SemanticSensitivity },
 ): Promise<EmbeddingConfig | null> {
   const { getEmbeddingConfig } = await import('@/lib/search/embedding-request');
-  return getEmbeddingConfig(sources, options);
+  return options === undefined
+    ? getEmbeddingConfig(sources)
+    : getEmbeddingConfig(sources, options);
 }
 
 function deniedOutcome(reason: string): SemanticEmbeddingFailure {

@@ -26,6 +26,10 @@ export const connectorConfigs = sqliteTable('connector_configs', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
+  /** Outcome of the most recent manual "Test Connection" click, independent of scheduled syncs. */
+  lastTestStatus: text('last_test_status').$type<'success' | 'failed'>(),
+  lastTestError: text('last_test_error'),
+  lastTestAt: text('last_test_at'),
 });
 
 export const listGroups = sqliteTable('list_groups', {

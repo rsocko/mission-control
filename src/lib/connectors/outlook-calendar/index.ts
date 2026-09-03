@@ -84,7 +84,13 @@ export class OutlookCalendarConnector implements IConnector {
 
   async fetchSourceLists(): Promise<SourceList[]> {
     const res = await this.graphFetch('/me/calendars');
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Calendar token expired or invalid — re-authenticate in Settings'
+          : `Outlook Calendar lookup failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     return (data.value || []).map((cal: { id: string; name: string }) => ({
@@ -114,7 +120,13 @@ export class OutlookCalendarConnector implements IConnector {
     const url = `/me/calendarView?startDateTime=${now.toISOString()}&endDateTime=${end.toISOString()}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,isAllDay,webLink,importance,isCancelled`;
 
     const res = await this.graphFetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Calendar token expired or invalid — re-authenticate in Settings'
+          : `Outlook Calendar event fetch failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     const notifications: InboundNotification[] = [];

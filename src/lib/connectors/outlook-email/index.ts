@@ -83,7 +83,13 @@ export class OutlookEmailConnector implements IConnector {
 
   async fetchSourceLists(): Promise<SourceList[]> {
     const res = await this.graphFetch('/me/mailFolders?$top=20');
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Email token expired or invalid — re-authenticate in Settings'
+          : `Outlook Email folder lookup failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     return (data.value || []).map((folder: { id: string; displayName: string; totalItemCount: number }) => ({
@@ -138,7 +144,13 @@ export class OutlookEmailConnector implements IConnector {
     const url = `/me/messages?$filter=${encodeURIComponent(filter)}&$top=50&$orderby=receivedDateTime desc&$select=id,subject,bodyPreview,from,receivedDateTime,importance,flag,webLink,isRead`;
 
     const res = await this.graphFetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Email token expired or invalid — re-authenticate in Settings'
+          : `Outlook Email message fetch failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     for (const msg of data.value || []) {

@@ -94,7 +94,7 @@ function asSettingsRecord(settings: ConnectorConfig['settings']): Record<string,
 
 function ConnectorsSection({
   connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
-  deletedConnectors, onRestore, onPermanentDelete,
+  deletedConnectors, onRestore, onPermanentDelete, onTested,
 }: {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
@@ -111,6 +111,9 @@ function ConnectorsSection({
   deletedConnectors: ConnectorConfig[];
   onRestore: (id: string) => void;
   onPermanentDelete: (id: string) => void;
+  /** Called after a manual "Test Connection" click so the connector list (and its
+   * connection badge) refreshes with the latest test outcome. */
+  onTested?: () => void | Promise<void>;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; confirmLabel: string; variant: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
@@ -240,6 +243,7 @@ function ConnectorsSection({
                         setConfirmDelete={setConfirmDelete}
                         healthState={healthState}
                         onHealthRefresh={refreshHealth}
+                        onTested={onTested}
                       />
                     </motion.div>
                   )}
@@ -661,6 +665,7 @@ type ConnectorEditPanelProps = {
   setConfirmDelete: (id: string | null) => void;
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
+  onTested?: () => void | Promise<void>;
 };
 
 function GitHubConnectorEditPanel(props: ConnectorEditPanelProps) {
@@ -712,7 +717,7 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
 }
 
 function DefaultConnectorEditPanel({
-  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, variant,
+  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, onTested, variant,
 }: {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
@@ -723,6 +728,7 @@ function DefaultConnectorEditPanel({
   setConfirmDelete: (id: string | null) => void;
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
+  onTested?: () => void | Promise<void>;
   variant?: 'default' | 'github' | 'finance' | 'document-intelligence';
 }) {
   const [editSyncMode, setEditSyncMode] = useState(connector.syncMode);
@@ -883,6 +889,9 @@ function DefaultConnectorEditPanel({
       if (isDiConnector) {
         onHealthRefresh(connector.id);
       }
+      // Refresh the connector list so the top-level badge picks up the persisted
+      // test result immediately, instead of only showing it in this inline message.
+      await onTested?.();
     } catch {
       setTestResult({ success: false, error: 'Request failed' });
     }

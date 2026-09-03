@@ -88,6 +88,8 @@ export interface PackagedPostgresSemanticRuntime {
 
 let runtime: PackagedPostgresSemanticRuntime | null = null;
 let runtimePromise: Promise<PackagedPostgresSemanticRuntime> | null = null;
+let runtimeGeneration = 0;
+const activePublications = new Set<Promise<SemanticPublishResult>>();
 
 function parseRoutingPolicy(value: unknown): AIRoutingPolicyConfig {
   if (value === null) return DEFAULT_AI_ROUTING_POLICY;
@@ -116,73 +118,81 @@ export async function createPackagedPostgresSemanticRuntime(
   isCapabilityActive: () => boolean = () => true,
 ): Promise<PackagedPostgresSemanticRuntime> {
   if (runtime) return runtime;
-  runtimePromise ??= (async () => {
-    const settings = getCorePersistenceRepositories().settings;
-    const [savedValue, routingPolicyValue] = await Promise.all([
-      settings.get(SETTINGS_KEY),
-      settings.get(ROUTING_POLICY_SETTINGS_KEY),
-    ]);
-    const resolved = resolveAIConfig(parseSavedAIProviderConfig(savedValue));
-    const policy = parseRoutingPolicy(routingPolicyValue);
-    const entityTypes = SEMANTIC_SOURCE_ENTITY_TYPES.filter((entityType) =>
-      entityType === 'houston-summary'
-        ? resolved.houstonMemoryEnabled
-        : resolved.semanticSearchEnabled
-    );
-    const enabledEntityTypes = new Set(entityTypes);
-    const config = resolveSemanticWorkerConfig(entityTypes);
-    if (
-      enabledEntityTypes.size > 0
-      && !buildEmbeddingConfig(resolved, policy)
-    ) {
-      throw new Error(
-        'PostgreSQL semantic indexing is enabled but its embedding provider is not configured',
+  if (!runtimePromise) {
+    const compositionGeneration = runtimeGeneration;
+    runtimePromise = (async () => {
+      const settings = getCorePersistenceRepositories().settings;
+      const [savedValue, routingPolicyValue] = await Promise.all([
+        settings.get(SETTINGS_KEY),
+        settings.get(ROUTING_POLICY_SETTINGS_KEY),
+      ]);
+      const resolved = resolveAIConfig(parseSavedAIProviderConfig(savedValue));
+      const policy = parseRoutingPolicy(routingPolicyValue);
+      const entityTypes = SEMANTIC_SOURCE_ENTITY_TYPES.filter((entityType) =>
+        entityType === 'houston-summary'
+          ? resolved.houstonMemoryEnabled
+          : resolved.semanticSearchEnabled
       );
-    }
-    const repository = getPostgresSemanticIndexRepository();
-    const source = getPostgresSemanticSourcePort();
-    assertMethods(
-      repository,
-      REQUIRED_SEMANTIC_REPOSITORY_METHODS,
-      'PostgreSQL semantic repository',
-    );
-    assertMethods(
-      source,
-      REQUIRED_SEMANTIC_SOURCE_METHODS,
-      'PostgreSQL semantic source',
-    );
-    const embeddings = new AIEmbeddingProvider({
-      getEmbeddingConfig: async (sources = [], options = {}) =>
-        buildEmbeddingConfig(resolved, policy, sources, options),
-    });
-    const service = new SemanticIndexService({
-      repository,
-      source,
-      embeddings,
-      resolveSensitivity: ({ connectorType }) => resolveSensitivity(
-        'semantic-embedding',
-        policy,
-        { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
-      ),
-      embeddingTimeoutMs: config.embeddingTimeoutMs,
-    });
-    const worker = new SemanticIndexWorker({
-      repository,
-      source,
-      embeddings,
-      service,
-      config,
-      isEnabled: () =>
-        isCapabilityActive() && !workerDisabled() && enabledEntityTypes.size > 0,
-      enabledEntityTypes: () => config.entityTypes,
-    });
-    runtime = { worker, service, enabledEntityTypes, isCapabilityActive };
-    return runtime;
-  })();
+      const enabledEntityTypes = new Set(entityTypes);
+      const config = resolveSemanticWorkerConfig(entityTypes);
+      if (
+        enabledEntityTypes.size > 0
+        && !buildEmbeddingConfig(resolved, policy)
+      ) {
+        throw new Error(
+          'PostgreSQL semantic indexing is enabled but its embedding provider is not configured',
+        );
+      }
+      const repository = getPostgresSemanticIndexRepository();
+      const source = getPostgresSemanticSourcePort();
+      assertMethods(
+        repository,
+        REQUIRED_SEMANTIC_REPOSITORY_METHODS,
+        'PostgreSQL semantic repository',
+      );
+      assertMethods(
+        source,
+        REQUIRED_SEMANTIC_SOURCE_METHODS,
+        'PostgreSQL semantic source',
+      );
+      const embeddings = new AIEmbeddingProvider({
+        getEmbeddingConfig: async (sources = [], options = {}) =>
+          buildEmbeddingConfig(resolved, policy, sources, options),
+      });
+      const service = new SemanticIndexService({
+        repository,
+        source,
+        embeddings,
+        resolveSensitivity: ({ connectorType }) => resolveSensitivity(
+          'semantic-embedding',
+          policy,
+          { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
+        ),
+        embeddingTimeoutMs: config.embeddingTimeoutMs,
+      });
+      const worker = new SemanticIndexWorker({
+        repository,
+        source,
+        embeddings,
+        service,
+        config,
+        isEnabled: () =>
+          isCapabilityActive() && !workerDisabled() && enabledEntityTypes.size > 0,
+        enabledEntityTypes: () => config.entityTypes,
+      });
+      if (compositionGeneration !== runtimeGeneration) {
+        await worker.stop();
+        throw new Error('Packaged PostgreSQL semantic runtime composition was invalidated');
+      }
+      runtime = { worker, service, enabledEntityTypes, isCapabilityActive };
+      return runtime;
+    })();
+  }
+  const pending = runtimePromise;
   try {
-    return await runtimePromise;
+    return await pending;
   } finally {
-    runtimePromise = null;
+    if (runtimePromise === pending) runtimePromise = null;
   }
 }
 
@@ -196,9 +206,13 @@ export function startPackagedPostgresSemanticWorker(
 }
 
 export async function stopPackagedPostgresSemanticWorker(): Promise<void> {
+  runtimeGeneration++;
+  const pending = runtimePromise;
   const current = runtime;
   runtime = null;
-  runtimePromise = null;
+  if (pending) await pending.catch(() => undefined);
+  if (runtimePromise === pending) runtimePromise = null;
+  await Promise.allSettled(activePublications);
   if (current) await current.worker.stop();
 }
 
@@ -207,17 +221,27 @@ export async function publishPackagedPostgresSemanticEntity(
   entityType: SemanticSourceEntityType,
   entityId: string,
 ): Promise<SemanticPublishResult> {
+  const publicationGeneration = runtimeGeneration;
   const current = runtime ?? await createPackagedPostgresSemanticRuntime();
   if (
-    !current
-    || !current.isCapabilityActive()
+    publicationGeneration !== runtimeGeneration
+    || current !== runtime
+  ) {
+    return { status: 'skipped', reason: 'runtime-shutdown' };
+  }
+  if (
+    !current.isCapabilityActive()
     || workerDisabled()
     || !current.enabledEntityTypes.has(entityType)
   ) {
     return { status: 'skipped', reason: 'semantic-search-disabled' };
   }
+  const publication = Promise.resolve().then(() =>
+    current.service.publish({ kind, entityType, entityId })
+  );
+  activePublications.add(publication);
   try {
-    return await current.service.publish({ kind, entityType, entityId });
+    return await publication;
   } catch (error) {
     semanticIndexLogger.warn({
       event: 'semantic_publish_failed',
@@ -227,5 +251,7 @@ export async function publishPackagedPostgresSemanticEntity(
       err: error,
     }, 'Failed to publish PostgreSQL semantic index intent');
     return { status: 'skipped', reason: 'publish-failed' };
+  } finally {
+    activePublications.delete(publication);
   }
 }

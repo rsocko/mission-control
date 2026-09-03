@@ -423,6 +423,7 @@ export function TaskRow({
         showMoreActions
         onToggleMyDay={isInMyDay ? onRemoveFromMyDay : onAddToMyDay}
         onOpenNotes={onOpenNotes}
+        dense={surface === 'plan'}
       />
     </div>
   );

@@ -611,27 +611,45 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       await producerSemanticRuntime.stopPackagedPostgresSemanticWorker();
 
       const claimPriorityAt = '1970-01-01T00:00:00.000Z';
-      const prioritizedClaims = await Promise.all([
-        pool.query(
+      const [
+        prioritizedEnrichment,
+        prioritizedAi,
+        prioritizedSemantic,
+      ] = await Promise.all([
+        pool.query<{ id: string }>(
           `UPDATE notification_enrichment_jobs
            SET created_at = $2, next_attempt_at = $2
-           WHERE notification_id = $1`,
+           WHERE notification_id = $1
+           RETURNING id`,
           [`${prefix}:enrichment`, claimPriorityAt],
         ),
-        pool.query(
+        pool.query<{ id: string; timeout_at: string }>(
           `UPDATE ai_runs
            SET created_at = $2, available_at = $2
-           WHERE id = $1`,
+           WHERE id = $1
+           RETURNING id, timeout_at`,
           [`${prefix}:ai`, claimPriorityAt],
         ),
-        pool.query(
+        pool.query<{ id: string }>(
           `UPDATE semantic_intents
            SET requested_at = $2, created_at = $2, available_at = $2
-           WHERE entity_id = $1`,
+           WHERE entity_id = $1
+           RETURNING id`,
           [`${prefix}:semantic`, claimPriorityAt],
         ),
       ]);
-      expect(prioritizedClaims.map((result) => result.rowCount)).toEqual([1, 1, 1]);
+      expect([
+        prioritizedEnrichment.rowCount,
+        prioritizedAi.rowCount,
+        prioritizedSemantic.rowCount,
+      ]).toEqual([1, 1, 1]);
+      const prioritizedClaimIds = {
+        enrichment: prioritizedEnrichment.rows[0].id,
+        ai: prioritizedAi.rows[0].id,
+        semantic: prioritizedSemantic.rows[0].id,
+      };
+      const originalAiTimeoutAt = Date.parse(prioritizedAi.rows[0].timeout_at);
+      expect(originalAiTimeoutAt - Date.now()).toBeGreaterThan(180_000);
 
       await expect(stat(readyFile)).rejects.toMatchObject({ code: 'ENOENT' });
       const beforeActivation = await pool.query(
@@ -687,11 +705,22 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
              INNER JOIN notification_enrichment_jobs job
                 ON job.notification_id = notification.id
              WHERE notification.id = $3) AS enrichment,
+            (SELECT job.id
+             FROM notification_enrichment_jobs job
+             WHERE job.notification_id = $3
+               AND job.status = 'processing'
+               AND job.lease_owner IS NOT NULL) AS enrichment_claim_id,
             (SELECT status FROM ai_runs WHERE id = $4) AS ai,
+            (SELECT id FROM ai_runs
+             WHERE id = $4 AND status = 'running' AND lease_owner IS NOT NULL)
+              AS ai_claim_id,
             (SELECT execution_state ->> 'state' FROM ai_runs WHERE id = $4)
               AS ai_lifecycle,
-            (SELECT status FROM semantic_intents WHERE entity_id = $5 ORDER BY created_at DESC LIMIT 1)
-               AS semantic`,
+            (SELECT status FROM semantic_intents
+             WHERE entity_id = $5 ORDER BY created_at DESC LIMIT 1) AS semantic,
+            (SELECT id FROM semantic_intents
+             WHERE entity_id = $5 AND status = 'running' AND lease_owner IS NOT NULL
+             ORDER BY created_at DESC LIMIT 1) AS semantic_claim_id`,
           [
             syncJob.id,
             `${prefix}:connector`,
@@ -704,9 +733,12 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           sync: 'succeeded',
           outbox: 'delivering',
           enrichment: 'processing',
+          enrichment_claim_id: prioritizedClaimIds.enrichment,
           ai: 'running',
+          ai_claim_id: prioritizedClaimIds.ai,
           ai_lifecycle: 'idle',
           semantic: 'running',
+          semantic_claim_id: prioritizedClaimIds.semantic,
         });
         expect(requests).toMatchObject({
           connectorTasks: 1,
@@ -746,6 +778,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
       const queueLeaseExpiresAt = Date.parse(timing.lease_expires_at);
       const lifecycleLeaseExpiresAt = Number(timing.lifecycle_lease_expires_at);
       const timeoutAt = Date.parse(timing.timeout_at);
+      expect(timeoutAt).toBe(originalAiTimeoutAt);
       const killedAt = Date.now();
       if (
         !Number.isFinite(queueLeaseExpiresAt)

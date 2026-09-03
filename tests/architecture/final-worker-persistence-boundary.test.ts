@@ -118,13 +118,12 @@ function resolveApplicationImport(fromPath: string, specifier: string): string |
   return null;
 }
 
-function postgresStartupGraph(): Set<string> {
-  const roots = [...staticImports(ROOT), ...dynamicImports(ROOT)]
-    .filter((specifier) => !POSTGRES_EXCLUDED_ENTRY_IMPORTS.has(specifier))
-    .map((specifier) => resolveApplicationImport(ROOT, specifier))
-    .filter((path): path is string => path !== null);
-  const visited = new Set<string>([ROOT]);
-  const pending = roots;
+function postgresApplicationGraph(
+  roots: string[],
+  initialPaths: string[] = [],
+): Set<string> {
+  const visited = new Set<string>(initialPaths);
+  const pending = [...roots];
   while (pending.length > 0) {
     const path = pending.pop()!;
     if (visited.has(path)) continue;
@@ -148,16 +147,28 @@ function postgresStartupGraph(): Set<string> {
   return visited;
 }
 
+function postgresStartupGraph(): Set<string> {
+  const roots = [...staticImports(ROOT), ...dynamicImports(ROOT)]
+    .filter((specifier) => !POSTGRES_EXCLUDED_ENTRY_IMPORTS.has(specifier))
+    .map((specifier) => resolveApplicationImport(ROOT, specifier))
+    .filter((path): path is string => path !== null);
+  return postgresApplicationGraph(roots, [ROOT]);
+}
+
+function staticSqliteViolations(graph: Set<string>): string[] {
+  return [...graph].flatMap((path) => {
+    return staticImports(path).filter((specifier) => {
+      const resolved = resolveApplicationImport(path, specifier);
+      return SQLITE_PACKAGE.test(specifier) || Boolean(resolved && SQLITE_MODULE.test(resolved));
+    })
+      .map((specifier) => `${path} -> ${specifier}`);
+  });
+}
+
 describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
   it('keeps the real PostgreSQL startup graph free of SQLite evaluation', () => {
     const graph = postgresStartupGraph();
-    const violations = [...graph].flatMap((path) => {
-      return staticImports(path).filter((specifier) => {
-        const resolved = resolveApplicationImport(path, specifier);
-        return SQLITE_PACKAGE.test(specifier) || Boolean(resolved && SQLITE_MODULE.test(resolved));
-      })
-        .map((specifier) => `${path} -> ${specifier}`);
-    });
+    const violations = staticSqliteViolations(graph);
 
     const configImporters = [...graph].filter((path) =>
       source(path).includes('config-resolver')
@@ -227,6 +238,22 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(triageScheduler.match(/enabled: false/g)).toHaveLength(4);
     expect(triageScheduler.indexOf('if (sourceConfig.enabled)'))
       .toBeLessThan(triageScheduler.indexOf('this.scheduleSource('));
+    const configuredTriageImporters = [...FEATURE_GUARDED_DYNAMIC_EDGES].map((edge) => {
+      const separator = edge.indexOf(' -> ');
+      return resolveApplicationImport(
+        edge.slice(0, separator),
+        edge.slice(separator + ' -> '.length),
+      );
+    }).filter((path): path is string => path !== null);
+    expect(configuredTriageImporters).toHaveLength(FEATURE_GUARDED_DYNAMIC_EDGES.size);
+    const configuredTriageGraph = postgresApplicationGraph(configuredTriageImporters);
+    expect(staticSqliteViolations(configuredTriageGraph)).toEqual([]);
+    expect([...configuredTriageGraph].flatMap((path) =>
+      dynamicImports(path).filter((specifier) => {
+        const resolved = resolveApplicationImport(path, specifier);
+        return SQLITE_PACKAGE.test(specifier) || Boolean(resolved && SQLITE_MODULE.test(resolved));
+      }).map((specifier) => `${path} -> ${specifier}`)
+    )).toEqual([]);
     expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(2);
     const categoryFailure = monarchClient.indexOf(
       'Legacy finance category write-back is unavailable',

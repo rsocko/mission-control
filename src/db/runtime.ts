@@ -21,6 +21,11 @@ import {
   getWorkerPersistenceRepositories,
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
+import type { DemoSeedCommandService } from '@/lib/settings/mode-route-services';
+import {
+  registerDemoSeedCommandService,
+  registerRelativeReminderTimezoneRepository,
+} from '@/lib/settings/mode-route-services';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import {
@@ -33,6 +38,7 @@ import { createPostgresSyncJobRepository } from './postgres/sync/job-repository'
 import { createPostgresKeywordSearchRepository } from './postgres/search';
 import { createPostgresSemanticIndexRepository } from './postgres/semantic-index/repository';
 import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
+import { createPostgresRelativeReminderTimezoneRepository } from './postgres/repositories/relative-reminder-timezone-repository';
 
 const postgresBackend = new PostgresPersistenceBackend();
 let postgresRepositories: CorePersistenceRepositories | null = null;
@@ -238,21 +244,41 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
  * `PostgresDatabase`/`Pool` handles, so `getPostgresCoreRepositories` and its
  * siblings below are guaranteed to be populated as soon as this resolves.
  * SQLite initialization is untouched.
+ *
+ * Also registers the two `src/app/api/settings/mode/route.ts` (Layer L02)
+ * services declared in `@/lib/settings/mode-route-services` — see that
+ * module's doc comment. For SQLite this wires the real
+ * `clearDatabase`/`resetDemoDatabase`/`clearTriageSampleData` functions
+ * (via the SQLite-named `./persistence/sqlite-demo-seed-command-adapter`
+ * seam, so `@/lib/seed-api`/`@/lib/triage/lifecycle` are never imported —
+ * statically or dynamically — from anywhere reachable on the PostgreSQL
+ * branch) and the drizzle-backed timezone repository. For PostgreSQL, the
+ * timezone repository gets a real adapter, but the demo/seed commands have
+ * no PostgreSQL equivalent yet, so all three reject with the documented
+ * "SQLite-only" error.
  */
 export async function initializeRuntimeDatabase(): Promise<void> {
   if (resolveDatabaseBackend() === 'sqlite') {
     const [
-      { initializeDatabase },
+      { initializeDatabase, default: sqliteDb },
       { sqliteCorePersistenceRepositories },
       { sqliteTaskCorePersistence },
+      { createSqliteDemoSeedCommandService },
+      { createSqliteRelativeReminderTimezoneRepository },
     ] = await Promise.all([
       import('./index'),
       import('./persistence/sqlite-core-repositories'),
       import('./persistence/sqlite-task-core-repositories'),
+      import('./persistence/sqlite-demo-seed-command-adapter'),
+      import('./persistence/sqlite-relative-reminder-timezone-repository'),
     ]);
     initializeDatabase();
     registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
     registerTaskCorePersistence(sqliteTaskCorePersistence);
+    registerDemoSeedCommandService(createSqliteDemoSeedCommandService());
+    registerRelativeReminderTimezoneRepository(
+      createSqliteRelativeReminderTimezoneRepository(sqliteDb),
+    );
     await getWorkerPersistenceRepositories();
     return;
   }
@@ -277,6 +303,22 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
   postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerPostgresDurableAiRunRepository(postgresDurableAiRunRepository);
+  registerRelativeReminderTimezoneRepository(
+    createPostgresRelativeReminderTimezoneRepository(db),
+  );
+  const unsupportedDemoSeedCommand = (message: string) => () => Promise.reject(new Error(message));
+  const postgresDemoSeedCommandService: DemoSeedCommandService = {
+    resetDemoDatabase: unsupportedDemoSeedCommand(
+      'Seed/demo database management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    ),
+    clearDatabase: unsupportedDemoSeedCommand(
+      'Seed/demo database management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    ),
+    clearTriageSampleData: unsupportedDemoSeedCommand(
+      'Clearing triage demo/sample data is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    ),
+  };
+  registerDemoSeedCommandService(postgresDemoSeedCommandService);
 }
 
 export async function shutdownRuntimeDatabase(): Promise<void> {

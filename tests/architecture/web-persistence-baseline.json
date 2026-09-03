@@ -2,7 +2,7 @@
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
   "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (plan.md at session-state 430296c8-f794-4625-b32f-abb04894e6d4). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-03",
-  "generatedFromCommit": "e7122a9f9f99033debace0a994f2671cdf4a4d43",
+  "generatedFromCommit": "17d8dea502ddab8ddafeb871222c6917f159866d+L04",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits, and reproduces the plan's committed 266/221/39/6/123/6/350 exactly against this commit.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 220,
+    "tierARoutes": 219,
     "tierBRoutes": 39,
-    "cleanRoutes": 7,
-    "directTaintSourceRoutes": 143,
+    "cleanRoutes": 8,
+    "directTaintSourceRoutes": 142,
     "transitiveOnlyTaintSourceRoutes": 77,
-    "directDbNamespaceRoutes": 144,
-    "taintedLibA": 116,
+    "directDbNamespaceRoutes": 143,
+    "taintedLibA": 114,
     "taintedApiHelpers": 1,
-    "totalMigrationUnits": 337
+    "totalMigrationUnits": 334
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -58,8 +58,7 @@
   ],
   "staticSources": [
     "src/db/bootstrap/connection.ts",
-    "src/db/index.ts",
-    "src/lib/seed-api.ts"
+    "src/db/index.ts"
   ],
   "dynamicSources": [
     "src/lib/connectors/github-issues/backup-verifier.ts",
@@ -245,7 +244,6 @@
     "src/app/api/settings/capture-destination/route.ts",
     "src/app/api/settings/dopamine-menu/route.ts",
     "src/app/api/settings/inbox-lists/route.ts",
-    "src/app/api/settings/mode/route.ts",
     "src/app/api/settings/shortcuts/route.ts",
     "src/app/api/shortcut/version/route.ts",
     "src/app/api/smart-score/route.ts",
@@ -276,7 +274,6 @@
     "src/app/api/tasks/[id]/breakdown/route.ts",
     "src/app/api/tasks/[id]/copy/route.ts",
     "src/app/api/tasks/[id]/document-preview/route.ts",
-    "src/app/api/tasks/[id]/hard-delete/route.ts",
     "src/app/api/tasks/[id]/linked-sources/route.ts",
     "src/app/api/tasks/[id]/move-to-list/route.ts",
     "src/app/api/tasks/[id]/move/route.ts",
@@ -488,7 +485,6 @@
     "src/app/api/settings/capture-destination/route.ts",
     "src/app/api/settings/dopamine-menu/route.ts",
     "src/app/api/settings/inbox-lists/route.ts",
-    "src/app/api/settings/mode/route.ts",
     "src/app/api/smart-score/route.ts",
     "src/app/api/smart-score/settings/route.ts",
     "src/app/api/source-lists/[id]/fix-emoji/route.ts",
@@ -601,6 +597,7 @@
     "src/app/api/assets/thumbnails/[filename]/route.ts",
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
+    "src/app/api/settings/mode/route.ts",
     "src/app/api/settings/shortcuts/route.ts",
     "src/app/api/shortcut/version/route.ts",
     "src/app/api/tasks/[id]/hard-delete/route.ts",
@@ -703,7 +700,6 @@
     "src/app/api/settings/capture-destination/route.ts",
     "src/app/api/settings/dopamine-menu/route.ts",
     "src/app/api/settings/inbox-lists/route.ts",
-    "src/app/api/settings/mode/route.ts",
     "src/app/api/smart-score/route.ts",
     "src/app/api/smart-score/settings/route.ts",
     "src/app/api/source-lists/[id]/fix-emoji/route.ts",
@@ -928,7 +924,6 @@
     "src/app/api/settings/capture-destination/route.ts",
     "src/app/api/settings/dopamine-menu/route.ts",
     "src/app/api/settings/inbox-lists/route.ts",
-    "src/app/api/settings/mode/route.ts",
     "src/app/api/smart-score/route.ts",
     "src/app/api/smart-score/settings/route.ts",
     "src/app/api/source-lists/[id]/fix-emoji/route.ts",
@@ -1063,8 +1058,6 @@
     "src/lib/search/index.ts",
     "src/lib/search/semantic.ts",
     "src/lib/search/sqlite-fts-repository.ts",
-    "src/lib/seed-api.ts",
-    "src/lib/seed.ts",
     "src/lib/semantic-index/config.ts",
     "src/lib/semantic-index/index.ts",
     "src/lib/semantic-index/runtime.ts",
@@ -1102,8 +1095,8 @@
       "layer": "L04",
       "title": "task-core PostgreSQL web parity",
       "totalMigrationUnits": {
-        "from": 350,
-        "to": 337,
+        "from": 347,
+        "to": 334,
         "delta": -13
       },
       "removedTaintedApiHelpers": [
@@ -1141,6 +1134,19 @@
         }
       ],
       "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the worktree; entry-set diff shows zero additions to any taint set, zero Tier A -> Tier B reclassifications, and tierBRoutes unchanged at 39."
+    }
+  ],
+  "layerUpdates": [
+    {
+      "layer": "L02",
+      "summary": "Web/API PostgreSQL parity: seed/demo fail-closed audit fix, entity-link cross-backend parity, and a fully clean settings/mode route migration.",
+      "changes": [
+        "src/lib/seed-api.ts and src/lib/seed.ts exit taintedLibA and staticSources (better-sqlite3 import became import type, erased at build time; the real handle is now obtained via a lazy `await import('@/db')` inside getDb(), which fails closed under MC_DATABASE_BACKEND=postgres before that import ever runs).",
+        "src/app/api/settings/mode/route.ts exits tierARoutes AND tierBRoutes entirely (was directTaintSourceRoutes; a transitional design briefly moved it to tierBRoutes via call-site dynamic imports, but the final design removes even that). The route now imports only the pure, backend-neutral `@/lib/settings/mode-route-services` registry (zero import edges -- static or dynamic -- to `@/db`, `@/lib/seed-api`, or `@/lib/triage/lifecycle`; the one value-level import it needs, `RelativeReminderTimezoneRepository`, is `import type`-only). Both the PATCH handler's timezone repository and the POST handler's three demo-only commands (reset-demo/clear-data/clear-triage-samples) are resolved through this registry's plain get accessors. The concrete SQLite and PostgreSQL implementations are constructed and registered once, at server startup, by `initializeRuntimeDatabase()` in src/db/runtime.ts -- the same, already-established composition root used for `CorePersistenceRepositories` -- so the route module itself never touches SQLite/PostgreSQL machinery at all, at import time or call time. For PostgreSQL, the timezone repository gets a real adapter (createPostgresRelativeReminderTimezoneRepository); the three demo commands have no PostgreSQL equivalent and reject with the same 'SQLite-only' error text already used by seed-api.ts/triage/lifecycle.ts, constructed inline in the PostgreSQL branch without importing either SQLite-only module.",
+        "src/lib/tasks/relative-reminder-timezone-runtime.ts (a transitional lazy dynamic-import resolver) was deleted; its role is now split between the pure registry (`@/lib/settings/mode-route-services`, owned by this layer, not `src/lib/tasks/` which is owned by a later layer) and the composition-root wiring in `src/db/runtime.ts`.",
+        "src/lib/triage/lifecycle.ts and src/lib/triage/shared.ts are unchanged in tier (still Tier A/tainted): their normal, non-demo functions (updateTriageItemThumbnail, hardDeleteTriageItem, hardDeleteTriageItems, purgeDismissedItems, ensureSeedData, and others) are explicitly NOT migrated by L02 and are NOT given a fail-closed guard merely because they share a module with clearTriageSampleData (the one genuine seed/demo exception in that file); they remain an explicit later-layer target, not narrowed L02 taint.",
+        "The notification entity-linking repository files (src/db/persistence/notification-entity-linking.ts and its SQLite/Postgres adapters) gained an ASCII-fold suffix-match parity fix and a JSON-string-type guard; neither file is on the tainted-graph census path (they are called from webhook/worker code already migrated by prior layers), so this change does not affect any count in this baseline."
+      ]
     }
   ]
 }

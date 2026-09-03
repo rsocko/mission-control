@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import { tasks } from '../schema';
 import type { PostgresDatabase } from '../runtime';
 import type {
@@ -13,6 +13,10 @@ export function createPostgresRelativeReminderTimezoneRepository(
     async applyTimezoneRecompute({ now, recompute }) {
       const nowIso = now.toISOString();
       return db.transaction(async (tx) => {
+        // NOTE: the null checks below use raw `sql` fragments (not drizzle's typed
+        // `isNotNull()` helper) to match this codebase's established convention for
+        // "IS NOT NULL" predicates against Postgres (see e.g. `schema/tasks.ts`'s own
+        // index definitions and the raw-SQL repositories under `src/db/postgres`).
         const candidates = (await tx.select({
           id: tasks.id,
           dueDate: tasks.dueDate,
@@ -20,10 +24,10 @@ export function createPostgresRelativeReminderTimezoneRepository(
           reminderRelative: tasks.reminderRelative,
           reminderDueTime: tasks.reminderDueTime,
         }).from(tasks).where(and(
-          isNotNull(tasks.reminderRelative),
-          isNotNull(tasks.reminderAt),
-          isNotNull(tasks.dueDate),
-          isNotNull(tasks.reminderDueTime),
+          sql`${tasks.reminderRelative} IS NOT NULL`,
+          sql`${tasks.reminderAt} IS NOT NULL`,
+          sql`${tasks.dueDate} IS NOT NULL`,
+          sql`${tasks.reminderDueTime} IS NOT NULL`,
           inArray(tasks.status, ['todo', 'in_progress']),
           gt(tasks.reminderAt, nowIso),
         ))) as RelativeReminderTaskSnapshot[];

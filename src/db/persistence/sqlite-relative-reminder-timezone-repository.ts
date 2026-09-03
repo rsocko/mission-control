@@ -1,5 +1,5 @@
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
+import { and, eq, gt, inArray, sql } from 'drizzle-orm';
 import type * as schema from '@/db/schema';
 import { tasks } from '@/db/schema';
 import type {
@@ -14,6 +14,8 @@ export function createSqliteRelativeReminderTimezoneRepository(
     async applyTimezoneRecompute({ now, recompute }) {
       const nowIso = now.toISOString();
       return db.transaction((tx) => {
+        // NOTE: see the Postgres sibling repository for why null checks use raw
+        // `sql` fragments instead of drizzle's typed `isNotNull()` helper.
         const candidates = tx.select({
           id: tasks.id,
           dueDate: tasks.dueDate,
@@ -21,10 +23,10 @@ export function createSqliteRelativeReminderTimezoneRepository(
           reminderRelative: tasks.reminderRelative,
           reminderDueTime: tasks.reminderDueTime,
         }).from(tasks).where(and(
-          isNotNull(tasks.reminderRelative),
-          isNotNull(tasks.reminderAt),
-          isNotNull(tasks.dueDate),
-          isNotNull(tasks.reminderDueTime),
+          sql`${tasks.reminderRelative} IS NOT NULL`,
+          sql`${tasks.reminderAt} IS NOT NULL`,
+          sql`${tasks.dueDate} IS NOT NULL`,
+          sql`${tasks.reminderDueTime} IS NOT NULL`,
           inArray(tasks.status, ['todo', 'in_progress']),
           gt(tasks.reminderAt, nowIso),
         )).all() as RelativeReminderTaskSnapshot[];

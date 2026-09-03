@@ -9,7 +9,7 @@ const CREATABLE_ENTITY_TYPES = new Set(['person', 'project', 'tag', 'source']);
 
 export async function GET() {
   try {
-    return NextResponse.json({ entities: getResolvedPriorityEntities({ includeMissing: true }) });
+    return NextResponse.json({ entities: await getResolvedPriorityEntities({ includeMissing: true }) });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch priority entities', error);
   }
@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     }
     const reference = type === 'person'
       ? null
-      : resolvePriorityReference(type, referenceId);
+      : await resolvePriorityReference(type, referenceId);
     if (type !== 'person' && !reference) {
       return ApiErrors.badRequest('Referenced priority entity does not exist');
     }
@@ -95,7 +95,7 @@ export async function PUT(request: Request) {
         .run();
     }
 
-    return NextResponse.json({ entities: getResolvedPriorityEntities({ includeMissing: true }) });
+    return NextResponse.json({ entities: await getResolvedPriorityEntities({ includeMissing: true }) });
   } catch (error) {
     return ApiErrors.internal('Failed to update priority entities', error);
   }

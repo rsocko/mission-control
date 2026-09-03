@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     const statusFilter = searchParams.get('status') || 'open';
 
     // Fetch scoring context
-    const entities: PriorityEntity[] = getResolvedPriorityEntities();
+    const entities: PriorityEntity[] = await getResolvedPriorityEntities();
     const rankings: SourceRanking[] = db.select().from(sourceRankings).orderBy(asc(sourceRankings.rank)).all() as SourceRanking[];
 
     // Fetch open tasks

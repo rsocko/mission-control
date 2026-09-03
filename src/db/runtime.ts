@@ -15,6 +15,9 @@ import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
 import {
+  registerTaskCorePersistence,
+} from '@/lib/tasks/core/runtime';
+import {
   getWorkerPersistenceRepositories,
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
@@ -24,6 +27,7 @@ import {
   createPostgresCoreRepositories,
   createPostgresWorkerPersistenceRepositories,
 } from './postgres/repositories';
+import { createPostgresTaskCorePersistence } from './postgres/repositories/task-core-repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
@@ -240,12 +244,15 @@ export async function initializeRuntimeDatabase(): Promise<void> {
     const [
       { initializeDatabase },
       { sqliteCorePersistenceRepositories },
+      { sqliteTaskCorePersistence },
     ] = await Promise.all([
       import('./index'),
       import('./persistence/sqlite-core-repositories'),
+      import('./persistence/sqlite-task-core-repositories'),
     ]);
     initializeDatabase();
     registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
+    registerTaskCorePersistence(sqliteTaskCorePersistence);
     await getWorkerPersistenceRepositories();
     return;
   }
@@ -253,6 +260,10 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
+  // The task-core composition is built atomically from the freshly
+  // initialized handle, so no request can observe a half-registered
+  // task-core surface under PostgreSQL.
+  registerTaskCorePersistence(createPostgresTaskCorePersistence(db));
   postgresWorkerRepositories = createPostgresWorkerPersistenceRepositories(
     db,
     pool,

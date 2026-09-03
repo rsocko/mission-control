@@ -2,7 +2,7 @@
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
   "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (plan.md at session-state 430296c8-f794-4625-b32f-abb04894e6d4). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-03",
-  "generatedFromCommit": "ebb8ad36666dde3bd1fc25ab309085ccd610c92a",
+  "generatedFromCommit": "e7122a9f9f99033debace0a994f2671cdf4a4d43",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits, and reproduces the plan's committed 266/221/39/6/123/6/350 exactly against this commit.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 221,
+    "tierARoutes": 220,
     "tierBRoutes": 39,
-    "cleanRoutes": 6,
+    "cleanRoutes": 7,
     "directTaintSourceRoutes": 143,
-    "transitiveOnlyTaintSourceRoutes": 78,
+    "transitiveOnlyTaintSourceRoutes": 77,
     "directDbNamespaceRoutes": 144,
-    "taintedLibA": 123,
-    "taintedApiHelpers": 6,
-    "totalMigrationUnits": 350
+    "taintedLibA": 116,
+    "taintedApiHelpers": 1,
+    "totalMigrationUnits": 337
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -516,7 +516,6 @@
     "src/app/api/tasks/[id]/breakdown/route.ts",
     "src/app/api/tasks/[id]/copy/route.ts",
     "src/app/api/tasks/[id]/document-preview/route.ts",
-    "src/app/api/tasks/[id]/hard-delete/route.ts",
     "src/app/api/tasks/[id]/linked-sources/route.ts",
     "src/app/api/tasks/[id]/move-to-list/route.ts",
     "src/app/api/tasks/[id]/owl/route.ts",
@@ -604,6 +603,7 @@
     "src/app/api/mcp/route.ts",
     "src/app/api/settings/shortcuts/route.ts",
     "src/app/api/shortcut/version/route.ts",
+    "src/app/api/tasks/[id]/hard-delete/route.ts",
     "src/app/api/triage/rules/route.ts"
   ],
   "directTaintSourceRoutes": [
@@ -812,7 +812,6 @@
     "src/app/api/stats/route.ts",
     "src/app/api/sync/stream/route.ts",
     "src/app/api/tag-insights/route.ts",
-    "src/app/api/tasks/[id]/hard-delete/route.ts",
     "src/app/api/tasks/[id]/owl/route.ts",
     "src/app/api/tasks/[id]/relationship-candidates/route.ts",
     "src/app/api/tasks/[id]/relationships/[relationshipId]/route.ts",
@@ -1053,7 +1052,6 @@
     "src/lib/notifications/service.ts",
     "src/lib/notifications/workflow-executor.ts",
     "src/lib/persistence/sqlite-runtime.ts",
-    "src/lib/priority-entities.ts",
     "src/lib/projects-overview/index.ts",
     "src/lib/projects/hierarchy-service.ts",
     "src/lib/public-demo-runtime.ts",
@@ -1082,11 +1080,6 @@
     "src/lib/sync/sqlite-job-repository.ts",
     "src/lib/sync/sqlite-maintenance-lock.ts",
     "src/lib/tag-insights/service.ts",
-    "src/lib/tasks/edit-policy.ts",
-    "src/lib/tasks/local-task-lifecycle.ts",
-    "src/lib/tasks/mutation-policy.ts",
-    "src/lib/tasks/scout-hard-delete.ts",
-    "src/lib/tasks/task-move-pending-sync.ts",
     "src/lib/tasks/task-move-write-through.ts",
     "src/lib/triage/actions.ts",
     "src/lib/triage/actions/ms-todo.ts",
@@ -1099,15 +1092,55 @@
     "src/lib/triage/query.ts",
     "src/lib/triage/shared.ts",
     "src/lib/triage/staleness.ts",
-    "src/lib/utils/resolve-task-list-names.ts",
     "src/lib/word-insights/service.ts"
   ],
   "taintedApiHelpers": [
-    "src/app/api/ideation/workspaces/route-errors.ts",
-    "src/app/api/tasks/canonical-filter.ts",
-    "src/app/api/tasks/filter-factory.ts",
-    "src/app/api/tasks/filter-query.ts",
-    "src/app/api/tasks/query-builder.ts",
-    "src/app/api/tasks/stats-computer.ts"
+    "src/app/api/ideation/workspaces/route-errors.ts"
+  ],
+  "decrementHistory": [
+    {
+      "layer": "L04",
+      "title": "task-core PostgreSQL web parity",
+      "totalMigrationUnits": {
+        "from": 350,
+        "to": 337,
+        "delta": -13
+      },
+      "removedTaintedApiHelpers": [
+        "src/app/api/tasks/canonical-filter.ts",
+        "src/app/api/tasks/filter-factory.ts",
+        "src/app/api/tasks/filter-query.ts",
+        "src/app/api/tasks/query-builder.ts",
+        "src/app/api/tasks/stats-computer.ts"
+      ],
+      "removedTaintedLibA": [
+        "src/lib/priority-entities.ts",
+        "src/lib/tasks/edit-policy.ts",
+        "src/lib/tasks/local-task-lifecycle.ts",
+        "src/lib/tasks/mutation-policy.ts",
+        "src/lib/tasks/scout-hard-delete.ts",
+        "src/lib/tasks/task-move-pending-sync.ts",
+        "src/lib/utils/resolve-task-list-names.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/tasks/[id]/hard-delete/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/tasks/[id]/hard-delete/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "ownedFilesWithResidualForeignLayerTaint": [
+        {
+          "file": "src/lib/tasks/task-move-write-through.ts",
+          "persistenceMigrated": true,
+          "blockedBy": [
+            "src/lib/connectors/transfer-identity.ts"
+          ],
+          "evidence": "The file itself contains no @/db, @/db/schema, drizzle-orm or better-sqlite3 reference, and every one of its nine original transaction sites is now an adapter-owned task-core operation. It stays in taintedLibA only because it statically imports @/lib/connectors/transfer-identity, whose own @/db usage and whose @/lib/external-identities dependency are external-identity persistence owned by L06. tests/db/task-core-postgres-import-safety.test.ts stubs exactly that one module and then imports and executes the move under a poisoned @/db, which fails loudly if any SQLite coupling is ever reintroduced into the move itself; tests/architecture/task-core-taint-decrement.test.ts pins that this is the only remaining blocking edge. It is therefore residual taint attributable to another layer, not a deferral inside L04."
+        }
+      ],
+      "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the worktree; entry-set diff shows zero additions to any taint set, zero Tier A -> Tier B reclassifications, and tierBRoutes unchanged at 39."
+    }
   ]
 }

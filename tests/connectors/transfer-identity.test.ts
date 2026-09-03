@@ -130,6 +130,106 @@ describe('task transfer identity persistence', () => {
       'acme/target',
     )).toBe(true);
   });
+
+  it('rejects an oversized legacy batch before ever opening a transaction', async () => {
+    // Replaces `runTransaction` with a spy (preserving every other real export
+    // via `importOriginal`) so this test can assert it is never called, then
+    // forces `vi.resetModules()` so `transfer-identity.ts` re-imports `@/db`
+    // and binds to this mocked `runTransaction`, not a prior test's cached one.
+    const runTransactionSpy = vi.fn();
+    vi.doMock('@/db', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/db')>();
+      return { ...actual, runTransaction: runTransactionSpy };
+    });
+    vi.resetModules();
+
+    const [
+      { default: db },
+      schema,
+      { reconcileTransferIdentity },
+    ] = await Promise.all([
+      import('@/db'),
+      import('@/db/schema'),
+      import('@/lib/connectors/transfer-identity'),
+    ]);
+    const now = '2026-08-09T21:00:00.000Z';
+    const connectorInstanceId = 'oversized-batch-connector';
+
+    // 500 source-list writes + 1 task write = 501, one past the ceiling.
+    const sourceListRows: (typeof schema.sourceLists.$inferInsert)[] = [];
+    const refreshSourceLists: { sourceId: string; evidence: { entity: ReturnType<typeof repositoryEvidence> } }[] = [];
+    for (let index = 0; index < 500; index += 1) {
+      const sourceId = `acme/repo-${index}`;
+      sourceListRows.push({
+        id: `oversized-list-${index}`,
+        connectorInstanceId,
+        sourceId,
+        name: sourceId,
+        type: 'repo',
+      });
+      refreshSourceLists.push({
+        sourceId,
+        evidence: { entity: repositoryEvidence(`R_oversized_${index}`, 'acme', `repo-${index}`, now) },
+      });
+    }
+    await db.insert(schema.sourceLists).values(sourceListRows);
+
+    const issueEvidence = {
+      entity: {
+        identity: {
+          provider: 'github',
+          hostKey: 'github.com',
+          entityType: 'issue' as const,
+          stableId: 'I_oversized',
+        },
+        locator: {
+          owner: 'acme',
+          repository: 'repo-0',
+          issueNumber: 1,
+          apiUrl: 'https://api.github.com/repos/acme/repo-0/issues/1',
+          webUrl: 'https://github.com/acme/repo-0/issues/1',
+        },
+        observationSource: 'rest' as const,
+        observedAt: now,
+      },
+    };
+
+    expect(() => reconcileTransferIdentity('oversized-task', connectorInstanceId, {
+      task: {
+        id: 'remote-placeholder',
+        sourceId: 'acme/repo-0:1',
+        connectorType: 'github-issues',
+        connectorInstanceId,
+        title: 'Oversized batch task',
+        description: undefined,
+        status: 'todo',
+        priority: 'none',
+        createdAt: now,
+        updatedAt: now,
+        parentId: undefined,
+        childIds: [],
+        depth: 0,
+        isChecklistItem: false,
+        sourceListId: undefined,
+        sourceListName: undefined,
+        hubProjectIds: [],
+        tags: [],
+        metadata: {},
+        externalIdentity: issueEvidence,
+        syncStatus: 'synced',
+        lastSyncedAt: now,
+      },
+      sourceLists: refreshSourceLists,
+    })).toThrow('External identity batch exceeds the maximum of 500');
+
+    // The ceiling must reject before any transaction is opened - no partial
+    // effects, and no unnecessary write-lock acquisition for an oversized
+    // batch that will never be persisted.
+    expect(runTransactionSpy).not.toHaveBeenCalled();
+
+    vi.doUnmock('@/db');
+    vi.resetModules();
+  });
 });
 
 function repositoryEvidence(

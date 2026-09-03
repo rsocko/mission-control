@@ -2,6 +2,7 @@ import db, { runTransaction } from '@/db';
 import { sourceLists, tasks } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import {
+  assertExternalIdentityBatchWithinLimit,
   assertGitHubIdentityModeSnapshotInTransaction,
   getGitHubIdentityModeSnapshotInTransaction,
   persistExternalIdentityBatchInTransaction,
@@ -143,12 +144,21 @@ function persistIdentityWrites(
  * handle), is not exported, and must never be exposed as a public
  * backend-neutral API. L06b removes this function once the task-row write
  * above is folded into the atomic orchestration port.
+ *
+ * The oversized-batch ceiling is rejected via the shared
+ * `assertExternalIdentityBatchWithinLimit` helper (single source of truth for
+ * the ceiling/error also used by `persistExternalIdentityBatch` and
+ * `persistExternalIdentityBatchInTransaction`), called here before any read
+ * or transaction is opened — matching the original `persistExternalIdentityBatch`
+ * call site's byte-for-byte ordering, where this same check ran before any
+ * transaction began.
  */
 function persistExternalIdentityBatchLegacySync(
   connectorInstanceId: string,
   writes: ExternalIdentityWrite[],
 ): void {
   if (writes.length === 0) return;
+  assertExternalIdentityBatchWithinLimit(writes);
   const modeSnapshot = getGitHubIdentityModeSnapshotInTransaction(db, connectorInstanceId);
   if (writes.some((write) => write.target.connectorInstanceId !== modeSnapshot.connectorInstanceId)) {
     throw new Error('External identity writes do not match the frozen connector');

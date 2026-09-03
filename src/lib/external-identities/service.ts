@@ -47,6 +47,20 @@ type IdentityDatabase = ExternalIdentityTransaction;
 const MAX_BATCH_SIZE = 500;
 const MAX_COLLISION_IDS = 50;
 const LOCATOR_PATH_CHUNK_SIZE = 100;
+
+/**
+ * Single source of truth for the `persistExternalIdentityBatch` ceiling and
+ * its exact error class/message. Shared by the async port wrapper below, the
+ * transaction-parameterized Group-2 primitive (kept as defense-in-depth), and
+ * `transfer-identity.ts`'s legacy SQLite-sync compatibility path, so an
+ * oversized batch is rejected before any transaction is opened everywhere
+ * this ceiling is enforced, with no duplicated magic number.
+ */
+export function assertExternalIdentityBatchWithinLimit(writes: ExternalIdentityWrite[]): void {
+  if (writes.length > MAX_BATCH_SIZE) {
+    throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
+  }
+}
 /**
  * Backfill lifecycle only. GitHub identity is permanently NodeID-first, so
  * these phases never select an identity mode and can never return a connector
@@ -423,9 +437,7 @@ export async function persistExternalIdentityBatch(
   modeSnapshot?: GitHubIdentityModeSnapshot,
 ): Promise<ExternalIdentityWriteResult[]> {
   if (writes.length === 0) return [];
-  if (writes.length > MAX_BATCH_SIZE) {
-    throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
-  }
+  assertExternalIdentityBatchWithinLimit(writes);
   if (
     modeSnapshot
     && writes.some((write) =>
@@ -450,9 +462,7 @@ export function persistExternalIdentityBatchInTransaction(
   bindingState: Extract<ExternalBindingState, 'shadow' | 'active'> = 'shadow',
 ): ExternalIdentityWriteResult[] {
   if (writes.length === 0) return [];
-  if (writes.length > MAX_BATCH_SIZE) {
-    throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
-  }
+  assertExternalIdentityBatchWithinLimit(writes);
   const connectorIds = new Set(writes.map((write) => write.target.connectorInstanceId));
   if (connectorIds.size !== 1) {
     throw new Error('External identity batches must contain one connector instance');

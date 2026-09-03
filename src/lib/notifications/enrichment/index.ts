@@ -18,8 +18,9 @@ import {
 } from '@/lib/notifications/providers';
 import type { NotificationActionDraft } from '@/lib/notifications/providers';
 import type { EntityLinkResult } from './entity-linker';
-import { enrichWithAI, shouldEnrichWithAI } from './ai-enrichment';
-import type { AIEnrichmentInput, AIEnrichmentResult } from './ai-enrichment';
+import { shouldEnrichWithAI } from './ai-enrichment-policy';
+import type { AIEnrichmentInput } from './ai-enrichment-policy';
+import { enrichWithAI, type AIEnrichmentResult } from './ai-enrichment-service';
 import { connectorLogger } from '@/lib/logger';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────

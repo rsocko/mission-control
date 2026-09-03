@@ -26,6 +26,7 @@ import { ryMessageFactory } from './rymessage';
 import { scoutFactory } from './scout';
 import { workTodoBridgeFactory } from './work-todo';
 import type { NotificationWritebackAction } from './notification-writeback-contract';
+import { registerConnectorRegistry } from './registry-runtime';
 export {
   ConnectorWritebackError,
   type NotificationWritebackAction,
@@ -306,6 +307,7 @@ export interface ConnectorFactory {
 
 // Singleton registry
 export const connectorRegistry = new ConnectorRegistry();
+registerConnectorRegistry(connectorRegistry);
 
 let defaultFactoriesRegistered = false;
 

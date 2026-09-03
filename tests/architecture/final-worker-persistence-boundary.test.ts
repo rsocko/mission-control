@@ -19,8 +19,6 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   'src/lib/connectors/rymessage/rymessage-client.ts',
   'src/lib/houston-memory/service.ts',
   'src/lib/notifications/enrichment/ai-enrichment.ts',
-  'src/lib/persistence/worker-runtime.ts',
-  'src/lib/persistence/runtime.ts',
   'src/lib/search/fts.ts',
   'src/lib/semantic-index/publication.ts',
   'src/lib/semantic-index/repository-facade.ts',
@@ -283,7 +281,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     const linker = source('src/lib/notifications/enrichment/entity-linker.ts');
     const workerPersistence = source('src/db/persistence/worker-repositories.ts');
     const postgresComposition = source('src/db/postgres/repositories/index.ts');
-    const sqliteComposition = source('src/lib/persistence/worker-runtime.ts');
+    const sqliteComposition = source('src/db/persistence/sqlite-worker-runtime.ts');
 
     expect(linker).toContain('notificationEntityLinking');
     expect(linker).not.toMatch(/from ['"]@\/db['"]/);

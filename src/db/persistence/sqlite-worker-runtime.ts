@@ -1,0 +1,140 @@
+import db, { sqlite } from '@/db';
+import type { CanonicalJsonValue } from '@/lib/finance-insights/canonical';
+import { financeInsightDigestV1 } from '@/lib/finance-insights/canonical';
+import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
+import {
+  registerSqliteGitHubRepointBackupVerifier,
+} from '@/lib/connectors/github-issues/backup-verifier';
+import { registerFinanceTransactionQuery } from '@/lib/connectors/monarch-money/transaction-query';
+import { registerSqliteLegacySearchIndexingService } from './sqlite-legacy-search-indexing';
+import {
+  registerSqliteAIEnrichmentService,
+} from '@/lib/notifications/enrichment/ai-enrichment';
+import { registerKeywordSearchRepository } from '@/lib/search/keyword-runtime';
+import { sqliteKeywordSearchRepository } from '@/lib/search/sqlite-fts-repository';
+import type { WorkerPersistenceRepositories } from './worker-repositories';
+import { sqliteCorePersistenceRepositories } from './sqlite-core-repositories';
+import { SqliteSyncRunRepository } from './sqlite-sync-run-repository';
+import { createSqliteConnectorExecutionRepositories } from './sqlite-connector-execution-repositories';
+import { createSqliteGitHubIdentityRepositories } from './sqlite-github-identity-repositories';
+import { createSqliteGitHubDependencyRepositories } from './sqlite-github-dependency-repositories';
+import { createSqliteGitHubHierarchyRepositories } from './sqlite-github-hierarchy-repositories';
+import { createSqliteGitHubProjectRepositories } from './sqlite-github-project-repositories';
+import { createSqliteGitHubRecoveryRepositories } from './sqlite-github-recovery-repositories';
+import { createSqliteWorkTodoRepositories } from './sqlite-work-todo-repositories';
+import { createSqliteNotificationDeliveryRepository } from './sqlite-notification-delivery-repository';
+import { createSqliteTaskReminderRepository } from './sqlite-task-reminder-repository';
+import { createSqliteTriagePersistenceRepositories } from './sqlite-triage-repositories';
+import { createSqlitePlanningSignalRepository } from './sqlite-planning-signal-repository';
+import { createSqliteProjectAutomationRepository } from './sqlite-project-automation-repository';
+import { createSqliteEventDeliveryRepositories } from './sqlite-event-outbox-repository';
+import { createSqliteNotificationEnrichmentRepository } from './sqlite-notification-enrichment-repository';
+import { createSqliteNotificationEntityLinkingRepository } from './sqlite-notification-entity-linking-repository';
+import { createSqliteFinanceWorkerPersistence } from './sqlite-finance-worker-repositories';
+import { createSqliteFinanceConnectionRecoveryPersistence } from './sqlite-finance-recovery-repository';
+import { createSqliteFinanceInsightPersistence } from './sqlite-finance-insights-repositories';
+import {
+  createSqliteFinanceAttentionRepairPersistence,
+  createSqliteFinanceAttentionRoutingPersistence,
+} from './sqlite-finance-attention-repositories';
+import {
+  createSqliteFinanceInsightNotificationLifecyclePersistence,
+} from './sqlite-finance-insight-notification-lifecycle';
+import { loadFinanceInsightProjectionFacts } from './sqlite-finance-insight-projection-facts';
+import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-query';
+
+let repositories: WorkerPersistenceRepositories | null = null;
+
+export function createSqliteWorkerPersistenceRepositories():
+WorkerPersistenceRepositories {
+  registerSqliteGitHubRepointBackupVerifier();
+  registerFinanceTransactionQuery(sqliteFinanceTransactionQuery);
+  registerSqliteLegacySearchIndexingService();
+  registerSqliteAIEnrichmentService();
+  registerKeywordSearchRepository(sqliteKeywordSearchRepository);
+  if (repositories) return repositories;
+
+  const githubIdentity = createSqliteGitHubIdentityRepositories(sqlite, db);
+  const financeCore = createSqliteFinanceWorkerPersistence(sqlite, {
+    projectionProofs: {
+      snapshot: ({ connectorId, projectionStartDate, windowStart, windowEnd }) => {
+        const facts = loadFinanceInsightProjectionFacts(
+          sqlite,
+          connectorId,
+          projectionStartDate,
+          'transaction',
+        ).transaction;
+        const dates = facts.map((fact) => fact.occurredOn).sort();
+        return {
+          itemCount: facts.length,
+          contentDigest: financeInsightDigestV1(facts as unknown as CanonicalJsonValue),
+          projectionStartDate,
+          coverageStart: dates[0] ?? windowStart,
+          coverageEnd: dates.at(-1) ?? windowEnd,
+          bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+        };
+      },
+      dataset: (connectorId, dataset) => {
+        const kind = dataset === 'accounts'
+          ? 'account'
+          : dataset === 'categories'
+            ? 'category'
+            : dataset === 'tags'
+              ? 'tag'
+              : dataset === 'recurring'
+                ? 'recurring'
+                : null;
+        if (!kind) return null;
+        const facts = loadFinanceInsightProjectionFacts(
+          sqlite,
+          connectorId,
+          '0000-01-01',
+          kind,
+        )[kind];
+        return {
+          itemCount: facts.length,
+          contentDigest: financeInsightDigestV1(facts as unknown as CanonicalJsonValue),
+          bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+        };
+      },
+    },
+  });
+  const finance = {
+    ...financeCore,
+    insights: {
+      ...createSqliteFinanceInsightPersistence(sqlite),
+      notifications: createSqliteFinanceInsightNotificationLifecyclePersistence({ sqlite, db }),
+    },
+    attention: {
+      routing: createSqliteFinanceAttentionRoutingPersistence({ sqlite, db }),
+      repair: createSqliteFinanceAttentionRepairPersistence(sqlite),
+    },
+    recovery: createSqliteFinanceConnectionRecoveryPersistence(sqlite, db),
+  };
+  repositories = {
+    connectors: sqliteCorePersistenceRepositories.connectors,
+    syncRuns: new SqliteSyncRunRepository(sqlite),
+    execution: createSqliteConnectorExecutionRepositories(sqlite, db),
+    github: {
+      identity: githubIdentity.identity,
+      writeFence: githubIdentity.writeFence,
+      dependencies: createSqliteGitHubDependencyRepositories(sqlite, db),
+      hierarchy: createSqliteGitHubHierarchyRepositories(sqlite, db),
+      projects: createSqliteGitHubProjectRepositories(sqlite, db),
+      recovery: createSqliteGitHubRecoveryRepositories(sqlite, db),
+    },
+    connectorState: {
+      workTodo: createSqliteWorkTodoRepositories(sqlite, db),
+    },
+    notificationDelivery: createSqliteNotificationDeliveryRepository(sqlite),
+    reminders: createSqliteTaskReminderRepository(sqlite),
+    triage: createSqliteTriagePersistenceRepositories(sqlite),
+    planningSignals: createSqlitePlanningSignalRepository(sqlite),
+    projectAutomation: createSqliteProjectAutomationRepository(sqlite),
+    eventDelivery: createSqliteEventDeliveryRepositories(sqlite),
+    notificationEntityLinking: createSqliteNotificationEntityLinkingRepository(sqlite),
+    notificationEnrichment: createSqliteNotificationEnrichmentRepository(sqlite),
+    finance,
+  };
+  return repositories;
+}

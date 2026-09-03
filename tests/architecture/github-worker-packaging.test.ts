@@ -9,9 +9,8 @@ import { describe, expect, it } from 'vitest';
  * backend. These checks assert, statically, that the PostgreSQL half of the
  * GitHub worker composition never pulls a SQLite adapter, a raw `sqlite`
  * handle, or `better-sqlite3` into its module graph, and that the SQLite half
- * never pulls `pg` in. `@/lib/persistence/worker-runtime` is the only place
- * allowed to reach a SQLite adapter, and it does so behind a dynamic import so
- * a PostgreSQL worker never evaluates it.
+ * never pulls `pg` in. The SQLite composition lives under `src/db/persistence`
+ * and is loaded only by the selected database runtime.
  */
 
 const POSTGRES_GITHUB_ADAPTERS = [
@@ -76,7 +75,6 @@ describe('sync worker persistence packaging reachability', () => {
     const offenders = sourceFiles.flatMap((absolute) => {
       const path = relative(process.cwd(), absolute).split(sep).join('/');
       if (path.startsWith('src/db/')) return [];
-      if (path === 'src/lib/persistence/worker-runtime.ts') return [];
       const source = readFileSync(absolute, 'utf8');
       return /(?:^|\n)import\s+[^;]*?from\s+['"]@\/db\/persistence\/sqlite-(?:github-|work-todo)[^'"]+['"]/
         .test(source)
@@ -87,8 +85,8 @@ describe('sync worker persistence packaging reachability', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('loads the SQLite GitHub adapters through dynamic imports only', () => {
-    const runtime = read('src/lib/persistence/worker-runtime.ts');
+  it('isolates SQLite GitHub adapters in the selected database composition', () => {
+    const composition = read('src/db/persistence/sqlite-worker-runtime.ts');
     for (const adapter of [
       'sqlite-github-identity-repositories',
       'sqlite-github-dependency-repositories',
@@ -97,11 +95,14 @@ describe('sync worker persistence packaging reachability', () => {
       'sqlite-github-recovery-repositories',
       'sqlite-work-todo-repositories',
     ]) {
-      expect(runtime).toContain(`import('@/db/persistence/${adapter}')`);
-      expect(runtime).not.toMatch(
-        new RegExp(String.raw`(?:^|\n)import\s+[^;]*?from\s+['"]@/db/persistence/${adapter}['"]`),
+      expect(composition).toMatch(
+        new RegExp(String.raw`from\s+['"]\./${adapter}['"]`),
       );
     }
+    expect(read('src/db/runtime.ts')).toContain(
+      "import('./persistence/sqlite-worker-runtime')",
+    );
+    expect(read('src/lib/persistence/worker-runtime.ts')).not.toContain('sqlite');
   });
 
   it('registers the GitHub worker composition atomically for PostgreSQL', () => {
@@ -126,7 +127,7 @@ describe('sync worker persistence packaging reachability', () => {
     );
     expect(index).toContain('workTodo: createPostgresWorkTodoRepositories(pool)');
 
-    const runtime = read('src/lib/persistence/worker-runtime.ts');
+    const runtime = read('src/db/persistence/sqlite-worker-runtime.ts');
     expect(runtime).toContain('workTodo: createSqliteWorkTodoRepositories(sqlite, db)');
   });
 });

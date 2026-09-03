@@ -29,12 +29,9 @@ describe('task reminder persistence boundary', () => {
   });
 
   it('registers reminders atomically without replacing inherited worker members', () => {
-    const runtime = read('src/lib/persistence/worker-runtime.ts');
+    const runtime = read('src/db/persistence/sqlite-worker-runtime.ts');
     expect(runtime).toContain(
-      "import('@/db/persistence/sqlite-task-reminder-repository')",
-    );
-    expect(runtime).not.toMatch(
-      /(?:^|\n)import\s+[^;]*from\s+['"]@\/db\/persistence\/sqlite-task-reminder-repository['"]/,
+      "from './sqlite-task-reminder-repository'",
     );
     expect(runtime).toContain('reminders: createSqliteTaskReminderRepository(sqlite)');
     expect(runtime).toContain(
@@ -52,14 +49,13 @@ describe('task reminder persistence boundary', () => {
 
   it('keeps PostgreSQL selection fail-closed before atomic registration', () => {
     const runtime = read('src/lib/persistence/worker-runtime.ts');
-    const failure = runtime.indexOf(
-      'PostgreSQL worker repositories must be registered before worker persistence is accessed',
+    expect(runtime).toContain(
+      'Worker persistence repositories must be registered before worker persistence is accessed',
     );
-    const sqliteEvaluation = runtime.indexOf(
-      'sqliteWorkerPersistencePromise ??= createSqliteWorkerPersistenceRepositories()',
+    expect(runtime).not.toContain('sqlite');
+    expect(read('src/db/runtime.ts')).toContain(
+      "import('./persistence/sqlite-worker-runtime')",
     );
-    expect(failure).toBeGreaterThan(-1);
-    expect(sqliteEvaluation).toBeGreaterThan(failure);
   });
 
   it('uses the inherited delivery outbox and dispatcher wake', () => {

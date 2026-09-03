@@ -9,10 +9,10 @@ import type {
 import { syncLogger } from '@/lib/logger';
 import { AIRoutingDeniedError } from '@/lib/ai/sensitivity-policy';
 import {
-  enrichWithAI,
   NotificationEnrichmentPermanentError,
   type AIEnrichmentResult,
-} from './ai-enrichment';
+} from './ai-enrichment-policy';
+import { enrichWithAI } from './ai-enrichment-service';
 
 export const DEFAULT_NOTIFICATION_ENRICHMENT_LEASE_MS = 60_000;
 export const DEFAULT_NOTIFICATION_ENRICHMENT_TIMEOUT_MS = 45_000;

@@ -6,6 +6,17 @@ import type { KeywordSearchRepository } from '@/lib/search/repository';
 import type { SemanticIndexRepository } from '@/lib/semantic-index/contracts';
 import type { SemanticSourcePort } from '@/lib/semantic-index/source/contracts';
 import type { DurableAiRunRepository } from '@/lib/ai/durable-runs/repository';
+import { clearGitHubRepointBackupVerifier } from '@/lib/connectors/github-issues/backup-verifier';
+import { clearFinanceTransactionQuery } from '@/lib/connectors/monarch-money/transaction-query';
+import { clearLegacySearchIndexingService } from '@/lib/search/indexing-service';
+import {
+  clearKeywordSearchRepository,
+  registerKeywordSearchRepository,
+} from '@/lib/search/keyword-runtime';
+import {
+  clearAIEnrichmentService,
+  registerAIEnrichmentService,
+} from '@/lib/notifications/enrichment/ai-enrichment-service';
 import {
   clearPostgresDurableAiRunRepository,
   registerPostgresDurableAiRunRepository,
@@ -15,7 +26,6 @@ import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
 import {
-  getWorkerPersistenceRepositories,
   registerWorkerPersistenceRepositories,
 } from '@/lib/persistence/worker-runtime';
 import { PostgresPersistenceBackend } from './postgres/runtime';
@@ -26,6 +36,7 @@ import {
 } from './postgres/repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
+import { createPostgresAIEnrichmentService } from './postgres/sync/notification-enrichment-service';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
 import { createPostgresSemanticIndexRepository } from './postgres/semantic-index/repository';
 import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
@@ -240,15 +251,22 @@ export async function initializeRuntimeDatabase(): Promise<void> {
     const [
       { initializeDatabase },
       { sqliteCorePersistenceRepositories },
+      { createSqliteWorkerPersistenceRepositories },
     ] = await Promise.all([
       import('./index'),
       import('./persistence/sqlite-core-repositories'),
+      import('./persistence/sqlite-worker-runtime'),
     ]);
     initializeDatabase();
     registerCorePersistenceRepositories(sqliteCorePersistenceRepositories);
-    await getWorkerPersistenceRepositories();
+    registerWorkerPersistenceRepositories(createSqliteWorkerPersistenceRepositories());
     return;
   }
+  clearGitHubRepointBackupVerifier();
+  clearFinanceTransactionQuery();
+  clearLegacySearchIndexingService();
+  clearKeywordSearchRepository();
+  clearAIEnrichmentService();
   await postgresBackend.initialize();
   const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
@@ -262,6 +280,8 @@ export async function initializeRuntimeDatabase(): Promise<void> {
   postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
+  registerKeywordSearchRepository(postgresKeywordSearchRepository);
+  registerAIEnrichmentService(createPostgresAIEnrichmentService());
   postgresSemanticIndexRepository = createPostgresSemanticIndexRepository(pool, vector);
   postgresSemanticSourcePort = createPostgresSemanticSourcePort(pool);
   postgresDurableAiRunRepository = new PostgresDurableAiRunRepository(pool);
@@ -279,6 +299,9 @@ export async function shutdownRuntimeDatabase(): Promise<void> {
     postgresSemanticIndexRepository = null;
     postgresSemanticSourcePort = null;
     postgresDurableAiRunRepository = null;
+    clearKeywordSearchRepository();
+    clearLegacySearchIndexingService();
+    clearAIEnrichmentService();
     clearPostgresDurableAiRunRepository();
   }
 }

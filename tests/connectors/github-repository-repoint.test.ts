@@ -26,6 +26,10 @@ let service: typeof import('@/lib/connectors/github-issues/repoint-service');
 
 beforeAll(async () => {
   database = await import('@/db');
+  const { registerSqliteGitHubRepointBackupVerifier } = await import(
+    '@/lib/connectors/github-issues/backup-verifier'
+  );
+  registerSqliteGitHubRepointBackupVerifier();
   schema = await import('@/db/schema');
   identities = await import('@/lib/external-identities');
   service = await import('@/lib/connectors/github-issues/repoint-service');

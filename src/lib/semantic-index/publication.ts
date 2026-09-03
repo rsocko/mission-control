@@ -1,6 +1,7 @@
 import type { SemanticSourceEntityType } from './source/contracts';
 import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import type { SemanticPublishResult } from './service';
+import { registerSemanticPublicationService } from './publication-service';
 
 async function publish(
   kind: 'upsert' | 'delete',
@@ -33,3 +34,8 @@ export function publishSemanticEntityDelete(
 ): Promise<SemanticPublishResult | void> {
   return publish('delete', entityType, entityId);
 }
+
+registerSemanticPublicationService({
+  upsert: publishSemanticEntityUpsert,
+  delete: publishSemanticEntityDelete,
+});

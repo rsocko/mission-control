@@ -1,15 +1,15 @@
 import { syncLogger } from '@/lib/logger';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
-
-let searchModulePromise: Promise<typeof import('@/lib/search') | null> | undefined;
-
-export function getSearchModule() {
-  if (!searchModulePromise) {
-    searchModulePromise = import('@/lib/search').catch(() => null);
-  }
-
-  return searchModulePromise;
-}
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication-service';
+import {
+  getLegacySearchIndexingService,
+  type SearchIndexAlert,
+  type SearchIndexTask,
+} from '@/lib/search/indexing-service';
+import { getKeywordSearchRepository } from '@/lib/search/keyword-runtime';
 
 async function allowsSemanticSearch(): Promise<boolean> {
   return (await getWorkerPersistenceRepositories()).execution.support
@@ -21,10 +21,6 @@ async function publishSemantic(
   entityType: 'task' | 'alert',
   entityId: string,
 ): Promise<void> {
-  const {
-    publishSemanticEntityDelete,
-    publishSemanticEntityUpsert,
-  } = await import('@/lib/semantic-index/publication');
   if (kind === 'upsert') await publishSemanticEntityUpsert(entityType, entityId);
   else await publishSemanticEntityDelete(entityType, entityId);
 }
@@ -35,41 +31,27 @@ async function publishSemantic(
  */
 export async function warmUpSearchAfterSync() {
   if (!(await allowsSemanticSearch()) || process.env.MC_DATABASE_BACKEND === 'postgres') {
-    const { warmUpFTS } = await import('@/lib/search/fts');
-    await warmUpFTS();
+    await getKeywordSearchRepository().warmUp();
     return;
   }
-  const search = await getSearchModule();
-  await search?.warmUpSearch().catch((e) => {
+  await getLegacySearchIndexingService().warmUp().catch((e) => {
     syncLogger.error({ err: e }, 'warmUpSearch failed');
   });
 }
 
-export type SearchableTask = {
-  id: string;
-  title: string;
-  description?: string | null;
-  sourceListName?: string | null;
-  connectorType?: string | null;
-  status?: string | null;
-  priority?: string | null;
-  updatedAt?: string | null;
-};
+export type SearchableTask = SearchIndexTask;
 
 export async function indexTaskForSearch(task: SearchableTask) {
   if (process.env.MC_DATABASE_BACKEND === 'postgres') {
-    const { indexTask } = await import('@/lib/search/fts');
-    await indexTask(task);
+    await getKeywordSearchRepository().indexTask(task);
     await publishSemantic('upsert', 'task', task.id);
     return;
   }
   if (!(await allowsSemanticSearch())) {
-    const { indexTask } = await import('@/lib/search/fts');
-    await indexTask(task);
+    await getKeywordSearchRepository().indexTask(task);
     return;
   }
-  const search = await getSearchModule();
-  await search?.indexTaskSearch(task).catch((e) => { syncLogger.error({ err: e, taskId: task.id }, 'indexTaskSearch failed'); });
+  await getLegacySearchIndexingService().indexTask(task).catch((e) => { syncLogger.error({ err: e, taskId: task.id }, 'indexTaskSearch failed'); });
 }
 
 /**
@@ -79,10 +61,9 @@ export async function indexTaskForSearch(task: SearchableTask) {
 export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
   if (taskBatch.length === 0) return;
   if (process.env.MC_DATABASE_BACKEND === 'postgres') {
-    const { indexTask } = await import('@/lib/search/fts');
     for (const task of taskBatch) {
       try {
-        await indexTask(task);
+        await getKeywordSearchRepository().indexTask(task);
         await publishSemantic('upsert', 'task', task.id);
       } catch (error) {
         syncLogger.error({ err: error, taskId: task.id }, 'indexTaskSearch failed');
@@ -91,22 +72,18 @@ export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
     return;
   }
   if (!(await allowsSemanticSearch())) {
-    const { indexTask } = await import('@/lib/search/fts');
     for (const task of taskBatch) {
       try {
-        await indexTask(task);
+        await getKeywordSearchRepository().indexTask(task);
       } catch (error) {
         syncLogger.error({ err: error, taskId: task.id }, 'indexTaskSearch failed');
       }
     }
     return;
   }
-  const search = await getSearchModule();
-  if (!search) return;
-
   for (const task of taskBatch) {
     try {
-      await search.indexTaskSearch(task);
+      await getLegacySearchIndexingService().indexTask(task);
     } catch (e) {
       syncLogger.error({ err: e, taskId: task.id }, 'indexTaskSearch failed');
     }
@@ -119,44 +96,28 @@ export async function indexTasksForSearchBatch(taskBatch: SearchableTask[]) {
  */
 export async function removeTaskFromSearch(taskId: string) {
   if (process.env.MC_DATABASE_BACKEND === 'postgres') {
-    const { removeTaskFromIndex } = await import('@/lib/search/fts');
-    await removeTaskFromIndex(taskId);
+    await getKeywordSearchRepository().removeTask(taskId);
     await publishSemantic('delete', 'task', taskId);
     return;
   }
   if (!(await allowsSemanticSearch())) {
-    const { removeTaskFromIndex } = await import('@/lib/search/fts');
-    await removeTaskFromIndex(taskId);
+    await getKeywordSearchRepository().removeTask(taskId);
     return;
   }
-  const search = await getSearchModule();
-  await search?.removeTaskSearch(taskId).catch((e) => {
+  await getLegacySearchIndexingService().removeTask(taskId).catch((e) => {
     syncLogger.error({ err: e, taskId }, 'removeTaskSearch failed');
   });
 }
 
-export async function indexAlertForSearch(alert: {
-  id: string;
-  title: string;
-  body?: string | null;
-  category?: string | null;
-  severity?: string | null;
-  isRead?: boolean | null;
-  isActionable?: boolean | null;
-  connectorType?: string | null;
-  receivedAt?: string | null;
-}) {
+export async function indexAlertForSearch(alert: SearchIndexAlert) {
   if (process.env.MC_DATABASE_BACKEND === 'postgres') {
-    const { indexAlert } = await import('@/lib/search/fts');
-    await indexAlert(alert);
+    await getKeywordSearchRepository().indexNotification(alert);
     await publishSemantic('upsert', 'alert', alert.id);
     return;
   }
   if (!(await allowsSemanticSearch())) {
-    const { indexAlert } = await import('@/lib/search/fts');
-    await indexAlert(alert);
+    await getKeywordSearchRepository().indexNotification(alert);
     return;
   }
-  const search = await getSearchModule();
-  await search?.indexAlertSearch(alert).catch((e) => { syncLogger.error({ err: e, alertId: alert.id }, 'indexAlertSearch failed'); });
+  await getLegacySearchIndexingService().indexAlert(alert).catch((e) => { syncLogger.error({ err: e, alertId: alert.id }, 'indexAlertSearch failed'); });
 }

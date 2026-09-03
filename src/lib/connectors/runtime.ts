@@ -1,7 +1,8 @@
 import 'server-only';
 
 import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
-import { connectorRegistry, type IConnector } from '.';
+import type { IConnector } from '.';
+import { getConnectorRegistry } from './registry-runtime';
 
 export async function getOrInitializeConnector(
   connectorInstanceId: string,
@@ -10,8 +11,9 @@ export async function getOrInitializeConnector(
   const config = await repositories.connectors.get(connectorInstanceId);
   if (!config?.enabled) return null;
 
-  const existing = connectorRegistry.getConnector(connectorInstanceId);
+  const registry = getConnectorRegistry();
+  const existing = registry.getConnector(connectorInstanceId);
   if (existing) return existing;
 
-  return connectorRegistry.createConnector(config);
+  return registry.createConnector(config);
 }

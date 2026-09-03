@@ -124,9 +124,23 @@ function createDirectCopilotExecutor(
     promise: Promise<DirectCopilotExecutorLifecycle>;
     users: number;
     retireRequested: boolean;
+    closing?: Promise<void>;
+    drainWaiters: Set<() => void>;
   }
   const lifecycles = new Map<string, LifecycleEntry>();
+  let stopping = false;
+  const notifyDrained = (entry: LifecycleEntry) => {
+    for (const resolve of entry.drainWaiters) resolve();
+    entry.drainWaiters.clear();
+  };
+  const waitForDrain = (entry: LifecycleEntry) => {
+    if (entry.users === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => entry.drainWaiters.add(resolve));
+  };
   const acquireLifecycle = async (run: ClaimedDurableAiRun) => {
+    if (stopping) {
+      throw new Error('Durable AI executor registry is shutting down.');
+    }
     const key = `${run.id}:${run.attempt}`;
     let entry = lifecycles.get(key);
     if (!entry) {
@@ -142,6 +156,7 @@ function createDirectCopilotExecutor(
         })(),
         users: 0,
         retireRequested: false,
+        drainWaiters: new Set(),
       };
       lifecycles.set(key, entry);
     }
@@ -154,6 +169,7 @@ function createDirectCopilotExecutor(
       if (entry.users === 0 && lifecycles.get(key) === entry) {
         lifecycles.delete(key);
       }
+      if (entry.users === 0) notifyDrained(entry);
       throw error;
     }
     let released = false;
@@ -172,7 +188,14 @@ function createDirectCopilotExecutor(
           && lifecycles.get(key) === entry
         ) {
           lifecycles.delete(key);
-          await lifecycle.shutdownForRestart();
+          entry.closing = lifecycle.shutdownForRestart();
+          try {
+            await entry.closing;
+          } finally {
+            notifyDrained(entry);
+          }
+        } else if (entry.users === 0) {
+          notifyDrained(entry);
         }
       },
     };
@@ -313,11 +336,20 @@ function createDirectCopilotExecutor(
   return {
     executor,
     async shutdown() {
-      const active = await Promise.all(
-        [...lifecycles.values()].map((entry) => entry.promise),
-      );
-      await Promise.all(active.map((lifecycle) => lifecycle.shutdownForRestart()));
-      lifecycles.clear();
+      stopping = true;
+      const entries = [...lifecycles.entries()];
+      await Promise.all(entries.map(async ([key, entry]) => {
+        await waitForDrain(entry);
+        if (entry.closing) {
+          await entry.closing;
+          return;
+        }
+        if (lifecycles.get(key) !== entry) return;
+        lifecycles.delete(key);
+        const lifecycle = await entry.promise;
+        entry.closing = lifecycle.shutdownForRestart();
+        await entry.closing;
+      }));
     },
   };
 }

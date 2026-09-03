@@ -340,6 +340,33 @@ describe('durable AI executor registry', () => {
     );
   });
 
+  it('drains active lifecycle users before registry shutdown', async () => {
+    const manager = lifecycle();
+    const completion = deferred<ReturnType<typeof lifecycleRecord>>();
+    vi.mocked(manager.completeRun).mockImplementation(async () => completion.promise);
+    const registry = createDurableAiExecutorRegistry(dependencies(manager));
+    const executor = registry.get(COPILOT_EXECUTION_ROUTE)!;
+
+    const execution = executor.execute(executionContext());
+    await vi.waitFor(() => expect(manager.completeRun).toHaveBeenCalledOnce());
+    const shutdown = shutdownDurableAiExecutorRegistry(registry);
+    await Promise.resolve();
+
+    expect(manager.shutdownForRestart).not.toHaveBeenCalled();
+    completion.resolve(lifecycleRecord({
+      state: 'cleaned_up',
+      connection: 'detached',
+      terminalState: 'completed',
+      providerSessionId: undefined,
+    }));
+    await Promise.all([execution, shutdown]);
+
+    expect(manager.shutdownForRestart).toHaveBeenCalledOnce();
+    await expect(executor.cancel!(executionContext())).rejects.toThrow(
+      'registry is shutting down',
+    );
+  });
+
   it('uses persisted cleanup state and shuts the lifecycle down for restart', async () => {
     const manager = lifecycle(lifecycleRecord({
       state: 'failed',

@@ -140,6 +140,7 @@ async function main(): Promise<void> {
         }
       : undefined,
   });
+  const keepAlive = setInterval(() => undefined, 60_000);
   worker.start();
   if (readyFile) {
     writeFileSync(readyFile, String(process.pid), { encoding: 'utf8', mode: 0o600 });
@@ -153,6 +154,7 @@ async function main(): Promise<void> {
   const shutdown = (signal: NodeJS.Signals) => {
     if (shutdownPromise) return;
     shutdownPromise = (async () => {
+      clearInterval(keepAlive);
       if (readyFile) rmSync(readyFile, { force: true });
       await worker.stop();
       await backend.shutdown();

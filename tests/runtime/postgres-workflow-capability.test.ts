@@ -55,6 +55,10 @@ function persistence(): WorkerPersistenceRepositories {
       recoverStaleLeases: async () => 0,
       getNextWakeAt: async () => null,
     },
+    notificationEntityLinking: {
+      findTaskBySourceReference: async () => null,
+      findProjectByRepository: async () => null,
+    },
   } as WorkerPersistenceRepositories;
 }
 
@@ -119,6 +123,12 @@ describe('PostgreSQL packaged workflow capability', () => {
       persistence: {
         ...persistence(),
         planningSignals: {},
+      } as WorkerPersistenceRepositories,
+    }],
+    ['notification entity-linking repository', {
+      persistence: {
+        ...persistence(),
+        notificationEntityLinking: {},
       } as WorkerPersistenceRepositories,
     }],
     ['executor routes', { durableExecutorRoutes: [] }],

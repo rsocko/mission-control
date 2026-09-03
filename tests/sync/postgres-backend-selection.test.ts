@@ -78,6 +78,10 @@ const postgresMocks = vi.hoisted(() => ({
   publishSemanticEntityUpsert: vi.fn(async () => ({ status: 'published' as const })),
   publishSemanticEntityDelete: vi.fn(async () => ({ status: 'published' as const })),
   workerRepositories: {
+    notificationEntityLinking: {
+      findTaskBySourceReference: vi.fn(async () => null),
+      findProjectByRepository: vi.fn(async () => null),
+    },
     connectors: {
       get: vi.fn(async () => null),
       mergeSettings: vi.fn(async (

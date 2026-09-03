@@ -119,6 +119,7 @@ export async function runPackagedSyncWorker(
       && workerPersistence.eventDelivery
       && workerPersistence.eventDelivery.outbox
       && workerPersistence.eventDelivery.subscriptions
+      && workerPersistence.notificationEntityLinking
       && workerPersistence.notificationEnrichment
     );
     if (!completeWorkerCompositionPresent) {

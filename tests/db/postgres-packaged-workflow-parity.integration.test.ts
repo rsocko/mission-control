@@ -278,7 +278,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
               updatedAt: '2034-01-01T00:00:00.000Z',
             },
             {
-              id: `${prefix}:semantic`,
+              id: `${prefix}/repo:42`,
               title: `${prefix} semantic task`,
               status: 'todo',
               priority: 'normal',
@@ -292,7 +292,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           return json([{
             id: `${prefix}:alert`,
             title: 'Review requested',
-            body: `Review ${prefix}`,
+            body: `Review ${prefix}/repo#42`,
             severity: 'fyi',
             category: 'development',
             receivedAt: '2034-01-01T00:00:00.000Z',
@@ -487,9 +487,15 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
            id, source_id, connector_type, connector_instance_id, title, status,
            priority, due_date, created_at, updated_at, last_synced_at
          ) VALUES
-           ($1, $1, 'custom-rest', $3, $1, 'todo', 'normal', '2035-01-01', $4, $4, $4),
-           ($2, $2, 'custom-rest', $3, $2, 'todo', 'normal', NULL, $4, $4, $4)`,
-        [`${prefix}:planning`, `${prefix}:semantic`, `${prefix}:connector`, now],
+           ($1, $1, 'custom-rest', $3, $1, 'todo', 'normal', '2035-01-01', $5, $5, $5),
+           ($2, $4, 'custom-rest', $3, $2, 'todo', 'normal', NULL, $5, $5, $5)`,
+        [
+          `${prefix}:planning`,
+          `${prefix}:semantic`,
+          `${prefix}:connector`,
+          `${prefix}/repo:42`,
+          now,
+        ],
       );
       await pool.query(
         `INSERT INTO my_day_items (id, task_id, date, added_at, is_auto_included, "order")
@@ -502,10 +508,11 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
            default_view, status, hidden, sort_order, hierarchy_revision, metadata,
            created_at, updated_at
          ) VALUES ($1, $1, '#3b82f6', '[]'::jsonb, $2::jsonb, '[]'::jsonb,
-           'list', 'active', false, 0, 0, '{}'::jsonb, $3, $3)`,
+           'list', 'active', false, 0, 0, $3::jsonb, $4, $4)`,
         [
           `${prefix}:project`,
           JSON.stringify([{ type: 'connector', value: `${prefix}:connector` }]),
+          JSON.stringify({ repository: `${prefix}/repo` }),
           now,
         ],
       );
@@ -882,7 +889,13 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
             WHERE id = $2) AS enrichment_summary,
            (SELECT count(*)::int
             FROM notifications
-            WHERE source_id = $9) AS pipeline_notifications`,
+            WHERE source_id = $9) AS pipeline_notifications,
+           (SELECT related_task_id
+            FROM notifications
+            WHERE source_id = $9) AS pipeline_related_task,
+           (SELECT navigation_target
+            FROM notifications
+            WHERE source_id = $9) AS pipeline_navigation`,
         [
           `${prefix}:connector`,
           `${prefix}:enrichment`,
@@ -911,6 +924,8 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         terminal_deliveries: 1,
         enrichment_summary: 'Durably enriched',
         pipeline_notifications: 1,
+        pipeline_related_task: `${prefix}:semantic`,
+        pipeline_navigation: `/tasks?selected=${prefix}:semantic`,
       });
       expect(evidence.rows[0].terminal_event_key).toBe(
         `sync.completed:job:${syncJob.id}:run:${evidence.rows[0].sync_run_id}`,

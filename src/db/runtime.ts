@@ -191,6 +191,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ),
     }),
   },
+  notificationEntityLinking: new Proxy(
+    {} as WorkerPersistenceRepositories['notificationEntityLinking'],
+    {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().notificationEntityLinking[
+          property as keyof WorkerPersistenceRepositories['notificationEntityLinking']
+        ]
+      ),
+    },
+  ),
   notificationEnrichment: new Proxy(
     {} as WorkerPersistenceRepositories['notificationEnrichment'],
     {

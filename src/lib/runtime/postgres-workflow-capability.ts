@@ -43,6 +43,10 @@ const REQUIRED_REPOSITORY_METHODS = {
     'recoverStaleLeases',
     'getNextWakeAt',
   ],
+  notificationEntityLinking: [
+    'findTaskBySourceReference',
+    'findProjectByRepository',
+  ],
 } as const;
 
 export interface PostgresPackagedWorkflowCapability {
@@ -102,6 +106,10 @@ export function composePostgresPackagedWorkflowCapability(input: {
     && hasMethods(
       persistence.notificationEnrichment,
       REQUIRED_REPOSITORY_METHODS.notificationEnrichment,
+    )
+    && hasMethods(
+      persistence.notificationEntityLinking,
+      REQUIRED_REPOSITORY_METHODS.notificationEntityLinking,
     )
   );
   if (!completeRepositories) {

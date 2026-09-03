@@ -39,6 +39,8 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
       subscriptions: {},
       outbox: {},
     } as WorkerPersistenceRepositories['eventDelivery'],
+    notificationEntityLinking:
+      {} as WorkerPersistenceRepositories['notificationEntityLinking'],
     notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
     finance: {
       identity: {},
@@ -80,6 +82,7 @@ afterEach(() => {
   vi.doUnmock('@/db/persistence/sqlite-project-automation-repository');
   vi.doUnmock('@/db/persistence/sqlite-event-outbox-repository');
   vi.doUnmock('@/db/persistence/sqlite-notification-enrichment-repository');
+  vi.doUnmock('@/db/persistence/sqlite-notification-entity-linking-repository');
   vi.doUnmock('@/db/persistence/sqlite-finance-worker-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-insights-repositories');
   vi.doUnmock('@/db/persistence/sqlite-finance-attention-repositories');
@@ -147,6 +150,10 @@ describe('worker persistence runtime', () => {
     const notificationEnrichmentModule = vi.fn(() => ({
       createSqliteNotificationEnrichmentRepository: () => repositories.notificationEnrichment,
     }));
+    const notificationEntityLinkingModule = vi.fn(() => ({
+      createSqliteNotificationEntityLinkingRepository: () =>
+        repositories.notificationEntityLinking,
+    }));
     const financeModule = vi.fn(() => ({
       createSqliteFinanceWorkerPersistence: () => repositories.finance,
     }));    const financeInsightsModule = vi.fn(() => ({
@@ -195,6 +202,10 @@ describe('worker persistence runtime', () => {
       '@/db/persistence/sqlite-notification-enrichment-repository',
       notificationEnrichmentModule,
     );
+    vi.doMock(
+      '@/db/persistence/sqlite-notification-entity-linking-repository',
+      notificationEntityLinkingModule,
+    );
     vi.doMock('@/db/persistence/sqlite-finance-worker-repositories', financeModule);
     vi.doMock(
       '@/db/persistence/sqlite-finance-insights-repositories',
@@ -233,6 +244,7 @@ describe('worker persistence runtime', () => {
     expect(projectAutomationModule).not.toHaveBeenCalled();
     expect(eventOutboxModule).not.toHaveBeenCalled();
     expect(notificationEnrichmentModule).not.toHaveBeenCalled();
+    expect(notificationEntityLinkingModule).not.toHaveBeenCalled();
     expect(financeModule).not.toHaveBeenCalled();
     expect(financeInsightsModule).not.toHaveBeenCalled();
     expect(financeAttentionModule).not.toHaveBeenCalled();
@@ -258,6 +270,7 @@ describe('worker persistence runtime', () => {
     expect(first.planningSignals).toBe(repositories.planningSignals);
     expect(first.projectAutomation).toBe(repositories.projectAutomation);
     expect(first.eventDelivery).toBe(repositories.eventDelivery);
+    expect(first.notificationEntityLinking).toBe(repositories.notificationEntityLinking);
     expect(first.notificationEnrichment).toBe(repositories.notificationEnrichment);
     expect(first.finance.identity).toBe(repositories.finance.identity);
     expect(first.finance.snapshots).toBe(repositories.finance.snapshots);
@@ -290,6 +303,7 @@ describe('worker persistence runtime', () => {
     expect(projectAutomationModule).toHaveBeenCalledOnce();
     expect(eventOutboxModule).toHaveBeenCalledOnce();
     expect(notificationEnrichmentModule).toHaveBeenCalledOnce();
+    expect(notificationEntityLinkingModule).toHaveBeenCalledOnce();
     expect(financeModule).toHaveBeenCalledOnce();
     expect(financeInsightsModule).toHaveBeenCalledOnce();
     expect(financeAttentionModule).toHaveBeenCalledOnce();

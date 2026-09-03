@@ -87,7 +87,7 @@ describe('GitHub identity backfill', () => {
     createConnector('dry-run');
     createTask('dry-run', 'dry-task', 'owner/repo:3', {}, 'synced');
     const before = identityCounts();
-    const statusBefore = backfill.getGitHubIdentityBackfillStatus('dry-run');
+    const statusBefore = await backfill.getGitHubIdentityBackfillStatus('dry-run');
     const result = await backfill.runGitHubIdentityBackfill({
       connectorInstanceId: 'dry-run',
       dryRun: true,
@@ -95,7 +95,7 @@ describe('GitHub identity backfill', () => {
     });
     expect(result).toMatchObject({ dryRun: true, processed: 1, bound: 1 });
     expect(identityCounts()).toEqual(before);
-    expect(backfill.getGitHubIdentityBackfillStatus('dry-run')).toEqual(statusBefore);
+    expect(await backfill.getGitHubIdentityBackfillStatus('dry-run')).toEqual(statusBefore);
   });
 
   it('leaves rate-limited batches retryable without advancing the cursor', async () => {

@@ -54,7 +54,7 @@ describe('GitHub identity persistence concurrency fences', () => {
       lastSyncedAt: now,
       metadata: {},
     }).run();
-    const snapshot = identity.getGitHubIdentityModeSnapshot('identity-fence');
+    const snapshot = await identity.getGitHubIdentityModeSnapshot('identity-fence');
     const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'identity-fence',
       modeSnapshot: snapshot,
@@ -66,7 +66,7 @@ describe('GitHub identity persistence concurrency fences', () => {
       updatedAt: now,
     }).where(eq(schema.githubIdentityControls.connectorInstanceId, 'identity-fence')).run();
 
-    expect(() => identity.persistExternalIdentityBatch([{
+    await expect(identity.persistExternalIdentityBatch([{
       target: {
         connectorInstanceId: 'identity-fence',
         bindingType: 'task',
@@ -97,7 +97,7 @@ describe('GitHub identity persistence concurrency fences', () => {
           observedAt: now,
         },
       },
-    }], snapshot)).toThrow('revision changed');
+    }], snapshot)).rejects.toThrow('revision changed');
     expect(db.select().from(schema.externalEntities).all()).toEqual([]);
 
     // The stable runtime writes no evidence, so the only durable fence is the

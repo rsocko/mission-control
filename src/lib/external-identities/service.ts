@@ -1,7 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import { and, eq, inArray, isNull, or, sql } from 'drizzle-orm';
-import db, { runTransaction, schema } from '@/db';
+import type * as schema from '@/db/schema';
+import {
+  getGitHubIdentityOperatorRepository,
+  getGitHubIdentityRepository,
+} from './worker-persistence';
 import {
   externalEntities,
   externalEntityBindings,
@@ -32,10 +36,7 @@ import type {
   NormalizedExternalEntityLocator,
 } from './types';
 import { digestExternalIdentifier } from './identifier-digest';
-import {
-  assertGitHubIdentityModeSnapshotInTransaction,
-  ensureGitHubIdentityControlsInTransaction,
-} from './identity-mode';
+import { ensureGitHubIdentityControlsInTransaction } from './identity-mode';
 import type { GitHubIdentityModeSnapshot } from './stable-identity-types';
 
 export { digestExternalIdentifier } from './identifier-digest';
@@ -46,6 +47,20 @@ type IdentityDatabase = ExternalIdentityTransaction;
 const MAX_BATCH_SIZE = 500;
 const MAX_COLLISION_IDS = 50;
 const LOCATOR_PATH_CHUNK_SIZE = 100;
+
+/**
+ * Single source of truth for the `persistExternalIdentityBatch` ceiling and
+ * its exact error class/message. Shared by the async port wrapper below, the
+ * transaction-parameterized Group-2 primitive (kept as defense-in-depth), and
+ * `transfer-identity.ts`'s legacy SQLite-sync compatibility path, so an
+ * oversized batch is rejected before any transaction is opened everywhere
+ * this ceiling is enforced, with no duplicated magic number.
+ */
+export function assertExternalIdentityBatchWithinLimit(writes: ExternalIdentityWrite[]): void {
+  if (writes.length > MAX_BATCH_SIZE) {
+    throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
+  }
+}
 /**
  * Backfill lifecycle only. GitHub identity is permanently NodeID-first, so
  * these phases never select an identity mode and can never return a connector
@@ -92,10 +107,10 @@ export function createExternalEntityKey(identity: ExternalEntityIdentity): Exter
   return Object.freeze({ ...identity });
 }
 
-export function getExternalEntityByKey(
+export async function getExternalEntityByKey(
   key: ExternalEntityKey,
-): ExternalEntityRecord | null {
-  return getExternalEntityByKeyInTransaction(db, key);
+): Promise<ExternalEntityRecord | null> {
+  return (await getGitHubIdentityRepository()).getExternalEntityByKey(key);
 }
 
 export function getExternalEntityByKeyInTransaction(
@@ -112,10 +127,10 @@ export function getExternalEntityByKeyInTransaction(
   return row ? toExternalEntityRecord(row) : null;
 }
 
-export function upsertExternalEntity(
+export async function upsertExternalEntity(
   input: ExternalEntityUpsert,
-): ExternalEntityRecord {
-  return runTransaction((tx) => upsertExternalEntityInTransaction(tx, input));
+): Promise<ExternalEntityRecord> {
+  return (await getGitHubIdentityRepository()).upsertExternalEntity(input);
 }
 
 export function upsertExternalEntityInTransaction(
@@ -151,10 +166,10 @@ export function upsertExternalEntityInTransaction(
   return toExternalEntityRecord(row);
 }
 
-export function getCurrentExternalEntityLocator(
+export async function getCurrentExternalEntityLocator(
   externalEntityId: string,
-): ExternalEntityLocatorRecord | null {
-  return getCurrentExternalEntityLocatorInTransaction(db, externalEntityId);
+): Promise<ExternalEntityLocatorRecord | null> {
+  return (await getGitHubIdentityRepository()).getCurrentExternalEntityLocator(externalEntityId);
 }
 
 export function getCurrentExternalEntityLocatorInTransaction(
@@ -169,10 +184,13 @@ export function getCurrentExternalEntityLocatorInTransaction(
   return row ? toExternalEntityLocatorRecord(row) : null;
 }
 
-export function listExternalEntityLocatorHistory(
+export async function listExternalEntityLocatorHistory(
   externalEntityId: string,
-): ExternalEntityLocatorRecord[] {
-  return listExternalEntityLocatorHistoryInTransaction(db, externalEntityId);
+): Promise<ExternalEntityLocatorRecord[]> {
+  return [
+    ...(await (await getGitHubIdentityRepository())
+      .listExternalEntityLocatorHistory(externalEntityId)),
+  ];
 }
 
 export function listExternalEntityLocatorHistoryInTransaction(
@@ -187,10 +205,10 @@ export function listExternalEntityLocatorHistoryInTransaction(
     .map(toExternalEntityLocatorRecord);
 }
 
-export function preflightExternalEntityLocator(
+export async function preflightExternalEntityLocator(
   input: ExternalEntityLocatorObservation,
-): ExternalEntityLocatorPreflight {
-  return preflightExternalEntityLocatorInTransaction(db, input);
+): Promise<ExternalEntityLocatorPreflight> {
+  return (await getGitHubIdentityRepository()).preflightExternalEntityLocator(input);
 }
 
 export function preflightExternalEntityLocatorInTransaction(
@@ -207,10 +225,10 @@ export function preflightExternalEntityLocatorInTransaction(
   });
 }
 
-export function observeOperatorExternalEntityLocator(
+export async function observeOperatorExternalEntityLocator(
   input: ExternalEntityLocatorObservation,
-): ExternalEntityLocatorObservationResult {
-  return runTransaction((tx) => observeOperatorExternalEntityLocatorInTransaction(tx, input));
+): Promise<ExternalEntityLocatorObservationResult> {
+  return (await getGitHubIdentityRepository()).observeExternalEntityLocator(input);
 }
 
 export function observeOperatorExternalEntityLocatorInTransaction(
@@ -286,10 +304,10 @@ export function observeOperatorExternalEntityLocatorInTransaction(
   };
 }
 
-export function recordExternalIdentityCollision(
+export async function recordExternalIdentityCollision(
   input: ExternalIdentityCollisionInput,
-): ExternalIdentityCollisionRecord {
-  return runTransaction((tx) => recordExternalIdentityCollisionInTransaction(tx, input));
+): Promise<ExternalIdentityCollisionRecord> {
+  return (await getGitHubIdentityRepository()).recordExternalIdentityCollision(input);
 }
 
 export function recordExternalIdentityCollisionInTransaction(
@@ -299,8 +317,28 @@ export function recordExternalIdentityCollisionInTransaction(
   return persistCollision(database, input, true);
 }
 
-export function getGitHubIdentityPhase(connectorInstanceId: string): GitHubIdentityPhase | null {
-  const row = db.select({ phase: githubIdentityMigrations.phase })
+/**
+ * Backend-neutral wrapper delegating to the GitHub identity-operator port.
+ * Only `github-backfill.ts` (one of the five pre-existing, previously audited
+ * operator/recovery surfaces) calls this; PostgreSQL fails closed via
+ * `UnsupportedGitHubWorkerOperationError`.
+ */
+export async function getGitHubIdentityPhase(
+  connectorInstanceId: string,
+): Promise<GitHubIdentityPhase | null> {
+  return (await getGitHubIdentityOperatorRepository()).getBackfillPhase(connectorInstanceId);
+}
+
+/**
+ * SQLite-adapter-oriented helper. Not selected under PostgreSQL: the operator
+ * backfill/phase surface fails closed there via
+ * `UnsupportedGitHubWorkerOperationError` before this is ever reached.
+ */
+export function getGitHubIdentityPhaseInTransaction(
+  database: ExternalIdentityTransaction,
+  connectorInstanceId: string,
+): GitHubIdentityPhase | null {
+  const row = database.select({ phase: githubIdentityMigrations.phase })
     .from(githubIdentityMigrations)
     .where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId))
     .limit(1)
@@ -326,53 +364,80 @@ export function createNewGitHubConnectorIdentityState(
   ensureGitHubIdentityControlsInTransaction(database, connectorInstanceId, now);
 }
 
-export function updateGitHubIdentityPhase(
+/**
+ * Backend-neutral wrapper delegating to the GitHub identity-operator port.
+ * Only `github-backfill.ts` (one of the five pre-existing, previously audited
+ * operator/recovery surfaces) calls this; PostgreSQL fails closed via
+ * `UnsupportedGitHubWorkerOperationError`.
+ */
+export async function updateGitHubIdentityPhase(
   connectorInstanceId: string,
   phase: GitHubIdentityPhase,
   now = new Date().toISOString(),
-): void {
-  runTransaction((tx) => {
-    const current = tx.select({
-      phase: githubIdentityMigrations.phase,
-      startedAt: githubIdentityMigrations.startedAt,
-    }).from(githubIdentityMigrations)
-      .where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId))
-      .limit(1)
-      .get();
-    if (!current) {
-      throw new Error('GitHub identity migration state is missing for this connector');
-    }
-    if (!BACKFILL_PHASE_TRANSITIONS[phase].has(current.phase)) {
-      throw new Error(`GitHub identity phase cannot transition from ${current.phase} to ${phase}`);
-    }
-
-    tx.update(githubIdentityMigrations).set({
-      phase,
-      updatedAt: now,
-      ...(phase === 'backfilling'
-        ? {
-            startedAt: current.startedAt ?? now,
-            completedAt: null,
-            lastError: null,
-          }
-        : {}),
-    }).where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId)).run();
+): Promise<void> {
+  await (await getGitHubIdentityOperatorRepository()).updateBackfillPhase({
+    connectorInstanceId,
+    phase,
+    now,
   });
+}
+
+/**
+ * SQLite-adapter-oriented helper carrying the exact original transition-guard
+ * body. Not selected under PostgreSQL; see `getGitHubIdentityPhaseInTransaction`.
+ */
+export function updateGitHubIdentityPhaseInTransaction(
+  database: ExternalIdentityTransaction,
+  connectorInstanceId: string,
+  phase: GitHubIdentityPhase,
+  now: string,
+): void {
+  const current = database.select({
+    phase: githubIdentityMigrations.phase,
+    startedAt: githubIdentityMigrations.startedAt,
+  }).from(githubIdentityMigrations)
+    .where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId))
+    .limit(1)
+    .get();
+  if (!current) {
+    throw new Error('GitHub identity migration state is missing for this connector');
+  }
+  if (!BACKFILL_PHASE_TRANSITIONS[phase].has(current.phase)) {
+    throw new Error(`GitHub identity phase cannot transition from ${current.phase} to ${phase}`);
+  }
+
+  database.update(githubIdentityMigrations).set({
+    phase,
+    updatedAt: now,
+    ...(phase === 'backfilling'
+      ? {
+          startedAt: current.startedAt ?? now,
+          completedAt: null,
+          lastError: null,
+        }
+      : {}),
+  }).where(eq(githubIdentityMigrations.connectorInstanceId, connectorInstanceId)).run();
 }
 
 /**
  * Persists observed GitHub NodeIDs. Identity capture is unconditional after the
  * permanent cutover, and every verified observation produces an active binding:
  * a locator is never authoritative on its own.
+ *
+ * Delegates to the same `GitHubIdentityPersistence.persistExternalIdentityBatch`
+ * port method the normal sync write path uses. Known, deliberate behavior note:
+ * that shared port method runs with `emitLogs=false` (it is also called from
+ * the hot sync path, where duplicate debug logging is undesirable), so this
+ * convenience entry point no longer emits the internal `logPersistedBinding`
+ * debug-level trace it used to. No durable data, return value, or error
+ * behavior changes — this is an observability-only difference.
  */
-export function persistExternalIdentityBatch(
+export async function persistExternalIdentityBatch(
   writes: ExternalIdentityWrite[],
   modeSnapshot?: GitHubIdentityModeSnapshot,
-): ExternalIdentityWriteResult[] {
+): Promise<ExternalIdentityWriteResult[]> {
   if (writes.length === 0) return [];
-  if (writes.length > MAX_BATCH_SIZE) {
-    throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
-  }
+  assertExternalIdentityBatchWithinLimit(writes);
   if (
     modeSnapshot
     && writes.some((write) =>
@@ -381,12 +446,13 @@ export function persistExternalIdentityBatch(
     throw new Error('External identity writes do not match the frozen connector');
   }
 
-  return runTransaction((tx) => {
-    if (modeSnapshot) {
-      assertGitHubIdentityModeSnapshotInTransaction(tx, modeSnapshot);
-    }
-    return persistExternalIdentityBatchInTransaction(tx, writes, true, 'active');
-  });
+  return [
+    ...(await (await getGitHubIdentityRepository()).persistExternalIdentityBatch({
+      connectorInstanceId: writes[0].target.connectorInstanceId,
+      modeSnapshot,
+      writes,
+    })),
+  ];
 }
 
 export function persistExternalIdentityBatchInTransaction(
@@ -396,9 +462,7 @@ export function persistExternalIdentityBatchInTransaction(
   bindingState: Extract<ExternalBindingState, 'shadow' | 'active'> = 'shadow',
 ): ExternalIdentityWriteResult[] {
   if (writes.length === 0) return [];
-  if (writes.length > MAX_BATCH_SIZE) {
-    throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
-  }
+  assertExternalIdentityBatchWithinLimit(writes);
   const connectorIds = new Set(writes.map((write) => write.target.connectorInstanceId));
   if (connectorIds.size !== 1) {
     throw new Error('External identity batches must contain one connector instance');
@@ -410,21 +474,19 @@ export function persistExternalIdentityBatchInTransaction(
     persistExternalIdentity(database, write, emitLogs, bindingState));
 }
 
-export function previewExternalIdentityBatch(
+/**
+ * Backend-neutral wrapper delegating to the GitHub identity-operator port.
+ * Only `github-backfill.ts` (one of the five pre-existing, previously audited
+ * operator/recovery surfaces) calls this; PostgreSQL fails closed via
+ * `UnsupportedGitHubWorkerOperationError`.
+ */
+export async function previewExternalIdentityBatch(
   writes: ExternalIdentityWrite[],
-): ExternalIdentityWriteResult[] {
+): Promise<ExternalIdentityWriteResult[]> {
   if (writes.length === 0) return [];
-  let results: ExternalIdentityWriteResult[] = [];
-  const rollback = new Error('external_identity_preview_rollback');
-  try {
-    runTransaction((tx) => {
-      results = persistExternalIdentityBatchInTransaction(tx, writes, false);
-      throw rollback;
-    });
-  } catch (error) {
-    if (error !== rollback) throw error;
-  }
-  return results;
+  return [
+    ...(await (await getGitHubIdentityOperatorRepository()).previewIdentityBatch(writes)),
+  ];
 }
 
 function persistUnambiguousBatch(
@@ -884,7 +946,7 @@ function updateBindingTimestamps(
   )).run();
 }
 
-function identityKey(identity: ExternalEntityIdentity): string {
+export function identityKey(identity: ExternalEntityIdentity): string {
   return `${identity.provider}\0${identity.hostKey}\0${identity.entityType}\0${identity.stableId}`;
 }
 
@@ -898,7 +960,7 @@ function locatorPathKey(
   return `${provider}\0${hostKey}\0${ownerKey}\0${repositoryKey}\0${issueNumber ?? ''}`;
 }
 
-function mergeLocatorWithCurrent(
+export function mergeLocatorWithCurrent(
   locator: ReturnType<typeof normalizeLocator>,
   current: typeof externalEntityLocators.$inferSelect | undefined,
 ): ReturnType<typeof normalizeLocator> {
@@ -1085,7 +1147,7 @@ function validateWrite(write: ExternalIdentityWrite): void {
   }
 }
 
-function validateObservation(observation: ExternalIdentityObservation): void {
+export function validateObservation(observation: ExternalIdentityObservation): void {
   const { identity, locator } = observation;
   validateIdentity(identity);
   if (
@@ -1103,7 +1165,7 @@ function validateObservation(observation: ExternalIdentityObservation): void {
   }
 }
 
-function validateIdentity(identity: ExternalEntityIdentity): void {
+export function validateIdentity(identity: ExternalEntityIdentity): void {
   if (!identity.provider || !identity.hostKey || !identity.stableId) {
     throw new Error('External entity key is incomplete');
   }
@@ -1373,7 +1435,7 @@ function normalizeLocator(
   return normalizeExternalEntityLocator(locator);
 }
 
-function toExternalEntityRecord(
+export function toExternalEntityRecord(
   row: typeof externalEntities.$inferSelect,
 ): ExternalEntityRecord {
   return {
@@ -1391,7 +1453,7 @@ function toExternalEntityRecord(
   };
 }
 
-function toExternalEntityLocatorRecord(
+export function toExternalEntityLocatorRecord(
   row: typeof externalEntityLocators.$inferSelect,
 ): ExternalEntityLocatorRecord {
   return {
@@ -1413,7 +1475,7 @@ function toExternalEntityLocatorRecord(
   };
 }
 
-function sameLocator(
+export function sameLocator(
   current: typeof externalEntityLocators.$inferSelect,
   locator: ReturnType<typeof normalizeLocator>,
 ): boolean {
@@ -1589,6 +1651,6 @@ function transitionBindingToCollision(
   }).where(eq(externalEntityBindings.id, binding.id)).run();
 }
 
-function boundedSorted(values: string[]): string[] {
+export function boundedSorted(values: string[]): string[] {
   return [...new Set(values)].sort().slice(0, MAX_COLLISION_IDS);
 }

@@ -178,10 +178,10 @@ if (connectionString) {
           );
           await pool.query(
             `
-              INSERT INTO external_entities (id, provider, host_key, entity_type, stable_id, first_seen_at, last_seen_at)
+              INSERT INTO external_entities (id, provider, host_key, entity_type, stable_id, first_seen_at, last_seen_at, next_locator_revision)
               VALUES
-                ('repo-entity', 'github', 'github.com', 'repository', 'R_repo', $1, $1),
-                ('issue-entity', 'github', 'github.com', 'issue', 'I_issue', $1, $1)
+                ('repo-entity', 'github', 'github.com', 'repository', 'R_repo', $1, $1, 2),
+                ('issue-entity', 'github', 'github.com', 'issue', 'I_issue', $1, $1, 2)
             `,
             [now],
           );

@@ -630,7 +630,11 @@ export function createSqliteGitHubRecoveryRepositories(
     },
 
     async recordHistoricalTransferReconciliation(request) {
-      return recordGitHubTaskTransferReconciliation({
+      // Surgical adapter compatibility `await`: `recordGitHubTaskTransferReconciliation`
+      // now takes an injected SQLite handle (see task-transfer-reconciliation.ts) but
+      // remains synchronous; awaiting its plain return value is harmless and keeps this
+      // call site future-proof if it ever needs to become genuinely async.
+      return await recordGitHubTaskTransferReconciliation(db, {
         connectorInstanceId: request.connectorInstanceId,
         sourceTaskId: request.sourceTaskId,
         successorTaskId: request.successorTaskId,

@@ -41,7 +41,7 @@ afterAll(() => {
 });
 
 describe('external identity public repository API', () => {
-  it('constructs exact keys and safely upserts and looks up entities', () => {
+  it('constructs exact keys and safely upserts and looks up entities', async () => {
     const key = identity.createExternalEntityKey({
       provider: 'github',
       hostKey: 'github.example.com',
@@ -50,19 +50,19 @@ describe('external identity public repository API', () => {
     });
     expect(Object.isFrozen(key)).toBe(true);
 
-    const created = identity.upsertExternalEntity({
+    const created = await identity.upsertExternalEntity({
       identity: key,
       observedAt: '2026-08-09T04:01:00.000Z',
     });
-    const repeated = identity.upsertExternalEntity({
+    const repeated = await identity.upsertExternalEntity({
       identity: key,
       observedAt: '2026-08-09T04:00:30.000Z',
     });
 
     expect(repeated.id).toBe(created.id);
     expect(repeated.lastSeenAt).toBe('2026-08-09T04:01:00.000Z');
-    expect(identity.getExternalEntityByKey(key)).toEqual(repeated);
-    expect(identity.getExternalEntityByKey(identity.createExternalEntityKey({
+    expect(await identity.getExternalEntityByKey(key)).toEqual(repeated);
+    expect(await identity.getExternalEntityByKey(identity.createExternalEntityKey({
       ...key,
       stableId: 'R_missing',
     }))).toBeNull();
@@ -76,19 +76,19 @@ describe('external identity public repository API', () => {
     });
   });
 
-  it('observes operator locator revisions idempotently and reads history', () => {
-    const entity = identity.upsertExternalEntity({
+  it('observes operator locator revisions idempotently and reads history', async () => {
+    const entity = await identity.upsertExternalEntity({
       identity: repositoryIdentity('R_locator'),
       observedAt: '2026-08-09T04:02:00.000Z',
     });
     const initial = locatorObservation(entity.id, entity.identity, 'owner', 'repository', '2026-08-09T04:02:00.000Z');
 
-    const first = identity.observeOperatorExternalEntityLocator(initial);
-    const repeated = identity.observeOperatorExternalEntityLocator({
+    const first = await identity.observeOperatorExternalEntityLocator(initial);
+    const repeated = await identity.observeOperatorExternalEntityLocator({
       ...initial,
       observedAt: '2026-08-09T04:03:00.000Z',
     });
-    const renamed = identity.observeOperatorExternalEntityLocator({
+    const renamed = await identity.observeOperatorExternalEntityLocator({
       ...initial,
       locator: { owner: 'renamed-owner', repository: 'renamed-repository' },
       observedAt: '2026-08-09T04:04:00.000Z',
@@ -97,19 +97,19 @@ describe('external identity public repository API', () => {
     expect(first).toMatchObject({ state: 'update', locatorRecord: { locatorRevision: 1 } });
     expect(repeated).toMatchObject({ state: 'unchanged', locatorRecord: { locatorRevision: 1 } });
     expect(renamed).toMatchObject({ state: 'update', locatorRecord: { locatorRevision: 2 } });
-    expect(identity.getCurrentExternalEntityLocator(entity.id)).toMatchObject({
+    expect(await identity.getCurrentExternalEntityLocator(entity.id)).toMatchObject({
       owner: 'renamed-owner',
       repository: 'renamed-repository',
       locatorRevision: 2,
       validTo: null,
     });
-    expect(identity.listExternalEntityLocatorHistory(entity.id)).toMatchObject([
+    expect(await identity.listExternalEntityLocatorHistory(entity.id)).toMatchObject([
       { locatorRevision: 1, validTo: '2026-08-09T04:04:00.000Z' },
       { locatorRevision: 2, validTo: null },
     ]);
   });
 
-  it('participates in caller-owned transactions and rolls back atomically', () => {
+  it('participates in caller-owned transactions and rolls back atomically', async () => {
     const key = identity.createExternalEntityKey(repositoryIdentity('R_rollback'));
     expect(() => database.runTransaction((tx) => {
       const entity = identity.upsertExternalEntityInTransaction(tx, {
@@ -129,19 +129,19 @@ describe('external identity public repository API', () => {
       throw new Error('rollback public identity transaction');
     })).toThrow('rollback public identity transaction');
 
-    expect(identity.getExternalEntityByKey(key)).toBeNull();
+    expect(await identity.getExternalEntityByKey(key)).toBeNull();
   });
 
-  it('preflights locator collisions, records them durably, and makes no partial update', () => {
-    const firstEntity = identity.upsertExternalEntity({
+  it('preflights locator collisions, records them durably, and makes no partial update', async () => {
+    const firstEntity = await identity.upsertExternalEntity({
       identity: repositoryIdentity('R_collision_public_1'),
       observedAt: '2026-08-09T04:06:00.000Z',
     });
-    const secondEntity = identity.upsertExternalEntity({
+    const secondEntity = await identity.upsertExternalEntity({
       identity: repositoryIdentity('R_collision_public_2'),
       observedAt: '2026-08-09T04:06:00.000Z',
     });
-    identity.observeOperatorExternalEntityLocator(locatorObservation(
+    await identity.observeOperatorExternalEntityLocator(locatorObservation(
       firstEntity.id,
       firstEntity.identity,
       'collision-owner',
@@ -156,17 +156,17 @@ describe('external identity public repository API', () => {
       '2026-08-09T04:07:00.000Z',
     );
 
-    expect(identity.preflightExternalEntityLocator(conflicting)).toMatchObject({
+    expect(await identity.preflightExternalEntityLocator(conflicting)).toMatchObject({
       state: 'collision',
       collisionCategory: 'repository_path_replacement',
       conflictingEntityId: firstEntity.id,
     });
-    expect(identity.observeOperatorExternalEntityLocator(conflicting)).toMatchObject({
+    expect(await identity.observeOperatorExternalEntityLocator(conflicting)).toMatchObject({
       state: 'collision',
       locatorRecord: null,
     });
-    expect(identity.listExternalEntityLocatorHistory(secondEntity.id)).toEqual([]);
-    expect(identity.getCurrentExternalEntityLocator(firstEntity.id)).toMatchObject({
+    expect(await identity.listExternalEntityLocatorHistory(secondEntity.id)).toEqual([]);
+    expect(await identity.getCurrentExternalEntityLocator(firstEntity.id)).toMatchObject({
       owner: 'collision-owner',
       repository: 'collision-repository',
       validTo: null,
@@ -181,8 +181,8 @@ describe('external identity public repository API', () => {
       legacyIdentity: 'collision-owner/collision-repository',
       observedAt: '2026-08-09T04:07:00.000Z',
     };
-    const recorded = identity.recordExternalIdentityCollision(collisionInput);
-    const repeated = identity.recordExternalIdentityCollision({
+    const recorded = await identity.recordExternalIdentityCollision(collisionInput);
+    const repeated = await identity.recordExternalIdentityCollision({
       ...collisionInput,
       observedAt: '2026-08-09T04:08:00.000Z',
     });

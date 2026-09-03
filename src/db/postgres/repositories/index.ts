@@ -14,6 +14,7 @@ import { PostgresSyncRunRepository } from './sync-run-repository';
 import { PostgresTaskRepository } from './task-repository';
 import { createPostgresConnectorExecutionRepositories } from './connector-execution-repositories';
 import { createPostgresGitHubIdentityRepositories } from './github-identity-repositories';
+import { createPostgresGitHubIdentityOperatorRepositories } from './github-identity-operator-repositories';
 import { createPostgresGitHubDependencyRepositories } from './github-dependency-repositories';
 import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
@@ -48,6 +49,7 @@ export { PostgresSyncRunRepository } from './sync-run-repository';
 export { PostgresTaskRepository } from './task-repository';
 export { createPostgresConnectorExecutionRepositories } from './connector-execution-repositories';
 export { createPostgresGitHubIdentityRepositories } from './github-identity-repositories';
+export { createPostgresGitHubIdentityOperatorRepositories } from './github-identity-operator-repositories';
 export { createPostgresGitHubDependencyRepositories } from './github-dependency-repositories';
 export { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-repositories';
 export { createPostgresGitHubProjectRepositories } from './github-project-repositories';
@@ -115,6 +117,7 @@ export function createPostgresGitHubWorkerRepositories(
     hierarchy: createPostgresGitHubHierarchyRepositories(pool),
     projects: createPostgresGitHubProjectRepositories(pool),
     recovery: createPostgresGitHubRecoveryRepositories(pool),
+    operator: createPostgresGitHubIdentityOperatorRepositories(),
   };
 }
 

@@ -118,7 +118,10 @@ vi.mock('@/db', () => ({
 vi.mock('@/db/runtime-backend', () => ({
   resolveDatabaseBackend: () => 'postgres',
 }));
-vi.mock('@/lib/connectors', () => ({
+vi.mock('@/lib/connectors', () => {
+  throw new Error('Runtime initialization evaluated the connector domain barrel');
+});
+vi.mock('@/lib/connectors/registry-runtime', () => ({
   assertCanRegisterConnectorRuntimeRegistry: vi.fn(),
   registerConnectorRuntimeRegistry: mocks.registerConnectorRuntime,
 }));

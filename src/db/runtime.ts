@@ -21,6 +21,10 @@ import {
   type SemanticPublicationService,
 } from '@/lib/semantic-index/publication-service';
 import {
+  assertCanRegisterConnectorRuntimeRegistry,
+  registerConnectorRuntimeRegistry,
+} from '@/lib/connectors/registry-runtime';
+import {
   clearPostgresDurableAiRunRepository,
   registerPostgresDurableAiRunRepository,
 } from '@/lib/ai/durable-runs/runtime';
@@ -308,10 +312,6 @@ const semanticPublicationRuntimeService: SemanticPublicationService = {
  * SQLite loads the same composition through its backend-selected startup path.
  */
 async function registerStableRuntimeServices(): Promise<void> {
-  const {
-    assertCanRegisterConnectorRuntimeRegistry,
-    registerConnectorRuntimeRegistry,
-  } = await import('@/lib/connectors');
   assertCanRegisterConnectorRuntimeRegistry();
   assertCanRegisterSemanticPublicationService(semanticPublicationRuntimeService);
   registerConnectorRuntimeRegistry();

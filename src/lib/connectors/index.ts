@@ -13,7 +13,6 @@ import type {
 } from '@/types';
 import type { ConnectorNotificationTypeDefinition } from '@/lib/notifications/push-policy/catalog';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
-import { validateNotificationTypeCatalog } from '@/lib/notifications/push-policy/catalog';
 import { customRestFactory } from './custom-rest';
 import { documentIntelligenceFactory } from './document-intelligence';
 import { githubIssuesFactory } from './github-issues';
@@ -27,8 +26,13 @@ import { scoutFactory } from './scout';
 import { workTodoBridgeFactory } from './work-todo';
 import type { NotificationWritebackAction } from './notification-writeback-contract';
 import {
-  assertCanRegisterConnectorRegistry,
-  registerConnectorRegistry,
+  connectorRegistry,
+  type ConnectorFactory,
+} from './registry-runtime';
+export {
+  ConnectorRegistry,
+  connectorRegistry,
+  type ConnectorFactory,
 } from './registry-runtime';
 export {
   ConnectorWritebackError,
@@ -237,86 +241,6 @@ export interface IConnector {
    * Only called for sourceIds NOT already resolved by getActiveAlertSourceIds().
    */
   reconcileAlerts?(activeSourceIds: string[]): Promise<AlertReconciliation[]>;
-}
-
-/**
- * Registry for managing connector instances.
- */
-export class ConnectorRegistry {
-  private connectors = new Map<string, IConnector>();
-  private factories = new Map<string, ConnectorFactory>();
-
-  registerFactory(type: string, factory: ConnectorFactory): void {
-    if (!type.trim()) throw new Error('Connector factory type is required');
-    if (factory.notificationTypes) {
-      validateNotificationTypeCatalog(type, factory.notificationTypes);
-    }
-    this.factories.set(type, factory);
-  }
-
-  getNotificationTypeCatalog(
-    type: string,
-    config?: ConnectorConfig,
-  ): readonly ConnectorNotificationTypeDefinition[] {
-    const factory = this.factories.get(type);
-    if (!factory) return Object.freeze([]);
-    const catalog = config && factory.getNotificationTypes
-      ? factory.getNotificationTypes(config)
-      : factory.notificationTypes ?? [];
-    return validateNotificationTypeCatalog(type, catalog);
-  }
-
-  async createConnector(config: ConnectorConfig): Promise<IConnector> {
-    const factory = this.factories.get(config.type);
-    if (!factory) {
-      throw new Error(`No factory registered for connector type: ${config.type}`);
-    }
-    this.getNotificationTypeCatalog(config.type, config);
-    const connector = factory.create();
-    await connector.initialize(config);
-    this.connectors.set(config.id, connector);
-    return connector;
-  }
-
-  async replaceConnector(config: ConnectorConfig): Promise<IConnector> {
-    // Do not dispose the previous instance here: an API operation may still
-    // hold it after reading from the registry. Dropping the map reference lets
-    // that operation finish while the refreshed instance serves new work.
-    return this.createConnector(config);
-  }
-
-  getConnector(id: string): IConnector | undefined {
-    return this.connectors.get(id);
-  }
-
-  getAllConnectors(): IConnector[] {
-    return Array.from(this.connectors.values());
-  }
-
-  async removeConnector(id: string): Promise<void> {
-    const connector = this.connectors.get(id);
-    if (connector) {
-      await connector.dispose();
-      this.connectors.delete(id);
-    }
-  }
-}
-
-export interface ConnectorFactory {
-  create(): IConnector;
-  readonly notificationTypes?: readonly ConnectorNotificationTypeDefinition[];
-  getNotificationTypes?(config: ConnectorConfig): readonly ConnectorNotificationTypeDefinition[];
-}
-
-// Singleton registry
-export const connectorRegistry = new ConnectorRegistry();
-
-export function assertCanRegisterConnectorRuntimeRegistry(): void {
-  assertCanRegisterConnectorRegistry(connectorRegistry);
-}
-
-export function registerConnectorRuntimeRegistry(): void {
-  registerConnectorRegistry(connectorRegistry);
 }
 
 let defaultFactoriesRegistered = false;

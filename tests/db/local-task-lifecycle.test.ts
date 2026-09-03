@@ -33,7 +33,7 @@ describe('local task lifecycle', () => {
     else process.env.MC_DB_PATH = originalDbPath;
   });
 
-  it('removes phase and lifecycle associations while preserving child tasks', () => {
+  it('removes phase and lifecycle associations while preserving child tasks', async () => {
     const now = '2026-08-08T04:00:00.000Z';
     db.insert(schema.tasks).values([
       {
@@ -135,7 +135,7 @@ describe('local task lifecycle', () => {
       relatedTaskId: 'local-root',
     }).run();
 
-    deleteTaskLocally('local-root');
+    await deleteTaskLocally('local-root');
 
     expect(sqlite.prepare(
       "SELECT COUNT(*) AS count FROM tasks WHERE id = 'local-root'",

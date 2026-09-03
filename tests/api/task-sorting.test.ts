@@ -4,6 +4,7 @@
  */
 import { NextResponse } from 'next/server';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
 // ─── Shared DB mock ─────────────────────────────────────────────────────────
 
@@ -117,6 +118,9 @@ vi.mock('@/lib/api-error', () => ({
 const BASE = 'http://localhost:3099';
 
 beforeEach(() => {
+  // L04: the canonical filter reads My Day membership through the portable
+  // task-core repository rather than the mocked Drizzle handle.
+  registerFakeTaskCorePersistence();
   queryLimits.length = 0;
   queryOrderings.length = 0;
   mockDb.select.mockImplementation(() => chainable([]));

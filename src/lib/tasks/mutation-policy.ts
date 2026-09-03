@@ -1,10 +1,8 @@
 import 'server-only';
 
-import { eq } from 'drizzle-orm';
-import db from '@/db';
-import { taskDependencies, tasks } from '@/db/schema';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { isDemoMode } from '@/lib/mode';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import { resolveTaskFieldPolicy, type FieldPolicy } from './field-policy';
 import type { ConnectorCapabilities, TaskField } from '@/types';
 
@@ -23,12 +21,8 @@ export async function getStoredTaskMutationPolicy(
   taskId: string,
   field: TaskField,
 ): Promise<StoredTaskMutationPolicy | null> {
-  const [task] = await db.select({
-    id: tasks.id,
-    sourceId: tasks.sourceId,
-    connectorType: tasks.connectorType,
-    connectorInstanceId: tasks.connectorInstanceId,
-  }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+  const persistence = await getTaskCorePersistence();
+  const task = await persistence.policyIdentities.getTaskSourceIdentity(taskId);
   if (!task) return null;
 
   const isLocal = task.sourceId.startsWith('local:') || task.connectorType === 'local';
@@ -40,7 +34,12 @@ export async function getStoredTaskMutationPolicy(
       ]);
 
   return {
-    task,
+    task: {
+      id: task.id,
+      sourceId: task.sourceId,
+      connectorType: task.connectorType,
+      connectorInstanceId: task.connectorInstanceId,
+    },
     capabilities,
     policy: resolveTaskFieldPolicy({
       sourceId: task.sourceId,
@@ -58,10 +57,8 @@ export async function getStoredRelationshipMutationPolicies(
   const dependencyId = relationshipId.startsWith('dependency:')
     ? relationshipId.slice('dependency:'.length)
     : relationshipId;
-  const [dependency] = await db.select({
-    taskId: taskDependencies.taskId,
-    dependsOnTaskId: taskDependencies.dependsOnTaskId,
-  }).from(taskDependencies).where(eq(taskDependencies.id, dependencyId)).limit(1);
+  const persistence = await getTaskCorePersistence();
+  const dependency = await persistence.policyIdentities.getDependencyEndpoints(dependencyId);
   if (
     !dependency
     || (dependency.taskId !== taskId && dependency.dependsOnTaskId !== taskId)

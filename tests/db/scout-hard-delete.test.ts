@@ -33,7 +33,7 @@ describe('Scout hard delete', () => {
     else process.env.MC_DB_PATH = originalDbPath;
   });
 
-  it('rolls back the tombstone if graph deletion fails, then removes the full graph', () => {
+  it('rolls back the tombstone if graph deletion fails, then removes the full graph', async () => {
     const now = '2026-08-05T13:00:00.000Z';
     db.insert(schema.tasks).values([
       {
@@ -154,7 +154,7 @@ describe('Scout hard delete', () => {
         SELECT RAISE(ABORT, 'forced delete failure');
       END
     `);
-    expect(() => hardDeleteScoutTask('scout-root')).toThrow('forced delete failure');
+    await expect(hardDeleteScoutTask('scout-root')).rejects.toThrow('forced delete failure');
     expect(sqlite.prepare(
       'SELECT COUNT(*) AS count FROM task_ingest_suppressions',
     ).get()).toEqual({ count: 0 });
@@ -163,7 +163,7 @@ describe('Scout hard delete', () => {
     ).get()).toEqual({ count: 1 });
 
     sqlite.exec('DROP TRIGGER fail_scout_task_delete');
-    expect(hardDeleteScoutTask('scout-root')).toMatchObject({
+    expect(await hardDeleteScoutTask('scout-root')).toMatchObject({
       kind: 'deleted',
       sourceId: 'scout:email:hard-delete',
       deletedTaskIds: expect.arrayContaining(['scout-root', 'scout-child']),
@@ -206,7 +206,7 @@ describe('Scout hard delete', () => {
     });
   });
 
-  it('does not apply the Scout hard-delete contract to other sources', () => {
+  it('does not apply the Scout hard-delete contract to other sources', async () => {
     const now = '2026-08-05T13:00:00.000Z';
     db.insert(schema.tasks).values({
       id: 'local-task',
@@ -221,7 +221,7 @@ describe('Scout hard delete', () => {
       lastSyncedAt: now,
     }).run();
 
-    expect(hardDeleteScoutTask('local-task')).toEqual({ kind: 'not-scout' });
+    expect(await hardDeleteScoutTask('local-task')).toEqual({ kind: 'not-scout' });
     expect(sqlite.prepare(
       "SELECT COUNT(*) AS count FROM tasks WHERE id = 'local-task'",
     ).get()).toEqual({ count: 1 });

@@ -1,6 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
-import db from '@/db';
-import { hubProjects, priorityEntities, sourceLists, tags } from '@/db/schema';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import type { PriorityEntity } from '@/lib/smart-score';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 
@@ -22,33 +20,29 @@ function parseSourceReference(referenceId: string): { connectorInstanceId: strin
   };
 }
 
-export function resolvePriorityReference(
+export async function resolvePriorityReference(
   type: ReferencedPriorityType,
   referenceId: string,
-): PriorityReference | null {
+): Promise<PriorityReference | null> {
+  const { priorityEntities } = await getTaskCorePersistence();
+
   if (type === 'project') {
-    const project = db.select({
-      name: hubProjects.name,
-      description: hubProjects.description,
-      color: hubProjects.color,
-    }).from(hubProjects).where(eq(hubProjects.id, referenceId)).get();
-    return project ? { referenceId, ...project } : null;
+    const project = await priorityEntities.getProjectReference(referenceId);
+    return project
+      ? {
+          referenceId,
+          name: project.name,
+          description: project.description,
+          color: project.color,
+        }
+      : null;
   }
 
   if (type === 'tag') {
-    const tag = db.select({
-      id: tags.id,
-      name: tags.name,
-      color: tags.color,
-      unifiedInto: tags.unifiedInto,
-    }).from(tags).where(eq(tags.id, referenceId)).get();
+    const tag = await priorityEntities.getTagReference(referenceId);
     if (!tag) return null;
     if (!tag.unifiedInto) return { referenceId: tag.id, name: tag.name, color: tag.color };
-    const canonicalTag = db.select({
-      id: tags.id,
-      name: tags.name,
-      color: tags.color,
-    }).from(tags).where(eq(tags.id, tag.unifiedInto)).get();
+    const canonicalTag = await priorityEntities.getTagReference(tag.unifiedInto);
     return canonicalTag
       ? { referenceId: canonicalTag.id, name: canonicalTag.name, color: canonicalTag.color }
       : null;
@@ -56,14 +50,10 @@ export function resolvePriorityReference(
 
   const parsed = parseSourceReference(referenceId);
   if (!parsed) return null;
-  const source = db.select({
-    name: sourceLists.name,
-    userDisplayName: sourceLists.userDisplayName,
-    color: sourceLists.iconColor,
-  }).from(sourceLists).where(and(
-    eq(sourceLists.connectorInstanceId, parsed.connectorInstanceId),
-    eq(sourceLists.sourceId, parsed.sourceId),
-  )).get();
+  const source = await priorityEntities.getSourceListReference(
+    parsed.connectorInstanceId,
+    parsed.sourceId,
+  );
   if (!source) return null;
   return {
     referenceId,
@@ -72,47 +62,29 @@ export function resolvePriorityReference(
   };
 }
 
-export function getResolvedPriorityEntities(options: { includeMissing?: boolean } = {}): PriorityEntity[] {
-  const entities = db.select()
-    .from(priorityEntities)
-    .orderBy(asc(priorityEntities.rank))
-    .all() as PriorityEntity[];
+export async function getResolvedPriorityEntities(
+  options: { includeMissing?: boolean } = {},
+): Promise<PriorityEntity[]> {
+  const repository = (await getTaskCorePersistence()).priorityEntities;
+  const entities = await repository.listPriorityEntitiesByRank() as unknown as PriorityEntity[];
   const referencedEntities = entities.filter((entity) => entity.referenceId);
   if (referencedEntities.length === 0) {
     return entities.map((entity) => ({ ...entity, referenceStatus: 'resolved' }));
   }
   const referencedTypes = new Set(referencedEntities.map((entity) => entity.type));
 
-  const projectsById = referencedTypes.has('project')
-    ? new Map(
-        db.select({ id: hubProjects.id, name: hubProjects.name })
-          .from(hubProjects)
-          .all()
-          .map((project) => [project.id, project.name]),
-      )
-    : new Map<string, string>();
-  const tagRows = referencedTypes.has('tag')
-    ? db.select({ id: tags.id, name: tags.name, unifiedInto: tags.unifiedInto })
-          .from(tags)
-          .all()
-    : [];
+  const [projectRows, tagRows, sourceRows] = await Promise.all([
+    referencedTypes.has('project') ? repository.listProjectReferences() : Promise.resolve([]),
+    referencedTypes.has('tag') ? repository.listTagReferences() : Promise.resolve([]),
+    referencedTypes.has('source') ? repository.listSourceListReferences() : Promise.resolve([]),
+  ]);
+
+  const projectsById = new Map(projectRows.map((project) => [project.id, project.name]));
   const rawTagsById = new Map(tagRows.map((tag) => [tag.id, tag]));
-  const sourcesById = referencedTypes.has('source')
-    ? new Map(
-        db.select({
-          connectorInstanceId: sourceLists.connectorInstanceId,
-          sourceId: sourceLists.sourceId,
-          name: sourceLists.name,
-          userDisplayName: sourceLists.userDisplayName,
-        })
-          .from(sourceLists)
-          .all()
-          .map((source) => [
-            `${source.connectorInstanceId}:${source.sourceId}`,
-            resolveSourceListDisplayName(source),
-          ]),
-      )
-    : new Map<string, string>();
+  const sourcesById = new Map(sourceRows.map((source) => [
+    `${source.connectorInstanceId}:${source.sourceId}`,
+    resolveSourceListDisplayName(source),
+  ]));
 
   return entities.flatMap((entity): PriorityEntity[] => {
     if (

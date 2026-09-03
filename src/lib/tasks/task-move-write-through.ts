@@ -1,15 +1,3 @@
-import db, { runTransaction } from '@/db';
-import {
-  tasks,
-  taskTags,
-  taskProjects,
-  taskSchedules,
-  taskAttachments,
-  sourceLists,
-  connectorConfigs,
-  tags,
-} from '@/db/schema';
-import { eq, and, isNull, inArray, sql } from 'drizzle-orm';
 import { connectorRegistry } from '@/lib/connectors';
 import { dbLogger, connectorLogger } from '@/lib/logger';
 import {
@@ -29,10 +17,18 @@ import {
   executeFencedGitHubTaskMutation,
   GitHubWriteFenceError,
   GitHubUnknownWriteOutcomeError,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/github-write-fence';
 import { refreshGitHubIssueMetadata } from '@/lib/connectors/github-issues/issue-transformer';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
-import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type {
+  TaskAttachmentInsert,
+  TaskMoveSubtaskCopy,
+  TaskMoveSubtaskRepoint,
+  TaskMoveTaskRow,
+  WriteThroughTaskMoveRepository,
+} from '@/lib/tasks/core/contracts';
 import type {
   ExecuteTaskMoveInput,
   TaskMoveServiceResult,
@@ -42,7 +38,27 @@ import {
   TASK_MOVE_BUDGETS,
   TaskMoveBudgetError,
 } from '@/lib/tasks/task-move-budgets';
-import { taskAttachmentSnapshotPredicates } from '@/lib/tasks/task-move-snapshot';
+
+/**
+ * Write-through ("create remotely, then rewrite locally") task move.
+ *
+ * Backend-neutral as of L04: this module names no database handle, no Drizzle
+ * table and no dialect. Every durable step runs through a narrow task-core
+ * `WriteThroughTaskMoveRepository` operation, and the five state transitions
+ * that must not tear — the optimistic claim, its release, destination
+ * materialization (including the copied subtask graph), move finalization
+ * (guard + reference repoint + source disposition, carrying the durable
+ * `pending_push`/`pendingCleanup` sync intent), and compensating destination
+ * cleanup — are each exactly one adapter-owned transaction.
+ *
+ * Every connector, network and identity call deliberately stays *outside*
+ * those transactions: remote creation, attachment materialization, tag/comment
+ * writes, GitHub write fencing and identity persistence all happen between
+ * operations, never inside one. The only thing that has to be atomic with the
+ * task rows is the durable sync intent that the sync pipeline later acts on,
+ * and that is expressed as `syncStatus` + `metadata` on the same row, in the
+ * same transaction.
+ */
 
 type SourceAction = 'move' | 'copy';
 type MoveAttachment = {
@@ -75,6 +91,7 @@ export async function executeWriteThroughTaskMove(
 ): Promise<TaskMoveServiceResult> {
   let compensateRemoteCreation: (() => Promise<void>) | null = null;
   let moveClaim: TaskMoveClaim | null = null;
+  let moves: WriteThroughTaskMoveRepository | null = null;
   const startedAt = Date.now();
   const traceId = normalizeTraceId(requestedTraceId);
   const logContext: TaskMoveLogContext = {
@@ -167,14 +184,18 @@ export async function executeWriteThroughTaskMove(
     }
 
     // ── Fetch source task ────────────────────────────────────────────────────
-    let [srcTask] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
-    if (!srcTask) {
+    const { writeThroughMoves } = await getTaskCorePersistence();
+    moves = writeThroughMoves;
+    const core = await getCorePersistenceRepositoriesForBackend();
+    const initialTask = await writeThroughMoves.getTask(taskId);
+    if (!initialTask) {
       return failureResponse(
         serviceResult({ error: 'Task not found' }, 404),
         'source_task_not_found',
       );
     }
-    const previousMove = parseMetadata(srcTask.metadata).movedTo;
+    let srcTask: TaskMoveTaskRow = initialTask;
+    const previousMove = srcTask.metadata.movedTo;
     if (
       sourceAction === 'move'
       && srcTask.statusReason === 'moved'
@@ -215,11 +236,7 @@ export async function executeWriteThroughTaskMove(
     }
 
     // ── Fetch target connector ───────────────────────────────────────────────
-    const [targetConnectorRow] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.id, targetConnectorInstanceId), isNull(connectorConfigs.deletedAt)))
-      .limit(1);
+    const targetConnectorRow = await core.connectors.get(targetConnectorInstanceId);
 
     if (!targetConnectorRow) {
       return failureResponse(
@@ -253,16 +270,10 @@ export async function executeWriteThroughTaskMove(
     }
 
     // ── Resolve target list name ─────────────────────────────────────────────
-    const [targetListRow] = await db
-      .select({ id: sourceLists.id, name: sourceLists.name, sourceId: sourceLists.sourceId })
-      .from(sourceLists)
-      .where(
-        and(
-          eq(sourceLists.connectorInstanceId, targetConnectorInstanceId),
-          eq(sourceLists.sourceId, targetSourceListId),
-        ),
-      )
-      .limit(1);
+    const targetListRow = await writeThroughMoves.findTargetListBySourceId(
+      targetConnectorInstanceId,
+      targetSourceListId,
+    );
     if (
       targetSourceListId
       && (!targetListRow || !isSourceListSelected(targetConnectorRow, targetListRow))
@@ -278,18 +289,13 @@ export async function executeWriteThroughTaskMove(
     const targetListName = targetListRow?.name ?? targetSourceListId;
 
     // ── Fetch task tags ──────────────────────────────────────────────────────
-    const taskTagRows = await db
-      .select({ id: tags.id, name: tags.name, slug: tags.slug, type: tags.type, color: tags.color })
-      .from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(eq(taskTags.taskId, taskId));
+    const taskTagRows = await writeThroughMoves.listTaskTagRefs(taskId);
 
     // ── Fetch subtasks ───────────────────────────────────────────────────────
-    const subtasks = await db
-      .select()
-      .from(tasks)
-      .where(and(eq(tasks.parentId, taskId)))
-      .limit(TASK_MOVE_BUDGETS.maxSubtasks + 1);
+    const subtasks = await writeThroughMoves.listChildTasks(
+      taskId,
+      TASK_MOVE_BUDGETS.maxSubtasks + 1,
+    );
     if (subtasks.length > TASK_MOVE_BUDGETS.maxSubtasks) {
       throw new TaskMoveBudgetError(
         `Task moves support at most ${TASK_MOVE_BUDGETS.maxSubtasks} subtasks; reduce the task size and retry.`,
@@ -297,25 +303,12 @@ export async function executeWriteThroughTaskMove(
     }
 
     const attachmentTaskIds = [taskId, ...subtasks.map((subtask) => subtask.id)];
-    const storedAttachmentRows = await db
-      .select({
-        id: taskAttachments.id,
-        taskId: taskAttachments.taskId,
-        name: taskAttachments.name,
-        contentType: taskAttachments.contentType,
-        size: taskAttachments.size,
-        sourceAttachmentId: taskAttachments.sourceAttachmentId,
-        createdAt: taskAttachments.createdAt,
-      })
-      .from(taskAttachments)
-      .where(inArray(taskAttachments.taskId, attachmentTaskIds))
-      .limit(TASK_MOVE_BUDGETS.maxAttachments + 1);
+    const storedAttachmentRows = await writeThroughMoves.listAttachmentMetadata(
+      attachmentTaskIds,
+      TASK_MOVE_BUDGETS.maxAttachments + 1,
+    );
 
-    const [sourceSchedule] = await db
-      .select()
-      .from(taskSchedules)
-      .where(eq(taskSchedules.taskId, taskId))
-      .limit(1);
+    const sourceSchedule = await writeThroughMoves.getTaskSchedule(taskId);
 
     const storedAttachments = storedAttachmentRows.filter((attachment) => attachment.taskId === taskId);
     const storedSubtaskAttachments = new Map(
@@ -343,7 +336,7 @@ export async function executeWriteThroughTaskMove(
       const deadline = Date.now() + 10_000;
       while (Date.now() < deadline && srcTask.sourceId.startsWith('local:')) {
         await new Promise((resolve) => setTimeout(resolve, 100));
-        const [latest] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+        const latest = await writeThroughMoves.getTask(taskId);
         if (!latest) break;
         srcTask = latest;
         if (srcTask.syncStatus === 'push_error' || srcTask.syncStatus === 'push_failed') break;
@@ -365,14 +358,7 @@ export async function executeWriteThroughTaskMove(
     let targetConnector = connectorRegistry.getConnector(targetConnectorInstanceId);
 
     if (!sourceConnector && !isLocalSource) {
-      const [sourceConnectorRow] = await db
-        .select()
-        .from(connectorConfigs)
-        .where(and(
-          eq(connectorConfigs.id, srcTask.connectorInstanceId),
-          isNull(connectorConfigs.deletedAt),
-        ))
-        .limit(1);
+      const sourceConnectorRow = await core.connectors.get(srcTask.connectorInstanceId);
       if (!sourceConnectorRow) {
         throw new Error('Source connector is unavailable. The operation was stopped to prevent data loss.');
       }
@@ -395,15 +381,12 @@ export async function executeWriteThroughTaskMove(
       } as ConnectorConfig);
     }
 
-    // If target connector isn't initialized in registry, try to create it from DB config
+    // If target connector isn't initialized in registry, try to create it from stored config
     if (!targetConnector) {
       try {
-        const credentials = (typeof targetConnectorRow.credentials === 'string'
-          ? JSON.parse(targetConnectorRow.credentials) : targetConnectorRow.credentials) || {};
-        const settings = (typeof targetConnectorRow.settings === 'string'
-          ? JSON.parse(targetConnectorRow.settings) : targetConnectorRow.settings) || {};
-        const syncedLists = (typeof targetConnectorRow.syncedLists === 'string'
-          ? JSON.parse(targetConnectorRow.syncedLists) : targetConnectorRow.syncedLists) || [];
+        const credentials = parseRecord(targetConnectorRow.credentials);
+        const settings = parseRecord(targetConnectorRow.settings);
+        const syncedLists = parseStringArray(targetConnectorRow.syncedLists);
 
         targetConnector = await connectorRegistry.createConnector({
           id: targetConnectorRow.id,
@@ -454,8 +437,8 @@ export async function executeWriteThroughTaskMove(
           srcTask.sourceId,
           targetSourceListId,
         );
-        reconcileTransferIdentity(taskId, srcTask.connectorInstanceId, refresh);
-        const [refreshedTask] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+        await reconcileTransferIdentity(taskId, srcTask.connectorInstanceId, refresh);
+        const refreshedTask = await writeThroughMoves.getTask(taskId);
         if (refreshedTask) srcTask = refreshedTask;
         performNativeTransfer = await sourceConnector.canTransferTask(
           srcTask.sourceId,
@@ -470,7 +453,7 @@ export async function executeWriteThroughTaskMove(
     }
 
     if (sourceAction === 'move' && !performNativeTransfer) {
-      moveClaim = claimTaskMove(srcTask);
+      moveClaim = await claimTaskMove(writeThroughMoves, srcTask);
       if (!moveClaim) {
         return failureResponse(
           serviceResult(
@@ -556,12 +539,7 @@ export async function executeWriteThroughTaskMove(
         .map((attachment) => attachment.storedAttachmentId)
         .filter((id): id is string => !!id);
       if (storedIds.length > 0) {
-        const storedContents = await db.select({
-          id: taskAttachments.id,
-          contentBase64: taskAttachments.contentBase64,
-        })
-          .from(taskAttachments)
-          .where(inArray(taskAttachments.id, storedIds));
+        const storedContents = await writeThroughMoves.listAttachmentContents(storedIds);
         const contentById = new Map(
           storedContents.map((attachment) => [attachment.id, attachment.contentBase64 ?? '']),
         );
@@ -603,11 +581,8 @@ export async function executeWriteThroughTaskMove(
     let newTaskNativeId = '';
     let subtasksMoved = 0;
     const warnings: string[] = [];
-    const destinationAttachments: Array<typeof taskAttachments.$inferInsert> = [];
-    const destinationSubtaskAttachments = new Map<
-      string,
-      Array<typeof taskAttachments.$inferInsert>
-    >();
+    const destinationAttachments: TaskAttachmentInsert[] = [];
+    const destinationSubtaskAttachments = new Map<string, TaskAttachmentInsert[]>();
     const createdSubtasks: Array<{ sourceTaskId: string; created: TaskItem }> = [];
     const createdRemoteSourceIds: string[] = [];
     let destinationMetadata: Record<string, unknown> = {};
@@ -682,7 +657,7 @@ export async function executeWriteThroughTaskMove(
       }
 
       const taskMetadata = {
-        ...parseMetadata(srcTask.metadata),
+        ...srcTask.metadata,
         ...(sourceSchedule?.recurrence ? { recurrence: sourceSchedule.recurrence } : {}),
       };
       const taskPayload: Partial<TaskItem> = {
@@ -707,23 +682,11 @@ export async function executeWriteThroughTaskMove(
         const createdTask = await targetConnector.createTask!(taskPayload);
         newSourceId = createdTask.sourceId;
         newTaskNativeId = newSourceId;
-        destinationMetadata = targetConnectorRow.type === 'github-issues'
-          ? refreshGitHubIssueMetadata(
-              createdTask.metadata,
-              createdTask.sourceId,
-              createdTask.externalIdentity,
-            )
-          : parseMetadata(createdTask.metadata);
         createdRemoteSourceIds.push(newSourceId);
-        if (targetConnectorRow.type === 'github-issues' && createdTask.externalIdentity) {
-          persistCreatedTaskIdentity({
-            taskId: newMcTaskId,
-            connectorInstanceId: targetConnectorInstanceId,
-            sourceId: createdTask.sourceId,
-            sourceListId: targetSourceListId,
-            evidence: createdTask.externalIdentity,
-          });
-        }
+        // Install compensation before any further fallible operation: once
+        // the remote destination exists, metadata validation, identity
+        // persistence and later connector calls must all be able to roll the
+        // remote creation back.
         compensateRemoteCreation = async () => {
           const cleanupErrors: unknown[] = [];
           for (const sourceId of [...createdRemoteSourceIds].reverse()) {
@@ -738,13 +701,7 @@ export async function executeWriteThroughTaskMove(
             }
           }
           try {
-            runTransaction((tx) => {
-              tx.delete(taskAttachments).where(eq(taskAttachments.taskId, newMcTaskId)).run();
-              tx.delete(taskSchedules).where(eq(taskSchedules.taskId, newMcTaskId)).run();
-              tx.delete(taskTags).where(eq(taskTags.taskId, newMcTaskId)).run();
-              tx.delete(taskProjects).where(eq(taskProjects.taskId, newMcTaskId)).run();
-              tx.delete(tasks).where(eq(tasks.id, newMcTaskId)).run();
-            });
+            await writeThroughMoves.discardMaterializedDestination(newMcTaskId);
           } catch (error) {
             cleanupErrors.push(error);
           }
@@ -752,6 +709,23 @@ export async function executeWriteThroughTaskMove(
             throw new AggregateError(cleanupErrors, 'One or more destination tasks could not be cleaned up');
           }
         };
+        destinationMetadata = targetConnectorRow.type === 'github-issues'
+          ? refreshGitHubIssueMetadata(
+              createdTask.metadata,
+              createdTask.sourceId,
+              createdTask.externalIdentity,
+            )
+          : parseMetadata(createdTask.metadata);
+
+        if (targetConnectorRow.type === 'github-issues' && createdTask.externalIdentity) {
+          await persistCreatedTaskIdentity({
+            taskId: newMcTaskId,
+            connectorInstanceId: targetConnectorInstanceId,
+            sourceId: createdTask.sourceId,
+            sourceListId: targetSourceListId,
+            evidence: createdTask.externalIdentity,
+          });
+        }
 
       if (targetConnector.addTagToTask) {
         for (const tag of sourceTags) {
@@ -811,12 +785,12 @@ export async function executeWriteThroughTaskMove(
             assignee: sub.assignee ?? undefined,
             effort: sub.effort,
             microStatus: (sub.microStatus ?? undefined) as TaskItem['microStatus'],
-            metadata: parseMetadata(sub.metadata),
+            metadata: sub.metadata,
           });
           createdSubtasks.push({ sourceTaskId: sub.id, created: createdSubtask });
           createdRemoteSourceIds.push(createdSubtask.sourceId);
 
-          const preservedAttachments: Array<typeof taskAttachments.$inferInsert> = [];
+          const preservedAttachments: TaskAttachmentInsert[] = [];
           for (const attachment of storedSubtaskAttachments.get(sub.id) ?? []) {
             if (targetCaps.attachments && targetConnector.uploadAttachment) {
               const uploaded = await targetConnector.uploadAttachment(createdSubtask.sourceId, {
@@ -880,7 +854,7 @@ export async function executeWriteThroughTaskMove(
     // ════════════════════════════════════════════════════════════════════════
 
     const provenanceMetadata = {
-      ...parseMetadata(srcTask.metadata),
+      ...srcTask.metadata,
       ...destinationMetadata,
       movedFrom: {
         taskId: srcTask.id,
@@ -893,156 +867,90 @@ export async function executeWriteThroughTaskMove(
     };
 
     if (!performNativeTransfer) {
-      // Insert the new task record in the local DB
+      // Materialize the successor (and, for a copy, its whole subtask graph)
+      // in one adapter-owned transaction. Until it commits, the remote
+      // destination is still compensatable; once it commits, there is no
+      // half-written destination for compensation to guess about.
+      const subtaskCopies: TaskMoveSubtaskCopy[] = [];
+      if (sourceAction === 'copy' && subtasks.length > 0) {
+        const createdBySourceId = new Map(
+          createdSubtasks.map(({ sourceTaskId, created }) => [sourceTaskId, created]),
+        );
+
+        for (const subtask of subtasks) {
+          const created = createdBySourceId.get(subtask.id);
+          const destinationSubtaskId = crypto.randomUUID();
+          const subtaskAttachments = destinationSubtaskAttachments.get(subtask.id)
+            ?? (storedSubtaskAttachments.get(subtask.id) ?? []).map((attachment) => ({
+              id: crypto.randomUUID(),
+              taskId: destinationSubtaskId,
+              name: attachment.name,
+              contentType: attachment.contentType,
+              size: attachment.size,
+              contentBase64: attachment.contentBase64,
+              createdAt: attachment.createdAt,
+            }));
+
+          subtaskCopies.push({
+            copyFromTaskId: subtask.id,
+            task: {
+              ...subtask,
+              id: destinationSubtaskId,
+              sourceId: created?.sourceId ?? `local:${destinationSubtaskId}`,
+              connectorType: created ? targetConnectorRow.type : 'local',
+              connectorInstanceId: created ? targetConnectorInstanceId : 'local',
+              parentId: newMcTaskId,
+              depth: (srcTask.depth ?? 0) + 1,
+              sourceListId: created ? targetSourceListId : null,
+              sourceListName: created ? targetListName : null,
+              updatedAt: now,
+              metadata: {
+                ...subtask.metadata,
+                copiedFrom: {
+                  taskId: subtask.id,
+                  sourceId: subtask.sourceId,
+                  copiedAt: now,
+                },
+              },
+              syncStatus: 'synced',
+              lastSyncedAt: now,
+              pushRetryCount: 0,
+            },
+            attachments: subtaskAttachments.map((attachment) => ({
+              ...attachment,
+              id: crypto.randomUUID(),
+              taskId: destinationSubtaskId,
+            })),
+          });
+        }
+      }
+
       try {
-        runTransaction((tx) => {
-          tx.insert(tasks).values({
+        await writeThroughMoves.materializeDestination({
+          task: {
+            ...srcTask,
             id: newMcTaskId,
             sourceId: newTaskNativeId,
             connectorType: targetConnectorRow.type,
             connectorInstanceId: targetConnectorInstanceId,
-            title: srcTask.title,
-            description: srcTask.description,
-            status: srcTask.status,
-            localDisposition: srcTask.localDisposition,
-            priority: srcTask.priority,
-            planningHorizon: srcTask.planningHorizon,
-            dueDate: srcTask.dueDate,
-            pushCount: srcTask.pushCount,
-            createdAt: srcTask.createdAt,
             updatedAt: now,
-            completedAt: srcTask.completedAt,
-            recurrenceGeneratedFromTaskId: srcTask.recurrenceGeneratedFromTaskId,
-            parentId: srcTask.parentId,
-            depth: srcTask.depth,
-            isChecklistItem: srcTask.isChecklistItem,
             sourceListId: targetSourceListId,
             sourceListName: targetListName,
-            assignee: srcTask.assignee,
-            microStatus: srcTask.microStatus,
-            statusReason: srcTask.statusReason,
-            snoozedUntil: srcTask.snoozedUntil,
-            reminderAt: srcTask.reminderAt,
-            reminderRelative: srcTask.reminderRelative,
-            reminderDueTime: srcTask.reminderDueTime,
-            effort: srcTask.effort,
-            kanbanColumn: srcTask.kanbanColumn,
-            kanbanOrder: srcTask.kanbanOrder,
-            isBulkImport: srcTask.isBulkImport,
-            metadata: JSON.stringify(provenanceMetadata),
+            metadata: provenanceMetadata,
             syncStatus: 'synced',
             lastSyncedAt: now,
-          }).run();
-
-          // Copy tag associations
-          if (taskTagRows.length > 0) {
-            tx.insert(taskTags).values(
-              taskTagRows.map((tt) => ({ taskId: newMcTaskId, tagId: tt.id })),
-            ).run();
-          }
-
-          // Copy project associations
-          const sourceProjects = tx.select().from(taskProjects).where(eq(taskProjects.taskId, taskId)).all();
-          if (sourceAction === 'copy' && sourceProjects.length > 0) {
-            tx.insert(taskProjects).values(
-              sourceProjects.map((tp) => ({ taskId: newMcTaskId, projectId: tp.projectId })),
-            ).run();
-          }
-
-          // Preserve local planning data for both moves and copies.
-          if (sourceSchedule) {
-            tx.insert(taskSchedules).values({ ...sourceSchedule, taskId: newMcTaskId }).run();
-          }
-
-          if (destinationAttachments.length > 0) {
-            tx.insert(taskAttachments).values(
-              destinationAttachments.map((attachment) => ({
-                ...attachment,
-                taskId: newMcTaskId,
-              })),
-            ).run();
-          }
-
-          if (sourceAction === 'copy' && subtasks.length > 0) {
-            const createdBySourceId = new Map(
-              createdSubtasks.map(({ sourceTaskId, created }) => [sourceTaskId, created]),
-            );
-
-            for (const subtask of subtasks) {
-              const created = createdBySourceId.get(subtask.id);
-              const destinationSubtaskId = crypto.randomUUID();
-              tx.insert(tasks).values({
-                ...subtask,
-                id: destinationSubtaskId,
-                sourceId: created?.sourceId ?? `local:${destinationSubtaskId}`,
-                connectorType: created ? targetConnectorRow.type : 'local',
-                connectorInstanceId: created ? targetConnectorInstanceId : 'local',
-                parentId: newMcTaskId,
-                depth: (srcTask.depth ?? 0) + 1,
-                sourceListId: created ? targetSourceListId : null,
-                sourceListName: created ? targetListName : null,
-                updatedAt: now,
-                metadata: JSON.stringify({
-                  ...parseMetadata(subtask.metadata),
-                  copiedFrom: {
-                    taskId: subtask.id,
-                    sourceId: subtask.sourceId,
-                    copiedAt: now,
-                  },
-                }),
-                syncStatus: 'synced',
-                lastSyncedAt: now,
-                pushRetryCount: 0,
-              }).run();
-
-              const subtaskTags = tx.select().from(taskTags).where(eq(taskTags.taskId, subtask.id)).all();
-              if (subtaskTags.length > 0) {
-                tx.insert(taskTags).values(
-                  subtaskTags.map((tag) => ({ taskId: destinationSubtaskId, tagId: tag.tagId })),
-                ).run();
-              }
-
-              const subtaskProjects = tx.select().from(taskProjects).where(eq(taskProjects.taskId, subtask.id)).all();
-              if (subtaskProjects.length > 0) {
-                tx.insert(taskProjects).values(
-                  subtaskProjects.map((project) => ({
-                    taskId: destinationSubtaskId,
-                    projectId: project.projectId,
-                  })),
-                ).run();
-              }
-
-              const subtaskSchedules = tx.select().from(taskSchedules).where(eq(taskSchedules.taskId, subtask.id)).all();
-              if (subtaskSchedules.length > 0) {
-                tx.insert(taskSchedules).values(
-                  subtaskSchedules.map((schedule) => ({
-                    ...schedule,
-                    taskId: destinationSubtaskId,
-                  })),
-                ).run();
-              }
-
-              const subtaskAttachments = destinationSubtaskAttachments.get(subtask.id)
-                ?? (storedSubtaskAttachments.get(subtask.id) ?? []).map((attachment) => ({
-                  id: crypto.randomUUID(),
-                  taskId: destinationSubtaskId,
-                  name: attachment.name,
-                  contentType: attachment.contentType,
-                  size: attachment.size,
-                  contentBase64: attachment.contentBase64,
-                  createdAt: attachment.createdAt,
-                }));
-              if (subtaskAttachments.length > 0) {
-                tx.insert(taskAttachments).values(
-                  subtaskAttachments.map((attachment) => ({
-                    ...attachment,
-                    id: crypto.randomUUID(),
-                    taskId: destinationSubtaskId,
-                  })),
-                ).run();
-              }
-            }
-          }
+            // The successor starts its own push history rather than
+            // inheriting the source's retry counter.
+            pushRetryCount: 0,
+          },
+          tagIds: taskTagRows.map((tag) => tag.id),
+          copyProjectsFromTaskId: sourceAction === 'copy' ? taskId : null,
+          schedule: sourceSchedule,
+          attachments: destinationAttachments.map((attachment) => ({
+            ...attachment,
+            taskId: newMcTaskId,
+          })),
+          subtaskCopies,
         });
       } catch (err) {
         dbLogger.error({ ...logContext, ...sanitizeException(err) },
@@ -1080,103 +988,87 @@ export async function executeWriteThroughTaskMove(
       // remote destination creation is still compensatable.
       let sourceDeletionFailed = !isLocalSource;
       const pendingSourceMeta = {
-        ...parseMetadata(srcTask.metadata),
+        ...srcTask.metadata,
         movedTo: movedToMeta,
         ...(sourceDeletionFailed ? { pendingCleanup: true } : {}),
       };
       if (!moveClaim) throw new TaskMoveSourceChangedError();
       const activeMoveClaim = moveClaim;
-      runTransaction((tx) => {
-        const sourceUnchanged = tx.update(tasks).set({
-          updatedAt: sql`${tasks.updatedAt}`,
-        }).where(and(
-          eq(tasks.id, taskId),
-          sql`json_extract(${tasks.metadata}, '$.taskMoveClaim.token') = ${activeMoveClaim.token}`,
-          ...taskAttachmentSnapshotPredicates(taskId, storedAttachments),
-        )).run();
-        if (sourceUnchanged.changes !== 1) {
-          throw new TaskMoveSourceChangedError();
-        }
 
-        repointTaskReferences(tx, taskId, newMcTaskId);
-        if (createdSubtasks.length > 0) {
-          for (const { sourceTaskId, created } of createdSubtasks) {
-            tx.update(tasks).set({
-              sourceId: created.sourceId,
-              connectorType: targetConnectorRow.type,
-              connectorInstanceId: targetConnectorInstanceId,
-              sourceListId: targetSourceListId,
-              sourceListName: targetListName,
-              parentId: newMcTaskId,
-              updatedAt: now,
-              syncStatus: 'synced',
-              lastSyncedAt: now,
-            }).where(eq(tasks.id, sourceTaskId)).run();
-            tx.delete(taskAttachments).where(eq(taskAttachments.taskId, sourceTaskId)).run();
-            const preservedAttachments = destinationSubtaskAttachments.get(sourceTaskId) ?? [];
-            if (preservedAttachments.length > 0) {
-              tx.insert(taskAttachments).values(
-                preservedAttachments.map((attachment) => ({
-                  ...attachment,
-                  taskId: sourceTaskId,
-                })),
-              ).run();
-            }
-          }
-        } else {
-          for (const subtask of subtasks) {
-            tx.update(tasks).set({
-              sourceId: `local:${subtask.id}`,
-              connectorType: 'local',
-              connectorInstanceId: 'local',
-              sourceListId: null,
-              sourceListName: null,
-              parentId: newMcTaskId,
-              updatedAt: now,
-              syncStatus: 'synced',
-              lastSyncedAt: now,
-            }).where(eq(tasks.id, subtask.id)).run();
-            tx.delete(taskAttachments).where(eq(taskAttachments.taskId, subtask.id)).run();
-            const preservedAttachments = storedSubtaskAttachments.get(subtask.id) ?? [];
-            if (preservedAttachments.length > 0) {
-              tx.insert(taskAttachments).values(
-                preservedAttachments.map((attachment) => ({
-                  id: crypto.randomUUID(),
-                  taskId: subtask.id,
-                  name: attachment.name,
-                  contentType: attachment.contentType,
-                  size: attachment.size,
-                  contentBase64: attachment.contentBase64,
-                  createdAt: attachment.createdAt,
-                })),
-              ).run();
-            }
-          }
-        }
-
-        tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId)).run();
-        tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
-
-        if (isLocalSource) {
-          tx.delete(taskTags).where(eq(taskTags.taskId, taskId)).run();
-          tx.delete(tasks).where(eq(tasks.id, taskId)).run();
-        } else {
-          const movedNote = `[Moved to ${targetConnectorRow.type}${targetListName ? ` / ${targetListName}` : ''} on ${now.slice(0, 10)}]`;
-          const updatedDescription = srcTask.description
-            ? `${movedNote}\n\n${srcTask.description}`
-            : movedNote;
-          tx.update(tasks).set({
-            status: sourceConnector?.completeTask && !sourceConnector.deleteTask
-              ? 'done'
-              : 'cancelled',
-            statusReason: 'moved',
-            description: updatedDescription,
+      const subtaskRepoints: TaskMoveSubtaskRepoint[] = createdSubtasks.length > 0
+        ? createdSubtasks.map(({ sourceTaskId, created }) => ({
+            taskId: sourceTaskId,
+            sourceId: created.sourceId,
+            connectorType: targetConnectorRow.type,
+            connectorInstanceId: targetConnectorInstanceId,
+            sourceListId: targetSourceListId,
+            sourceListName: targetListName,
+            parentId: newMcTaskId,
             updatedAt: now,
-            syncStatus: 'pending_push',
-            metadata: JSON.stringify(pendingSourceMeta),
-          }).where(eq(tasks.id, taskId)).run();
-        }
+            syncStatus: 'synced',
+            lastSyncedAt: now,
+            attachments: (destinationSubtaskAttachments.get(sourceTaskId) ?? []).map(
+              (attachment) => ({ ...attachment, taskId: sourceTaskId }),
+            ),
+          }))
+        : subtasks.map((subtask) => ({
+            taskId: subtask.id,
+            sourceId: `local:${subtask.id}`,
+            connectorType: 'local',
+            connectorInstanceId: 'local',
+            sourceListId: null,
+            sourceListName: null,
+            parentId: newMcTaskId,
+            updatedAt: now,
+            syncStatus: 'synced',
+            lastSyncedAt: now,
+            attachments: (storedSubtaskAttachments.get(subtask.id) ?? []).map((attachment) => ({
+              id: crypto.randomUUID(),
+              taskId: subtask.id,
+              name: attachment.name,
+              contentType: attachment.contentType,
+              size: attachment.size,
+              contentBase64: attachment.contentBase64,
+              createdAt: attachment.createdAt,
+            })),
+          }));
+
+      const movedNote = `[Moved to ${targetConnectorRow.type}${targetListName ? ` / ${targetListName}` : ''} on ${now.slice(0, 10)}]`;
+      const updatedDescription = srcTask.description
+        ? `${movedNote}\n\n${srcTask.description}`
+        : movedNote;
+
+      // One transaction: optimistic guard, reference repoint, subtask
+      // rehoming, and the source's durable disposition. For a remote source
+      // that disposition *is* the sync intent (`pending_push` plus
+      // `pendingCleanup`), so it can never be observed apart from the move.
+      const finalization = await writeThroughMoves.finalizeMove({
+        sourceTaskId: taskId,
+        successorTaskId: newMcTaskId,
+        claimToken: activeMoveClaim.token,
+        attachmentSnapshot: storedAttachments.map((attachment) => ({
+          id: attachment.id,
+          size: attachment.size,
+          sourceAttachmentId: attachment.sourceAttachmentId,
+        })),
+        subtaskRepoints,
+        sourceDisposition: isLocalSource
+          ? { kind: 'delete' }
+          : {
+              kind: 'retain',
+              status: sourceConnector?.completeTask && !sourceConnector.deleteTask
+                ? 'done'
+                : 'cancelled',
+              statusReason: 'moved',
+              description: updatedDescription,
+              updatedAt: now,
+              syncStatus: 'pending_push',
+              metadata: pendingSourceMeta,
+            },
       });
+      if (finalization.kind === 'source-changed') {
+        throw new TaskMoveSourceChangedError();
+      }
       compensateRemoteCreation = null;
 
       // Dispose the source only after the durable local move is complete.
@@ -1241,14 +1133,19 @@ export async function executeWriteThroughTaskMove(
 
       if (!isLocalSource) {
         const sourceMeta = {
-          ...parseMetadata(srcTask.metadata),
+          ...srcTask.metadata,
           movedTo: movedToMeta,
           ...(sourceDeletionFailed ? { pendingCleanup: true } : {}),
         };
-        await db.update(tasks).set({
+        // Settles the durable intent recorded above once the remote source has
+        // actually been disposed of. Deliberately outside the finalization
+        // transaction: it can only be decided after external I/O, and it is
+        // idempotent — re-running it writes the same terminal state.
+        await writeThroughMoves.recordSourceSyncIntent({
+          taskId,
           syncStatus: sourceDeletionFailed ? 'pending_push' : 'synced',
-          metadata: JSON.stringify(sourceMeta),
-        }).where(eq(tasks.id, taskId));
+          metadata: sourceMeta,
+        });
       }
     } else {
       // Copy: keep source alive, add cross-reference comment
@@ -1278,11 +1175,18 @@ export async function executeWriteThroughTaskMove(
       }
 
       // Update source task metadata with "movedTo" provenance
-      const srcMeta = { ...parseMetadata(srcTask.metadata), copiedTo: movedToMeta };
-      await db.update(tasks).set({
+      await writeThroughMoves.recordSourceCopyProvenance({
+        taskId,
         updatedAt: now,
-        metadata: JSON.stringify(srcMeta),
-      }).where(eq(tasks.id, taskId));
+        copiedTo: {
+          taskId: newMcTaskId,
+          sourceId: newSourceId,
+          connectorType: targetConnectorRow.type,
+          connectorInstanceId: targetConnectorInstanceId,
+          sourceListId: targetSourceListId,
+          copiedAt: now,
+        },
+      });
     }
 
     return successResponse({
@@ -1301,9 +1205,9 @@ export async function executeWriteThroughTaskMove(
         compensationError = cleanupError;
       }
     }
-    if (moveClaim) {
+    if (moveClaim && moves) {
       try {
-        releaseTaskMoveClaim(moveClaim.taskId, moveClaim);
+        await releaseTaskMoveClaim(moves, moveClaim);
       } catch (cleanupError) {
         compensationError ??= cleanupError;
       }
@@ -1404,50 +1308,61 @@ interface TaskMoveClaim {
   originalSyncStatus: string;
 }
 
-function claimTaskMove(sourceTask: typeof tasks.$inferSelect): TaskMoveClaim | null {
-  const metadata = parseMetadata(sourceTask.metadata);
+/**
+ * Optimistically claims the source task for this move.
+ *
+ * The claim is what makes the move exactly-once: it flips `syncStatus` to
+ * `move_in_progress` and stamps a fresh token into `metadata.taskMoveClaim`,
+ * guarded on the exact `(id, sourceId, syncStatus)` the caller observed. A
+ * second concurrent move sees `move_in_progress` (or loses the guarded
+ * update) and is rejected, and the finalization transaction re-checks the
+ * same token so a claim that was released or stolen in the meantime cannot
+ * finalize.
+ */
+async function claimTaskMove(
+  moves: WriteThroughTaskMoveRepository,
+  sourceTask: TaskMoveTaskRow,
+): Promise<TaskMoveClaim | null> {
   if (sourceTask.syncStatus === 'move_in_progress') return null;
 
-  const originalMetadata = { ...metadata };
+  const originalMetadata = { ...sourceTask.metadata };
   delete originalMetadata.taskMoveClaim;
   const originalSyncStatus = sourceTask.syncStatus;
   const token = crypto.randomUUID();
-  return runTransaction((tx) => {
-    const result = tx.update(tasks).set({
-      syncStatus: 'move_in_progress',
-      metadata: {
-        ...originalMetadata,
-        taskMoveClaim: {
-          token,
-          claimedAt: new Date().toISOString(),
-          previousSyncStatus: originalSyncStatus,
-        },
+  const claimed = await moves.claimTaskMove({
+    taskId: sourceTask.id,
+    expectedSourceId: sourceTask.sourceId,
+    expectedSyncStatus: sourceTask.syncStatus,
+    claimSyncStatus: 'move_in_progress',
+    claimToken: token,
+    metadata: {
+      ...originalMetadata,
+      taskMoveClaim: {
+        token,
+        claimedAt: new Date().toISOString(),
+        previousSyncStatus: originalSyncStatus,
       },
-    }).where(and(
-      eq(tasks.id, sourceTask.id),
-      eq(tasks.sourceId, sourceTask.sourceId),
-      eq(tasks.syncStatus, sourceTask.syncStatus),
-    )).run();
-    if (result.changes !== 1) return null;
-
-    return {
-      token,
-      taskId: sourceTask.id,
-      originalMetadata,
-      originalSyncStatus,
-    };
+    },
   });
+  if (!claimed) return null;
+
+  return {
+    token,
+    taskId: sourceTask.id,
+    originalMetadata,
+    originalSyncStatus,
+  };
 }
 
-function releaseTaskMoveClaim(taskId: string, claim: TaskMoveClaim): void {
-  runTransaction((tx) => {
-    tx.update(tasks).set({
-      syncStatus: claim.originalSyncStatus,
-      metadata: claim.originalMetadata,
-    }).where(and(
-      eq(tasks.id, taskId),
-      sql`json_extract(${tasks.metadata}, '$.taskMoveClaim.token') = ${claim.token}`,
-    )).run();
+async function releaseTaskMoveClaim(
+  moves: WriteThroughTaskMoveRepository,
+  claim: TaskMoveClaim,
+): Promise<void> {
+  await moves.releaseTaskMoveClaim({
+    taskId: claim.taskId,
+    claimToken: claim.token,
+    syncStatus: claim.originalSyncStatus,
+    metadata: claim.originalMetadata,
   });
 }
 
@@ -1481,6 +1396,7 @@ function sanitizeException(error: unknown): {
   return { exceptionType, exceptionCode, exceptionStatus };
 }
 
+/** Connector payloads may still carry metadata as a JSON string. */
 function parseMetadata(raw: unknown): Record<string, unknown> {
   if (!raw) return {};
   if (typeof raw === 'object' && raw !== null && !Array.isArray(raw)) return raw as Record<string, unknown>;
@@ -1502,7 +1418,7 @@ function parseStringArray(raw: unknown): string[] {
     : [];
 }
 
-function formatSubtaskForDescription(subtask: typeof tasks.$inferSelect): string {
+function formatSubtaskForDescription(subtask: TaskMoveTaskRow): string {
   const details = [
     subtask.description && `description: ${subtask.description.replace(/\s+/g, ' ').trim()}`,
     subtask.priority !== 'none' && `priority: ${subtask.priority}`,

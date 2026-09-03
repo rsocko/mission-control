@@ -654,6 +654,363 @@ execution, no test runner required) against the current worktree and
 confirming an exact match with the committed baseline. CI is expected to run
 the full suite with a working install.
 
+## Web/API PostgreSQL parity: Layer L04 (task core)
+
+L04 makes the task-core domain surface backend-neutral: canonical
+filter/query/stats specifications, edit- and mutation-policy identity loading,
+local task lifecycle, Scout hard delete, both task-move strategies
+(pending-sync and write-through), priority entity resolution, and source-list
+display names.
+
+### The contract
+
+`src/lib/tasks/core/contracts.ts` defines `TaskCorePersistence`, a composition
+of ten narrowly-named repositories (`filterInputs`, `queries`,
+`policyIdentities`, `lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`,
+`priorityEntities`, `sourceListNames`, `transferIdentity`). It is deliberately **not** a generic
+table/dialect query API, and it has no "run this callback in a transaction"
+escape hatch: the inputs are domain values (`TaskFilterSpec`, `TaskListPage`,
+`PendingSyncTaskMoveRequest`, `TaskMoveDestinationMaterialization`,
+`TaskMoveFinalizationRequest`) and the results are domain DTOs
+(`TaskStatsResult`, `AvailableTaskTag`, `ScoutHardDeleteOutcome`,
+`TaskMoveFinalizationOutcome`). No Drizzle `SQL` predicate, table object, or
+transaction handle crosses this boundary in either direction.
+
+`src/lib/tasks/core/filter-spec.ts` is the single pure parser from
+`URLSearchParams` to `TaskFilterSpec`. It performs no I/O — My Day membership,
+GitHub identity evidence, and inbox-list configuration are *stored data* and are
+read separately through `TaskFilterInputRepository`. Both the legacy SQLite route
+assembly and both adapters consume the same spec, so they cannot disagree about
+what the canonical filter means, only about how to express it in SQL.
+
+#### Sort ordering, including NULLs
+
+`listTaskIds` sorts by an explicit expression plus an `id` tie-break, so the two
+backends cannot disagree about a page boundary. NULL placement is a genuine
+dialect difference — SQLite treats NULL as the lowest value (NULLs first
+ascending, last descending) while PostgreSQL defaults to NULLS LAST ascending —
+so it is never left to the dialect default. Both adapters prepend a
+`CASE WHEN <column> IS NULL THEN 0 ELSE 1 END` rank, sorted in the requested
+direction, for the two nullable sort columns (`dueDate`, `sourceListName`). The
+pinned behavior is "NULL sorts lowest", which is exactly what the legacy SQLite
+`/api/tasks` route already returns. `priority`, `status`, `title`, `createdAt`
+and `updatedAt` are `NOT NULL`. Both adapters preserve the route's exact
+`COALESCE(effort, 0)` expression, so unknown effort also sorts lowest.
+
+### The composition seam
+
+`src/lib/tasks/core/runtime.ts` is intentionally **clean**: it imports neither
+`@/db` nor a SQLite driver, statically or dynamically. That is what lets the
+migrated consumers leave the taint census entirely rather than being reclassified
+from import-time (Tier A) to call-time (Tier B) taint — a reclassification the
+ratchet correctly rejects as non-progress.
+
+Two registration shapes exist:
+
+- `registerTaskCorePersistence` — eager. `initializeRuntimeDatabase` uses it for
+  both backends; under PostgreSQL the composition is built atomically from the
+  freshly initialized handle, so no request can observe a half-registered
+  task-core surface.
+- `registerTaskCorePersistenceProvider` — lazy. `src/db/index.ts` installs the
+  SQLite default this way, so any process that genuinely reaches SQLite (dev
+  server, scripts, tests) gets a working composition without a clean module ever
+  naming a SQLite one. An explicit registration always wins, so this can never
+  resurrect SQLite under PostgreSQL, and the provider resolves through the same
+  `db` handle that already refuses to initialize under the PostgreSQL backend.
+
+The provider slot lives on `globalThis` (surviving hot reload and
+`vi.resetModules()`) while the resolved value is memoized per module instance and
+invalidated by a registration revision counter, so a test that swaps its database
+re-resolves instead of reusing a stale handle.
+
+### Transaction honesty
+
+`SqliteTaskCorePersistence` methods are `async` to satisfy the portable contract,
+but never `await` inside a transaction body: `runTransaction` is better-sqlite3's
+synchronous transaction. The PostgreSQL adapter uses genuine
+`db.transaction(async tx => …)`. The contract does not pretend the two are the
+same mechanism; it pins the same *observable* guarantees:
+
+`createSqliteTaskCorePersistence(database, transactionRunner)` takes the
+transaction runner as an explicit second argument rather than closing over the
+module-level `runTransaction`, and every repository it builds — reader and
+writer — is constructed from exactly that pair. There is no module-level
+fallback, so an injected database can never be read while its writes land in
+another one. The runner type is deliberately the narrow *synchronous* callback
+shape better-sqlite3 actually supports (`<T>(fn: (tx) => T, options?) => T`), not
+a `Promise`-returning stand-in; production passes `runTransaction` from `@/db`
+verbatim, so transaction behavior (`immediate`/`deferred`) and the database
+telemetry wrapper are preserved. `tests/db/sqlite-task-core-injection.test.ts`
+proves an independently injected handle + runner reads and writes the same
+database and leaves a second database untouched.
+
+- a pending-sync move claims the source optimistically (source id, `updated_at`,
+  and a null-safe attachment fingerprint), materializes the successor, repoints
+  every durable reference, and deletes the source **in one transaction**, so a
+  failure leaves the source completely intact;
+- the durable `pending_push` sync intent that carries the deferred upstream write
+  lands in that same transaction, while all connector/network I/O stays outside
+  it (validation, budgets, and target-list resolution happen before the
+  transaction opens);
+- a Scout hard delete writes its ingest-suppression tombstones and deletes the
+  task graph atomically — a partial application would either resurrect the task
+  on the next sync or permanently suppress a task that still exists;
+- a second hard delete of the same task reports `not-found` and writes no new
+  tombstones (idempotent).
+
+#### The write-through move's five atomic operations
+
+The write-through move (`src/lib/tasks/task-move-write-through.ts`) creates the
+destination remotely and only then rewrites the local graph, so it has five
+state transitions that must not tear. Each is exactly one adapter-owned
+transaction, expressed as a narrow domain operation on
+`WriteThroughTaskMoveRepository`:
+
+| operation | what it makes atomic |
+| --- | --- |
+| `claimTaskMove` | Flips the source to `move_in_progress` and stamps `metadata.taskMoveClaim.token`, guarded on the exact `(id, source_id, sync_status)` the caller observed. This is the exactly-once gate: a concurrent move loses the guarded update and is rejected with `TASK_MOVE_IN_PROGRESS`. |
+| `releaseTaskMoveClaim` | Restores the pre-claim `sync_status`/`metadata`, guarded on the claim token, so a stale releaser can never clobber a re-claimed task. Idempotent: replaying it is a no-op. |
+| `materializeDestination` | Writes the successor task, its tag links, the copied project links, the copied schedule, its attachments, and — for a copy — the whole subtask graph with each subtask's own tags, projects, schedules and attachments. A half-written destination is precisely the state the caller's remote compensation cannot repair. |
+| `finalizeMove` | Re-checks the claim token *and* the attachment fingerprint, repoints every durable reference onto the successor, rehomes the subtasks, drops the source's schedules/attachments, and applies the source disposition (delete, or a retained tombstone carrying `pending_push` + `pendingCleanup`). Returns `source-changed` instead of throwing when a guard fails, which is what produces the `TASK_MOVE_SOURCE_CHANGED` 409. |
+| `discardMaterializedDestination` | Compensating cleanup for a destination that was materialized but never finalized. Idempotent, because compensation runs on a best-effort path and may be retried. |
+
+Two single-statement operations complete the picture:
+`recordSourceSyncIntent` settles the retained source's durable intent
+(`pending_push` → `synced`) *after* the remote source has been disposed of, and
+`recordSourceCopyProvenance` stamps `copiedTo` on a copy's source. Both are
+deliberately outside the finalization transaction: their value can only be
+decided after external I/O, and both are idempotent — replaying either writes
+the same terminal state.
+
+#### External calls, inventoried
+
+Everything below happens strictly *between* those transactions, never inside
+one, which is what keeps each of them short and non-blocking:
+
+- **Connector/network:** `connectorRegistry.getConnector` /
+  `createConnector`, `createTask`, `createSubTask`, `deleteTask`,
+  `completeTask`, `addComment`, `addTagToTask`, `uploadAttachment`,
+  `listAttachments`, `getAttachmentContent`, `transferTask`,
+  `canTransferTask`, `refreshTransferIdentity`.
+- **Identity:** `executeFencedGitHubTaskMutation`,
+  `executeFencedGitHubSourceMutation` (GitHub write fencing),
+  `persistCreatedTaskIdentity` and `reconcileTransferIdentity` (L06-owned
+  external-identity persistence, awaited so L06 can make them asynchronous
+  without touching this file).
+- **Semantic/derived:** `refreshGitHubIssueMetadata`.
+
+The only thing that must be atomic with the task rows is the durable sync
+intent the sync pipeline later acts on, and this move expresses that intent as
+`sync_status` + `metadata` on the same rows — so it is written by the same
+`finalizeMove`/`materializeDestination` transaction that writes the rows. No
+separate outbox or queue was invented for it.
+
+Genuine dialect differences are resolved inside the adapters, never leaked into
+the contract: `jsonb` metadata needs an explicit `::text` cast for substring
+matching, SQLite's `IS <value>` null-safe comparison is
+`IS NOT DISTINCT FROM` on PostgreSQL, the claim-token guard is
+`json_extract(metadata, '$.taskMoveClaim.token')` on SQLite and
+`metadata #>> '{taskMoveClaim,token}'` on PostgreSQL, `INSERT OR IGNORE` is
+`ON CONFLICT DO NOTHING`, and only SQLite has the `task_history_events`
+append-only DELETE trigger that the hard delete must drop and recreate.
+
+### Legacy route compatibility
+
+The task read/write route handlers (layers L05/L07) still compose their own
+Drizzle predicates. `src/app/api/tasks/{canonical-filter,filter-factory,
+filter-query,query-builder}.ts` therefore still *return* SQLite Drizzle
+predicates, but they no longer *open* a database: the predicate constructors moved
+to the handle-free SQLite dialect compiler
+(`src/db/persistence/sqlite-task-filter.ts`, which imports only `@/db/schema` and
+`drizzle-orm`), and the stored inputs come from `TaskFilterInputRepository`. That
+is a compatibility seam on the route side of the boundary, not a contract leak.
+`tests/architecture/task-core-taint-decrement.test.ts` pins that exact four-file
+list, so no other owned file can quietly acquire a Drizzle surface.
+
+`src/app/api/tasks/stats-computer.ts` is now fully portable: every entry point
+takes a `TaskFilterSpec` and runs through `TaskQueryRepository`. Its former
+clause-shaped counters (`countTasks`, `getStats`, `getSourceCounts`,
+`getAvailableTags`, which take a *composed* `WHERE` clause because the route
+appends route-local predicates for effort, free-text search, tag ids,
+no-project and group scoping) now live inside
+`src/app/api/tasks/route.ts` — the single Tier A route that still needs them.
+That is deliberately a relocation, not a port: modelling those route-local
+predicates as `TaskFilterSpec` fields is the L05 read-route migration, and
+passing Drizzle predicates across a task-core contract behind an opaque port
+would have been worse than leaving them where they are used. The route's only
+other change is importing the identity-aware quick-filter builders it now calls
+directly; its data access is otherwise untouched.
+
+### Residual taint owned by another layer
+
+`src/lib/tasks/task-move-write-through.ts` contains no `@/db`, `@/db/schema`,
+`drizzle-orm` or `better-sqlite3` reference, and all nine of its original
+transaction sites are adapter-owned task-core operations. The census still
+counts it in `taintedLibA` for exactly one reason: it statically imports
+`@/lib/connectors/transfer-identity`, whose own `@/db` usage and whose
+`@/lib/external-identities` dependency are external-identity persistence owned
+by **L06**. (The write-fence import was narrowed from the
+`@/lib/external-identities` barrel to the already-clean
+`@/lib/external-identities/github-write-fence` leaf, which removed the second
+blocker without changing a single runtime value.)
+
+This is residual taint attributable to another layer, not a deferral inside
+L04, and it is machine-checked in both directions:
+`tests/db/task-core-postgres-import-safety.test.ts` stubs exactly that one
+module and then imports *and executes* the move under a poisoned `@/db`, and
+`tests/architecture/task-core-taint-decrement.test.ts` asserts that
+`transfer-identity` is the **only** tainted static edge the file has left. If
+L06 migrates it, the write-through move leaves the census with no further work.
+
+### `TaskTransferIdentityRepository`: a narrow seam for the L06 coordinator
+
+`TaskTransferIdentityRepository` (on `TaskCorePersistence.transferIdentity`)
+exists solely so that `src/lib/connectors/transfer-identity.ts` — still
+entirely L06-owned and **not modified by this layer** — has a portable
+task-core seam to migrate onto later, instead of continuing to open `@/db`
+directly for the two task-row reads/writes it needs. It exposes exactly two
+methods, both already implemented for SQLite and PostgreSQL and exercised by
+the shared suite in `tests/contracts/task-core.contract.ts`:
+
+```ts
+interface TaskTransferIdentityRepository {
+  resolveIdentityTargets(input: {
+    taskId: string;
+    connectorInstanceId: string;
+    sourceListIds: readonly string[];
+  }): Promise<{
+    taskExists: boolean;
+    taskMetadata: Record<string, unknown>;
+    sourceLists: readonly { sourceId: string; localId: string }[];
+  }>;
+  reconcileTaskRefresh(input: {
+    taskId: string;
+    connectorInstanceId: string;
+    task: {
+      sourceId: string; sourceListId: string | null; sourceListName: string | null;
+      title: string; description: string | null; status: string; statusReason: string | null;
+      priority: string; effort: number | null; microStatus: string | null; assignee: string | null;
+      updatedAt: string; completedAt: string | null; metadata: Record<string, unknown>;
+    };
+    observedAt: string;
+  }): Promise<boolean>;
+}
+```
+
+- `resolveIdentityTargets` resolves the local `source_lists.id` for each of
+  `sourceListIds`, scoped to `connectorInstanceId` (a source id under a
+  different connector never resolves), plus the task's current metadata.
+  Unknown source ids are silently dropped, duplicates are deduplicated, and
+  the returned order matches each id's first occurrence in the input — this
+  is what replaces `persistIdentityWrites`'s per-list `db.select` loop in the
+  legacy file with one deterministic read. When the task does not exist,
+  `taskExists` is `false` and `taskMetadata` is `{}`, but source-list
+  resolution is unaffected: it is a separate read against a separate table
+  and stays fully deterministic regardless of the task's existence.
+- `reconcileTaskRefresh` merges the task's existing metadata with the
+  incoming `task.metadata` (incoming wins on key collisions — the same
+  spread order `reconcileTransferIdentity` uses today) and updates exactly
+  `sourceId`, `sourceListId`, `sourceListName`, `title`, `description`,
+  `status`, `statusReason`, `priority`, `effort`, `microStatus`, `assignee`,
+  `updatedAt`, `completedAt`, the merged `metadata`, `syncStatus` (set to
+  `'synced'`) and `lastSyncedAt` (set to `observedAt`), guarded by `taskId`
+  *and* `connectorInstanceId` matching. It resolves `true` iff exactly one
+  row was updated, `false` when the task is absent or its
+  `connectorInstanceId` doesn't match — no update happens in that case. The
+  read-then-write is one adapter-owned transaction on both backends
+  (`runTransaction` on SQLite, `db.transaction` on PostgreSQL): metadata is
+  decoded through the shared L01 codecs (`decodeLenientJsonObject`) at the
+  SQLite boundary and read as the `jsonb` object directly on PostgreSQL, so
+  the merge always happens against a plain JS object regardless of dialect.
+
+**This is not a cross-domain task+external-identity atomic bridge.** The
+repository only ever touches the `tasks` and `source_lists` tables; it has no
+knowledge of `external_identities`, evidence shaping, or GitHub identity-mode
+snapshots, and it does not wrap the external-identity writes and the task
+update in one transaction — those remain the two separate operations they are
+today in `reconcileTransferIdentity`/`persistIdentityWrites`. Identity policy
+(what evidence to persist, when, and under which mode) stays owned entirely by
+L06; this layer adds only the narrow task-core reads/writes that a future L06
+change can call instead of opening `@/db` itself. `transfer-identity.ts` is
+untouched by this change and keeps its own `@/db` usage until L06 migrates it.
+
+### Ratchet decrement
+
+Recomputed by `computeWebPersistenceGraph` against the worktree (run with
+`node --experimental-strip-types`):
+
+| metric | L01 | L04 |
+| --- | --- | --- |
+| Tier A routes | 221 | 220 |
+| Tier B routes | 39 | 39 |
+| clean routes | 6 | 7 |
+| direct taint-source routes | 143 | 143 |
+| transitive-only taint-source routes | 78 | 77 |
+| `@/db` namespace routes | 144 | 144 |
+| tainted `src/lib` (Tier A) | 123 | 116 |
+| tainted API helpers (Tier A) | 6 | 1 |
+| **total migration units** | **350** | **337** |
+
+Twelve of the thirteen owned files left the census (five API helpers, seven
+`src/lib` modules) and `src/app/api/tasks/[id]/hard-delete/route.ts` became
+genuinely clean — it moved to `cleanRoutes`, **not** to Tier B. The entry-set
+diff shows zero additions to any taint set and Tier B unchanged at 39. The
+per-file expectations are pinned by
+`tests/architecture/task-core-taint-decrement.test.ts`, and the exact removals
+are recorded in `decrementHistory` in
+`tests/architecture/web-persistence-baseline.json`.
+
+### Proof
+
+- `tests/contracts/task-core.contract.ts` — one shared suite run against both
+  backends (`tests/db/sqlite-task-core.contract.test.ts` in-process,
+  `tests/db/postgres-task-core.integration.test.ts` guarded by
+  `MC_TEST_POSTGRES_URL`): filter semantics including empty/null/boundary
+  filters and unknown ids, deterministic ordering with an id tie-break and
+  non-overlapping pagination, explicit NULL placement for the nullable sort
+  columns (`dueDate`, `sourceListName`) in both directions and across a page
+  boundary, JSON/boolean normalization, stats denominators,
+  policy identity loading, delete/convert atomicity, hard-delete idempotency,
+  move claim rejection with no partial effects, and — for each of the
+  write-through move's atomic operations — concurrency (a second claim loses),
+  idempotency (replayed release/discard/settle are no-ops), rollback with no
+  partial state (a failed materialization or repoint leaves the source graph
+  untouched), and the durable sync intent being written exactly once.
+- `tests/api/task-move-orchestration-characterization.test.ts` — end-to-end
+  against real SQLite: compensation after a failed local persist, compensation
+  after a failed reference finalization, the attachment-race 409, replay
+  protection for both local and remote sources, and concurrent moves
+  serializing to `201`/`409`.
+- `tests/api/task-move-execute.test.ts` — route behavior against the
+  repository seam: what the move asks each atomic operation to do, in order.
+- `tests/api/task-move-identity-compensation.test.ts` — the remote compensation
+  closure is installed before the created task's external identity is
+  persisted, so a failure in that durable write still deletes the remote issue
+  and leaves no local destination behind.
+- `tests/db/sqlite-task-core-injection.test.ts` — an independently injected
+  handle + transaction runner reads and writes the same database, rolls a
+  failed mutation back inside that runner, and leaves a second database
+  untouched (no module-level write fallback).
+- `tests/unit/task-filter-spec.test.ts` — pure parsing, including the preserved
+  quirk that an *invalid* `status` parameter still suppresses the implicit
+  open-only exclusion.
+- `tests/db/task-core-runtime.test.ts` — seam semantics: explicit registration
+  beats the lazy provider, resolution is memoized per registration, and a failed
+  resolution is not cached.
+- `tests/db/task-core-postgres-import-safety.test.ts` — `@/db` is replaced by a
+  module that throws on import and the backend is switched to PostgreSQL; every
+  migrated consumer must still import and execute, including both task-move
+  strategies and the portable statistics path.
+
+**Known limitation: no local validation was run for this layer either.** The
+approved-registry restore remains broken (`qs@6.16.0` 404), so `node_modules`
+contains only `next` and no local `tsc`/`eslint`/`vitest` run was possible. What
+*was* verified locally, with Node 24's native TypeScript execution and no test
+runner: every changed file parses (`module.stripTypeScriptTypes`), every
+internal import resolves to a real module and every named binding it imports is
+actually exported, and the ratchet decrement above was recomputed and matched
+against the committed baseline. CI is expected to run the full suite with a
+working install.
 ## Web/API PostgreSQL parity: Layer L02 (seed/demo fail-closed, entity-link parity, settings/mode route)
 
 Layer L02 owns exactly four application files (`src/app/api/settings/mode/
@@ -891,7 +1248,6 @@ executing `computeWebPersistenceGraph` directly via Node's native TypeScript
 execution (no test runner required) against the worktree after every change
 in this layer, confirming the exact before/after transition described
 above. CI is expected to run the full suite with a working install.
-
 ## Web/API PostgreSQL parity: Layer L06a (external-identities, excluding transfer-identity.ts)
 
 Layer L06 was split into **L06a** (this layer) and a later **L06b** once it

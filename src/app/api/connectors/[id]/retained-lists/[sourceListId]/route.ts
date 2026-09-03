@@ -39,7 +39,7 @@ export async function DELETE(
           eq(tasks.sourceListId, sourceList.sourceId),
         ));
 
-      for (const task of taskRows) deleteTaskLocally(task.id);
+      for (const task of taskRows) await deleteTaskLocally(task.id);
       await db.delete(sourceLists).where(eq(sourceLists.id, sourceList.id));
       return {
         kind: 'deleted',

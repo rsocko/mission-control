@@ -1,6 +1,5 @@
 import { and, eq, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm';
-import db from '@/db';
-import { myDayItems, tasks } from '@/db/schema';
+import { tasks } from '@/db/schema';
 import {
   getMultiTagFilterCondition,
   getProjectFilterCondition,
@@ -11,8 +10,6 @@ import {
   getSourceListGroupCondition,
   getSourceListIdsCondition,
 } from './filter-query';
-import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
-import type { LocalDisposition } from '@/types';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import {
   getAssignedFilterCondition,
@@ -22,12 +19,27 @@ import {
   withCondition,
 } from './query-builder';
 import { normalizedCsv } from './query-input';
-import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
+import { getLocalDaysFromNow } from '@/lib/utils/date';
+import { buildTaskFilterSpec } from '@/lib/tasks/core/filter-spec';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type { TaskFilterSpec } from '@/lib/tasks/core/contracts';
 
-const VALID_STATUSES = new Set(['todo', 'in_progress', 'done', 'cancelled']);
-const VALID_PRIORITIES = new Set(['critical', 'high', 'medium', 'low', 'none']);
-const VALID_PLANNING_HORIZONS = new Set(['next', 'soon', 'later', 'someday']);
-const VALID_LOCAL_DISPOSITIONS = new Set(['active', 'handled', 'dismissed']);
+/**
+ * Canonical task filter entry point.
+ *
+ * Backend-neutral as of L04 in the sense that matters for the migration: this
+ * module no longer opens a database. Request input is parsed into a portable
+ * `TaskFilterSpec` by `@/lib/tasks/core/filter-spec`, and the only stored
+ * input the assembly still needs (My Day membership) is read through the
+ * task-core `TaskFilterInputRepository`.
+ *
+ * The Drizzle predicates it returns are a *compatibility seam* for the task
+ * route handlers that have not been migrated yet (L05/L07) — no predicate ever
+ * crosses a task-core contract. The portable equivalent of this assembly lives
+ * in each adapter (`compileCanonicalTaskFilter`) and is pinned for both
+ * backends by `tests/contracts/task-core.contract.ts`; this legacy assembly is
+ * pinned by `tests/api/task-attribute-filters.test.ts`.
+ */
 
 export interface CanonicalTaskFilterConditions {
   conditions: SQL[];
@@ -36,6 +48,8 @@ export interface CanonicalTaskFilterConditions {
   weekFromNow: string;
   myDayTaskIds: string[];
   quickFilterCondition: SQL | undefined;
+  /** The portable filter description this assembly was derived from. */
+  spec: TaskFilterSpec;
 }
 
 export function getTaskSourceVisibilityConditions(): SQL[] {
@@ -45,138 +59,118 @@ export function getTaskSourceVisibilityConditions(): SQL[] {
   ];
 }
 
+/** Parses request input into the portable, backend-neutral filter spec. */
+export function buildCanonicalTaskFilterSpec(
+  searchParams: URLSearchParams,
+): TaskFilterSpec {
+  // The date boundaries deliberately come from `getDateBounds()` rather than
+  // straight from `@/lib/utils/date`, preserving the exact clock seam the
+  // legacy route helpers (and their tests) already depend on.
+  const { today, weekFromNow } = getDateBounds();
+  return buildTaskFilterSpec(searchParams, {
+    readCsv: normalizedCsv,
+    clock: { today, weekFromNow, recentCutoff: getLocalDaysFromNow(-7) },
+  });
+}
+
 export async function buildCanonicalTaskFilterConditions(
   searchParams: URLSearchParams,
 ): Promise<CanonicalTaskFilterConditions> {
+  const spec = buildCanonicalTaskFilterSpec(searchParams);
   const conditions = getTaskSourceVisibilityConditions();
-  const { today, weekFromNow } = getDateBounds();
-  const quickFilter = searchParams.get('quickFilter');
-  const myDayDate = searchParams.get('myDayDate');
-  const effectiveMyDayDate = myDayDate && /^\d{4}-\d{2}-\d{2}$/.test(myDayDate)
-    ? myDayDate
-    : today;
-  const myDayRows = await db
-    .select({ taskId: myDayItems.taskId })
-    .from(myDayItems)
-    .where(eq(myDayItems.date, effectiveMyDayDate));
-  const myDayTaskIds = myDayRows.map((row) => row.taskId);
-  const filterQuery = searchParams.get('filterQuery')?.trim();
-  const hasDispositionQuery = Boolean(
-    filterQuery
-    && parseFilterQuery(filterQuery).tokens.some(
-      (token) => token.type === 'disposition' && isLocalDisposition(token.value),
-    ),
-  );
+  const { filterInputs } = await getTaskCorePersistence();
+  const myDayTaskIds = [...await filterInputs.listMyDayTaskIds(spec.myDayDate)];
 
-  const sources = normalizedCsv(searchParams, 'sources', VALID_VALUE);
-  const source = searchParams.get('source');
-  if (sources.length) conditions.push(inArray(tasks.connectorType, sources));
-  else if (source) conditions.push(eq(tasks.connectorType, source));
+  if (spec.connectorTypes.length > 1) {
+    conditions.push(inArray(tasks.connectorType, [...spec.connectorTypes]));
+  } else if (spec.connectorTypes.length === 1) {
+    conditions.push(eq(tasks.connectorType, spec.connectorTypes[0]));
+  }
 
-  const statuses = normalizedCsv(searchParams, 'statuses', VALID_STATUSES);
-  const status = searchParams.get('status');
-  if (statuses.length) conditions.push(inArray(tasks.status, statuses));
-  else if (status && VALID_STATUSES.has(status)) conditions.push(eq(tasks.status, status));
+  if (spec.statuses.length > 1) {
+    conditions.push(inArray(tasks.status, [...spec.statuses]));
+  } else if (spec.statuses.length === 1) {
+    conditions.push(eq(tasks.status, spec.statuses[0]));
+  }
 
-  const priorities = normalizedCsv(searchParams, 'priorities', VALID_PRIORITIES);
-  const priority = searchParams.get('priority');
-  if (priorities.length) conditions.push(inArray(tasks.priority, priorities));
-  else if (priority && VALID_PRIORITIES.has(priority)) conditions.push(eq(tasks.priority, priority));
+  if (spec.priorities.length > 1) {
+    conditions.push(inArray(tasks.priority, [...spec.priorities]));
+  } else if (spec.priorities.length === 1) {
+    conditions.push(eq(tasks.priority, spec.priorities[0]));
+  }
 
-  const planningHorizons = normalizedCsv(
-    searchParams,
-    'planningHorizons',
-    VALID_PLANNING_HORIZONS,
-  ).filter(isPlanningHorizon);
-  const planningHorizon = searchParams.get('planningHorizon');
-  if (planningHorizons.length) {
-    conditions.push(inArray(tasks.planningHorizon, planningHorizons));
-  } else if (planningHorizon === 'none') {
+  const horizons = [...spec.planningHorizons] as ('next' | 'soon' | 'later' | 'someday')[];
+  if (horizons.length > 1) {
+    conditions.push(inArray(tasks.planningHorizon, horizons));
+  } else if (horizons.length === 1) {
+    conditions.push(eq(tasks.planningHorizon, horizons[0]));
+  } else if (spec.planningHorizonIsNull) {
     conditions.push(isNull(tasks.planningHorizon));
-  } else if (isPlanningHorizon(planningHorizon)) {
-    conditions.push(eq(tasks.planningHorizon, planningHorizon));
   }
 
-  const localDispositions = normalizedCsv(
-    searchParams,
-    'localDispositions',
-    VALID_LOCAL_DISPOSITIONS,
-  ).filter(isLocalDisposition);
-  const localDisposition = searchParams.get('localDisposition');
-  if (localDispositions.length) {
+  const localDispositions = [...spec.localDispositions];
+  if (localDispositions.length > 1) {
     conditions.push(inArray(tasks.localDisposition, localDispositions));
-  } else if (localDisposition && isLocalDisposition(localDisposition)) {
-    conditions.push(eq(tasks.localDisposition, localDisposition));
-  } else if (localDisposition !== 'all' && !hasDispositionQuery) {
-    conditions.push(eq(tasks.localDisposition, 'active'));
+  } else if (localDispositions.length === 1) {
+    conditions.push(eq(tasks.localDisposition, localDispositions[0]));
   }
 
-  const openOnly = searchParams.get('openOnly') === 'true'
-    && quickFilter !== 'recentlyClosed';
-  if (openOnly && !statuses.length && !status) {
+  if (spec.excludeClosedStatuses) {
     conditions.push(notInArray(tasks.status, ['done', 'cancelled']));
   }
-  if (searchParams.get('parentOnly') === 'true') {
+  if (spec.parentOnly) {
     conditions.push(isNull(tasks.parentId));
   }
 
-  const listIds = normalizedCsv(searchParams, 'listIds', VALID_VALUE);
-  const listId = searchParams.get('listId');
-  if (listIds.length) {
-    conditions.push(getSourceListIdsCondition(listIds));
-  } else if (listId) {
-    conditions.push(getSourceListIdsCondition([listId]));
+  if (spec.sourceListIds.length > 0) {
+    conditions.push(getSourceListIdsCondition([...spec.sourceListIds]));
+  }
+  if (spec.sourceListGroupId) {
+    conditions.push(getSourceListGroupCondition(spec.sourceListGroupId));
   }
 
-  const listGroupId = searchParams.get('listGroupId');
-  if (listGroupId) {
-    conditions.push(getSourceListGroupCondition(listGroupId));
+  if (spec.createdAtMax !== null) {
+    conditions.push(sql`${tasks.createdAt} <= ${spec.createdAtMax}`);
+  }
+  if (spec.createdAtMin !== null) {
+    conditions.push(sql`${tasks.createdAt} >= ${spec.createdAtMin}`);
   }
 
-  const ageMin = nonNegativeInteger(searchParams.get('ageMin'));
-  if (ageMin !== null) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - ageMin);
-    conditions.push(sql`${tasks.createdAt} <= ${cutoff.toISOString()}`);
-  }
-  const ageMax = nonNegativeInteger(searchParams.get('ageMax'));
-  if (ageMax !== null) {
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - ageMax);
-    conditions.push(sql`${tasks.createdAt} >= ${cutoff.toISOString()}`);
+  if (spec.filterQuery) {
+    conditions.push(
+      ...await getFilterQueryConditions(spec.filterQuery, spec.today, spec.weekFromNow),
+    );
   }
 
-  if (filterQuery) {
-    conditions.push(...await getFilterQueryConditions(filterQuery, today, weekFromNow));
+  if (spec.tagSlug) {
+    conditions.push(getTagSlugFilterCondition(spec.tagSlug));
+  }
+  if (spec.tagSlugs.length > 0) {
+    conditions.push(getMultiTagFilterCondition([...spec.tagSlugs]));
+  }
+  if (spec.projectId) {
+    conditions.push(getProjectFilterCondition(spec.projectId));
   }
 
-  const tagSlug = searchParams.get('tag');
-  if (tagSlug) {
-    conditions.push(getTagSlugFilterCondition(tagSlug));
-  }
-  const tagSlugs = normalizedCsv(searchParams, 'tagSlugs', VALID_VALUE);
-  if (tagSlugs.length) {
-    conditions.push(getMultiTagFilterCondition(tagSlugs));
-  }
-
-  const projectId = searchParams.get('projectId');
-  if (projectId) {
-    conditions.push(getProjectFilterCondition(projectId));
-  }
-
-  const quickFilterCondition = quickFilter === 'assigned'
+  const quickFilterCondition = spec.quickFilter === 'assigned'
     ? await getAssignedFilterCondition()
-    : quickFilter === 'inbox'
+    : spec.quickFilter === 'inbox'
       ? await getInboxFilterCondition()
-      : getQuickFilterCondition(quickFilter, today, weekFromNow, myDayTaskIds);
+      : getQuickFilterCondition(
+          spec.quickFilter,
+          spec.today,
+          spec.weekFromNow,
+          myDayTaskIds,
+        );
 
   return {
     conditions,
-    openOnly,
-    today,
-    weekFromNow,
+    openOnly: spec.openOnly,
+    today: spec.today,
+    weekFromNow: spec.weekFromNow,
     myDayTaskIds,
     quickFilterCondition,
+    spec,
   };
 }
 
@@ -188,16 +182,4 @@ export async function getCanonicalTaskFilterWhere(searchParams: URLSearchParams)
     baseWhere,
     taskWhere: withCondition(baseWhere, canonical.quickFilterCondition),
   };
-}
-
-const VALID_VALUE = { has: (value: string) => Boolean(value) };
-
-function nonNegativeInteger(value: string | null): number | null {
-  if (value === null || value === '') return null;
-  const parsed = Number(value);
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
-}
-
-function isLocalDisposition(value: string): value is LocalDisposition {
-  return VALID_LOCAL_DISPOSITIONS.has(value);
 }

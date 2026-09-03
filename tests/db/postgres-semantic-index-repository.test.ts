@@ -22,6 +22,7 @@ interface Handler {
   rows?: unknown[];
   rowCount?: number;
   times?: number;
+  error?: Error;
 }
 
 interface MockPool {
@@ -52,6 +53,7 @@ function createMockPool(handlers: Handler[] = []): MockPool {
       if (remaining <= 0) continue;
       if (!handler.match.test(text)) continue;
       budget.set(handler, remaining - 1);
+      if (handler.error) throw handler.error;
       return {
         rows: handler.rows ?? [],
         rowCount: handler.rowCount ?? handler.rows?.length ?? 0,
@@ -229,6 +231,7 @@ describe('PostgresSemanticIndexRepository', () => {
           rows: [{
             id: 'i1',
             idempotencyKey: 'k1',
+            idempotencyKeyVersion: 0,
             indexId: 'idx-1',
             kind: 'upsert',
             entityType: 'task',
@@ -281,24 +284,86 @@ describe('PostgresSemanticIndexRepository', () => {
       expect(recovery).toContain('FOR UPDATE SKIP LOCKED');
     });
 
+    it('clamps oversized intent claims to the shared maximum batch', async () => {
+      const repo = new PostgresSemanticIndexRepository(mock.pool);
+      await repo.claimIntents({
+        indexId: 'idx-1', owner: 'worker-a', limit: 10_000, leaseMs: 60_000, now: T0,
+      });
+
+      const claimIndex = mock.sql().findIndex((sql) => sql.includes('WITH candidates AS'));
+      expect(mock.params[claimIndex][3]).toBe(200);
+    });
+
     it('claims runs with SKIP LOCKED and refuses a second running run per kind', async () => {
+      mock = createMockPool([
+        {
+          match: /FROM semantic_runs r/,
+          rows: [{
+            id: 'run-1',
+            indexId: 'idx-1',
+            kind: 'backfill',
+            idempotencyKey: 'backfill:initial',
+            idempotencyKeyVersion: 0,
+            status: 'queued',
+          }],
+        },
+      ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0, indexId: 'idx-1', kinds: ['backfill'] });
 
-      const claim = mock.find(/WITH candidate AS/);
+      const claim = mock.find(/FOR UPDATE SKIP LOCKED/);
       expect(claim).toContain('FOR UPDATE SKIP LOCKED');
-      expect(claim).toContain('NOT EXISTS');
-      expect(claim).toContain("active.status = 'running'");
-      expect(claim).toContain('r.kind = ANY($3::text[])');
-      expect(claim).toContain('SELECT r.id AS candidate_id');
+      expect(claim).toContain("status = 'queued' AND available_at <= $3");
+      const peek = mock.find(/FROM semantic_runs r/);
+      expect(peek).toContain('NOT EXISTS');
+      expect(peek).toContain("active.status = 'running'");
+      expect(peek).toContain('r.kind = ANY($3::text[])');
+      expect(peek).toContain('ORDER BY r.available_at ASC, r.created_at ASC, r.id ASC');
+    });
+
+    it('rechecks the exact identity and kind after the transaction lock and rolls back on failure', async () => {
+      const candidate = {
+        id: 'run-1',
+        indexId: 'idx-1',
+        kind: 'backfill',
+        idempotencyKey: 'backfill:initial',
+        idempotencyKeyVersion: 0,
+        status: 'queued',
+      };
+      mock = createMockPool([
+        { match: /FROM semantic_runs r/, rows: [candidate] },
+        {
+          match: /WHERE index_id = \$1 AND kind = \$2\s+AND status = 'queued'/,
+          rows: [candidate],
+        },
+        {
+          match: /UPDATE semantic_runs\s+SET status = 'running'/,
+          error: new Error('claim failed'),
+        },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool);
+
+      await expect(repo.claimRun({
+        owner: 'w', leaseMs: 60_000, now: T0, indexId: 'idx-1', kinds: ['backfill'],
+      })).rejects.toThrow('claim failed');
+
+      const advisory = mock.find(/pg_advisory_xact_lock/)!;
+      const recheck = mock.find(
+        /FROM semantic_runs WHERE index_id = \$1 AND kind = \$2 AND status = 'running'/,
+      )!;
+      expect(advisory).toContain('hashtext($1), hashtext($2)');
+      expect(recheck).toContain("status = 'running'");
+      expect(mock.sql()).toContain('ROLLBACK');
+      expect(mock.sql()).not.toContain('COMMIT');
     });
   });
 
   describe('run scheduling', () => {
     const existingRun = (overrides: Record<string, unknown>) => ({
-      match: /FROM semantic_runs WHERE idempotency_key = \$1 FOR UPDATE/,
+      match: /FROM semantic_runs\s+WHERE \(idempotency_key_version, idempotency_key\)/,
       rows: [{
         id: 'run-1', indexId: 'idx-1', kind: 'backfill', idempotencyKey: 'backfill:initial',
+        idempotencyKeyVersion: 0,
         status: 'succeeded', checkpoint: null, processedCount: 0, failedCount: 0,
         skippedCount: 0, attempt: 0, maxAttempts: 3, availableAt: T0, leaseOwner: null,
         leaseExpiresAt: null, errorMessage: null, createdAt: T0, updatedAt: T0,
@@ -332,7 +397,13 @@ describe('PostgresSemanticIndexRepository', () => {
           existingRun({ status, checkpoint: '{"kind":"task","after":"t-42"}', attempt: 3 }),
           {
             match: /INSERT INTO semantic_runs/,
-            rows: [{ id: 'run-2', status: 'queued', attempt: 0 }],
+            rows: [{
+              id: 'run-2',
+              idempotencyKey: 'backfill:initial',
+              idempotencyKeyVersion: 1,
+              status: 'queued',
+              attempt: 0,
+            }],
           },
         ]);
         const repo = new PostgresSemanticIndexRepository(mock.pool);
@@ -344,11 +415,13 @@ describe('PostgresSemanticIndexRepository', () => {
         // deleted, so the failure stays auditable.
         const moved = mock.find(/SET idempotency_key = \$1/);
         expect(moved, status).toBeDefined();
-        expect(mock.params.some((values) => values[0]
-          === supersededRunIdempotencyKey('backfill:initial', 'run-1')), status).toBe(true);
+        const supersededKey = supersededRunIdempotencyKey('backfill:initial', 'run-1');
+        const storedSupersededKey =
+          `mc-semantic-key:v1:${Buffer.from(supersededKey, 'utf16le').toString('base64url')}`;
+        expect(mock.params.some((values) => values[0] === storedSupersededKey), status).toBe(true);
         // The replacement resumes from where the failed run stopped.
         const insert = mock.sql().findIndex((sql) => sql.startsWith('INSERT INTO semantic_runs'));
-        expect(mock.params[insert][4], status).toBe('{"kind":"task","after":"t-42"}');
+        expect(mock.params[insert][5], status).toBe('{"kind":"task","after":"t-42"}');
       }
     });
   });
@@ -358,12 +431,18 @@ describe('PostgresSemanticIndexRepository', () => {
       mock = createMockPool([
         identityHandler(),
         {
-          match: /FROM semantic_intents\s+WHERE idempotency_key = \$1 AND status = 'queued'/,
-          rows: [{ id: 'existing', requestedAt: T0, status: 'queued' }],
+          match: /FROM semantic_intents\s+WHERE status = 'queued'/,
+          rows: [{
+            id: 'existing', idempotencyKey: 'k1', idempotencyKeyVersion: 0,
+            requestedAt: T0, status: 'queued',
+          }],
         },
         {
           match: /UPDATE semantic_intents\s+SET kind = \$1/,
-          rows: [{ id: 'existing', status: 'queued', sourceRevision: 'rev-2' }],
+          rows: [{
+            id: 'existing', idempotencyKey: 'k1', idempotencyKeyVersion: 0,
+            status: 'queued', sourceRevision: 'rev-2',
+          }],
         },
       ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
@@ -382,8 +461,15 @@ describe('PostgresSemanticIndexRepository', () => {
       mock = createMockPool([
         identityHandler(),
         {
-          match: /FROM semantic_intents\s+WHERE idempotency_key = \$1 AND status = 'queued'/,
-          rows: [{ id: 'existing', requestedAt: T1, sourceRevision: 'rev-2', status: 'queued' }],
+          match: /FROM semantic_intents\s+WHERE status = 'queued'/,
+          rows: [{
+            id: 'existing',
+            idempotencyKey: 'k1',
+            idempotencyKeyVersion: 0,
+            requestedAt: T1,
+            sourceRevision: 'rev-2',
+            status: 'queued',
+          }],
         },
       ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
@@ -399,16 +485,96 @@ describe('PostgresSemanticIndexRepository', () => {
       mock = createMockPool([
         identityHandler(),
         {
-          match: /WHERE idempotency_key = \$1 AND status = 'running' LIMIT 1/,
+          match: /WHERE status = 'running'\s+AND \(idempotency_key_version, idempotency_key\)/,
           rows: [{ id: 'running-1' }],
         },
-        { match: /INSERT INTO semantic_intents/, rows: [{ id: 'intent-2', status: 'queued' }] },
+        {
+          match: /INSERT INTO semantic_intents/,
+          rows: [{
+            id: 'intent-2', idempotencyKey: 'k1', idempotencyKeyVersion: 1, status: 'queued',
+          }],
+        },
       ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
 
       const result = await repo.enqueueIntent(makeIntent({ id: 'intent-2' }));
       expect(result.status).toBe('superseded');
       expect(mock.find(/INSERT INTO semantic_intents/)).toBeDefined();
+    });
+
+    it('encodes arbitrary keys only inside PostgreSQL and decodes returned rows', async () => {
+      const key = 'idx-1\u0000task\u0000task-1';
+      const storedKey = `mc-semantic-key:v1:${Buffer.from(key, 'utf16le').toString('base64url')}`;
+      mock = createMockPool([
+        identityHandler(),
+        {
+          match: /INSERT INTO semantic_intents/,
+          rows: [{
+            id: 'intent-1', idempotencyKey: storedKey,
+            idempotencyKeyVersion: 1, status: 'queued',
+          }],
+        },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool);
+
+      const result = await repo.enqueueIntent(makeIntent({ idempotencyKey: key }));
+
+      expect(result.intent.idempotencyKey).toBe(key);
+      expect(mock.params.some((values) => values.includes(storedKey))).toBe(true);
+      expect(mock.params.flat().some((value) =>
+        typeof value === 'string' && value.includes('\u0000')
+      )).toBe(false);
+    });
+
+    it('uses the version discriminator to preserve canonical legacy prefix lookalikes', async () => {
+      const encodedLogicalKey = 'logical-key';
+      const legacyLookalike =
+        `mc-semantic-key:v1:${Buffer.from(encodedLogicalKey, 'utf16le').toString('base64url')}`;
+      mock = createMockPool([
+        identityHandler(),
+        {
+          match: /FROM semantic_intents\s+WHERE status = 'queued'/,
+          rows: [{
+            id: 'legacy',
+            idempotencyKey: legacyLookalike,
+            idempotencyKeyVersion: 0,
+            requestedAt: T1,
+            status: 'queued',
+          }],
+        },
+      ]);
+      const repo = new PostgresSemanticIndexRepository(mock.pool);
+
+      const legacy = await repo.enqueueIntent(makeIntent({
+        id: 'new-legacy',
+        idempotencyKey: legacyLookalike,
+        requestedAt: T0,
+      }));
+      expect(legacy).toMatchObject({
+        status: 'ignored',
+        intent: { id: 'legacy', idempotencyKey: legacyLookalike },
+      });
+
+      mock = createMockPool([
+        identityHandler(),
+        {
+          match: /INSERT INTO semantic_intents/,
+          rows: [{
+            id: 'encoded',
+            idempotencyKey: legacyLookalike,
+            idempotencyKeyVersion: 1,
+            status: 'queued',
+          }],
+        },
+      ]);
+      const encodedRepo = new PostgresSemanticIndexRepository(mock.pool);
+      const encoded = await encodedRepo.enqueueIntent(makeIntent({
+        id: 'encoded',
+        idempotencyKey: encodedLogicalKey,
+      }));
+      expect(encoded.intent.idempotencyKey).toBe(encodedLogicalKey);
+      const insert = mock.sql().findIndex((sql) => sql.startsWith('INSERT INTO semantic_intents'));
+      expect(mock.params[insert].slice(1, 3)).toEqual([legacyLookalike, 1]);
     });
   });
 
@@ -1098,15 +1264,17 @@ describe('PostgresSemanticIndexRepository', () => {
   describe('failure handling', () => {
     it('retries with backoff while attempts remain and fails permanently afterwards', async () => {
       const running = {
-        id: 'i1', idempotencyKey: 'k1', attempt: 1, maxAttempts: 3, status: 'running',
+        id: 'i1', idempotencyKey: 'k1', idempotencyKeyVersion: 0,
+        attempt: 1, maxAttempts: 3, status: 'running',
       };
       mock = createMockPool([
         { match: /FROM semantic_intents\s+WHERE id = \$1 AND status = 'running'/, rows: [running] },
+        { match: /UPDATE semantic_intents/, rowCount: 1 },
       ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
 
       expect(await repo.failIntent({
-        id: 'i1', owner: 'w', error: 'boom', now: T0, retryAfter: T1,
+        id: 'i1', owner: 'w', attempt: 1, error: 'boom', now: T0, retryAfter: T1,
       })).toBe('queued');
       expect(mock.find(/SET status = 'queued', available_at/)).toBeDefined();
       expect(mock.params.some((values) => values[0] === T1)).toBe(true);
@@ -1116,9 +1284,12 @@ describe('PostgresSemanticIndexRepository', () => {
           match: /FROM semantic_intents\s+WHERE id = \$1 AND status = 'running'/,
           rows: [{ ...running, attempt: 3 }],
         },
+        { match: /UPDATE semantic_intents/, rowCount: 1 },
       ]);
       const exhausted = new PostgresSemanticIndexRepository(mock.pool);
-      expect(await exhausted.failIntent({ id: 'i1', owner: 'w', error: 'boom', now: T0 }))
+      expect(await exhausted.failIntent({
+        id: 'i1', owner: 'w', attempt: 3, error: 'boom', now: T0,
+      }))
         .toBe('failed');
       expect(mock.params.some((values) => values.includes('permanent-failure'))).toBe(true);
     });
@@ -1127,24 +1298,50 @@ describe('PostgresSemanticIndexRepository', () => {
       mock = createMockPool([
         {
           match: /FROM semantic_intents\s+WHERE id = \$1 AND status = 'running'/,
-          rows: [{ id: 'i1', idempotencyKey: 'k1', attempt: 1, maxAttempts: 3, status: 'running' }],
+          rows: [{
+            id: 'i1', idempotencyKey: 'k1', idempotencyKeyVersion: 0,
+            attempt: 1, maxAttempts: 3, status: 'running',
+          }],
         },
         {
-          match: /WHERE idempotency_key = \$1 AND status = 'queued' AND id <> \$2/,
+          match: /WHERE status = 'queued' AND id <> \$3/,
           rows: [{ id: 'i2' }],
         },
+        { match: /UPDATE semantic_intents/, rowCount: 1 },
       ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
 
-      expect(await repo.failIntent({ id: 'i1', owner: 'w', error: 'boom', now: T0 })).toBe('expired');
+      expect(await repo.failIntent({
+        id: 'i1', owner: 'w', attempt: 1, error: 'boom', now: T0,
+      })).toBe('expired');
       expect(mock.find(/SET status = 'expired', outcome = 'superseded'/)).toBeDefined();
     });
 
     it('claims a run without spending an attempt', async () => {
+      const run = {
+        id: 'r1',
+        indexId: 'idx-1',
+        kind: 'backfill',
+        idempotencyKey: 'k1',
+        idempotencyKeyVersion: 0,
+        status: 'queued',
+        attempt: 0,
+      };
+      mock = createMockPool([
+        { match: /FROM semantic_runs r/, rows: [run] },
+        {
+          match: /WHERE index_id = \$1 AND kind = \$2\s+AND status = 'queued'/,
+          rows: [run],
+        },
+        {
+          match: /UPDATE semantic_runs\s+SET status = 'running'/,
+          rows: [{ ...run, status: 'running', leaseOwner: 'w' }],
+        },
+      ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0, indexId: 'idx-1' });
 
-      const claim = mock.find(/WITH candidate AS/)!;
+      const claim = mock.find(/UPDATE semantic_runs SET status = 'running'/)!;
       // A yielded-and-reclaimed slice must not consume the retry budget, so the
       // claim leaves `attempt` alone.
       expect(claim).toContain("SET status = 'running'");
@@ -1153,14 +1350,18 @@ describe('PostgresSemanticIndexRepository', () => {
 
     it('increments the run attempt atomically with the failure it records', async () => {
       const running = {
-        id: 'r1', idempotencyKey: 'k1', attempt: 0, maxAttempts: 3, status: 'running',
+        id: 'r1', idempotencyKey: 'k1', idempotencyKeyVersion: 0,
+        attempt: 0, maxAttempts: 3, status: 'running',
       };
       mock = createMockPool([
         { match: /FROM semantic_runs\s+WHERE id = \$1 AND status = 'running'/, rows: [running] },
+        { match: /UPDATE semantic_runs/, rowCount: 1 },
       ]);
       const repo = new PostgresSemanticIndexRepository(mock.pool);
 
-      expect(await repo.failRun({ id: 'r1', owner: 'w', error: 'boom', now: T0 })).toBe('queued');
+      expect(await repo.failRun({
+        id: 'r1', owner: 'w', attempt: 0, error: 'boom', now: T0,
+      })).toBe('queued');
       const requeue = mock.find(/SET status = 'queued', attempt = \$1/)!;
       expect(requeue).toBeDefined();
       const values = mock.params[mock.sql().indexOf(requeue)];
@@ -1173,9 +1374,12 @@ describe('PostgresSemanticIndexRepository', () => {
           match: /FROM semantic_runs\s+WHERE id = \$1 AND status = 'running'/,
           rows: [{ ...running, attempt: 2 }],
         },
+        { match: /UPDATE semantic_runs/, rowCount: 1 },
       ]);
       const exhausted = new PostgresSemanticIndexRepository(mock.pool);
-      expect(await exhausted.failRun({ id: 'r1', owner: 'w', error: 'boom', now: T0 }))
+      expect(await exhausted.failRun({
+        id: 'r1', owner: 'w', attempt: 2, error: 'boom', now: T0,
+      }))
         .toBe('failed');
       expect(mock.find(/SET status = 'failed', attempt = \$1/)).toBeDefined();
       expect(mock.params.some((values) => values[0] === 3)).toBe(true);
@@ -1186,8 +1390,24 @@ describe('PostgresSemanticIndexRepository', () => {
         {
           match: /FROM semantic_runs\s+WHERE status = 'running' AND lease_expires_at/,
           rows: [
-            { id: 'r1', attempt: 0, maxAttempts: 3, status: 'running' },
-            { id: 'r2', attempt: 2, maxAttempts: 3, status: 'running' },
+            {
+              id: 'r1',
+              idempotencyKey: 'k1',
+              idempotencyKeyVersion: 0,
+              attempt: 0,
+              maxAttempts: 3,
+              status: 'running',
+              leaseOwner: 'w1',
+            },
+            {
+              id: 'r2',
+              idempotencyKey: 'k2',
+              idempotencyKeyVersion: 0,
+              attempt: 2,
+              maxAttempts: 3,
+              status: 'running',
+              leaseOwner: 'w2',
+            },
           ],
         },
         { match: /SET status = 'queued', attempt = \$1/, rowCount: 1 },
@@ -1203,20 +1423,31 @@ describe('PostgresSemanticIndexRepository', () => {
 
     it('returns null when the caller does not hold the lease', async () => {
       const repo = new PostgresSemanticIndexRepository(mock.pool);
-      expect(await repo.failIntent({ id: 'i1', owner: 'w', error: 'boom', now: T0 })).toBeNull();
-      expect(await repo.failRun({ id: 'r1', owner: 'w', error: 'boom', now: T0 })).toBeNull();
+      expect(await repo.failIntent({
+        id: 'i1', owner: 'w', attempt: 1, error: 'boom', now: T0,
+      })).toBeNull();
+      expect(await repo.failRun({
+        id: 'r1', owner: 'w', attempt: 0, error: 'boom', now: T0,
+      })).toBeNull();
     });
 
-    it('scopes lease renewal, completion, and release to the holding owner', async () => {
+    it('scopes lease mutations to the holding owner and attempt', async () => {
       const repo = new PostgresSemanticIndexRepository(mock.pool);
-      await repo.renewIntentLease({ id: 'i1', owner: 'w', leaseMs: 1_000, now: T0 });
-      await repo.completeIntent({ id: 'i1', owner: 'w', now: T0 });
-      await repo.renewRunLease({ id: 'r1', owner: 'w', leaseMs: 1_000, now: T0 });
-      await repo.releaseRun({ id: 'r1', owner: 'w', now: T0 });
-      await repo.checkpointRun({ id: 'r1', owner: 'w', now: T0, checkpoint: 'c' });
+      await repo.renewIntentLease({
+        id: 'i1', owner: 'w', attempt: 1, leaseMs: 1_000, now: T0,
+      });
+      await repo.completeIntent({ id: 'i1', owner: 'w', attempt: 1, now: T0 });
+      await repo.renewRunLease({
+        id: 'r1', owner: 'w', attempt: 0, leaseMs: 1_000, now: T0,
+      });
+      await repo.releaseRun({ id: 'r1', owner: 'w', attempt: 0, now: T0 });
+      await repo.checkpointRun({
+        id: 'r1', owner: 'w', attempt: 0, now: T0, checkpoint: 'c',
+      });
 
       for (const statement of mock.sql().filter((sql) => sql.startsWith('UPDATE'))) {
         expect(statement, statement).toContain('lease_owner = $');
+        expect(statement, statement).toContain('attempt = $');
       }
       expect(mock.find(/UPDATE semantic_intents SET lease_expires_at/))
         .toContain("status = 'running'");

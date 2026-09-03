@@ -6,6 +6,7 @@ import {
   SEMANTIC_TERMINAL_INTENT_STATUSES,
   SEMANTIC_WRITABLE_IDENTITY_STATUSES,
   SemanticIndexValidationError,
+  MAX_SEMANTIC_INTENT_CLAIM_BATCH,
   type SemanticActivationGate,
   type SemanticActivationResult,
   type SemanticCleanupResult,
@@ -29,6 +30,7 @@ import {
   type SemanticIntentEnqueue,
   type SemanticIntentEnqueueResult,
   type SemanticIntentFailure,
+  type SemanticIntentLeaseFence,
   type SemanticIntentKind,
   type SemanticIntentQueueMetrics,
   type SemanticIntentStatus,
@@ -79,6 +81,19 @@ import {
 } from './validation';
 
 type SqliteDatabase = Database.Database;
+
+function holdsIntentLease(
+  db: SqliteDatabase,
+  fence: SemanticIntentLeaseFence | undefined,
+  now: string,
+): boolean {
+  if (!fence) return true;
+  return db.prepare(`
+    SELECT 1 FROM semantic_intents
+    WHERE id = ? AND status = 'running' AND lease_owner = ?
+      AND attempt = ? AND lease_expires_at > ?
+  `).get(fence.intentId, fence.owner, fence.attempt, now) !== undefined;
+}
 
 // ─── Row shapes ─────────────────────────────────────────────────────────────
 
@@ -846,6 +861,9 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
 
   async upsertDocument(document: SemanticDocumentWrite): Promise<SemanticDocumentWriteResult> {
     return this.db.transaction((): SemanticDocumentWriteResult => {
+      if (!holdsIntentLease(this.db, document.leaseFence, document.now)) {
+        return { status: 'stale', document: null, reason: 'lease-lost' };
+      }
       const identity = this.requireWritableIdentity(document.indexId);
       validateDocumentWrite(document, identity);
 
@@ -998,8 +1016,12 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
     entityId: string;
     now: string;
     sourceUpdatedAt?: string;
+    leaseFence?: SemanticIntentLeaseFence;
   }): Promise<SemanticDocumentDeleteResult> {
     return this.db.transaction((): SemanticDocumentDeleteResult => {
+      if (!holdsIntentLease(this.db, input.leaseFence, input.now)) {
+        return { status: 'lease-lost', removedVectors: 0 };
+      }
       const existing = this.documentRow(input.indexId, input.entityType, input.entityId);
       if (!existing) return { status: 'missing', removedVectors: 0 };
       if (existing.deleted_at !== null) return { status: 'already-deleted', removedVectors: 0 };
@@ -1083,6 +1105,9 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
 
   async upsertVector(vector: SemanticVectorWrite): Promise<SemanticVectorWriteResult> {
     return this.db.transaction((): SemanticVectorWriteResult => {
+      if (!holdsIntentLease(this.db, vector.leaseFence, vector.now)) {
+        return { status: 'stale', reason: 'lease-lost' };
+      }
       const identity = this.requireWritableIdentity(vector.indexId);
       const norm = validateVectorWrite(vector, identity);
 
@@ -1470,7 +1495,10 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
   }
 
   async claimIntents(request: SemanticIntentClaimRequest): Promise<SemanticIntent[]> {
-    const limit = Math.max(1, Math.trunc(request.limit) || 1);
+    const limit = Math.min(
+      MAX_SEMANTIC_INTENT_CLAIM_BATCH,
+      Math.max(1, Math.trunc(request.limit) || 1),
+    );
     if (request.entityTypes?.length === 0) return [];
     return this.db.transaction((): SemanticIntent[] => {
       this.recoverExpiredIntentLeasesSync(request.now);
@@ -1513,14 +1541,23 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
   async renewIntentLease(input: {
     id: string;
     owner: string;
+    attempt: number;
     leaseMs: number;
     now: string;
   }): Promise<boolean> {
     const result = this.db.prepare(`
       UPDATE semantic_intents
       SET lease_expires_at = ?, updated_at = ?
-      WHERE id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?
-    `).run(addMs(input.now, input.leaseMs), input.now, input.id, input.owner, input.now);
+      WHERE id = ? AND status = 'running' AND lease_owner = ?
+        AND attempt = ? AND lease_expires_at > ?
+    `).run(
+      addMs(input.now, input.leaseMs),
+      input.now,
+      input.id,
+      input.owner,
+      input.attempt,
+      input.now,
+    );
     return result.changes > 0;
   }
 
@@ -1530,7 +1567,16 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       SET status = 'succeeded', outcome = ?, completed_at = ?, updated_at = ?,
           lease_owner = NULL, lease_expires_at = NULL, last_error = NULL
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(input.outcome ?? 'succeeded', input.now, input.now, input.id, input.owner);
+        AND attempt = ? AND lease_expires_at > ?
+    `).run(
+      input.outcome ?? 'succeeded',
+      input.now,
+      input.now,
+      input.id,
+      input.owner,
+      input.attempt,
+      input.now,
+    );
     return result.changes > 0;
   }
 
@@ -1539,7 +1585,8 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       const row = this.db.prepare(`
         SELECT * FROM semantic_intents
         WHERE id = ? AND status = 'running' AND lease_owner = ?
-      `).get(input.id, input.owner) as IntentRow | undefined;
+          AND attempt = ? AND lease_expires_at > ?
+      `).get(input.id, input.owner, input.attempt, input.now) as IntentRow | undefined;
       if (!row) return null;
 
       const next = resolveIntentFailureStatus({
@@ -1560,36 +1607,65 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
         `).get(row.idempotency_key, row.id) as { 1: number } | undefined;
 
         if (superseding) {
-          this.db.prepare(`
+          const changed = this.db.prepare(`
             UPDATE semantic_intents
             SET status = 'expired', outcome = 'superseded', last_error = ?,
                 completed_at = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
-            WHERE id = ?
-          `).run(input.error, input.now, input.now, row.id);
+            WHERE id = ? AND status = 'running' AND lease_owner = ?
+              AND attempt = ? AND lease_expires_at > ?
+          `).run(
+            input.error,
+            input.now,
+            input.now,
+            row.id,
+            input.owner,
+            input.attempt,
+            input.now,
+          ).changes;
+          if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during failure`);
           return 'expired';
         }
 
         const availableAt = input.retryAfter
           ?? computeSemanticRetryAt(input.now, row.attempt);
-        this.db.prepare(`
+        const changed = this.db.prepare(`
           UPDATE semantic_intents
           SET status = 'queued', available_at = ?, retry_after = ?, last_error = ?,
               lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-          WHERE id = ?
-        `).run(availableAt, input.retryAfter ?? null, input.error, input.now, row.id);
+          WHERE id = ? AND status = 'running' AND lease_owner = ?
+            AND attempt = ? AND lease_expires_at > ?
+        `).run(
+          availableAt,
+          input.retryAfter ?? null,
+          input.error,
+          input.now,
+          row.id,
+          input.owner,
+          input.attempt,
+          input.now,
+        ).changes;
+        if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during failure`);
         return 'queued';
       }
 
-      this.db.prepare(`
+      const changed = this.db.prepare(`
         UPDATE semantic_intents
         SET status = ?, outcome = ?, last_error = ?, completed_at = ?,
             updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
-        WHERE id = ?
+        WHERE id = ? AND status = 'running' AND lease_owner = ?
+          AND attempt = ? AND lease_expires_at > ?
       `).run(
         next,
         next === 'denied' ? 'denied' : 'permanent-failure',
-        input.error, input.now, input.now, row.id,
-      );
+        input.error,
+        input.now,
+        input.now,
+        row.id,
+        input.owner,
+        input.attempt,
+        input.now,
+      ).changes;
+      if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during failure`);
       return next;
     })();
   }
@@ -1617,24 +1693,43 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       `).get(row.idempotency_key, row.id) as { 1: number } | undefined;
 
       if (!superseding && row.attempt < row.max_attempts) {
-        this.db.prepare(`
+        const changed = this.db.prepare(`
           UPDATE semantic_intents
           SET status = 'queued', available_at = ?, lease_owner = NULL,
               lease_expires_at = NULL, last_error = 'Lease expired before completion',
               updated_at = ?
-          WHERE id = ? AND status = 'running'
-        `).run(computeSemanticRetryAt(now, row.attempt), now, row.id);
-        requeued += 1;
+          WHERE id = ? AND status = 'running' AND attempt = ?
+            AND lease_owner = ? AND lease_expires_at <= ?
+        `).run(
+          computeSemanticRetryAt(now, row.attempt),
+          now,
+          row.id,
+          row.attempt,
+          row.lease_owner,
+          now,
+        ).changes;
+        if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during recovery`);
+        requeued += changed;
         continue;
       }
 
-      this.db.prepare(`
+      const changed = this.db.prepare(`
         UPDATE semantic_intents
         SET status = 'expired', outcome = ?, last_error = 'Lease expired before completion',
             completed_at = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
-        WHERE id = ? AND status = 'running'
-      `).run(superseding ? 'superseded' : 'attempts-exhausted', now, now, row.id);
-      expired += 1;
+        WHERE id = ? AND status = 'running' AND attempt = ?
+          AND lease_owner = ? AND lease_expires_at <= ?
+      `).run(
+        superseding ? 'superseded' : 'attempts-exhausted',
+        now,
+        now,
+        row.id,
+        row.attempt,
+        row.lease_owner,
+        now,
+      ).changes;
+      if (changed !== 1) throw new Error(`Semantic intent ${row.id} lease changed during recovery`);
+      expired += changed;
     }
     return { requeued, expired };
   }
@@ -1744,14 +1839,23 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
   async renewRunLease(input: {
     id: string;
     owner: string;
+    attempt: number;
     leaseMs: number;
     now: string;
   }): Promise<boolean> {
     const result = this.db.prepare(`
       UPDATE semantic_runs
       SET lease_expires_at = ?, updated_at = ?
-      WHERE id = ? AND status = 'running' AND lease_owner = ? AND lease_expires_at > ?
-    `).run(addMs(input.now, input.leaseMs), input.now, input.id, input.owner, input.now);
+      WHERE id = ? AND status = 'running' AND lease_owner = ?
+        AND attempt = ? AND lease_expires_at > ?
+    `).run(
+      addMs(input.now, input.leaseMs),
+      input.now,
+      input.id,
+      input.owner,
+      input.attempt,
+      input.now,
+    );
     return result.changes > 0;
   }
 
@@ -1768,6 +1872,7 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
           lease_expires_at = COALESCE(?, lease_expires_at),
           updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
+        AND attempt = ? AND lease_expires_at > ?
     `).run(
       input.checkpoint ?? null,
       input.processedDelta ?? 0,
@@ -1777,6 +1882,8 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       input.now,
       input.id,
       input.owner,
+      input.attempt,
+      input.now,
     );
     return result.changes > 0;
   }
@@ -1784,6 +1891,7 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
   async releaseRun(input: {
     id: string;
     owner: string;
+    attempt: number;
     now: string;
     availableAt?: string;
   }): Promise<boolean> {
@@ -1792,7 +1900,15 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       SET status = 'queued', available_at = ?, lease_owner = NULL,
           lease_expires_at = NULL, updated_at = ?
       WHERE id = ? AND status = 'running' AND lease_owner = ?
-    `).run(input.availableAt ?? input.now, input.now, input.id, input.owner);
+        AND attempt = ? AND lease_expires_at > ?
+    `).run(
+      input.availableAt ?? input.now,
+      input.now,
+      input.id,
+      input.owner,
+      input.attempt,
+      input.now,
+    );
     return result.changes > 0;
   }
 
@@ -1802,6 +1918,7 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       SET status = ?, checkpoint = COALESCE(?, checkpoint), completed_at = ?,
           updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
       WHERE id = ? AND status = 'running' AND lease_owner = ?
+        AND attempt = ? AND lease_expires_at > ?
     `).run(
       input.status ?? 'succeeded',
       input.checkpoint ?? null,
@@ -1809,6 +1926,8 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       input.now,
       input.id,
       input.owner,
+      input.attempt,
+      input.now,
     );
     return result.changes > 0;
   }
@@ -1818,7 +1937,8 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       const row = this.db.prepare(`
         SELECT * FROM semantic_runs
         WHERE id = ? AND status = 'running' AND lease_owner = ?
-      `).get(input.id, input.owner) as RunRow | undefined;
+          AND attempt = ? AND lease_expires_at > ?
+      `).get(input.id, input.owner, input.attempt, input.now) as RunRow | undefined;
       if (!row) return null;
 
       // `attempt` counts *failures*, not claims: a run that yields its slice and
@@ -1827,27 +1947,43 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       const attempt = row.attempt + 1;
       const retry = !input.terminal && attempt < row.max_attempts;
       if (retry) {
-        this.db.prepare(`
+        const changed = this.db.prepare(`
           UPDATE semantic_runs
           SET status = 'queued', attempt = ?, available_at = ?, error_message = ?,
               lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-          WHERE id = ?
+          WHERE id = ? AND status = 'running' AND lease_owner = ?
+            AND attempt = ? AND lease_expires_at > ?
         `).run(
           attempt,
           input.availableAt ?? computeSemanticRetryAt(input.now, attempt),
           input.error,
           input.now,
           row.id,
-        );
+          input.owner,
+          input.attempt,
+          input.now,
+        ).changes;
+        if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during failure`);
         return 'queued';
       }
 
-      this.db.prepare(`
+      const changed = this.db.prepare(`
         UPDATE semantic_runs
         SET status = 'failed', attempt = ?, error_message = ?, completed_at = ?, updated_at = ?,
             lease_owner = NULL, lease_expires_at = NULL
-        WHERE id = ?
-      `).run(attempt, input.error, input.now, input.now, row.id);
+        WHERE id = ? AND status = 'running' AND lease_owner = ?
+          AND attempt = ? AND lease_expires_at > ?
+      `).run(
+        attempt,
+        input.error,
+        input.now,
+        input.now,
+        row.id,
+        input.owner,
+        input.attempt,
+        input.now,
+      ).changes;
+      if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during failure`);
       return 'failed';
     })();
   }
@@ -1874,23 +2010,35 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
       if (attempt < row.max_attempts) {
         // The checkpoint is deliberately preserved so recovery resumes rather
         // than restarting the backfill from the beginning.
-        this.db.prepare(`
+        const changed = this.db.prepare(`
           UPDATE semantic_runs
           SET status = 'queued', attempt = ?, available_at = ?, lease_owner = NULL,
               lease_expires_at = NULL, error_message = 'Lease expired before completion',
               updated_at = ?
-          WHERE id = ? AND status = 'running'
-        `).run(attempt, computeSemanticRetryAt(now, attempt), now, row.id);
-        requeued += 1;
+          WHERE id = ? AND status = 'running' AND attempt = ?
+            AND lease_owner = ? AND lease_expires_at <= ?
+        `).run(
+          attempt,
+          computeSemanticRetryAt(now, attempt),
+          now,
+          row.id,
+          row.attempt,
+          row.lease_owner,
+          now,
+        ).changes;
+        if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during recovery`);
+        requeued += changed;
         continue;
       }
-      this.db.prepare(`
+      const changed = this.db.prepare(`
         UPDATE semantic_runs
         SET status = 'expired', attempt = ?, error_message = 'Lease expired before completion',
             completed_at = ?, updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
-        WHERE id = ? AND status = 'running'
-      `).run(attempt, now, now, row.id);
-      expired += 1;
+        WHERE id = ? AND status = 'running' AND attempt = ?
+          AND lease_owner = ? AND lease_expires_at <= ?
+      `).run(attempt, now, now, row.id, row.attempt, row.lease_owner, now).changes;
+      if (changed !== 1) throw new Error(`Semantic run ${row.id} lease changed during recovery`);
+      expired += changed;
     }
     return { requeued, expired };
   }

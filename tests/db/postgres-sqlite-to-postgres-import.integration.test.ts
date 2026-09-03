@@ -1,7 +1,17 @@
+import {
+  cpSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { createPostgresPool } from '@/db/postgres/connection';
 import { resolvePostgresConfig } from '@/db/postgres/config';
+import { runPostgresMigrations } from '@/db/postgres/migrations';
 import {
   copyAllTables,
   runSqliteToPostgresImport,
@@ -90,7 +100,326 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
         "SELECT COUNT(*)::text AS count FROM task_search_documents WHERE search_vector @@ websearch_to_tsquery('english', 'cobaltqueue')",
       );
       expect(Number(search.rows[0]?.count)).toBeGreaterThan(0);
+
+      const semanticVersions = await pool.query<{
+        column_name: string;
+        column_default: string | null;
+        is_nullable: string;
+      }>(`
+        SELECT column_name, column_default, is_nullable
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name IN ('semantic_intents', 'semantic_runs')
+          AND column_name = 'idempotency_key_version'
+        ORDER BY table_name
+      `);
+      expect(semanticVersions.rows).toHaveLength(2);
+      expect(semanticVersions.rows).toEqual([
+        expect.objectContaining({
+          column_name: 'idempotency_key_version',
+          column_default: expect.stringMatching(/^0(?:::integer)?$/),
+          is_nullable: 'NO',
+        }),
+        expect.objectContaining({
+          column_name: 'idempotency_key_version',
+          column_default: expect.stringMatching(/^0(?:::integer)?$/),
+          is_nullable: 'NO',
+        }),
+      ]);
+
+      const migrationCount = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM drizzle.__drizzle_migrations
+        WHERE created_at = 1788486400000
+      `);
+      expect(migrationCount.rows[0]?.count).toBe('1');
+      await runPostgresMigrations(pool);
+      const rerunMigrationCount = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM drizzle.__drizzle_migrations
+        WHERE created_at = 1788486400000
+      `);
+      expect(rerunMigrationCount.rows[0]?.count).toBe('1');
     } finally {
+      await pool.end();
+    }
+  }, 120_000);
+
+  it('imports legacy semantic rows without PostgreSQL-only columns as version zero', async () => {
+    assertSafeIntegrationTestTarget(postgresUrl);
+    const pool = createPostgresPool(resolvePostgresConfig({
+      MC_POSTGRES_URL: postgresUrl,
+      MC_POSTGRES_APPLICATION_NAME: 'mission-control-semantic-import-integration-test',
+    }));
+    const sqlite = new Database(':memory:');
+    const identityId = `semantic-import-${process.pid}-${Date.now()}`;
+    const intentId = `${identityId}-intent`;
+    const runId = `${identityId}-run`;
+    const legacyIntentKey = `mc-semantic-key:v1:${
+      Buffer.from(`${identityId}:intent`, 'utf16le').toString('base64url')
+    }`;
+    const legacyRunKey = `mc-semantic-key:v1:${
+      Buffer.from(`${identityId}:run`, 'utf16le').toString('base64url')
+    }`;
+    const now = new Date().toISOString();
+    sqlite.exec(`
+      CREATE TABLE semantic_intents (
+        id TEXT PRIMARY KEY,
+        idempotency_key TEXT NOT NULL,
+        index_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        source_revision TEXT,
+        content_fingerprint TEXT,
+        projection_version INTEGER,
+        requested_at TEXT NOT NULL,
+        status TEXT NOT NULL,
+        attempt INTEGER NOT NULL,
+        max_attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        retry_after TEXT,
+        last_error TEXT,
+        outcome TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        completed_at TEXT
+      );
+      CREATE TABLE semantic_runs (
+        id TEXT PRIMARY KEY,
+        index_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        idempotency_key TEXT NOT NULL,
+        status TEXT NOT NULL,
+        checkpoint TEXT,
+        processed_count INTEGER NOT NULL,
+        failed_count INTEGER NOT NULL,
+        skipped_count INTEGER NOT NULL,
+        attempt INTEGER NOT NULL,
+        max_attempts INTEGER NOT NULL,
+        available_at TEXT NOT NULL,
+        lease_owner TEXT,
+        lease_expires_at TEXT,
+        error_message TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT
+      );
+    `);
+    sqlite.prepare(`
+      INSERT INTO semantic_intents
+      VALUES (?, ?, ?, 'upsert', 'task', 'legacy-task', '1', 'fingerprint', 1, ?,
+        'queued', 0, 5, ?, NULL, NULL, NULL, NULL, NULL, ?, ?, NULL)
+    `).run(intentId, legacyIntentKey, identityId, now, now, now, now);
+    sqlite.prepare(`
+      INSERT INTO semantic_runs
+      VALUES (?, ?, 'backfill', ?, 'queued', NULL, 0, 0, 0, 0, 3, ?,
+        NULL, NULL, NULL, ?, ?, NULL, NULL)
+    `).run(runId, identityId, legacyRunKey, now, now, now);
+
+    const validateSource = vi.fn();
+    try {
+      await pool.query(
+        `INSERT INTO semantic_index_identities
+          (id, provider, model, dimensions, projection_version, status,
+           document_count, vector_count, created_at, updated_at)
+         VALUES ($1, 'test', 'test', 3, 1, 'building', 0, 0, $2, $2)`,
+        [identityId, now],
+      );
+      const columnResult = await pool.query<{
+        table_name: string;
+        column_name: string;
+        data_type: string;
+        udt_name: string;
+        is_nullable: string;
+        column_default: string | null;
+        is_generated: string;
+      }>(`
+        SELECT table_name, column_name, data_type, udt_name, is_nullable,
+          column_default, is_generated
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name IN ('semantic_intents', 'semantic_runs')
+        ORDER BY ordinal_position
+      `);
+      const columnsByTable = new Map(
+        ['semantic_intents', 'semantic_runs'].map((table) => [
+          table,
+          columnResult.rows
+            .filter((column) => column.table_name === table)
+            .map((column) => ({
+              name: column.column_name,
+              dataType: column.data_type,
+              udtName: column.udt_name,
+              nullable: column.is_nullable === 'YES',
+              hasDefault: column.column_default !== null,
+              generated: column.is_generated !== 'NEVER',
+            })),
+        ]),
+      );
+
+      const counts = await copyAllTables(
+        pool,
+        sqlite,
+        ['semantic_intents', 'semantic_runs'],
+        columnsByTable,
+        [],
+        validateSource,
+      );
+      expect(counts).toEqual([
+        { table: 'semantic_intents', sourceRows: 1, targetRows: 1 },
+        { table: 'semantic_runs', sourceRows: 1, targetRows: 1 },
+      ]);
+      expect(validateSource).toHaveBeenCalledOnce();
+
+      const intent = await pool.query<{
+        idempotency_key: string;
+        idempotency_key_version: number;
+      }>(
+        `SELECT idempotency_key, idempotency_key_version
+         FROM semantic_intents WHERE id = $1`,
+        [intentId],
+      );
+      expect(intent.rows[0]).toEqual({
+        idempotency_key: legacyIntentKey,
+        idempotency_key_version: 0,
+      });
+      const run = await pool.query<{
+        idempotency_key: string;
+        idempotency_key_version: number;
+      }>(
+        `SELECT idempotency_key, idempotency_key_version
+         FROM semantic_runs WHERE id = $1`,
+        [runId],
+      );
+      expect(run.rows[0]).toEqual({
+        idempotency_key: legacyRunKey,
+        idempotency_key_version: 0,
+      });
+
+      const planClient = await pool.connect();
+      try {
+        await planClient.query('BEGIN');
+        await planClient.query('SET LOCAL enable_seqscan = off');
+        const intentLookupPlan = await planClient.query(
+          `EXPLAIN (FORMAT JSON)
+           SELECT id FROM semantic_intents
+           WHERE status = 'queued'
+             AND idempotency_key_version = 0
+             AND idempotency_key = $1`,
+          [legacyIntentKey],
+        );
+        expect(JSON.stringify(intentLookupPlan.rows))
+          .toContain('idx_semantic_intents_pending');
+        const runLookupPlan = await planClient.query(
+          `EXPLAIN (FORMAT JSON)
+           SELECT id FROM semantic_runs
+           WHERE idempotency_key_version = 0
+             AND idempotency_key = $1`,
+          [legacyRunKey],
+        );
+        expect(JSON.stringify(runLookupPlan.rows))
+          .toContain('idx_semantic_runs_idempotency');
+        const intentClaimPlan = await planClient.query(
+          `EXPLAIN (FORMAT JSON)
+           SELECT id FROM semantic_intents
+           WHERE index_id = $1 AND status = 'queued' AND available_at <= $2
+           ORDER BY requested_at, created_at, id
+           LIMIT 1`,
+          [identityId, now],
+        );
+        expect(JSON.stringify(intentClaimPlan.rows))
+          .toContain('idx_semantic_intents_claim');
+        const runClaimPlan = await planClient.query(
+          `EXPLAIN (FORMAT JSON)
+           SELECT id FROM semantic_runs
+           WHERE status = 'queued' AND available_at <= $1
+           ORDER BY available_at, created_at, id
+           LIMIT 1`,
+          [now],
+        );
+        expect(JSON.stringify(runClaimPlan.rows))
+          .toContain('idx_semantic_runs_claim');
+        await planClient.query('ROLLBACK');
+      } finally {
+        planClient.release();
+      }
+    } finally {
+      await pool.query(
+        'DELETE FROM semantic_index_identities WHERE id = $1',
+        [identityId],
+      );
+      sqlite.close();
+      await pool.end();
+    }
+  }, 120_000);
+
+  it('rolls back a failed additive migration and records it only after success', async () => {
+    assertSafeIntegrationTestTarget(postgresUrl);
+    const pool = createPostgresPool(resolvePostgresConfig({
+      MC_POSTGRES_URL: postgresUrl,
+      MC_POSTGRES_APPLICATION_NAME: 'mission-control-migration-atomicity-test',
+    }));
+    const migrationDirectory = mkdtempSync(join(tmpdir(), 'mc-pg-migrations-'));
+    try {
+      cpSync(resolve(process.cwd(), 'drizzle', 'postgres'), migrationDirectory, {
+        recursive: true,
+      });
+      const journalPath = join(migrationDirectory, 'meta', '_journal.json');
+      const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+        entries: Array<{
+          idx: number;
+          version: string;
+          when: number;
+          tag: string;
+          breakpoints: boolean;
+        }>;
+      };
+      journal.entries.push({
+        idx: 4,
+        version: '7',
+        when: 1788486400001,
+        tag: '0004_atomicity_probe',
+        breakpoints: true,
+      });
+      writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
+      writeFileSync(
+        join(migrationDirectory, '0004_atomicity_probe.sql'),
+        'CREATE TABLE "migration_atomicity_probe" ("id" integer);--> statement-breakpoint\nSELECT missing_atomicity_probe_function();\n',
+      );
+
+      await expect(runPostgresMigrations(pool, {
+        migrationsFolder: migrationDirectory,
+      })).rejects.toThrow();
+      const rolledBack = await pool.query<{ table_name: string | null }>(
+        "SELECT to_regclass('public.migration_atomicity_probe')::text AS table_name",
+      );
+      expect(rolledBack.rows[0]?.table_name).toBeNull();
+      const failedHistory = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM drizzle.__drizzle_migrations
+        WHERE created_at = 1788486400001
+      `);
+      expect(failedHistory.rows[0]?.count).toBe('0');
+
+      writeFileSync(
+        join(migrationDirectory, '0004_atomicity_probe.sql'),
+        'CREATE TABLE "migration_atomicity_probe" ("id" integer);\n',
+      );
+      await runPostgresMigrations(pool, { migrationsFolder: migrationDirectory });
+      await runPostgresMigrations(pool, { migrationsFolder: migrationDirectory });
+      const appliedHistory = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM drizzle.__drizzle_migrations
+        WHERE created_at = 1788486400001
+      `);
+      expect(appliedHistory.rows[0]?.count).toBe('1');
+    } finally {
+      await pool.query('DROP TABLE IF EXISTS migration_atomicity_probe');
+      rmSync(migrationDirectory, { recursive: true, force: true });
       await pool.end();
     }
   }, 120_000);

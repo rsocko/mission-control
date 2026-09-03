@@ -9,9 +9,9 @@ import {
 import { sql } from 'drizzle-orm';
 
 /**
- * PostgreSQL mirror of `src/db/schema/semantic-index.ts`. Column order, types,
- * nullability, defaults, index names, and foreign keys must match the SQLite
- * definitions exactly — `tests/db/postgres-schema.test.ts` asserts full parity.
+ * PostgreSQL mirror of `src/db/schema/semantic-index.ts`. The only additive
+ * columns are the PostgreSQL key-encoding discriminators needed because PG text
+ * rejects NUL; `tests/db/postgres-schema.test.ts` asserts that narrow exception.
  */
 
 // ─── Index identities ───────────────────────────────────────────────────────
@@ -136,6 +136,7 @@ export type SemanticIntentStatus =
 export const semanticIntents = pgTable('semantic_intents', {
   id: text('id').primaryKey(),
   idempotencyKey: text('idempotency_key').notNull(),
+  idempotencyKeyVersion: integer('idempotency_key_version').notNull().default(0),
   indexId: text('index_id')
     .notNull()
     .references(() => semanticIndexIdentities.id, { onDelete: 'cascade' }),
@@ -160,7 +161,7 @@ export const semanticIntents = pgTable('semantic_intents', {
   completedAt: text('completed_at'),
 }, (table) => [
   uniqueIndex('idx_semantic_intents_pending')
-    .on(table.idempotencyKey)
+    .on(table.idempotencyKeyVersion, table.idempotencyKey)
     .where(sql`${table.status} = 'queued'`),
   index('idx_semantic_intents_claim')
     .on(table.indexId, table.status, table.availableAt, table.requestedAt),
@@ -191,6 +192,7 @@ export const semanticRuns = pgTable('semantic_runs', {
     .references(() => semanticIndexIdentities.id, { onDelete: 'cascade' }),
   kind: text('kind').$type<SemanticRunKind>().notNull(),
   idempotencyKey: text('idempotency_key').notNull(),
+  idempotencyKeyVersion: integer('idempotency_key_version').notNull().default(0),
   status: text('status').$type<SemanticRunStatus>().notNull(),
   checkpoint: text('checkpoint'),
   processedCount: integer('processed_count').notNull().default(0),
@@ -208,7 +210,7 @@ export const semanticRuns = pgTable('semantic_runs', {
   completedAt: text('completed_at'),
 }, (table) => [
   uniqueIndex('idx_semantic_runs_idempotency')
-    .on(table.idempotencyKey),
+    .on(table.idempotencyKeyVersion, table.idempotencyKey),
   uniqueIndex('idx_semantic_runs_active')
     .on(table.indexId, table.kind)
     .where(sql`${table.status} = 'running'`),

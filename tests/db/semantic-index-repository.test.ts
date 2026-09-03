@@ -1055,6 +1055,20 @@ describe('SqliteSemanticIndexRepository', () => {
       })).toEqual([]);
     });
 
+    it('clamps oversized intent claims to the shared maximum batch', async () => {
+      for (let index = 0; index < 205; index++) {
+        await repo.enqueueIntent(makeIntent({
+          id: `intent-${index}`,
+          idempotencyKey: `key-${index}`,
+          entityId: `task-${index}`,
+        }));
+      }
+
+      expect(await repo.claimIntents({
+        indexId: 'idx-1', owner: 'worker-a', limit: 10_000, leaseMs: 60_000, now: T0,
+      })).toHaveLength(200);
+    });
+
     it('honours availableAt so retried work is not claimed early', async () => {
       await repo.enqueueIntent(makeIntent({ availableAt: T2 }));
       expect(await repo.claimIntents({
@@ -1068,51 +1082,140 @@ describe('SqliteSemanticIndexRepository', () => {
     it('renews a lease only for the holding owner', async () => {
       await repo.enqueueIntent(makeIntent());
       await repo.claimIntents({
-        indexId: 'idx-1', owner: 'worker-a', limit: 10, leaseMs: 60_000, now: T0,
+        indexId: 'idx-1', owner: 'worker-a', limit: 10, leaseMs: 7_200_000, now: T0,
       });
 
       expect(await repo.renewIntentLease({
-        id: 'intent-1', owner: 'worker-b', leaseMs: 60_000, now: T0,
+        id: 'intent-1', owner: 'worker-b', attempt: 1, leaseMs: 60_000, now: T0,
       })).toBe(false);
       expect(await repo.renewIntentLease({
-        id: 'intent-1', owner: 'worker-a', leaseMs: 120_000, now: T0,
+        id: 'intent-1', owner: 'worker-a', attempt: 1, leaseMs: 120_000, now: T0,
       })).toBe(true);
       expect((await repo.getIntent('intent-1'))?.leaseExpiresAt)
         .toBe('2026-08-29T00:02:00.000Z');
     });
 
+    it('fences every stale same-owner intent mutation after recovery and reclaim', async () => {
+      await seedIndexedTask();
+      await repo.enqueueIntent(makeIntent());
+      await repo.claimIntents({
+        indexId: 'idx-1', owner: 'worker-a', limit: 1, leaseMs: 1_000, now: T0,
+      });
+      expect(await repo.recoverExpiredIntentLeases(T1))
+        .toEqual({ requeued: 1, expired: 0 });
+      const availableAt = (await repo.getIntent('intent-1'))!.availableAt;
+      expect(await repo.claimIntents({
+        indexId: 'idx-1',
+        owner: 'worker-a',
+        limit: 1,
+        leaseMs: 60_000,
+        now: availableAt,
+      })).toMatchObject([{ attempt: 2, leaseOwner: 'worker-a' }]);
+
+      expect(await repo.renewIntentLease({
+        id: 'intent-1',
+        owner: 'worker-a',
+        attempt: 1,
+        leaseMs: 60_000,
+        now: availableAt,
+      })).toBe(false);
+      expect(await repo.completeIntent({
+        id: 'intent-1', owner: 'worker-a', attempt: 1, now: availableAt,
+      })).toBe(false);
+      expect(await repo.failIntent({
+        id: 'intent-1',
+        owner: 'worker-a',
+        attempt: 1,
+        error: 'stale failure',
+        now: availableAt,
+      })).toBeNull();
+      expect(await repo.upsertDocument(makeDocument({
+        title: 'stale title',
+        sourceRevision: 'rev-stale-worker',
+        sourceUpdatedAt: T2,
+        now: availableAt,
+        leaseFence: { intentId: 'intent-1', owner: 'worker-a', attempt: 1 },
+      }))).toEqual({ status: 'stale', document: null, reason: 'lease-lost' });
+      expect(await repo.upsertVector(makeVector({
+        embedding: new Float32Array([0, 1, 0]),
+        now: availableAt,
+        leaseFence: { intentId: 'intent-1', owner: 'worker-a', attempt: 1 },
+      }))).toEqual({ status: 'stale', reason: 'lease-lost' });
+      expect(await repo.deleteDocument({
+        indexId: 'idx-1',
+        entityType: 'task',
+        entityId: 'task-1',
+        now: availableAt,
+        leaseFence: { intentId: 'intent-1', owner: 'worker-a', attempt: 1 },
+      })).toEqual({ status: 'lease-lost', removedVectors: 0 });
+      expect(await repo.getDocument('idx-1', 'task', 'task-1'))
+        .toMatchObject({ title: 'Ship the semantic index', deletedAt: null });
+      expect(await repo.getVector('idx-1', 'task', 'task-1')).not.toBeNull();
+      expect(await repo.completeIntent({
+        id: 'intent-1', owner: 'worker-a', attempt: 2, now: availableAt,
+      })).toBe(true);
+    });
+
+    it('rejects intent failure and settlement exactly at the lease expiry boundary', async () => {
+      const expiresAt = '2026-08-29T00:01:00.000Z';
+      await repo.enqueueIntent(makeIntent());
+      await repo.claimIntents({
+        indexId: 'idx-1', owner: 'worker-a', limit: 1, leaseMs: 60_000, now: T0,
+      });
+
+      expect(await repo.failIntent({
+        id: 'intent-1', owner: 'worker-a', attempt: 1, error: 'too late', now: expiresAt,
+      })).toBeNull();
+      expect(await repo.renewIntentLease({
+        id: 'intent-1', owner: 'worker-a', attempt: 1, leaseMs: 60_000, now: expiresAt,
+      })).toBe(false);
+      expect(await repo.completeIntent({
+        id: 'intent-1', owner: 'worker-a', attempt: 1, now: expiresAt,
+      })).toBe(false);
+      expect(await repo.getIntent('intent-1')).toMatchObject({ status: 'running', attempt: 1 });
+    });
+
     it('completes terminally only for the lease holder', async () => {
       await repo.enqueueIntent(makeIntent());
       await repo.claimIntents({
-        indexId: 'idx-1', owner: 'worker-a', limit: 10, leaseMs: 60_000, now: T0,
+        indexId: 'idx-1', owner: 'worker-a', limit: 10, leaseMs: 7_200_000, now: T0,
       });
 
-      expect(await repo.completeIntent({ id: 'intent-1', owner: 'worker-b', now: T1 })).toBe(false);
       expect(await repo.completeIntent({
-        id: 'intent-1', owner: 'worker-a', now: T1, outcome: 'embedded',
+        id: 'intent-1', owner: 'worker-b', attempt: 1, now: T1,
+      })).toBe(false);
+      expect(await repo.completeIntent({
+        id: 'intent-1', owner: 'worker-a', attempt: 1, now: T1, outcome: 'embedded',
       })).toBe(true);
 
       expect(await repo.getIntent('intent-1')).toMatchObject({
         status: 'succeeded', outcome: 'embedded', completedAt: T1, leaseOwner: null,
       });
       // A terminal intent cannot be completed twice.
-      expect(await repo.completeIntent({ id: 'intent-1', owner: 'worker-a', now: T2 })).toBe(false);
+      expect(await repo.completeIntent({
+        id: 'intent-1', owner: 'worker-a', attempt: 1, now: T2,
+      })).toBe(false);
     });
 
     it('retries with backoff, honours retryAfter, and fails permanently at max attempts', async () => {
       await repo.enqueueIntent(makeIntent({ maxAttempts: 2 }));
 
-      await repo.claimIntents({ indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 60_000, now: T0 });
+      await repo.claimIntents({
+        indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 7_200_000, now: T0,
+      });
       expect(await repo.failIntent({
-        id: 'intent-1', owner: 'w', error: 'rate limited', now: T0, retryAfter: T1,
+        id: 'intent-1', owner: 'w', attempt: 1, error: 'rate limited', now: T0, retryAfter: T1,
       })).toBe('queued');
       expect(await repo.getIntent('intent-1')).toMatchObject({
         status: 'queued', attempt: 1, availableAt: T1, retryAfter: T1, lastError: 'rate limited',
       });
 
       await repo.claimIntents({ indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 60_000, now: T1 });
+      expect(await repo.completeIntent({
+        id: 'intent-1', owner: 'w', attempt: 1, now: T1,
+      })).toBe(false);
       expect(await repo.failIntent({
-        id: 'intent-1', owner: 'w', error: 'boom', now: T1,
+        id: 'intent-1', owner: 'w', attempt: 2, error: 'boom', now: T1,
       })).toBe('failed');
       expect(await repo.getIntent('intent-1')).toMatchObject({
         status: 'failed', attempt: 2, outcome: 'permanent-failure', completedAt: T1,
@@ -1121,9 +1224,16 @@ describe('SqliteSemanticIndexRepository', () => {
 
     it('marks a policy refusal as denied without consuming retries', async () => {
       await repo.enqueueIntent(makeIntent());
-      await repo.claimIntents({ indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 60_000, now: T0 });
+      await repo.claimIntents({
+        indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 7_200_000, now: T0,
+      });
       expect(await repo.failIntent({
-        id: 'intent-1', owner: 'w', error: 'sensitivity policy', now: T1, denied: true,
+        id: 'intent-1',
+        owner: 'w',
+        attempt: 1,
+        error: 'sensitivity policy',
+        now: T1,
+        denied: true,
       })).toBe('denied');
       expect(await repo.getIntent('intent-1')).toMatchObject({
         status: 'denied', outcome: 'denied', attempt: 1,
@@ -1163,7 +1273,7 @@ describe('SqliteSemanticIndexRepository', () => {
     it('prunes only terminal intents older than the cutoff', async () => {
       await repo.enqueueIntent(makeIntent());
       await repo.claimIntents({ indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 60_000, now: T0 });
-      await repo.completeIntent({ id: 'intent-1', owner: 'w', now: T0 });
+      await repo.completeIntent({ id: 'intent-1', owner: 'w', attempt: 1, now: T0 });
       await repo.enqueueIntent(makeIntent({ id: 'intent-2', idempotencyKey: 'k2' }));
 
       expect(await repo.pruneIntents(T1)).toBe(1);
@@ -1175,11 +1285,15 @@ describe('SqliteSemanticIndexRepository', () => {
       await repo.enqueueIntent(makeIntent({ id: 'q1', idempotencyKey: 'k1' }));
       await repo.enqueueIntent(makeIntent({ id: 'q2', idempotencyKey: 'k2', entityId: 'task-2' }));
       await repo.claimIntents({ indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 60_000, now: T0 });
-      await repo.failIntent({ id: 'q1', owner: 'w', error: 'retry me', now: T0 });
+      await repo.failIntent({
+        id: 'q1', owner: 'w', attempt: 1, error: 'retry me', now: T0,
+      });
 
       await repo.enqueueIntent(makeIntent({ id: 'q3', idempotencyKey: 'k3', entityId: 'task-3' }));
       await repo.claimIntents({ indexId: 'idx-1', owner: 'w', limit: 1, leaseMs: 60_000, now: T0 });
-      await repo.failIntent({ id: 'q2', owner: 'w', error: 'nope', now: T0, terminal: true });
+      await repo.failIntent({
+        id: 'q2', owner: 'w', attempt: 1, error: 'nope', now: T0, terminal: true,
+      });
 
       const metrics = await repo.getMetrics('idx-1', T1);
       expect(metrics.intents).toMatchObject({
@@ -1245,12 +1359,16 @@ describe('SqliteSemanticIndexRepository', () => {
       expect(claimed).toMatchObject({ status: 'running', attempt: 0, leaseOwner: 'w', startedAt: T0 });
 
       expect(await repo.checkpointRun({
-        id: 'run-1', owner: 'w', now: T0, checkpoint: 'task:500',
+        id: 'run-1', owner: 'w', attempt: 0, now: T0, checkpoint: 'task:500',
         processedDelta: 500, failedDelta: 2, skippedDelta: 1, leaseMs: 60_000,
       })).toBe(true);
-      expect(await repo.checkpointRun({ id: 'run-1', owner: 'other', now: T0 })).toBe(false);
+      expect(await repo.checkpointRun({
+        id: 'run-1', owner: 'other', attempt: 0, now: T0,
+      })).toBe(false);
 
-      expect(await repo.releaseRun({ id: 'run-1', owner: 'w', now: T0 })).toBe(true);
+      expect(await repo.releaseRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: T0,
+      })).toBe(true);
       const resumed = await repo.claimRun({ owner: 'w2', leaseMs: 60_000, now: T0 });
       expect(resumed).toMatchObject({
         status: 'running',
@@ -1274,25 +1392,36 @@ describe('SqliteSemanticIndexRepository', () => {
         const claimed = await repo.claimRun({ owner: `w${slice}`, leaseMs: 60_000, now: T0 });
         expect(claimed).not.toBeNull();
         await repo.checkpointRun({
-          id: 'run-1', owner: `w${slice}`, now: T0, checkpoint: `task:${slice}`, processedDelta: 10,
+          id: 'run-1',
+          owner: `w${slice}`,
+          attempt: 0,
+          now: T0,
+          checkpoint: `task:${slice}`,
+          processedDelta: 10,
         });
-        await repo.releaseRun({ id: 'run-1', owner: `w${slice}`, now: T0 });
+        await repo.releaseRun({
+          id: 'run-1', owner: `w${slice}`, attempt: 0, now: T0,
+        });
       }
 
       expect(await repo.getRun('run-1')).toMatchObject({
         status: 'queued', attempt: 0, processedCount: 60, checkpoint: 'task:6',
       });
       // The budget is intact, so a genuine failure still gets its retries.
-      await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
-      expect(await repo.failRun({ id: 'run-1', owner: 'w', error: 'boom', now: T0 })).toBe('queued');
+      await repo.claimRun({ owner: 'w', leaseMs: 7_200_000, now: T0 });
+      expect(await repo.failRun({
+        id: 'run-1', owner: 'w', attempt: 0, error: 'boom', now: T0,
+      })).toBe('queued');
     });
 
     it('completes only for the lease holder', async () => {
       await createBackfill();
-      await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
-      expect(await repo.completeRun({ id: 'run-1', owner: 'other', now: T1 })).toBe(false);
+      await repo.claimRun({ owner: 'w', leaseMs: 7_200_000, now: T0 });
       expect(await repo.completeRun({
-        id: 'run-1', owner: 'w', now: T1, checkpoint: 'task:end',
+        id: 'run-1', owner: 'other', attempt: 0, now: T1,
+      })).toBe(false);
+      expect(await repo.completeRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: T1, checkpoint: 'task:end',
       })).toBe(true);
       expect(await repo.getRun('run-1')).toMatchObject({
         status: 'succeeded', checkpoint: 'task:end', completedAt: T1, leaseOwner: null,
@@ -1304,17 +1433,21 @@ describe('SqliteSemanticIndexRepository', () => {
         id: 'run-1', indexId: 'idx-1', kind: 'backfill', idempotencyKey: 'k', now: T0, maxAttempts: 2,
       });
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
-      await repo.checkpointRun({ id: 'run-1', owner: 'w', now: T0, checkpoint: 'task:100' });
+      await repo.checkpointRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: T0, checkpoint: 'task:100',
+      });
 
       expect(await repo.failRun({
-        id: 'run-1', owner: 'w', error: 'provider down', now: T0, availableAt: T1,
+        id: 'run-1', owner: 'w', attempt: 0, error: 'provider down', now: T0, availableAt: T1,
       })).toBe('queued');
       expect(await repo.getRun('run-1')).toMatchObject({
         status: 'queued', checkpoint: 'task:100', availableAt: T1, attempt: 1,
       });
 
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T1 });
-      expect(await repo.failRun({ id: 'run-1', owner: 'w', error: 'again', now: T1 })).toBe('failed');
+      expect(await repo.failRun({
+        id: 'run-1', owner: 'w', attempt: 1, error: 'again', now: T1,
+      })).toBe('failed');
       expect(await repo.getRun('run-1')).toMatchObject({
         status: 'failed', checkpoint: 'task:100', errorMessage: 'again', attempt: 2,
       });
@@ -1326,15 +1459,15 @@ describe('SqliteSemanticIndexRepository', () => {
       });
       // A yield before the first failure must not inflate the backoff.
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
-      await repo.releaseRun({ id: 'run-1', owner: 'w', now: T0 });
+      await repo.releaseRun({ id: 'run-1', owner: 'w', attempt: 0, now: T0 });
 
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
-      await repo.failRun({ id: 'run-1', owner: 'w', error: 'boom', now: T0 });
+      await repo.failRun({ id: 'run-1', owner: 'w', attempt: 0, error: 'boom', now: T0 });
       const first = await repo.getRun('run-1');
       expect(first).toMatchObject({ attempt: 1, availableAt: computeSemanticRetryAt(T0, 1) });
 
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: first!.availableAt });
-      await repo.failRun({ id: 'run-1', owner: 'w', error: 'boom', now: T1 });
+      await repo.failRun({ id: 'run-1', owner: 'w', attempt: 1, error: 'boom', now: T1 });
       expect(await repo.getRun('run-1')).toMatchObject({
         attempt: 2, availableAt: computeSemanticRetryAt(T1, 2),
       });
@@ -1343,12 +1476,70 @@ describe('SqliteSemanticIndexRepository', () => {
     it('recovers an expired run lease and preserves its checkpoint', async () => {
       await createBackfill();
       await repo.claimRun({ owner: 'w', leaseMs: 1_000, now: T0 });
-      await repo.checkpointRun({ id: 'run-1', owner: 'w', now: T0, checkpoint: 'task:250' });
+      await repo.checkpointRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: T0, checkpoint: 'task:250',
+      });
 
       expect(await repo.recoverExpiredRunLeases(T1)).toEqual({ requeued: 1, expired: 0 });
       expect(await repo.getRun('run-1')).toMatchObject({
         status: 'queued', checkpoint: 'task:250', leaseOwner: null, attempt: 1,
       });
+      expect(await repo.claimRun({ owner: 'too-early', leaseMs: 60_000, now: T1 }))
+        .toBeNull();
+      const recovered = await repo.getRun('run-1');
+      if (!recovered) throw new Error('Expected the recovered run');
+      const recoveryAvailableAt = recovered.availableAt;
+      expect(await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: recoveryAvailableAt }))
+        .toMatchObject({ status: 'running', attempt: 1, leaseOwner: 'w' });
+      expect(await repo.checkpointRun({
+        id: 'run-1',
+        owner: 'w',
+        attempt: 0,
+        now: recoveryAvailableAt,
+        checkpoint: 'stale-overwrite',
+        processedDelta: 99,
+      })).toBe(false);
+      expect(await repo.renewRunLease({
+        id: 'run-1', owner: 'w', attempt: 0, leaseMs: 60_000, now: recoveryAvailableAt,
+      })).toBe(false);
+      expect(await repo.completeRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: recoveryAvailableAt,
+      })).toBe(false);
+      expect(await repo.failRun({
+        id: 'run-1', owner: 'w', attempt: 0, error: 'stale failure', now: recoveryAvailableAt,
+      })).toBeNull();
+      expect(await repo.releaseRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: recoveryAvailableAt,
+      })).toBe(false);
+      expect(await repo.releaseRun({
+        id: 'run-1', owner: 'w', attempt: 1, now: recoveryAvailableAt,
+      })).toBe(true);
+      expect(await repo.getRun('run-1')).toMatchObject({
+        status: 'queued', checkpoint: 'task:250', processedCount: 0, attempt: 1,
+      });
+    });
+
+    it('rejects run failure and settlement exactly at the lease expiry boundary', async () => {
+      const expiresAt = '2026-08-29T00:01:00.000Z';
+      await createBackfill();
+      await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
+
+      expect(await repo.failRun({
+        id: 'run-1', owner: 'w', attempt: 0, error: 'too late', now: expiresAt,
+      })).toBeNull();
+      expect(await repo.renewRunLease({
+        id: 'run-1', owner: 'w', attempt: 0, leaseMs: 60_000, now: expiresAt,
+      })).toBe(false);
+      expect(await repo.checkpointRun({
+        id: 'run-1', owner: 'w', attempt: 0, checkpoint: 'too-late', now: expiresAt,
+      })).toBe(false);
+      expect(await repo.completeRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: expiresAt,
+      })).toBe(false);
+      expect(await repo.releaseRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: expiresAt,
+      })).toBe(false);
+      expect(await repo.getRun('run-1')).toMatchObject({ status: 'running', attempt: 0 });
     });
 
     it('spends the whole recovery budget on abandoned leases and no more', async () => {
@@ -1389,8 +1580,12 @@ describe('SqliteSemanticIndexRepository', () => {
         idempotencyKey: 'backfill:initial', now: T0, maxAttempts: 1,
       });
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T0 });
-      await repo.checkpointRun({ id: 'run-1', owner: 'w', now: T0, checkpoint: 'task:42' });
-      expect(await repo.failRun({ id: 'run-1', owner: 'w', error: 'provider gone', now: T0 }))
+      await repo.checkpointRun({
+        id: 'run-1', owner: 'w', attempt: 0, now: T0, checkpoint: 'task:42',
+      });
+      expect(await repo.failRun({
+        id: 'run-1', owner: 'w', attempt: 0, error: 'provider gone', now: T0,
+      }))
         .toBe('failed');
 
       const rescheduled = await repo.createRun({
@@ -1428,8 +1623,8 @@ describe('SqliteSemanticIndexRepository', () => {
 
       // A completed run keeps its key: the once-per-identity backfill must not
       // be requeued on every maintenance tick.
-      await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T1 });
-      await repo.completeRun({ id: 'run-2', owner: 'w', now: T2 });
+      await repo.claimRun({ owner: 'w', leaseMs: 7_200_000, now: T1 });
+      await repo.completeRun({ id: 'run-2', owner: 'w', attempt: 0, now: T2 });
       const afterSuccess = await repo.createRun({
         id: 'run-3', indexId: 'idx-1', kind: 'cleanup', idempotencyKey: 'cleanup:w', now: T2,
       });
@@ -1525,7 +1720,12 @@ describe('SqliteSemanticIndexRepository', () => {
       });
       await repo.claimRun({ owner: 'w', leaseMs: 60_000, now: T1, kinds: ['backfill'] });
       await repo.checkpointRun({
-        id: 'run-old', owner: 'w', now: T1, checkpoint: 'task:cursor-9', processedDelta: 4,
+        id: 'run-old',
+        owner: 'w',
+        attempt: 0,
+        now: T1,
+        checkpoint: 'task:cursor-9',
+        processedDelta: 4,
       });
 
       const metrics = await repo.getMetrics('idx-1', T2);

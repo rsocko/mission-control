@@ -1,9 +1,10 @@
-import db from '@/db';
+import db, { runTransaction } from '@/db';
 import { sourceLists, tasks } from '@/db/schema';
 import { and, eq } from 'drizzle-orm';
 import {
-  getGitHubIdentityModeSnapshot,
-  persistExternalIdentityBatch,
+  assertGitHubIdentityModeSnapshotInTransaction,
+  getGitHubIdentityModeSnapshotInTransaction,
+  persistExternalIdentityBatchInTransaction,
 } from '@/lib/external-identities';
 import type {
   ExternalIdentityEvidence,
@@ -123,10 +124,39 @@ function persistIdentityWrites(
     },
     evidence: taskEvidence,
   });
-  persistExternalIdentityBatch(
-    writes,
-    getGitHubIdentityModeSnapshot(connectorInstanceId),
-  );
+  persistExternalIdentityBatchLegacySync(connectorInstanceId, writes);
+}
+
+/**
+ * Legacy SQLite-only synchronous compatibility path.
+ *
+ * This file's task-row write cycle (above) is not yet converted to the
+ * backend-neutral async port — that is deferred to a follow-up session
+ * (L06b) that will replace it with a single adapter-owned atomic
+ * task+identity orchestration operation. Until then, this function
+ * reproduces the exact pre-existing synchronous behavior of the now-async
+ * `getGitHubIdentityModeSnapshot`/`persistExternalIdentityBatch` ports by
+ * calling the same SQLite-adapter-internal `*InTransaction` primitives those
+ * ports delegate to (see `sqlite-github-identity-repositories.ts`).
+ *
+ * It is intentionally SQLite-only (accepts/assumes the module-level `db`
+ * handle), is not exported, and must never be exposed as a public
+ * backend-neutral API. L06b removes this function once the task-row write
+ * above is folded into the atomic orchestration port.
+ */
+function persistExternalIdentityBatchLegacySync(
+  connectorInstanceId: string,
+  writes: ExternalIdentityWrite[],
+): void {
+  if (writes.length === 0) return;
+  const modeSnapshot = getGitHubIdentityModeSnapshotInTransaction(db, connectorInstanceId);
+  if (writes.some((write) => write.target.connectorInstanceId !== modeSnapshot.connectorInstanceId)) {
+    throw new Error('External identity writes do not match the frozen connector');
+  }
+  runTransaction((tx) => {
+    assertGitHubIdentityModeSnapshotInTransaction(tx, modeSnapshot);
+    persistExternalIdentityBatchInTransaction(tx, writes, true, 'active');
+  });
 }
 
 function parseMetadata(raw: unknown): Record<string, unknown> {

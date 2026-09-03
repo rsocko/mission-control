@@ -448,7 +448,24 @@ export class OperatorError extends Error {
 // Guarded entrypoint invocation: only runs `main()` when this module is
 // executed directly (not when imported, e.g. by tests exercising
 // `assertSqliteOnlyCommandSupported` in isolation).
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+//
+// Two module formats reach this line, so both are checked:
+//  - The esbuild-bundled production CLI artifact
+//    (`dist/github-identity-operator.cjs`, `format: 'cjs'`) is real CommonJS
+//    at runtime: Node's canonical `require.main === module` idiom identifies
+//    the entry script reliably there.
+//  - The raw TypeScript source, imported directly by
+//    `github-identity-operator-pg-guard.test.ts` (via Vitest/Vite's ESM
+//    module graph) or run ad hoc via `tsx`, has no `require`/`module`
+//    globals; `typeof require` safely detects their absence (it never
+//    throws for an unbound identifier) and falls back to the
+//    `import.meta.url` comparison, which is only true for actual direct
+//    execution, never for a plain `import()`.
+const isDirectCliInvocation = typeof require !== 'undefined' && typeof module !== 'undefined'
+  ? require.main === module
+  : Boolean(process.argv[1]) && import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (isDirectCliInvocation) {
   main()
     .catch((error: unknown) => {
       const operatorError = error instanceof OperatorError ? error : null;

@@ -102,4 +102,28 @@ describe('assertSqliteOnlyCommandSupported', () => {
     expect(betterSqlite3ConstructorCalls).not.toHaveBeenCalled();
     vi.doUnmock('better-sqlite3');
   });
+
+  it('never runs main() merely by importing the raw source module (only the built CJS artifact self-invokes)', async () => {
+    // Vitest imports this module as a real ES module (no `require`/`module`
+    // globals), so the entrypoint guard's fallback branch applies: it
+    // compares `import.meta.url` against `pathToFileURL(process.argv[1])`,
+    // which is Vitest's own runner path here, never this script — so `main()`
+    // must not run. If it incorrectly did, `process.argv[2]` (Vitest's own
+    // argv, not a recognized operator command) would make `main()` throw an
+    // `OperatorError` inside its `.catch()` handler and leave a non-zero
+    // `process.exitCode` behind. This complements the built-artifact test in
+    // `github-identity-operator-artifact.test.ts`, which proves the opposite:
+    // that direct invocation of the compiled CJS artifact *does* run main().
+    const originalExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      await import('../../scripts/github-identity-operator');
+      // Give any wrongly-fired `main().catch(...)` a turn of the microtask
+      // queue to observe its (undesired) effect before asserting.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(process.exitCode).toBeUndefined();
+    } finally {
+      process.exitCode = originalExitCode;
+    }
+  });
 });

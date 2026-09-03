@@ -36,9 +36,9 @@ afterAll(() => {
 });
 
 describe('GitHub post-dispatch outcome resolution', () => {
-  it('inspects bounded evidence without tokens, credentials, node IDs, or bodies', () => {
+  it('inspects bounded evidence without tokens, credentials, node IDs, or bodies', async () => {
     const fixture = seedOutcome('inspect-redaction');
-    const inspected = identity.inspectGitHubWriteOutcomes({
+    const inspected = await identity.inspectGitHubWriteOutcomes({
       connectorInstanceId: fixture.connectorId,
       cycleId: fixture.cycleId,
       limit: 1,
@@ -70,10 +70,10 @@ describe('GitHub post-dispatch outcome resolution', () => {
     expect(serialized).not.toContain(fixture.issueStableId);
     expect(serialized).not.toContain(fixture.repositoryStableId);
     expect(serialized).not.toContain('sensitive body');
-    expect(() => identity.inspectGitHubWriteOutcomes({
+    await expect(identity.inspectGitHubWriteOutcomes({
       connectorInstanceId: fixture.connectorId,
       limit: 51,
-    })).toThrow('between 1 and 50');
+    })).rejects.toThrow('between 1 and 50');
   });
 
   it('proves a completed issue applied and finalizes a clean interrupted cycle', async () => {
@@ -142,7 +142,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
     });
     expect(reader.readGitHubWriteOutcome).toHaveBeenCalledTimes(1);
 
-    const status = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    const status = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       now,
     }) as {
       operationalState: {
@@ -210,7 +210,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
         reconciliationReason: 'Authoritative outcome inspection',
         reconciliationIdempotencyKey: `resolve-${orphaned.leaseId}`,
       });
-    expect((identity.getGitHubIdentityStatus(orphaned.connectorId, {
+    expect((await identity.getGitHubIdentityStatus(orphaned.connectorId, {
       now,
     }) as { operationalState: { incompleteWriteCycles: number } })
       .operationalState.incompleteWriteCycles).toBe(0);
@@ -259,7 +259,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
         syncStatus: 'pending_push',
         pushRetryCount: 0,
       });
-    let status = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    let status = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       now,
     }) as {
       operationalState: { incompleteWriteCycles: number };
@@ -316,7 +316,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
     expect(database.default.select().from(schema.githubIdentityWriteCycles)
       .where(eq(schema.githubIdentityWriteCycles.id, fixture.cycleId)).get())
       .toMatchObject({ reconciliationState: 'superseded' });
-    status = identity.getGitHubIdentityStatus(fixture.connectorId, { now }) as typeof status;
+    status = await identity.getGitHubIdentityStatus(fixture.connectorId, { now }) as typeof status;
     expect(status.operationalState.incompleteWriteCycles).toBe(0);
   });
 
@@ -345,7 +345,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
           WHERE connector_instance_id = ? AND local_id = ?
         `).run(fixture.connectorId, fixture.taskId);
       }
-      const inspected = identity.inspectGitHubWriteOutcomes({
+      const inspected = await identity.inspectGitHubWriteOutcomes({
         connectorInstanceId: fixture.connectorId,
         cycleId: fixture.cycleId,
         leaseId: fixture.leaseId,
@@ -397,7 +397,7 @@ describe('GitHub post-dispatch outcome resolution', () => {
         unknownCount: 0,
       });
       const reader = { readGitHubWriteOutcome: vi.fn() };
-      const inspected = identity.inspectGitHubWriteOutcomes({
+      const inspected = await identity.inspectGitHubWriteOutcomes({
         connectorInstanceId: unsupported.connectorId,
         cycleId: unsupported.cycleId,
         leaseId: unsupported.leaseId,

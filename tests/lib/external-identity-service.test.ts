@@ -36,7 +36,7 @@ afterAll(() => {
 });
 
 describe('external identity persistence service', () => {
-  it('enforces Stage 1 migration phase transitions', () => {
+  it('enforces Stage 1 migration phase transitions', async () => {
     const now = '2026-08-08T13:00:00.000Z';
     database.default.insert(schema.connectorConfigs).values([
       connector('github-transition-disabled', now),
@@ -47,27 +47,27 @@ describe('external identity persistence service', () => {
       { connectorInstanceId: 'github-transition-shadow', phase: 'shadow_write', updatedAt: now },
     ]).run();
 
-    expect(() => service.updateGitHubIdentityPhase(
+    await expect(service.updateGitHubIdentityPhase(
       'github-transition-disabled',
       'backfilling',
       now,
-    )).toThrow('cannot transition from disabled to backfilling');
-    expect(() => service.updateGitHubIdentityPhase(
+    )).rejects.toThrow('cannot transition from disabled to backfilling');
+    await expect(service.updateGitHubIdentityPhase(
       'github-transition-shadow',
       'paused',
       now,
-    )).toThrow('cannot transition from shadow_write to paused');
+    )).rejects.toThrow('cannot transition from shadow_write to paused');
 
-    service.updateGitHubIdentityPhase('github-transition-shadow', 'backfilling', now);
-    service.updateGitHubIdentityPhase('github-transition-shadow', 'paused', now);
-    service.updateGitHubIdentityPhase('github-transition-shadow', 'backfilling', now);
-    expect(service.getGitHubIdentityPhase('github-transition-shadow')).toBe('backfilling');
+    await service.updateGitHubIdentityPhase('github-transition-shadow', 'backfilling', now);
+    await service.updateGitHubIdentityPhase('github-transition-shadow', 'paused', now);
+    await service.updateGitHubIdentityPhase('github-transition-shadow', 'backfilling', now);
+    expect(await service.getGitHubIdentityPhase('github-transition-shadow')).toBe('backfilling');
   });
 
-  it('creates idempotent repository and issue bindings with locator history', () => {
+  it('creates idempotent repository and issue bindings with locator history', async () => {
     const initial = issueWrite('github-shadow', 'task-1', 'I_1', 'R_1');
-    expect(service.persistExternalIdentityBatch([initial])[0].state).toBe('bound');
-    service.persistExternalIdentityBatch([initial]);
+    expect((await service.persistExternalIdentityBatch([initial]))[0].state).toBe('bound');
+    await service.persistExternalIdentityBatch([initial]);
 
     const issueEntity = database.default.select().from(schema.externalEntities)
       .where(eq(schema.externalEntities.entityType, 'issue')).get();
@@ -76,7 +76,7 @@ describe('external identity persistence service', () => {
       .where(eq(schema.externalEntityLocators.externalEntityId, issueEntity!.id)).all()).toHaveLength(1);
 
     const renamed = issueWrite('github-shadow', 'task-1', 'I_1', 'R_1', 'renamed-owner', 'renamed-repo');
-    service.persistExternalIdentityBatch([renamed]);
+    await service.persistExternalIdentityBatch([renamed]);
     const locators = database.default.select().from(schema.externalEntityLocators)
       .where(eq(schema.externalEntityLocators.externalEntityId, issueEntity!.id))
       .orderBy(schema.externalEntityLocators.locatorRevision)
@@ -91,7 +91,7 @@ describe('external identity persistence service', () => {
     });
   });
 
-  it('records collisions without selecting a winner', () => {
+  it('records collisions without selecting a winner', async () => {
     const first = issueWrite(
       'github-shadow',
       'task-collision-a',
@@ -108,8 +108,8 @@ describe('external identity persistence service', () => {
       'collision-owner',
       'collision-repo',
     );
-    expect(service.persistExternalIdentityBatch([first])[0].state).toBe('bound');
-    expect(service.persistExternalIdentityBatch([second])[0]).toMatchObject({
+    expect((await service.persistExternalIdentityBatch([first]))[0].state).toBe('bound');
+    expect((await service.persistExternalIdentityBatch([second]))[0]).toMatchObject({
       state: 'collision',
       collisionCategory: 'multiple_local_one_stable',
     });
@@ -125,7 +125,7 @@ describe('external identity persistence service', () => {
       .where(eq(schema.externalEntityBindings.localId, 'task-collision-b')).all()).toEqual([]);
   });
 
-  it('reopens collision fingerprints and rejects one local row with two identities', () => {
+  it('reopens collision fingerprints and rejects one local row with two identities', async () => {
     const first = issueWrite(
       'github-shadow',
       'task-rebound',
@@ -142,8 +142,8 @@ describe('external identity persistence service', () => {
       'rebound-owner',
       'rebound-repo',
     );
-    expect(service.persistExternalIdentityBatch([first])[0].state).toBe('bound');
-    expect(service.persistExternalIdentityBatch([second])[0]).toMatchObject({
+    expect((await service.persistExternalIdentityBatch([first]))[0].state).toBe('bound');
+    expect((await service.persistExternalIdentityBatch([second]))[0]).toMatchObject({
       state: 'collision',
       collisionCategory: 'one_local_multiple_stable',
     });
@@ -156,7 +156,7 @@ describe('external identity persistence service', () => {
       resolvedBy: 'operator',
     }).where(eq(schema.githubIdentityCollisions.id, collision.id)).run();
 
-    service.persistExternalIdentityBatch([second]);
+    await service.persistExternalIdentityBatch([second]);
     expect(database.default.select().from(schema.githubIdentityCollisions)
       .where(eq(schema.githubIdentityCollisions.id, collision.id)).get()).toMatchObject({
       state: 'open',
@@ -166,7 +166,7 @@ describe('external identity persistence service', () => {
     });
   });
 
-  it('keeps identical node IDs distinct across hosts', () => {
+  it('keeps identical node IDs distinct across hosts', async () => {
     const github = issueWrite(
       'github-shadow',
       'task-host-github',
@@ -188,8 +188,8 @@ describe('external identity persistence service', () => {
     enterprise.evidence.entity.locator.webUrl = 'https://github.example.com/owner/repo/issues/1';
     enterprise.evidence.repository!.locator.webUrl = 'https://github.example.com/owner/repo';
 
-    expect(service.persistExternalIdentityBatch([github])[0].state).toBe('bound');
-    expect(service.persistExternalIdentityBatch([enterprise])[0].state).toBe('bound');
+    expect((await service.persistExternalIdentityBatch([github]))[0].state).toBe('bound');
+    expect((await service.persistExternalIdentityBatch([enterprise]))[0].state).toBe('bound');
     const shared = database.default.select().from(schema.externalEntities)
       .where(eq(schema.externalEntities.stableId, 'I_shared')).all();
     expect(shared.map((row) => row.hostKey).sort()).toEqual([
@@ -198,7 +198,7 @@ describe('external identity persistence service', () => {
     ]);
   });
 
-  it('persists 100-row pages with bounded queries, latency, and storage', () => {
+  it('persists 100-row pages with bounded queries, latency, and storage', async () => {
     const writes = Array.from({ length: 100 }, (_, index) => issueWrite(
       'github-shadow',
       `bulk-task-${index}`,
@@ -215,7 +215,7 @@ describe('external identity persistence service', () => {
 
     for (let sample = 0; sample < 20; sample++) {
       const startedAt = performance.now();
-      const results = service.persistExternalIdentityBatch(writes);
+      const results = await service.persistExternalIdentityBatch(writes);
       durations.push(performance.now() - startedAt);
       expect(results.every((result) => result.state === 'bound')).toBe(true);
     }

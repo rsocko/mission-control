@@ -40,7 +40,7 @@ afterAll(() => {
 
 describe('GitHub bulk issue transfer', () => {
   it('selects only reviewed stable issue node IDs and binds the manifest into the plan', async () => {
-    const seeded = seedConnector('bulk-reviewed-allowlist');
+    const seeded = await seedConnector('bulk-reviewed-allowlist');
     const common = {
       ...input(seeded.connectorId),
       scope: reviewedScope(seeded.connectorId, [1]),
@@ -110,7 +110,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('fails closed for duplicate or non-source allowlist node IDs', async () => {
-    const seeded = seedConnector('bulk-invalid-allowlist');
+    const seeded = await seedConnector('bulk-invalid-allowlist');
     const duplicate = reviewedScope(seeded.connectorId, [1, 1]);
     await expect(service.previewGitHubBulkTransfer({
       ...input(seeded.connectorId),
@@ -138,7 +138,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('requires repository-wide transfers to opt into all-issues scope', async () => {
-    const seeded = seedConnector('bulk-explicit-all-issues');
+    const seeded = await seedConnector('bulk-explicit-all-issues');
     await expect(service.previewGitHubBulkTransfer({
       ...input(seeded.connectorId),
       scope: undefined,
@@ -149,7 +149,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('previews every open and closed issue without mutating state', async () => {
-    const seeded = seedConnector('bulk-preview');
+    const seeded = await seedConnector('bulk-preview');
     const remote = createRemote(seeded);
     const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
       remote,
@@ -177,8 +177,8 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('excludes a cancelled task with durable authoritative deletion evidence', async () => {
-    const seeded = seedConnector('bulk-authoritative-deletion');
-    const deletedTaskId = addBoundTask(seeded, 1996, 'cancelled');
+    const seeded = await seedConnector('bulk-authoritative-deletion');
+    const deletedTaskId = await addBoundTask(seeded, 1996, 'cancelled');
     addAuthoritativeDeletionProof(seeded.connectorId, deletedTaskId);
 
     const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
@@ -195,9 +195,9 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('keeps arbitrary cancelled and live tasks in transfer reconciliation', async () => {
-    const seeded = seedConnector('bulk-unproven-deletions');
-    const cancelledTaskId = addBoundTask(seeded, 1996, 'cancelled');
-    const liveTaskId = addBoundTask(seeded, 1997, 'todo');
+    const seeded = await seedConnector('bulk-unproven-deletions');
+    const cancelledTaskId = await addBoundTask(seeded, 1996, 'cancelled');
+    const liveTaskId = await addBoundTask(seeded, 1997, 'todo');
 
     const preview = await service.previewGitHubBulkTransfer(input(seeded.connectorId), {
       remote: createRemote(seeded),
@@ -217,8 +217,8 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('rejects a revoked deletion exception as authoritative evidence', async () => {
-    const seeded = seedConnector('bulk-revoked-deletion');
-    const deletedTaskId = addBoundTask(seeded, 1996, 'cancelled');
+    const seeded = await seedConnector('bulk-revoked-deletion');
+    const deletedTaskId = await addBoundTask(seeded, 1996, 'cancelled');
     addAuthoritativeDeletionProof(seeded.connectorId, deletedTaskId);
     database.default.insert(schema.githubIdentityExceptionEvents).values({
       connectorInstanceId: seeded.connectorId,
@@ -249,7 +249,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('allows a fully observed completed comparison write cycle', async () => {
-    const seeded = seedConnector('bulk-completed-write-cycle');
+    const seeded = await seedConnector('bulk-completed-write-cycle');
     database.default.insert(schema.githubIdentityWriteCycles).values({
       id: 'bulk-completed-write-cycle-evidence',
       connectorInstanceId: seeded.connectorId,
@@ -271,7 +271,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('fails closed while an unknown GitHub write outcome is unresolved', async () => {
-    const seeded = seedConnector('bulk-push-failed');
+    const seeded = await seedConnector('bulk-push-failed');
     database.default.update(schema.tasks).set({
       syncStatus: 'push_failed',
       pushRetryCount: 5,
@@ -287,7 +287,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('fails closed while dependency reconciliation is incomplete', async () => {
-    const seeded = seedConnector('bulk-dependency-running');
+    const seeded = await seedConnector('bulk-dependency-running');
     database.default.insert(schema.dependencyReconciliationSnapshots).values({
       id: 'bulk-dependency-running-snapshot',
       connectorInstanceId: seeded.connectorId,
@@ -310,7 +310,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('checkpoints verified transfers and reconciles unchanged local metadata', async () => {
-    const seeded = seedConnector('bulk-execute');
+    const seeded = await seedConnector('bulk-execute');
     const remote = createRemote(seeded);
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -380,7 +380,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('leaves the connector disabled and blocks replay after an ambiguous dispatch', async () => {
-    const seeded = seedConnector('bulk-interrupted');
+    const seeded = await seedConnector('bulk-interrupted');
     const remote = createRemote(seeded, { failAfterDispatch: true });
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -437,7 +437,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('marks pre-dispatch failures as retryable rather than ambiguous', async () => {
-    const seeded = seedConnector('bulk-pre-dispatch');
+    const seeded = await seedConnector('bulk-pre-dispatch');
     const remote = createRemote(seeded, { failSourceResolutionOnce: true });
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -477,7 +477,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('returns rate-limited dispatches to pending before bounded retry', async () => {
-    const seeded = seedConnector('bulk-rate-limit');
+    const seeded = await seedConnector('bulk-rate-limit');
     const remote = createRemote(seeded, { rateLimitFirstDispatch: true });
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -555,7 +555,7 @@ describe('GitHub bulk issue transfer', () => {
     error,
     expectedDelayMs,
   }) => {
-    const seeded = seedConnector(`bulk-403-${name.replaceAll(' ', '-')}`);
+    const seeded = await seedConnector(`bulk-403-${name.replaceAll(' ', '-')}`);
     const remote = createRemote(seeded, { firstDispatchError: error });
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -606,7 +606,7 @@ describe('GitHub bulk issue transfer', () => {
       }),
     },
   ])('rejects a 403 dispatch with $name evidence', async ({ name, error }) => {
-    const seeded = seedConnector(`bulk-403-reject-${name.replaceAll(' ', '-')}`);
+    const seeded = await seedConnector(`bulk-403-reject-${name.replaceAll(' ', '-')}`);
     const remote = createRemote(seeded, { firstDispatchError: error });
     const transferIssue = vi.fn(remote.transferIssue!);
     remote.transferIssue = transferIssue;
@@ -644,7 +644,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('keeps a post-transfer 403 rate limit ambiguous without redispatch', async () => {
-    const seeded = seedConnector('bulk-verification-rate-limit');
+    const seeded = await seedConnector('bulk-verification-rate-limit');
     const remote = createRemote(seeded, {
       targetResolutionError: new GitHubHttpError(
         'GraphQL request failed: 403',
@@ -708,7 +708,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('automatically records changed transfer identities and preserves local task identity', async () => {
-    const seeded = seedConnector('bulk-automatic-successor');
+    const seeded = await seedConnector('bulk-automatic-successor');
     const remote = createRemote(seeded, { changeIdentityOnTransfer: true });
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -760,7 +760,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('keeps manual successor reconciliation explicitly authorization-gated', async () => {
-    const seeded = seedConnector('bulk-identity-successor');
+    const seeded = await seedConnector('bulk-identity-successor');
     const remote = createRemote(seeded, {
       changeIdentityOnTransfer: true,
       targetResolutionError: new GitHubHttpError(
@@ -935,7 +935,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('fails closed when an automatic successor identity is already bound', async () => {
-    const seeded = seedConnector('bulk-successor-occupied');
+    const seeded = await seedConnector('bulk-successor-occupied');
     const remote = createRemote(seeded, { changeIdentityOnTransfer: true });
     const common = input(seeded.connectorId);
     const preview = await service.previewGitHubBulkTransfer(common, {
@@ -957,7 +957,7 @@ describe('GitHub bulk issue transfer', () => {
       updatedAt: now.toISOString(),
       lastSyncedAt: now.toISOString(),
     }).run();
-    identities.persistExternalIdentityBatch([{
+    await identities.persistExternalIdentityBatch([{
       target: {
         connectorInstanceId: seeded.connectorId,
         bindingType: 'task',
@@ -1002,7 +1002,7 @@ describe('GitHub bulk issue transfer', () => {
   });
 
   it('fails closed when changed identity evidence names another target repository', async () => {
-    const seeded = seedConnector('bulk-successor-target-mismatch');
+    const seeded = await seedConnector('bulk-successor-target-mismatch');
     const remote = createRemote(seeded, {
       changeIdentityOnTransfer: true,
       mismatchTargetRepositoryOnTransfer: true,
@@ -1058,7 +1058,7 @@ describe('GitHub bulk issue transfer', () => {
     name,
     locator,
   }) => {
-    const seeded = seedConnector(`bulk-successor-locator-${name.replace(' ', '-')}`);
+    const seeded = await seedConnector(`bulk-successor-locator-${name.replace(' ', '-')}`);
     const remote = createRemote(seeded, {
       changeIdentityOnTransfer: true,
       targetIssueLocatorOverride: locator,
@@ -1142,7 +1142,7 @@ function reviewedScope(connectorInstanceId: string, issueNumbers: number[]) {
   };
 }
 
-function seedConnector(connectorId: string) {
+async function seedConnector(connectorId: string) {
   const taskIds = [`${connectorId}-1`, `${connectorId}-2`];
   database.default.insert(schema.connectorConfigs).values({
     id: connectorId,
@@ -1198,7 +1198,7 @@ function seedConnector(connectorId: string) {
     updatedAt: now.toISOString(),
     lastSyncedAt: now.toISOString(),
   }))).run();
-  identities.persistExternalIdentityBatch([
+  await identities.persistExternalIdentityBatch([
     {
       target: {
         connectorInstanceId: connectorId,
@@ -1230,11 +1230,11 @@ function seedConnector(connectorId: string) {
   return { connectorId, taskIds };
 }
 
-function addBoundTask(
-  seeded: ReturnType<typeof seedConnector>,
+async function addBoundTask(
+  seeded: Awaited<ReturnType<typeof seedConnector>>,
   issueNumber: number,
   status: 'todo' | 'cancelled',
-): string {
+): Promise<string> {
   const taskId = `${seeded.connectorId}-${issueNumber}`;
   database.default.insert(schema.tasks).values({
     id: taskId,
@@ -1251,7 +1251,7 @@ function addBoundTask(
     updatedAt: now.toISOString(),
     lastSyncedAt: now.toISOString(),
   }).run();
-  identities.persistExternalIdentityBatch([{
+  await identities.persistExternalIdentityBatch([{
     target: {
       connectorInstanceId: seeded.connectorId,
       bindingType: 'task',
@@ -1293,7 +1293,7 @@ function addAuthoritativeDeletionProof(connectorId: string, taskId: string): str
 }
 
 function createRemote(
-  seeded: ReturnType<typeof seedConnector>,
+  seeded: Awaited<ReturnType<typeof seedConnector>>,
   options: {
     failAfterDispatch?: boolean;
     failSourceResolutionOnce?: boolean;

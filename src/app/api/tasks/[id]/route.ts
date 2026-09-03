@@ -1137,7 +1137,7 @@ export async function DELETE(
         connectorType: task.connectorType,
       });
     } else {
-      deleteTaskLocally(id);
+      await deleteTaskLocally(id);
       await removeTaskSearch(id);
     }
 
@@ -1191,7 +1191,7 @@ async function writeThroughDelete(
       await deleteRemote();
     }
 
-    deleteTaskLocally(task.id);
+    await deleteTaskLocally(task.id);
     await removeTaskSearch(task.id);
   } catch (err) {
     logger.error({ err, taskId: task.id }, 'Write-through task delete failed');

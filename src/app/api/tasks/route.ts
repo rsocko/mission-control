@@ -36,8 +36,18 @@ import {
 } from '@/lib/external-identities';
 
 import { createEmptyResponse, getTagIdsFilterCondition } from './filter-factory';
-import { countTasks, getStats, getSourceCounts, getAvailableTags } from './stats-computer';
+import type {
+  AvailableTag,
+  SourceCounts,
+  TaskStats,
+} from './stats-computer';
 import { buildCanonicalTaskFilterConditions } from './canonical-filter';
+import {
+  getAssignedFilterCondition,
+  getInboxFilterCondition,
+  getQuickFilterCondition,
+  withCondition,
+} from './query-builder';
 import {
   requireTaskEditPolicy,
   resolveTaskEditPolicies,
@@ -64,6 +74,119 @@ const VALID_PRIORITIES = ['critical', 'high', 'medium', 'low', 'none'];
 
 function isTaskPriority(value: unknown): value is TaskPriority {
   return VALID_PRIORITIES.includes(String(value));
+}
+
+/* ------------------------------------------------------------------ *
+ * Legacy clause-shaped statistics (route-local)
+ *
+ * This route still composes its own Drizzle predicates (effort, free-text
+ * search, tag ids, no-project, group scoping) on top of the canonical
+ * condition array, so its counters take a composed WHERE clause rather than
+ * a portable `TaskFilterSpec`. Modelling those route-local predicates as
+ * spec fields is the L05 read-route migration; until then the clause-shaped
+ * counters live here, inside the one SQLite consumer that needs them,
+ * instead of keeping the shared `stats-computer` helper tainted or passing
+ * Drizzle predicates across a task-core contract.
+ * ------------------------------------------------------------------ */
+
+async function countTasks(
+  whereClause: ReturnType<typeof and> | ReturnType<typeof eq> | ReturnType<typeof sql> | undefined,
+): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(tasks)
+    .where(whereClause);
+
+  return Number(row?.count ?? 0);
+}
+
+async function getStats(
+  baseWhere: ReturnType<typeof and> | undefined,
+  openOnly: boolean,
+  today: string,
+  weekFromNow: string,
+  myDayTaskIds: string[],
+): Promise<TaskStats> {
+  const openCondition = notInArray(tasks.status, ['done', 'cancelled']);
+  const openWhere = openOnly ? baseWhere : withCondition(baseWhere, openCondition);
+
+  const assignedCondition = await getAssignedFilterCondition();
+  const inboxCondition = await getInboxFilterCondition();
+
+  const [totalOpen, overdue, dueToday, dueThisWeek, noDate, highPriority, assignedToMe, myDay, recentlyCreated, recentlyClosed, waiting, inbox] = await Promise.all([
+    countTasks(openWhere),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('overdue', today, weekFromNow))),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('today', today, weekFromNow))),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('week', today, weekFromNow))),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('noDate', today, weekFromNow))),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('high', today, weekFromNow))),
+    countTasks(withCondition(openWhere, assignedCondition)),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('myDay', today, weekFromNow, myDayTaskIds))),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('recentlyCreated', today, weekFromNow))),
+    countTasks(withCondition(baseWhere, getQuickFilterCondition('recentlyClosed', today, weekFromNow))),
+    countTasks(withCondition(openWhere, getQuickFilterCondition('waiting', today, weekFromNow))),
+    countTasks(withCondition(openWhere, inboxCondition)),
+  ]);
+
+  return {
+    totalOpen,
+    overdue,
+    dueToday,
+    dueThisWeek,
+    noDate,
+    highPriority,
+    assignedToMe,
+    myDay,
+    recentlyCreated,
+    recentlyClosed,
+    waiting,
+    inbox,
+  };
+}
+
+async function getSourceCounts(
+  baseWhere: ReturnType<typeof and> | undefined,
+): Promise<SourceCounts> {
+  const rows = await db
+    .select({
+      connectorType: tasks.connectorType,
+      count: sql<number>`count(*)`,
+    })
+    .from(tasks)
+    .where(baseWhere)
+    .groupBy(tasks.connectorType);
+
+  return rows.reduce<Record<string, number>>((acc, row) => {
+    acc[row.connectorType] = Number(row.count ?? 0);
+    return acc;
+  }, {});
+}
+
+async function getAvailableTags(
+  baseWhere: ReturnType<typeof and> | undefined,
+): Promise<AvailableTag[]> {
+  const rows = await db
+    .select({
+      id: tags.id,
+      name: tags.name,
+      slug: tags.slug,
+      type: tags.type,
+      source: tags.source,
+      color: tags.color,
+      confirmed: tags.confirmed,
+      count: sql<number>`count(*)`,
+    })
+    .from(taskTags)
+    .innerJoin(tags, eq(taskTags.tagId, tags.id))
+    .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+    .where(baseWhere)
+    .groupBy(tags.id, tags.name, tags.slug, tags.type, tags.source, tags.color, tags.confirmed)
+    .orderBy(asc(tags.name));
+
+  return rows.map((row) => ({
+    ...row,
+    count: Number(row.count ?? 0),
+  }));
 }
 
 export async function GET(request: Request) {
@@ -347,7 +470,7 @@ export async function GET(request: Request) {
     let smartScoreOrderedIds: string[] | null = null;
     const smartScoreMap = new Map<string, ScoredTask>();
     if (sortBy === 'smartScore') {
-      const entities = getResolvedPriorityEntities();
+      const entities = await getResolvedPriorityEntities();
       const rankings = db.select().from(sourceRankings).orderBy(asc(sourceRankings.rank)).all() as unknown as SourceRanking[];
 
       const candidateTasks = db.select({
@@ -495,7 +618,7 @@ export async function GET(request: Request) {
 
     // Resolve authoritative display names from source_lists (userDisplayName takes priority)
     // This prevents stale denormalized sourceListName from showing after renames.
-    const sourceListNameMap = buildSourceListNameMap(result);
+    const sourceListNameMap = await buildSourceListNameMap(result);
 
     // Fetch related data in parallel
     const connectorInstanceIds = [...new Set(
@@ -663,7 +786,7 @@ export async function GET(request: Request) {
     }
 
     if (includeScoreBreakdown && sortBy !== 'smartScore') {
-      const entities = getResolvedPriorityEntities();
+      const entities = await getResolvedPriorityEntities();
       const rankings = db.select().from(sourceRankings).orderBy(asc(sourceRankings.rank)).all() as unknown as SourceRanking[];
       const scoreInputs = result.map((task) => createScoreInput(
         {

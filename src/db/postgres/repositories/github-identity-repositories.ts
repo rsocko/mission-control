@@ -2,6 +2,17 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 import type {
+  ExternalEntityIdentity,
+  ExternalEntityKey,
+  ExternalEntityLocatorEvidence,
+  ExternalEntityLocatorObservation,
+  ExternalEntityLocatorObservationResult,
+  ExternalEntityLocatorPreflight,
+  ExternalEntityLocatorRecord,
+  ExternalEntityRecord,
+  ExternalEntityUpsert,
+  ExternalIdentityCollisionInput,
+  ExternalIdentityCollisionRecord,
   ExternalIdentityObservation,
   ExternalIdentityWrite,
   ExternalIdentityWriteResult,
@@ -10,6 +21,7 @@ import type {
 import type {
   ExternalBindingState,
   ExternalEntityType,
+  ExternalLocatorSource,
   GitHubCollisionCategory,
 } from '@/db/postgres/schema';
 import type {
@@ -2047,6 +2059,310 @@ export function createPostgresGitHubIdentityRepositories(
     }));
   }
 
+  // ── External entity directory helpers (generic, operator + non-batch callers) ──
+  //
+  // These mirror the pure business rules in `src/lib/external-identities/service.ts`
+  // (`validateIdentity`, `validateObservation`, `normalizeExternalEntityLocator`,
+  // `identityKey`) exactly, but are re-declared locally rather than imported so this
+  // adapter has no runtime dependency on lib-level helpers beyond the shared types.
+
+  function operatorEntityIdentityKey(identity: ExternalEntityIdentity): string {
+    return `${identity.provider}\0${identity.hostKey}\0${identity.entityType}\0${identity.stableId}`;
+  }
+
+  function validateOperatorEntityIdentity(identity: ExternalEntityIdentity): void {
+    if (!identity.provider || !identity.hostKey || !identity.stableId) {
+      throw new Error('External entity key is incomplete');
+    }
+    if (identity.entityType !== 'repository' && identity.entityType !== 'issue') {
+      throw new Error('External entity type is invalid');
+    }
+  }
+
+  function validateOperatorObservation(observation: ExternalIdentityObservation): void {
+    const { identity, locator } = observation;
+    validateOperatorEntityIdentity(identity);
+    if (!locator.owner || !locator.repository) {
+      throw new Error('External identity observation is incomplete');
+    }
+    if (identity.entityType === 'issue') {
+      if (!Number.isSafeInteger(locator.issueNumber) || (locator.issueNumber ?? 0) <= 0) {
+        throw new Error('Issue identity observation requires a positive issue number');
+      }
+    } else if (locator.issueNumber !== undefined) {
+      throw new Error('Repository locator must not include an issue number');
+    }
+  }
+
+  function normalizeOperatorLocator(
+    locator: ExternalEntityLocatorEvidence,
+  ): NormalizedExternalEntityLocator {
+    if (!locator.owner || !locator.repository) {
+      throw new Error('External entity locator is incomplete');
+    }
+    if (
+      locator.issueNumber !== undefined
+      && (!Number.isSafeInteger(locator.issueNumber) || locator.issueNumber <= 0)
+    ) {
+      throw new Error('External entity issue number must be a positive integer');
+    }
+    return {
+      owner: locator.owner,
+      repository: locator.repository,
+      ownerKey: locator.owner.toLowerCase(),
+      repositoryKey: locator.repository.toLowerCase(),
+      issueNumber: locator.issueNumber ?? null,
+      apiUrl: locator.apiUrl ?? null,
+      webUrl: locator.webUrl ?? null,
+    };
+  }
+
+  interface OperatorExternalEntityRow {
+    id: string;
+    provider: string;
+    hostKey: string;
+    entityType: ExternalEntityType;
+    stableId: string;
+    identityVersion: number;
+    nextLocatorRevision: number;
+    firstSeenAt: string;
+    lastSeenAt: string;
+  }
+
+  function toOperatorEntityRecord(row: OperatorExternalEntityRow): ExternalEntityRecord {
+    return {
+      id: row.id,
+      identity: {
+        provider: row.provider,
+        hostKey: row.hostKey,
+        entityType: row.entityType,
+        stableId: row.stableId,
+      },
+      identityVersion: row.identityVersion,
+      nextLocatorRevision: row.nextLocatorRevision,
+      firstSeenAt: row.firstSeenAt,
+      lastSeenAt: row.lastSeenAt,
+    };
+  }
+
+  const OPERATOR_ENTITY_COLUMNS = `
+    id, provider, host_key AS "hostKey", entity_type AS "entityType", stable_id AS "stableId",
+    identity_version AS "identityVersion", next_locator_revision AS "nextLocatorRevision",
+    first_seen_at AS "firstSeenAt", last_seen_at AS "lastSeenAt"
+  `;
+
+  interface OperatorExternalEntityLocatorRow {
+    id: string;
+    externalEntityId: string;
+    repositoryEntityId: string | null;
+    owner: string;
+    repository: string;
+    ownerKey: string;
+    repositoryKey: string;
+    issueNumber: number | null;
+    apiUrl: string | null;
+    webUrl: string | null;
+    validFrom: string;
+    validTo: string | null;
+    lastSeenAt: string;
+    observationSource: ExternalLocatorSource;
+    locatorRevision: number;
+  }
+
+  function toOperatorLocatorRecord(
+    row: OperatorExternalEntityLocatorRow,
+  ): ExternalEntityLocatorRecord {
+    return { ...row };
+  }
+
+  const OPERATOR_LOCATOR_COLUMNS = `
+    id, external_entity_id AS "externalEntityId", repository_entity_id AS "repositoryEntityId",
+    owner, repository, owner_key AS "ownerKey", repository_key AS "repositoryKey",
+    issue_number AS "issueNumber", api_url AS "apiUrl", web_url AS "webUrl",
+    valid_from AS "validFrom", valid_to AS "validTo", last_seen_at AS "lastSeenAt",
+    observation_source AS "observationSource", locator_revision AS "locatorRevision"
+  `;
+
+  async function requireOperatorExternalEntity(
+    client: Client,
+    entityId: string,
+    identity: ExternalEntityIdentity,
+    forUpdate: boolean,
+  ): Promise<OperatorExternalEntityRow> {
+    if (!entityId) throw new Error('External entity ID is required');
+    validateOperatorEntityIdentity(identity);
+    const { rows } = await query<OperatorExternalEntityRow>(
+      client,
+      `
+        SELECT ${OPERATOR_ENTITY_COLUMNS}
+        FROM external_entities
+        WHERE id = $1
+        LIMIT 1
+        ${forUpdate ? 'FOR UPDATE' : ''}
+      `,
+      [entityId],
+    );
+    const row = rows[0];
+    if (!row) throw new Error('External entity was not found');
+    if (operatorEntityIdentityKey({
+      provider: row.provider,
+      hostKey: row.hostKey,
+      entityType: row.entityType,
+      stableId: row.stableId,
+    }) !== operatorEntityIdentityKey(identity)) {
+      throw new Error('External entity ID does not match the supplied key');
+    }
+    return row;
+  }
+
+  async function validateOperatorLocatorObservation(
+    client: Client,
+    input: ExternalEntityLocatorObservation,
+  ): Promise<void> {
+    validateOperatorObservation({
+      identity: input.identity,
+      locator: input.locator,
+      observationSource: 'operator',
+      observedAt: input.observedAt,
+    });
+    if (!input.observedAt) throw new Error('External locator observation time is required');
+
+    const repositoryEntityId = input.repositoryEntityId ?? null;
+    if (input.identity.entityType === 'repository') {
+      if (repositoryEntityId !== null) {
+        throw new Error('Repository locator must not reference a repository entity');
+      }
+      return;
+    }
+    if (!repositoryEntityId) {
+      throw new Error('Issue locator requires a repository entity');
+    }
+    const { rows } = await query<OperatorExternalEntityRow>(
+      client,
+      `SELECT ${OPERATOR_ENTITY_COLUMNS} FROM external_entities WHERE id = $1 LIMIT 1`,
+      [repositoryEntityId],
+    );
+    const repository = rows[0];
+    if (
+      !repository
+      || repository.entityType !== 'repository'
+      || repository.provider !== input.identity.provider
+      || repository.hostKey !== input.identity.hostKey
+    ) {
+      throw new Error('Issue locator repository entity does not match its provider and host');
+    }
+  }
+
+  function sameOperatorLocator(
+    current: OperatorExternalEntityLocatorRow,
+    locator: NormalizedExternalEntityLocator,
+  ): boolean {
+    return current.owner === locator.owner
+      && current.repository === locator.repository
+      && current.ownerKey === locator.ownerKey
+      && current.repositoryKey === locator.repositoryKey
+      && current.issueNumber === locator.issueNumber
+      && current.apiUrl === locator.apiUrl
+      && current.webUrl === locator.webUrl;
+  }
+
+  function mergeOperatorLocatorWithCurrent(
+    locator: NormalizedExternalEntityLocator,
+    current: OperatorExternalEntityLocatorRow | undefined,
+  ): NormalizedExternalEntityLocator {
+    if (
+      !current
+      || current.owner !== locator.owner
+      || current.repository !== locator.repository
+      || current.issueNumber !== locator.issueNumber
+    ) {
+      return locator;
+    }
+    return {
+      ...locator,
+      apiUrl: locator.apiUrl ?? current.apiUrl,
+      webUrl: locator.webUrl ?? current.webUrl,
+    };
+  }
+
+  async function evaluateOperatorLocatorPreflight(
+    client: Client,
+    entity: { id: string; identity: ExternalEntityIdentity },
+    observation: ExternalIdentityObservation,
+    forUpdate: boolean,
+  ): Promise<ExternalEntityLocatorPreflight> {
+    let locator = normalizeOperatorLocator(observation.locator);
+    const { rows: currentRows } = await query<OperatorExternalEntityLocatorRow>(
+      client,
+      `
+        SELECT ${OPERATOR_LOCATOR_COLUMNS}
+        FROM external_entity_locators
+        WHERE external_entity_id = $1
+          AND valid_to IS NULL
+        LIMIT 1
+        ${forUpdate ? 'FOR UPDATE' : ''}
+      `,
+      [entity.id],
+    );
+    const currentRow = currentRows[0];
+    locator = mergeOperatorLocatorWithCurrent(locator, currentRow);
+    const current = currentRow ? toOperatorLocatorRecord(currentRow) : null;
+
+    if (
+      currentRow
+      && observation.observedAt < currentRow.validFrom
+      && !sameOperatorLocator(currentRow, locator)
+    ) {
+      return {
+        state: 'collision',
+        locator,
+        current,
+        collisionCategory: 'locator_overlap_or_regression',
+        conflictingEntityId: entity.id,
+      };
+    }
+    if (currentRow && sameOperatorLocator(currentRow, locator)) {
+      return { state: 'unchanged', locator, current };
+    }
+
+    const { rows: pathConflictRows } = await query<{ externalEntityId: string }>(
+      client,
+      `
+        SELECT external_entity_id AS "externalEntityId"
+        FROM external_entity_locators
+        WHERE provider = $1
+          AND host_key = $2
+          AND owner_key = $3
+          AND repository_key = $4
+          AND ${locator.issueNumber === null ? 'issue_number IS NULL' : 'issue_number = $5'}
+          AND valid_to IS NULL
+        LIMIT 1
+      `,
+      locator.issueNumber === null
+        ? [entity.identity.provider, entity.identity.hostKey, locator.ownerKey, locator.repositoryKey]
+        : [
+          entity.identity.provider,
+          entity.identity.hostKey,
+          locator.ownerKey,
+          locator.repositoryKey,
+          locator.issueNumber,
+        ],
+    );
+    const pathConflict = pathConflictRows[0];
+    if (pathConflict && pathConflict.externalEntityId !== entity.id) {
+      return {
+        state: 'collision',
+        locator,
+        current,
+        collisionCategory: entity.identity.entityType === 'repository'
+          ? 'repository_path_replacement'
+          : 'stable_legacy_disagree',
+        conflictingEntityId: pathConflict.externalEntityId,
+      };
+    }
+    return { state: 'update', locator, current };
+  }
+
   const identity: GitHubIdentityPersistence = {
     async getModeSnapshot(connectorInstanceId, capturedAt = new Date().toISOString()) {
       const modeRevision = await readModeRevision(pool, connectorInstanceId);
@@ -2509,6 +2825,313 @@ export function createPostgresGitHubIdentityRepositories(
         [connectorInstanceId, bindingType, localId],
       );
       return rows[0] ?? null;
+    },
+
+    // ── External entity directory (generic, operator + non-batch callers) ───────
+
+    async getExternalEntityByKey(key: ExternalEntityKey) {
+      validateOperatorEntityIdentity(key);
+      const { rows } = await query<OperatorExternalEntityRow>(
+        pool,
+        `
+          SELECT ${OPERATOR_ENTITY_COLUMNS}
+          FROM external_entities
+          WHERE provider = $1
+            AND host_key = $2
+            AND entity_type = $3
+            AND stable_id = $4
+          LIMIT 1
+        `,
+        [key.provider, key.hostKey, key.entityType, key.stableId],
+      );
+      const row = rows[0];
+      return row ? toOperatorEntityRecord(row) : null;
+    },
+
+    async upsertExternalEntity(input: ExternalEntityUpsert) {
+      validateOperatorEntityIdentity(input.identity);
+      if (!input.observedAt) throw new Error('External entity observation time is required');
+      const { identity, observedAt } = input;
+      const { rows } = await query<OperatorExternalEntityRow>(
+        pool,
+        `
+          INSERT INTO external_entities (
+            id, provider, host_key, entity_type, stable_id,
+            identity_version, next_locator_revision, first_seen_at, last_seen_at
+          ) VALUES ($1, $2, $3, $4, $5, 1, 1, $6, $6)
+          ON CONFLICT (provider, host_key, entity_type, stable_id) DO UPDATE SET
+            last_seen_at = GREATEST(external_entities.last_seen_at, EXCLUDED.last_seen_at)
+          RETURNING ${OPERATOR_ENTITY_COLUMNS}
+        `,
+        [randomUUID(), identity.provider, identity.hostKey, identity.entityType, identity.stableId, observedAt],
+      );
+      const row = rows[0];
+      if (!row) throw new Error('Failed to persist external entity');
+      return toOperatorEntityRecord(row);
+    },
+
+    async getCurrentExternalEntityLocator(externalEntityId: string) {
+      if (!externalEntityId) throw new Error('External entity ID is required');
+      const { rows } = await query<OperatorExternalEntityLocatorRow>(
+        pool,
+        `
+          SELECT ${OPERATOR_LOCATOR_COLUMNS}
+          FROM external_entity_locators
+          WHERE external_entity_id = $1
+            AND valid_to IS NULL
+          LIMIT 1
+        `,
+        [externalEntityId],
+      );
+      const row = rows[0];
+      return row ? toOperatorLocatorRecord(row) : null;
+    },
+
+    async listExternalEntityLocatorHistory(externalEntityId: string) {
+      if (!externalEntityId) throw new Error('External entity ID is required');
+      const { rows } = await query<OperatorExternalEntityLocatorRow>(
+        pool,
+        `
+          SELECT ${OPERATOR_LOCATOR_COLUMNS}
+          FROM external_entity_locators
+          WHERE external_entity_id = $1
+          ORDER BY locator_revision
+        `,
+        [externalEntityId],
+      );
+      return rows.map(toOperatorLocatorRecord);
+    },
+
+    async preflightExternalEntityLocator(input: ExternalEntityLocatorObservation) {
+      const entityRow = await requireOperatorExternalEntity(
+        pool,
+        input.entityId,
+        input.identity,
+        false,
+      );
+      const entity = toOperatorEntityRecord(entityRow);
+      await validateOperatorLocatorObservation(pool, input);
+      return evaluateOperatorLocatorPreflight(pool, entity, {
+        identity: input.identity,
+        locator: input.locator,
+        observationSource: 'operator',
+        observedAt: input.observedAt,
+      }, false);
+    },
+
+    async observeExternalEntityLocator(input: ExternalEntityLocatorObservation) {
+      return transaction(pool, async (client): Promise<ExternalEntityLocatorObservationResult> => {
+        const entityRow = await requireOperatorExternalEntity(
+          client,
+          input.entityId,
+          input.identity,
+          true,
+        );
+        const entity = toOperatorEntityRecord(entityRow);
+        await validateOperatorLocatorObservation(client, input);
+        const observation: ExternalIdentityObservation = {
+          identity: input.identity,
+          locator: input.locator,
+          observationSource: 'operator',
+          observedAt: input.observedAt,
+        };
+        const preflight = await evaluateOperatorLocatorPreflight(client, entity, observation, true);
+        if (preflight.state === 'collision') {
+          return { ...preflight, locatorRecord: null };
+        }
+
+        if (preflight.state === 'unchanged') {
+          const current = preflight.current!;
+          if (input.observedAt > current.lastSeenAt) {
+            await query(
+              client,
+              `UPDATE external_entity_locators SET last_seen_at = $1 WHERE id = $2`,
+              [input.observedAt, current.id],
+            );
+            await query(
+              client,
+              `
+                UPDATE external_entities
+                SET last_seen_at = GREATEST(last_seen_at, $1)
+                WHERE id = $2
+              `,
+              [input.observedAt, entity.id],
+            );
+          }
+          return {
+            ...preflight,
+            locatorRecord: {
+              ...current,
+              lastSeenAt: input.observedAt > current.lastSeenAt
+                ? input.observedAt
+                : current.lastSeenAt,
+            },
+          };
+        }
+
+        const { rows: entityRows } = await query<{ nextLocatorRevision: number }>(
+          client,
+          `
+            SELECT next_locator_revision AS "nextLocatorRevision"
+            FROM external_entities
+            WHERE id = $1
+            LIMIT 1
+            FOR UPDATE
+          `,
+          [entity.id],
+        );
+        const nextEntityRow = entityRows[0];
+        if (!nextEntityRow) throw new Error('External entity disappeared during locator update');
+
+        if (preflight.current) {
+          await query(
+            client,
+            `UPDATE external_entity_locators SET valid_to = $1 WHERE id = $2`,
+            [input.observedAt, preflight.current.id],
+          );
+        }
+        await query(
+          client,
+          `
+            UPDATE external_entities
+            SET next_locator_revision = $1,
+                last_seen_at = GREATEST(last_seen_at, $2)
+            WHERE id = $3
+          `,
+          [nextEntityRow.nextLocatorRevision + 1, input.observedAt, entity.id],
+        );
+        const { rows: insertedRows } = await query<OperatorExternalEntityLocatorRow>(
+          client,
+          `
+            INSERT INTO external_entity_locators (
+              id, external_entity_id, repository_entity_id, provider, host_key,
+              owner, repository, owner_key, repository_key, issue_number, api_url, web_url,
+              valid_from, valid_to, last_seen_at, observation_source, locator_revision
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NULL, $13, 'operator', $14
+            )
+            RETURNING ${OPERATOR_LOCATOR_COLUMNS}
+          `,
+          [
+            randomUUID(),
+            entity.id,
+            input.repositoryEntityId ?? null,
+            entity.identity.provider,
+            entity.identity.hostKey,
+            preflight.locator.owner,
+            preflight.locator.repository,
+            preflight.locator.ownerKey,
+            preflight.locator.repositoryKey,
+            preflight.locator.issueNumber,
+            preflight.locator.apiUrl,
+            preflight.locator.webUrl,
+            input.observedAt,
+            nextEntityRow.nextLocatorRevision,
+          ],
+        );
+        const inserted = insertedRows[0];
+        if (!inserted) throw new Error('Failed to persist external entity locator');
+        return {
+          ...preflight,
+          locatorRecord: toOperatorLocatorRecord(inserted),
+        };
+      });
+    },
+
+    async recordExternalIdentityCollision(input: ExternalIdentityCollisionInput) {
+      if (!input.connectorInstanceId || !input.observedAt) {
+        throw new Error('External identity collision context is incomplete');
+      }
+      if (input.localIds.length === 0 || input.externalEntityIds.length === 0) {
+        throw new Error('External identity collision requires local and entity IDs');
+      }
+      return transaction(pool, async (client): Promise<ExternalIdentityCollisionRecord> => {
+        const boundedLocalIds = boundedPrimaryIdentityCollisionIds(input.localIds);
+        const boundedEntityIds = boundedPrimaryIdentityCollisionIds(input.externalEntityIds);
+        const fingerprint = digestExternalIdentifier(JSON.stringify({
+          category: input.category,
+          bindingType: input.bindingType,
+          localIds: boundedLocalIds,
+          externalEntityIds: boundedEntityIds,
+        }));
+        const legacyIdentityDigest = input.legacyIdentity
+          ? digestExternalIdentifier(input.legacyIdentity)
+          : null;
+
+        const { rows } = await query<ExternalIdentityCollisionRecord>(
+          client,
+          `
+            INSERT INTO github_identity_collisions (
+              id, connector_instance_id, category, fingerprint, binding_type,
+              local_ids, external_entity_ids, legacy_identity_digest, state,
+              resolution, first_seen_at, last_seen_at, resolved_at, resolved_by
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8, 'open',
+              NULL, $9, $9, NULL, NULL
+            )
+            ON CONFLICT (connector_instance_id, category, fingerprint) DO UPDATE SET
+              local_ids = EXCLUDED.local_ids,
+              external_entity_ids = EXCLUDED.external_entity_ids,
+              legacy_identity_digest = EXCLUDED.legacy_identity_digest,
+              state = 'open',
+              resolution = NULL,
+              last_seen_at = EXCLUDED.last_seen_at,
+              resolved_at = NULL,
+              resolved_by = NULL
+            RETURNING
+              id,
+              connector_instance_id AS "connectorInstanceId",
+              category,
+              fingerprint,
+              binding_type AS "bindingType",
+              local_ids AS "localIds",
+              external_entity_ids AS "externalEntityIds",
+              legacy_identity_digest AS "legacyIdentityDigest",
+              state,
+              first_seen_at AS "firstSeenAt",
+              last_seen_at AS "lastSeenAt"
+          `,
+          [
+            randomUUID(),
+            input.connectorInstanceId,
+            input.category,
+            fingerprint,
+            input.bindingType,
+            JSON.stringify(boundedLocalIds),
+            JSON.stringify(boundedEntityIds),
+            legacyIdentityDigest,
+            input.observedAt,
+          ],
+        );
+        const row = rows[0];
+        if (!row) throw new Error('Failed to record external identity collision');
+
+        await query(
+          client,
+          `
+            UPDATE external_entity_bindings
+            SET state = 'collision', updated_at = $1
+            WHERE connector_instance_id = $2
+              AND binding_type = $3
+              AND local_id = ANY($4::text[])
+              AND state != 'retired'
+          `,
+          [input.observedAt, input.connectorInstanceId, input.bindingType, boundedLocalIds],
+        );
+        await query(
+          client,
+          `
+            UPDATE external_entity_bindings
+            SET state = 'collision', updated_at = $1
+            WHERE connector_instance_id = $2
+              AND external_entity_id = ANY($3::text[])
+              AND state != 'retired'
+          `,
+          [input.observedAt, input.connectorInstanceId, boundedEntityIds],
+        );
+
+        return row;
+      });
     },
   };
 

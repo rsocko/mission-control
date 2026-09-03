@@ -1,6 +1,20 @@
-import db from '@/db';
-import { tasks, taskTags, taskProjects, tags } from '@/db/schema';
-import { eq, inArray, or, sql, type SQL } from 'drizzle-orm';
+import type { SQL } from 'drizzle-orm';
+import {
+  getAnyTagSlugFilterCondition as compileAnyTagSlugCondition,
+  getMultiTagFilterCondition as compileMultiTagCondition,
+  getProjectFilterCondition as compileProjectCondition,
+  getTagIdsFilterCondition as compileTagIdsCondition,
+  getTagSlugFilterCondition as compileTagSlugCondition,
+} from '@/db/persistence/sqlite-task-filter';
+
+/**
+ * Relation-membership filter factories for the legacy SQLite task routes.
+ *
+ * The predicates themselves now live in the SQLite dialect compiler
+ * (`@/db/persistence/sqlite-task-filter`), which is handle-free, so this
+ * module no longer needs a database connection to build a subquery. The
+ * portable equivalents live behind `TaskQueryRepository`.
+ */
 
 type EmptyResponse = {
   tasks: never[];
@@ -52,50 +66,25 @@ export function createEmptyResponse(): EmptyResponse {
 
 /** Match tasks with a tag slug without hydrating the task-tag junction. */
 export function getTagSlugFilterCondition(tagSlug: string): SQL {
-  const matchingTasks = db
-    .select({ taskId: taskTags.taskId })
-    .from(taskTags)
-    .innerJoin(tags, eq(taskTags.tagId, tags.id))
-    .where(eq(tags.slug, tagSlug));
-  return inArray(tasks.id, matchingTasks);
+  return compileTagSlugCondition(tagSlug);
 }
 
 /** Match every requested slug while treating duplicate tag rows as one logical slug. */
 export function getMultiTagFilterCondition(tagSlugs: string[]): SQL {
-  const matchingTasks = db
-    .select({ taskId: taskTags.taskId })
-    .from(taskTags)
-    .innerJoin(tags, eq(taskTags.tagId, tags.id))
-    .where(inArray(tags.slug, tagSlugs))
-    .groupBy(taskTags.taskId)
-    .having(sql`COUNT(DISTINCT ${tags.slug}) = ${tagSlugs.length}`);
-  return inArray(tasks.id, matchingTasks);
+  return compileMultiTagCondition(tagSlugs);
 }
 
 /** Match any requested tag slug or name. */
 export function getAnyTagSlugFilterCondition(tagSlugs: string[]): SQL {
-  const matchingTasks = db
-    .select({ taskId: taskTags.taskId })
-    .from(taskTags)
-    .innerJoin(tags, eq(taskTags.tagId, tags.id))
-    .where(or(inArray(tags.slug, tagSlugs), inArray(tags.name, tagSlugs)));
-  return inArray(tasks.id, matchingTasks);
+  return compileAnyTagSlugCondition(tagSlugs);
 }
 
 /** Match any requested tag ID. */
 export function getTagIdsFilterCondition(tagIds: string[]): SQL {
-  const matchingTasks = db
-    .select({ taskId: taskTags.taskId })
-    .from(taskTags)
-    .where(inArray(taskTags.tagId, tagIds));
-  return inArray(tasks.id, matchingTasks);
+  return compileTagIdsCondition(tagIds);
 }
 
 /** Match tasks in the requested project. */
 export function getProjectFilterCondition(projectId: string): SQL {
-  const matchingTasks = db
-    .select({ taskId: taskProjects.taskId })
-    .from(taskProjects)
-    .where(eq(taskProjects.projectId, projectId));
-  return inArray(tasks.id, matchingTasks);
+  return compileProjectCondition(projectId);
 }

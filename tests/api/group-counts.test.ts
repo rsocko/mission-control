@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
 const mocks = vi.hoisted(() => {
   const inboxCondition = { type: 'inbox' };
@@ -120,6 +121,9 @@ vi.mock('@/app/api/tasks/filter-query', () => ({
 
 describe('GET /api/tasks/group-counts', () => {
   beforeEach(() => {
+    // Since L04 the canonical filter reads My Day membership through the
+    // portable task-core repository instead of the mocked Drizzle handle.
+    registerFakeTaskCorePersistence();
     mocks.select.mockReset();
     mocks.select.mockImplementation((selection: Record<string, unknown>) => (
       Object.hasOwn(selection, 'taskId')

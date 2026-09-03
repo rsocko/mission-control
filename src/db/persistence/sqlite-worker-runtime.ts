@@ -35,6 +35,7 @@ import type { CorePersistenceRepositories } from './core-repositories';
 import { SqliteSyncRunRepository } from './sqlite-sync-run-repository';
 import { createSqliteConnectorExecutionRepositories } from './sqlite-connector-execution-repositories';
 import { createSqliteGitHubIdentityRepositories } from './sqlite-github-identity-repositories';
+import { createSqliteGitHubIdentityOperatorRepositories } from './sqlite-github-identity-operator-repositories';
 import { createSqliteGitHubDependencyRepositories } from './sqlite-github-dependency-repositories';
 import { createSqliteGitHubHierarchyRepositories } from './sqlite-github-hierarchy-repositories';
 import { createSqliteGitHubProjectRepositories } from './sqlite-github-project-repositories';
@@ -163,6 +164,7 @@ export function createSqliteWorkerPersistenceRepositories(
       hierarchy: createSqliteGitHubHierarchyRepositories(sqlite, db),
       projects: createSqliteGitHubProjectRepositories(sqlite, db),
       recovery: createSqliteGitHubRecoveryRepositories(sqlite, db),
+      operator: createSqliteGitHubIdentityOperatorRepositories(sqlite, db),
     },
     connectorState: {
       workTodo: createSqliteWorkTodoRepositories(sqlite, db),

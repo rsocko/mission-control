@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'crypto';
-import db, { runTransaction, sqlite } from '@/db';
+import type Database from 'better-sqlite3';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import type * as schema from '@/db/schema';
 import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
+import { getGitHubIdentityOperatorRepository } from './worker-persistence';
 
 const DEFAULT_INSPECTION_LIMIT = 20;
 const MAX_INSPECTION_LIMIT = 50;
@@ -118,12 +121,46 @@ interface CycleLeaseRow {
   expiresAt: string;
 }
 
-export function inspectGitHubWriteOutcomes(options: {
+type WriteOutcomeDeps = { sqlite: Database.Database; db: BetterSQLite3Database<typeof schema> };
+
+/**
+ * Read-only, bounded inspection of GitHub write leases that reached (or may
+ * have reached) a real dispatch, plus any recorded resolution.
+ *
+ * This is one of the five pre-existing, previously audited GitHub worker
+ * operator/recovery surfaces (see `github-worker-errors.ts`). PostgreSQL does
+ * not implement it and fails closed via `UnsupportedGitHubWorkerOperationError`
+ * before any SQLite import, transaction, or durable mutation. The exact logic
+ * is preserved bit-for-bit in `inspectGitHubWriteOutcomesSync` below, which is
+ * the SQLite adapter's implementation
+ * (`sqlite-github-identity-operator-repositories.ts`); only the database
+ * handle sourcing changed from a module-level singleton import to an injected
+ * parameter so this file carries no SQLite/`@/db` import of its own.
+ */
+export async function inspectGitHubWriteOutcomes(options: {
   connectorInstanceId: string;
   cycleId?: string;
   leaseId?: string;
   limit?: number;
-}): Record<string, unknown> {
+}): Promise<Record<string, unknown>> {
+  return (await getGitHubIdentityOperatorRepository()).inspectWriteOutcomes(options);
+}
+
+/**
+ * SQLite-only synchronous implementation reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`. Must never be selected or
+ * imported under PostgreSQL.
+ */
+export function inspectGitHubWriteOutcomesSync(
+  deps: WriteOutcomeDeps,
+  options: {
+    connectorInstanceId: string;
+    cycleId?: string;
+    leaseId?: string;
+    limit?: number;
+  },
+): Record<string, unknown> {
+  const { sqlite } = deps;
   const limit = validateLimit(options.limit ?? DEFAULT_INSPECTION_LIMIT);
   const filters = ['cycle.connector_instance_id = ?'];
   const values: Array<string | number> = [options.connectorInstanceId];
@@ -261,10 +298,659 @@ export function inspectGitHubWriteOutcomes(options: {
   };
 }
 
+/**
+ * Resolves the durable outcome of a dispatched (or possibly dispatched)
+ * GitHub write lease, using either an immutable local finalization proof or an
+ * authoritative GitHub issue-state readback performed strictly outside any
+ * transaction.
+ *
+ * This is one of the five pre-existing, previously audited GitHub worker
+ * operator/recovery surfaces (see `github-worker-errors.ts`). PostgreSQL does
+ * not implement it and fails closed via `UnsupportedGitHubWorkerOperationError`
+ * before any SQLite import, transaction, or durable mutation, or remote
+ * effect. The exact logic is preserved bit-for-bit in
+ * `resolveGitHubWriteOutcomeSync` below, which is the SQLite adapter's
+ * implementation (`sqlite-github-identity-operator-repositories.ts`); only the
+ * database handle sourcing changed from a module-level singleton import to an
+ * injected parameter so this file carries no SQLite/`@/db` import of its own.
+ */
 export async function resolveGitHubWriteOutcome(
   command: GitHubWriteOutcomeResolutionCommand,
   reader: GitHubWriteOutcomeReader,
 ): Promise<GitHubWriteOutcomeResolutionResult> {
+  return (await getGitHubIdentityOperatorRepository()).resolveWriteOutcome(command, reader);
+}
+
+/**
+ * SQLite-only implementation reused directly by
+ * `sqlite-github-identity-operator-repositories.ts`. Must never be selected or
+ * imported under PostgreSQL. Genuinely async only because it performs the
+ * external GitHub readback outside of any SQLite transaction; every durable
+ * read/write remains synchronous against the injected handle.
+ */
+export async function resolveGitHubWriteOutcomeSync(
+  deps: WriteOutcomeDeps,
+  command: GitHubWriteOutcomeResolutionCommand,
+  reader: GitHubWriteOutcomeReader,
+): Promise<GitHubWriteOutcomeResolutionResult> {
+  const { sqlite, db } = deps;
+
+  function validateCurrentContext(
+    cmd: GitHubWriteOutcomeResolutionCommand,
+    row: CycleLeaseRow,
+    now: string,
+    immutableLocalSuccess: boolean,
+  ): Extract<GitHubWriteOutcomeResolutionResult, { ok: false }> | null {
+    const mode = getGitHubIdentityModeSnapshotInTransaction(
+      db,
+      cmd.connectorInstanceId,
+      now,
+    );
+    if (mode.modeRevision !== cmd.expectedRevision) {
+      return failure(cmd, 'revision_conflict', 'Connector mode revision changed');
+    }
+    if (row.modeRevision !== mode.modeRevision) {
+      return failure(cmd, 'stale_cycle_context', 'Write cycle belongs to a different identity context');
+    }
+    if (immutableLocalSuccess) return null;
+    const taskVersion = row.taskId.startsWith('source-list:')
+      ? sqlite.prepare(`
+          SELECT source_id AS version
+          FROM source_lists
+          WHERE connector_instance_id = ? AND id = ?
+        `).get(
+          cmd.connectorInstanceId,
+          row.taskId.slice('source-list:'.length),
+        ) as { version: string } | undefined
+      : sqlite.prepare(`
+          SELECT updated_at AS version
+          FROM tasks
+          WHERE connector_instance_id = ? AND id = ?
+        `).get(cmd.connectorInstanceId, row.taskId) as { version: string } | undefined;
+    if (!taskVersion || taskVersion.version !== row.taskVersion) {
+      return failure(cmd, 'task_version_changed', 'Task or source-list version changed');
+    }
+    if (!currentTargetsMatch(row.leaseId)) {
+      return failure(cmd, 'binding_or_locator_changed', 'Frozen binding or locator no longer matches');
+    }
+    return null;
+  }
+
+  function loadCycleLease(
+    connectorInstanceId: string,
+    cycleId: string,
+    leaseId: string,
+  ): CycleLeaseRow | undefined {
+    return sqlite.prepare(`
+      SELECT cycle.connector_instance_id AS connectorInstanceId,
+        cycle.id AS cycleId,
+        cycle.state AS cycleState,
+        cycle.reconciliation_state AS reconciliationState,
+        cycle.job_id AS jobId,
+        cycle.mode_revision AS modeRevision,
+        lease.id AS leaseId,
+        lease.task_id AS taskId,
+        lease.operation,
+        lease.task_version AS taskVersion,
+        lease.idempotency_key AS idempotencyKey,
+        lease.state AS leaseState,
+        lease.cycle_outcome AS cycleOutcome,
+        lease.dispatched_at AS dispatchedAt,
+        lease.finalized_at AS finalizedAt,
+        lease.expires_at AS expiresAt
+      FROM github_identity_write_cycles AS cycle
+      JOIN task_source_write_leases AS lease ON lease.write_cycle_id = cycle.id
+      WHERE cycle.connector_instance_id = ?
+        AND cycle.id = ?
+        AND lease.connector_instance_id = cycle.connector_instance_id
+        AND lease.id = ?
+      LIMIT 1
+    `).get(connectorInstanceId, cycleId, leaseId) as CycleLeaseRow | undefined;
+  }
+
+  function interruptStoppedOwnerCycle(
+    cmd: GitHubWriteOutcomeResolutionCommand,
+    row: CycleLeaseRow,
+    now: string,
+  ): Extract<GitHubWriteOutcomeResolutionResult, { ok: false }> | null {
+    if (!cmd.confirmOwnerStopped) {
+      return failure(
+        cmd,
+        'active_dispatch',
+        'A running cycle may still own this post-dispatch lease',
+        false,
+        'Stop every app and worker process that can use this connector, wait for durable leases to expire, then rerun with --confirm-owner-stopped. Lease expiry alone is not proof that an in-flight GitHub request ended.',
+      );
+    }
+    const live = sqlite.prepare(`
+      SELECT
+        EXISTS (
+          SELECT 1
+          FROM task_source_write_leases AS active_lease
+          WHERE active_lease.connector_instance_id = ?
+            AND active_lease.write_cycle_id = ?
+            AND active_lease.state IN ('claimed', 'authorized', 'dispatched', 'unknown')
+            AND active_lease.expires_at > ?
+        ) AS writeLease,
+        EXISTS (
+          SELECT 1
+          FROM connector_operation_leases AS operation_lease
+          WHERE operation_lease.connector_id = ?
+            AND operation_lease.lease_expires_at > ?
+        ) AS connectorLease,
+        EXISTS (
+          SELECT 1
+          FROM sync_jobs AS job
+          WHERE job.id = ?
+            AND job.connector_id = ?
+            AND job.status = 'running'
+            AND job.lease_expires_at > ?
+        ) AS jobLease
+    `).get(
+      cmd.connectorInstanceId,
+      cmd.cycleId,
+      now,
+      cmd.connectorInstanceId,
+      now,
+      row.jobId,
+      cmd.connectorInstanceId,
+      now,
+    ) as { writeLease: number; connectorLease: number; jobLease: number };
+    if (live.writeLease || live.connectorLease || live.jobLease) {
+      return failure(
+        cmd,
+        'active_dispatch',
+        'Durable owner or write leases are still active',
+        false,
+        'Keep all connector-capable app and worker processes stopped, wait for every reported lease to expire, and retry. Do not infer owner death from a single expired lease.',
+      );
+    }
+    const changed = sqlite.prepare(`
+      UPDATE github_identity_write_cycles
+      SET state = 'interrupted',
+          reconciliation_state = 'quarantined',
+          reconciliation_code = 'possible_post_dispatch_outcome',
+          completed_at = ?,
+          reconciled_at = ?,
+          reconciled_by = ?,
+          reconciliation_reason = ?,
+          reconciliation_idempotency_key = ?
+      WHERE connector_instance_id = ?
+        AND id = ?
+        AND state = 'running'
+        AND mode_revision = ?
+    `).run(
+      now,
+      now,
+      cmd.actor,
+      cmd.reason,
+      cmd.idempotencyKey,
+      cmd.connectorInstanceId,
+      cmd.cycleId,
+      row.modeRevision,
+    ).changes;
+    if (changed !== 1) {
+      return failure(
+        cmd,
+        'stale_cycle_context',
+        'Running cycle quarantine lost a concurrent race',
+      );
+    }
+    row.cycleState = 'interrupted';
+    row.reconciliationState = 'quarantined';
+    return null;
+  }
+
+  function loadIssueReadRequest(row: CycleLeaseRow): GitHubWriteOutcomeReadRequest | null {
+    if (row.operation !== 'complete') return null;
+    const target = sqlite.prepare(`
+      SELECT target.owner, target.repository, target.issue_number AS issueNumber
+      FROM task_source_write_lease_targets AS target
+      WHERE target.lease_id = ? AND target.role = 'primary_issue'
+      LIMIT 1
+    `).get(row.leaseId) as {
+      owner: string | null;
+      repository: string | null;
+      issueNumber: number | null;
+    } | undefined;
+    return target?.owner && target.repository && target.issueNumber !== null
+      ? {
+          owner: target.owner,
+          repository: target.repository,
+          issueNumber: target.issueNumber,
+          operation: 'complete',
+        }
+      : null;
+  }
+
+  function currentTargetsMatch(leaseId: string): boolean {
+    const result = sqlite.prepare(`
+      SELECT COUNT(*) AS total,
+        COALESCE(SUM(CASE
+          WHEN target.external_entity_id IS NOT NULL
+            AND locator.id IS NOT NULL
+            AND binding.id IS NOT NULL
+            AND binding.verified_at = target.binding_revision
+            AND locator.locator_revision = target.locator_revision
+            AND lower(locator.owner) = lower(target.owner)
+            AND lower(locator.repository) = lower(target.repository)
+            AND COALESCE(locator.issue_number, -1) = COALESCE(target.issue_number, -1)
+          THEN 1 ELSE 0 END
+        ), 0) AS matching
+      FROM task_source_write_lease_targets AS target
+      JOIN task_source_write_leases AS lease ON lease.id = target.lease_id
+      LEFT JOIN external_entity_locators AS locator
+        ON locator.external_entity_id = target.external_entity_id
+        AND locator.valid_to IS NULL
+      LEFT JOIN external_entity_bindings AS binding
+        ON binding.connector_instance_id = lease.connector_instance_id
+        AND binding.external_entity_id = target.external_entity_id
+        AND binding.state IN ('shadow', 'active')
+      WHERE target.lease_id = ?
+    `).get(leaseId) as { total: number; matching: number };
+    return Number(result.total) > 0 && Number(result.total) === Number(result.matching);
+  }
+
+  function remoteIdentityMatches(
+    leaseId: string,
+    readResult: GitHubWriteOutcomeReadResult,
+  ): boolean {
+    const expected = sqlite.prepare(`
+      SELECT issue.stable_id AS issueStableId,
+        repository.stable_id AS repositoryStableId
+      FROM task_source_write_lease_targets AS target
+      JOIN external_entities AS issue ON issue.id = target.external_entity_id
+      JOIN external_entities AS repository ON repository.id = target.repository_entity_id
+      WHERE target.lease_id = ? AND target.role = 'primary_issue'
+      LIMIT 1
+    `).get(leaseId) as {
+      issueStableId: string;
+      repositoryStableId: string;
+    } | undefined;
+    return Boolean(
+      expected
+      && expected.repositoryStableId === readResult.repositoryStableId
+      && (
+        readResult.availability === 'authoritative_absent'
+        || expected.issueStableId === readResult.issueStableId
+      ),
+    );
+  }
+
+  function prepareResolution(
+    cmd: GitHubWriteOutcomeResolutionCommand,
+    now: string,
+  ): { ok: true; value: PreparedResolution } | {
+    ok: false;
+    result: Extract<GitHubWriteOutcomeResolutionResult, { ok: false }>;
+  } {
+    return db.transaction(() => {
+      const row = loadCycleLease(cmd.connectorInstanceId, cmd.cycleId, cmd.leaseId);
+      if (!row) {
+        const cycle = sqlite.prepare(`
+          SELECT 1 FROM github_identity_write_cycles
+          WHERE connector_instance_id = ? AND id = ?
+        `).get(cmd.connectorInstanceId, cmd.cycleId);
+        return {
+          ok: false,
+          result: failure(
+            cmd,
+            cycle ? 'lease_not_found' : 'write_cycle_not_found',
+            cycle ? 'Write lease was not found in the requested cycle' : 'Write cycle was not found',
+          ),
+        };
+      }
+      const support = resolutionSupport(row);
+      const immutableLocalSuccess = support.supported
+        && support.proofKind === 'local_finalization'
+        && support.outcome === 'proven_applied'
+        && support.remoteState === 'locally_succeeded';
+      const contextFailure = validateCurrentContext(
+        cmd,
+        row,
+        now,
+        immutableLocalSuccess,
+      );
+      if (contextFailure) return { ok: false, result: contextFailure };
+      const cycleInterrupted = row.cycleState === 'running';
+      if (cycleInterrupted) {
+        const interruptionFailure = interruptStoppedOwnerCycle(cmd, row, now);
+        if (interruptionFailure) {
+          return { ok: false, result: interruptionFailure };
+        }
+      }
+      if (!support.supported) {
+        return {
+          ok: false,
+          result: failure(
+            cmd,
+            'unsupported_outcome_proof',
+            support.reason,
+            cycleInterrupted,
+            support.remediation,
+          ),
+        };
+      }
+      const proof = support.proofKind === 'local_finalization'
+        ? {
+            kind: 'local_finalization' as const,
+            outcome: support.outcome,
+            remoteState: support.remoteState,
+          }
+        : {
+            kind: 'issue_state' as const,
+            request: loadIssueReadRequest(row),
+          };
+      if (proof.kind === 'issue_state' && !proof.request) {
+        return {
+          ok: false,
+          result: failure(
+            cmd,
+            'binding_or_locator_changed',
+            'The frozen issue target is missing or no longer current',
+            cycleInterrupted,
+            'Refresh identity evidence through normal comparison. Do not edit the lease target or task/source IDs.',
+          ),
+        };
+      }
+      return {
+        ok: true,
+        value: {
+          connectorInstanceId: cmd.connectorInstanceId,
+          cycleId: cmd.cycleId,
+          leaseId: cmd.leaseId,
+          taskId: row.taskId,
+          operation: row.operation,
+          taskVersion: row.taskVersion,
+          idempotencyKey: row.idempotencyKey,
+          modeRevision: row.modeRevision,
+          leaseState: row.leaseState,
+          cycleOutcome: row.cycleOutcome,
+          dispatchedAt: row.dispatchedAt,
+          finalizedAt: row.finalizedAt,
+          cycleInterrupted,
+          proof,
+        } as PreparedResolution,
+      };
+    }, { behavior: 'immediate' });
+  }
+
+  function commitResolution(
+    cmd: GitHubWriteOutcomeResolutionCommand,
+    prepared: PreparedResolution,
+    proof: {
+      outcome: 'proven_applied' | 'proven_not_applied_retryable';
+      proofKind: 'issue_state' | 'local_finalization';
+      proofDigest: string;
+      remoteState: string;
+      readResult?: GitHubWriteOutcomeReadResult;
+    },
+    now: string,
+  ): GitHubWriteOutcomeResolutionResult {
+    return db.transaction(() => {
+      const existing = sqlite.prepare(`
+        SELECT lease_id AS leaseId,
+          actor,
+          reason,
+          outcome,
+          proof_kind AS proofKind
+        FROM github_write_outcome_events
+        WHERE connector_instance_id = ? AND idempotency_key = ?
+        LIMIT 1
+      `).get(cmd.connectorInstanceId, cmd.idempotencyKey) as {
+        leaseId: string;
+        actor: string;
+        reason: string;
+        outcome: 'proven_applied' | 'proven_not_applied_retryable';
+        proofKind: 'issue_state' | 'local_finalization';
+      } | undefined;
+      if (existing) {
+        if (
+          existing.leaseId !== cmd.leaseId
+          || existing.actor !== cmd.actor
+          || existing.reason !== cmd.reason
+        ) {
+          return failure(cmd, 'idempotency_conflict', 'Idempotency key was reused with different audit fields');
+        }
+        const cycle = sqlite.prepare(`
+          SELECT reconciliation_state AS reconciliationState
+          FROM github_identity_write_cycles
+          WHERE id = ?
+        `).get(cmd.cycleId) as { reconciliationState: string };
+        return {
+          ok: true,
+          changed: false,
+          cycleId: cmd.cycleId,
+          leaseId: cmd.leaseId,
+          outcome: existing.outcome,
+          proofKind: existing.proofKind,
+          cycleFinalized: cycle.reconciliationState !== 'quarantined',
+          reconciliationState: normalizeReconciliationState(cycle.reconciliationState),
+        };
+      }
+      const existingLeaseEvent = sqlite.prepare(`
+        SELECT idempotency_key AS idempotencyKey
+        FROM github_write_outcome_events
+        WHERE connector_instance_id = ? AND lease_id = ?
+        LIMIT 1
+      `).get(cmd.connectorInstanceId, cmd.leaseId) as {
+        idempotencyKey: string;
+      } | undefined;
+      if (existingLeaseEvent) {
+        return failure(
+          cmd,
+          'idempotency_conflict',
+          'Write lease was already resolved with another idempotency key',
+        );
+      }
+      const row = loadCycleLease(cmd.connectorInstanceId, cmd.cycleId, cmd.leaseId);
+      if (!row) return failure(cmd, 'lease_not_found', 'Write lease changed before resolution commit');
+      const contextFailure = validateCurrentContext(
+        cmd,
+        row,
+        now,
+        proof.proofKind === 'local_finalization'
+          && proof.outcome === 'proven_applied'
+          && proof.remoteState === 'locally_succeeded',
+      );
+      if (contextFailure) return contextFailure;
+      if (
+        row.taskId !== prepared.taskId
+        || row.operation !== prepared.operation
+        || row.taskVersion !== prepared.taskVersion
+        || row.idempotencyKey !== prepared.idempotencyKey
+        || row.modeRevision !== prepared.modeRevision
+        || row.leaseState !== prepared.leaseState
+        || row.cycleOutcome !== prepared.cycleOutcome
+      ) {
+        return failure(cmd, 'stale_cycle_context', 'Lease or cycle changed during GitHub readback');
+      }
+      if (proof.readResult && !remoteIdentityMatches(cmd.leaseId, proof.readResult)) {
+        return failure(
+          cmd,
+          'binding_or_locator_changed',
+          'GitHub readback identity does not match the frozen and current binding',
+        );
+      }
+
+      const nextLeaseState = proof.outcome === 'proven_applied' ? 'succeeded' : 'failed';
+      const changed = sqlite.prepare(`
+        UPDATE task_source_write_leases
+        SET state = ?,
+            cycle_outcome = ?,
+            unknown_reason = NULL,
+            block_reason = ?,
+            finalized_at = COALESCE(finalized_at, ?),
+            updated_at = ?
+        WHERE connector_instance_id = ?
+          AND write_cycle_id = ?
+          AND id = ?
+          AND state = ?
+      `).run(
+        nextLeaseState,
+        nextLeaseState,
+        proof.outcome === 'proven_not_applied_retryable'
+          ? 'proven_not_applied_retryable'
+          : null,
+        now,
+        now,
+        cmd.connectorInstanceId,
+        cmd.cycleId,
+        cmd.leaseId,
+        prepared.leaseState,
+      ).changes;
+      if (changed !== 1) {
+        return failure(cmd, 'stale_cycle_context', 'Lease finalization lost a concurrent race');
+      }
+
+      sqlite.prepare(`
+        INSERT INTO github_write_outcome_events (
+          id, connector_instance_id, cycle_id, lease_id, task_id, operation,
+          task_version, expected_mode_revision, outcome, proof_kind, proof_digest,
+          remote_state, actor, reason, idempotency_key, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        cmd.connectorInstanceId,
+        cmd.cycleId,
+        cmd.leaseId,
+        prepared.taskId,
+        prepared.operation,
+        prepared.taskVersion,
+        cmd.expectedRevision,
+        proof.outcome,
+        proof.proofKind,
+        proof.proofDigest,
+        proof.remoteState,
+        cmd.actor,
+        cmd.reason,
+        cmd.idempotencyKey,
+        now,
+      );
+
+      if (
+        !prepared.taskId.startsWith('source-list:')
+        && ['update', 'complete', 'delete'].includes(prepared.operation)
+      ) {
+        if (proof.outcome === 'proven_applied') {
+          sqlite.prepare(`
+            UPDATE tasks
+            SET sync_status = 'synced',
+                push_retry_count = 0,
+                last_synced_at = ?
+            WHERE connector_instance_id = ? AND id = ? AND updated_at = ?
+          `).run(
+            now,
+            cmd.connectorInstanceId,
+            prepared.taskId,
+            prepared.taskVersion,
+          );
+        } else {
+          sqlite.prepare(`
+            UPDATE tasks
+            SET sync_status = 'pending_push',
+                push_retry_count = 0
+            WHERE connector_instance_id = ? AND id = ? AND updated_at = ?
+          `).run(
+            cmd.connectorInstanceId,
+            prepared.taskId,
+            prepared.taskVersion,
+          );
+        }
+      }
+
+      const cycle = finalizeCycleAfterResolution(cmd, now);
+      return {
+        ok: true,
+        changed: true,
+        cycleId: cmd.cycleId,
+        leaseId: cmd.leaseId,
+        outcome: proof.outcome,
+        proofKind: proof.proofKind,
+        cycleFinalized: cycle.finalized,
+        reconciliationState: cycle.state,
+      };
+    }, { behavior: 'immediate' });
+  }
+
+  function finalizeCycleAfterResolution(
+    cmd: GitHubWriteOutcomeResolutionCommand,
+    now: string,
+  ): {
+    finalized: boolean;
+    state: 'resolved' | 'post_dispatch_retryable' | 'quarantined';
+  } {
+    const cycle = sqlite.prepare(`
+      SELECT pending_candidate_count AS pendingCandidateCount
+      FROM github_identity_write_cycles
+      WHERE connector_instance_id = ? AND id = ?
+    `).get(cmd.connectorInstanceId, cmd.cycleId) as {
+      pendingCandidateCount: number;
+    };
+    const leases = sqlite.prepare(`
+      SELECT id, state, cycle_outcome AS cycleOutcome, cycle_observed_at AS cycleObservedAt
+      FROM task_source_write_leases
+      WHERE connector_instance_id = ? AND write_cycle_id = ?
+      ORDER BY id
+    `).all(cmd.connectorInstanceId, cmd.cycleId) as Array<{
+      id: string;
+      state: string;
+      cycleOutcome: string | null;
+      cycleObservedAt: string | null;
+    }>;
+    // Every lease that received a NodeID route carries `cycle_observed_at`, so
+    // the lease rows alone prove the cycle is durably accounted for.
+    const observedLeases = leases.filter((lease) => lease.cycleObservedAt !== null);
+    const durable = leases.length <= cycle.pendingCandidateCount
+      && leases.every((lease) =>
+        ['succeeded', 'failed', 'blocked', 'expired'].includes(lease.state)
+        && (
+          lease.state === 'expired'
+          || lease.cycleOutcome === lease.state
+        ))
+      && observedLeases.length === leases.length;
+    if (!durable) {
+      sqlite.prepare(`
+        UPDATE github_identity_write_cycles
+        SET reconciliation_state = 'quarantined',
+            reconciliation_code = 'outcome_resolution_incomplete'
+        WHERE connector_instance_id = ? AND id = ?
+      `).run(
+        cmd.connectorInstanceId,
+        cmd.cycleId,
+      );
+      return { finalized: false, state: 'quarantined' };
+    }
+    const failedCount = leases.filter((lease) => lease.cycleOutcome === 'failed').length;
+    const state = failedCount > 0 ? 'post_dispatch_retryable' : 'resolved';
+    sqlite.prepare(`
+      UPDATE github_identity_write_cycles
+      SET observed_route_count = ?,
+          applied_count = ?,
+          blocked_count = ?,
+          failed_count = ?,
+          unknown_count = 0,
+          state = 'completed',
+          reconciliation_state = ?,
+          reconciliation_code = ?,
+          completed_at = COALESCE(completed_at, ?)
+      WHERE connector_instance_id = ? AND id = ?
+    `).run(
+      observedLeases.length,
+      leases.filter((lease) => lease.cycleOutcome === 'succeeded').length,
+      leases.filter((lease) => lease.cycleOutcome === 'blocked').length,
+      failedCount,
+      state,
+      state === 'resolved'
+        ? 'post_dispatch_outcomes_resolved'
+        : 'proven_not_applied_retryable',
+      now,
+      cmd.connectorInstanceId,
+      cmd.cycleId,
+    );
+    return { finalized: true, state };
+  }
+
   validateCommand(command);
   const now = command.now ?? new Date().toISOString();
   const prepared = prepareResolution(command, now);
@@ -325,622 +1011,6 @@ export async function resolveGitHubWriteOutcome(
   return !committed.ok && prepared.value.cycleInterrupted
     ? { ...committed, changed: true }
     : committed;
-}
-
-function prepareResolution(
-  command: GitHubWriteOutcomeResolutionCommand,
-  now: string,
-): { ok: true; value: PreparedResolution } | {
-  ok: false;
-  result: Extract<GitHubWriteOutcomeResolutionResult, { ok: false }>;
-} {
-  return runTransaction(() => {
-    const row = loadCycleLease(command.connectorInstanceId, command.cycleId, command.leaseId);
-    if (!row) {
-      const cycle = sqlite.prepare(`
-        SELECT 1 FROM github_identity_write_cycles
-        WHERE connector_instance_id = ? AND id = ?
-      `).get(command.connectorInstanceId, command.cycleId);
-      return {
-        ok: false,
-        result: failure(
-          command,
-          cycle ? 'lease_not_found' : 'write_cycle_not_found',
-          cycle ? 'Write lease was not found in the requested cycle' : 'Write cycle was not found',
-        ),
-      };
-    }
-    const support = resolutionSupport(row);
-    const immutableLocalSuccess = support.supported
-      && support.proofKind === 'local_finalization'
-      && support.outcome === 'proven_applied'
-      && support.remoteState === 'locally_succeeded';
-    const contextFailure = validateCurrentContext(
-      command,
-      row,
-      now,
-      immutableLocalSuccess,
-    );
-    if (contextFailure) return { ok: false, result: contextFailure };
-    const cycleInterrupted = row.cycleState === 'running';
-    if (cycleInterrupted) {
-      const interruptionFailure = interruptStoppedOwnerCycle(command, row, now);
-      if (interruptionFailure) {
-        return { ok: false, result: interruptionFailure };
-      }
-    }
-    if (!support.supported) {
-      return {
-        ok: false,
-        result: failure(
-          command,
-          'unsupported_outcome_proof',
-          support.reason,
-          cycleInterrupted,
-          support.remediation,
-        ),
-      };
-    }
-    const proof = support.proofKind === 'local_finalization'
-      ? {
-          kind: 'local_finalization' as const,
-          outcome: support.outcome,
-          remoteState: support.remoteState,
-        }
-      : {
-          kind: 'issue_state' as const,
-          request: loadIssueReadRequest(row),
-        };
-    if (proof.kind === 'issue_state' && !proof.request) {
-      return {
-        ok: false,
-        result: failure(
-          command,
-          'binding_or_locator_changed',
-          'The frozen issue target is missing or no longer current',
-          cycleInterrupted,
-          'Refresh identity evidence through normal comparison. Do not edit the lease target or task/source IDs.',
-        ),
-      };
-    }
-    return {
-      ok: true,
-      value: {
-        connectorInstanceId: command.connectorInstanceId,
-        cycleId: command.cycleId,
-        leaseId: command.leaseId,
-        taskId: row.taskId,
-        operation: row.operation,
-        taskVersion: row.taskVersion,
-        idempotencyKey: row.idempotencyKey,
-        modeRevision: row.modeRevision,
-        leaseState: row.leaseState,
-        cycleOutcome: row.cycleOutcome,
-        dispatchedAt: row.dispatchedAt,
-        finalizedAt: row.finalizedAt,
-        cycleInterrupted,
-        proof,
-      } as PreparedResolution,
-    };
-  });
-}
-
-function commitResolution(
-  command: GitHubWriteOutcomeResolutionCommand,
-  prepared: PreparedResolution,
-  proof: {
-    outcome: 'proven_applied' | 'proven_not_applied_retryable';
-    proofKind: 'issue_state' | 'local_finalization';
-    proofDigest: string;
-    remoteState: string;
-    readResult?: GitHubWriteOutcomeReadResult;
-  },
-  now: string,
-): GitHubWriteOutcomeResolutionResult {
-  return runTransaction(() => {
-    const existing = sqlite.prepare(`
-      SELECT lease_id AS leaseId,
-        actor,
-        reason,
-        outcome,
-        proof_kind AS proofKind
-      FROM github_write_outcome_events
-      WHERE connector_instance_id = ? AND idempotency_key = ?
-      LIMIT 1
-    `).get(command.connectorInstanceId, command.idempotencyKey) as {
-      leaseId: string;
-      actor: string;
-      reason: string;
-      outcome: 'proven_applied' | 'proven_not_applied_retryable';
-      proofKind: 'issue_state' | 'local_finalization';
-    } | undefined;
-    if (existing) {
-      if (
-        existing.leaseId !== command.leaseId
-        || existing.actor !== command.actor
-        || existing.reason !== command.reason
-      ) {
-        return failure(command, 'idempotency_conflict', 'Idempotency key was reused with different audit fields');
-      }
-      const cycle = sqlite.prepare(`
-        SELECT reconciliation_state AS reconciliationState
-        FROM github_identity_write_cycles
-        WHERE id = ?
-      `).get(command.cycleId) as { reconciliationState: string };
-      return {
-        ok: true,
-        changed: false,
-        cycleId: command.cycleId,
-        leaseId: command.leaseId,
-        outcome: existing.outcome,
-        proofKind: existing.proofKind,
-        cycleFinalized: cycle.reconciliationState !== 'quarantined',
-        reconciliationState: normalizeReconciliationState(cycle.reconciliationState),
-      };
-    }
-    const existingLeaseEvent = sqlite.prepare(`
-      SELECT idempotency_key AS idempotencyKey
-      FROM github_write_outcome_events
-      WHERE connector_instance_id = ? AND lease_id = ?
-      LIMIT 1
-    `).get(command.connectorInstanceId, command.leaseId) as {
-      idempotencyKey: string;
-    } | undefined;
-    if (existingLeaseEvent) {
-      return failure(
-        command,
-        'idempotency_conflict',
-        'Write lease was already resolved with another idempotency key',
-      );
-    }
-    const row = loadCycleLease(command.connectorInstanceId, command.cycleId, command.leaseId);
-    if (!row) return failure(command, 'lease_not_found', 'Write lease changed before resolution commit');
-    const contextFailure = validateCurrentContext(
-      command,
-      row,
-      now,
-      proof.proofKind === 'local_finalization'
-        && proof.outcome === 'proven_applied'
-        && proof.remoteState === 'locally_succeeded',
-    );
-    if (contextFailure) return contextFailure;
-    if (
-      row.taskId !== prepared.taskId
-      || row.operation !== prepared.operation
-      || row.taskVersion !== prepared.taskVersion
-      || row.idempotencyKey !== prepared.idempotencyKey
-      || row.modeRevision !== prepared.modeRevision
-      || row.leaseState !== prepared.leaseState
-      || row.cycleOutcome !== prepared.cycleOutcome
-    ) {
-      return failure(command, 'stale_cycle_context', 'Lease or cycle changed during GitHub readback');
-    }
-    if (proof.readResult && !remoteIdentityMatches(command.leaseId, proof.readResult)) {
-      return failure(
-        command,
-        'binding_or_locator_changed',
-        'GitHub readback identity does not match the frozen and current binding',
-      );
-    }
-
-    const nextLeaseState = proof.outcome === 'proven_applied' ? 'succeeded' : 'failed';
-    const changed = sqlite.prepare(`
-      UPDATE task_source_write_leases
-      SET state = ?,
-          cycle_outcome = ?,
-          unknown_reason = NULL,
-          block_reason = ?,
-          finalized_at = COALESCE(finalized_at, ?),
-          updated_at = ?
-      WHERE connector_instance_id = ?
-        AND write_cycle_id = ?
-        AND id = ?
-        AND state = ?
-    `).run(
-      nextLeaseState,
-      nextLeaseState,
-      proof.outcome === 'proven_not_applied_retryable'
-        ? 'proven_not_applied_retryable'
-        : null,
-      now,
-      now,
-      command.connectorInstanceId,
-      command.cycleId,
-      command.leaseId,
-      prepared.leaseState,
-    ).changes;
-    if (changed !== 1) {
-      return failure(command, 'stale_cycle_context', 'Lease finalization lost a concurrent race');
-    }
-
-    sqlite.prepare(`
-      INSERT INTO github_write_outcome_events (
-        id, connector_instance_id, cycle_id, lease_id, task_id, operation,
-        task_version, expected_mode_revision, outcome, proof_kind, proof_digest,
-        remote_state, actor, reason, idempotency_key, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      command.connectorInstanceId,
-      command.cycleId,
-      command.leaseId,
-      prepared.taskId,
-      prepared.operation,
-      prepared.taskVersion,
-      command.expectedRevision,
-      proof.outcome,
-      proof.proofKind,
-      proof.proofDigest,
-      proof.remoteState,
-      command.actor,
-      command.reason,
-      command.idempotencyKey,
-      now,
-    );
-
-    if (
-      !prepared.taskId.startsWith('source-list:')
-      && ['update', 'complete', 'delete'].includes(prepared.operation)
-    ) {
-      if (proof.outcome === 'proven_applied') {
-        sqlite.prepare(`
-          UPDATE tasks
-          SET sync_status = 'synced',
-              push_retry_count = 0,
-              last_synced_at = ?
-          WHERE connector_instance_id = ? AND id = ? AND updated_at = ?
-        `).run(
-          now,
-          command.connectorInstanceId,
-          prepared.taskId,
-          prepared.taskVersion,
-        );
-      } else {
-        sqlite.prepare(`
-          UPDATE tasks
-          SET sync_status = 'pending_push',
-              push_retry_count = 0
-          WHERE connector_instance_id = ? AND id = ? AND updated_at = ?
-        `).run(
-          command.connectorInstanceId,
-          prepared.taskId,
-          prepared.taskVersion,
-        );
-      }
-    }
-
-    const cycle = finalizeCycleAfterResolution(command, now);
-    return {
-      ok: true,
-      changed: true,
-      cycleId: command.cycleId,
-      leaseId: command.leaseId,
-      outcome: proof.outcome,
-      proofKind: proof.proofKind,
-      cycleFinalized: cycle.finalized,
-      reconciliationState: cycle.state,
-    };
-  });
-}
-
-function finalizeCycleAfterResolution(
-  command: GitHubWriteOutcomeResolutionCommand,
-  now: string,
-): {
-  finalized: boolean;
-  state: 'resolved' | 'post_dispatch_retryable' | 'quarantined';
-} {
-  const cycle = sqlite.prepare(`
-    SELECT pending_candidate_count AS pendingCandidateCount
-    FROM github_identity_write_cycles
-    WHERE connector_instance_id = ? AND id = ?
-  `).get(command.connectorInstanceId, command.cycleId) as {
-    pendingCandidateCount: number;
-  };
-  const leases = sqlite.prepare(`
-    SELECT id, state, cycle_outcome AS cycleOutcome, cycle_observed_at AS cycleObservedAt
-    FROM task_source_write_leases
-    WHERE connector_instance_id = ? AND write_cycle_id = ?
-    ORDER BY id
-  `).all(command.connectorInstanceId, command.cycleId) as Array<{
-    id: string;
-    state: string;
-    cycleOutcome: string | null;
-    cycleObservedAt: string | null;
-  }>;
-  // Every lease that received a NodeID route carries `cycle_observed_at`, so
-  // the lease rows alone prove the cycle is durably accounted for.
-  const observedLeases = leases.filter((lease) => lease.cycleObservedAt !== null);
-  const durable = leases.length <= cycle.pendingCandidateCount
-    && leases.every((lease) =>
-      ['succeeded', 'failed', 'blocked', 'expired'].includes(lease.state)
-      && (
-        lease.state === 'expired'
-        || lease.cycleOutcome === lease.state
-      ))
-    && observedLeases.length === leases.length;
-  if (!durable) {
-    sqlite.prepare(`
-      UPDATE github_identity_write_cycles
-      SET reconciliation_state = 'quarantined',
-          reconciliation_code = 'outcome_resolution_incomplete'
-      WHERE connector_instance_id = ? AND id = ?
-    `).run(
-      command.connectorInstanceId,
-      command.cycleId,
-    );
-    return { finalized: false, state: 'quarantined' };
-  }
-  const failedCount = leases.filter((lease) => lease.cycleOutcome === 'failed').length;
-  const state = failedCount > 0 ? 'post_dispatch_retryable' : 'resolved';
-  sqlite.prepare(`
-    UPDATE github_identity_write_cycles
-    SET observed_route_count = ?,
-        applied_count = ?,
-        blocked_count = ?,
-        failed_count = ?,
-        unknown_count = 0,
-        state = 'completed',
-        reconciliation_state = ?,
-        reconciliation_code = ?,
-        completed_at = COALESCE(completed_at, ?)
-    WHERE connector_instance_id = ? AND id = ?
-  `).run(
-    observedLeases.length,
-    leases.filter((lease) => lease.cycleOutcome === 'succeeded').length,
-    leases.filter((lease) => lease.cycleOutcome === 'blocked').length,
-    failedCount,
-    state,
-    state === 'resolved'
-      ? 'post_dispatch_outcomes_resolved'
-      : 'proven_not_applied_retryable',
-    now,
-    command.connectorInstanceId,
-    command.cycleId,
-  );
-  return { finalized: true, state };
-}
-
-function validateCurrentContext(
-  command: GitHubWriteOutcomeResolutionCommand,
-  row: CycleLeaseRow,
-  now: string,
-  immutableLocalSuccess: boolean,
-): Extract<GitHubWriteOutcomeResolutionResult, { ok: false }> | null {
-  const mode = getGitHubIdentityModeSnapshotInTransaction(
-    db,
-    command.connectorInstanceId,
-    now,
-  );
-  if (mode.modeRevision !== command.expectedRevision) {
-    return failure(command, 'revision_conflict', 'Connector mode revision changed');
-  }
-  if (row.modeRevision !== mode.modeRevision) {
-    return failure(command, 'stale_cycle_context', 'Write cycle belongs to a different identity context');
-  }
-  if (immutableLocalSuccess) return null;
-  const taskVersion = row.taskId.startsWith('source-list:')
-    ? sqlite.prepare(`
-        SELECT source_id AS version
-        FROM source_lists
-        WHERE connector_instance_id = ? AND id = ?
-      `).get(
-        command.connectorInstanceId,
-        row.taskId.slice('source-list:'.length),
-      ) as { version: string } | undefined
-    : sqlite.prepare(`
-        SELECT updated_at AS version
-        FROM tasks
-        WHERE connector_instance_id = ? AND id = ?
-      `).get(command.connectorInstanceId, row.taskId) as { version: string } | undefined;
-  if (!taskVersion || taskVersion.version !== row.taskVersion) {
-    return failure(command, 'task_version_changed', 'Task or source-list version changed');
-  }
-  if (!currentTargetsMatch(row.leaseId)) {
-    return failure(command, 'binding_or_locator_changed', 'Frozen binding or locator no longer matches');
-  }
-  return null;
-}
-
-function loadCycleLease(
-  connectorInstanceId: string,
-  cycleId: string,
-  leaseId: string,
-): CycleLeaseRow | undefined {
-  return sqlite.prepare(`
-    SELECT cycle.connector_instance_id AS connectorInstanceId,
-      cycle.id AS cycleId,
-      cycle.state AS cycleState,
-      cycle.reconciliation_state AS reconciliationState,
-      cycle.job_id AS jobId,
-      cycle.mode_revision AS modeRevision,
-      lease.id AS leaseId,
-      lease.task_id AS taskId,
-      lease.operation,
-      lease.task_version AS taskVersion,
-      lease.idempotency_key AS idempotencyKey,
-      lease.state AS leaseState,
-      lease.cycle_outcome AS cycleOutcome,
-      lease.dispatched_at AS dispatchedAt,
-      lease.finalized_at AS finalizedAt,
-      lease.expires_at AS expiresAt
-    FROM github_identity_write_cycles AS cycle
-    JOIN task_source_write_leases AS lease ON lease.write_cycle_id = cycle.id
-    WHERE cycle.connector_instance_id = ?
-      AND cycle.id = ?
-      AND lease.connector_instance_id = cycle.connector_instance_id
-      AND lease.id = ?
-    LIMIT 1
-  `).get(connectorInstanceId, cycleId, leaseId) as CycleLeaseRow | undefined;
-}
-
-function interruptStoppedOwnerCycle(
-  command: GitHubWriteOutcomeResolutionCommand,
-  row: CycleLeaseRow,
-  now: string,
-): Extract<GitHubWriteOutcomeResolutionResult, { ok: false }> | null {
-  if (!command.confirmOwnerStopped) {
-    return failure(
-      command,
-      'active_dispatch',
-      'A running cycle may still own this post-dispatch lease',
-      false,
-      'Stop every app and worker process that can use this connector, wait for durable leases to expire, then rerun with --confirm-owner-stopped. Lease expiry alone is not proof that an in-flight GitHub request ended.',
-    );
-  }
-  const live = sqlite.prepare(`
-    SELECT
-      EXISTS (
-        SELECT 1
-        FROM task_source_write_leases AS active_lease
-        WHERE active_lease.connector_instance_id = ?
-          AND active_lease.write_cycle_id = ?
-          AND active_lease.state IN ('claimed', 'authorized', 'dispatched', 'unknown')
-          AND active_lease.expires_at > ?
-      ) AS writeLease,
-      EXISTS (
-        SELECT 1
-        FROM connector_operation_leases AS operation_lease
-        WHERE operation_lease.connector_id = ?
-          AND operation_lease.lease_expires_at > ?
-      ) AS connectorLease,
-      EXISTS (
-        SELECT 1
-        FROM sync_jobs AS job
-        WHERE job.id = ?
-          AND job.connector_id = ?
-          AND job.status = 'running'
-          AND job.lease_expires_at > ?
-      ) AS jobLease
-  `).get(
-    command.connectorInstanceId,
-    command.cycleId,
-    now,
-    command.connectorInstanceId,
-    now,
-    row.jobId,
-    command.connectorInstanceId,
-    now,
-  ) as { writeLease: number; connectorLease: number; jobLease: number };
-  if (live.writeLease || live.connectorLease || live.jobLease) {
-    return failure(
-      command,
-      'active_dispatch',
-      'Durable owner or write leases are still active',
-      false,
-      'Keep all connector-capable app and worker processes stopped, wait for every reported lease to expire, and retry. Do not infer owner death from a single expired lease.',
-    );
-  }
-  const changed = sqlite.prepare(`
-    UPDATE github_identity_write_cycles
-    SET state = 'interrupted',
-        reconciliation_state = 'quarantined',
-        reconciliation_code = 'possible_post_dispatch_outcome',
-        completed_at = ?,
-        reconciled_at = ?,
-        reconciled_by = ?,
-        reconciliation_reason = ?,
-        reconciliation_idempotency_key = ?
-    WHERE connector_instance_id = ?
-      AND id = ?
-      AND state = 'running'
-      AND mode_revision = ?
-  `).run(
-    now,
-    now,
-    command.actor,
-    command.reason,
-    command.idempotencyKey,
-    command.connectorInstanceId,
-    command.cycleId,
-    row.modeRevision,
-  ).changes;
-  if (changed !== 1) {
-    return failure(
-      command,
-      'stale_cycle_context',
-      'Running cycle quarantine lost a concurrent race',
-    );
-  }
-  row.cycleState = 'interrupted';
-  row.reconciliationState = 'quarantined';
-  return null;
-}
-
-function loadIssueReadRequest(row: CycleLeaseRow): GitHubWriteOutcomeReadRequest | null {
-  if (row.operation !== 'complete') return null;
-  const target = sqlite.prepare(`
-    SELECT target.owner, target.repository, target.issue_number AS issueNumber
-    FROM task_source_write_lease_targets AS target
-    WHERE target.lease_id = ? AND target.role = 'primary_issue'
-    LIMIT 1
-  `).get(row.leaseId) as {
-    owner: string | null;
-    repository: string | null;
-    issueNumber: number | null;
-  } | undefined;
-  return target?.owner && target.repository && target.issueNumber !== null
-    ? {
-        owner: target.owner,
-        repository: target.repository,
-        issueNumber: target.issueNumber,
-        operation: 'complete',
-      }
-    : null;
-}
-
-function currentTargetsMatch(leaseId: string): boolean {
-  const result = sqlite.prepare(`
-    SELECT COUNT(*) AS total,
-      COALESCE(SUM(CASE
-        WHEN target.external_entity_id IS NOT NULL
-          AND locator.id IS NOT NULL
-          AND binding.id IS NOT NULL
-          AND binding.verified_at = target.binding_revision
-          AND locator.locator_revision = target.locator_revision
-          AND lower(locator.owner) = lower(target.owner)
-          AND lower(locator.repository) = lower(target.repository)
-          AND COALESCE(locator.issue_number, -1) = COALESCE(target.issue_number, -1)
-        THEN 1 ELSE 0 END
-      ), 0) AS matching
-    FROM task_source_write_lease_targets AS target
-    JOIN task_source_write_leases AS lease ON lease.id = target.lease_id
-    LEFT JOIN external_entity_locators AS locator
-      ON locator.external_entity_id = target.external_entity_id
-      AND locator.valid_to IS NULL
-    LEFT JOIN external_entity_bindings AS binding
-      ON binding.connector_instance_id = lease.connector_instance_id
-      AND binding.external_entity_id = target.external_entity_id
-      AND binding.state IN ('shadow', 'active')
-    WHERE target.lease_id = ?
-  `).get(leaseId) as { total: number; matching: number };
-  return Number(result.total) > 0 && Number(result.total) === Number(result.matching);
-}
-
-function remoteIdentityMatches(
-  leaseId: string,
-  readResult: GitHubWriteOutcomeReadResult,
-): boolean {
-  const expected = sqlite.prepare(`
-    SELECT issue.stable_id AS issueStableId,
-      repository.stable_id AS repositoryStableId
-    FROM task_source_write_lease_targets AS target
-    JOIN external_entities AS issue ON issue.id = target.external_entity_id
-    JOIN external_entities AS repository ON repository.id = target.repository_entity_id
-    WHERE target.lease_id = ? AND target.role = 'primary_issue'
-    LIMIT 1
-  `).get(leaseId) as {
-    issueStableId: string;
-    repositoryStableId: string;
-  } | undefined;
-  return Boolean(
-    expected
-    && expected.repositoryStableId === readResult.repositoryStableId
-    && (
-      readResult.availability === 'authoritative_absent'
-      || expected.issueStableId === readResult.issueStableId
-    ),
-  );
 }
 
 function resolutionSupport(input: {

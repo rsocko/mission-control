@@ -3,8 +3,13 @@
  * - POST /api/tasks/move/preview
  * - POST /api/tasks/move/execute
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
 import { NextResponse } from 'next/server';
+import {
+  clearTaskCorePersistence,
+  registerTaskCorePersistence,
+} from '@/lib/tasks/core/runtime';
+import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 
 // ─── Chainable mock helper ───────────────────────────────────────────────────
 
@@ -81,6 +86,126 @@ vi.mock('@/db', () => ({
   default: mockDb,
   runTransaction: mockRunTransaction,
 }));
+
+// ─── Task-core write-through move fake ───────────────────────────────────────
+//
+// The write-through move is backend-neutral since L04: it reads and writes
+// through narrow `WriteThroughTaskMoveRepository` operations instead of a
+// Drizzle handle. The fake below consumes `selectResults` in exactly the order
+// the move performs its reads, so these route tests keep seeding the same
+// fixtures, and it records each atomic operation's *request* so the tests can
+// assert on what the move asked the adapter to do. What each adapter then does
+// with that request (transaction boundaries, tag/project/schedule copying,
+// reference repointing, optimistic guards) is proven against real SQLite and
+// PostgreSQL databases by `tests/contracts/task-core.contract.ts`.
+
+interface RecordedTask {
+  sourceId: string;
+  metadata: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+interface RecordedAttachment {
+  name: string;
+  taskId: string;
+  contentBase64?: string | null;
+  [key: string]: unknown;
+}
+
+interface RecordedMaterialization {
+  task: RecordedTask;
+  tagIds: string[];
+  copyProjectsFromTaskId: string | null;
+  schedule: unknown;
+  attachments: RecordedAttachment[];
+  subtaskCopies: Array<{
+    copyFromTaskId: string;
+    task: RecordedTask;
+    attachments: RecordedAttachment[];
+  }>;
+}
+
+interface RecordedFinalization {
+  sourceTaskId: string;
+  successorTaskId: string;
+  claimToken: string;
+  attachmentSnapshot: unknown[];
+  subtaskRepoints: Array<Record<string, unknown>>;
+  sourceDisposition: { kind: string; [key: string]: unknown };
+}
+
+const moveClaim = vi.fn((_request: Record<string, unknown>) => {});
+const moveRelease = vi.fn((_request: Record<string, unknown>) => {});
+const moveDiscard = vi.fn((_taskId: string) => {});
+const moveMaterialize = vi.fn((_request: RecordedMaterialization) => {});
+const moveFinalize = vi.fn((_request: RecordedFinalization) => {});
+const moveSyncIntent = vi.fn((_request: Record<string, unknown>) => {});
+const moveCopyProvenance = vi.fn((_request: Record<string, unknown>) => {});
+let claimGranted = true;
+let finalizeOutcome: 'finalized' | 'source-changed' = 'finalized';
+
+function nextSelectRows(): Array<Record<string, unknown>> {
+  const rows = (selectResults[selectCallIndex] ?? []) as Array<Record<string, unknown>>;
+  selectCallIndex++;
+  return rows;
+}
+
+function nextSelectRow(): Record<string, unknown> | null {
+  return nextSelectRows()[0] ?? null;
+}
+
+const writeThroughMovesFake = {
+  getTask: async () => {
+    const row = nextSelectRow();
+    return row ? { ...row, metadata: row.metadata ?? {} } : null;
+  },
+  findTargetListBySourceId: async () => nextSelectRow(),
+  listTaskTagRefs: async () => nextSelectRows(),
+  listChildTasks: async () => nextSelectRows().map((row) => ({
+    ...row,
+    metadata: row.metadata ?? {},
+  })),
+  listAttachmentMetadata: async () => nextSelectRows(),
+  getTaskSchedule: async () => nextSelectRow(),
+  listAttachmentContents: async () => nextSelectRows(),
+  claimTaskMove: async (request: Record<string, unknown>) => {
+    moveClaim(request);
+    return claimGranted;
+  },
+  releaseTaskMoveClaim: async (request: Record<string, unknown>) => {
+    moveRelease(request);
+  },
+  discardMaterializedDestination: async (taskId: string) => {
+    moveDiscard(taskId);
+  },
+  materializeDestination: async (request: RecordedMaterialization) => {
+    moveMaterialize(request);
+  },
+  finalizeMove: async (request: RecordedFinalization) => {
+    moveFinalize(request);
+    return { kind: finalizeOutcome };
+  },
+  recordSourceSyncIntent: async (request: Record<string, unknown>) => {
+    moveSyncIntent(request);
+  },
+  recordSourceCopyProvenance: async (request: Record<string, unknown>) => {
+    moveCopyProvenance(request);
+  },
+};
+
+vi.mock('@/lib/persistence/runtime', () => {
+  const repositories = {
+    // The move resolves the destination connector (and, when the registry has
+    // no live instance, the source connector) through the portable connector
+    // repository, which is the next seeded `selectResults` slot.
+    connectors: { get: async () => nextSelectRow() },
+  };
+  return {
+    registerCorePersistenceRepositories: vi.fn(),
+    getCorePersistenceRepositories: () => repositories,
+    getCorePersistenceRepositoriesForBackend: async () => repositories,
+  };
+});
 
 vi.mock('@/db/schema', () => ({
   tasks: { id: 'id', parentId: 'parent_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', sourceListId: 'source_list_id' },
@@ -240,6 +365,11 @@ vi.mock('@/lib/api-error', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  registerTaskCorePersistence({
+    writeThroughMoves: writeThroughMovesFake,
+  } as unknown as TaskCorePersistence);
+  claimGranted = true;
+  finalizeOutcome = 'finalized';
   mockGetAttachmentContent.mockReset();
   mockGetAttachmentContent.mockResolvedValue({
     contentBase64: 'cmVtb3RlIGNvbnRlbnQ=',
@@ -253,7 +383,22 @@ beforeEach(() => {
   mockConnectorRefreshSupported = false;
 });
 
+afterAll(() => {
+  // The registry slot lives on `globalThis` so it survives module resets;
+  // clear it so this file's fake cannot leak into another test file.
+  clearTaskCorePersistence();
+});
+
 const BASE = 'http://localhost:3099';
+
+/** The destination task the move asked the adapter to materialize. */
+function materializedTask(sourceId: string): RecordedTask {
+  const task = moveMaterialize.mock.calls
+    .map(([request]) => request.task)
+    .find((candidate) => candidate.sourceId === sourceId);
+  if (!task) throw new Error(`No destination materialized with sourceId ${sourceId}`);
+  return task;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // PREVIEW ENDPOINT
@@ -838,9 +983,7 @@ describe('POST /api/tasks/move/execute', () => {
       microStatus: 'blocked_external',
       snoozedUntil: '2026-08-02T12:00:00Z',
     }));
-    const insertedTask = mockTxValues.mock.calls
-      .map(([value]) => value)
-      .find((value) => value && !Array.isArray(value) && value.sourceId === 'acme/repo:123');
+    const insertedTask = materializedTask('acme/repo:123');
     expect(insertedTask).toMatchObject({
       localDisposition: 'active',
       planningHorizon: 'soon',
@@ -850,7 +993,8 @@ describe('POST /api/tasks/move/execute', () => {
       reminderDueTime: '09:30',
       snoozedUntil: '2026-08-02T12:00:00Z',
     });
-    expect(mockRunTransaction).toHaveBeenCalled();
+    expect(moveMaterialize).toHaveBeenCalled();
+    expect(moveFinalize).toHaveBeenCalled();
     expect(mockMoveLogInfo).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'task_move',
@@ -998,16 +1142,22 @@ describe('POST /api/tasks/move/execute', () => {
 
     expect(res.status).toBe(201);
     expect(mockDeleteTask).not.toHaveBeenCalled();
-    expect(mockTxDelete).toHaveBeenCalledWith(expect.objectContaining({
-      id: 'id',
-      connectorType: 'connector_type',
+    // A local source is deleted outright rather than kept as a tombstone, and
+    // its stored attachment content is carried onto the successor.
+    expect(moveFinalize).toHaveBeenCalledWith(expect.objectContaining({
+      sourceTaskId: 'task-local',
+      sourceDisposition: { kind: 'delete' },
     }));
-    expect(mockTxValues).toHaveBeenCalledWith(expect.arrayContaining([
-      expect.objectContaining({
-        name: 'spec.txt',
-        contentBase64: 'cHJlc2VydmUgbWU=',
-      }),
-    ]));
+    expect(moveMaterialize).toHaveBeenCalledWith(expect.objectContaining({
+      attachments: expect.arrayContaining([
+        expect.objectContaining({
+          name: 'spec.txt',
+          contentBase64: 'cHJlc2VydmUgbWU=',
+        }),
+      ]),
+    }));
+    // The local source never reaches the deferred sync-intent write-back.
+    expect(moveSyncIntent).not.toHaveBeenCalled();
   });
 
   it('uses native transfer for same-owner GitHub→GitHub move', async () => {
@@ -1148,11 +1298,8 @@ describe('POST /api/tasks/move/execute', () => {
       sourceListId: 'acme/repo-b',
     }));
     expect(mockCompleteTask).toHaveBeenCalledWith('acme/repo-a:10');
-    const insertedTask = mockTxValues.mock.calls
-      .map(([value]) => value)
-      .find((value) => value && !Array.isArray(value) && value.sourceId === 'acme/repo-b:42');
-    expect(insertedTask).toBeDefined();
-    expect(JSON.parse(insertedTask.metadata)).toMatchObject({
+    const insertedTask = materializedTask('acme/repo-b:42');
+    expect(insertedTask.metadata).toMatchObject({
       issueNumber: 42,
       nodeId: 'I_destination',
       url: 'https://github.com/acme/repo-b/issues/42',
@@ -1188,7 +1335,11 @@ describe('POST /api/tasks/move/execute', () => {
     expect(data.nativeTransfer).toBeUndefined();
     expect(mockTransferTask).not.toHaveBeenCalled();
     expect(mockCreateTask).toHaveBeenCalled();
-    expect(mockRunTransaction).toHaveBeenCalled();
+    expect(moveMaterialize).toHaveBeenCalled();
+    expect(moveCopyProvenance).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'task-1',
+    }));
+    expect(moveFinalize).not.toHaveBeenCalled();
   });
 
   it('moves subtasks when strategy is move-as-subtasks', async () => {
@@ -1206,16 +1357,6 @@ describe('POST /api/tasks/move/execute', () => {
       { id: 'sub-2', title: 'Subtask 2', status: 'done', parentId: 'task-1', isChecklistItem: true },
     ]); // subtasks
     selectResults.push([]); // attachments
-    txSelectResults.push(
-      [], // parent projects
-      [{
-        id: 'parent-link',
-        taskId: 'task-1',
-        connectorType: 'github-issues',
-        connectorInstanceId: 'github-1',
-        sourceId: 'acme/other#1',
-      }],
-    );
 
     const { POST } = await import('@/app/api/tasks/move/execute/route');
     const request = new Request(`${BASE}/api/tasks/move/execute`, {
@@ -1233,12 +1374,16 @@ describe('POST /api/tasks/move/execute', () => {
     expect(data.subtasksMoved).toBe(2);
     expect(mockCreateSubTask).toHaveBeenCalledTimes(2);
     expect(mockListAttachments).toHaveBeenCalledTimes(1);
-    expect(mockTxUpdates).toHaveBeenCalledWith(expect.objectContaining({
-      sourceId: 'sub-1',
-      connectorType: 'github-issues',
-      parentId: expect.any(String),
+    expect(moveFinalize).toHaveBeenCalledWith(expect.objectContaining({
+      subtaskRepoints: expect.arrayContaining([
+        expect.objectContaining({
+          taskId: 'sub-1',
+          sourceId: 'sub-1',
+          connectorType: 'github-issues',
+          parentId: expect.any(String),
+        }),
+      ]),
     }));
-    expect(mockTxRun).toHaveBeenCalled();
   });
 
   it('creates Microsoft To Do steps and preserves GitHub subtask details in notes', async () => {
@@ -1309,21 +1454,6 @@ describe('POST /api/tasks/move/execute', () => {
       contentBase64: 'aGVsbG8=',
     }]); // bounded attachment content load
 
-    txSelectResults.push(
-      [], // parent projects
-      [{ taskId: 'sub-1', tagId: 'tag-1' }],
-      [{ taskId: 'sub-1', projectId: 'project-1' }],
-      [{
-        taskId: 'sub-1', scheduledDate: '2026-08-02', scheduledTime: '09:00',
-        estimatedDuration: 45, isTimeBlocked: true, recurrence: 'weekly',
-      }],
-      [{
-        id: 'link-1', taskId: 'sub-1', connectorType: 'github-issues',
-        connectorInstanceId: 'github-1', sourceId: 'acme/other#1',
-        title: 'Related', linkedAt: '2026-08-01T12:00:00Z', metadata: {},
-      }],
-    );
-
     const { POST } = await import('@/app/api/tasks/move/execute/route');
     const res = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
       method: 'POST',
@@ -1339,30 +1469,28 @@ describe('POST /api/tasks/move/execute', () => {
 
     expect(res.status).toBe(201);
     expect(mockCreateSubTask).toHaveBeenCalledTimes(1);
-    expect(mockTxValues).toHaveBeenCalledWith(expect.objectContaining({
+    const materialization = moveMaterialize.mock.calls[0][0];
+    expect(materialization.copyProjectsFromTaskId).toBe('task-1');
+    expect(materialization.subtaskCopies).toHaveLength(1);
+    const [subtaskCopy] = materialization.subtaskCopies;
+    // Tag, project and schedule rows are copied from the source subtask by the
+    // adapter inside the same transaction; the move only names the row to copy
+    // from, so a transferable relation can never be half-copied.
+    expect(subtaskCopy.copyFromTaskId).toBe('sub-1');
+    expect(subtaskCopy.task).toMatchObject({
       title: 'Subtask',
       parentId: expect.any(String),
       sourceId: 'sub-1',
-    }));
-    expect(mockTxValues).toHaveBeenCalledWith([
-      expect.objectContaining({ tagId: 'tag-1', taskId: expect.any(String) }),
-    ]);
-    expect(mockTxValues).toHaveBeenCalledWith([
-      expect.objectContaining({ projectId: 'project-1', taskId: expect.any(String) }),
-    ]);
-    expect(mockTxValues).toHaveBeenCalledWith([
-      expect.objectContaining({ recurrence: 'weekly', taskId: expect.any(String) }),
-    ]);
-    expect(mockTxValues).toHaveBeenCalledWith([
+    });
+    expect(subtaskCopy.attachments).toEqual([
       expect.objectContaining({
         name: 'notes.txt',
         contentBase64: 'aGVsbG8=',
         taskId: expect.any(String),
       }),
     ]);
-    expect(mockTxValues).not.toHaveBeenCalledWith([
-      expect.objectContaining({ sourceId: 'acme/other#1' }),
-    ]);
+    // Linked-source identity is never re-materialized onto the copy.
+    expect(JSON.stringify(materialization)).not.toContain('acme/other#1');
   });
 
   it('downloads and uploads remote subtask attachments before deleting the source', async () => {
@@ -1499,8 +1627,11 @@ describe('POST /api/tasks/move/execute', () => {
       traceId: 'deadbeef',
     });
     expect(mockDeleteTask).toHaveBeenCalledWith('new-source-123');
-    expect(mockRunTransaction).toHaveBeenCalledTimes(3); // claim, cleanup, and release
-    expect(mockTxValues).not.toHaveBeenCalled();
+    expect(moveClaim).toHaveBeenCalledTimes(1);
+    expect(moveDiscard).toHaveBeenCalledTimes(1);
+    expect(moveRelease).toHaveBeenCalledTimes(1);
+    expect(moveMaterialize).not.toHaveBeenCalled();
+    expect(moveFinalize).not.toHaveBeenCalled();
     expect(mockMoveLogError).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'task_move',

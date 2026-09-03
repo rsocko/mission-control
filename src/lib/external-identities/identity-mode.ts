@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm';
-import db from '@/db';
 import { githubIdentityControls } from '@/db/schema';
+import { getGitHubIdentityRepository } from './worker-persistence';
 import {
   GITHUB_IDENTITY_MODE,
   type GitHubIdentityModeSnapshot,
@@ -13,19 +13,18 @@ import type { ExternalIdentityTransaction } from './service';
  * identity epoch (`mode_revision`) that fences in-flight write cycles, write
  * leases, and queued sync jobs against a connector being re-provisioned.
  *
- * This read stays Drizzle-bound: it is a thin wrapper over the
- * `*InTransaction` helper and is still called synchronously by SQLite-only
- * legacy reconciliation modules (`repoint-service`, `bulk-transfer-service`,
- * `identity-status`) that are out of scope for this migration layer. The
- * backend-neutral equivalent is exposed on the persistence port as
- * `GitHubIdentityPersistence.getModeSnapshot`, which the adapters and the
- * migrated write-fence/runtime flows re-check inside their own transactions.
+ * This is a backend-neutral async wrapper over
+ * `GitHubIdentityPersistence.getModeSnapshot`, obtained through the L01
+ * worker-persistence composition root. The SQLite adapter answers it with the
+ * exact query the `*InTransaction` helper below performs (re-used verbatim
+ * inside the adapter's own transaction); the PostgreSQL adapter answers it
+ * genuinely async against its own schema.
  */
-export function getGitHubIdentityModeSnapshot(
+export async function getGitHubIdentityModeSnapshot(
   connectorInstanceId: string,
   capturedAt = new Date().toISOString(),
-): GitHubIdentityModeSnapshot {
-  return getGitHubIdentityModeSnapshotInTransaction(db, connectorInstanceId, capturedAt);
+): Promise<GitHubIdentityModeSnapshot> {
+  return (await getGitHubIdentityRepository()).getModeSnapshot(connectorInstanceId, capturedAt);
 }
 
 export function getGitHubIdentityModeSnapshotInTransaction(

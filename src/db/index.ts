@@ -13,6 +13,7 @@ import {
   DatabaseTelemetryCollector,
   type DatabaseTelemetrySnapshot,
 } from '@/lib/telemetry/database';
+import { registerTaskCorePersistenceProvider } from '@/lib/tasks/core/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import { createSqliteCorePersistenceRepositories } from './persistence/sqlite-core-repositories';
 import {
@@ -325,6 +326,30 @@ export {
   getDatabaseTelemetry,
   withoutDatabaseObservation,
 };
+
+/**
+ * Installs the SQLite task-core default as a *lazy* provider, after the SQLite
+ * handles this module exports (`db`, `runTransaction`) exist.
+ *
+ * The L04 task-core seam (`@/lib/tasks/core/runtime`) is deliberately free of
+ * any SQLite reference so its consumers stay out of the web/API taint census.
+ * Doing the registration here instead keeps that property while guaranteeing
+ * that any process which actually reaches SQLite (dev server, scripts, tests)
+ * has a working composition without a per-call-site bootstrap.
+ *
+ * This is registration only: no domain logic and no PostgreSQL branch lives
+ * here. It is also not a PostgreSQL fallback — `initializeRuntimeDatabase`
+ * registers the PostgreSQL composition eagerly, an explicit registration
+ * always wins over this provider, and the provider resolves through the same
+ * `db` handle that already refuses to initialize under the PostgreSQL backend.
+ */
+registerTaskCorePersistenceProvider(async () => {
+  const { sqliteTaskCorePersistence } = await import(
+    './persistence/sqlite-task-core-repositories'
+  );
+  return sqliteTaskCorePersistence;
+});
+
 export {
   shouldRunDatabaseInitialization,
 } from './bootstrap/connection';

@@ -1,5 +1,6 @@
-import { sql } from 'drizzle-orm';
+import { randomUUID } from 'node:crypto';
 import { afterAll, describe, it } from 'vitest';
+import { appSettings } from '@/db/postgres/schema';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 import {
   describeAsyncTransactionRunnerContract,
@@ -54,7 +55,10 @@ async function initialize(): Promise<void> {
   initialized = true;
 }
 
-const KEY_PREFIX = 'contract:transaction-runner:';
+// Unique per test run so parallel CI jobs sharing a Postgres instance can
+// never collide on `app_settings` rows (matches the `randomUUID()` isolation
+// convention used by every other `postgres-*.integration.test.ts` file).
+const KEY_PREFIX = `contract:transaction-runner:${randomUUID()}:`;
 
 async function createAsyncHarness(): Promise<
   AsyncTransactionRunnerContractHarness<import('@/db/postgres/runtime').PostgresTransaction>
@@ -68,11 +72,19 @@ async function createAsyncHarness(): Promise<
     async write(context, key, value) {
       const fullKey = `${KEY_PREFIX}${key}`;
       const updatedAt = new Date().toISOString();
-      await context.execute(sql`
-        INSERT INTO app_settings (key, value, updated_at)
-        VALUES (${fullKey}, ${JSON.stringify(value)}::jsonb, ${updatedAt})
-        ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
-      `);
+      // Uses the same Drizzle query-builder upsert as
+      // `PostgresSettingsRepository.set` (proven working production code) -
+      // deliberately not a raw `sql` template `.execute()` call, which was
+      // found to throw `query.getSQL is not a function` from this harness
+      // for reasons unrelated to the transaction/rollback behavior under
+      // test here.
+      await context
+        .insert(appSettings)
+        .values({ key: fullKey, value, updatedAt })
+        .onConflictDoUpdate({
+          target: appSettings.key,
+          set: { value, updatedAt },
+        });
     },
     async read(key) {
       const result = await backend.context.pool.query<{ value: string }>(

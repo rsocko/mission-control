@@ -14,7 +14,7 @@ import {
 describe('canonicalJson', () => {
   it('sorts object keys recursively while preserving array order', () => {
     expect(canonicalJson({ b: 1, a: [3, 2, { d: 1, c: 2 }] }))
-      .toBe('{"a":[3,2,{"c":2,"d":1}]}');
+      .toBe('{"a":[3,2,{"c":2,"d":1}],"b":1}');
   });
 
   it('round-trips primitives, null, and booleans', () => {

@@ -43,7 +43,8 @@ function testDatabase() {
       enabled INTEGER DEFAULT 1 NOT NULL, sync_mode TEXT DEFAULT 'poll' NOT NULL,
       poll_interval_minutes INTEGER, capabilities TEXT NOT NULL, credentials TEXT DEFAULT '{}' NOT NULL,
       settings TEXT DEFAULT '{}' NOT NULL, synced_lists TEXT DEFAULT '[]' NOT NULL,
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, deleted_at TEXT,
+      last_test_status TEXT, last_test_error TEXT, last_test_at TEXT
     );
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY NOT NULL, source_id TEXT NOT NULL, connector_type TEXT NOT NULL,

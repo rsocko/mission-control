@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   findOpenRecurringTaskDuplicates,
+  findOrphanedRecurringTasks,
   getRecurringSeriesKey,
   getRecurringTitleKey,
   inferRecurringTitleKeys,
@@ -159,6 +160,51 @@ describe('recurring task reconciliation', () => {
     ], '2026-08-02');
 
     expect(groups).toEqual([]);
+  });
+
+  it('flags a stale open recurrence whose series has already completed a later occurrence', () => {
+    // Mirrors two independent Microsoft To Do recurrence chains for the same
+    // title: an old chain stuck open since June/July that nobody ever
+    // completed, while a separate, newer chain kept cycling and has already
+    // completed an occurrence dated after the stale one's due date.
+    const openTasks = [
+      { id: 'stale-open', sourceId: 'source-stale-open', title: 'Dog Poop (Side, Hill, Patio transition)', sourceListId: 'list', dueDate: '2026-07-23', updatedAt: '2026-08-22', metadata: recurringMetadata },
+    ];
+    const historyTasks = [
+      { title: 'Dog Poop (Side, Hill, Patio transition)', sourceListId: 'list', status: 'done', dueDate: '2026-08-23', completedAt: '2026-08-23T04:00:00', metadata: recurringMetadata },
+    ];
+
+    const orphaned = findOrphanedRecurringTasks(openTasks, historyTasks);
+    expect(orphaned).toEqual(openTasks);
+  });
+
+  it('does not flag an open recurrence with no later completion in its series', () => {
+    const openTasks = [
+      { id: 'current', sourceId: 'source-current', title: 'Water plants', sourceListId: 'list', dueDate: '2026-08-20', updatedAt: '2026-08-19', metadata: recurringMetadata },
+    ];
+    const historyTasks = [
+      { title: 'Water plants', sourceListId: 'list', status: 'done', dueDate: '2026-08-19', completedAt: '2026-08-19T20:00:00Z', metadata: recurringMetadata },
+    ];
+
+    expect(findOrphanedRecurringTasks(openTasks, historyTasks)).toEqual([]);
+  });
+
+  it('does not flag an open recurrence against a later completion from a distinct recurrence pattern', () => {
+    const openTasks = [
+      { id: 'daily-open', sourceId: 'source-daily-open', title: 'Review', sourceListId: 'list', dueDate: '2026-08-02', updatedAt: '2026-08-01', metadata: recurringMetadata },
+    ];
+    const historyTasks = [
+      {
+        title: 'Review',
+        sourceListId: 'list',
+        status: 'done',
+        dueDate: '2026-08-10',
+        completedAt: '2026-08-10T20:00:00Z',
+        metadata: JSON.stringify({ recurrence: 'weekly', recurrenceIdentity: '{"type":"weekly","interval":1,"daysOfWeek":["monday"],"dayOfMonth":null,"month":null}' }),
+      },
+    ];
+
+    expect(findOrphanedRecurringTasks(openTasks, historyTasks)).toEqual([]);
   });
 
   it('suppresses the successor for the rest of the day after its sibling was completed in My Day', () => {

@@ -47,11 +47,13 @@ export async function POST(
         'home-assistant': '42 service domains accessible',
         'document-intelligence': 'OWL healthy — 3 Paperless-ngx modules active',
       };
-      return NextResponse.json({
+      const demoResult = {
         success: true,
         latencyMs: 87 + Math.floor(Math.random() * 200),
         details: demoDetails[connector.type] || 'Connection OK',
-      });
+      };
+      await persistTestResult(id, demoResult);
+      return NextResponse.json(demoResult);
     }
 
     if (normalizeFinanceProviderAlias(connector.type)) {
@@ -60,7 +62,7 @@ export async function POST(
         const health = await new MonarchBridgeClient(
           financeConnectorConfigFromRow(connector),
         ).getHealth();
-        return NextResponse.json(health.authenticated
+        const financeResult = health.authenticated
           ? {
               success: true,
               latencyMs: Date.now() - start,
@@ -70,14 +72,18 @@ export async function POST(
               success: false,
               latencyMs: Date.now() - start,
               error: 'Tyrion is reachable, but its Monarch session is not authenticated yet',
-            });
+            };
+        await persistTestResult(id, financeResult);
+        return NextResponse.json(financeResult);
       } catch (error) {
         const code = error instanceof MonarchBridgeError ? error.code : 'bridge_unavailable';
-        return NextResponse.json({
+        const financeErrorResult = {
           success: false,
           latencyMs: Date.now() - start,
           error: describeTyrionConnectionError({ code }),
-        });
+        };
+        await persistTestResult(id, financeErrorResult);
+        return NextResponse.json(financeErrorResult);
       }
     }
 
@@ -86,13 +92,38 @@ export async function POST(
       ? JSON.parse(connector.settings)
       : (connector.settings as Record<string, unknown> | null);
     const result = await testConnector(connector.type, credentials || {}, settings || {});
+    await persistTestResult(id, result);
 
     return NextResponse.json(result);
   } catch {
-    return NextResponse.json(
-      { success: false, error: 'Connector test failed. Check credentials and try again.' },
-      { status: 500 }
-    );
+    const failureResult = { success: false, error: 'Connector test failed. Check credentials and try again.' };
+    await persistTestResult(id, failureResult);
+    return NextResponse.json(failureResult, { status: 500 });
+  }
+}
+
+/**
+ * Persist the outcome of a manual "Test Connection" click on the connector row so the
+ * settings UI's connection badge can reflect real, current status instead of only
+ * "credentials are stored" (which stays green even after a token expires).
+ */
+async function persistTestResult(
+  connectorId: string,
+  result: { success: boolean; error?: string },
+): Promise<void> {
+  try {
+    await db
+      .update(connectorConfigs)
+      .set({
+        lastTestStatus: result.success ? 'success' : 'failed',
+        lastTestError: result.success ? null : (result.error || 'Connection test failed'),
+        lastTestAt: new Date().toISOString(),
+      })
+      .where(eq(connectorConfigs.id, connectorId));
+  } catch (err) {
+    // Non-fatal — the test result is still returned to the caller even if we
+    // can't persist it for the badge.
+    console.error('Failed to persist connector test result', err);
   }
 }
 

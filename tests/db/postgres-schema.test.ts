@@ -210,12 +210,12 @@ describe('PostgreSQL schema', () => {
     expect(notificationDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.notifications);
   });
 
-  it('ships one clean PostgreSQL baseline plus additive notification enrichment', () => {
+  it('ships one clean PostgreSQL baseline plus additive notification enrichment and connector test-result tracking', () => {
     const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(2);
+    expect(migrations).toHaveLength(3);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -242,5 +242,16 @@ describe('PostgreSQL schema', () => {
     );
     expect(enrichmentSql).toContain('idx_notification_enrichment_generation');
     expect(sql).not.toContain('PRAGMA');
+
+    const connectorTestResultSql = readFileSync(resolve(migrationDirectory, migrations[2]), 'utf8');
+    expect(connectorTestResultSql).toContain(
+      'ALTER TABLE "connector_configs" ADD COLUMN "last_test_status" text',
+    );
+    expect(connectorTestResultSql).toContain(
+      'ALTER TABLE "connector_configs" ADD COLUMN "last_test_error" text',
+    );
+    expect(connectorTestResultSql).toContain(
+      'ALTER TABLE "connector_configs" ADD COLUMN "last_test_at" text',
+    );
   });
 });

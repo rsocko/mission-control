@@ -27,6 +27,13 @@ export interface ConnectorConfig {
     status: 'configured' | 'needs-configuration';
     code: 'household_currency_unavailable' | null;
   };
+  /** Outcome of the most recent manual "Test Connection" click. */
+  lastTestStatus?: 'success' | 'failed' | null;
+  lastTestError?: string | null;
+  lastTestAt?: string | null;
+  /** Outcome of the most recent scheduled/triggered sync attempt (from sync_log). */
+  lastSyncStatus?: 'success' | 'failed' | null;
+  lastSyncError?: string | null;
 }
 
 export interface SourceList {

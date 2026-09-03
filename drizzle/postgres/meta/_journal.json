@@ -15,6 +15,13 @@
       "when": 1788375712263,
       "tag": "0001_lame_bucky",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0002_connector_last_test_result",
+      "breakpoints": true
     }
   ]
 }

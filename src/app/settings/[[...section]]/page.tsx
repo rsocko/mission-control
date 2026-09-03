@@ -300,6 +300,7 @@ export default function SettingsPage() {
                   onSync={triggerSync}
                   onDelete={deleteConnector}
                   onUpdate={updateConnector}
+                  onTested={fetchData}
                   onPurgeSourceList={purgeRetainedSourceList}
                   onAdd={() => setShowAddModal(true)}
                   selectedConnector={selectedConnector}

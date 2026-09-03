@@ -72,7 +72,10 @@ async function resolvePostgresTaskTransferIdentityTargetsInternal(
 
   const taskQuery = database.select({ metadata: tasks.metadata })
     .from(tasks)
-    .where(eq(tasks.id, input.taskId))
+    .where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.connectorInstanceId, input.connectorInstanceId),
+    ))
     .limit(1);
   const [taskRow] = lockRows ? await taskQuery.for('update') : await taskQuery;
   return {

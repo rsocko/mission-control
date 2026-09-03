@@ -1655,6 +1655,9 @@ export function createSqliteGitHubIdentityRepositories(
           connectorInstanceId: input.connectorInstanceId,
           sourceListIds: sourceListIdsForGitHubTransferIdentity(input),
         });
+        if (input.taskEvidence && !targets.taskExists) {
+          throw new Error('Task transfer identity target was not found');
+        }
         const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
         assertExternalIdentityBatchWithinLimit(writes);
         if (writes.length > 0) {

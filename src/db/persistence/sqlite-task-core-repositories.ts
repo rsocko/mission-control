@@ -38,7 +38,7 @@ import { detachTaskDescendants } from '@/lib/tasks/task-hierarchy-deletion';
 import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
 import {
-  reconcileSqliteTaskTransferIdentityRefreshInTransaction,
+  reconcileSqliteTaskTransferIdentityRefreshForRepository,
   resolveSqliteTaskTransferIdentityTargetsForRepository,
 } from './sqlite-task-transfer-identity';
 import {
@@ -1455,9 +1455,10 @@ class SqliteTaskTransferIdentityRepository implements TaskTransferIdentityReposi
     };
     observedAt: string;
   }): Promise<boolean> {
-    return this.runTransaction((tx) => (
-      reconcileSqliteTaskTransferIdentityRefreshInTransaction(tx, input)
-    ));
+    return reconcileSqliteTaskTransferIdentityRefreshForRepository(
+      this.runTransaction,
+      input,
+    );
   }
 }
 

@@ -370,7 +370,7 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
     ).transferIdentity;
 
     await expect(repository.persist(bridgeInput(connectorB)))
-      .rejects.toThrow('Task transfer identity refresh target was not found');
+      .rejects.toThrow('Task transfer identity target was not found');
 
     const task = await backend.context.pool.query<{
       source_id: string;

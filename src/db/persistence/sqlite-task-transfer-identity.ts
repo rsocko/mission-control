@@ -12,6 +12,9 @@ type ResolveResult = Awaited<
   ReturnType<TaskTransferIdentityRepository['resolveIdentityTargets']>
 >;
 type ReconcileInput = Parameters<TaskTransferIdentityRepository['reconcileTaskRefresh']>[0];
+type RepositoryTransactionRunner = <T>(
+  work: (database: SqliteDatabase) => T,
+) => T;
 
 function resolveSqliteTaskTransferIdentityTargets(
   database: SqliteDatabase | SqliteTransaction,
@@ -35,7 +38,10 @@ function resolveSqliteTaskTransferIdentityTargets(
 
   const taskRow = database.select({ metadata: tasks.metadata })
     .from(tasks)
-    .where(eq(tasks.id, input.taskId))
+    .where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.connectorInstanceId, input.connectorInstanceId),
+    ))
     .limit(1)
     .get();
   return {
@@ -60,12 +66,11 @@ export function resolveSqliteTaskTransferIdentityTargetsInTransaction(
   return resolveSqliteTaskTransferIdentityTargets(transaction, input);
 }
 
-/** Only call with the database handle supplied by the owning SQLite transaction. */
-export function reconcileSqliteTaskTransferIdentityRefreshInTransaction(
-  transaction: SqliteTransaction,
+function reconcileSqliteTaskTransferIdentityRefresh(
+  database: SqliteDatabase | SqliteTransaction,
   input: ReconcileInput,
 ): boolean {
-  const current = transaction.select({ metadata: tasks.metadata })
+  const current = database.select({ metadata: tasks.metadata })
     .from(tasks)
     .where(and(
       eq(tasks.id, input.taskId),
@@ -78,7 +83,7 @@ export function reconcileSqliteTaskTransferIdentityRefreshInTransaction(
     ...decodeLenientJsonObject(current.metadata),
     ...input.task.metadata,
   };
-  const result = transaction.update(tasks).set({
+  const result = database.update(tasks).set({
     sourceId: input.task.sourceId,
     sourceListId: input.task.sourceListId,
     sourceListName: input.task.sourceListName,
@@ -100,4 +105,21 @@ export function reconcileSqliteTaskTransferIdentityRefreshInTransaction(
     eq(tasks.connectorInstanceId, input.connectorInstanceId),
   )).run();
   return result.changes === 1;
+}
+
+export function reconcileSqliteTaskTransferIdentityRefreshForRepository(
+  runTransaction: RepositoryTransactionRunner,
+  input: ReconcileInput,
+): boolean {
+  return runTransaction((database) => (
+    reconcileSqliteTaskTransferIdentityRefresh(database, input)
+  ));
+}
+
+/** Only call with the database handle supplied by the owning SQLite transaction. */
+export function reconcileSqliteTaskTransferIdentityRefreshInTransaction(
+  transaction: SqliteTransaction,
+  input: ReconcileInput,
+): boolean {
+  return reconcileSqliteTaskTransferIdentityRefresh(transaction, input);
 }

@@ -201,7 +201,7 @@ describe('task transfer identity persistence', () => {
           evidence: { entity: repository },
         }],
       },
-    )).rejects.toThrow('Task transfer identity refresh target was not found');
+    )).rejects.toThrow('Task transfer identity target was not found');
 
     const [task] = await db.select().from(schema.tasks)
       .where(eq(schema.tasks.id, 'rollback-task'));

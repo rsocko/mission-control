@@ -1,10 +1,10 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
   "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (plan.md at session-state 430296c8-f794-4625-b32f-abb04894e6d4). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
-  "generatedAt": "2026-01-01",
-  "generatedFromCommit": "e7122a9f9f99033debace0a994f2671cdf4a4d43+L02",
+  "generatedAt": "2026-09-03",
+  "generatedFromCommit": "2bda811253b8a438d918fca4f050b404ef144873+origin/main@17d8dea502ddab8ddafeb871222c6917f159866d",
   "provenance": {
-    "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits, and reproduces the plan's committed 266/221/39/6/123/6/350 exactly against this commit.",
+    "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
     "directTaintSourceAlgorithm": "New metric introduced by this layer (L01): the exact partition of tierARoutes into routes with an edge whose TARGET is literally one of staticSources (directTaintSourceRoutes) vs. routes tainted only transitively (transitiveOnlyTaintSourceRoutes). By construction, directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length always holds. Do not conflate with the plan's committed 144/79 figures (see knownArchivedGeneratorDefect for the exact reconciliation)."
   },
@@ -42,8 +42,8 @@
   "counts": {
     "apiRoutes": 266,
     "tierARoutes": 220,
-    "tierBRoutes": 39,
-    "cleanRoutes": 7,
+    "tierBRoutes": 26,
+    "cleanRoutes": 20,
     "directTaintSourceRoutes": 142,
     "transitiveOnlyTaintSourceRoutes": 78,
     "directDbNamespaceRoutes": 143,
@@ -564,20 +564,12 @@
     "src/app/api/ai/runs/[runId]/retry/route.ts",
     "src/app/api/ai/runs/[runId]/route.ts",
     "src/app/api/ai/runs/route.ts",
-    "src/app/api/auth/microsoft/callback/route.ts",
-    "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
-    "src/app/api/connectors/[id]/work-todo/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
-    "src/app/api/connectors/test-pre-save/route.ts",
-    "src/app/api/finance/insights/[occurrenceId]/route.ts",
-    "src/app/api/finance/insights/presentation/route.ts",
-    "src/app/api/finance/insights/route.ts",
     "src/app/api/health/live/route.ts",
     "src/app/api/health/ready/route.ts",
     "src/app/api/health/route.ts",
     "src/app/api/health/runtime/route.ts",
     "src/app/api/metrics/route.ts",
-    "src/app/api/push/vapid-key/route.ts",
     "src/app/api/sync/retained/resolve/route.ts",
     "src/app/api/tasks/[id]/move/route.ts",
     "src/app/api/tasks/move/execute/route.ts",
@@ -589,21 +581,29 @@
     "src/app/api/triage/import/reddit-saved/route.ts",
     "src/app/api/triage/import/twitter-archive/route.ts",
     "src/app/api/triage/import/youtube/route.ts",
+    "src/app/api/triage/sync-status/route.ts"
+  ],
+  "cleanRoutes": [
+    "src/app/api/assets/thumbnails/[filename]/route.ts",
+    "src/app/api/auth/microsoft/callback/route.ts",
+    "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
+    "src/app/api/connectors/[id]/work-todo/route.ts",
+    "src/app/api/connectors/test-pre-save/route.ts",
+    "src/app/api/finance/insights/[occurrenceId]/route.ts",
+    "src/app/api/finance/insights/presentation/route.ts",
+    "src/app/api/finance/insights/route.ts",
+    "src/app/api/manifest/route.ts",
+    "src/app/api/mcp/route.ts",
+    "src/app/api/push/vapid-key/route.ts",
+    "src/app/api/settings/mode/route.ts",
+    "src/app/api/settings/shortcuts/route.ts",
+    "src/app/api/shortcut/version/route.ts",
+    "src/app/api/triage/rules/route.ts",
     "src/app/api/triage/sources/route.ts",
-    "src/app/api/triage/sync-status/route.ts",
     "src/app/api/work-todo/ack/route.ts",
     "src/app/api/work-todo/changes/route.ts",
     "src/app/api/work-todo/ingest/route.ts",
     "src/app/api/work-todo/pull-request/route.ts"
-  ],
-  "cleanRoutes": [
-    "src/app/api/assets/thumbnails/[filename]/route.ts",
-    "src/app/api/manifest/route.ts",
-    "src/app/api/mcp/route.ts",
-    "src/app/api/settings/mode/route.ts",
-    "src/app/api/settings/shortcuts/route.ts",
-    "src/app/api/shortcut/version/route.ts",
-    "src/app/api/triage/rules/route.ts"
   ],
   "directTaintSourceRoutes": [
     "src/app/api/ai/context-tasks/route.ts",
@@ -1104,18 +1104,5 @@
     "src/app/api/tasks/filter-query.ts",
     "src/app/api/tasks/query-builder.ts",
     "src/app/api/tasks/stats-computer.ts"
-  ],
-  "layerUpdates": [
-    {
-      "layer": "L02",
-      "summary": "Web/API PostgreSQL parity: seed/demo fail-closed audit fix, entity-link cross-backend parity, and a fully clean settings/mode route migration.",
-      "changes": [
-        "src/lib/seed-api.ts and src/lib/seed.ts exit taintedLibA and staticSources (better-sqlite3 import became import type, erased at build time; the real handle is now obtained via a lazy `await import('@/db')` inside getDb(), which fails closed under MC_DATABASE_BACKEND=postgres before that import ever runs).",
-        "src/app/api/settings/mode/route.ts exits tierARoutes AND tierBRoutes entirely (was directTaintSourceRoutes; a transitional design briefly moved it to tierBRoutes via call-site dynamic imports, but the final design removes even that). The route now imports only the pure, backend-neutral `@/lib/settings/mode-route-services` registry (zero import edges -- static or dynamic -- to `@/db`, `@/lib/seed-api`, or `@/lib/triage/lifecycle`; the one value-level import it needs, `RelativeReminderTimezoneRepository`, is `import type`-only). Both the PATCH handler's timezone repository and the POST handler's three demo-only commands (reset-demo/clear-data/clear-triage-samples) are resolved through this registry's plain get accessors. The concrete SQLite and PostgreSQL implementations are constructed and registered once, at server startup, by `initializeRuntimeDatabase()` in src/db/runtime.ts -- the same, already-established composition root used for `CorePersistenceRepositories` -- so the route module itself never touches SQLite/PostgreSQL machinery at all, at import time or call time. For PostgreSQL, the timezone repository gets a real adapter (createPostgresRelativeReminderTimezoneRepository); the three demo commands have no PostgreSQL equivalent and reject with the same 'SQLite-only' error text already used by seed-api.ts/triage/lifecycle.ts, constructed inline in the PostgreSQL branch without importing either SQLite-only module.",
-        "src/lib/tasks/relative-reminder-timezone-runtime.ts (a transitional lazy dynamic-import resolver) was deleted; its role is now split between the pure registry (`@/lib/settings/mode-route-services`, owned by this layer, not `src/lib/tasks/` which is owned by a later layer) and the composition-root wiring in `src/db/runtime.ts`.",
-        "src/lib/triage/lifecycle.ts and src/lib/triage/shared.ts are unchanged in tier (still Tier A/tainted): their normal, non-demo functions (updateTriageItemThumbnail, hardDeleteTriageItem, hardDeleteTriageItems, purgeDismissedItems, ensureSeedData, and others) are explicitly NOT migrated by L02 and are NOT given a fail-closed guard merely because they share a module with clearTriageSampleData (the one genuine seed/demo exception in that file); they remain an explicit later-layer target, not narrowed L02 taint.",
-        "The notification entity-linking repository files (src/db/persistence/notification-entity-linking.ts and its SQLite/Postgres adapters) gained an ASCII-fold suffix-match parity fix and a JSON-string-type guard; neither file is on the tainted-graph census path (they are called from webhook/worker code already migrated by prior layers), so this change does not affect any count in this baseline."
-      ]
-    }
   ]
 }

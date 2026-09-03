@@ -18,9 +18,6 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   'src/lib/connectors/monarch-money/index.ts',
   'src/lib/connectors/rymessage/rymessage-client.ts',
   'src/lib/houston-memory/service.ts',
-  'src/lib/notifications/enrichment/ai-enrichment.ts',
-  'src/lib/persistence/worker-runtime.ts',
-  'src/lib/persistence/runtime.ts',
   'src/lib/search/fts.ts',
   'src/lib/semantic-index/publication.ts',
   'src/lib/semantic-index/repository-facade.ts',
@@ -41,7 +38,6 @@ const POSTGRES_GUARDED_DYNAMIC_BARRELS = new Set([
 const POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES = new Set([
   'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
   'src/lib/connectors/monarch-money/index.ts -> ./snapshot-sync',
-  'src/lib/notifications/enrichment/ai-enrichment.ts -> @/lib/ai/provider-factory',
   'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
   'src/lib/semantic-index/publication.ts -> ./config',
   'src/lib/semantic-index/publication.ts -> ./runtime',
@@ -212,16 +208,10 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
       'src/lib/ai/durable-runs/runtime.ts -> ./sqlite-adapter',
     );
     expect(guardedEdges).toContain(
-      'src/lib/sync/search-indexer.ts -> @/lib/search',
-    );
-    expect(guardedEdges).toContain(
       'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
     );
     expect(guardedEdges).toContain(
       'src/lib/connectors/monarch-money/index.ts -> ./snapshot-sync',
-    );
-    expect(guardedEdges).toContain(
-      'src/lib/notifications/enrichment/ai-enrichment.ts -> @/lib/ai/provider-factory',
     );
     expect(guardedEdges).toContain(
       'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
@@ -283,7 +273,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     const linker = source('src/lib/notifications/enrichment/entity-linker.ts');
     const workerPersistence = source('src/db/persistence/worker-repositories.ts');
     const postgresComposition = source('src/db/postgres/repositories/index.ts');
-    const sqliteComposition = source('src/lib/persistence/worker-runtime.ts');
+    const sqliteComposition = source('src/db/persistence/sqlite-worker-runtime.ts');
 
     expect(linker).toContain('notificationEntityLinking');
     expect(linker).not.toMatch(/from ['"]@\/db['"]/);

@@ -1,3 +1,4 @@
+import { on } from 'node:events';
 import { runWithConnectorOperationLease } from '../../../src/lib/sync/connector-lock';
 
 const [connectorId, leaseMsValue, mode] = process.argv.slice(2);
@@ -18,6 +19,26 @@ function send(message: object): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  if (mode === 'probe') {
+    await send({ ready: true });
+    for await (const [message] of on(process, 'message')) {
+      if (message === 'exit') break;
+      if (message !== 'probe') {
+        throw new Error(`Unexpected fixture message: ${String(message)}`);
+      }
+      try {
+        await runWithConnectorOperationLease(connectorId, 'retention', async () => undefined);
+        await send({ acquired: true });
+      } catch (error) {
+        await send({
+          acquired: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    process.exit(0);
+  }
+
   try {
     await runWithConnectorOperationLease(connectorId, 'retention', async () => {
       await send({ acquired: true });

@@ -88,6 +88,33 @@ describe('PostgreSQL persistence runtime', () => {
     expect(backend.context.pool).toBe(second);
   });
 
+  it('preserves retry classification while fencing failed initialization cleanup', async () => {
+    const first = fakePool();
+    const failure = Object.assign(new Error('connection refused'), {
+      code: 'ECONNREFUSED',
+    });
+    first.query.mockRejectedValueOnce(failure);
+    first.end.mockRejectedValueOnce(new Error('pool cleanup failed'));
+    const second = fakePool();
+    vi.mocked(drizzle).mockReturnValue({ transaction: vi.fn() } as never);
+    const createPool = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const backend = new PostgresPersistenceBackend({
+      config,
+      initializeSchema: false,
+      createPool: createPool as never,
+    });
+
+    await expect(backend.initialize()).rejects.toMatchObject({ cause: failure });
+    const reinitialize = backend.initialize();
+    await reinitialize;
+
+    expect(first.end).toHaveBeenCalledTimes(2);
+    expect(createPool).toHaveBeenCalledTimes(2);
+    expect(backend.context.pool).toBe(second);
+  });
+
   it('fails startup when indexed retrieval is required without pgvector', async () => {
     const pool = fakePool();
     const backend = new PostgresPersistenceBackend({
@@ -157,6 +184,40 @@ describe('PostgreSQL persistence runtime', () => {
     finishShutdown?.();
     await shutdown;
     await reinitialize;
+    expect(createPool).toHaveBeenCalledTimes(2);
+    expect(backend.context.pool).toBe(second);
+  });
+
+  it('retries an incomplete shutdown before creating a replacement pool', async () => {
+    let finishCleanup!: () => void;
+    const first = fakePool();
+    first.end
+      .mockRejectedValueOnce(new Error('pool close outcome unknown'))
+      .mockImplementationOnce(() => new Promise<void>((resolve) => {
+        finishCleanup = resolve;
+      }));
+    const second = fakePool();
+    vi.mocked(drizzle).mockReturnValue({ transaction: vi.fn() } as never);
+    const createPool = vi.fn()
+      .mockReturnValueOnce(first)
+      .mockReturnValueOnce(second);
+    const backend = new PostgresPersistenceBackend({
+      config,
+      initializeSchema: false,
+      createPool: createPool as never,
+    });
+    await backend.initialize();
+
+    await expect(backend.shutdown()).rejects.toThrow('pool close outcome unknown');
+    expect(backend.context.pool).toBe(first);
+
+    const reinitialize = backend.initialize();
+    await Promise.resolve();
+    expect(createPool).toHaveBeenCalledOnce();
+    finishCleanup();
+    await reinitialize;
+
+    expect(first.end).toHaveBeenCalledTimes(2);
     expect(createPool).toHaveBeenCalledTimes(2);
     expect(backend.context.pool).toBe(second);
   });

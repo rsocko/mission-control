@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { GitHubWriteAuthorization } from '@/lib/external-identities';
 import type { ConnectorConfig } from '@/types';
 
@@ -29,7 +30,7 @@ describe('GitHub write fence', () => {
 
   it('dispatches only an agreeing legacy route and quarantines a stale mode lease', async () => {
     const [{ default: db, sqlite }, schema, identity] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/external-identities'),
     ]);

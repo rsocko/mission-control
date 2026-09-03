@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
@@ -15,7 +16,7 @@ let PATCH: typeof import('@/app/api/connectors/route').PATCH;
 let eq: typeof import('drizzle-orm').eq;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   ({ connectorConfigs, sourceLists, syncLog, tasks } = await import('@/db/schema'));
   ({ GET, POST, PATCH } = await import('@/app/api/connectors/route'));
   ({ eq } = await import('drizzle-orm'));

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { SyncResult } from '@/types';
 
 vi.unmock('drizzle-orm');
@@ -30,7 +31,7 @@ function success(): SyncResult {
 }
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   queue = await import('@/lib/sync/job-queue');
   ({ enqueueFinanceInsightContinuation } = await import('@/lib/finance-insights/continuation'));
   ({ findFinanceInsightContinuationPublicationId } = await import(

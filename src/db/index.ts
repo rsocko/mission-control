@@ -14,31 +14,10 @@ import {
   type DatabaseTelemetrySnapshot,
 } from '@/lib/telemetry/database';
 import { resolveDatabaseBackend } from './runtime-backend';
-import { createSqliteCorePersistenceRepositories } from './persistence/sqlite-core-repositories';
-import {
-  assertCanRegisterSqliteWorkerRuntimeServices,
-  clearSqliteWorkerRuntimeServices,
-  createSqliteWorkerPersistenceRepositories,
-  registerSqliteWorkerRuntimeServices,
-} from './persistence/sqlite-worker-runtime';
-import {
-  assertCanRegisterCorePersistenceRepositories,
-  clearCorePersistenceRepositories,
-  registerCorePersistenceRepositories,
-} from '@/lib/persistence/runtime';
 import {
   assertPersistenceCompositionPublicationAllowed,
-  completePersistenceCompositionInitialization,
   isPersistenceCompositionAccessBlocked,
 } from '@/lib/persistence/composition-lifecycle';
-import {
-  assertCanRegisterWorkerPersistenceRepositories,
-  assertCanRegisterWorkerPersistenceRepositoriesWithBorrowedTriage,
-  clearWorkerPersistenceRepositories,
-  registerWorkerPersistenceRepositories,
-  registerWorkerPersistenceRepositoriesWithBorrowedTriage,
-} from '@/lib/persistence/worker-runtime';
-import { getTriagePersistenceRegistrationForComposition } from '@/lib/triage/persistence';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 
@@ -52,6 +31,16 @@ let sqliteComposition: {
   workerRepositories: WorkerPersistenceRepositories;
   borrowsTriage: boolean;
 } | null = null;
+type SqliteCompositionModules = {
+  createCoreRepositories:
+    typeof import('./persistence/sqlite-core-repositories').createSqliteCorePersistenceRepositories;
+  workerRuntime: typeof import('./persistence/sqlite-worker-runtime');
+  coreRuntime: typeof import('@/lib/persistence/runtime');
+  workerPersistenceRuntime: typeof import('@/lib/persistence/worker-runtime');
+  triageRuntime: typeof import('@/lib/triage/persistence');
+};
+let sqliteCompositionModules: SqliteCompositionModules | null = null;
+let sqliteCompositionModulesPromise: Promise<SqliteCompositionModules> | null = null;
 let sqliteCompositionPromise: Promise<void> | null = null;
 let sqliteCompositionShutdownPromise: Promise<void> | null = null;
 let sqliteCompositionState: 'cold' | 'initializing' | 'active' | 'stopping' | 'stopped' = 'cold';
@@ -84,20 +73,56 @@ function assertSqliteCompatibilityAccessAllowed(): void {
   }
 }
 
-function getOrCreateSqliteComposition(): NonNullable<typeof sqliteComposition> {
+async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules> {
+  if (sqliteCompositionModules) return sqliteCompositionModules;
+  if (sqliteCompositionModulesPromise) return sqliteCompositionModulesPromise;
+  const pending = Promise.all([
+    import('./persistence/sqlite-core-repositories'),
+    import('./persistence/sqlite-worker-runtime'),
+    import('@/lib/persistence/runtime'),
+    import('@/lib/persistence/worker-runtime'),
+    import('@/lib/triage/persistence'),
+  ]).then(([
+    core,
+    workerRuntime,
+    coreRuntime,
+    workerPersistenceRuntime,
+    triageRuntime,
+  ]) => ({
+    createCoreRepositories: core.createSqliteCorePersistenceRepositories,
+    workerRuntime,
+    coreRuntime,
+    workerPersistenceRuntime,
+    triageRuntime,
+  }));
+  sqliteCompositionModulesPromise = pending;
+  try {
+    sqliteCompositionModules = await pending;
+    return sqliteCompositionModules;
+  } finally {
+    if (sqliteCompositionModulesPromise === pending) {
+      sqliteCompositionModulesPromise = null;
+    }
+  }
+}
+
+function getOrCreateSqliteComposition(
+  modules: SqliteCompositionModules,
+): NonNullable<typeof sqliteComposition> {
   const localSqlite = _observedSqlite;
   const localDb = _db;
   if (!localSqlite || !localDb) {
     throw new Error('SQLite must be initialized before persistence composition');
   }
   if (!sqliteComposition) {
-    const coreRepositories = createSqliteCorePersistenceRepositories(localSqlite);
-    const workerRepositories = createSqliteWorkerPersistenceRepositories(
+    const coreRepositories = modules.createCoreRepositories(localSqlite);
+    const workerRepositories = modules.workerRuntime.createSqliteWorkerPersistenceRepositories(
       localSqlite,
       localDb,
       coreRepositories,
     );
-    const triageRegistration = getTriagePersistenceRegistrationForComposition();
+    const triageRegistration =
+      modules.triageRuntime.getTriagePersistenceRegistrationForComposition();
     const borrowedTriage = triageRegistration?.accessed
       ? triageRegistration.repositories
       : null;
@@ -112,54 +137,48 @@ function getOrCreateSqliteComposition(): NonNullable<typeof sqliteComposition> {
   return sqliteComposition;
 }
 
-function publishSqliteComposition(): void {
-  const composition = getOrCreateSqliteComposition();
+function publishSqliteComposition(modules: SqliteCompositionModules): void {
+  const composition = getOrCreateSqliteComposition(modules);
 
-  assertCanRegisterCorePersistenceRepositories(composition.coreRepositories);
+  modules.coreRuntime.assertCanRegisterCorePersistenceRepositories(
+    composition.coreRepositories,
+  );
   if (composition.borrowsTriage) {
-    assertCanRegisterWorkerPersistenceRepositoriesWithBorrowedTriage(
+    modules.workerPersistenceRuntime
+      .assertCanRegisterWorkerPersistenceRepositoriesWithBorrowedTriage(
+        composition.workerRepositories,
+      );
+  } else {
+    modules.workerPersistenceRuntime.assertCanRegisterWorkerPersistenceRepositories(
       composition.workerRepositories,
     );
-  } else {
-    assertCanRegisterWorkerPersistenceRepositories(composition.workerRepositories);
   }
-  assertCanRegisterSqliteWorkerRuntimeServices();
+  modules.workerRuntime.assertCanRegisterSqliteWorkerRuntimeServices();
 
   try {
-    registerCorePersistenceRepositories(composition.coreRepositories);
+    modules.coreRuntime.registerCorePersistenceRepositories(composition.coreRepositories);
     if (composition.borrowsTriage) {
-      registerWorkerPersistenceRepositoriesWithBorrowedTriage(
+      modules.workerPersistenceRuntime.registerWorkerPersistenceRepositoriesWithBorrowedTriage(
         composition.workerRepositories,
       );
     } else {
-      registerWorkerPersistenceRepositories(composition.workerRepositories);
+      modules.workerPersistenceRuntime.registerWorkerPersistenceRepositories(
+        composition.workerRepositories,
+      );
     }
-    registerSqliteWorkerRuntimeServices();
+    modules.workerRuntime.registerSqliteWorkerRuntimeServices();
     sqliteCompositionState = 'active';
   } catch (error) {
-    clearSqliteWorkerRuntimeServices();
-    clearWorkerPersistenceRepositories(composition.workerRepositories);
-    clearCorePersistenceRepositories(composition.coreRepositories);
+    modules.workerRuntime.clearSqliteWorkerRuntimeServices();
+    modules.workerPersistenceRuntime.clearWorkerPersistenceRepositories(
+      composition.workerRepositories,
+    );
+    modules.coreRuntime.clearCorePersistenceRepositories(composition.coreRepositories);
     throw error;
   }
 }
 
-// Temporary L03a1 bridge. L03a2 removes this call from raw SQLite access.
-function publishTemporarySqliteCompatibilityComposition(): void {
-  if (sqliteCompositionState === 'active') return;
-  assertSqliteCompatibilityAccessAllowed();
-  assertPersistenceCompositionPublicationAllowed();
-  sqliteCompositionState = 'initializing';
-  try {
-    publishSqliteComposition();
-    completePersistenceCompositionInitialization();
-  } catch (error) {
-    sqliteCompositionState = 'cold';
-    throw error;
-  }
-}
-
-function initDatabase(): {
+function initDatabase(options: { allowCompositionInitialization?: boolean } = {}): {
   sqlite: Database.Database;
   db: BetterSQLite3Database<typeof schema>;
 } {
@@ -168,10 +187,11 @@ function initDatabase(): {
       'This workflow still uses the SQLite compatibility API and is not supported by the PostgreSQL backend',
     );
   }
-  assertSqliteCompatibilityAccessAllowed();
+  if (!options.allowCompositionInitialization) {
+    assertSqliteCompatibilityAccessAllowed();
+  }
   assertPersistenceCompositionPublicationAllowed();
   if (_observedSqlite && _db) {
-    publishTemporarySqliteCompatibilityComposition();
     return { sqlite: _observedSqlite, db: _db };
   }
   if (_sqlite || _observedSqlite || _db) resetPartialDatabaseInitialization();
@@ -189,7 +209,6 @@ function initDatabase(): {
     _sqlite = sqlite;
     _observedSqlite = observedSqlite;
     _db = localDb;
-    publishTemporarySqliteCompatibilityComposition();
     databaseTelemetry.reset();
     return { sqlite: observedSqlite, db: localDb };
   } catch (error) {
@@ -205,7 +224,7 @@ function initDatabase(): {
 }
 
 export function initializeDatabase(): void {
-  initDatabase();
+  initDatabase({ allowCompositionInitialization: true });
 }
 
 export function initializeSqlitePersistenceComposition(): Promise<void> {
@@ -217,34 +236,14 @@ export function initializeSqlitePersistenceComposition(): Promise<void> {
 
   const retryState = sqliteCompositionState === 'stopped' ? 'stopped' : 'cold';
   sqliteCompositionState = 'initializing';
-  const pending = Promise.resolve().then(() => {
+  const pending = Promise.resolve().then(async () => {
     try {
-      if (!_observedSqlite || !_db) {
-        const sqlite = openDatabaseConnection();
-        try {
-          configureDatabaseConnection(sqlite);
-          const observedSqlite = createObservedDatabase(sqlite, databaseTelemetry);
-          const localDb = drizzle(observedSqlite, { schema });
-          if (shouldRunDatabaseInitialization()) {
-            runOrderedDatabaseBootstrap(sqlite, path.join(process.cwd(), 'drizzle'));
-          }
-          _sqlite = sqlite;
-          _observedSqlite = observedSqlite;
-          _db = localDb;
-          databaseTelemetry.reset();
-        } catch (error) {
-          try {
-            sqlite.close();
-          } catch {
-            // Preserve the initialization error when closing a partial handle fails.
-          }
-          throw error;
-        }
-      }
+      const modules = await loadSqliteCompositionModules();
       if (sqliteCompositionState !== 'initializing') {
         throw new Error('SQLite persistence composition initialization was invalidated');
       }
-      publishSqliteComposition();
+      initDatabase({ allowCompositionInitialization: true });
+      publishSqliteComposition(modules);
     } catch (error) {
       if (sqliteCompositionState !== 'stopping') sqliteCompositionState = retryState;
       throw error;
@@ -266,9 +265,16 @@ export function shutdownSqlitePersistenceComposition(): Promise<void> {
       await sqliteCompositionPromise.catch(() => undefined);
     }
     if (sqliteComposition) {
-      clearSqliteWorkerRuntimeServices();
-      clearWorkerPersistenceRepositories(sqliteComposition.workerRepositories);
-      clearCorePersistenceRepositories(sqliteComposition.coreRepositories);
+      if (!sqliteCompositionModules) {
+        throw new Error('SQLite persistence composition modules are unavailable during shutdown');
+      }
+      sqliteCompositionModules.workerRuntime.clearSqliteWorkerRuntimeServices();
+      sqliteCompositionModules.workerPersistenceRuntime.clearWorkerPersistenceRepositories(
+        sqliteComposition.workerRepositories,
+      );
+      sqliteCompositionModules.coreRuntime.clearCorePersistenceRepositories(
+        sqliteComposition.coreRepositories,
+      );
     }
     sqliteCompositionState = 'stopped';
   })();

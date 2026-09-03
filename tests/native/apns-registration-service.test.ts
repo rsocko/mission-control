@@ -1,5 +1,6 @@
 import { generateKeyPairSync } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 process.env.MC_DB_PATH = ':memory:';
@@ -32,7 +33,7 @@ const deviceToken = 'ab'.repeat(32);
 const baseTime = new Date('2026-08-02T12:00:00.000Z');
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   schema = await import('@/db/schema');
   ({ eq } = await import('drizzle-orm'));
   service = await import('@/lib/native/apns-registration-service');

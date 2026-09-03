@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -78,7 +79,7 @@ beforeAll(async () => {
   vi.doUnmock('crypto');
   vi.resetModules();
   [dbModule, schema, hierarchy] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/sync/github-hierarchy-reconciliation'),
   ]);

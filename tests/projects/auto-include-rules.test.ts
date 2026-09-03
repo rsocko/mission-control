@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 beforeAll(() => {
   process.env.MC_DB_PATH = ':memory:';
@@ -10,7 +11,7 @@ beforeAll(() => {
 describe('project auto-include rules', () => {
   it('normalizes tag rules, backfills matches on save, and explains qualification', async () => {
     const [{ default: db }, schema, { eq, and }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('drizzle-orm'),
     ]);

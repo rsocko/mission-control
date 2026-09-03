@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 // This suite exercises the real SQLite worker-persistence adapter.
 vi.unmock('drizzle-orm');
@@ -22,7 +23,7 @@ describe('shared connector config store', () => {
 
   beforeAll(async () => {
     vi.resetModules();
-    const database = await import('@/db');
+    const database = await importInitializedSqliteDatabase();
     const schemaModule = await import('@/db/schema');
     const store = await import('@/lib/connectors/shared/connector-config-store');
     db = database.default;

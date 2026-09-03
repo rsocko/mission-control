@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 beforeAll(() => {
   process.env.MC_DB_PATH = ':memory:';
@@ -13,7 +14,7 @@ beforeAll(() => {
 
 async function seedEntryPointProject(suffix: string) {
   const [{ default: db }, schema, { eq }] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('drizzle-orm'),
   ]);

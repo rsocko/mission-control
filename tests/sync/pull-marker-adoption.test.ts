@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { eq } from 'drizzle-orm';
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem } from '@/types';
@@ -23,7 +24,7 @@ let tasks: typeof import('@/db/schema').tasks;
 let upsertTasks: typeof import('@/lib/sync/pull-manager').upsertTasks;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   ({ tasks } = await import('@/db/schema'));
   ({ upsertTasks } = await import('@/lib/sync/pull-manager'));
 });

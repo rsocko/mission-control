@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('stale queued GitHub identity jobs', () => {
   beforeEach(() => {
@@ -18,7 +19,7 @@ describe('stale queued GitHub identity jobs', () => {
 
   it('cancels a stale stable job on first failure and permits a current-mode enqueue', async () => {
     const [{ default: db, sqlite }, schema, queue, context, { SyncWorker }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync/job-queue'),
       import('@/lib/sync/github-identity-context'),

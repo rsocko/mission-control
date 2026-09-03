@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -29,7 +30,7 @@ beforeAll(async () => {
   vi.doUnmock('crypto');
   vi.resetModules();
   [database, schema, identity, pullManager, hierarchy] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/external-identities'),
     import('@/lib/sync/pull-manager'),

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { eq } from 'drizzle-orm';
 
 process.env.MC_DB_PATH = ':memory:';
@@ -15,7 +16,7 @@ let heartbeatTaskPush: typeof import('@/lib/sync/push-lease').heartbeatTaskPush;
 let releaseTaskPush: typeof import('@/lib/sync/push-lease').releaseTaskPush;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   ({ tasks } = await import('@/db/schema'));
   ({
     claimTaskForPush,

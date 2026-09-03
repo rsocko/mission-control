@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -23,7 +24,7 @@ beforeAll(async () => {
   process.env.LOG_LEVEL = 'silent';
   vi.resetModules();
   [database, schema, identity] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/external-identities'),
   ]);

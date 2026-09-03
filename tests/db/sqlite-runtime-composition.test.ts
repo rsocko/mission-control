@@ -16,14 +16,14 @@ describe('SQLite runtime composition', () => {
     delete process.env.MC_DB_PATH;
   });
 
-  it('documents the temporary cold-access publication that L03a2 must remove', async () => {
+  it('keeps raw SQLite access from publishing persistence composition', async () => {
     const source = readFileSync('src/db/index.ts', 'utf8');
-    expect(source).toContain(
-      '// Temporary L03a1 bridge. L03a2 removes this call from raw SQLite access.',
+    const initDatabaseSource = source.slice(
+      source.indexOf('function initDatabase('),
+      source.indexOf('export function initializeDatabase()'),
     );
-    expect(source).toMatch(
-      /function initDatabase\(\)[\s\S]*publishTemporarySqliteCompatibilityComposition\(\)/,
-    );
+    expect(source).not.toContain('publishTemporarySqliteCompatibilityComposition');
+    expect(initDatabaseSource).not.toContain('publishSqliteComposition');
     const connectorSource = readFileSync('src/lib/connectors/index.ts', 'utf8');
     const runtimeSource = readFileSync('src/db/runtime.ts', 'utf8');
     const semanticSource = readFileSync('src/lib/semantic-index/publication.ts', 'utf8');
@@ -40,10 +40,15 @@ describe('SQLite runtime composition', () => {
     );
 
     database.sqlite.prepare('SELECT 1').get();
-    await expect(workerRuntime.getWorkerPersistenceRepositories()).resolves.toBeDefined();
+    await expect(workerRuntime.getWorkerPersistenceRepositories()).rejects.toThrow(
+      'Worker persistence repositories must be registered before worker persistence is accessed',
+    );
 
     const close = database.sqlite.close.bind(database.sqlite);
-    await (await import('@/db/runtime')).shutdownRuntimeDatabase();
+    const runtime = await import('@/db/runtime');
+    await runtime.initializeRuntimeDatabase();
+    await expect(workerRuntime.getWorkerPersistenceRepositories()).resolves.toBeDefined();
+    await runtime.shutdownRuntimeDatabase();
     close();
   });
 

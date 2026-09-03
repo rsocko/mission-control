@@ -7,15 +7,17 @@ import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { notifyTaskChanged } from '@/lib/task-change-events';
-import type {
-  CalendarEvent,
-  ConfirmDialogState,
-  DayPlan,
-  EnergyLevel,
-  MyDayItem,
-  SaveTemplateTask,
-  ScheduledTask,
-  SourceList,
+import {
+  EMPTY_SUGGESTION_GROUPS,
+  type CalendarEvent,
+  type ConfirmDialogState,
+  type DayPlan,
+  type EnergyLevel,
+  type MyDayItem,
+  type SaveTemplateTask,
+  type ScheduledTask,
+  type SourceList,
+  type SuggestionGroups,
 } from '@/components/today/types';
 import type { LocalDisposition, TaskEditPolicy, TaskField } from '@/types';
 import {
@@ -30,6 +32,8 @@ import {
 interface UseTodayActionsParams {
   items: MyDayItem[];
   setItems: Dispatch<SetStateAction<MyDayItem[]>>;
+  suggestions?: SuggestionGroups;
+  setSuggestions?: Dispatch<SetStateAction<SuggestionGroups>>;
   scheduled: ScheduledTask[];
   calendarEvents: CalendarEvent[];
   sourceLists: SourceList[];
@@ -37,6 +41,20 @@ interface UseTodayActionsParams {
   setEnergyLevel: Dispatch<SetStateAction<EnergyLevel | null>>;
   todayISO: string;
   fetchData: (options?: { skipSync?: boolean }) => Promise<void>;
+}
+
+/**
+ * Removes a task from every suggestion group. Used to optimistically keep the
+ * "My Day" suggestion panel in sync when a suggested task is completed or
+ * deleted from the task detail panel without first being added to My Day
+ * (i.e. it only ever existed in `suggestions`, never in `items`).
+ */
+function removeTaskFromSuggestions(suggestions: SuggestionGroups, taskId: string): SuggestionGroups {
+  const next = { ...suggestions };
+  for (const key of Object.keys(next) as (keyof SuggestionGroups)[]) {
+    next[key] = next[key].filter((task) => task.id !== taskId);
+  }
+  return next;
 }
 
 const DEFAULT_CONFIRM_DIALOG: ConfirmDialogState = {
@@ -51,6 +69,8 @@ const DEFAULT_CONFIRM_DIALOG: ConfirmDialogState = {
 export function useTodayActions({
   items,
   setItems,
+  suggestions = EMPTY_SUGGESTION_GROUPS,
+  setSuggestions = () => {},
   scheduled,
   calendarEvents,
   sourceLists,
@@ -144,11 +164,15 @@ export function useTodayActions({
     }
 
     const previousItems = items;
+    const previousSuggestions = suggestions;
     setItems((current) => disposition === 'active'
       ? current.map((candidate) => candidate.taskId === taskId
         ? { ...candidate, localDisposition: disposition }
         : candidate)
       : current.filter((candidate) => candidate.taskId !== taskId));
+    if (disposition !== 'active') {
+      setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
+    }
 
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
@@ -173,6 +197,7 @@ export function useTodayActions({
       return true;
     } catch (error) {
       setItems(previousItems);
+      setSuggestions(previousSuggestions);
       toast.error(error instanceof Error ? error.message : 'Failed to update Mission Control state');
       return false;
     }
@@ -184,6 +209,7 @@ export function useTodayActions({
     const taskTitle = item?.title || taskContext?.title || 'Task';
     const previousStatus = item?.status || taskContext?.status || 'todo';
     const previousCompletedAt = item?.completedAt ?? null;
+    const previousSuggestions = suggestions;
 
     const outcome = await runTaskCompletion(taskId, {
       optimisticUpdate: () => {
@@ -192,6 +218,10 @@ export function useTodayActions({
             ? { ...candidate, status: 'done', completedAt: new Date().toISOString() }
             : candidate
         )));
+        // The task may only exist as a suggestion (never added to My Day), so
+        // remove it from every suggestion group too -- otherwise it lingers
+        // there until the next full refetch.
+        setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
       },
       request: async () => {
         const response = await fetch(`/api/tasks/${taskId}`, {
@@ -208,6 +238,7 @@ export function useTodayActions({
             ? { ...candidate, status: previousStatus, completedAt: previousCompletedAt }
             : candidate
         )));
+        setSuggestions(previousSuggestions);
       },
     });
 
@@ -335,7 +366,12 @@ export function useTodayActions({
         // re-renders the task list.
         requestAnimationFrame(() => {
           const previousItems = items;
+          const previousSuggestions = suggestions;
           setItems((prev) => prev.filter((current) => current.taskId !== taskId));
+          // The task may only exist as a suggestion (never added to My Day),
+          // so remove it from every suggestion group too -- otherwise it
+          // lingers there until the next full refetch.
+          setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
           let undone = false;
           toast.success('Task deleted', {
             action: {
@@ -343,6 +379,7 @@ export function useTodayActions({
               onClick: () => {
                 undone = true;
                 setItems(previousItems);
+                setSuggestions(previousSuggestions);
               },
             },
             duration: 5000,
@@ -355,6 +392,7 @@ export function useTodayActions({
                 fetchData({ skipSync: true });
               } catch {
                 setItems(previousItems);
+                setSuggestions(previousSuggestions);
                 toast.error('Failed to delete task');
               }
             }

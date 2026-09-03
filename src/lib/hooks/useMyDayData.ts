@@ -100,6 +100,7 @@ export function useMyDayData(todayISO: string) {
     loading,
     fetchData,
     setItems,
+    setSuggestions,
     setEnergyLevel,
   };
 }

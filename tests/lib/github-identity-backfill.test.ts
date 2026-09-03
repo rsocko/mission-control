@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type {
   GitHubIdentityBackfillResolution,
   GitHubIdentityResolver,
@@ -18,7 +19,7 @@ let schema: typeof import('@/db/schema');
 let backfill: typeof import('@/lib/external-identities/github-backfill');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   schema = await import('@/db/schema');
   backfill = await import('@/lib/external-identities/github-backfill');
 });

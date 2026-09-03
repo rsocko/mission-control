@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ExternalEntityIdentity } from '@/lib/external-identities';
 
 vi.unmock('drizzle-orm');
@@ -15,7 +16,7 @@ let schema: typeof import('@/db/schema');
 let identity: typeof import('@/lib/external-identities');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   schema = await import('@/db/schema');
   identity = await import('@/lib/external-identities');
   const now = '2026-08-09T04:00:00.000Z';

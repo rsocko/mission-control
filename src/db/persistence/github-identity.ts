@@ -1,6 +1,15 @@
 import type { ExternalBindingType, GitHubTaskWriteOperation } from '@/db/schema';
 import type { GitHubIdentityModeSnapshot } from '@/lib/external-identities/stable-identity-types';
 import type {
+  ExternalEntityKey,
+  ExternalEntityLocatorObservation,
+  ExternalEntityLocatorObservationResult,
+  ExternalEntityLocatorPreflight,
+  ExternalEntityLocatorRecord,
+  ExternalEntityRecord,
+  ExternalEntityUpsert,
+  ExternalIdentityCollisionInput,
+  ExternalIdentityCollisionRecord,
   ExternalIdentityWrite,
   ExternalIdentityWriteResult,
 } from '@/lib/external-identities/types';
@@ -195,6 +204,39 @@ export interface GitHubIdentityPersistence {
     bindingType: ExternalBindingType;
     localId: string;
   }): Promise<GitHubIdentityExceptionSnapshot | null>;
+
+  // ── External entity directory (generic, operator + non-batch callers) ───────
+
+  /** Looks up one external entity by its full identity key. */
+  getExternalEntityByKey(key: ExternalEntityKey): Promise<ExternalEntityRecord | null>;
+
+  /** Idempotently upserts one external entity, advancing `lastSeenAt` only forward. */
+  upsertExternalEntity(input: ExternalEntityUpsert): Promise<ExternalEntityRecord>;
+
+  /** The currently valid (`validTo IS NULL`) locator for an entity, if any. */
+  getCurrentExternalEntityLocator(
+    externalEntityId: string,
+  ): Promise<ExternalEntityLocatorRecord | null>;
+
+  /** Every locator revision recorded for an entity, oldest first. */
+  listExternalEntityLocatorHistory(
+    externalEntityId: string,
+  ): Promise<ExternalEntityLocatorRecord[]>;
+
+  /** Read-only check of what an operator locator observation would resolve to. */
+  preflightExternalEntityLocator(
+    input: ExternalEntityLocatorObservation,
+  ): Promise<ExternalEntityLocatorPreflight>;
+
+  /** Durably applies an operator-sourced locator observation. */
+  observeExternalEntityLocator(
+    input: ExternalEntityLocatorObservation,
+  ): Promise<ExternalEntityLocatorObservationResult>;
+
+  /** Idempotently records (or refreshes) a durable external-identity collision. */
+  recordExternalIdentityCollision(
+    input: ExternalIdentityCollisionInput,
+  ): Promise<ExternalIdentityCollisionRecord>;
 }
 
 // ── Write fence ───────────────────────────────────────────────────────────────

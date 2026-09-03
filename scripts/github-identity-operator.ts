@@ -1,8 +1,10 @@
 import { parseArgs } from 'node:util';
-import db from '@/db';
+import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { connectorConfigs } from '@/db/schema';
 import { initializeDatabaseWithRetry } from '@/db/startup';
 import { shutdownRuntimeDatabase } from '@/db/runtime';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import {
   GitHubIssuesConnector,
   reconcileHistoricalGitHubIssueTransfer,
@@ -23,7 +25,7 @@ import {
  * comparison evidence to inspect, and no rollback to locator identity, so this
  * tool only exposes status and durable write/transfer/exception recovery.
  */
-type Command =
+export type Command =
   | 'status'
   | 'write-cycle-reconcile'
   | 'write-outcome-inspect'
@@ -41,6 +43,44 @@ const COMMANDS = new Set<Command>([
   'exception-accept',
   'exception-revoke',
 ]);
+
+/**
+ * These five commands are the audited GitHub identity operator/recovery
+ * surfaces that remain SQLite-only (see `GitHubIdentityOperatorPersistence`):
+ * identity backfill/status, manual exception mutation, unknown-outcome
+ * resolution, and interrupted write-cycle recovery. `transfer-reconcile`
+ * (historical GitHub issue transfer) is a separate, already-portable
+ * capability and is intentionally excluded from this set.
+ */
+const SQLITE_ONLY_COMMANDS = new Set<Command>([
+  'status',
+  'write-cycle-reconcile',
+  'write-outcome-inspect',
+  'write-outcome-resolve',
+  'exception-accept',
+  'exception-revoke',
+]);
+
+/**
+ * Fail-closed guard for the audited SQLite-only operator/recovery commands.
+ * This must run — and must be able to reject — before this module (or any
+ * caller) evaluates `@/db`, `better-sqlite3`, or any other SQLite-coupled
+ * module. It is pure (reads only `MC_DATABASE_BACKEND` via
+ * `resolveDatabaseBackend`) and has no side effects of its own, so it is
+ * safe to call as the very first statement of a command handler, ahead of
+ * `initializeDatabaseWithRetry()` and ahead of the dynamic `import('@/db')`
+ * inside `initializeGitHubOutcomeReader`.
+ */
+export function assertSqliteOnlyCommandSupported(command: Command): void {
+  if (SQLITE_ONLY_COMMANDS.has(command) && resolveDatabaseBackend() === 'postgres') {
+    throw new OperatorError(
+      `Command '${command}' is an audited SQLite-only operator/recovery surface and is not `
+        + 'supported when MC_DATABASE_BACKEND=postgres. This is a pre-existing, documented '
+        + 'limitation, not a new restriction introduced by web/application PostgreSQL parity.',
+      4,
+    );
+  }
+}
 
 function usage(): string {
   return `Usage:
@@ -62,8 +102,9 @@ async function main(): Promise<void> {
   if (!COMMANDS.has(rawCommand as Command)) {
     throw new OperatorError(`Unsupported command: ${rawCommand}`, 2);
   }
-  await initializeDatabaseWithRetry();
   const command = rawCommand as Command;
+  assertSqliteOnlyCommandSupported(command);
+  await initializeDatabaseWithRetry();
   const { values } = parseArgs({
     args: process.argv.slice(3),
     strict: true,
@@ -97,7 +138,7 @@ async function main(): Promise<void> {
     if (limit !== undefined && limit > 50) {
       throw new OperatorError('--limit must not exceed 50 for write-outcome-inspect', 2);
     }
-    print(inspectGitHubWriteOutcomes({
+    print(await inspectGitHubWriteOutcomes({
       connectorInstanceId,
       cycleId: values.cycle,
       leaseId: values.lease,
@@ -109,7 +150,7 @@ async function main(): Promise<void> {
   if (command === 'status') {
     rejectMutationOptions(values);
     const limit = values.limit === undefined ? undefined : parsePositiveInteger(values.limit, '--limit');
-    print(getGitHubIdentityStatus(connectorInstanceId, { limit }));
+    print(await getGitHubIdentityStatus(connectorInstanceId, { limit }));
     return;
   }
   const actor = required(values.actor, '--actor');
@@ -194,7 +235,7 @@ async function main(): Promise<void> {
     if (!values['confirm-pre-dispatch']) {
       throw new OperatorError('write-cycle-reconcile requires --confirm-pre-dispatch', 3);
     }
-    const result = reconcileInterruptedGitHubWriteCycle({
+    const result = await reconcileInterruptedGitHubWriteCycle({
       connectorInstanceId,
       cycleId: required(values.cycle, '--cycle'),
       expectedRevision: parseNonNegativeInteger(
@@ -227,7 +268,7 @@ async function main(): Promise<void> {
       2,
     );
   }
-  print(recordGitHubIdentityException({
+  print(await recordGitHubIdentityException({
     connectorInstanceId,
     bindingType: 'task',
     localId: required(values['local-id'], '--local-id'),
@@ -290,6 +331,11 @@ function rejectOutcomeInspectionMutationOptions(values: Record<string, unknown>)
 async function initializeGitHubOutcomeReader(
   connectorInstanceId: string,
 ): Promise<GitHubIssuesConnector> {
+  // Dynamic (not static) import: this keeps the SQLite driver from being
+  // evaluated merely by loading this script module. Reachable only from the
+  // `write-outcome-resolve` handler, which `assertSqliteOnlyCommandSupported`
+  // has already fail-closed on PostgreSQL before this point is ever reached.
+  const { default: db } = await import('@/db');
   const row = db.select().from(connectorConfigs).where(and(
     eq(connectorConfigs.id, connectorInstanceId),
     eq(connectorConfigs.type, 'github-issues'),
@@ -393,17 +439,22 @@ function print(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
-class OperatorError extends Error {
+export class OperatorError extends Error {
   constructor(message: string, readonly exitCode: number) {
     super(message);
   }
 }
 
-main()
-  .catch((error: unknown) => {
-    const operatorError = error instanceof OperatorError ? error : null;
-    console.error(operatorError?.message ?? (error instanceof Error ? error.message : String(error)));
-    if (operatorError?.exitCode === 2) console.error(usage());
-    process.exitCode = operatorError?.exitCode ?? 1;
-  })
-  .finally(() => shutdownRuntimeDatabase());
+// Guarded entrypoint invocation: only runs `main()` when this module is
+// executed directly (not when imported, e.g. by tests exercising
+// `assertSqliteOnlyCommandSupported` in isolation).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main()
+    .catch((error: unknown) => {
+      const operatorError = error instanceof OperatorError ? error : null;
+      console.error(operatorError?.message ?? (error instanceof Error ? error.message : String(error)));
+      if (operatorError?.exitCode === 2) console.error(usage());
+      process.exitCode = operatorError?.exitCode ?? 1;
+    })
+    .finally(() => shutdownRuntimeDatabase());
+}

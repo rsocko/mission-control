@@ -31,6 +31,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     { SqliteSyncRunRepository },
     { createSqliteConnectorExecutionRepositories },
     { createSqliteGitHubIdentityRepositories },
+    { createSqliteGitHubIdentityOperatorRepositories },
     { createSqliteGitHubDependencyRepositories },
     { createSqliteGitHubHierarchyRepositories },
     { createSqliteGitHubProjectRepositories },
@@ -61,6 +62,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
     import('@/db/persistence/sqlite-sync-run-repository'),
     import('@/db/persistence/sqlite-connector-execution-repositories'),
     import('@/db/persistence/sqlite-github-identity-repositories'),
+    import('@/db/persistence/sqlite-github-identity-operator-repositories'),
     import('@/db/persistence/sqlite-github-dependency-repositories'),
     import('@/db/persistence/sqlite-github-hierarchy-repositories'),
     import('@/db/persistence/sqlite-github-project-repositories'),
@@ -151,6 +153,7 @@ async function createSqliteWorkerPersistenceRepositories(): Promise<
       hierarchy: createSqliteGitHubHierarchyRepositories(sqlite, db),
       projects: createSqliteGitHubProjectRepositories(sqlite, db),
       recovery: createSqliteGitHubRecoveryRepositories(sqlite, db),
+      operator: createSqliteGitHubIdentityOperatorRepositories(sqlite, db),
     },
     connectorState: {
       workTodo: createSqliteWorkTodoRepositories(sqlite, db),

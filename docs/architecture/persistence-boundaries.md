@@ -164,7 +164,7 @@ PostgreSQL now supports the generic list/task push/task pull/notification path.
 Layer 3A additionally migrates *normal* GitHub queue execution behind a second
 worker-registered composition, `GitHubWorkerRepositories`
 (`src/db/persistence/github-worker.ts`). It is registered atomically alongside
-`ConnectorExecutionRepositories`, so a backend either has all six members or
+`ConnectorExecutionRepositories`, so a backend either has all seven members or
 none:
 
 - `identity` — the durable GitHub identity epoch, transactional primary
@@ -185,7 +185,15 @@ none:
   association reconciliation; and
 - `recovery` — the Layer 3B operator recovery composition
   (`src/db/persistence/github-recovery.ts`), split into `transfer`,
-  `bulkTransfer`, and `repoint` sub-ports.
+  `bulkTransfer`, and `repoint` sub-ports; and
+- `operator` — the five pre-existing, previously audited GitHub worker
+  operator/recovery surfaces (identity backfill/status, manual
+  terminal-inaccessible exception mutation, unknown write-outcome resolution,
+  interrupted write-cycle recovery), exposed through
+  `GitHubIdentityOperatorPersistence` (`src/db/persistence/
+  github-identity-operator.ts`) so `scripts/github-identity-operator.ts` can
+  reach them without importing `@/db` directly. See "Layer L06" below for why
+  its PostgreSQL adapter is not a genuine implementation.
 
 ### Layer 3B: GitHub recovery persistence
 
@@ -645,6 +653,135 @@ own numbers were independently verified by executing
 execution, no test runner required) against the current worktree and
 confirming an exact match with the committed baseline. CI is expected to run
 the full suite with a working install.
+
+## Web/API PostgreSQL parity: Layer L06a (external-identities, excluding transfer-identity.ts)
+
+Layer L06 was split into **L06a** (this layer) and a later **L06b** once it
+became clear that `src/lib/connectors/transfer-identity.ts` mixes external-
+identity operations with direct task/source-list row mutation that is
+task-domain state outside this layer's ownership (see "Deferred to L06b"
+below). L06a migrates the nine other owned `src/lib/external-identities/*`
+files off direct SQLite/Drizzle handle access onto the backend-neutral
+`GitHubIdentityPersistence`/`GitHubWriteFencePersistence`/
+`GitHubIdentityOperatorPersistence` ports, preserving every prior public API,
+canonicalization rule, mode/status/exception behavior, reconciliation
+ordering, dedupe/idempotency key, error type/message, and durable write
+outcome bit-for-bit. `transfer-identity.ts`, its task-transfer attribution
+behavior, and the Layer 3B `recovery.transferReconciliation` sub-port it
+uses are unchanged and untouched by L06a; production remains SQLite.
+
+**Genuinely async normal APIs.** `identity-mode.ts`, `identity-exceptions.ts`,
+`write-cycle-reconciliation.ts`, `identity-status.ts`, and
+`write-outcome-resolution.ts` now expose real `async` domain functions backed
+by PostgreSQL's genuinely async adapter methods (`FOR UPDATE` row locks,
+`GREATEST()`-based epoch/lease advancement, and equivalent replay/idempotency
+checks) and SQLite's synchronous adapter internals reached through a
+Promise-returning wrapper. No SQLite public API was preserved by silently
+allowing a PostgreSQL call-time failure: every normal caller was converted to
+`await` its now-`Promise`-returning entry point.
+
+**Five pre-existing, previously audited operator/recovery exclusions are
+unchanged, not newly introduced.** Identity backfill/status, manual
+terminal-inaccessible exception mutation, unknown write-outcome resolution,
+and interrupted write-cycle recovery (11 methods total, since 3 of them are
+backfill-lifecycle helpers with no direct CLI command) were audited before
+this layer and remain unsupported on PostgreSQL, preserving the existing
+`UnsupportedGitHubWorkerOperationError` contract exactly. They are reached
+only through `GitHubIdentityOperatorPersistence`
+(`src/db/persistence/github-identity-operator.ts`): the SQLite adapter
+(`sqlite-github-identity-operator-repositories.ts`) genuinely reuses the
+exact prior query/mutation logic verbatim via injected-handle `*Sync`
+functions; the PostgreSQL adapter
+(`src/db/postgres/repositories/github-identity-operator-repositories.ts`) is
+**not** a genuine async implementation — every member is `async` and
+synchronously throws `UnsupportedGitHubWorkerOperationError` before any
+SQLite import/evaluation, transaction acquisition, remote network effect, or
+durable mutation, so it merely returns a Promise already rejected with that
+error. Cross-backend behavioral parity is neither claimed nor required for
+this port. `tests/db/postgres-github-identity-operator-repositories.test.ts`
+proves, for all 11 methods, both direct-invocation and awaited rejection with
+the exact established error class/code/message, that the adapter module has
+no static import of `better-sqlite3`/`@/db`/any `@/lib/external-identities`
+module, and that neither a mocked `better-sqlite3` constructor nor `fetch` is
+ever reached. No normal HTTP/application route calls this port; only
+`scripts/github-identity-operator.ts` does.
+
+**`github-backfill.ts` is rowid-free by construction, not by a lossy
+rewrite.** The pre-existing implementation ordered cursor pagination by
+`id COLLATE BINARY`, never SQLite `rowid`; this was verified directly against
+`main` before the rewrite (not inferred from a prior audit's SQLite-only-site
+count, which was not evidence of `rowid` use). The rewrite preserves that
+exact ordering and every SQLite-only raw `json_*`/`json_extract` predicate
+verbatim inside the SQLite adapter; the PostgreSQL adapter's 7 genuinely
+async entity/locator methods use faithful (not mechanically translated)
+PostgreSQL equivalents (`FOR UPDATE`, `jsonb` operators, `GREATEST()`).
+
+**Operator CLI script is an explicit SQLite-only tool, not application
+parity.** `scripts/github-identity-operator.ts` fails closed with
+`assertSqliteOnlyCommandSupported` before any SQLite-specific import
+evaluation or effect for its five audited SQLite-only commands (`status`,
+`write-cycle-reconcile`, `write-outcome-inspect`, `write-outcome-resolve`,
+`exception-accept`/`exception-revoke`) when
+`resolveDatabaseBackend() === 'postgres'`; its already-portable
+`transfer-reconcile` command is unaffected.
+`tests/scripts/github-identity-operator-pg-guard.test.ts` and
+`tests/scripts/github-identity-operator-artifact.test.ts` cover the guard
+and the built-artifact process boundary respectively.
+
+**Deferred to L06b: the `tasks/route.ts` compatibility edit.**
+`src/app/api/tasks/route.ts`'s `persistCreatedTaskIdentity` call site needs a
+single surgical `await` addition to stay source-compatible with the now-async
+`identity-mode.ts` API, but that edit is coupled to how `transfer-identity.ts`
+is finally reshaped (see below) and is therefore out of scope for L06a. The
+route file is completely untouched by this layer; it remains a documented
+compatibility edit for L06b.
+
+**Deferred to L06b: `transfer-identity.ts`.** `transfer-identity.ts` mixes
+external-identity operations with direct task/source-list row mutation,
+which is task-domain state outside this layer's ownership. Rather than
+adding a SQLite-handle escape hatch (which would move a PostgreSQL failure to
+call time) or splitting the file to dodge the ratchet on its filename, L06
+was split so this file, its task-transfer attribution behavior, and the
+`tasks/route.ts` caller above are owned together by a future L06b layer once
+Layer L04 ships a narrow `TaskCorePersistence.transferIdentity`-shaped
+capability (with `resolveIdentityTargets`/`reconcileTaskRefresh`) that this
+file can call asynchronously; if atomicity across task and identity state is
+required, L06b will define a single adapter-owned orchestration method
+instead of splitting transactions across repositories. `transfer-identity.ts`
+is unchanged in L06a and remains the one tainted `src/lib/external-identities`
+sibling (`src/lib/connectors/transfer-identity.ts`) in the ratchet baseline;
+L06a's ratchet decrement therefore covers exactly the other nine owned
+files.
+
+**Ratchet decrement.** `tests/architecture/web-persistence-baseline.json`'s
+committed `taintedLibA`/`totalMigrationUnits` ceilings drop by exactly nine
+(123 → 114 tainted `src/lib` modules; 350 → 341 total migration units),
+removing exactly `github-backfill.ts`, `identity-exceptions.ts`,
+`identity-mode.ts`, `identity-status.ts`, `index.ts`, `service.ts`,
+`task-transfer-reconciliation.ts`, `write-cycle-reconciliation.ts`, and
+`write-outcome-resolution.ts` from the `taintedLibA` allowlist; every other
+ratchet set (`tierARoutes`, `tierBRoutes`, `cleanRoutes`,
+`directTaintSourceRoutes`, `transitiveOnlyTaintSourceRoutes`,
+`directDbNamespaceRoutes`, `taintedApiHelpers`, `staticSources`,
+`dynamicSources`, `apiRoutes`) is unchanged, and `transfer-identity.ts` stays
+tainted (deferred to L06b, above). `tests/architecture/
+persistence-boundaries.test.ts`'s separate, narrower raw-handle/driver-import
+allowlist is likewise updated: `github-backfill.ts`, `identity-status.ts`,
+`write-cycle-reconciliation.ts`, and `write-outcome-resolution.ts` are
+removed from `LEGACY_RAW_SQLITE_IMPORTS` because they no longer import a raw
+SQLite handle at all (only `import type` bindings for Group-2 adapter-internal
+sync-helper handle types remain, which that file's `better-sqlite3` check was
+tightened to exclude, matching the type-only exclusion already applied to
+its `@/db` runtime-import checks). `LEGACY_GITHUB_OPERATOR_MODULES` in the
+same file is unchanged: it still lists exactly the same five operator/
+recovery surfaces as the pre-existing audited exclusion above, now reached
+through the port instead of a raw import.
+
+**Known limitation: no local validation was run for this layer**, for the
+same approved-registry `qs@6.16.0` restore failure documented under Layer
+L01 above; the ratchet's own numbers were independently verified the same
+way, by executing `computeWebPersistenceGraph` directly against the current
+worktree.
 
 ## Backend-specific exceptions
 

@@ -47,9 +47,9 @@
     "directTaintSourceRoutes": 143,
     "transitiveOnlyTaintSourceRoutes": 78,
     "directDbNamespaceRoutes": 144,
-    "taintedLibA": 123,
+    "taintedLibA": 114,
     "taintedApiHelpers": 6,
-    "totalMigrationUnits": 350
+    "totalMigrationUnits": 341
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -1019,15 +1019,6 @@
     "src/lib/external-agents/registry.ts",
     "src/lib/external-agents/service.ts",
     "src/lib/external-agents/transports.ts",
-    "src/lib/external-identities/github-backfill.ts",
-    "src/lib/external-identities/identity-exceptions.ts",
-    "src/lib/external-identities/identity-mode.ts",
-    "src/lib/external-identities/identity-status.ts",
-    "src/lib/external-identities/index.ts",
-    "src/lib/external-identities/service.ts",
-    "src/lib/external-identities/task-transfer-reconciliation.ts",
-    "src/lib/external-identities/write-cycle-reconciliation.ts",
-    "src/lib/external-identities/write-outcome-resolution.ts",
     "src/lib/finance-insights/cutover-operator.ts",
     "src/lib/finance-insights/cutover.ts",
     "src/lib/finance/houston-tools.ts",

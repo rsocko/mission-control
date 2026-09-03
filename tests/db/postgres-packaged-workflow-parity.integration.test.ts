@@ -747,8 +747,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
            (SELECT status FROM notification_enrichment_jobs WHERE notification_id = $3)
              AS enrichment,
            (SELECT status FROM ai_runs WHERE id = $4) AS ai,
-           (SELECT status FROM semantic_intents WHERE entity_id = $5 ORDER BY created_at DESC LIMIT 1)
-             AS semantic,
+           (SELECT status FROM semantic_intents WHERE id = $5) AS semantic,
            (SELECT count(*)::int FROM task_projects WHERE project_id = $6)
              AS project_memberships,
            (SELECT count(*)::int FROM task_history_events
@@ -758,7 +757,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           `${prefix}:connector`,
           `${prefix}:enrichment`,
           `${prefix}:ai`,
-          `${prefix}:semantic`,
+          prioritizedClaimIds.semantic,
           `${prefix}:project`,
           `${prefix}:planning`,
         ],
@@ -803,16 +802,15 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
               AS ai_claim_id,
             (SELECT execution_state ->> 'state' FROM ai_runs WHERE id = $4)
               AS ai_lifecycle,
-            (SELECT status FROM semantic_intents WHERE id = $6) AS semantic,
+            (SELECT status FROM semantic_intents WHERE id = $5) AS semantic,
             (SELECT id FROM semantic_intents
-             WHERE entity_id = $5 AND status = 'running' AND lease_owner IS NOT NULL
-             ORDER BY created_at DESC LIMIT 1) AS semantic_claim_id`,
+             WHERE id = $5 AND status = 'running' AND lease_owner IS NOT NULL)
+              AS semantic_claim_id`,
           [
             syncJob.id,
             `${prefix}:connector`,
             `${prefix}:enrichment`,
             `${prefix}:ai`,
-            `${prefix}:semantic`,
             prioritizedClaimIds.semantic,
           ],
         );
@@ -998,14 +996,13 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
               FROM ai_run_events
               WHERE run_id = $4
                 AND kind = 'run.terminal') AS terminal_ai_events,
-             (SELECT status FROM semantic_intents WHERE entity_id = $5 ORDER BY created_at DESC LIMIT 1)
-               AS semantic`,
+             (SELECT status FROM semantic_intents WHERE id = $5) AS semantic`,
            [
              syncJob.id,
              `${prefix}:connector`,
              `${prefix}:enrichment`,
              `${prefix}:ai`,
-             `${prefix}:semantic`,
+             prioritizedClaimIds.semantic,
           ],
         );
         expect(states.rows[0]).toEqual({
@@ -1039,10 +1036,17 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
            (SELECT attempt FROM ai_runs WHERE id = $3) AS ai_attempts,
            (SELECT (execution_state ->> 'revision')::int
             FROM ai_runs WHERE id = $3) AS ai_lifecycle_revision,
-           (SELECT attempt FROM semantic_intents WHERE entity_id = $4 ORDER BY created_at DESC LIMIT 1)
-             AS semantic_attempts,
-           (SELECT count(*)::int FROM semantic_documents WHERE entity_id = $4) AS documents,
-           (SELECT count(*)::int FROM semantic_vectors WHERE entity_id = $4) AS vectors,
+           (SELECT attempt FROM semantic_intents WHERE id = $4) AS semantic_attempts,
+           (SELECT count(*)::int
+            FROM semantic_documents document
+            INNER JOIN semantic_intents intent
+              ON intent.id = $4
+             AND document.index_id = intent.index_id
+             AND document.entity_type = intent.entity_type
+             AND document.entity_id = intent.entity_id) AS documents,
+           (SELECT count(*)::int
+            FROM semantic_vectors
+            WHERE intent_id = $4) AS vectors,
            (SELECT count(*)::int
             FROM ai_provider_sessions
             WHERE run_id = $3
@@ -1087,7 +1091,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           `${prefix}:connector`,
           `${prefix}:enrichment`,
           `${prefix}:ai`,
-          `${prefix}:semantic`,
+          prioritizedClaimIds.semantic,
           `ai-run:${prefix}:ai`,
           `${prefix}:project`,
           `${prefix}:planning`,

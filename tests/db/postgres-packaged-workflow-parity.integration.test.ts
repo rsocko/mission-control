@@ -655,7 +655,6 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           sessionOperationTimeoutMs: 50_000,
           leaseDurationMs: 55_000,
           workerId: setupOwner,
-          eventSink: setupPersistence.eventSink,
           reportError: () => undefined,
         },
       );

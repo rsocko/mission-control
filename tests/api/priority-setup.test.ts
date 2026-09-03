@@ -1,8 +1,26 @@
 /**
  * API Route Tests – Priority Entities, Source Rankings, Smart Score Settings
  * Tests #143 (Priority Setup Wizard first-launch onboarding)
+ *
+ * Updated for L04: priority-entity resolution now runs through the portable
+ * task-core `PriorityEntityRepository`, so the reference-resolution cases are
+ * driven by a registered fake composition instead of `mockDb.select`
+ * sequencing. Everything the route still does directly against `@/db`
+ * (inserts, updates, deletes, ranking reads) keeps using the chainable mock.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type {
+  PriorityEntityRepository,
+  PriorityEntityRow,
+  PriorityProjectReference,
+  PrioritySourceListReference,
+  PriorityTagReference,
+  TaskCorePersistence,
+} from '@/lib/tasks/core/contracts';
+import {
+  clearTaskCorePersistence,
+  registerTaskCorePersistence,
+} from '@/lib/tasks/core/runtime';
 
 // ─── Chainable DB mock ──────────────────────────────────────────────────────
 
@@ -33,6 +51,59 @@ const mockDb = {
 
 vi.mock('@/db', () => ({ default: mockDb }));
 
+// ─── Portable task-core fake ────────────────────────────────────────────────
+
+const NOW = '2026-08-05T12:00:00.000Z';
+
+interface PriorityFixture {
+  entities: PriorityEntityRow[];
+  projects: PriorityProjectReference[];
+  tags: PriorityTagReference[];
+  sources: PrioritySourceListReference[];
+}
+
+const fixture: PriorityFixture = { entities: [], projects: [], tags: [], sources: [] };
+
+function resetFixture(): void {
+  fixture.entities = [];
+  fixture.projects = [];
+  fixture.tags = [];
+  fixture.sources = [];
+}
+
+export function priorityEntityRow(
+  overrides: Partial<PriorityEntityRow> & Pick<PriorityEntityRow, 'id' | 'name' | 'type'>,
+): PriorityEntityRow {
+  return {
+    referenceId: null,
+    description: null,
+    tier: 'standard',
+    color: '#64748b',
+    rank: 0,
+    activeTaskCount: 0,
+    lastTouchedAt: null,
+    createdAt: NOW,
+    updatedAt: NOW,
+    ...overrides,
+  };
+}
+
+const priorityEntities: PriorityEntityRepository = {
+  listPriorityEntitiesByRank: async () => fixture.entities,
+  getProjectReference: async (id) => fixture.projects.find((row) => row.id === id) ?? null,
+  getTagReference: async (id) => fixture.tags.find((row) => row.id === id) ?? null,
+  getSourceListReference: async (connectorInstanceId, sourceId) =>
+    fixture.sources.find((row) =>
+      row.connectorInstanceId === connectorInstanceId && row.sourceId === sourceId) ?? null,
+  listProjectReferences: async () => fixture.projects,
+  listTagReferences: async () => fixture.tags,
+  listSourceListReferences: async () => fixture.sources,
+};
+
+function registerTaskCore(): void {
+  registerTaskCorePersistence({ priorityEntities } as unknown as TaskCorePersistence);
+}
+
 vi.mock('@/db/schema', () => ({
   priorityEntities: {
     id: 'id', name: 'name', type: 'type', description: 'description',
@@ -59,7 +130,15 @@ vi.mock('@/db/schema', () => ({
 // ─── /api/priority-entities ─────────────────────────────────────────────────
 
 describe('GET /api/priority-entities', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFixture();
+    registerTaskCore();
+  });
+
+  afterEach(() => {
+    clearTaskCorePersistence();
+  });
 
   it('returns entities array', async () => {
     const { GET } = await import('@/app/api/priority-entities/route');
@@ -71,28 +150,32 @@ describe('GET /api/priority-entities', () => {
   });
 
   it('returns 500 on db error', async () => {
-    mockDb.select.mockImplementationOnce(() => { throw new Error('db fail'); });
+    registerTaskCorePersistence({
+      priorityEntities: {
+        ...priorityEntities,
+        listPriorityEntitiesByRank: async () => { throw new Error('db fail'); },
+      },
+    } as unknown as TaskCorePersistence);
     const { GET } = await import('@/app/api/priority-entities/route');
     const res = await GET();
     expect(res.status).toBe(500);
   });
 
   it('returns the current name for a referenced entity after rename', async () => {
-    mockDb.select
-      .mockImplementationOnce(() => chainable([{
-        id: 'priority-1',
-        name: 'Old name',
-        type: 'project',
-        referenceId: 'project-1',
-        tier: 'high',
-        rank: 1,
-      }]))
-      .mockImplementationOnce(() => chainable([{
-        id: 'project-1',
-        name: 'Current name',
-        description: null,
-        color: '#a78bfa',
-      }]));
+    fixture.entities = [priorityEntityRow({
+      id: 'priority-1',
+      name: 'Old name',
+      type: 'project',
+      referenceId: 'project-1',
+      tier: 'high',
+      rank: 1,
+    })];
+    fixture.projects = [{
+      id: 'project-1',
+      name: 'Current name',
+      description: null,
+      color: '#a78bfa',
+    }];
 
     const { GET } = await import('@/app/api/priority-entities/route');
     const res = await GET();
@@ -104,16 +187,14 @@ describe('GET /api/priority-entities', () => {
   });
 
   it('flags a referenced entity when its target was removed', async () => {
-    mockDb.select
-      .mockImplementationOnce(() => chainable([{
-        id: 'priority-1',
-        name: 'Removed project',
-        type: 'project',
-        referenceId: 'project-1',
-        tier: 'high',
-        rank: 1,
-      }]))
-      .mockImplementationOnce(() => chainable([]));
+    fixture.entities = [priorityEntityRow({
+      id: 'priority-1',
+      name: 'Removed project',
+      type: 'project',
+      referenceId: 'project-1',
+      tier: 'high',
+      rank: 1,
+    })];
 
     const { GET } = await import('@/app/api/priority-entities/route');
     const res = await GET();
@@ -122,19 +203,18 @@ describe('GET /api/priority-entities', () => {
   });
 
   it('resolves a unified tag reference to its canonical hub tag', async () => {
-    mockDb.select
-      .mockImplementationOnce(() => chainable([{
-        id: 'priority-1',
-        name: 'Old source tag',
-        type: 'tag',
-        referenceId: 'source-tag',
-        tier: 'high',
-        rank: 1,
-      }]))
-      .mockImplementationOnce(() => chainable([
-        { id: 'source-tag', name: 'Old source tag', unifiedInto: 'hub-tag' },
-        { id: 'hub-tag', name: 'Customer', unifiedInto: null },
-      ]));
+    fixture.entities = [priorityEntityRow({
+      id: 'priority-1',
+      name: 'Old source tag',
+      type: 'tag',
+      referenceId: 'source-tag',
+      tier: 'high',
+      rank: 1,
+    })];
+    fixture.tags = [
+      { id: 'source-tag', name: 'Old source tag', color: null, unifiedInto: 'hub-tag' },
+      { id: 'hub-tag', name: 'Customer', color: null, unifiedInto: null },
+    ];
 
     const { GET } = await import('@/app/api/priority-entities/route');
     const res = await GET();
@@ -148,9 +228,26 @@ describe('GET /api/priority-entities', () => {
 });
 
 describe('POST /api/priority-entities', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFixture();
+    registerTaskCore();
+  });
+
+  afterEach(() => {
+    clearTaskCorePersistence();
+  });
 
   it('creates an entity and returns 201', async () => {
+    fixture.projects = [{
+      id: 'project-1',
+      name: 'Test',
+      description: null,
+      color: null,
+    }];
+    fixture.entities = [priorityEntityRow({
+      id: 'e1', name: 'Test', type: 'project', tier: 'high', rank: 1,
+    })];
     mockDb.select.mockImplementation(() => chainable([{ id: 'e1', name: 'Test', type: 'project', tier: 'high', rank: 1 }]));
     const { POST } = await import('@/app/api/priority-entities/route');
     const req = new Request('http://localhost/api/priority-entities', {
@@ -213,7 +310,13 @@ describe('POST /api/priority-entities', () => {
 describe('GET /api/priority-entities/options', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetFixture();
+    registerTaskCore();
     mockDb.select.mockImplementation(() => chainable([]));
+  });
+
+  afterEach(() => {
+    clearTaskCorePersistence();
   });
 
   it('returns canonical picker option groups', async () => {
@@ -225,7 +328,15 @@ describe('GET /api/priority-entities/options', () => {
 });
 
 describe('PUT /api/priority-entities', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetFixture();
+    registerTaskCore();
+  });
+
+  afterEach(() => {
+    clearTaskCorePersistence();
+  });
 
   it('batch-updates entities and returns updated list', async () => {
     mockDb.select.mockImplementation(() => chainable([{ id: 'e1', name: 'Updated', rank: 1 }]));

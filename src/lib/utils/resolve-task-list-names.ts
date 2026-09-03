@@ -1,6 +1,4 @@
-import db from '@/db';
-import { sourceLists } from '@/db/schema';
-import { inArray } from 'drizzle-orm';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import { resolveSourceListDisplayName } from './source-list-display-name';
 
 /**
@@ -10,29 +8,24 @@ import { resolveSourceListDisplayName } from './source-list-display-name';
  * This resolves at query time so the UI always shows the user's renamed
  * value, even if the denormalized `tasks.sourceListName` is stale due to a
  * sync race condition.
+ *
+ * Backend-neutral as of L04: the lookup goes through the portable task-core
+ * `SourceListNameRepository`, which is why this is now asynchronous.
  */
-export function buildSourceListNameMap(
+export async function buildSourceListNameMap(
   tasks: Array<{ sourceListId: string | null; connectorInstanceId: string }>,
-): Map<string, string> {
+): Promise<Map<string, string>> {
   const sourceListIds = [...new Set(tasks.map((t) => t.sourceListId).filter(Boolean))] as string[];
   const map = new Map<string, string>();
   if (sourceListIds.length === 0) return map;
 
-  const slRows = db
-    .select({
-      sourceId: sourceLists.sourceId,
-      connectorInstanceId: sourceLists.connectorInstanceId,
-      name: sourceLists.name,
-      userDisplayName: sourceLists.userDisplayName,
-    })
-    .from(sourceLists)
-    .where(inArray(sourceLists.sourceId, sourceListIds))
-    .all();
+  const persistence = await getTaskCorePersistence();
+  const rows = await persistence.sourceListNames.listSourceListDisplayNames(sourceListIds);
 
-  for (const sl of slRows) {
+  for (const row of rows) {
     map.set(
-      `${sl.connectorInstanceId}:${sl.sourceId}`,
-      resolveSourceListDisplayName(sl),
+      `${row.connectorInstanceId}:${row.sourceId}`,
+      resolveSourceListDisplayName(row),
     );
   }
 

@@ -9,7 +9,7 @@ export async function DELETE(
 ) {
   const { id } = await params;
   try {
-    const result = hardDeleteScoutTask(id);
+    const result = await hardDeleteScoutTask(id);
     if (result.kind === 'not-found') return ApiErrors.notFound('Task');
     if (result.kind === 'not-scout') {
       return ApiErrors.badRequest('Hard delete with ingest suppression is only available for Scout tasks');

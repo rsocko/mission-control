@@ -34,6 +34,11 @@ import {
   registerCorePersistenceRepositories,
 } from '@/lib/persistence/runtime';
 import {
+  clearSelectedTaskCorePersistence,
+  registerTaskCorePersistence,
+} from '@/lib/tasks/core/runtime';
+import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
+import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
   beginPersistenceCompositionInitialization,
@@ -56,6 +61,7 @@ import {
   createPostgresCoreRepositories,
   createPostgresWorkerPersistenceRepositories,
 } from './postgres/repositories';
+import { createPostgresTaskCorePersistence } from './postgres/repositories/task-core-repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
 import { createPostgresAIEnrichmentService } from './postgres/sync/notification-enrichment-service';
@@ -74,6 +80,7 @@ let postgresSemanticIndexRepository: SemanticIndexRepository | null = null;
 let postgresSemanticSourcePort: SemanticSourcePort | null = null;
 let postgresDurableAiRunRepository: DurableAiRunRepository | null = null;
 let postgresAIEnrichmentService: AIEnrichmentService | null = null;
+let postgresTaskCorePersistence: TaskCorePersistence | null = null;
 let runtimeInitialized = false;
 let runtimeInitializationPromise: Promise<void> | null = null;
 let runtimeShutdownPromise: Promise<void> | null = null;
@@ -128,6 +135,9 @@ function clearModeRouteServiceDelegates(): void {
 }
 
 function clearPostgresRuntimeComposition(): void {
+  if (postgresTaskCorePersistence) {
+    clearSelectedTaskCorePersistence(postgresTaskCorePersistence);
+  }
   if (postgresWorkerRepositories) {
     clearWorkerPersistenceRepositories(postgresWorkerPersistenceRepositories);
   }
@@ -152,6 +162,7 @@ function clearPostgresRuntimeComposition(): void {
   postgresSemanticSourcePort = null;
   postgresDurableAiRunRepository = null;
   postgresAIEnrichmentService = null;
+  postgresTaskCorePersistence = null;
 }
 
 function requirePostgresRepositories(): CorePersistenceRepositories {
@@ -409,6 +420,11 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   const { db, pool, vector } = postgresBackend.context;
   postgresRepositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(postgresCorePersistenceRepositories);
+  // The task-core composition is built atomically from the freshly
+  // initialized handle, so no request can observe a half-registered
+  // task-core surface under PostgreSQL.
+  postgresTaskCorePersistence = createPostgresTaskCorePersistence(db);
+  registerTaskCorePersistence(postgresTaskCorePersistence);
   postgresWorkerRepositories = createPostgresWorkerPersistenceRepositories(
     db,
     pool,

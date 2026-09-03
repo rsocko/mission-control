@@ -34,7 +34,7 @@ export async function GET(request: Request) {
 
   // Fetch priority entities and source rankings for SmartScore
   const [entities, rankings] = await Promise.all([
-    Promise.resolve(getResolvedPriorityEntities() as PriorityEntity[]),
+    getResolvedPriorityEntities() as Promise<PriorityEntity[]>,
     db.select().from(sourceRankings) as Promise<SourceRanking[]>,
   ]);
 

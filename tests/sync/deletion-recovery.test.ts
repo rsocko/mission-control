@@ -525,7 +525,7 @@ describe('sync deletion recovery', () => {
 
 async function setupGitHubTask() {
   const [{ default: db }, schema] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
   ]);
   const now = '2026-08-03T12:00:00.000Z';

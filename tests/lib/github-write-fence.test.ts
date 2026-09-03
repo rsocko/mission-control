@@ -1299,7 +1299,7 @@ describe('GitHub write fence', () => {
 
 async function setupFixture() {
   const [{ default: db, sqlite }, schema, identity] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/external-identities'),
   ]);

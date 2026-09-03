@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { IConnector } from '@/lib/connectors';
 import type { SourceTaskDependency } from '@/types';
 import {
@@ -167,7 +168,7 @@ beforeAll(async () => {
   vi.doUnmock('crypto');
   vi.resetModules();
   [dbModule, schema, manager] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/sync/task-dependency-manager'),
   ]);
@@ -464,11 +465,10 @@ describe('checkpointed dependency reconciliation', () => {
     dbModule.sqlite.close();
     vi.resetModules();
     [dbModule, schema, manager] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync/task-dependency-manager'),
     ]);
-    await (await import('@/db/runtime')).initializeRuntimeDatabase();
 
     const completed = await manager.reconcileTaskDependencies(
       connectorId,

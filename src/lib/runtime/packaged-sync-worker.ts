@@ -238,6 +238,10 @@ export async function runPackagedSyncWorker(
     }
 
     let telemetry: Awaited<ReturnType<typeof startRuntimeTelemetry>> | null = null;
+    function requireStartedTelemetry(): Awaited<ReturnType<typeof startRuntimeTelemetry>> {
+      if (!telemetry) throw new Error('Runtime telemetry did not start');
+      return telemetry;
+    }
     let healthSnapshotScheduler:
       InstanceType<typeof WorkerHealthSnapshotScheduler> | null = null;
     const components: AtomicWorkerComponent[] = [
@@ -461,10 +465,8 @@ export async function runPackagedSyncWorker(
       startupAbort.signal,
     );
     startupAbort.signal.throwIfAborted();
-    if (!telemetry) {
-      throw new Error('Runtime telemetry did not start');
-    }
-    writeFileSync(instanceFile, telemetry.instanceId, {
+    const startedTelemetry = requireStartedTelemetry();
+    writeFileSync(instanceFile, startedTelemetry.instanceId, {
       encoding: 'utf8',
       mode: 0o600,
     });

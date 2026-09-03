@@ -19,6 +19,7 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   'src/lib/connectors/rymessage/rymessage-client.ts',
   'src/lib/houston-memory/service.ts',
   'src/lib/notifications/enrichment/ai-enrichment.ts',
+  'src/lib/notifications/enrichment/index.ts',
   'src/lib/persistence/worker-runtime.ts',
   'src/lib/persistence/runtime.ts',
   'src/lib/search/fts.ts',
@@ -39,7 +40,10 @@ const POSTGRES_GUARDED_DYNAMIC_BARRELS = new Set([
   '@/lib/semantic-index/runtime',
 ]);
 const POSTGRES_BACKEND_GUARDED_DYNAMIC_EDGES = new Set([
+  'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
+  'src/lib/connectors/monarch-money/index.ts -> ./snapshot-sync',
   'src/lib/notifications/enrichment/ai-enrichment.ts -> @/lib/ai/provider-factory',
+  'src/lib/notifications/enrichment/index.ts -> ./entity-linker',
   'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
   'src/lib/semantic-index/publication.ts -> ./config',
   'src/lib/semantic-index/publication.ts -> ./runtime',
@@ -165,6 +169,8 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
 
   it('allowlists every guarded dynamic SQLite or compatibility-barrel edge', () => {
     const graph = postgresStartupGraph();
+    const executionPipeline = source('src/lib/sync/execution-pipeline.ts');
+    const monarchClient = source('src/lib/connectors/monarch-money/index.ts');
     const guardedEdges = [...graph].flatMap((path) =>
       dynamicImports(path).flatMap((specifier) => {
         const resolved = resolveApplicationImport(path, specifier);
@@ -192,7 +198,16 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
       'src/lib/sync/search-indexer.ts -> @/lib/search',
     );
     expect(guardedEdges).toContain(
+      'src/lib/connectors/monarch-money/index.ts -> ./attribution-service',
+    );
+    expect(guardedEdges).toContain(
+      'src/lib/connectors/monarch-money/index.ts -> ./snapshot-sync',
+    );
+    expect(guardedEdges).toContain(
       'src/lib/notifications/enrichment/ai-enrichment.ts -> @/lib/ai/provider-factory',
+    );
+    expect(guardedEdges).toContain(
+      'src/lib/notifications/enrichment/index.ts -> ./entity-linker',
     );
     expect(guardedEdges).toContain(
       'src/lib/semantic-index/embedding-provider.ts -> @/lib/search/embedding-request',
@@ -202,6 +217,10 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     );
     expect(guardedEdges).toContain(
       'src/lib/semantic-index/publication.ts -> ./runtime',
+    );
+    expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(2);
+    expect(executionPipeline).toContain(
+      "enableEntityLinking: resolveDatabaseBackend() !== 'postgres'",
     );
   });
 

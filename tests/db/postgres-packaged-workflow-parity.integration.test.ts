@@ -633,7 +633,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
         outbox: 0,
         enrichment: 'pending',
         ai: 'queued',
-        semantic: 'pending',
+        semantic: 'queued',
         project_memberships: 0,
         planning_outputs: 0,
       });

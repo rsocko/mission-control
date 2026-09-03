@@ -81,6 +81,7 @@ import {
   shouldEnrichWithAI,
   type AIEnrichmentInput,
 } from '@/lib/notifications/enrichment/ai-enrichment';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
 
 function canonicalJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
@@ -1178,7 +1179,10 @@ export class SyncExecutionPipeline {
       ? await import('@/lib/notifications/enrichment')
           .then(({ enrichAlertBatch }) => enrichAlertBatch(
             alertItemsForEnrichment,
-            { enableAI: false },
+            {
+              enableAI: false,
+              enableEntityLinking: resolveDatabaseBackend() !== 'postgres',
+            },
           ))
       : [];
 

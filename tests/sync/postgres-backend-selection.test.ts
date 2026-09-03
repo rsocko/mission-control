@@ -76,6 +76,7 @@ const postgresMocks = vi.hoisted(() => ({
     search: vi.fn(async () => []),
   },
   publishSemanticEntityUpsert: vi.fn(async () => ({ status: 'published' as const })),
+  publishSemanticEntityDelete: vi.fn(async () => ({ status: 'published' as const })),
   workerRepositories: {
     connectors: {
       get: vi.fn(async () => null),
@@ -136,6 +137,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 }));
 
 vi.mock('@/lib/semantic-index/publication', () => ({
+  publishSemanticEntityDelete: postgresMocks.publishSemanticEntityDelete,
   publishSemanticEntityUpsert: postgresMocks.publishSemanticEntityUpsert,
 }));
 

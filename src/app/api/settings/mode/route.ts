@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { getAppMode, setAppMode, getSettings, updateSettings, type AppMode } from '@/lib/mode';
-import { clearDatabase, resetDemoDatabase } from '@/lib/seed-api';
-import { clearTriageSampleData } from '@/lib/triage/lifecycle';
 import { isPublicDemoMode } from '@/lib/public-demo';
-import { runTransaction } from '@/db';
-import { tasks } from '@/db/schema';
-import { and, eq, gt, inArray, isNotNull } from 'drizzle-orm';
 import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
+import {
+  getDemoSeedCommandService,
+  getRelativeReminderTimezoneRepository,
+} from '@/lib/settings/mode-route-services';
 
 /**
  * GET /api/settings/mode — Get current app mode and settings
@@ -20,6 +19,18 @@ export async function GET() {
 /**
  * POST /api/settings/mode — Switch between demo and live mode
  * Body: { mode: "demo" | "live" } or { action: "reset-demo" | "clear-data" }
+ *
+ * `resetDemoDatabase`/`clearDatabase`/`clearTriageSampleData` are the
+ * narrow, documented seed/demo exception to the L02 web/API PostgreSQL
+ * parity migration (see `docs/architecture/persistence-boundaries.md`):
+ * there is no PostgreSQL equivalent yet. They are reached exclusively
+ * through `getDemoSeedCommandService()` (see
+ * `@/lib/settings/mode-route-services`), a backend-neutral registry with no
+ * import edge of its own to `@/db`/SQLite, so this module stays fully clean
+ * under PostgreSQL. The concrete implementation registered for
+ * `MC_DATABASE_BACKEND=postgres` rejects all three commands before any
+ * SQLite-side module is evaluated (see `initializeRuntimeDatabase` in
+ * `src/db/runtime.ts`).
  */
 export async function POST(request: Request) {
   if (isPublicDemoMode()) {
@@ -34,18 +45,18 @@ export async function POST(request: Request) {
 
   // Handle special actions
   if (action === 'reset-demo') {
-    await resetDemoDatabase();
+    await getDemoSeedCommandService().resetDemoDatabase();
     updateSettings({ demoSeededAt: new Date().toISOString() });
     return NextResponse.json({ success: true, message: 'Demo data reset successfully' });
   }
 
   if (action === 'clear-data') {
-    await clearDatabase();
+    await getDemoSeedCommandService().clearDatabase();
     return NextResponse.json({ success: true, message: 'All data cleared' });
   }
 
   if (action === 'clear-triage-samples') {
-    const deleted = await clearTriageSampleData();
+    const deleted = await getDemoSeedCommandService().clearTriageSampleData();
     return NextResponse.json({ success: true, message: `Cleared ${deleted} triage sample item(s)` });
   }
 
@@ -59,7 +70,7 @@ export async function POST(request: Request) {
   // When switching to live, optionally clear demo data
   if (previousMode === 'demo' && mode === 'live') {
     if (body.clearDemoData) {
-      await clearDatabase();
+      await getDemoSeedCommandService().clearDatabase();
     }
   }
 
@@ -67,7 +78,7 @@ export async function POST(request: Request) {
   if (mode === 'demo' && body.seedIfEmpty !== false) {
     const settings = getSettings();
     if (!settings.demoSeededAt) {
-      await resetDemoDatabase();
+      await getDemoSeedCommandService().resetDemoDatabase();
       updateSettings({ demoSeededAt: new Date().toISOString() });
     }
   }
@@ -107,41 +118,17 @@ export async function PATCH(request: Request) {
 
   if (Object.keys(updates).length > 0) {
     if (typeof updates.timezone === 'string' && updates.timezone !== getSettings().timezone) {
+      const timezone = updates.timezone;
       const now = new Date();
-      const invalidCount = runTransaction((tx) => {
-        const relativeTasks = tx.select({
-          id: tasks.id,
-          dueDate: tasks.dueDate,
-          reminderAt: tasks.reminderAt,
-          reminderRelative: tasks.reminderRelative,
-          reminderDueTime: tasks.reminderDueTime,
-        }).from(tasks).where(and(
-          isNotNull(tasks.reminderRelative),
-          isNotNull(tasks.reminderAt),
-          isNotNull(tasks.dueDate),
-          isNotNull(tasks.reminderDueTime),
-          inArray(tasks.status, ['todo', 'in_progress']),
-          gt(tasks.reminderAt, now.toISOString()),
-        )).all();
-        const recomputed = relativeTasks.map((task) => ({
-          task,
-          result: resolveRelativeReminderMutation({
-            current: task,
-            input: { dueDate: task.dueDate },
-            timezone: updates.timezone as string,
-            now,
-          }),
-        }));
-        const invalid = recomputed.filter((item) => !item.result.success);
-        if (invalid.length > 0) return invalid.length;
-        for (const item of recomputed) {
-          if (!item.result.success) continue;
-          tx.update(tasks)
-            .set({ ...item.result.updates, updatedAt: now.toISOString() })
-            .where(eq(tasks.id, item.task.id))
-            .run();
-        }
-        return 0;
+      const repository = getRelativeReminderTimezoneRepository();
+      const { invalidCount } = await repository.applyTimezoneRecompute({
+        now,
+        recompute: (task) => resolveRelativeReminderMutation({
+          current: task,
+          input: { dueDate: task.dueDate },
+          timezone,
+          now,
+        }),
       });
       if (invalidCount > 0) {
         return NextResponse.json({

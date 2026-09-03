@@ -654,6 +654,244 @@ execution, no test runner required) against the current worktree and
 confirming an exact match with the committed baseline. CI is expected to run
 the full suite with a working install.
 
+## Web/API PostgreSQL parity: Layer L02 (seed/demo fail-closed, entity-link parity, settings/mode route)
+
+Layer L02 owns exactly four application files (`src/app/api/settings/mode/
+route.ts`, `src/lib/seed-api.ts`, `src/lib/triage/lifecycle.ts`,
+`src/lib/triage/shared.ts`) plus the tightly-scoped notification
+entity-linking adapter/contract used by webhook/worker code migrated by
+earlier layers. It does not migrate any other route or lib. Delivering the
+`settings/mode/route.ts` decrement cleanly (see below) additionally requires
+two small, additive edits outside this ownership list, called out
+explicitly here rather than left implicit: a new pure registry module,
+`src/lib/settings/mode-route-services.ts` (owned by this layer, new file,
+zero pre-existing owner), and two new registration calls added to the
+existing `initializeRuntimeDatabase()` composition root in `src/db/runtime.ts`
+(a shared file owned by no single layer) — one per backend branch, wiring
+the concrete SQLite/PostgreSQL implementations of the two services the
+route depends on. No other behavior in `runtime.ts` changes.
+
+**Goal 1: seed/demo fails closed before any SQLite driver import or file
+creation, under `MC_DATABASE_BACKEND=postgres`.** `src/lib/seed-api.ts`'s
+`better-sqlite3` import became `import type Database from 'better-sqlite3'`
+(type-only, erased at build time — the file no longer references the driver
+value at all), and its private `getDb()` helper now:
+
+```ts
+async function getDb(): Promise<Database.Database> {
+  if (resolveDatabaseBackend() === 'postgres') {
+    throw new Error(
+      'Seed/demo database management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+    );
+  }
+  const { sqlite } = await import('@/db');
+  return sqlite;
+}
+```
+
+The backend check runs strictly before the dynamic `import('@/db')`, so under
+PostgreSQL neither `@/db` (and therefore neither `better-sqlite3` nor
+`src/db/bootstrap/connection.ts`'s `new Database(databasePath)`) is ever
+evaluated, and no `.db`/`-wal`/`-shm` file is ever created. In SQLite mode,
+`getDb()` returns the *same shared singleton* `@/db` already owns (configured
+once, in `configureDatabaseConnection`) rather than opening a private
+connection of its own — `clearDatabase`, `resetDemoDatabase`, and
+`clearTriageSampleData` (the only three seed/demo entry points, see below)
+are unchanged in SQLite-mode behavior. This is a minimal, explicit,
+documented exception to the L01 ratchet's "zero" final target, not a hidden
+allowance: there is no PostgreSQL equivalent yet for demo/seed database
+management, and every guarded function is proven, by test, to fail with this
+exact message before touching `@/db` (`tests/db/
+seed-api-postgres-fail-closed.test.ts`, covering poisoned-`@/db`-property
+access, a real scratch-directory stray-file check, and that SQLite mode
+still delegates to the shared singleton rather than opening a private
+connection).
+
+**The seed/demo exception is narrow: exactly three functions, not a whole
+module.** `src/lib/triage/lifecycle.ts` and `src/lib/triage/shared.ts` gate
+*all* normal triage web traffic (thumbnail cleanup, hard-delete, purge,
+`ensureSeedData`'s read-through seeding for every triage list request) —
+these are not seed/demo operations and must keep working identically on both
+backends as later layers migrate them. Only `clearTriageSampleData` (in
+`lifecycle.ts`) is a genuine SQLite-only seed/demo action (deletes only the
+canonical sample rows inserted by `resetDemoDatabase`) and carries an inline
+guard identical in spirit to `seed-api.ts`'s:
+
+```ts
+if (resolveDatabaseBackend() === 'postgres') {
+  throw new Error(
+    'Triage sample-data management is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+  );
+}
+```
+
+`updateTriageItemThumbnail`, `hardDeleteTriageItem`, `hardDeleteTriageItems`,
+`purgeDismissedItems`, and every function in `shared.ts` (including
+`ensureSeedData`) are **untouched** — same static `import db from '@/db'`,
+same behavior, same Tier A membership as before this layer. They remain an
+explicit target for a later layer's real migration, not narrowed L02 taint
+and not silently guarded. An earlier draft of this layer incorrectly wrapped
+all five `lifecycle.ts` functions in a fail-closed guard; that was reverted
+because it would make ordinary web traffic (e.g. deleting a triage item)
+throw under PostgreSQL for a reason unrelated to seed/demo, which is exactly
+the failure mode Goal 1 exists to prevent, not reproduce for normal
+operations.
+
+**Goal 2: SQLite/PostgreSQL suffix-match and JSON-type parity for
+notification entity linking.** `src/db/persistence/
+notification-entity-linking.ts` defines `asciiFoldLower` — folds only the 26
+ASCII letters `A`-`Z`, leaving every other character (including all
+non-ASCII text) byte-for-byte unchanged, matching SQLite's own default
+(non-ICU) `LIKE` behavior exactly. This is deliberately **not** PostgreSQL's
+`ILIKE`, which is locale-aware and can fold non-ASCII case pairs (e.g.
+Turkish dotted/dotless I, German ß) depending on the database's collation —
+using `ILIKE` as a "case-insensitive" proxy would silently make suffix
+matching behave differently per backend for non-ASCII input, reproducing
+the exact parity bug this layer closes. The SQLite adapter
+(`sqlite-notification-entity-linking-repository.ts`) is left unchanged
+(its plain `LIKE` already has this behavior with no ICU extension loaded);
+the PostgreSQL adapter (`postgres/repositories/
+notification-entity-linking-repository.ts`) applies `asciiFoldLower` to its
+query parameter and pairs it with a `translate(source_id, $ASCII_UPPER,
+$ASCII_LOWER)` expression on the column, so both backends fold exactly the
+same character set and no non-ASCII character is ever folded on either
+side. Both adapters also now guard `metadata.repository` project lookups
+against non-string JSON: SQLite's `json_extract` naturally never equals a
+TEXT parameter for a non-TEXT JSON value, but an explicit `json_type(...) =
+'text'` guard documents and pins that behavior; PostgreSQL's `->>` operator
+stringifies *any* JSON scalar, so without the equivalent
+`jsonb_typeof(metadata -> 'repository') = 'string'` guard a numeric-looking
+search term could match a JSON number. `tests/contracts/
+notification-entity-linking.contract.ts` runs identically against both
+adapters (`tests/db/sqlite-notification-entity-linking-repository.contract.
+test.ts`, always-on; `tests/db/postgres-notification-entity-linking-
+repository.integration.test.ts`, guarded by `MC_TEST_POSTGRES_URL` and
+`assertSafeIntegrationTestTarget`) and covers: exact match, unique suffix
+match, zero matches, ambiguous suffix match (2 rows → `null`, never an
+arbitrary pick), mixed-case ASCII suffix folding, a non-ASCII case pair
+(`Ö`/`ö`) that must stay distinct, and `metadata.repository` missing, JSON
+`null`, a non-string JSON number, and a non-string JSON boolean — each
+resolving to zero project matches even when the search term equals the
+scalar's stringified form.
+
+**`settings/mode/route.ts`: PATCH genuinely migrated, POST's demo actions
+kept SQLite-only, and the route module is fully clean under the
+web-persistence-graph census (neither Tier A nor Tier B).** The PATCH
+handler's timezone-change logic — recomputing every `relative_*` reminder
+task's `reminder_at` for the new timezone and rejecting the change with 409
+`RELATIVE_REMINDER_TIMEZONE_CONFLICT` if any recompute would land in the past
+or fail validation — was real, non-demo, backend-dependent business logic
+that an earlier draft of this layer left untouched. It is now migrated
+through a new narrow contract, `src/db/persistence/
+relative-reminder-timezone.ts` (`RelativeReminderTimezoneRepository.
+applyTimezoneRecompute`), with SQLite (`sqlite-relative-reminder-timezone-
+repository.ts`, a `drizzle` transaction) and PostgreSQL (`postgres/
+repositories/relative-reminder-timezone-repository.ts`, an async `drizzle`
+transaction) adapters. The route itself has **zero import edges — static or
+dynamic — to `@/db`, `@/lib/seed-api`, or `@/lib/triage/lifecycle`**: no
+backend branching, no generic query facade.
+
+The route's three demo-only actions (`reset-demo`, `clear-data`,
+`clear-triage-samples`) remain SQLite-only, correctly and unapologetically —
+there is no PostgreSQL demo-reset equivalent yet. Both the demo commands and
+the timezone repository are reached exclusively through
+`@/lib/settings/mode-route-services`, a pure backend-neutral registry (a
+plain register/get pair per service, no import edge of its own to any
+backend-touching module — the one value-level type it needs,
+`RelativeReminderTimezoneRepository`, is imported with `import type`, which
+is erased at build time and therefore does not create a graph edge). The
+concrete SQLite and PostgreSQL implementations are constructed and
+registered once, at server startup, by `initializeRuntimeDatabase()` in
+`src/db/runtime.ts` — the same, already-established composition root used
+for `CorePersistenceRepositories` (it already calls
+`registerCorePersistenceRepositories`) — which runs from
+`src/instrumentation.ts` before the server accepts any request. For SQLite,
+this wires the real `clearDatabase`/`resetDemoDatabase`/
+`clearTriageSampleData` functions and the drizzle-backed timezone repository.
+The demo-command trio is wired through one dynamically-imported seam file,
+`src/db/persistence/sqlite-demo-seed-command-adapter.ts` (its name
+deliberately contains "sqlite", following the same convention as
+`sqlite-core-repositories.ts`/`sqlite-relative-reminder-timezone-repository.
+ts`): `runtime.ts` itself never names `@/lib/seed-api` or
+`@/lib/triage/lifecycle` — statically or dynamically — only the adapter file
+does, so the sync-worker's PostgreSQL-startup-graph ratchet
+(`tests/architecture/final-worker-persistence-boundary.test.ts`), which
+follows *every* dynamic import out of `runtime.ts` (a permanent member of its
+traversal) unless the resolved target's filename itself signals
+SQLite-only, does not pull `@/db`/`@/db/schema`'s entire subtree into the
+PostgreSQL startup graph through this wiring. An earlier draft imported
+`@/lib/seed-api` and `@/lib/triage/lifecycle` directly from `runtime.ts`;
+that passed the route-focused `web-persistence-graph` census (which only
+traces from route entry points) but failed the separate sync-worker ratchet,
+which starts from `src/sync-worker.ts` and reaches `runtime.ts` as one of its
+guarded dynamic importers — a reminder that this layer's route-level
+"clean" proof and the pre-existing worker-boundary proof are independent
+gates that both must hold. For PostgreSQL, the timezone repository
+gets the real PostgreSQL adapter, but the three demo commands are
+constructed inline as immediate rejections using the exact same
+"SQLite-only" error text `seed-api.ts`/`lifecycle.ts` already throw — the
+PostgreSQL branch never imports either SQLite-only module at all, so the
+rejection happens before any SQLite-side module is evaluated, by
+construction.
+
+An earlier draft of this layer used a call-site-scoped dynamic `import()` at
+each of the three demo-action call sites, which moved the route from Tier A
+to Tier B (fails at PostgreSQL *import* time, `GET`/`PATCH` unreachable →
+fails only at *call* time for those three actions). That was a real
+improvement but still left the route with deferred taint. The registry +
+composition-root design above removes even that: the route is **fully
+absent from both `tierARoutes` and `tierBRoutes`** and present in
+`cleanRoutes` in `tests/architecture/web-persistence-baseline.json` (see its
+`layerUpdates` entry): `tierARoutes` 221 → 220 (route removed, no other route
+added), `tierBRoutes` unchanged at 39 (the route never lands here either),
+`cleanRoutes` +1 (the route joins the floor set — floor increases are always
+safe), `taintedLibA` 123 → 121 (`seed-api.ts`/`seed.ts` exit Tier A per Goal
+1), `totalMigrationUnits` 350 → 347. A dedicated test,
+`tests/architecture/settings-mode-route-clean.test.ts`, names this route
+explicitly and asserts it is in neither tier and is in `cleanRoutes`, so a
+future regression (e.g. reintroducing a static/dynamic import from the route
+to any backend-touching module) fails immediately and legibly, independent
+of the generic baseline-ratchet mechanism. `tests/lib/settings/
+mode-route-services.test.ts` covers the registry's register/get/throw
+semantics in isolation; `tests/db/
+runtime-mode-route-services-registration.test.ts` proves
+`initializeRuntimeDatabase`'s PostgreSQL branch registers a demo command
+service that rejects all three commands (with poisoned `@/lib/seed-api`/
+`@/lib/triage/lifecycle` mocks that throw on import, so any accidental import
+attempt fails the test) and a working PostgreSQL timezone repository.
+`tests/api/settings-mode-route.test.ts` covers exact GET/POST/PATCH auth
+(403 public-demo), status, body, and error-code behavior — mocking only the
+route's actual dependencies (`@/lib/mode`, `@/lib/public-demo`, and the
+`mode-route-services` registry) — including the 409 conflict path and a test
+that wires the mocked repository's recompute callback to the real, unmocked
+`resolveRelativeReminderMutation` to prove correct end-to-end wiring without
+a real database. `RelativeReminderTimezoneRepository`'s own query-filtering,
+atomicity, and `invalidCount` semantics are additionally pinned identically
+on both backends by `tests/contracts/relative-reminder-timezone-repository.
+contract.ts` (`tests/db/sqlite-relative-reminder-timezone-repository.
+contract.test.ts`, always-on; `tests/db/
+postgres-relative-reminder-timezone-repository.integration.test.ts`, guarded
+by `MC_TEST_POSTGRES_URL` and `assertSafeIntegrationTestTarget`), using a
+deterministic stub `recompute` callback so this contract is independent of
+the relative-reminder date-math already covered by the route-level test
+above and by `resolveRelativeReminderMutation`'s own unit tests.
+`initializeRuntimeDatabase`'s PostgreSQL branch is proven, in
+`tests/db/runtime-mode-route-services-registration.test.ts`, to register a
+demo command service that rejects all three commands and a working
+timezone repository, with `@/lib/seed-api`/`@/lib/triage/lifecycle` mocked
+to throw on import so any accidental import from that branch fails the
+test immediately.
+
+**Known limitation: no local validation was run for this layer.** Same
+approved-registry `qs@6.16.0` 404 documented in the L01 section above;
+`node_modules` remained unusable, so none of this layer's new tests were
+executed by `vitest` and no `tsc`/`eslint` run validated its TypeScript. The
+web-persistence-graph ratchet numbers were independently re-verified by
+executing `computeWebPersistenceGraph` directly via Node's native TypeScript
+execution (no test runner required) against the worktree after every change
+in this layer, confirming the exact before/after transition described
+above. CI is expected to run the full suite with a working install.
+
 ## Web/API PostgreSQL parity: Layer L06a (external-identities, excluding transfer-identity.ts)
 
 Layer L06 was split into **L06a** (this layer) and a later **L06b** once it
@@ -753,18 +991,19 @@ sibling (`src/lib/connectors/transfer-identity.ts`) in the ratchet baseline;
 L06a's ratchet decrement therefore covers exactly the other nine owned
 files.
 
-**Ratchet decrement.** `tests/architecture/web-persistence-baseline.json`'s
+**Ratchet decrement.** Relative to this layer's own base (the state before
+Layer L02 merged), `tests/architecture/web-persistence-baseline.json`'s
 committed `taintedLibA`/`totalMigrationUnits` ceilings drop by exactly nine
 (123 → 114 tainted `src/lib` modules; 350 → 341 total migration units),
 removing exactly `github-backfill.ts`, `identity-exceptions.ts`,
 `identity-mode.ts`, `identity-status.ts`, `index.ts`, `service.ts`,
 `task-transfer-reconciliation.ts`, `write-cycle-reconciliation.ts`, and
 `write-outcome-resolution.ts` from the `taintedLibA` allowlist; every other
-ratchet set (`tierARoutes`, `tierBRoutes`, `cleanRoutes`,
-`directTaintSourceRoutes`, `transitiveOnlyTaintSourceRoutes`,
+ratchet set this layer itself touches (`tierARoutes`, `tierBRoutes`,
+`cleanRoutes`, `directTaintSourceRoutes`, `transitiveOnlyTaintSourceRoutes`,
 `directDbNamespaceRoutes`, `taintedApiHelpers`, `staticSources`,
-`dynamicSources`, `apiRoutes`) is unchanged, and `transfer-identity.ts` stays
-tainted (deferred to L06b, above). `tests/architecture/
+`dynamicSources`, `apiRoutes`) is unchanged by L06a's own diff, and
+`transfer-identity.ts` stays tainted (deferred to L06b, above). `tests/architecture/
 persistence-boundaries.test.ts`'s separate, narrower raw-handle/driver-import
 allowlist is likewise updated: `github-backfill.ts`, `identity-status.ts`,
 `write-cycle-reconciliation.ts`, and `write-outcome-resolution.ts` are
@@ -776,6 +1015,19 @@ its `@/db` runtime-import checks). `LEGACY_GITHUB_OPERATOR_MODULES` in the
 same file is unchanged: it still lists exactly the same five operator/
 recovery surfaces as the pre-existing audited exclusion above, now reached
 through the port instead of a raw import.
+
+**Merge reconciliation with Layer L02.** L02 (above) merged to `main` first
+and independently removed two different, disjoint files from `taintedLibA`
+(`seed-api.ts`/`seed.ts`, 123 → 121) and one route from `directDbNamespaceRoutes`
+(144 → 143), touching none of L06a's nine owned files. Because the two
+layers' decrements are over disjoint sets, they compose additively: the
+committed baseline after both merge is `taintedLibA` 123 → 112 (nine L06a
+files plus the two L02 files), `directDbNamespaceRoutes` 144 → 143 (L02's
+contribution only, unrelated to L06a), and `totalMigrationUnits` 350 → 338.
+This combined figure — not either layer's own isolated delta above — is what
+`tests/architecture/web-persistence-baseline.json` and
+`tests/architecture/web-persistence-baseline.test.ts`'s exact-equality check
+enforce on `main` after both merges.
 
 **Known limitation: no local validation was run for this layer**, for the
 same approved-registry `qs@6.16.0` restore failure documented under Layer

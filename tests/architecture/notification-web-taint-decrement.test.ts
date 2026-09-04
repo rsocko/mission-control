@@ -71,7 +71,7 @@ describe('L13 notification-web taint decrement', () => {
   it('records the layer in the baseline decrement history', () => {
     const entry = baseline.decrementHistory?.find(r => r.layer === 'L13');
     expect(entry, 'L13 must be recorded in web-persistence-baseline.json').toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 310, to: 302, delta: -8 });
+    expect(entry?.totalMigrationUnits).toEqual({ from: 301, to: 293, delta: -8 });
     expect(entry?.tierBReclassifications).toEqual([]);
     expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
     expect(entry?.removedTierARoutes.sort()).toEqual([...OWNED_ROUTES].sort());
@@ -116,13 +116,13 @@ describe('L13 notification-web taint decrement', () => {
     }).toEqual({
       taintedLibA: 91,
       taintedApiHelpers: 1,
-      tierARoutes: 210,
+      tierARoutes: 201,
       tierBRoutes: 26,
-      cleanRoutes: 30,
-      directTaintSourceRoutes: 135,
-      transitiveOnlyTaintSourceRoutes: 75,
-      directDbNamespaceRoutes: 136,
-      totalMigrationUnits: 302,
+      cleanRoutes: 39,
+      directTaintSourceRoutes: 127,
+      transitiveOnlyTaintSourceRoutes: 74,
+      directDbNamespaceRoutes: 128,
+      totalMigrationUnits: 293,
     });
   });
 });

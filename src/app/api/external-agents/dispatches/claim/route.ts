@@ -16,8 +16,8 @@ export async function POST(request: Request) {
     if (agent.transport !== 'pull') {
       throw new ExternalAgentError('Agent does not use pull transport', 'TRANSPORT_INVALID', 409);
     }
-    expireDispatches();
-    const claim = claimNextDispatch(agent.id, { leaseMs: body.leaseMs });
+    await expireDispatches();
+    const claim = await claimNextDispatch(agent.id, { leaseMs: body.leaseMs });
     return claim
       ? NextResponse.json(claim)
       : new Response(null, { status: 204 });

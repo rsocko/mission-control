@@ -13,6 +13,7 @@ import type { NotificationEnrichmentRepository } from './notification-enrichment
 import type {
   NotificationEntityLinkingRepository,
 } from './notification-entity-linking';
+import type { ExternalAgentControlPersistence } from './external-agent-control';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -65,6 +66,7 @@ export interface WorkerPersistenceRepositories {
   eventDelivery: EventDeliveryRepositories;
   notificationEntityLinking: NotificationEntityLinkingRepository;
   notificationEnrichment: NotificationEnrichmentRepository;
+  externalAgentControl: ExternalAgentControlPersistence;
   /**
    * Layer 5A: the atomic core finance worker projection (identity, transaction
    * snapshots, reference datasets, and automated attribution).

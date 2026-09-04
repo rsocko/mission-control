@@ -473,6 +473,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ),
     },
   ),
+  externalAgentControl: new Proxy(
+    {} as WorkerPersistenceRepositories['externalAgentControl'],
+    {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().externalAgentControl[
+          property as keyof WorkerPersistenceRepositories['externalAgentControl']
+        ]
+      ),
+    },
+  ),
   finance: new Proxy({} as WorkerPersistenceRepositories['finance'], {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().finance[

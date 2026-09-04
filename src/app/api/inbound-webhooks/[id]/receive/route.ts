@@ -227,7 +227,7 @@ export async function POST(
       const resultPayload = { ...payload };
       delete resultPayload.type;
       delete resultPayload.dispatchId;
-      const result = submitDispatchResult(
+      const result = await submitDispatchResult(
         dispatchId,
         resultPayload as DispatchResultInput,
         { agentAuthenticated: true },

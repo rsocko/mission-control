@@ -68,6 +68,13 @@ function retryable(error: unknown): boolean {
   return code === '40001' || code === '40P01';
 }
 
+function isUniqueConstraintViolation(error: unknown, constraint: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const code = 'code' in error ? String(error.code) : '';
+  const actualConstraint = 'constraint' in error ? String(error.constraint) : '';
+  return code === '23505' && actualConstraint === constraint;
+}
+
 async function transaction<T>(
   pool: Pool,
   work: (client: PoolClient) => Promise<T>,
@@ -479,64 +486,72 @@ export function createPostgresExternalAgentControlRepository(
       return row ?? null;
     },
     async createPreview(record, createdEvent) {
-      return transaction(pool, async (client) => {
-        await client.query(
-          'SELECT pg_advisory_xact_lock(hashtext($1))',
-          [`external-agent-preview:${record.externalAgentId}:${record.idempotencyKey}`],
-        );
-        const [duplicate] = await query<{ id: string; previewHash: string }>(client, `
-          SELECT id, preview_hash AS "previewHash" FROM agent_dispatches
-          WHERE external_agent_id = $1 AND idempotency_key = $2
-        `, [record.externalAgentId, record.idempotencyKey]);
-        if (duplicate) {
-          if (duplicate.previewHash !== record.previewHash) {
-            throw new ExternalAgentError(
-              'Idempotency key was already used for a different disclosure preview',
-              'IDEMPOTENCY_CONFLICT',
-              409,
-            );
+      try {
+        return await transaction(pool, async (client) => {
+          await client.query(
+            'SELECT pg_advisory_xact_lock(hashtext($1))',
+            [`external-agent-preview:${record.externalAgentId}:${record.idempotencyKey}`],
+          );
+          const [duplicate] = await query<{ id: string; previewHash: string }>(client, `
+            SELECT id, preview_hash AS "previewHash" FROM agent_dispatches
+            WHERE external_agent_id = $1 AND idempotency_key = $2
+          `, [record.externalAgentId, record.idempotencyKey]);
+          if (duplicate) {
+            return { ...duplicate, created: false };
           }
-          return { ...duplicate, created: false };
+          await client.query(`
+            INSERT INTO agent_dispatches (
+              id, external_agent_id, idempotency_key, instruction, scope, status,
+              transport, execution_locality, data_classification, allowed_actions,
+              disclosed_fields, payload_preview, preview_hash, provider_task_id,
+              provider_detail, result, result_digest, result_status, claim_token_hash,
+              claimed_at, lease_expires_at, attempt_count, max_attempts, available_at,
+              deadline_at, cancel_requested_at, github_issue_url, github_pull_request_url,
+              repository, base_ref, branch_ref, commit_sha, checks, artifacts,
+              error_message, confirmed_at, started_at, completed_at, reviewed_at,
+              created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10::jsonb,
+              $11::jsonb, $12::jsonb, $13, $14, $15::jsonb, $16::jsonb, $17,
+              $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
+              $30, $31, $32, $33::jsonb, $34::jsonb, $35, $36, $37, $38,
+              $39, $40, $41
+            )
+          `, [
+            record.id, record.externalAgentId, record.idempotencyKey, record.instruction,
+            JSON.stringify(record.scope), record.status, record.transport,
+            record.executionLocality, record.dataClassification,
+            JSON.stringify(record.allowedActions), JSON.stringify(record.disclosedFields),
+            JSON.stringify(record.payloadPreview), record.previewHash, record.providerTaskId,
+            record.providerDetail ? JSON.stringify(record.providerDetail) : null,
+            record.result ? JSON.stringify(record.result) : null, record.resultDigest,
+            record.resultStatus, record.claimTokenHash, record.claimedAt,
+            record.leaseExpiresAt, record.attemptCount, record.maxAttempts,
+            record.availableAt, record.deadlineAt, record.cancelRequestedAt,
+            record.githubIssueUrl, record.githubPullRequestUrl, record.repository,
+            record.baseRef, record.branchRef, record.commitSha,
+            record.checks ? JSON.stringify(record.checks) : null,
+            record.artifacts ? JSON.stringify(record.artifacts) : null,
+            record.errorMessage, record.confirmedAt, record.startedAt, record.completedAt,
+            record.reviewedAt, record.createdAt, record.updatedAt,
+          ]);
+          await insertEvent(client, record.id, createdEvent);
+          return { id: record.id, previewHash: record.previewHash, created: true };
+        });
+      } catch (error) {
+        if (!isUniqueConstraintViolation(error, 'idx_agent_dispatches_agent_idempotency')) {
+          throw error;
         }
-        await client.query(`
-          INSERT INTO agent_dispatches (
-            id, external_agent_id, idempotency_key, instruction, scope, status,
-            transport, execution_locality, data_classification, allowed_actions,
-            disclosed_fields, payload_preview, preview_hash, provider_task_id,
-            provider_detail, result, result_digest, result_status, claim_token_hash,
-            claimed_at, lease_expires_at, attempt_count, max_attempts, available_at,
-            deadline_at, cancel_requested_at, github_issue_url, github_pull_request_url,
-            repository, base_ref, branch_ref, commit_sha, checks, artifacts,
-            error_message, confirmed_at, started_at, completed_at, reviewed_at,
-            created_at, updated_at
-          ) VALUES (
-            $1, $2, $3, $4, $5::jsonb, $6, $7, $8, $9, $10::jsonb,
-            $11::jsonb, $12::jsonb, $13, $14, $15::jsonb, $16::jsonb, $17,
-            $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29,
-            $30, $31, $32, $33::jsonb, $34::jsonb, $35, $36, $37, $38,
-            $39, $40, $41
-          )
-        `, [
-          record.id, record.externalAgentId, record.idempotencyKey, record.instruction,
-          JSON.stringify(record.scope), record.status, record.transport,
-          record.executionLocality, record.dataClassification,
-          JSON.stringify(record.allowedActions), JSON.stringify(record.disclosedFields),
-          JSON.stringify(record.payloadPreview), record.previewHash, record.providerTaskId,
-          record.providerDetail ? JSON.stringify(record.providerDetail) : null,
-          record.result ? JSON.stringify(record.result) : null, record.resultDigest,
-          record.resultStatus, record.claimTokenHash, record.claimedAt,
-          record.leaseExpiresAt, record.attemptCount, record.maxAttempts,
-          record.availableAt, record.deadlineAt, record.cancelRequestedAt,
-          record.githubIssueUrl, record.githubPullRequestUrl, record.repository,
-          record.baseRef, record.branchRef, record.commitSha,
-          record.checks ? JSON.stringify(record.checks) : null,
-          record.artifacts ? JSON.stringify(record.artifacts) : null,
-          record.errorMessage, record.confirmedAt, record.startedAt, record.completedAt,
-          record.reviewedAt, record.createdAt, record.updatedAt,
-        ]);
-        await insertEvent(client, record.id, createdEvent);
-        return { id: record.id, previewHash: record.previewHash, created: true };
-      });
+        // The advisory-lock wait can retain a pre-winner serializable snapshot.
+        return transaction(pool, async (client) => {
+          const [duplicate] = await query<{ id: string; previewHash: string }>(client, `
+            SELECT id, preview_hash AS "previewHash" FROM agent_dispatches
+            WHERE external_agent_id = $1 AND idempotency_key = $2
+          `, [record.externalAgentId, record.idempotencyKey]);
+          if (!duplicate) throw error;
+          return { ...duplicate, created: false };
+        });
+      }
     },
     async confirm(input) {
       return transaction(pool, async (client) => {

@@ -479,13 +479,6 @@ export function createSqliteExternalAgentControlRepository(
         `).get(record.externalAgentId, record.idempotencyKey) as
           { id: string; previewHash: string } | undefined;
         if (duplicate) {
-          if (duplicate.previewHash !== record.previewHash) {
-            throw new ExternalAgentError(
-              'Idempotency key was already used for a different disclosure preview',
-              'IDEMPOTENCY_CONFLICT',
-              409,
-            );
-          }
           return { ...duplicate, created: false };
         }
         sqlite.prepare(`

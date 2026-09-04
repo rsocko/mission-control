@@ -238,20 +238,17 @@ describe('disclosure preview and manual result review', () => {
   it('persists one exact, redacted preview behind confirmation', async () => {
     await manualAgent();
     await seedTask();
-    const first = await service.createDispatchPreview({
+    const request = {
       agentId: 'manual-agent',
       instruction: 'Review token=instruction-secret and propose work',
       scope: { taskIds: ['task-1', 'task-1'], repository: 'owner/repo' },
       allowedActions: ['propose_tasks'],
       idempotencyKey: 'preview-once',
-    });
-    const duplicate = await service.createDispatchPreview({
-      agentId: 'manual-agent',
-      instruction: 'Review token=instruction-secret and propose work',
-      scope: { taskIds: ['task-1', 'task-1'], repository: 'owner/repo' },
-      allowedActions: ['propose_tasks'],
-      idempotencyKey: 'preview-once',
-    });
+    };
+    const [first, duplicate] = await Promise.all([
+      service.createDispatchPreview(request),
+      service.createDispatchPreview(request),
+    ]);
 
     expect(duplicate.id).toBe(first.id);
     expect(first.status).toBe('needs_confirmation');

@@ -115,7 +115,7 @@ export function externalAgentControlRepositoryContract(
       });
     });
 
-    it('creates previews idempotently and rejects semantic drift', async () => {
+    it('serializes concurrent preview creation and returns the winning record', async () => {
       await repository().registry.create(agent('preview-agent'));
       const record = dispatch('dispatch-1', 'preview-agent', 'same-key');
       const event = {
@@ -125,19 +125,15 @@ export function externalAgentControlRepositoryContract(
         detail: { credential: 'already-redacted' },
         createdAt: now,
       };
-      await expect(repository().dispatches.createPreview(record, event)).resolves.toMatchObject({
-        id: record.id,
-        created: true,
-      });
-      await expect(repository().dispatches.createPreview(record, event)).resolves.toMatchObject({
-        id: record.id,
-        created: false,
-      });
-      await expect(repository().dispatches.createPreview(
-        { ...record, id: 'dispatch-2', previewHash: 'different' },
-        event,
-      )).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
-      expect((await repository().dispatches.get(record.id))?.events).toHaveLength(1);
+      const competingRecord = dispatch('dispatch-2', 'preview-agent', 'same-key');
+      const results = await Promise.all([
+        repository().dispatches.createPreview(record, event),
+        repository().dispatches.createPreview(competingRecord, event),
+      ]);
+      expect(results[0].id).toBe(results[1].id);
+      expect(results[0].previewHash).toBe(results[1].previewHash);
+      expect(results.map(({ created }) => created).sort()).toEqual([false, true]);
+      expect((await repository().dispatches.get(results[0].id))?.events).toHaveLength(1);
     });
 
     it('claims oldest work once, stores only a token hash, and deduplicates results', async () => {

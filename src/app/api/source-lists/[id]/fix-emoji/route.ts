@@ -1,14 +1,23 @@
-﻿import { NextResponse } from 'next/server';
-import db from '@/db';
-import { sourceLists, listFixAuditLog } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { connectorRegistry } from '@/lib/connectors';
-import { randomUUID } from 'crypto';
+﻿import { createHash } from 'node:crypto';
+import { NextResponse } from 'next/server';
+import type { IConnector } from '@/lib/connectors';
+import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
 import { validateNameForGraphApi } from '@/lib/validation/emoji-safety';
-import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import logger from '@/lib/logger';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { ApiErrors } from '@/lib/api-error';
+import {
+  ConnectorOperationBusyError,
+  runWithConnectorOperationLease,
+} from '@/lib/sync/connector-lock';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import type {
+  ConnectorManagementPersistence,
+  SourceListRepairMoveResult,
+  SourceListRepairRecord,
+  SourceListRepairTask,
+} from '@/db/persistence/connector-management';
+import type { SourceListRecord } from '@/db/persistence/connector-execution';
 
 /**
  * Fix a list affected by the Graph API emoji bug.
@@ -35,11 +44,17 @@ export async function POST(
       );
     }
 
-    const [sourceList] = await db
-      .select()
-      .from(sourceLists)
-      .where(eq(sourceLists.id, id))
-      .limit(1);
+    const persistence = await getConnectorManagementPersistence();
+    const repairId = sourceListRepairId(
+      id,
+      strategy,
+      request.headers.get('idempotency-key'),
+    );
+    const completedRepair = await persistence.getSourceListRepair(repairId);
+    if (completedRepair?.status === 'completed') {
+      return completedRepairResponse(completedRepair);
+    }
+    const sourceList = await persistence.getSourceList(id);
 
     if (!sourceList) {
       return NextResponse.json({ error: 'Source list not found' }, { status: 404 });
@@ -54,7 +69,7 @@ export async function POST(
       return ApiErrors.forbidden('Write capability is disabled for this connector');
     }
 
-    const connector = connectorRegistry.getConnector(sourceList.connectorInstanceId);
+    const connector = getConnectorRegistry().getConnector(sourceList.connectorInstanceId);
     if (!connector) {
       return NextResponse.json(
         { error: 'Connector not initialized. Try syncing first.' },
@@ -74,17 +89,57 @@ export async function POST(
     }
 
     if (strategy === 'strip-emoji') {
-      return await handleStripEmoji(sourceList, connector, cleanName, newName);
-    } else {
-      return handleMigrateStream(sourceList, connector, cleanName);
+      return await runWithConnectorOperationLease(
+        sourceList.connectorInstanceId,
+        'transfer',
+        () => handleStripEmoji(
+          sourceList,
+          connector,
+          cleanName,
+          newName,
+          repairId,
+          persistence,
+        ),
+      );
     }
+    return handleMigrateStream(
+      sourceList,
+      connector,
+      cleanName,
+      repairId,
+      persistence,
+    );
   } catch (error) {
+    if (error instanceof ConnectorOperationBusyError) {
+      return NextResponse.json(
+        { error: error.message, code: 'CONNECTOR_BUSY' },
+        { status: 409 },
+      );
+    }
     logger.error({ err: error, sourceListId: id }, 'Fix emoji request failed');
     return NextResponse.json(
       { error: 'Fix failed', code: 'INTERNAL_ERROR' },
       { status: 500 },
     );
   }
+}
+
+function sourceListRepairId(
+  sourceListId: string,
+  strategy: 'strip-emoji' | 'migrate',
+  idempotencyKey: string | null,
+): string {
+  const digest = createHash('sha256')
+    .update(`${sourceListId}\0${strategy}\0${idempotencyKey ?? 'default'}`)
+    .digest('hex')
+    .slice(0, 32);
+  return [
+    digest.slice(0, 8),
+    digest.slice(8, 12),
+    `4${digest.slice(13, 16)}`,
+    `8${digest.slice(17, 20)}`,
+    digest.slice(20),
+  ].join('-');
 }
 
 function stripEmojiPrefix(name: string): string {
@@ -100,55 +155,58 @@ function stripEmojiPrefix(name: string): string {
 // --- Strip Emoji (simple rename) ---
 
 async function handleStripEmoji(
-  sourceList: { id: string; sourceId: string; name: string; userDisplayName?: string | null; connectorInstanceId: string; groupId: string | null },
-  connector: ReturnType<typeof connectorRegistry.getConnector>,
+  sourceList: SourceListRecord,
+  connector: IConnector | undefined,
   cleanName: string,
-  newName?: string,
+  newName: string | undefined,
+  repairId: string,
+  persistence: ConnectorManagementPersistence,
 ) {
   if (!connector || !connector.renameList) {
     return NextResponse.json({ error: 'Connector does not support renaming' }, { status: 501 });
   }
 
-  const auditId = randomUUID();
-  const now = new Date().toISOString();
+  const { repair } = await persistence.beginSourceListRepair({
+    id: repairId,
+    createdAt: new Date().toISOString(),
+    strategy: 'strip-emoji',
+    sourceList,
+    newName: cleanName,
+  });
+  if (repair.status === 'completed') {
+    return completedRepairResponse(repair);
+  }
 
   await connector.renameList(sourceList.sourceId, cleanName);
 
   // Only update userDisplayName if it also has the emoji prefix that needs stripping.
   // If the user had a completely custom display name, preserve it.
-  const updateSet: Record<string, string> = { name: cleanName, lastKnownRemoteName: cleanName };
+  let userDisplayName: string | undefined;
   if (sourceList.userDisplayName) {
     const udnCp = sourceList.userDisplayName.codePointAt(0) || 0;
     if (udnCp >= 0x10000) {
-      updateSet.userDisplayName = newName || stripEmojiPrefix(sourceList.userDisplayName);
+      userDisplayName = newName || stripEmojiPrefix(sourceList.userDisplayName);
     }
   }
-  await db.update(sourceLists).set(updateSet).where(eq(sourceLists.id, sourceList.id));
-
-  await db.insert(listFixAuditLog).values({
-    id: auditId,
-    createdAt: now,
+  const outcome = await persistence.finalizeSourceListRepair({
     strategy: 'strip-emoji',
-    status: 'completed',
-    originalListId: sourceList.id,
-    originalSourceId: sourceList.sourceId,
-    originalName: sourceList.name,
-    originalGroupId: sourceList.groupId,
-    connectorInstanceId: sourceList.connectorInstanceId,
-    newListId: null,
+    id: repairId,
+    sourceListId: sourceList.id,
+    expectedOriginalName: sourceList.name,
     newName: cleanName,
-    taskSnapshot: null,
-    moveResults: null,
-    tasksTotal: 0,
-    tasksMoved: 0,
-    tasksFailed: 0,
-    oldListDeleted: false,
+    userDisplayName,
   });
+  if (outcome === 'conflict') {
+    return NextResponse.json(
+      { error: 'Source list changed during repair', code: 'REPAIR_CONFLICT' },
+      { status: 409 },
+    );
+  }
 
   return NextResponse.json({
     success: true,
     strategy: 'strip-emoji',
-    auditId,
+    auditId: repairId,
     originalName: sourceList.name,
     newName: cleanName,
     message: `Renamed "${sourceList.name}" to "${cleanName}". Now visible to Graph API.`,
@@ -156,12 +214,44 @@ async function handleStripEmoji(
   });
 }
 
+function completedRepairResponse(repair: SourceListRepairRecord): Response {
+  if (repair.strategy === 'strip-emoji') {
+    return NextResponse.json({
+      success: true,
+      strategy: 'strip-emoji',
+      auditId: repair.id,
+      originalName: repair.originalName,
+      newName: repair.newName,
+      message: `Renamed "${repair.originalName}" to "${repair.newName}". Now visible to Graph API.`,
+      undoInfo: `To undo: rename back to "${repair.originalName}" via Settings or To Do app.`,
+    });
+  }
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(
+        `event: complete\ndata: ${JSON.stringify(responseBodyForCompletedRepair(repair))}\n\n`,
+      ));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
+}
+
 // --- Migrate (SSE stream with live progress) ---
 
 function handleMigrateStream(
-  sourceList: { id: string; sourceId: string; name: string; connectorInstanceId: string; groupId: string | null },
-  connector: NonNullable<ReturnType<typeof connectorRegistry.getConnector>>,
+  sourceList: SourceListRecord,
+  connector: IConnector,
   cleanName: string,
+  repairId: string,
+  persistence: ConnectorManagementPersistence,
 ) {
   const encoder = new TextEncoder();
 
@@ -171,161 +261,20 @@ function handleMigrateStream(
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
       };
 
-      const auditId = randomUUID();
-      const now = new Date().toISOString();
-
       try {
-        if (!connector.createList || !connector.moveTaskToList) {
-          send('error', { message: 'Connector does not support list creation or task migration' });
-          controller.close();
-          return;
-        }
-
-        // Phase 1: Create new list
-        send('phase', { phase: 'creating', message: `Creating "${cleanName}"...` });
-
-        let newList: { id: string; displayName: string };
-        try {
-          newList = await connector.createList(cleanName);
-        } catch (err) {
-          send('error', { message: `Failed to create list: ${err instanceof Error ? err.message : String(err)}` });
-          controller.close();
-          return;
-        }
-        const newListId = newList.id;
-        send('phase', { phase: 'created', message: `Created "${cleanName}"`, newListId });
-
-        // Phase 2: Fetch all tasks (including completed)
-        send('phase', { phase: 'fetching', message: 'Fetching all tasks (including completed)...' });
-
-        let remoteTasks: Array<{ id: string; title: string; status: string }> = [];
-        try {
-          remoteTasks = await fetchAllRemoteTasks(connector, sourceList.sourceId);
-        } catch (err) {
-          send('error', { message: `Failed to fetch tasks: ${err instanceof Error ? err.message : String(err)}` });
-          await writeAudit(auditId, now, 'failed', sourceList, newListId, cleanName, [], [], false);
-          controller.close();
-          return;
-        }
-
-        if (remoteTasks.length === 0) {
-          send('phase', { phase: 'moving', message: 'No tasks to move.', total: 0 });
-        } else {
-          send('phase', { phase: 'moving', message: `Moving ${remoteTasks.length} task(s)...`, total: remoteTasks.length });
-        }
-
-        // Phase 3: Move tasks one by one with progress events
-        let moved = 0;
-        const moveResults: MoveResult[] = [];
-
-        for (let i = 0; i < remoteTasks.length; i++) {
-          const task = remoteTasks[i];
-          let newTaskId: string | undefined;
-          let success = false;
-          let error: string | undefined;
-
-          try {
-            const compositeId = `${sourceList.sourceId}:${task.id}`;
-            const result = await connector.moveTaskToList(compositeId, newListId);
-            newTaskId = result || undefined;
-            moved++;
-            success = true;
-          } catch (err) {
-            error = err instanceof Error ? err.message : String(err);
-          }
-
-          moveResults.push({ taskId: task.id, title: task.title, status: task.status, newTaskId, success, error });
-
-          send('progress', {
-            current: i + 1,
-            total: remoteTasks.length,
-            moved,
-            failed: (i + 1) - moved,
-            currentTask: task.title,
-            currentStatus: task.status,
-            success,
-            percent: Math.round(((i + 1) / remoteTasks.length) * 100),
-          });
-        }
-
-        // Phase 4: Cleanup
-        let oldListDeleted = false;
-        const allMoved = moved === remoteTasks.length;
-
-        if (allMoved && remoteTasks.length > 0 && connector.deleteList) {
-          send('phase', { phase: 'cleanup', message: 'Removing old list...' });
-          try {
-            await connector.deleteList(sourceList.sourceId);
-            oldListDeleted = true;
-          } catch {
-            // Non-fatal
-          }
-        }
-
-        // Phase 5: Update local DB — remove old list, verify new list in Graph
-        if (allMoved) {
-          send('phase', { phase: 'verifying', message: 'Verifying new list is Graph API visible...' });
-          
-          // Remove old source_list entry from local DB
-          try {
-            await db.delete(sourceLists).where(eq(sourceLists.id, sourceList.id));
-          } catch { /* non-critical */ }
-
-          // Verify new list appears in Graph API listing
-          let graphVisible = false;
-          try {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const graphFetch = (connector as any).graphFetch?.bind(connector);
-            if (graphFetch) {
-              const verifyRes: Response = await graphFetch(`/me/todo/lists/${encodeURIComponent(newListId)}`);
-              if (verifyRes.ok) {
-                const verifyData = await verifyRes.json();
-                graphVisible = verifyData.displayName === cleanName;
-              }
-            }
-          } catch { /* non-critical */ }
-
-          send('phase', { 
-            phase: 'verified', 
-            message: graphVisible 
-              ? `✓ "${cleanName}" confirmed visible in Graph API` 
-              : `New list created but Graph visibility unconfirmed`,
-            graphVisible,
-          });
-
-          // Trigger background re-sync to update UI
-          try {
-            fetch(`http://localhost:${process.env.PORT || 3099}/api/sync`, { method: 'POST' }).catch((e) => {
-              logger.error({ err: e }, 'Failed to trigger background resync');
-            });
-          } catch { /* fire and forget */ }
-        }
-
-        // Phase 6: Write audit log
-        await writeAudit(
-          auditId, now, allMoved ? 'completed' : (moved > 0 ? 'partial' : 'failed'),
-          sourceList, newListId, cleanName, remoteTasks, moveResults, oldListDeleted,
+        const completion = await runWithConnectorOperationLease(
+          sourceList.connectorInstanceId,
+          'transfer',
+          () => executeMigration({
+            sourceList,
+            connector,
+            cleanName,
+            repairId,
+            persistence,
+            send,
+          }),
         );
-
-        // Final completion event
-        send('complete', {
-          success: allMoved,
-          auditId,
-          originalName: sourceList.name,
-          newName: cleanName,
-          newListId,
-          tasksMoved: moved,
-          tasksTotal: remoteTasks.length,
-          tasksFailed: remoteTasks.length - moved,
-          oldListDeleted,
-          message: allMoved
-            ? `Done! Moved ${moved} task(s) to "${cleanName}".${oldListDeleted ? ' Old list removed.' : ''}`
-            : `Moved ${moved}/${remoteTasks.length}. ${remoteTasks.length - moved} failed. Old list kept.`,
-          undoInfo: oldListDeleted
-            ? `Audit ID: ${auditId}. Full task snapshot saved for recovery.`
-            : `Old list still exists (empty). Tasks now in "${cleanName}".`,
-        });
-
+        if (completion) send('complete', completion);
       } catch (err) {
         send('error', { message: `Unexpected: ${err instanceof Error ? err.message : String(err)}` });
       } finally {
@@ -343,54 +292,271 @@ function handleMigrateStream(
   });
 }
 
-// --- Helpers ---
-
-interface MoveResult {
-  taskId: string;
-  title: string;
-  status: string;
-  newTaskId?: string;
-  success: boolean;
-  error?: string;
+interface MigrationExecutionInput {
+  sourceList: SourceListRecord;
+  connector: IConnector;
+  cleanName: string;
+  repairId: string;
+  persistence: ConnectorManagementPersistence;
+  send: (event: string, data: unknown) => void;
 }
 
-async function writeAudit(
-  auditId: string,
-  createdAt: string,
-  status: string,
-  sourceList: { id: string; sourceId: string; name: string; connectorInstanceId: string; groupId: string | null },
-  newListId: string,
-  newName: string,
-  taskSnapshot: Array<{ id: string; title: string; status: string }>,
-  moveResults: MoveResult[],
-  oldListDeleted: boolean,
-) {
-  const moved = moveResults.filter(r => r.success).length;
-  await db.insert(listFixAuditLog).values({
-    id: auditId,
-    createdAt,
+async function executeMigration(input: MigrationExecutionInput) {
+  const {
+    sourceList,
+    connector,
+    cleanName,
+    repairId,
+    persistence,
+    send,
+  } = input;
+  if (!connector.createList || !connector.moveTaskToList) {
+    send('error', { message: 'Connector does not support list creation or task migration' });
+    return null;
+  }
+
+  const { repair } = await persistence.beginSourceListRepair({
+    id: repairId,
+    createdAt: new Date().toISOString(),
     strategy: 'migrate',
+    sourceList,
+    newName: cleanName,
+  });
+  if (repair.status === 'completed') {
+    return responseBodyForCompletedRepair(repair);
+  }
+
+  let newListId = repair.newListId;
+  if (!newListId) {
+    send('phase', { phase: 'creating', message: `Creating "${cleanName}"...` });
+    try {
+      const newList = await connector.createList(cleanName);
+      newListId = newList.id;
+      await persistence.checkpointSourceListRepair({
+        id: repairId,
+        status: 'running',
+        newListId,
+      });
+    } catch (err) {
+      await persistence.checkpointSourceListRepair({ id: repairId, status: 'failed' });
+      send('error', {
+        message: `Failed to create list: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return null;
+    }
+  }
+  send('phase', { phase: 'created', message: `Created "${cleanName}"`, newListId });
+
+  let taskSnapshot: SourceListRepairTask[] = [...repair.taskSnapshot];
+  if (taskSnapshot.length === 0) {
+    send('phase', { phase: 'fetching', message: 'Fetching all tasks (including completed)...' });
+    try {
+      taskSnapshot = await fetchAllRemoteTasks(connector, sourceList.sourceId);
+      await persistence.checkpointSourceListRepair({
+        id: repairId,
+        status: 'running',
+        newListId,
+        taskSnapshot,
+      });
+    } catch (err) {
+      await persistence.checkpointSourceListRepair({
+        id: repairId,
+        status: 'failed',
+        newListId,
+      });
+      send('error', {
+        message: `Failed to fetch tasks: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      return null;
+    }
+  }
+
+  send('phase', {
+    phase: 'moving',
+    message: taskSnapshot.length === 0
+      ? 'No tasks to move.'
+      : `Moving ${taskSnapshot.length} task(s)...`,
+    total: taskSnapshot.length,
+  });
+
+  const resultsByTaskId = new Map(
+    repair.moveResults.map((result) => [result.taskId, result]),
+  );
+  for (let index = 0; index < taskSnapshot.length; index += 1) {
+    const task = taskSnapshot[index];
+    const previous = resultsByTaskId.get(task.id);
+    if (!previous?.success) {
+      let result: SourceListRepairMoveResult;
+      try {
+        const compositeId = `${sourceList.sourceId}:${task.id}`;
+        const movedTaskId = await connector.moveTaskToList(compositeId, newListId);
+        result = {
+          taskId: task.id,
+          title: task.title,
+          status: task.status,
+          newTaskId: movedTaskId || undefined,
+          success: true,
+        };
+      } catch (err) {
+        result = {
+          taskId: task.id,
+          title: task.title,
+          status: task.status,
+          success: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+      resultsByTaskId.set(task.id, result);
+      await persistence.checkpointSourceListRepair({
+        id: repairId,
+        status: 'running',
+        newListId,
+        taskSnapshot,
+        moveResults: [...resultsByTaskId.values()],
+      });
+    }
+    const moveResults = [...resultsByTaskId.values()];
+    const moved = moveResults.filter((result) => result.success).length;
+    const current = resultsByTaskId.get(task.id);
+    send('progress', {
+      current: index + 1,
+      total: taskSnapshot.length,
+      moved,
+      failed: (index + 1) - moved,
+      currentTask: task.title,
+      currentStatus: task.status,
+      success: current?.success ?? false,
+      percent: taskSnapshot.length === 0
+        ? 100
+        : Math.round(((index + 1) / taskSnapshot.length) * 100),
+    });
+  }
+
+  const moveResults = taskSnapshot.map((task) => (
+    resultsByTaskId.get(task.id) ?? {
+      taskId: task.id,
+      title: task.title,
+      status: task.status,
+      success: false,
+      error: 'Task move was not attempted',
+    }
+  ));
+  const moved = moveResults.filter((result) => result.success).length;
+  const allMoved = moved === taskSnapshot.length;
+  let oldListDeleted = repair.oldListDeleted;
+  if (allMoved && taskSnapshot.length > 0 && connector.deleteList && !oldListDeleted) {
+    send('phase', { phase: 'cleanup', message: 'Removing old list...' });
+    try {
+      await connector.deleteList(sourceList.sourceId);
+      oldListDeleted = true;
+      await persistence.checkpointSourceListRepair({
+        id: repairId,
+        status: 'running',
+        newListId,
+        taskSnapshot,
+        moveResults,
+        oldListDeleted,
+      });
+    } catch {
+      // The old list remains available when cleanup fails.
+    }
+  }
+
+  const status = allMoved ? 'completed' : moved > 0 ? 'partial' : 'failed';
+  const finalized = await persistence.finalizeSourceListRepair({
+    strategy: 'migrate',
+    id: repairId,
+    sourceListId: sourceList.id,
+    expectedOriginalName: sourceList.name,
     status,
-    originalListId: sourceList.id,
-    originalSourceId: sourceList.sourceId,
-    originalName: sourceList.name,
-    originalGroupId: sourceList.groupId,
-    connectorInstanceId: sourceList.connectorInstanceId,
     newListId,
-    newName,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    taskSnapshot: taskSnapshot as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    moveResults: moveResults as any,
-    tasksTotal: taskSnapshot.length,
-    tasksMoved: moved,
-    tasksFailed: taskSnapshot.length - moved,
+    taskSnapshot,
+    moveResults,
     oldListDeleted,
   });
+  if (finalized === 'conflict') {
+    send('error', { message: 'Source list changed during repair' });
+    return null;
+  }
+
+  if (allMoved) {
+    send('phase', { phase: 'verifying', message: 'Verifying new list is Graph API visible...' });
+    let graphVisible = false;
+    try {
+      const graphFetch = (
+        connector as IConnector & {
+          graphFetch?: (path: string) => Promise<Response>;
+        }
+      ).graphFetch?.bind(connector);
+      if (graphFetch) {
+        const verifyRes = await graphFetch(
+          `/me/todo/lists/${encodeURIComponent(newListId)}`,
+        );
+        if (verifyRes.ok) {
+          const verifyData = await verifyRes.json() as { displayName?: string };
+          graphVisible = verifyData.displayName === cleanName;
+        }
+      }
+    } catch {
+      // Verification is advisory and does not undo a completed migration.
+    }
+    send('phase', {
+      phase: 'verified',
+      message: graphVisible
+        ? `✓ "${cleanName}" confirmed visible in Graph API`
+        : 'New list created but Graph visibility unconfirmed',
+      graphVisible,
+    });
+    try {
+      fetch(`http://localhost:${process.env.PORT || 3099}/api/sync`, {
+        method: 'POST',
+      }).catch((error) => {
+        logger.error({ err: error }, 'Failed to trigger background resync');
+      });
+    } catch {
+      // The durable repair is complete even if the follow-up sync cannot start.
+    }
+  }
+
+  return {
+    success: allMoved,
+    auditId: repairId,
+    originalName: sourceList.name,
+    newName: cleanName,
+    newListId,
+    tasksMoved: moved,
+    tasksTotal: taskSnapshot.length,
+    tasksFailed: taskSnapshot.length - moved,
+    oldListDeleted,
+    message: allMoved
+      ? `Done! Moved ${moved} task(s) to "${cleanName}".${oldListDeleted ? ' Old list removed.' : ''}`
+      : `Moved ${moved}/${taskSnapshot.length}. ${taskSnapshot.length - moved} failed. Old list kept.`,
+    undoInfo: oldListDeleted
+      ? `Audit ID: ${repairId}. Full task snapshot saved for recovery.`
+      : `Old list still exists (empty). Tasks now in "${cleanName}".`,
+  };
+}
+
+function responseBodyForCompletedRepair(repair: SourceListRepairRecord) {
+  return {
+    success: true,
+    auditId: repair.id,
+    originalName: repair.originalName,
+    newName: repair.newName,
+    newListId: repair.newListId,
+    tasksMoved: repair.tasksMoved,
+    tasksTotal: repair.tasksTotal,
+    tasksFailed: repair.tasksFailed,
+    oldListDeleted: repair.oldListDeleted,
+    message: `Done! Moved ${repair.tasksMoved} task(s) to "${repair.newName}".${repair.oldListDeleted ? ' Old list removed.' : ''}`,
+    undoInfo: repair.oldListDeleted
+      ? `Audit ID: ${repair.id}. Full task snapshot saved for recovery.`
+      : `Old list still exists (empty). Tasks now in "${repair.newName}".`,
+  };
 }
 
 async function fetchAllRemoteTasks(
-  connector: NonNullable<ReturnType<typeof connectorRegistry.getConnector>>,
+  connector: IConnector,
   listSourceId: string,
 ): Promise<Array<{ id: string; title: string; status: string }>> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

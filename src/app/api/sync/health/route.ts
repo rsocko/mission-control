@@ -1,12 +1,15 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { sourceLists, connectorConfigs, tasks } from '@/db/schema';
-import { eq, sql, and, isNull } from 'drizzle-orm';
-import { connectorRegistry } from '@/lib/connectors';
 import type { IConnector } from '@/lib/connectors';
-import type { ConnectorConfig } from '@/types';
+import type {
+  ConnectorCapabilities,
+  ConnectorConfig,
+  SyncMode,
+} from '@/types';
 import { ApiErrors } from '@/lib/api-error';
 import { isPublicDemoMode } from '@/lib/public-demo';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import type { ManagedConnectorRecord } from '@/db/persistence/connector-management';
 
 /**
  * Checks the sync health of Microsoft To Do lists.
@@ -86,33 +89,86 @@ async function fetchTaskCount(connector: IConnector, listSourceId: string): Prom
   }
 }
 
+function isSyncMode(value: string): value is SyncMode {
+  return value === 'webhook' || value === 'poll' || value === 'manual';
+}
+
+function isConnectorCapabilities(
+  value: unknown,
+): value is ConnectorCapabilities {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return [
+    'read',
+    'write',
+    'delete',
+    'sync',
+    'subtasks',
+    'lists',
+    'tags',
+    'tagWriteBack',
+  ].every((key) => typeof Reflect.get(value, key) === 'boolean');
+}
+
+function isStringRecord(
+  value: Record<string, unknown>,
+): value is Record<string, string> {
+  return Object.values(value).every((entry) => typeof entry === 'string');
+}
+
+function asConnectorConfig(connector: ManagedConnectorRecord): ConnectorConfig | null {
+  if (
+    !isSyncMode(connector.syncMode)
+    || !isConnectorCapabilities(connector.capabilities)
+    || !isStringRecord(connector.credentials)
+  ) {
+    return null;
+  }
+  return {
+    id: connector.id,
+    type: connector.type,
+    name: connector.name,
+    enabled: connector.enabled,
+    syncMode: connector.syncMode,
+    ...(connector.pollIntervalMinutes === null
+      ? {}
+      : { pollIntervalMinutes: connector.pollIntervalMinutes }),
+    capabilities: connector.capabilities,
+    credentials: connector.credentials,
+    settings: connector.settings,
+    syncedLists: connector.syncedLists,
+  };
+}
+
 export async function GET() {
   try {
-    const allLists = await db.select().from(sourceLists);
-    
-    const todoConnectors = await db.select().from(connectorConfigs)
-      .where(and(eq(connectorConfigs.type, 'microsoft-todo'), isNull(connectorConfigs.deletedAt)));
-    
-    const todoConnectorIds = new Set(todoConnectors.map(c => c.id));
-    const todoLists = allLists.filter(l => todoConnectorIds.has(l.connectorInstanceId));
-    
+    const {
+      connectors: todoConnectors,
+      sourceLists: todoLists,
+      taskCounts,
+    } = await (
+      await getConnectorManagementPersistence()
+    ).getMicrosoftTodoHealthSnapshot();
     const affectedLists: AffectedList[] = [];
 
-    // Get actual task counts from the tasks table (more reliable than source_lists.task_count)
-    const taskCounts = await db
-      .select({ sourceListId: tasks.sourceListId, count: sql<number>`count(*)` })
-      .from(tasks)
-      .groupBy(tasks.sourceListId);
-    const taskCountMap = new Map(taskCounts.map(r => [r.sourceListId, r.count]));
+    const taskCountMap = new Map(
+      taskCounts.map((row) => [
+        `${row.connectorInstanceId}:${row.sourceListId ?? ''}`,
+        row.count,
+      ]),
+    );
 
     // Get connector for live task count queries (fallback if tasks not synced)
     const connectorConfig = todoConnectors[0];
+    const connectorRegistry = getConnectorRegistry();
     let connector = connectorConfig ? connectorRegistry.getConnector(connectorConfig.id) : null;
     if (isPublicDemoMode()) {
       connector = null;
     } else if (!connector && connectorConfig) {
       try {
-        connector = await connectorRegistry.createConnector(connectorConfig as ConnectorConfig);
+        const normalizedConfig = asConnectorConfig(connectorConfig);
+        if (normalizedConfig) {
+          connector = await connectorRegistry.createConnector(normalizedConfig);
+        }
       } catch {
         // Can't initialize connector — will show counts from local DB
       }
@@ -124,7 +180,9 @@ export async function GET() {
         const cp = getFirstCodepoint(list.name);
         
         // Use local task count from tasks table (accurate if synced)
-        const localCount = taskCountMap.get(list.sourceId) ?? null;
+        const localCount = taskCountMap.get(
+          `${list.connectorInstanceId}:${list.sourceId}`,
+        ) ?? null;
         
         affectedLists.push({
           id: list.id,

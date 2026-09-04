@@ -4,14 +4,33 @@ import { describe, expect, it } from 'vitest';
 import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 const OWNED_ROUTES = [
-  'src/app/api/connectors/route.ts',
-  'src/app/api/source-lists/[id]/route.ts',
-  'src/app/api/source-lists/[id]/rename/route.ts',
-  'src/app/api/source-lists/rename/route.ts',
-  'src/app/api/source-lists/reorder/route.ts',
-  'src/app/api/source-rankings/route.ts',
-  'src/app/api/sync/deletions/[id]/route.ts',
-  'src/app/api/sync/route.ts',
+  'src/app/api/auth/microsoft/connect/route.ts',
+  'src/app/api/calendar-events/route.ts',
+  'src/app/api/connectors/[id]/label-normalize/route.ts',
+  'src/app/api/connectors/[id]/label-scan/route.ts',
+  'src/app/api/connectors/[id]/lists/route.ts',
+  'src/app/api/connectors/[id]/permissions/route.ts',
+  'src/app/api/connectors/[id]/validate-repo/route.ts',
+  'src/app/api/connectors/github-repos/route.ts',
+  'src/app/api/source-lists/[id]/fix-emoji/route.ts',
+  'src/app/api/sync/health/route.ts',
+] as const;
+
+const ALLOWED_PATHS = [
+  ...OWNED_ROUTES,
+  'src/db/persistence/connector-management.ts',
+  'src/db/persistence/sqlite-connector-management-repository.ts',
+  'src/db/postgres/repositories/connector-management-repository.ts',
+  'src/lib/connectors/management-service.ts',
+  'tests/contracts/connector-management-repository.contract.ts',
+  'tests/db/sqlite-connector-management-repository.contract.test.ts',
+  'tests/db/postgres-connector-management-repository.contract.integration.test.ts',
+  'tests/db/postgres-connector-domain-routes.integration.test.ts',
+  'tests/api/connector-domain-routes.test.ts',
+  'tests/api/source-list-fix-emoji.test.ts',
+  'tests/api/sync-health.test.ts',
+  'tests/architecture/l12a-connector-domains-parity.test.ts',
+  'tests/architecture/web-persistence-baseline.json',
 ] as const;
 
 const baseline = JSON.parse(
@@ -28,11 +47,11 @@ const baseline = JSON.parse(
 };
 const current = computeWebPersistenceGraph(process.cwd());
 
-describe('L11 connector-core PostgreSQL parity', () => {
-  it('records the exact eight-route decrement with no deferrals or reclassification', () => {
-    const entry = baseline.decrementHistory?.find(({ layer }) => layer === 'L11');
+describe('L12a connector-domain PostgreSQL parity', () => {
+  it('records the exact ten-route decrement without reclassification', () => {
+    const entry = baseline.decrementHistory?.find(({ layer }) => layer === 'L12a');
     expect(entry).toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 313, to: 305, delta: -8 });
+    expect(entry?.totalMigrationUnits).toEqual({ from: 305, to: 295, delta: -10 });
     expect(entry?.removedTierARoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.newlyCleanRoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.tierBReclassifications).toEqual([]);
@@ -45,9 +64,8 @@ describe('L11 connector-core PostgreSQL parity', () => {
     expect(current.cleanRoutes).toContain(route);
   });
 
-  it.each(OWNED_ROUTES)('%s uses the connector composition seam without @/db', (route) => {
+  it.each(OWNED_ROUTES)('%s has no runtime @/db or SQLite driver import', (route) => {
     const source = readFileSync(join(process.cwd(), route), 'utf8');
-    expect(source).toContain('@/lib/connectors/management-service');
     expect(source).not.toMatch(
       /(?:^|\n)\s*import\s+(?!type\b)[^;]*from\s+['"]@\/db(?:['"/])/,
     );
@@ -55,7 +73,7 @@ describe('L11 connector-core PostgreSQL parity', () => {
     expect(source).not.toMatch(/better-sqlite3/);
   });
 
-  it('pins the approved post-L11 graph exactly', () => {
+  it('pins the approved post-L12a graph exactly', () => {
     expect({
       apiRoutes: current.apiRoutes.length,
       tierARoutes: current.tierARoutes.length,
@@ -79,5 +97,10 @@ describe('L11 connector-core PostgreSQL parity', () => {
       taintedApiHelpers: 0,
       totalMigrationUnits: 235,
     });
+  });
+
+  it('keeps the frozen implementation within the 23-path hard cap', () => {
+    expect(ALLOWED_PATHS).toHaveLength(23);
+    expect(new Set(ALLOWED_PATHS).size).toBe(23);
   });
 });

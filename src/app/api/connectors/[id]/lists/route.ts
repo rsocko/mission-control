@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs, sourceLists, tasks, listGroups } from '@/db/schema';
-import { asc, eq, and, isNull, notInArray, sql } from 'drizzle-orm';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { ApiErrors } from '@/lib/api-error';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 export async function GET(
   _request: Request,
@@ -13,43 +11,20 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [connector] = await db.select({
-      id: connectorConfigs.id,
-      type: connectorConfigs.type,
-      settings: connectorConfigs.settings,
-      syncedLists: connectorConfigs.syncedLists,
-    })
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const snapshot = await (
+      await getConnectorManagementPersistence()
+    ).getConnectorListSnapshot(id);
+    const { connector } = snapshot;
 
     if (!connector) {
       return NextResponse.json({ error: 'Connector not found' }, { status: 404 });
     }
 
-    const lists = await db.select()
-      .from(sourceLists)
-      .where(eq(sourceLists.connectorInstanceId, id))
-      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.name));
+    const countMap = new Map(
+      snapshot.openTaskCounts.map((count) => [count.sourceListId, count.count]),
+    );
 
-    // Compute top-level open task counts from the tasks table.
-    const taskCounts = await db
-      .select({
-        sourceListId: tasks.sourceListId,
-        count: sql<number>`count(*)`.as('count'),
-      })
-      .from(tasks)
-      .where(and(
-        eq(tasks.connectorInstanceId, id),
-        notInArray(tasks.status, ['done', 'cancelled']),
-        isNull(tasks.parentId),
-        eq(tasks.isChecklistItem, false),
-      ))
-      .groupBy(tasks.sourceListId);
-
-    const countMap = new Map(taskCounts.map(tc => [tc.sourceListId, tc.count]));
-
-    const listsWithCounts = lists
+    const listsWithCounts = snapshot.sourceLists
       .filter(sl => isSourceListSelected(connector, sl))
       .map(sl => ({
         ...sl,
@@ -58,19 +33,12 @@ export async function GET(
         selectedForSync: true,
       }));
 
-    // Fetch list groups referenced by these lists
-    const groupIds = [...new Set(listsWithCounts.map(l => l.groupId).filter(Boolean))] as string[];
-    let groups: { id: string; name: string; sortOrder: number }[] = [];
-    if (groupIds.length > 0) {
-      groups = await db.select({
-        id: listGroups.id,
-        name: listGroups.name,
-        sortOrder: listGroups.sortOrder,
-      })
-        .from(listGroups)
-        .where(sql`${listGroups.id} IN (${sql.join(groupIds.map(gid => sql`${gid}`), sql`, `)})`)
-        .orderBy(asc(listGroups.sortOrder));
-    }
+    const selectedGroupIds = new Set(
+      listsWithCounts
+        .map((sourceList) => sourceList.groupId)
+        .filter((groupId): groupId is string => Boolean(groupId)),
+    );
+    const groups = snapshot.groups.filter((group) => selectedGroupIds.has(group.id));
 
     return NextResponse.json({ sourceLists: listsWithCounts, groups });
   } catch (error) {

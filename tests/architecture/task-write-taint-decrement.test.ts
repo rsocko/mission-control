@@ -63,7 +63,7 @@ describe('L07 task-write taint decrement', () => {
   it('records the exact decrement with no Tier-B reclassification or deferral', () => {
     const entry = baseline.decrementHistory.find((record) => record.layer === 'L07');
     expect(entry).toMatchObject({
-      totalMigrationUnits: { from: 304, to: 301, delta: -3 },
+      totalMigrationUnits: { from: 301, to: 298, delta: -3 },
       removedTaintedApiHelpers: [],
       removedTaintedLibA: [],
       removedTierARoutes: [...CLEAN_ROUTES],
@@ -93,9 +93,9 @@ describe('L07 task-write taint decrement', () => {
       directTaintSourceRoutes: 132,
       transitiveOnlyTaintSourceRoutes: 73,
       directDbNamespaceRoutes: 133,
-      taintedLibA: 95,
+      taintedLibA: 92,
       taintedApiHelpers: 1,
-      totalMigrationUnits: 301,
+      totalMigrationUnits: 298,
     });
   });
 });

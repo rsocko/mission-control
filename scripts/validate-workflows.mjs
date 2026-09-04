@@ -5,6 +5,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { parse } from 'yaml';
+import {
+  estimatedPostgresTestWeight,
+  partitionPostgresIntegrationTests,
+  POSTGRES_TEST_RUNTIME_MS,
+} from './select-postgres-integration-shard.mjs';
 
 const execFileAsync = promisify(execFile);
 const workflowsDirectory = path.resolve('.github', 'workflows');
@@ -306,7 +311,7 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       postgresIntegrationShards.name,
-      'PostgreSQL integration worker (${{ matrix.shard }}/4)',
+      'PostgreSQL integration worker (${{ matrix.shard }}/3)',
       'PostgreSQL integration shards must not claim the required check name',
     );
     for (const invariant of [
@@ -321,8 +326,8 @@ for (const file of workflowFiles) {
     }
     assert.deepEqual(
       postgresIntegrationShards.strategy?.matrix?.shard,
-      [1, 2, 3, 4],
-      'ci.yml must run four PostgreSQL integration shards',
+      [1, 2, 3],
+      'ci.yml must run three PostgreSQL integration shards',
     );
     assert.equal(
       postgresIntegrationShards.strategy?.['fail-fast'],
@@ -368,8 +373,45 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       postgresIntegrationTests?.run,
-      'npm test -- --run --no-file-parallelism --shard=${{ matrix.shard }}/4 tests/db/postgres-*.integration.test.ts',
-      'PostgreSQL integration shards must partition the live database suite',
+      `set -euo pipefail
+mapfile -t test_files < <(
+  node scripts/select-postgres-integration-shard.mjs "\${{ matrix.shard }}" 3
+)
+test "\${#test_files[@]}" -gt 0
+npm test -- --run --no-file-parallelism "\${test_files[@]}"
+`,
+      'PostgreSQL integration shards must use the runtime-weighted file partition',
+    );
+    const postgresTestFiles = (await readdir(path.resolve('tests', 'db')))
+      .filter((testFile) => /^postgres-.*\.integration\.test\.ts$/u.test(testFile))
+      .sort();
+    const postgresTestShards = partitionPostgresIntegrationTests(postgresTestFiles, 3);
+    assert.ok(
+      postgresTestShards.every((testFiles) => testFiles.length > 0),
+      'Every PostgreSQL integration shard must contain tests',
+    );
+    assert.deepEqual(
+      postgresTestShards.flat().sort(),
+      postgresTestFiles,
+      'Runtime-weighted PostgreSQL shards must cover every integration test exactly once',
+    );
+    assert.deepEqual(
+      Object.keys(POSTGRES_TEST_RUNTIME_MS)
+        .filter((testFile) => !postgresTestFiles.includes(testFile)),
+      [],
+      'PostgreSQL runtime weights must not reference deleted integration tests',
+    );
+    const postgresShardWeights = postgresTestShards.map((testFiles) =>
+      testFiles.reduce((total, testFile) => total + estimatedPostgresTestWeight(testFile), 0)
+    );
+    assert.equal(
+      postgresTestShards[0].includes('postgres-packaged-workflow-parity.integration.test.ts'),
+      true,
+      'The longest PostgreSQL integration test must anchor the first shard',
+    );
+    assert.ok(
+      Math.max(...postgresShardWeights.slice(1)) < postgresShardWeights[0],
+      'Other PostgreSQL shards must remain lighter than the irreducible longest-test shard',
     );
     const pgvectorBenchmark = postgresIntegrationShards.steps?.find(
       (step) => step.name === 'Run pgvector 100k benchmark gate',
@@ -382,14 +424,19 @@ for (const file of workflowFiles) {
       'PostgreSQL integration must expose its service container for pg_dump and pg_restore',
     );
     assert.equal(
+      pgvectorContainer?.if,
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 2",
+      'PostgreSQL container discovery must run only with the manual benchmark',
+    );
+    assert.equal(
       pgvectorBenchmark?.run,
       'npm run --silent benchmark:postgres-vector',
       'PostgreSQL integration must run the repository pgvector benchmark',
     );
     assert.equal(
       pgvectorBenchmark?.if,
-      "github.event_name == 'workflow_dispatch' && matrix.shard == 1",
-      'The pgvector benchmark must run only on the first shard of manually dispatched CI',
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 2",
+      'The pgvector benchmark must run only on a light shard of manually dispatched CI',
     );
     assert.equal(
       pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,

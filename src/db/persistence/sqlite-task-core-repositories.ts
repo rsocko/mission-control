@@ -38,6 +38,10 @@ import { detachTaskDescendants } from '@/lib/tasks/task-hierarchy-deletion';
 import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
 import {
+  reconcileSqliteTaskTransferIdentityRefreshForRepository,
+  resolveSqliteTaskTransferIdentityTargetsForRepository,
+} from './sqlite-task-transfer-identity';
+import {
   compileCanonicalTaskFilter,
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
@@ -1437,32 +1441,7 @@ class SqliteTaskTransferIdentityRepository implements TaskTransferIdentityReposi
     taskMetadata: Record<string, unknown>;
     sourceLists: readonly { sourceId: string; localId: string }[];
   }> {
-    const orderedUniqueSourceIds = [...new Set(input.sourceListIds.filter(Boolean))];
-    const localIdBySourceId = new Map<string, string>();
-    if (orderedUniqueSourceIds.length > 0) {
-      const rows = await this.database.select({
-        sourceId: sourceLists.sourceId,
-        localId: sourceLists.id,
-      }).from(sourceLists).where(and(
-        eq(sourceLists.connectorInstanceId, input.connectorInstanceId),
-        inArray(sourceLists.sourceId, orderedUniqueSourceIds),
-      ));
-      for (const row of rows) localIdBySourceId.set(row.sourceId, row.localId);
-    }
-    const resolvedSourceLists = orderedUniqueSourceIds
-      .filter((sourceId) => localIdBySourceId.has(sourceId))
-      .map((sourceId) => ({ sourceId, localId: localIdBySourceId.get(sourceId)! }));
-
-    const [taskRow] = await this.database.select({ metadata: tasks.metadata })
-      .from(tasks)
-      .where(eq(tasks.id, input.taskId))
-      .limit(1);
-
-    return {
-      taskExists: Boolean(taskRow),
-      taskMetadata: taskRow ? decodeLenientJsonObject(taskRow.metadata) : {},
-      sourceLists: resolvedSourceLists,
-    };
+    return resolveSqliteTaskTransferIdentityTargetsForRepository(this.database, input);
   }
 
   async reconcileTaskRefresh(input: {
@@ -1476,39 +1455,10 @@ class SqliteTaskTransferIdentityRepository implements TaskTransferIdentityReposi
     };
     observedAt: string;
   }): Promise<boolean> {
-    return this.runTransaction((tx) => {
-      const current = tx.select({ metadata: tasks.metadata })
-        .from(tasks)
-        .where(eq(tasks.id, input.taskId))
-        .limit(1)
-        .get();
-      const metadata = {
-        ...decodeLenientJsonObject(current?.metadata),
-        ...input.task.metadata,
-      };
-      const result = tx.update(tasks).set({
-        sourceId: input.task.sourceId,
-        sourceListId: input.task.sourceListId,
-        sourceListName: input.task.sourceListName,
-        title: input.task.title,
-        description: input.task.description,
-        status: input.task.status,
-        statusReason: input.task.statusReason,
-        priority: input.task.priority,
-        effort: input.task.effort,
-        microStatus: input.task.microStatus,
-        assignee: input.task.assignee,
-        updatedAt: input.task.updatedAt,
-        completedAt: input.task.completedAt,
-        metadata: JSON.stringify(metadata),
-        syncStatus: 'synced',
-        lastSyncedAt: input.observedAt,
-      }).where(and(
-        eq(tasks.id, input.taskId),
-        eq(tasks.connectorInstanceId, input.connectorInstanceId),
-      )).run();
-      return result.changes === 1;
-    });
+    return reconcileSqliteTaskTransferIdentityRefreshForRepository(
+      this.runTransaction,
+      input,
+    );
   }
 }
 

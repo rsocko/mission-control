@@ -113,6 +113,7 @@ export function createPostgresGitHubWorkerRepositories(
   return {
     identity: identity.identity,
     writeFence: identity.writeFence,
+    transferIdentity: identity.transferIdentity,
     dependencies: createPostgresGitHubDependencyRepositories(pool),
     hierarchy: createPostgresGitHubHierarchyRepositories(pool),
     projects: createPostgresGitHubProjectRepositories(pool),

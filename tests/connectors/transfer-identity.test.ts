@@ -1,4 +1,7 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 process.env.MC_DB_PATH = ':memory:';
@@ -11,7 +14,7 @@ describe('task transfer identity persistence', () => {
     vi.resetModules();
   });
 
-  it('binds a newly created issue and both repositories without a full sync', async () => {
+  it('atomically refreshes a task and binds both repositories without a full sync', async () => {
     const [
       { default: db },
       schema,
@@ -24,24 +27,7 @@ describe('task transfer identity persistence', () => {
       import('@/lib/connectors/github-issues/repoint-service'),
     ]);
     const now = '2026-08-09T20:00:00.000Z';
-    await db.insert(schema.connectorConfigs).values({
-      id: 'github-targeted',
-      type: 'github-issues',
-      name: 'GitHub',
-      enabled: true,
-      syncMode: 'poll',
-      capabilities: { read: true, write: true, taskCreate: true },
-      credentials: { token: 'test' },
-      settings: { repos: ['acme/source', 'acme/target'] },
-      syncedLists: ['acme/source', 'acme/target'],
-      createdAt: now,
-      updatedAt: now,
-    });
-    await db.insert(schema.githubIdentityMigrations).values({
-      connectorInstanceId: 'github-targeted',
-      phase: 'shadow_write',
-      updatedAt: now,
-    });
+    await insertConnector(db, schema, 'github-targeted', now);
     await db.insert(schema.sourceLists).values([
       {
         id: 'source-list',
@@ -66,6 +52,7 @@ describe('task transfer identity persistence', () => {
       title: 'Fresh issue',
       sourceListId: 'acme/source',
       sourceListName: 'acme/source',
+      metadata: { preserved: true },
       createdAt: now,
       updatedAt: now,
       lastSyncedAt: now,
@@ -73,52 +60,24 @@ describe('task transfer identity persistence', () => {
 
     const sourceRepository = repositoryEvidence('R_source', 'acme', 'source', now);
     const targetRepository = repositoryEvidence('R_target', 'acme', 'target', now);
-    const issueEvidence = {
-      entity: {
-        identity: {
-          provider: 'github',
-          hostKey: 'github.com',
-          entityType: 'issue' as const,
-          stableId: 'I_fresh',
-        },
-        locator: {
-          owner: 'acme',
-          repository: 'source',
-          issueNumber: 7,
-          apiUrl: 'https://api.github.com/repos/acme/source/issues/7',
-          webUrl: 'https://github.com/acme/source/issues/7',
-        },
-        observationSource: 'rest' as const,
-        observedAt: now,
-      },
-      repository: sourceRepository,
-    };
-
-    reconcileTransferIdentity('fresh-issue', 'github-targeted', {
-      task: {
-        id: 'remote-placeholder',
-        sourceId: 'acme/source:7',
-        connectorType: 'github-issues',
+    await reconcileTransferIdentity('fresh-issue', 'github-targeted', {
+      task: transferTask({
         connectorInstanceId: 'github-targeted',
-        title: 'Fresh issue, refreshed',
-        description: 'Current body',
-        status: 'todo',
-        priority: 'none',
-        createdAt: now,
-        updatedAt: now,
-        parentId: undefined,
-        childIds: [],
-        depth: 0,
-        isChecklistItem: false,
+        sourceId: 'acme/source:7',
         sourceListId: 'acme/source',
         sourceListName: 'acme/source',
-        hubProjectIds: [],
-        tags: [],
-        metadata: {},
-        externalIdentity: issueEvidence,
-        syncStatus: 'synced',
-        lastSyncedAt: now,
-      },
+        title: 'Fresh issue, refreshed',
+        metadata: { refreshed: true },
+        externalIdentity: issueEvidence(
+          'I_fresh',
+          'acme',
+          'source',
+          7,
+          now,
+          sourceRepository,
+        ),
+        now,
+      }),
       sourceLists: [
         { sourceId: 'acme/source', evidence: { entity: sourceRepository } },
         { sourceId: 'acme/target', evidence: { entity: targetRepository } },
@@ -130,35 +89,177 @@ describe('task transfer identity persistence', () => {
       'acme/source:7',
       'acme/target',
     )).toBe(true);
+    const [task] = await db.select().from(schema.tasks)
+      .where((await import('drizzle-orm')).eq(schema.tasks.id, 'fresh-issue'));
+    expect(task).toMatchObject({
+      title: 'Fresh issue, refreshed',
+      sourceId: 'acme/source:7',
+    });
+    expect(decodeLenientJsonObject(task.metadata)).toEqual({
+      preserved: true,
+      refreshed: true,
+    });
   });
 
-  it('rejects an oversized legacy batch before ever opening a transaction', async () => {
-    // Replaces `runTransaction` with a spy (preserving every other real export
-    // via `importOriginal`) so this test can assert it is never called, then
-    // forces `vi.resetModules()` so `transfer-identity.ts` re-imports `@/db`
-    // and binds to this mocked `runTransaction`, not a prior test's cached one.
-    const runTransactionSpy = vi.fn();
-    vi.doMock('@/db', async (importOriginal) => {
-      const actual = await importOriginal<typeof import('@/db')>();
-      return { ...actual, runTransaction: runTransactionSpy };
-    });
-    vi.resetModules();
-
-    const [
-      { default: db },
-      schema,
-      { reconcileTransferIdentity },
-    ] = await Promise.all([
-      import('@/db'),
+  it('reconciles task-only refreshes when external identity evidence is absent', async () => {
+    const [{ default: db }, schema, { reconcileTransferIdentity }] = await Promise.all([
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
     ]);
-    const now = '2026-08-09T21:00:00.000Z';
-    const connectorInstanceId = 'oversized-batch-connector';
+    const { eq } = await import('drizzle-orm');
+    const now = '2026-08-10T20:00:00.000Z';
+    await insertConnector(db, schema, 'github-task-only', now);
+    await db.insert(schema.tasks).values({
+      id: 'task-only',
+      sourceId: 'acme/original:2',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-task-only',
+      title: 'Before',
+      metadata: { preserved: true },
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+    const identitiesBefore = await db.select().from(schema.externalEntities);
 
-    // 500 source-list writes + 1 task write = 501, one past the ceiling.
+    await reconcileTransferIdentity('task-only', 'github-task-only', {
+      task: transferTask({
+        connectorInstanceId: 'github-task-only',
+        sourceId: 'acme/renamed:2',
+        title: 'After',
+        metadata: { refreshed: true },
+        now,
+      }),
+      sourceLists: [],
+    });
+
+    const [task] = await db.select().from(schema.tasks)
+      .where(eq(schema.tasks.id, 'task-only'));
+    expect(task).toMatchObject({
+      title: 'After',
+      sourceId: 'acme/renamed:2',
+    });
+    expect(decodeLenientJsonObject(task.metadata)).toEqual({
+      preserved: true,
+      refreshed: true,
+    });
+    expect(await db.select().from(schema.externalEntities)).toHaveLength(
+      identitiesBefore.length,
+    );
+  });
+
+  it('rolls back source-list, identity, and task effects after a late task failure', async () => {
+    const [{ default: db }, schema, { reconcileTransferIdentity }] = await Promise.all([
+      importInitializedSqliteDatabase(),
+      import('@/db/schema'),
+      import('@/lib/connectors/transfer-identity'),
+    ]);
+    const { eq } = await import('drizzle-orm');
+    const now = '2026-08-11T20:00:00.000Z';
+    await insertConnector(db, schema, 'github-rollback', now);
+    await db.insert(schema.sourceLists).values({
+      id: 'rollback-list',
+      connectorInstanceId: 'github-rollback',
+      sourceId: 'acme/rollback',
+      name: 'acme/rollback',
+      type: 'repo',
+    });
+    await db.insert(schema.tasks).values({
+      id: 'rollback-task',
+      sourceId: 'acme/original:9',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-rollback',
+      title: 'Before rollback',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+    await db.insert(schema.tasks).values({
+      id: 'rollback-source-conflict',
+      sourceId: 'acme/rollback:9',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-rollback',
+      title: 'Conflicting task',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+    const repository = repositoryEvidence('R_rollback', 'acme', 'rollback', now);
+
+    await expect(reconcileTransferIdentity(
+      'rollback-task',
+      'github-rollback',
+      {
+        task: transferTask({
+          connectorInstanceId: 'github-rollback',
+          sourceId: 'acme/rollback:9',
+          sourceListId: 'acme/rollback',
+          sourceListName: 'acme/rollback',
+          title: 'Must roll back',
+          externalIdentity: issueEvidence(
+            'I_rollback',
+            'acme',
+            'rollback',
+            9,
+            now,
+            repository,
+          ),
+          now,
+        }),
+        sourceLists: [{
+          sourceId: 'acme/rollback',
+          evidence: { entity: repository },
+        }],
+      },
+    )).rejects.toThrow();
+
+    const [task] = await db.select().from(schema.tasks)
+      .where(eq(schema.tasks.id, 'rollback-task'));
+    expect(task).toMatchObject({
+      title: 'Before rollback',
+      sourceId: 'acme/original:9',
+    });
+    const rolledBackEntities = await db.select().from(schema.externalEntities)
+      .where((await import('drizzle-orm')).inArray(
+        schema.externalEntities.stableId,
+        ['I_rollback', 'R_rollback'],
+      ));
+    const rolledBackBindings = await db.select().from(schema.externalEntityBindings)
+      .where((await import('drizzle-orm')).inArray(
+        schema.externalEntityBindings.localId,
+        ['rollback-task', 'rollback-list'],
+      ));
+    expect(rolledBackEntities).toEqual([]);
+    expect(rolledBackBindings).toEqual([]);
+  });
+
+  it('rejects an oversized batch without partial effects', async () => {
+    const [{ default: db }, schema, { reconcileTransferIdentity }] = await Promise.all([
+      importInitializedSqliteDatabase(),
+      import('@/db/schema'),
+      import('@/lib/connectors/transfer-identity'),
+    ]);
+    const now = '2026-08-12T20:00:00.000Z';
+    const connectorInstanceId = 'oversized-batch-connector';
+    await insertConnector(db, schema, connectorInstanceId, now);
+    await db.insert(schema.tasks).values({
+      id: 'oversized-task',
+      sourceId: 'acme/repo-0:1',
+      connectorType: 'github-issues',
+      connectorInstanceId,
+      title: 'Oversized batch task',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+    const entityCountBefore = (await db.select().from(schema.externalEntities)).length;
+    const bindingCountBefore = (await db.select().from(schema.externalEntityBindings)).length;
     const sourceListRows: (typeof schema.sourceLists.$inferInsert)[] = [];
-    const refreshSourceLists: { sourceId: string; evidence: { entity: ReturnType<typeof repositoryEvidence> } }[] = [];
+    const refreshSourceLists: {
+      sourceId: string;
+      evidence: { entity: ReturnType<typeof repositoryEvidence> };
+    }[] = [];
     for (let index = 0; index < 500; index += 1) {
       const sourceId = `acme/repo-${index}`;
       sourceListRows.push({
@@ -170,68 +271,191 @@ describe('task transfer identity persistence', () => {
       });
       refreshSourceLists.push({
         sourceId,
-        evidence: { entity: repositoryEvidence(`R_oversized_${index}`, 'acme', `repo-${index}`, now) },
+        evidence: {
+          entity: repositoryEvidence(`R_oversized_${index}`, 'acme', `repo-${index}`, now),
+        },
       });
     }
     await db.insert(schema.sourceLists).values(sourceListRows);
 
-    const issueEvidence = {
-      entity: {
-        identity: {
-          provider: 'github',
-          hostKey: 'github.com',
-          entityType: 'issue' as const,
-          stableId: 'I_oversized',
-        },
-        locator: {
-          owner: 'acme',
-          repository: 'repo-0',
-          issueNumber: 1,
-          apiUrl: 'https://api.github.com/repos/acme/repo-0/issues/1',
-          webUrl: 'https://github.com/acme/repo-0/issues/1',
-        },
-        observationSource: 'rest' as const,
-        observedAt: now,
-      },
-    };
-
-    expect(() => reconcileTransferIdentity('oversized-task', connectorInstanceId, {
-      task: {
-        id: 'remote-placeholder',
-        sourceId: 'acme/repo-0:1',
-        connectorType: 'github-issues',
+    await expect(reconcileTransferIdentity('oversized-task', connectorInstanceId, {
+      task: transferTask({
         connectorInstanceId,
+        sourceId: 'acme/repo-0:1',
         title: 'Oversized batch task',
-        description: undefined,
-        status: 'todo',
-        priority: 'none',
-        createdAt: now,
-        updatedAt: now,
-        parentId: undefined,
-        childIds: [],
-        depth: 0,
-        isChecklistItem: false,
-        sourceListId: undefined,
-        sourceListName: undefined,
-        hubProjectIds: [],
-        tags: [],
-        metadata: {},
-        externalIdentity: issueEvidence,
-        syncStatus: 'synced',
-        lastSyncedAt: now,
-      },
+        externalIdentity: issueEvidence('I_oversized', 'acme', 'repo-0', 1, now),
+        now,
+      }),
       sourceLists: refreshSourceLists,
-    })).toThrow('External identity batch exceeds the maximum of 500');
+    })).rejects.toThrow('External identity batch exceeds the maximum of 500');
 
-    // The ceiling must reject before any transaction is opened - no partial
-    // effects, and no unnecessary write-lock acquisition for an oversized
-    // batch that will never be persisted.
-    expect(runTransactionSpy).not.toHaveBeenCalled();
+    expect(await db.select().from(schema.externalEntities)).toHaveLength(entityCountBefore);
+    expect(await db.select().from(schema.externalEntityBindings)).toHaveLength(bindingCountBefore);
+  });
 
-    vi.doUnmock('@/db');
-    vi.resetModules();
+  it('persists create identity before local task materialization and returns a promise', async () => {
+    const [{ default: db }, schema, { persistCreatedTaskIdentity }] = await Promise.all([
+      importInitializedSqliteDatabase(),
+      import('@/db/schema'),
+      import('@/lib/connectors/transfer-identity'),
+    ]);
+    const { eq } = await import('drizzle-orm');
+    const now = '2026-08-13T20:00:00.000Z';
+    await insertConnector(db, schema, 'github-create-async', now);
+    await db.insert(schema.sourceLists).values({
+      id: 'create-async-list',
+      connectorInstanceId: 'github-create-async',
+      sourceId: 'acme/async',
+      name: 'acme/async',
+      type: 'repo',
+    });
+    const repository = repositoryEvidence('R_create_async', 'acme', 'async', now);
+
+    const pending = persistCreatedTaskIdentity({
+      taskId: 'create-async-task',
+      connectorInstanceId: 'github-create-async',
+      sourceId: 'acme/async:5',
+      sourceListId: 'acme/async',
+      evidence: issueEvidence('I_create_async', 'acme', 'async', 5, now, repository),
+    });
+    expect(pending).toBeInstanceOf(Promise);
+    await pending;
+    expect(await db.select().from(schema.tasks)
+      .where(eq(schema.tasks.id, 'create-async-task'))).toEqual([]);
+    expect(await db.select().from(schema.externalEntityBindings)
+      .where(eq(schema.externalEntityBindings.localId, 'create-async-task')))
+      .toEqual([expect.objectContaining({
+        connectorInstanceId: 'github-create-async',
+        bindingType: 'task',
+        state: 'active',
+      })]);
+
+    const routeSource = readFileSync(
+      resolve(process.cwd(), 'src/app/api/tasks/route.ts'),
+      'utf8',
+    );
+    expect(routeSource).toMatch(/await persistCreatedTaskIdentity\(\{/);
+  });
+
+  it('rejects foreign-owned create targets and absent reconciliation targets', async () => {
+    const [
+      { default: db },
+      schema,
+      { persistCreatedTaskIdentity, reconcileTransferIdentity },
+    ] = await Promise.all([
+      importInitializedSqliteDatabase(),
+      import('@/db/schema'),
+      import('@/lib/connectors/transfer-identity'),
+    ]);
+    const { inArray } = await import('drizzle-orm');
+    const now = '2026-08-14T20:00:00.000Z';
+    await insertConnector(db, schema, 'github-create-owner', now);
+    await insertConnector(db, schema, 'github-create-requester', now);
+    await db.insert(schema.tasks).values({
+      id: 'foreign-create-task',
+      sourceId: 'acme/foreign:6',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-create-owner',
+      title: 'Foreign task',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+
+    await expect(persistCreatedTaskIdentity({
+      taskId: 'foreign-create-task',
+      connectorInstanceId: 'github-create-requester',
+      sourceId: 'acme/foreign:6',
+      sourceListId: null,
+      evidence: issueEvidence('I_foreign_create', 'acme', 'foreign', 6, now),
+    })).rejects.toThrow('Task transfer identity target is owned by another connector');
+
+    await expect(reconcileTransferIdentity(
+      'absent-reconcile-task',
+      'github-create-requester',
+      {
+        task: transferTask({
+          connectorInstanceId: 'github-create-requester',
+          sourceId: 'acme/absent:7',
+          title: 'Absent task',
+          externalIdentity: issueEvidence('I_absent_reconcile', 'acme', 'absent', 7, now),
+          now,
+        }),
+        sourceLists: [],
+      },
+    )).rejects.toThrow('Task transfer identity refresh target was not found');
+
+    expect(await db.select().from(schema.externalEntities)
+      .where(inArray(
+        schema.externalEntities.stableId,
+        ['I_foreign_create', 'I_absent_reconcile'],
+      ))).toEqual([]);
   });
 });
+
+function transferTask(input: {
+  connectorInstanceId: string;
+  sourceId: string;
+  title: string;
+  metadata?: Record<string, unknown>;
+  sourceListId?: string;
+  sourceListName?: string;
+  externalIdentity?: ReturnType<typeof issueEvidence>;
+  now: string;
+}) {
+  return {
+    id: 'remote-placeholder',
+    sourceId: input.sourceId,
+    connectorType: 'github-issues',
+    connectorInstanceId: input.connectorInstanceId,
+    title: input.title,
+    status: 'todo' as const,
+    priority: 'none' as const,
+    createdAt: input.now,
+    updatedAt: input.now,
+    childIds: [],
+    depth: 0,
+    isChecklistItem: false,
+    sourceListId: input.sourceListId,
+    sourceListName: input.sourceListName,
+    hubProjectIds: [],
+    tags: [],
+    metadata: input.metadata ?? {},
+    externalIdentity: input.externalIdentity,
+    syncStatus: 'synced' as const,
+    lastSyncedAt: input.now,
+  };
+}
+
+function issueEvidence(
+  stableId: string,
+  owner: string,
+  repository: string,
+  issueNumber: number,
+  observedAt: string,
+  repositoryIdentity?: ReturnType<typeof repositoryEvidence>,
+) {
+  return {
+    entity: {
+      identity: {
+        provider: 'github',
+        hostKey: 'github.com',
+        entityType: 'issue' as const,
+        stableId,
+      },
+      locator: {
+        owner,
+        repository,
+        issueNumber,
+        apiUrl: `https://api.github.com/repos/${owner}/${repository}/issues/${issueNumber}`,
+        webUrl: `https://github.com/${owner}/${repository}/issues/${issueNumber}`,
+      },
+      observationSource: 'rest' as const,
+      observedAt,
+    },
+    ...(repositoryIdentity ? { repository: repositoryIdentity } : {}),
+  };
+}
 
 function repositoryEvidence(
   stableId: string,
@@ -255,4 +479,25 @@ function repositoryEvidence(
     observationSource: 'rest' as const,
     observedAt,
   };
+}
+
+async function insertConnector(
+  database: typeof import('@/db').default,
+  schema: typeof import('@/db/schema'),
+  connectorInstanceId: string,
+  now: string,
+): Promise<void> {
+  await database.insert(schema.connectorConfigs).values({
+    id: connectorInstanceId,
+    type: 'github-issues',
+    name: connectorInstanceId,
+    enabled: true,
+    syncMode: 'poll',
+    capabilities: { read: true, write: true, taskCreate: true },
+    credentials: { token: 'test' },
+    settings: {},
+    syncedLists: [],
+    createdAt: now,
+    updatedAt: now,
+  });
 }

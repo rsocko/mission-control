@@ -1311,7 +1311,7 @@ async function writeThroughCreate(params: {
     if (!finalized) return;
 
     try {
-      persistCreatedTaskIdentity({
+      await persistCreatedTaskIdentity({
         taskId: params.id,
         connectorInstanceId: params.connectorInstanceId,
         sourceId: created.sourceId,

@@ -1,6 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
+import {
+  GITHUB_IDENTITY_MODE,
+  type GitHubIdentityModeSnapshot,
+} from '@/lib/external-identities/stable-identity-types';
+import {
+  buildGitHubTransferIdentityWrites,
+  sourceListIdsForGitHubTransferIdentity,
+  type GitHubTransferIdentityPersistence,
+} from '@/db/persistence/github-transfer-identity';
+import {
+  bindPostgresTaskTransferIdentityClientTransaction,
+  reconcilePostgresTaskTransferIdentityRefreshInTransaction,
+  resolvePostgresTaskTransferIdentityTargetsInTransaction,
+} from './task-transfer-identity';
 import type {
   ExternalEntityIdentity,
   ExternalEntityKey,
@@ -34,6 +47,7 @@ import type {
   GitHubFinalizeWriteResult,
   GitHubIdentityExceptionSnapshot,
   GitHubIdentityPersistence,
+  GitHubIdentityRepositories,
   GitHubLinkedSourceLookupRow,
   GitHubLinkedSourcePersistResult,
   GitHubRecordCycleObservationResult,
@@ -390,7 +404,7 @@ function primaryIdentityLockKeys(
   connectorInstanceId: string,
   writes: readonly ExternalIdentityWrite[],
 ): string[] {
-  const keys = new Set<string>([`connector:${connectorInstanceId}`]);
+  const keys = new Set<string>();
   for (const write of writes) {
     for (const observation of [
       ...(write.evidence.repository ? [write.evidence.repository] : []),
@@ -415,7 +429,7 @@ function primaryIdentityLockKeys(
       ]));
     }
   }
-  return [...keys].sort();
+  return [`connector:${connectorInstanceId}`, ...[...keys].sort()];
 }
 
 function samePrimaryIdentityLocator(
@@ -1725,7 +1739,9 @@ function digestLocator(...values: Array<string | number | null>): string {
 
 export function createPostgresGitHubIdentityRepositories(
   pool: Pool,
-): { identity: GitHubIdentityPersistence; writeFence: GitHubWriteFencePersistence } {
+): GitHubIdentityRepositories & {
+  transferIdentity: GitHubTransferIdentityPersistence;
+} {
   async function readModeRevision(client: Client, connectorInstanceId: string): Promise<number> {
     const { rows } = await query<{ modeRevision: number }>(
       client,
@@ -1755,6 +1771,78 @@ export function createPostgresGitHubIdentityRepositories(
       [connectorInstanceId],
     );
     return rows[0]?.modeRevision ?? null;
+  }
+
+  function validatePrimaryIdentityBatch(
+    connectorInstanceId: string,
+    writes: readonly ExternalIdentityWrite[],
+  ): void {
+    if (writes.length > MAX_PRIMARY_IDENTITY_BATCH_SIZE) {
+      throw new Error(
+        `External identity batch exceeds the maximum of ${MAX_PRIMARY_IDENTITY_BATCH_SIZE}`,
+      );
+    }
+    if (writes.some((write) => (
+      write.target.connectorInstanceId !== connectorInstanceId
+    ))) {
+      throw new Error('External identity batches must contain one connector instance');
+    }
+    for (const write of writes) validatePrimaryIdentityWrite(write);
+  }
+
+  async function persistPrimaryIdentityBatchInTransaction(
+    client: PoolClient,
+    input: {
+      connectorInstanceId: string;
+      modeSnapshot?: GitHubIdentityModeSnapshot;
+      writes: readonly ExternalIdentityWrite[];
+    },
+  ): Promise<readonly ExternalIdentityWriteResult[]> {
+    const { connectorInstanceId, modeSnapshot, writes } = input;
+    await query(
+      client,
+      `
+        SELECT pg_advisory_xact_lock(hashtextextended(lock_key, 0))
+        FROM unnest($1::text[]) AS lock_keys(lock_key)
+        ORDER BY array_position($1::text[], lock_key)
+      `,
+      [primaryIdentityLockKeys(connectorInstanceId, writes)],
+    );
+    if (modeSnapshot) {
+      const current = await readModeRevisionForShare(
+        client,
+        modeSnapshot.connectorInstanceId,
+      );
+      if (current === null) {
+        throw new Error(
+          `GitHub identity controls are missing for ${modeSnapshot.connectorInstanceId}`,
+        );
+      }
+      if (
+        modeSnapshot.connectorInstanceId !== connectorInstanceId
+        || current !== modeSnapshot.modeRevision
+      ) {
+        throw new Error(
+          `GitHub identity revision changed from ${modeSnapshot.modeRevision} to ${current}`,
+        );
+      }
+    }
+    const results: Array<ExternalIdentityWriteResult | undefined> =
+      Array.from({ length: writes.length });
+    const { fastIndexes, sequentialIndexes } = partitionPrimaryIdentityWrites(writes);
+    if (sequentialIndexes.length > 0) {
+      for (const [index, write] of writes.entries()) {
+        results[index] = await persistPrimaryIdentityWrite(client, write);
+      }
+    } else {
+      await persistPrimaryIdentityFastBatch(client, writes, fastIndexes, results);
+    }
+    return results.map((result, index) => {
+      if (!result) {
+        throw new Error(`External identity batch result missing at index ${index}`);
+      }
+      return result;
+    });
   }
 
   async function identityForBinding(
@@ -2388,64 +2476,12 @@ export function createPostgresGitHubIdentityRepositories(
 
     async persistExternalIdentityBatch({ connectorInstanceId, modeSnapshot, writes }) {
       if (writes.length === 0) return [];
-      if (writes.length > MAX_PRIMARY_IDENTITY_BATCH_SIZE) {
-        throw new Error(
-          `External identity batch exceeds the maximum of ${MAX_PRIMARY_IDENTITY_BATCH_SIZE}`,
-        );
-      }
-      if (writes.some((write) => (
-        write.target.connectorInstanceId !== connectorInstanceId
-      ))) {
-        throw new Error('External identity batches must contain one connector instance');
-      }
-      for (const write of writes) validatePrimaryIdentityWrite(write);
-
-      return transaction(pool, async (client) => {
-        await query(
-          client,
-          `
-            SELECT pg_advisory_xact_lock(hashtextextended(lock_key, 0))
-            FROM unnest($1::text[]) AS lock_keys(lock_key)
-            ORDER BY lock_key
-          `,
-          [primaryIdentityLockKeys(connectorInstanceId, writes)],
-        );
-        if (modeSnapshot) {
-          const current = await readModeRevisionForShare(
-            client,
-            modeSnapshot.connectorInstanceId,
-          );
-          if (current === null) {
-            throw new Error(
-              `GitHub identity controls are missing for ${modeSnapshot.connectorInstanceId}`,
-            );
-          }
-          if (
-            modeSnapshot.connectorInstanceId !== connectorInstanceId
-            || current !== modeSnapshot.modeRevision
-          ) {
-            throw new Error(
-              `GitHub identity revision changed from ${modeSnapshot.modeRevision} to ${current}`,
-            );
-          }
-        }
-        const results: Array<ExternalIdentityWriteResult | undefined> =
-          Array.from({ length: writes.length });
-        const { fastIndexes, sequentialIndexes } = partitionPrimaryIdentityWrites(writes);
-        if (sequentialIndexes.length > 0) {
-          for (const [index, write] of writes.entries()) {
-            results[index] = await persistPrimaryIdentityWrite(client, write);
-          }
-        } else {
-          await persistPrimaryIdentityFastBatch(client, writes, fastIndexes, results);
-        }
-        return results.map((result, index) => {
-          if (!result) {
-            throw new Error(`External identity batch result missing at index ${index}`);
-          }
-          return result;
-        });
-      });
+      validatePrimaryIdentityBatch(connectorInstanceId, writes);
+      return transaction(pool, (client) => persistPrimaryIdentityBatchInTransaction(client, {
+        connectorInstanceId,
+        modeSnapshot,
+        writes,
+      }));
     },
 
     async lookupStableIdentityBatch({ connectorInstanceId, namespace, rows }) {
@@ -4125,5 +4161,70 @@ export function createPostgresGitHubIdentityRepositories(
     },
   };
 
-  return { identity, writeFence };
+  const transferIdentity: GitHubTransferIdentityPersistence = {
+    async persist(input) {
+      await transaction(pool, async (client) => {
+        await query(
+          client,
+          'SELECT pg_advisory_xact_lock(hashtextextended($1, 0))',
+          [`connector:${input.connectorInstanceId}`],
+        );
+        const taskTransaction =
+          await bindPostgresTaskTransferIdentityClientTransaction(client);
+        const targets = await resolvePostgresTaskTransferIdentityTargetsInTransaction(
+          taskTransaction,
+          {
+            taskId: input.taskId,
+            connectorInstanceId: input.connectorInstanceId,
+            sourceListIds: sourceListIdsForGitHubTransferIdentity(input),
+          },
+        );
+        if (targets.taskOwnership === 'foreign') {
+          throw new Error('Task transfer identity target is owned by another connector');
+        }
+        if (input.reconcileTask && targets.taskOwnership === 'absent') {
+          throw new Error('Task transfer identity refresh target was not found');
+        }
+        const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
+        validatePrimaryIdentityBatch(input.connectorInstanceId, writes);
+        if (writes.length > 0) {
+          const modeRevision = await readModeRevisionForShare(
+            client,
+            input.connectorInstanceId,
+          );
+          if (modeRevision === null) {
+            throw new Error(
+              `GitHub identity controls are missing for ${input.connectorInstanceId}`,
+            );
+          }
+          await persistPrimaryIdentityBatchInTransaction(client, {
+            connectorInstanceId: input.connectorInstanceId,
+            modeSnapshot: Object.freeze({
+              connectorInstanceId: input.connectorInstanceId,
+              effectiveMode: GITHUB_IDENTITY_MODE,
+              modeRevision,
+              capturedAt: input.observedAt,
+            }),
+            writes,
+          });
+        }
+        if (
+          input.reconcileTask
+          && !await reconcilePostgresTaskTransferIdentityRefreshInTransaction(
+            taskTransaction,
+            {
+              taskId: input.taskId,
+              connectorInstanceId: input.connectorInstanceId,
+              task: input.reconcileTask,
+              observedAt: input.observedAt,
+            },
+          )
+        ) {
+          throw new Error('Task transfer identity refresh target was not found');
+        }
+      });
+    },
+  };
+
+  return { identity, writeFence, transferIdentity };
 }

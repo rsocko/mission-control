@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { SyncResult } from '@/types';
 import { SqliteSyncRunRepository } from '@/db/persistence/sqlite-sync-run-repository';
 
@@ -33,7 +34,7 @@ function success(connectorId: string): SyncResult {
 }
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   queue = await import('@/lib/sync/job-queue');
   connectorLock = await import('@/lib/sync/connector-lock');
   database.sqlite.prepare('SELECT 1').get();

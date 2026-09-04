@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('@/db');
@@ -17,7 +18,7 @@ describe('task transfer identity persistence', () => {
       { reconcileTransferIdentity },
       { canTransferGitHubIssueSafely },
     ] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
       import('@/lib/connectors/github-issues/repoint-service'),

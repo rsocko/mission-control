@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
 const testDirectory = mkdtempSync(join(tmpdir(), 'mc-github-notifications-'));
@@ -17,7 +18,7 @@ describe('GitHub notification lifecycle', () => {
 
   beforeAll(async () => {
     vi.resetModules();
-    const database = await import('@/db');
+    const database = await importInitializedSqliteDatabase();
     const schemaModule = await import('@/db/schema');
     const connectorModule = await import('@/lib/connectors/github-issues');
     db = database.default;

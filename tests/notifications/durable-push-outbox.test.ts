@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 const webPushMocks = vi.hoisted(() => ({
   sendNotification: vi.fn(),
@@ -45,7 +46,7 @@ const transientFailure = {
 } as const;
 
 beforeAll(async () => {
-  ({ default: db, runTransaction } = await import('@/db'));
+  ({ default: db, runTransaction } = await importInitializedSqliteDatabase());
   schema = await import('@/db/schema');
   service = await import('@/lib/notifications/service');
   dispatcher = await import('@/lib/push/dispatcher');

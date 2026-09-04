@@ -11,6 +11,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 
@@ -212,7 +213,7 @@ beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   process.env.MC_API_KEY = 'repair-test-key';
   vi.resetModules();
-  ({ sqlite } = await import('@/db'));
+  ({ sqlite } = await importInitializedSqliteDatabase());
   ({ financeAttentionSourceId, financeAttentionTaskId } = await import(
     '@/lib/finance/attention-routing'
   ));

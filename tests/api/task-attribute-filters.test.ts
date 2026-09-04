@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('task attribute filtering', () => {
   let db: typeof import('@/db').default;
@@ -15,7 +16,7 @@ describe('task attribute filtering', () => {
     vi.resetModules();
 
     const [dbModule, schemaModule, filterModule, drizzle] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/app/api/tasks/canonical-filter'),
       import('drizzle-orm'),

@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
@@ -17,7 +18,7 @@ let upsertSourceLists: typeof import('@/lib/sync/list-manager').upsertSourceList
 let eq: typeof import('drizzle-orm').eq;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   ({ connectorConfigs, sourceLists, tasks, tags } = await import('@/db/schema'));
   ({ GET: getConnectorLists } = await import('@/app/api/connectors/[id]/lists/route'));
   ({ DELETE: purgeRetainedList } = await import('@/app/api/connectors/[id]/retained-lists/[sourceListId]/route'));

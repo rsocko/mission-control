@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { IConnector } from '@/lib/connectors';
 
 describe('sync deletion recovery', () => {
@@ -16,7 +17,7 @@ describe('sync deletion recovery', () => {
 
   async function setupTask(sourceId = 'remote:missing') {
     const [{ default: db }, schema] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
     ]);
     const now = '2026-08-03T12:00:00.000Z';
@@ -524,7 +525,7 @@ describe('sync deletion recovery', () => {
 
 async function setupGitHubTask() {
   const [{ default: db }, schema] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
   ]);
   const now = '2026-08-03T12:00:00.000Z';

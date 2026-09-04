@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
 type SnapshotSynchronizer = InstanceType<
@@ -99,7 +100,7 @@ beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   process.env.TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION = '7';
   vi.resetModules();
-  const dbModule = await import('@/db');
+  const dbModule = await importInitializedSqliteDatabase();
   sqlite = dbModule.sqlite;
   const configuredAt = new Date().toISOString();
   sqlite.prepare(`

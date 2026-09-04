@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 import type {
   EvaluationRequestV1,
@@ -387,7 +388,7 @@ beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED = 'true';
   vi.resetModules();
-  ({ sqlite, runTransaction } = await import('@/db'));
+  ({ sqlite, runTransaction } = await importInitializedSqliteDatabase());
   ({ createNotificationsInTransaction } = await import('@/lib/notifications/service'));
   ({ financeInsightDigestV1 } = await import('@/lib/finance-insights/canonical'));
   ({ sourceGenerationCreateRequestSchema } = await import('@/lib/finance-insights/contract'));

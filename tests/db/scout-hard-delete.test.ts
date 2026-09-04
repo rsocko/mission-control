@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('Scout hard delete', () => {
   const dbPath = join(process.cwd(), 'data', `scout-hard-delete-${process.pid}-${Date.now()}.db`);
@@ -17,7 +18,7 @@ describe('Scout hard delete', () => {
     vi.doUnmock('crypto');
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
-    const dbModule = await import('@/db');
+    const dbModule = await importInitializedSqliteDatabase();
     db = dbModule.default;
     sqlite = dbModule.sqlite;
     ({ hardDeleteScoutTask } = await import('@/lib/tasks/scout-hard-delete'));

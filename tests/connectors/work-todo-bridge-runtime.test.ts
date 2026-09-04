@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('Work To Do bridge runtime', () => {
   let db: typeof import('@/db').default;
@@ -13,7 +14,7 @@ describe('Work To Do bridge runtime', () => {
     vi.doUnmock('crypto');
     vi.resetModules();
     const [dbModule, schemaModule, serviceModule] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/work-todo/service'),
     ]);

@@ -11,6 +11,7 @@ import {
   it,
   vi,
 } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 
@@ -177,7 +178,7 @@ function clearDatabase(): void {
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.resetModules();
-  ({ sqlite } = await import('@/db'));
+  ({ sqlite } = await importInitializedSqliteDatabase());
   ({
     financeAttentionSourceId,
     financeAttentionTaskId,

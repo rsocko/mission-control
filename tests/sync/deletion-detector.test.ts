@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { SyncAuditEntry } from '@/lib/sync';
 
 describe('deletion detector source ownership', () => {
@@ -11,7 +12,7 @@ describe('deletion detector source ownership', () => {
 
   it('deletes missing remote numeric IDs while protecting MC-created subtasks', async () => {
     const [{ default: db }, schema, { detectDeletions }, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync/deletion-detector'),
       import('drizzle-orm'),

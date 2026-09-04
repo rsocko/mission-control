@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities';
 import {
   digestHistoricalProof,
@@ -23,7 +24,7 @@ let identities: typeof import('@/lib/external-identities');
 let service: typeof import('@/lib/connectors/github-issues/repoint-service');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   schema = await import('@/db/schema');
   identities = await import('@/lib/external-identities');
   service = await import('@/lib/connectors/github-issues/repoint-service');

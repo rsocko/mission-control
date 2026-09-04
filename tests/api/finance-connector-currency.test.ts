@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -35,7 +36,7 @@ function createBody(settings: Record<string, unknown>) {
 }
 
 beforeAll(async () => {
-  ({ sqlite } = await import('@/db'));
+  ({ sqlite } = await importInitializedSqliteDatabase());
   route = await import('@/app/api/connectors/route');
 }, 30_000);
 

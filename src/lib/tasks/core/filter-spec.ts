@@ -1,6 +1,7 @@
 import { getLocalDaysFromNow, getLocalToday } from '@/lib/utils/date';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
+import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import type { LocalDisposition } from '@/types';
 import {
   isTaskQuickFilter,
@@ -9,16 +10,15 @@ import {
   TASK_PRIORITY_VALUES,
   TASK_STATUS_VALUES,
   type TaskFilterSpec,
+  type TaskGroupMode,
 } from './contracts';
 
 /**
  * Pure, backend-neutral canonical task filter parser.
  *
  * This is the single place raw request input becomes a `TaskFilterSpec`.
- * Both the legacy SQLite predicate compiler (`src/app/api/tasks/*`) and the
- * portable adapters consume the *same* spec, so an adapter can never disagree
- * with the web layer about what "the canonical filter" means — only about how
- * to express it in SQL.
+ * Both portable adapters consume the *same* spec, so they cannot disagree
+ * about what the canonical filter means — only about how to express it in SQL.
  *
  * It performs no I/O whatsoever: My Day membership, GitHub identity, and
  * inbox-list configuration are read separately through
@@ -32,6 +32,17 @@ const VALID_PLANNING_HORIZONS = new Set<string>(TASK_PLANNING_HORIZON_VALUES);
 const VALID_LOCAL_DISPOSITIONS = new Set<string>(TASK_LOCAL_DISPOSITION_VALUES);
 const ANY_NON_EMPTY_VALUE = { has: (value: string) => Boolean(value) };
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const TASK_GROUP_MODES = new Set<TaskGroupMode>([
+  'status',
+  'priority',
+  'planningHorizon',
+  'source',
+  'list',
+  'effort',
+  'dueDate',
+  'tag',
+  'project',
+]);
 
 export interface TaskFilterSpecClock {
   readonly today: string;
@@ -54,13 +65,26 @@ export function isLocalDisposition(value: string): value is LocalDisposition {
 /**
  * `true` when the filter query itself pins a local disposition, which
  * suppresses the implicit `localDisposition = 'active'` default. Exported
- * because the legacy SQLite compiler needs the identical decision.
+ * because both dialect compilers need the identical decision.
  */
 export function filterQueryPinsDisposition(filterQuery: string | null): boolean {
   if (!filterQuery) return false;
   return parseFilterQuery(filterQuery).tokens.some(
     (token) => token.type === 'disposition' && isLocalDisposition(token.value),
   );
+}
+
+export function taskCollectionGroupReturnsEmpty(
+  group: TaskFilterSpec['group'],
+): boolean {
+  if (!group) return false;
+  if (group.mode === 'effort') {
+    return group.value !== NO_EFFORT_GROUP_LABEL
+      && !Number.isInteger(Number(group.value));
+  }
+  return group.mode === 'project'
+    && group.value !== 'No Project'
+    && !group.value.includes(' › ');
 }
 
 function defaultReadCsv(
@@ -80,6 +104,10 @@ function nonNegativeInteger(value: string | null): number | null {
   if (value === null || value === '') return null;
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function legacyEffort(value: string | null): number | null {
+  return value ? Number.parseInt(value, 10) : null;
 }
 
 function daysAgoIso(days: number, now: Date): string {
@@ -185,6 +213,9 @@ export function buildTaskFilterSpec(
   const ageMax = nonNegativeInteger(searchParams.get('ageMax'));
 
   const tagSlugs = csv('tagSlugs', ANY_NON_EMPTY_VALUE);
+  const effort = legacyEffort(searchParams.get('effort'));
+  const groupMode = searchParams.get('groupBy');
+  const groupValue = searchParams.get('groupValue');
 
   return {
     connectorTypes: resolvedConnectorTypes,
@@ -209,5 +240,12 @@ export function buildTaskFilterSpec(
     today: clock.today,
     weekFromNow: clock.weekFromNow,
     recentCutoff: clock.recentCutoff,
+    search: searchParams.get('search')?.trim() || null,
+    effort,
+    tagIds: csv('tagIds', ANY_NON_EMPTY_VALUE),
+    noProject: searchParams.get('noProject') === 'true',
+    group: groupMode && groupValue && TASK_GROUP_MODES.has(groupMode as TaskGroupMode)
+      ? { mode: groupMode as TaskGroupMode, value: groupValue }
+      : null,
   };
 }

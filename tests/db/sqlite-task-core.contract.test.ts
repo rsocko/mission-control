@@ -50,6 +50,10 @@ beforeAll(async () => {
     persistence,
     async reset() {
       const tables = [
+        schema.eventOutboxDeliveries,
+        schema.eventOutbox,
+        schema.triageActionClaims,
+        schema.triageItems,
         schema.taskIngestSuppressions,
         schema.taskAttachments,
         schema.taskLinkedSources,
@@ -187,6 +191,15 @@ beforeAll(async () => {
       if (rows.length === 0) return;
       await db.insert(schema.taskProjects).values([...rows]);
     },
+    async insertTaskDependencies(rows) {
+      if (rows.length === 0) return;
+      await db.insert(schema.taskDependencies).values(rows.map((row) => ({
+        ...row,
+        type: 'blocks',
+        syncStatus: 'local',
+        createdAt: DEFAULT_NOW,
+      })));
+    },
     async insertSourceLists(rows: SeedSourceList[]) {
       if (rows.length === 0) return;
       await db.insert(schema.sourceLists).values(rows.map((row) => ({
@@ -299,6 +312,18 @@ beforeAll(async () => {
         .all(taskId) as Array<{ projectId: string }>;
       return rows.map((row) => row.projectId).sort();
     },
+    async listTaskDependencyIds(taskId) {
+      const rows = sqlite
+        .prepare('SELECT depends_on_task_id AS dependsOnTaskId FROM task_dependencies WHERE task_id = ?')
+        .all(taskId) as Array<{ dependsOnTaskId: string }>;
+      return rows.map((row) => row.dependsOnTaskId).sort();
+    },
+    async listProjectPhaseIds(taskId) {
+      const rows = sqlite
+        .prepare('SELECT phase_id AS phaseId FROM project_phase_items WHERE task_id = ?')
+        .all(taskId) as Array<{ phaseId: string }>;
+      return rows.map((row) => row.phaseId).sort();
+    },
     async listMyDayTaskIds() {
       const rows = sqlite
         .prepare('SELECT DISTINCT task_id AS taskId FROM my_day_items')
@@ -322,6 +347,24 @@ beforeAll(async () => {
         .prepare('SELECT updated_at AS updatedAt FROM tasks WHERE id = ?')
         .get(taskId) as { updatedAt: string } | undefined;
       return row?.updatedAt ?? null;
+    },
+    async countOutboxEvents(stableKey) {
+      const row = sqlite
+        .prepare('SELECT COUNT(*) AS total FROM event_outbox WHERE stable_key = ?')
+        .get(stableKey) as { total: number };
+      return Number(row.total);
+    },
+    async insertTriageItem(input) {
+      await db.insert(schema.triageItems).values({
+        id: input.id,
+        sourcePlatform: 'web',
+        sourceId: input.id,
+        sourceUrl: input.url,
+        title: input.title,
+        capturedAt: DEFAULT_NOW,
+        ingestedAt: DEFAULT_NOW,
+        status: input.status ?? 'pending',
+      });
     },
     async countMyDayItems() {
       const row = sqlite

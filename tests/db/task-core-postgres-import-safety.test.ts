@@ -147,6 +147,43 @@ function fakePersistence(): TaskCorePersistence {
   };
 
   return {
+    collections: {
+      readTaskCollection: () => record('readTaskCollection', {
+        rows: [],
+        total: 0,
+        stats: {
+          totalOpen: 0, overdue: 0, dueToday: 0, dueThisWeek: 0,
+          noDate: 0, highPriority: 0, assignedToMe: 0, myDay: 0,
+          recentlyCreated: 0, recentlyClosed: 0, waiting: 0, inbox: 0,
+        },
+        sourceCounts: {},
+        availableTags: [],
+        connectorContexts: [],
+        smartScore: null,
+      }),
+    },
+    details: {
+      getTaskDetail: () => record('getTaskDetail', null),
+    },
+    creates: {
+      resolveTaskCreateTarget: () => record(
+        'resolveTaskCreateTarget',
+        { kind: 'connector-not-found' as const },
+      ),
+      createTask: () => record('createTask', { kind: 'connector-not-found' as const }),
+    },
+    mutations: {
+      getTaskWriteContext: () => record('getTaskWriteContext', null),
+      mutateTask: () => record('mutateTask', { kind: 'not-found' as const }),
+    },
+    removals: {
+      getTaskRemovalContext: () => record('getTaskRemovalContext', null),
+      applyTaskRemoval: () => record('applyTaskRemoval', { kind: 'not-found' as const }),
+      finalizeRemoteTaskRemoval: () => record(
+        'finalizeRemoteTaskRemoval',
+        { kind: 'not-found' as const },
+      ),
+    },
     taskReads: {
       getAttachmentReadContext: () => record('getAttachmentReadContext', {
         task: {

@@ -70,6 +70,10 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
     async reset() {
       await client.query(`
         TRUNCATE TABLE
+          event_outbox_deliveries,
+          event_outbox,
+          triage_action_claims,
+          triage_items,
           task_ingest_suppressions,
           task_attachments,
           task_linked_sources,
@@ -175,6 +179,16 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         await client.query(
           'INSERT INTO task_projects (task_id, project_id) VALUES ($1,$2)',
           [row.taskId, row.projectId],
+        );
+      }
+    },
+    async insertTaskDependencies(rows) {
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO task_dependencies (
+            id, task_id, depends_on_task_id, type, sync_status, created_at
+          ) VALUES ($1,$2,$3,'blocks','local',$4)`,
+          [row.id, row.taskId, row.dependsOnTaskId, DEFAULT_NOW],
         );
       }
     },
@@ -392,6 +406,20 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
       );
       return result.rows.map((row) => row.project_id);
     },
+    async listTaskDependencyIds(taskId) {
+      const result = await client.query<{ depends_on_task_id: string }>(
+        'SELECT depends_on_task_id FROM task_dependencies WHERE task_id = $1 ORDER BY depends_on_task_id',
+        [taskId],
+      );
+      return result.rows.map((row) => row.depends_on_task_id);
+    },
+    async listProjectPhaseIds(taskId) {
+      const result = await client.query<{ phase_id: string }>(
+        'SELECT phase_id FROM project_phase_items WHERE task_id = $1 ORDER BY phase_id',
+        [taskId],
+      );
+      return result.rows.map((row) => row.phase_id);
+    },
     async listMyDayTaskIds() {
       const result = await client.query<{ task_id: string }>(
         'SELECT DISTINCT task_id FROM my_day_items ORDER BY task_id',
@@ -419,6 +447,21 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         [taskId],
       );
       return result.rows[0]?.updated_at ?? null;
+    },
+    async countOutboxEvents(stableKey) {
+      const result = await client.query<{ count: string }>(
+        'SELECT COUNT(*)::text AS count FROM event_outbox WHERE stable_key = $1',
+        [stableKey],
+      );
+      return Number(result.rows[0]?.count ?? 0);
+    },
+    async insertTriageItem(input) {
+      await client.query(
+        `INSERT INTO triage_items (
+          id, source_platform, source_id, source_url, title, captured_at, ingested_at, status
+        ) VALUES ($1, 'web', $1, $2, $3, $4, $4, $5)`,
+        [input.id, input.url, input.title, DEFAULT_NOW, input.status ?? 'pending'],
+      );
     },
     async countMyDayItems() {
       const result = await client.query<{ count: string }>(

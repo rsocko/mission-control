@@ -1025,6 +1025,26 @@
       "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the post-L06b worktree; entry-set diff shows zero additions to any taint set and zero Tier A -> Tier B reclassifications attributable to L04. L06b resolved the one recorded foreign-layer blocker without changing L04's owned migration accounting."
     },
     {
+      "layer": "L09",
+      "title": "Houston finance-assistant PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 313,
+        "to": 310,
+        "delta": -3
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/ai/finance-approval-store.ts",
+        "src/lib/ai/tools/finance-tools.ts",
+        "src/lib/finance/houston-tools.ts"
+      ],
+      "removedTierARoutes": [],
+      "newlyCleanRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact L09 recomputation removes only the three owned Houston finance-assistant persistence modules from taintedLibA, leaves route tiers unchanged, and reduces total migration units from 313 to 310."
+    },
+    {
       "layer": "L10",
       "title": "AI provider configuration PostgreSQL web/API parity",
       "totalMigrationUnits": {

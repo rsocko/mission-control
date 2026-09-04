@@ -24,6 +24,7 @@ const OWNED_TEST_PATHS = [
   'tests/architecture/task-core-taint-decrement.test.ts',
   'tests/architecture/transfer-identity-taint-decrement.test.ts',
   'tests/architecture/web-persistence-baseline.json',
+  'tests/contracts/finance-assistant-persistence.contract.ts',
   'tests/contracts/settings-repository-batch.contract.ts',
   'tests/db/sqlite-settings-repository-batch.test.ts',
   'tests/db/postgres-settings-repository-batch.integration.test.ts',
@@ -51,9 +52,9 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L10 AI provider configuration parity', () => {
-  it('pins the exact approved 21-path ownership boundary', () => {
+  it('pins the exact approved 22-path ownership boundary', () => {
     expect(OWNED_PRODUCTION_PATHS).toHaveLength(11);
-    expect(OWNED_TEST_PATHS).toHaveLength(10);
+    expect(OWNED_TEST_PATHS).toHaveLength(11);
     for (const path of [...OWNED_PRODUCTION_PATHS, ...OWNED_TEST_PATHS]) {
       expect(existsSync(join(process.cwd(), path)), `${path} must exist`).toBe(true);
     }

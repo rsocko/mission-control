@@ -66,8 +66,8 @@ beforeEach(() => {
 });
 
 afterAll(async () => {
-  await (await import('@/db/runtime')).shutdownRuntimeDatabase();
   sqlite.close();
+  await (await import('@/db/runtime')).shutdownRuntimeDatabase();
   delete process.env.MC_DB_PATH;
   delete process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON;
 });

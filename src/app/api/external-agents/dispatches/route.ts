@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import type { AgentDispatchStatus } from '@/db/schema';
+import type { AgentDispatchStatus } from '@/lib/external-agents/contracts';
 import {
   cleanupExpiredDispatches,
   expireDispatches,

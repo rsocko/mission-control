@@ -18,6 +18,8 @@ const processRegistryKeys = [
   'mission-control.sync-control-state-runtime-registry',
   'mission-control.connector-maintenance-lock-runtime-registry',
   'mission-control.sync-operator-control-runtime-registry',
+  'mission-control.runtime-health-persistence-registry',
+  'mission-control.runtime-telemetry-persistence-registry',
 ];
 
 const preserveAcrossModuleResetKey = Symbol.for(

@@ -34,6 +34,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     for (const id of connectorIds) {
       await backend.context.pool.query('DELETE FROM sync_log WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM sync_jobs WHERE connector_id = $1', [id]);
+      await backend.context.pool.query('DELETE FROM sync_schedules WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_operation_leases WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_configs WHERE id = $1', [id]);
     }
@@ -56,6 +57,25 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     );
     connectorIds.add(id);
     return id;
+  }
+
+  async function waitForAdvisoryLockWaiter(): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await backend.context.pool.query<{ waiting: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+           FROM pg_locks AS locks
+           JOIN pg_stat_activity AS activity ON activity.pid = locks.pid
+           WHERE locks.locktype = 'advisory'
+             AND locks.granted = false
+             AND activity.application_name = 'mission-control-sync-job-repository-test'
+         ) AS waiting`,
+      );
+      if (result.rows[0]?.waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('Timed out waiting for the scheduler advisory lock');
   }
 
   it('enqueues a job and claims it exactly once under concurrent claim attempts', async () => {
@@ -83,7 +103,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     const claimed = await repository.claimNext('worker-complete', 60_000);
     expect(claimed?.id).toBe(job.id);
 
-    await repository.complete(job.id, 'worker-complete', {
+    await repository.complete(job.id, 'worker-complete', claimed!.attempt, {
       connectorId,
       success: true,
       tasksAdded: 1,
@@ -103,7 +123,52 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     const nextJob = await repository.enqueue(connectorId);
     const nextClaim = await repository.claimNext('worker-complete-2', 60_000);
     expect(nextClaim?.id).toBe(nextJob.id);
-    await repository.release(nextJob.id, 'worker-complete-2', 'test cleanup');
+    await repository.release(
+      nextJob.id,
+      'worker-complete-2',
+      nextClaim!.attempt,
+      'test cleanup',
+    );
+  });
+
+  it('fences a stale attempt when a retry is reclaimed by the same owner', async () => {
+    const connectorId = await createConnector();
+    const queued = await repository.enqueue(connectorId, { maxAttempts: 2 });
+    const first = await repository.claimNext('worker-retry', 60_000);
+    expect(first?.id).toBe(queued.id);
+    await expect(repository.fail(first!, 'worker-retry', 'retry')).resolves.toBe('queued');
+    await backend.context.pool.query(
+      `UPDATE sync_jobs SET available_at = now() - interval '1 second' WHERE id = $1`,
+      [queued.id],
+    );
+    const second = await repository.claimNext('worker-retry', 60_000);
+    expect(second?.attempt).toBe(first!.attempt + 1);
+
+    await expect(repository.renewLease(
+      first!.id,
+      'worker-retry',
+      first!.attempt,
+      60_000,
+    )).resolves.toBe(false);
+    await expect(repository.complete(first!.id, 'worker-retry', first!.attempt, {
+      connectorId,
+      success: true,
+      tasksAdded: 0,
+      tasksUpdated: 0,
+      tasksRemoved: 0,
+      notificationsAdded: 0,
+      errors: [],
+      syncedAt: new Date().toISOString(),
+    })).rejects.toThrow(/ownership was lost/);
+    await expect(repository.fail(first!, 'worker-retry', 'stale failure'))
+      .rejects.toThrow(/ownership was lost/);
+    await expect(repository.release(
+      first!.id,
+      'worker-retry',
+      first!.attempt,
+      'stale release',
+    )).resolves.toBe(false);
+    expect((await repository.get(second!.id))?.status).toBe('running');
   });
 
     it('atomically links the exact owned log while completing and releasing', async () => {
@@ -194,7 +259,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
         trigger: null,
         attempt: null,
       });
-      await repository.release(job.id, 'worker-owner', 'test cleanup');
+      await repository.release(job.id, 'worker-owner', claimed!.attempt, 'test cleanup');
     });
 
     it('does not publish a provisional success after the job lease expires', async () => {
@@ -282,6 +347,58 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     const stillQueued = await repository.get(excludedJob.id);
     expect(stillQueued?.status).toBe('queued');
 
-    await repository.release(claimableJob.id, 'worker-exclusion', 'test cleanup');
+    await repository.release(
+      claimableJob.id,
+      'worker-exclusion',
+      claimed!.attempt,
+      'test cleanup',
+    );
+  });
+
+  it('takes the connector advisory lock before the due schedule row lock', async () => {
+    const connectorId = await createConnector();
+    await repository.registerSchedule(connectorId, 5);
+    await backend.context.pool.query(
+      `UPDATE sync_schedules
+       SET next_due_at = now() - interval '1 minute'
+       WHERE connector_id = $1`,
+      [connectorId],
+    );
+    const advisoryBlocker = await backend.context.pool.connect();
+    const rowProbe = await backend.context.pool.connect();
+    let enqueuePromise: Promise<unknown> | undefined;
+    let blockerOpen = false;
+    let probeOpen = false;
+
+    try {
+      await advisoryBlocker.query('BEGIN');
+      blockerOpen = true;
+      await advisoryBlocker.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [connectorId],
+      );
+
+      enqueuePromise = repository.enqueueDueSchedules(new Date().toISOString());
+      await waitForAdvisoryLockWaiter();
+
+      await rowProbe.query('BEGIN');
+      probeOpen = true;
+      await rowProbe.query(
+        'SELECT 1 FROM sync_schedules WHERE connector_id = $1 FOR UPDATE NOWAIT',
+        [connectorId],
+      );
+      await rowProbe.query('ROLLBACK');
+      probeOpen = false;
+
+      await advisoryBlocker.query('COMMIT');
+      blockerOpen = false;
+      await expect(enqueuePromise).resolves.toHaveLength(1);
+    } finally {
+      if (probeOpen) await rowProbe.query('ROLLBACK');
+      if (blockerOpen) await advisoryBlocker.query('ROLLBACK');
+      advisoryBlocker.release();
+      rowProbe.release();
+      await enqueuePromise;
+    }
   });
 });

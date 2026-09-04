@@ -3,6 +3,11 @@ import type { TriagePersistenceRepositories } from '@/db/persistence/triage-repo
 import type { ConnectorRuntimeRegistry } from '@/lib/connectors/registry-runtime';
 import type { LegacySearchIndexingService } from '@/lib/search/indexing-service';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
+import type { SyncJobRepository } from '@/lib/sync/job-repository';
+import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
+import type { SyncControlStateRepository } from '@/lib/sync/control-state';
+import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
+import type { SyncOperatorControlRepository } from '@/lib/sync/operator-control';
 import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 afterEach(() => {
@@ -132,5 +137,42 @@ describe('process-wide runtime registries', () => {
     const secondIndexing = await import('@/lib/search/indexing-service');
 
     expect(secondIndexing.getLegacySearchIndexingService()).toBe(indexingService);
+  });
+
+  it('shares L03b sync registries and preserves newer state from stale cleanup', async () => {
+    const firstJobs = await import('@/lib/sync/job-runtime');
+    const firstLeases = await import('@/lib/sync/connector-lock-runtime');
+    const firstControl = await import('@/lib/sync/control-state');
+    const firstMaintenance = await import('@/lib/sync/maintenance-lock');
+    const firstOperator = await import('@/lib/sync/operator-control');
+    const staleJobs = {} as SyncJobRepository;
+    const jobs = {} as SyncJobRepository;
+    const leases = {} as ConnectorOperationLeaseRepository;
+    const control = {} as SyncControlStateRepository;
+    const maintenance = {} as ConnectorMaintenanceLockRepository;
+    const getStatus = vi.fn(async () => ({ marker: 'operator' }));
+    const operator = { getStatus } as unknown as SyncOperatorControlRepository;
+    firstJobs.registerSyncJobRepository(staleJobs);
+    firstJobs.clearSyncJobRepository(staleJobs);
+    firstJobs.registerSyncJobRepository(jobs);
+    firstLeases.registerConnectorOperationLeaseRepository(leases);
+    firstControl.registerSyncControlStateRepository(control);
+    firstMaintenance.registerConnectorMaintenanceLockRepository(maintenance);
+    firstOperator.registerSyncOperatorControlRepository(operator);
+
+    vi.resetModules();
+    const secondJobs = await import('@/lib/sync/job-runtime');
+    const secondLeases = await import('@/lib/sync/connector-lock-runtime');
+    const secondControl = await import('@/lib/sync/control-state');
+    const secondMaintenance = await import('@/lib/sync/maintenance-lock');
+    const secondOperator = await import('@/lib/sync/operator-control');
+    secondJobs.clearSyncJobRepository(staleJobs);
+
+    expect(await secondJobs.getSyncJobRepository()).toBe(jobs);
+    expect(await secondLeases.getConnectorOperationLeaseRepository()).toBe(leases);
+    expect(await secondControl.getSyncControlStateRepository()).toBe(control);
+    expect(await secondMaintenance.getConnectorMaintenanceLockRepository()).toBe(maintenance);
+    await secondOperator.getFinanceSyncControlStatus('connector-1');
+    expect(getStatus).toHaveBeenCalledWith('connector-1');
   });
 });

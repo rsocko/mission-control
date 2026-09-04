@@ -65,7 +65,8 @@ afterAll(() => {
 describe.sequential('finance insight durable continuation', () => {
   it('deduplicates delayed work and survives worker restart under the connector lease', async () => {
     const active = queue.enqueueSyncJob('finance-continuation');
-    expect(queue.claimNextSyncJob('worker-before-restart')?.id).toBe(active.id);
+    const claimed = queue.claimNextSyncJob('worker-before-restart')!;
+    expect(claimed.id).toBe(active.id);
     const now = new Date();
 
     const first = await enqueueFinanceInsightContinuation({
@@ -89,7 +90,12 @@ describe.sequential('finance insight durable continuation', () => {
     });
     expect(queue.claimNextSyncJob('competing-worker')).toBeNull();
 
-    queue.completeSyncJob(active.id, 'worker-before-restart', success());
+    queue.completeSyncJob(
+      claimed.id,
+      'worker-before-restart',
+      claimed.attempt,
+      success(),
+    );
     expect(queue.claimNextSyncJob('worker-after-restart')).toBeNull();
     database.sqlite.prepare(`
       UPDATE sync_jobs SET available_at = ? WHERE id = ?

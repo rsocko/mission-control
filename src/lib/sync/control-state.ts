@@ -1,30 +1,64 @@
 import 'server-only';
 
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import type { SyncJobSource } from './job-repository';
 
 export { ConnectorSyncControlError } from './control-state-error';
 
-/**
- * Backend-selected, async equivalent of `isConnectorSyncQuarantined`. SQLite
- * delegates to the unchanged synchronous check above; PostgreSQL queries
- * `connector_sync_controls` directly via the registered pool (dynamically
- * imported so SQLite-only callers never pull in the PostgreSQL schema/driver
- * graph).
- */
-export async function isConnectorSyncQuarantinedAsync(connectorId: string): Promise<boolean> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, { isConnectorSyncQuarantinedInPostgres }] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/sync/job-repository'),
-    ]);
-    return isConnectorSyncQuarantinedInPostgres(
-      getPostgresPersistenceBackend().context.pool,
-      connectorId,
-    );
+export interface SyncControlStateRepository {
+  isQuarantined(connectorId: string): Promise<boolean>;
+  assertEnqueueAllowed(
+    connectorId: string,
+    source: SyncJobSource,
+    operatorCanaryRunId?: string,
+  ): Promise<void>;
+}
+
+interface SyncControlStateRuntimeRegistry {
+  repository: SyncControlStateRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.sync-control-state-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): SyncControlStateRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
+
+export function registerSyncControlStateRepository(next: SyncControlStateRepository): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = registry().repository;
+  if (selected && selected !== next) {
+    throw new Error('Sync control-state repository is already selected');
   }
-  const { isConnectorSyncQuarantined } = await import('./sqlite-control-state');
-  return isConnectorSyncQuarantined(connectorId);
+  registry().repository = next;
+}
+
+export function clearSyncControlStateRepository(
+  expectedRepository?: SyncControlStateRepository,
+): void {
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
+}
+
+export async function getSyncControlStateRepository(): Promise<SyncControlStateRepository> {
+  assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
+  if (!repository) {
+    throw new Error('Sync control-state repository has not been registered');
+  }
+  return repository;
+}
+
+export async function isConnectorSyncQuarantinedAsync(connectorId: string): Promise<boolean> {
+  return (await getSyncControlStateRepository()).isQuarantined(connectorId);
 }
 
 /**
@@ -41,19 +75,9 @@ export async function assertConnectorSyncEnqueueAllowedAsync(
   source: SyncJobSource,
   operatorCanaryRunId?: string,
 ): Promise<void> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, { assertConnectorSyncEnqueueAllowedInPostgres }] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/sync/job-repository'),
-    ]);
-    await assertConnectorSyncEnqueueAllowedInPostgres(
-      getPostgresPersistenceBackend().context.pool,
-      connectorId,
-      source,
-      operatorCanaryRunId,
-    );
-    return;
-  }
-  const { assertConnectorSyncEnqueueAllowed } = await import('./sqlite-control-state');
-  assertConnectorSyncEnqueueAllowed(connectorId, source, operatorCanaryRunId);
+  await (await getSyncControlStateRepository()).assertEnqueueAllowed(
+    connectorId,
+    source,
+    operatorCanaryRunId,
+  );
 }

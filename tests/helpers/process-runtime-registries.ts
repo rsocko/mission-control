@@ -13,6 +13,11 @@ const processRegistryKeys = [
   'mission-control.legacy-search-indexing-registry',
   'mission-control.task-core-persistence-registry',
   'mission-control.task-core-persistence-registry.v2',
+  'mission-control.sync-job-runtime-registry',
+  'mission-control.connector-operation-lease-runtime-registry',
+  'mission-control.sync-control-state-runtime-registry',
+  'mission-control.connector-maintenance-lock-runtime-registry',
+  'mission-control.sync-operator-control-runtime-registry',
 ];
 
 export function resetProcessRuntimeRegistries(): void {

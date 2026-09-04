@@ -1,4 +1,8 @@
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 export interface ConnectorMaintenanceLock {
   connectorInstanceId: string;
@@ -9,28 +13,57 @@ export interface ConnectorMaintenanceLock {
   updatedAt: string;
 }
 
-/**
- * Backend-selected, async equivalent of `assertConnectorMaintenanceUnlocked`.
- * SQLite delegates to the unchanged synchronous check above; PostgreSQL
- * queries `connector_maintenance_locks` directly via the registered pool
- * (dynamically imported so SQLite-only callers never pull in the PostgreSQL
- * schema/driver graph).
- */
+export interface ConnectorMaintenanceLockRepository {
+  get(connectorInstanceId: string): Promise<ConnectorMaintenanceLock | null>;
+  assertUnlocked(connectorInstanceId: string): Promise<void>;
+}
+
+interface ConnectorMaintenanceLockRuntimeRegistry {
+  repository: ConnectorMaintenanceLockRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.connector-maintenance-lock-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): ConnectorMaintenanceLockRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
+
+export function registerConnectorMaintenanceLockRepository(
+  next: ConnectorMaintenanceLockRepository,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = registry().repository;
+  if (selected && selected !== next) {
+    throw new Error('Connector maintenance-lock repository is already selected');
+  }
+  registry().repository = next;
+}
+
+export function clearConnectorMaintenanceLockRepository(
+  expectedRepository?: ConnectorMaintenanceLockRepository,
+): void {
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
+}
+
+export async function getConnectorMaintenanceLockRepository():
+Promise<ConnectorMaintenanceLockRepository> {
+  assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
+  if (!repository) {
+    throw new Error('Connector maintenance-lock repository has not been registered');
+  }
+  return repository;
+}
+
 export async function assertConnectorMaintenanceUnlockedAsync(
   connectorInstanceId: string,
 ): Promise<void> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const { getPostgresPersistenceBackend } = await import('@/db/runtime');
-    const result = await getPostgresPersistenceBackend().context.pool.query<{ operationId: string }>(
-      `SELECT operation_id AS "operationId" FROM connector_maintenance_locks WHERE connector_instance_id = $1`,
-      [connectorInstanceId],
-    );
-    const lock = result.rows[0];
-    if (lock) {
-      throw new Error(`Connector is locked for maintenance by operation ${lock.operationId}`);
-    }
-    return;
-  }
-  const { assertConnectorMaintenanceUnlocked } = await import('./sqlite-maintenance-lock');
-  assertConnectorMaintenanceUnlocked(connectorInstanceId);
+  await (await getConnectorMaintenanceLockRepository()).assertUnlocked(
+    connectorInstanceId,
+  );
 }

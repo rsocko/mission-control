@@ -1,6 +1,10 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import type {
   ConnectorOperationLeaseRepository,
   ConnectorOperationType,
@@ -27,15 +31,46 @@ export {
   getConnectorOperationLeaseMs,
 } from './connector-lock-values';
 
-export async function getConnectorOperationLeaseRepository(): Promise<ConnectorOperationLeaseRepository> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const { getPostgresConnectorOperationLeaseRepository } = await import('@/db/runtime');
-    return getPostgresConnectorOperationLeaseRepository();
+interface ConnectorOperationLeaseRuntimeRegistry {
+  repository: ConnectorOperationLeaseRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.connector-operation-lease-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): ConnectorOperationLeaseRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
+
+export function registerConnectorOperationLeaseRepository(
+  next: ConnectorOperationLeaseRepository,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = registry().repository;
+  if (selected && selected !== next) {
+    throw new Error('Connector operation lease repository is already selected');
   }
-  const { sqliteConnectorOperationLeaseRepository } = await import(
-    './sqlite-connector-operation-lease-repository'
-  );
-  return sqliteConnectorOperationLeaseRepository;
+  registry().repository = next;
+}
+
+export function clearConnectorOperationLeaseRepository(
+  expectedRepository?: ConnectorOperationLeaseRepository,
+): void {
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
+}
+
+export async function getConnectorOperationLeaseRepository():
+Promise<ConnectorOperationLeaseRepository> {
+  assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
+  if (!repository) {
+    throw new Error('Connector operation lease repository has not been registered');
+  }
+  return repository;
 }
 
 async function runWithConnectorOperationLeaseViaRepository<T>(
@@ -103,16 +138,10 @@ export async function runWithConnectorOperationLease<T>(
   operationType: ConnectorOperationType,
   operation: () => Promise<T>,
 ): Promise<T> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    return runWithConnectorOperationLeaseViaRepository(
-      await getConnectorOperationLeaseRepository(),
-      connectorId,
-      operationType,
-      operation,
-    );
-  }
-  const { runWithConnectorOperationLease: runWithSQLiteConnectorOperationLease } = await import(
-    './sqlite-connector-operation-lease-repository'
+  return runWithConnectorOperationLeaseViaRepository(
+    await getConnectorOperationLeaseRepository(),
+    connectorId,
+    operationType,
+    operation,
   );
-  return runWithSQLiteConnectorOperationLease(connectorId, operationType, operation);
 }

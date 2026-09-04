@@ -945,7 +945,12 @@ describePostgres('PostgreSQL GitHub worker queue-execution smoke', () => {
       [syncRunId],
     );
     expect(log.rows[0]).toEqual({ success: false, jobId: null });
-    await jobs.release(job.id, `worker-owner-${ids.connectorId}`, 'test cleanup');
+    await jobs.release(
+      job.id,
+      `worker-owner-${ids.connectorId}`,
+      claimed!.attempt,
+      'test cleanup',
+    );
   });
 
   it('does not commit a write lease when its write cycle is no longer running', async () => {

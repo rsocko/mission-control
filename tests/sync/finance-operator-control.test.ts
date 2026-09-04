@@ -66,6 +66,10 @@ function nextMessage(child: ChildProcess): Promise<Record<string, unknown>> {
 
 beforeAll(async () => {
   ({ sqlite } = await import('@/db'));
+  const { registerSqliteSyncInfrastructure } = await import(
+    '@/db/persistence/sqlite-sync-runtime'
+  );
+  registerSqliteSyncInfrastructure();
   queue = await import('@/lib/sync/job-queue');
   operator = await import('@/lib/sync/operator-control');
 });
@@ -137,11 +141,11 @@ describe.sequential('finance operator sync control', () => {
     `).get(connectorId)).toEqual({ count: 0 });
   }, 15_000);
 
-  it('atomically cancels queued work, removes schedules, and rejects automatic enqueue', () => {
+  it('atomically cancels queued work, removes schedules, and rejects automatic enqueue', async () => {
     queue.registerSyncSchedule(connectorId, 240);
     queue.enqueueSyncJob(connectorId, { source: 'schedule' });
 
-    const result = operator.quarantineFinanceConnectorSync({
+    const result = await operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('quarantine'),
@@ -158,31 +162,31 @@ describe.sequential('finance operator sync control', () => {
     expect(queue.claimNextSyncJob('worker-a')).toBeNull();
   });
 
-  it('rejects quarantine while a job is running', () => {
+  it('rejects quarantine while a job is running', async () => {
     queue.enqueueSyncJob(connectorId);
     expect(queue.claimNextSyncJob('worker-a')).not.toBeNull();
-    expect(() => operator.quarantineFinanceConnectorSync({
+    await expect(operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'parent-admin',
       idempotencyKey: key('running'),
-    })).toThrowError(expect.objectContaining({ code: 'sync_quarantine_active_job' }));
+    })).rejects.toThrowError(expect.objectContaining({ code: 'sync_quarantine_active_job' }));
   });
 
-  it('permits exactly one idempotent canary while the connector stays disabled', () => {
+  it('permits exactly one idempotent canary while the connector stays disabled', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    operator.quarantineFinanceConnectorSync({
+    await operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('quarantine-canary'),
     });
 
-    const first = operator.enqueueFinanceOperatorCanary({
+    const first = await operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('canary'),
     });
-    const replay = operator.enqueueFinanceOperatorCanary({
+    const replay = await operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('canary'),
@@ -194,12 +198,12 @@ describe.sequential('finance operator sync control', () => {
       maxAttempts: 1,
     });
     expect(replay).toMatchObject({ replayed: true, job: { id: first.job.id } });
-    expect(() => operator.enqueueFinanceOperatorCanary({
+    await expect(operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('second-canary'),
-    })).toThrowError(expect.objectContaining({ code: 'sync_canary_already_invoked' }));
-    expect(operator.getFinanceSyncControlStatus(connectorId)).toMatchObject({
+    })).rejects.toThrowError(expect.objectContaining({ code: 'sync_canary_already_invoked' }));
+    expect(await operator.getFinanceSyncControlStatus(connectorId)).toMatchObject({
       connector: { enabled: false },
       canary: { status: 'queued' },
     });
@@ -207,14 +211,14 @@ describe.sequential('finance operator sync control', () => {
     vi.unstubAllGlobals();
   });
 
-  it('keeps quarantine after failure and releases only after a successful canary', () => {
-    operator.quarantineFinanceConnectorSync({
+  it('keeps quarantine after failure and releases only after a successful canary', async () => {
+    await operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('quarantine-failure'),
     });
 
-    const failed = operator.enqueueFinanceOperatorCanary({
+    const failed = await operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('failure-canary'),
@@ -222,33 +226,35 @@ describe.sequential('finance operator sync control', () => {
     const claimed = queue.claimNextSyncJob('worker-failure');
     expect(claimed?.id).toBe(failed.job.id);
     expect(queue.failSyncJob(claimed!, 'worker-failure', 'invented failure')).toBe('failed');
-    expect(() => operator.releaseFinanceConnectorQuarantine({
+    await expect(operator.releaseFinanceConnectorQuarantine({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('release-failed'),
-    })).toThrowError(expect.objectContaining({ code: 'sync_canary_not_successful' }));
-    expect(operator.getFinanceSyncControlStatus(connectorId).scheduler.state).toBe('quarantined');
+    })).rejects.toThrowError(expect.objectContaining({ code: 'sync_canary_not_successful' }));
+    expect((await operator.getFinanceSyncControlStatus(connectorId)).scheduler.state)
+      .toBe('quarantined');
 
-    operator.rollbackFinanceOperatorCanary({
+    await operator.rollbackFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('rollback-failed'),
     });
-    expect(operator.getFinanceSyncControlStatus(connectorId).scheduler.state).toBe('quarantined');
+    expect((await operator.getFinanceSyncControlStatus(connectorId)).scheduler.state)
+      .toBe('quarantined');
   });
 
-  it('cancels queued canaries on rollback and requests cancellation for running canaries', () => {
-    operator.quarantineFinanceConnectorSync({
+  it('cancels queued canaries on rollback and requests cancellation for running canaries', async () => {
+    await operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('quarantine-rollback'),
     });
-    const queued = operator.enqueueFinanceOperatorCanary({
+    const queued = await operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('queued-rollback'),
     });
-    const cancelled = operator.rollbackFinanceOperatorCanary({
+    const cancelled = await operator.rollbackFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('rollback-queued'),
@@ -256,13 +262,13 @@ describe.sequential('finance operator sync control', () => {
     expect(cancelled.cancelledQueuedCount).toBe(1);
     expect(queue.getSyncJob(queued.job.id)?.status).toBe('cancelled');
 
-    const running = operator.enqueueFinanceOperatorCanary({
+    const running = await operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('running-rollback'),
     });
     expect(queue.claimNextSyncJob('worker-rollback')?.id).toBe(running.job.id);
-    const requested = operator.rollbackFinanceOperatorCanary({
+    const requested = await operator.rollbackFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('rollback-running'),
@@ -271,22 +277,22 @@ describe.sequential('finance operator sync control', () => {
     expect(queue.getSyncJob(running.job.id)?.cancelRequestedAt).not.toBeNull();
   });
 
-  it('restores the poll schedule only when a successful connector is enabled', () => {
-    operator.quarantineFinanceConnectorSync({
+  it('restores the poll schedule only when a successful connector is enabled', async () => {
+    await operator.quarantineFinanceConnectorSync({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('quarantine-release'),
     });
-    const canary = operator.enqueueFinanceOperatorCanary({
+    const canary = await operator.enqueueFinanceOperatorCanary({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('success-canary'),
     });
     const claimed = queue.claimNextSyncJob('worker-success')!;
-    queue.completeSyncJob(claimed.id, 'worker-success', successfulResult());
+    queue.completeSyncJob(claimed.id, 'worker-success', claimed.attempt, successfulResult());
     sqlite.prepare(`UPDATE connector_configs SET enabled = 1 WHERE id = ?`).run(connectorId);
 
-    expect(operator.releaseFinanceConnectorQuarantine({
+    expect(await operator.releaseFinanceConnectorQuarantine({
       connectorId,
       actorType: 'service',
       idempotencyKey: key('release-success'),

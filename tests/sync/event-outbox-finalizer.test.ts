@@ -79,6 +79,10 @@ function deliveryRows() {
 
 beforeAll(async () => {
   database = await import('@/db');
+  const { registerSqliteSyncInfrastructure } = await import(
+    '@/db/persistence/sqlite-sync-runtime'
+  );
+  registerSqliteSyncInfrastructure();
   repository = await import('@/lib/sync/sqlite-job-repository');
   terminalEvents = await import('@/lib/sync/terminal-events');
   database.sqlite.prepare('SELECT 1').get();

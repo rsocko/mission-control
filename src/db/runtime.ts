@@ -1,6 +1,9 @@
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
+import type { SyncControlStateRepository } from '@/lib/sync/control-state';
+import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
+import type { SyncOperatorControlRepository } from '@/lib/sync/operator-control';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
 import type { SemanticIndexRepository } from '@/lib/semantic-index/contracts';
@@ -10,6 +13,26 @@ import {
   clearKeywordSearchRepository,
   registerKeywordSearchRepository,
 } from '@/lib/search/keyword-runtime';
+import {
+  clearSyncControlStateRepository,
+  registerSyncControlStateRepository,
+} from '@/lib/sync/control-state';
+import {
+  clearConnectorOperationLeaseRepository,
+  registerConnectorOperationLeaseRepository,
+} from '@/lib/sync/connector-lock-runtime';
+import {
+  clearSyncJobRepository,
+  registerSyncJobRepository as registerSelectedSyncJobRepository,
+} from '@/lib/sync/job-runtime';
+import {
+  clearConnectorMaintenanceLockRepository,
+  registerConnectorMaintenanceLockRepository,
+} from '@/lib/sync/maintenance-lock';
+import {
+  clearSyncOperatorControlRepository,
+  registerSyncOperatorControlRepository,
+} from '@/lib/sync/operator-control';
 import {
   clearAIEnrichmentService,
   registerAIEnrichmentService,
@@ -63,6 +86,9 @@ import {
 } from './postgres/repositories';
 import { createPostgresTaskCorePersistence } from './postgres/repositories/task-core-repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
+import { createPostgresSyncControlStateRepository } from './postgres/sync/control-state-repository';
+import { createPostgresConnectorMaintenanceLockRepository } from './postgres/sync/maintenance-lock-repository';
+import { createPostgresSyncOperatorControlRepository } from './postgres/sync/operator-control-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
 import { createPostgresAIEnrichmentService } from './postgres/sync/notification-enrichment-service';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
@@ -77,6 +103,9 @@ interface DatabaseRuntimeRegistry {
   workerRepositories: WorkerPersistenceRepositories | null;
   syncJobRepository: SyncJobRepository | null;
   connectorOperationLeaseRepository: ConnectorOperationLeaseRepository | null;
+  syncControlStateRepository: SyncControlStateRepository | null;
+  connectorMaintenanceLockRepository: ConnectorMaintenanceLockRepository | null;
+  syncOperatorControlRepository: SyncOperatorControlRepository | null;
   keywordSearchRepository: KeywordSearchRepository | null;
   semanticIndexRepository: SemanticIndexRepository | null;
   semanticSourcePort: SemanticSourcePort | null;
@@ -113,6 +142,9 @@ function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
       workerRepositories: null,
       syncJobRepository: null,
       connectorOperationLeaseRepository: null,
+      syncControlStateRepository: null,
+      connectorMaintenanceLockRepository: null,
+      syncOperatorControlRepository: null,
       keywordSearchRepository: null,
       semanticIndexRepository: null,
       semanticSourcePort: null,
@@ -190,6 +222,21 @@ function clearModeRouteServiceDelegates(): void {
 
 function clearPostgresRuntimeComposition(): void {
   const runtime = databaseRuntimeRegistry();
+  if (runtime.syncOperatorControlRepository) {
+    clearSyncOperatorControlRepository(runtime.syncOperatorControlRepository);
+  }
+  if (runtime.connectorMaintenanceLockRepository) {
+    clearConnectorMaintenanceLockRepository(runtime.connectorMaintenanceLockRepository);
+  }
+  if (runtime.syncControlStateRepository) {
+    clearSyncControlStateRepository(runtime.syncControlStateRepository);
+  }
+  if (runtime.connectorOperationLeaseRepository) {
+    clearConnectorOperationLeaseRepository(runtime.connectorOperationLeaseRepository);
+  }
+  if (runtime.syncJobRepository) {
+    clearSyncJobRepository(runtime.syncJobRepository);
+  }
   if (runtime.taskCorePersistence) {
     clearSelectedTaskCorePersistence(runtime.taskCorePersistence);
   }
@@ -216,6 +263,9 @@ function clearPostgresRuntimeComposition(): void {
   runtime.workerRepositories = null;
   runtime.syncJobRepository = null;
   runtime.connectorOperationLeaseRepository = null;
+  runtime.syncControlStateRepository = null;
+  runtime.connectorMaintenanceLockRepository = null;
+  runtime.syncOperatorControlRepository = null;
   runtime.keywordSearchRepository = null;
   runtime.semanticIndexRepository = null;
   runtime.semanticSourcePort = null;
@@ -482,6 +532,11 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
       sqliteRuntime.shutdownSqlitePersistenceComposition;
     await sqliteRuntime.initializeSqlitePersistenceComposition();
     if (!isCurrentGeneration()) return;
+    const { registerSqliteSyncInfrastructure } = await import(
+      './persistence/sqlite-sync-runtime'
+    );
+    if (!isCurrentGeneration()) return;
+    registerSqliteSyncInfrastructure();
     await registerStableRuntimeServices();
     const [
       { createSqliteDemoSeedCommandService },
@@ -514,8 +569,19 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
     runtime.repositories,
   );
   registerWorkerPersistenceRepositories(stableWorkerPersistenceFacade());
-  runtime.syncJobRepository = createPostgresSyncJobRepository(pool);
+  const syncJobRepository = createPostgresSyncJobRepository(pool);
+  runtime.syncJobRepository = syncJobRepository;
   runtime.connectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
+  runtime.syncControlStateRepository = createPostgresSyncControlStateRepository(pool);
+  runtime.connectorMaintenanceLockRepository =
+    createPostgresConnectorMaintenanceLockRepository(pool);
+  runtime.syncOperatorControlRepository =
+    createPostgresSyncOperatorControlRepository(pool, syncJobRepository);
+  registerSelectedSyncJobRepository(syncJobRepository);
+  registerConnectorOperationLeaseRepository(runtime.connectorOperationLeaseRepository);
+  registerSyncControlStateRepository(runtime.syncControlStateRepository);
+  registerConnectorMaintenanceLockRepository(runtime.connectorMaintenanceLockRepository);
+  registerSyncOperatorControlRepository(runtime.syncOperatorControlRepository);
   runtime.keywordSearchRepository = createPostgresKeywordSearchRepository(pool);
   registerKeywordSearchRepository(runtime.keywordSearchRepository);
   runtime.aiEnrichmentService = createPostgresAIEnrichmentService();
@@ -608,6 +674,11 @@ export function initializeRuntimeDatabase(): Promise<void> {
               'SQLite runtime initialization cleanup failed',
               { cause: error },
             );
+          } finally {
+            const { clearSqliteSyncInfrastructure } = await import(
+              './persistence/sqlite-sync-runtime'
+            );
+            clearSqliteSyncInfrastructure();
           }
         }
         throw error;
@@ -697,6 +768,10 @@ export function shutdownRuntimeDatabase(): Promise<void> {
       runtime.cleanupRequired = true;
       throw error;
     } finally {
+      const { clearSqliteSyncInfrastructure } = await import(
+        './persistence/sqlite-sync-runtime'
+      );
+      clearSqliteSyncInfrastructure();
       clearModeRouteServiceDelegates();
       if (!runtime.cleanupRequired) runtime.shutdownSqliteComposition = null;
     }
@@ -741,7 +816,17 @@ export function getPostgresWorkerPersistenceRepositories(): WorkerPersistenceRep
  */
 export function registerPostgresSyncJobRepository(repository: SyncJobRepository): void {
   assertPersistenceCompositionPublicationAllowed();
-  databaseRuntimeRegistry().syncJobRepository = repository;
+  const runtime = databaseRuntimeRegistry();
+  const previous = runtime.syncJobRepository;
+  if (previous === repository) return;
+  if (previous) clearSyncJobRepository(previous);
+  try {
+    registerSelectedSyncJobRepository(repository);
+    runtime.syncJobRepository = repository;
+  } catch (error) {
+    if (previous) registerSelectedSyncJobRepository(previous);
+    throw error;
+  }
 }
 
 export function getPostgresSyncJobRepository(): SyncJobRepository {
@@ -761,7 +846,17 @@ export function registerPostgresConnectorOperationLeaseRepository(
   repository: ConnectorOperationLeaseRepository,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  databaseRuntimeRegistry().connectorOperationLeaseRepository = repository;
+  const runtime = databaseRuntimeRegistry();
+  const previous = runtime.connectorOperationLeaseRepository;
+  if (previous === repository) return;
+  if (previous) clearConnectorOperationLeaseRepository(previous);
+  try {
+    registerConnectorOperationLeaseRepository(repository);
+    runtime.connectorOperationLeaseRepository = repository;
+  } catch (error) {
+    if (previous) registerConnectorOperationLeaseRepository(previous);
+    throw error;
+  }
 }
 
 export function getPostgresConnectorOperationLeaseRepository(): ConnectorOperationLeaseRepository {
@@ -769,6 +864,35 @@ export function getPostgresConnectorOperationLeaseRepository(): ConnectorOperati
   const repository = databaseRuntimeRegistry().connectorOperationLeaseRepository;
   if (!repository) {
     throw new Error('PostgreSQL connector-operation lease repository has not been registered');
+  }
+  return repository;
+}
+
+export function getPostgresSyncControlStateRepository(): SyncControlStateRepository {
+  assertPersistenceCompositionAccessAllowed();
+  const repository = databaseRuntimeRegistry().syncControlStateRepository;
+  if (!repository) {
+    throw new Error('PostgreSQL sync control-state repository has not been registered');
+  }
+  return repository;
+}
+
+export function getPostgresConnectorMaintenanceLockRepository():
+ConnectorMaintenanceLockRepository {
+  assertPersistenceCompositionAccessAllowed();
+  const repository = databaseRuntimeRegistry().connectorMaintenanceLockRepository;
+  if (!repository) {
+    throw new Error('PostgreSQL connector maintenance-lock repository has not been registered');
+  }
+  return repository;
+}
+
+export function getPostgresSyncOperatorControlRepository():
+SyncOperatorControlRepository {
+  assertPersistenceCompositionAccessAllowed();
+  const repository = databaseRuntimeRegistry().syncOperatorControlRepository;
+  if (!repository) {
+    throw new Error('PostgreSQL sync operator-control repository has not been registered');
   }
   return repository;
 }

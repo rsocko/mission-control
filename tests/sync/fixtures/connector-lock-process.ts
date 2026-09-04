@@ -1,5 +1,6 @@
 import { on } from 'node:events';
 import { runWithConnectorOperationLease } from '../../../src/lib/sync/connector-lock';
+import { registerSqliteSyncInfrastructure } from '../../../src/db/persistence/sqlite-sync-runtime';
 
 const [connectorId, leaseMsValue, mode] = process.argv.slice(2);
 const leaseMs = Number(leaseMsValue);
@@ -19,6 +20,7 @@ function send(message: object): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  registerSqliteSyncInfrastructure();
   if (mode === 'probe') {
     await send({ ready: true });
     for await (const [message] of on(process, 'message')) {

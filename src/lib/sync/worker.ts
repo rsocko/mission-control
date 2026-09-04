@@ -160,7 +160,7 @@ export class SyncWorker {
         ),
       );
       if (job && (!this.isEnabled() || this.stopping)) {
-        await repository.release(job.id, this.ownerId, 'worker_deactivated');
+        await repository.release(job.id, this.ownerId, job.attempt, 'worker_deactivated');
         continue;
       }
       if (!job) {
@@ -190,14 +190,14 @@ export class SyncWorker {
         try {
           if (await withDatabaseOperation(
             'sync-job-lease',
-            () => repository.isCancellationRequested(job.id, this.ownerId),
+            () => repository.isCancellationRequested(job.id, this.ownerId, job.attempt),
           )) {
             controller.abort(new Error('Sync cancellation requested'));
             return;
           }
           if (!(await withDatabaseOperation(
             'sync-job-lease',
-            () => repository.renewLease(job.id, this.ownerId, leaseMs),
+            () => repository.renewLease(job.id, this.ownerId, job.attempt, leaseMs),
           ))) {
             controller.abort(new Error('Sync job lease ownership lost'));
           }
@@ -247,7 +247,7 @@ export class SyncWorker {
       if (controller.signal.aborted) {
         const cancelled = await withDatabaseOperation(
           'sync-job-lease',
-          () => repository.isCancellationRequested(job.id, this.ownerId),
+          () => repository.isCancellationRequested(job.id, this.ownerId, job.attempt),
         );
         if (result.syncRunId) {
           await withDatabaseOperation(
@@ -310,7 +310,7 @@ export class SyncWorker {
         const cancelled = !staleIdentityContext
           && await withDatabaseOperation(
             'sync-job-lease',
-            () => repository.isCancellationRequested(job.id, this.ownerId),
+            () => repository.isCancellationRequested(job.id, this.ownerId, job.attempt),
           );
         await withDatabaseOperation('sync-job-finalize', () => repository.fail(
           job,

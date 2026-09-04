@@ -1,6 +1,7 @@
 import {
   runWithConnectorOperationLease as runWithSelectedConnectorOperationLease,
 } from './connector-lock-runtime';
+import type { ConnectorOperationType } from './connector-operation-lease-repository';
 
 export type {
   ConnectorOperationLeaseAcquireOutcome,
@@ -27,7 +28,13 @@ export {
 export { getConnectorOperationLeaseRepository } from './connector-lock-runtime';
 
 export async function runWithConnectorOperationLease<T>(
-  ...args: Parameters<typeof runWithSelectedConnectorOperationLease<T>>
+  connectorId: string,
+  operationType: ConnectorOperationType,
+  operation: () => Promise<T>,
 ): Promise<T> {
-  return runWithSelectedConnectorOperationLease(...args);
+  return runWithSelectedConnectorOperationLease(
+    connectorId,
+    operationType,
+    operation,
+  );
 }

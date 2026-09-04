@@ -78,6 +78,11 @@ export class PostgresConnectorOperationLeaseRepository implements ConnectorOpera
       const nowIso = now.toISOString();
       const leaseExpiresAt = new Date(now.getTime() + leaseDurationMs).toISOString();
 
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [connectorId]);
+      await client.query(
+        'SELECT 1 FROM connector_configs WHERE id = $1 FOR UPDATE',
+        [connectorId],
+      );
       await client.query(
         `DELETE FROM connector_operation_leases WHERE connector_id = $1 AND lease_expires_at <= $2`,
         [connectorId, nowIso],

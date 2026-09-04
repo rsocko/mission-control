@@ -89,6 +89,11 @@ describe('stale queued GitHub identity jobs', () => {
       identityModeRevision: 8,
       error: expect.stringContaining('revision 8 is stale'),
     });
+    expect(queue.renewSyncJobLease(
+      stale.id,
+      'stale-context-worker',
+      1,
+    )).toBe(false);
     expect(sqlite.prepare(`
       SELECT COUNT(*) AS value
       FROM sync_jobs

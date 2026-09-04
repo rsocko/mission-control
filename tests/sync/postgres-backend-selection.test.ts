@@ -58,9 +58,12 @@ const postgresMocks = vi.hoisted(() => ({
     fail: vi.fn(async () => 'failed'),
     linkSyncLog: vi.fn(async () => undefined),
     persistEvent: vi.fn(async () => undefined),
+    getEventsAfter: vi.fn(async () => []),
+    getLatestEventId: vi.fn(async () => 0),
     prune: vi.fn(async () => undefined),
     isCancellationRequested: vi.fn(async () => false),
     renewLease: vi.fn(async () => true),
+    release: vi.fn(async () => true),
     requestCancellation: vi.fn(async () => ({ cancelled: 0, cancellationRequested: 0 })),
   },
   leaseRepository: {
@@ -68,12 +71,60 @@ const postgresMocks = vi.hoisted(() => ({
     acquire: vi.fn(async () => ({ status: 'acquired' as const, expiresAt: '2026-01-01T00:00:00.000Z' })),
     renew: vi.fn(async () => ({ status: 'renewed' as const, expiresAt: '2026-01-01T00:01:00.000Z' })),
     release: vi.fn(async () => ({ status: 'released' as const })),
+    recoverExpiredJobs: vi.fn(async () => ({ exhausted: 0, superseded: 0, requeued: 0 })),
   },
   searchRepository: {
+    rebuild: vi.fn(async () => undefined),
     indexTask: vi.fn(async () => undefined),
+    removeTask: vi.fn(async () => undefined),
     indexNotification: vi.fn(async () => undefined),
+    removeNotification: vi.fn(async () => undefined),
     warmUp: vi.fn(async () => undefined),
     search: vi.fn(async () => []),
+  },
+  controlStateRepository: {
+    isQuarantined: vi.fn(async () => false),
+    assertEnqueueAllowed: vi.fn(async () => undefined),
+  },
+  maintenanceLockRepository: {
+    get: vi.fn(async () => null),
+    assertUnlocked: vi.fn(async () => undefined),
+  },
+  operatorControlRepository: {
+    getStatus: vi.fn(async () => ({
+      connector: {
+        id: 'pg-connector',
+        enabled: true,
+        configurationState: { status: 'configured' as const, code: null },
+      },
+      scheduler: {
+        state: 'scheduled' as const,
+        quarantineId: null,
+        quarantinedAt: null,
+        releasedAt: null,
+        queued: 0,
+        running: 0,
+      },
+      gates: {
+        shadowIngestEnabled: true,
+        immediateNotificationsEnabled: false,
+        monthlyDigestEnabled: false,
+        deliveryEnabled: false,
+        presentationEnabled: false,
+        actionsEnabled: false,
+      },
+      canary: { status: 'not-started' as const, jobId: null, counts: null, resultCode: null },
+      readiness: { ready: false, blockers: ['sync_quarantine_required' as const] },
+    })),
+    quarantine: vi.fn(async () => ({
+      status: 'quarantined' as const,
+      quarantineId: 'pg-quarantine',
+      cancelledQueuedCount: 0,
+      replayed: false,
+    })),
+    enqueueCanary: vi.fn(),
+    release: vi.fn(),
+    rollback: vi.fn(),
   },
   publishSemanticEntityUpsert: vi.fn(async () => ({ status: 'published' as const })),
   publishSemanticEntityDelete: vi.fn(async () => ({ status: 'published' as const })),
@@ -151,10 +202,28 @@ vi.mock('@/lib/semantic-index/publication-service', () => ({
 
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   process.env.MC_DATABASE_BACKEND = 'postgres';
   vi.resetModules();
+  const [
+    { registerSyncJobRepository },
+    { registerConnectorOperationLeaseRepository },
+    { registerSyncControlStateRepository },
+    { registerConnectorMaintenanceLockRepository },
+    { registerSyncOperatorControlRepository },
+  ] = await Promise.all([
+    import('@/lib/sync/job-runtime'),
+    import('@/lib/sync/connector-lock-runtime'),
+    import('@/lib/sync/control-state'),
+    import('@/lib/sync/maintenance-lock'),
+    import('@/lib/sync/operator-control'),
+  ]);
+  registerSyncJobRepository(postgresMocks.syncJobRepository as never);
+  registerConnectorOperationLeaseRepository(postgresMocks.leaseRepository);
+  registerSyncControlStateRepository(postgresMocks.controlStateRepository);
+  registerConnectorMaintenanceLockRepository(postgresMocks.maintenanceLockRepository);
+  registerSyncOperatorControlRepository(postgresMocks.operatorControlRepository);
 });
 
 afterEach(() => {
@@ -254,34 +323,38 @@ describe('PostgreSQL backend selection — connector sync controls', () => {
     const { isConnectorSyncQuarantinedAsync } = await import('@/lib/sync/control-state');
     const quarantined = await isConnectorSyncQuarantinedAsync('pg-connector');
     expect(quarantined).toBe(false);
-    expect(postgresMocks.isConnectorSyncQuarantinedInPostgres).toHaveBeenCalledWith(
-      postgresMocks.pool,
-      'pg-connector',
-    );
+    expect(postgresMocks.controlStateRepository.isQuarantined)
+      .toHaveBeenCalledWith('pg-connector');
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 
   it('assertConnectorSyncEnqueueAllowedAsync delegates to the PostgreSQL check without touching SQLite', async () => {
     const { assertConnectorSyncEnqueueAllowedAsync } = await import('@/lib/sync/control-state');
     await expect(assertConnectorSyncEnqueueAllowedAsync('pg-connector', 'api')).resolves.toBeUndefined();
-    expect(postgresMocks.assertConnectorSyncEnqueueAllowedInPostgres).toHaveBeenCalledWith(
-      postgresMocks.pool,
-      'pg-connector',
-      'api',
-      undefined,
-    );
+    expect(postgresMocks.controlStateRepository.assertEnqueueAllowed)
+      .toHaveBeenCalledWith('pg-connector', 'api', undefined);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 });
 
 describe('PostgreSQL backend selection — connector maintenance lock', () => {
-  it('assertConnectorMaintenanceUnlockedAsync queries the PostgreSQL pool directly without touching SQLite', async () => {
+  it('assertConnectorMaintenanceUnlockedAsync delegates to the selected repository', async () => {
     const { assertConnectorMaintenanceUnlockedAsync } = await import('@/lib/sync/maintenance-lock');
     await expect(assertConnectorMaintenanceUnlockedAsync('pg-connector')).resolves.toBeUndefined();
-    expect(postgresMocks.pool.query).toHaveBeenCalledWith(
-      expect.stringContaining('connector_maintenance_locks'),
-      ['pg-connector'],
-    );
+    expect(postgresMocks.maintenanceLockRepository.assertUnlocked)
+      .toHaveBeenCalledWith('pg-connector');
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  });
+});
+
+describe('PostgreSQL backend selection — operator control', () => {
+  it('delegates status reads without touching SQLite', async () => {
+    const { getFinanceSyncControlStatus } = await import('@/lib/sync/operator-control');
+    await expect(getFinanceSyncControlStatus('pg-connector')).resolves.toMatchObject({
+      connector: { id: 'pg-connector' },
+    });
+    expect(postgresMocks.operatorControlRepository.getStatus)
+      .toHaveBeenCalledWith('pg-connector');
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 });

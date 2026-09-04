@@ -1,7 +1,5 @@
-import db from '@/db';
-import { triageContentTypes } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import logger from '@/lib/logger';
+import { getTriagePersistenceRepositories } from './persistence';
 import {
   BUILTIN_CONTENT_TYPES,
   type ContentTypeDefinition,
@@ -24,7 +22,7 @@ export async function getContentTypes(): Promise<ContentTypeDefinition[]> {
   }
 
   try {
-    const rows = await db.select().from(triageContentTypes);
+    const rows = await getTriagePersistenceRepositories().contentTypes.list();
     const dbMap = new Map(rows.map((r) => [r.id, r]));
 
     // Start with built-in types, apply DB overrides (e.g., suppression)
@@ -197,8 +195,6 @@ export async function upsertContentType(input: {
   const now = new Date().toISOString();
   const id = input.id || input.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
 
-  const existing = await db.select().from(triageContentTypes).where(eq(triageContentTypes.id, id));
-
   const record = {
     id,
     name: input.name,
@@ -213,11 +209,10 @@ export async function upsertContentType(input: {
     updatedAt: now,
   };
 
-  if (existing.length > 0) {
-    await db.update(triageContentTypes).set(record).where(eq(triageContentTypes.id, id));
-  } else {
-    await db.insert(triageContentTypes).values({ ...record, createdAt: now });
-  }
+  await getTriagePersistenceRepositories().contentTypes.upsert({
+    ...record,
+    createdAt: now,
+  });
 
   invalidateContentTypeCache();
 
@@ -234,36 +229,31 @@ export async function deleteContentType(id: string): Promise<boolean> {
     return false;
   }
 
-  await db.delete(triageContentTypes).where(eq(triageContentTypes.id, id));
+  const deleted = await getTriagePersistenceRepositories().contentTypes.deleteCustom(id);
   invalidateContentTypeCache();
-  return true;
+  return deleted;
 }
 
 export async function suppressContentType(id: string, suppressed: boolean): Promise<void> {
   const now = new Date().toISOString();
-  const existing = await db.select().from(triageContentTypes).where(eq(triageContentTypes.id, id));
-
-  if (existing.length > 0) {
-    await db.update(triageContentTypes).set({ suppressed, updatedAt: now }).where(eq(triageContentTypes.id, id));
-  } else {
-    // Insert a DB record for this built-in type so we can track suppression
-    const builtin = BUILTIN_CONTENT_TYPES.find((bt) => bt.id === id);
-    if (!builtin) return;
-    await db.insert(triageContentTypes).values({
-      id: builtin.id,
-      name: builtin.name,
-      icon: builtin.icon || null,
-      color: builtin.color,
-      builtin: true,
-      suppressed,
-      priority: builtin.priority,
-      urlPatterns: builtin.urlPatterns,
-      keywordHints: builtin.keywordHints,
-      description: builtin.description || null,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
+  const builtin = BUILTIN_CONTENT_TYPES.find((candidate) => candidate.id === id);
+  await getTriagePersistenceRepositories().contentTypes.setSuppressed({
+    id,
+    suppressed,
+    updatedAt: now,
+    builtin: builtin
+      ? {
+          name: builtin.name,
+          icon: builtin.icon || null,
+          color: builtin.color,
+          priority: builtin.priority,
+          urlPatterns: builtin.urlPatterns,
+          keywordHints: builtin.keywordHints,
+          description: builtin.description || null,
+          createdAt: now,
+        }
+      : null,
+  });
 
   invalidateContentTypeCache();
 }

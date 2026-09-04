@@ -5,9 +5,6 @@
  * captured items.
  */
 import { randomUUID } from 'crypto';
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import type { TriageContentType, TriageItem, TriageSourcePlatform } from '@/types';
 import { resolveEmbed } from './embed-resolver';
 import type { EmbedMetadata } from './embed-resolver';
@@ -16,8 +13,9 @@ import { parseDateFromText } from '@/lib/parse-task-input';
 import { evaluateRules } from './suggestion-engine';
 import { parseDescriptionLinks } from './importers/youtube-importer';
 import { detectContentType as detectContentTypeFromRegistry } from './content-type-registry';
-import { ensureSeedData, mapRow, safeJsonObject } from './shared';
-import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
+import { ensureSeedData, safeJsonObject } from './shared';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication-service';
+import { getTriagePersistenceRepositories } from './persistence';
 export {
   ingestTriageImport,
   ingestTriageImports,
@@ -66,20 +64,11 @@ function resolveEmbedAsync(itemId: string, url: string) {
     .then(async (result) => {
       if (!result.success || !result.embed) return;
 
-      const [existing] = await db.select().from(triageItems).where(eq(triageItems.id, itemId));
-      if (!existing) return;
-
-      const currentMeta = safeJsonObject(existing.rawMetadata);
-      const updatedMeta = { ...currentMeta, embed: result.embed };
-
-      const updates: Record<string, unknown> = { rawMetadata: updatedMeta };
-
-      // Set thumbnailUrl if not already set and embed has one
-      if (!existing.thumbnailUrl && result.embed.thumbnail_url) {
-        updates.thumbnailUrl = result.embed.thumbnail_url;
-      }
-
-      await db.update(triageItems).set(updates).where(eq(triageItems.id, itemId));
+      await getTriagePersistenceRepositories().items.mergeMetadata(
+        itemId,
+        { embed: result.embed },
+        { fillThumbnailUrl: result.embed.thumbnail_url },
+      );
     })
     .catch((err) => {
       logger.error({ err, itemId }, 'Failed to resolve triage embed');
@@ -99,23 +88,20 @@ export async function resolveAndStoreEmbed(
   const result = await resolveEmbed(url);
   if (!result.success || !result.embed) return null;
 
-  const [existing] = await db.select().from(triageItems).where(eq(triageItems.id, itemId));
+  const existing = await getTriagePersistenceRepositories().items.get(itemId);
   if (!existing) return null;
 
-  const currentMeta = safeJsonObject(existing.rawMetadata);
-
   // Fill-only: skip if embed data already exists (don't overwrite good data)
-  if (fillOnly && currentMeta.embed) return result.embed;
+  if (fillOnly && existing.rawMetadata.embed) return result.embed;
 
-  const updatedMeta = { ...currentMeta, embed: result.embed };
-
-  const updates: Record<string, unknown> = { rawMetadata: updatedMeta };
-  // Only fill thumbnailUrl when it's currently empty (COALESCE semantics)
-  if (!existing.thumbnailUrl && result.embed.thumbnail_url) {
-    updates.thumbnailUrl = result.embed.thumbnail_url;
-  }
-
-  await db.update(triageItems).set(updates).where(eq(triageItems.id, itemId));
+  await getTriagePersistenceRepositories().items.mergeMetadata(
+    itemId,
+    { embed: result.embed },
+    {
+      fillThumbnailUrl: result.embed.thumbnail_url,
+      ...(fillOnly ? { skipWhenKeyPresent: 'embed' } : {}),
+    },
+  );
   return result.embed;
 }
 
@@ -166,15 +152,15 @@ function enrichYouTubeCaptureAsync(itemId: string, url: string) {
       const data = await response.json() as { author_name?: string; author_url?: string; title?: string };
       if (!data.author_name) return;
 
-      const [existing] = await db.select().from(triageItems).where(eq(triageItems.id, itemId));
+      const existing = await getTriagePersistenceRepositories().items.get(itemId);
       if (!existing) return;
 
-      const currentMeta = safeJsonObject(existing.rawMetadata);
-      if (currentMeta.channelName) return; // don't clobber metadata the extension/importer already supplied
-
-      await db.update(triageItems).set({
-        rawMetadata: { ...currentMeta, channelName: data.author_name, channelUrl: data.author_url },
-      }).where(eq(triageItems.id, itemId));
+      if (existing.rawMetadata.channelName) return;
+      await getTriagePersistenceRepositories().items.mergeMetadata(
+        itemId,
+        { channelName: data.author_name, channelUrl: data.author_url },
+        { skipWhenKeyPresent: 'channelName' },
+      );
     })
     .catch((err) => {
       logger.error({ err, url }, 'YouTube oEmbed enrichment failed — continuing without channel metadata');
@@ -236,7 +222,7 @@ export async function createTriageCapture(input: TriageCaptureInput) {
     ? parseDescriptionLinks(input.description || input.sharedText)
     : undefined;
 
-  await db.insert(triageItems).values({
+  const created = await getTriagePersistenceRepositories().items.create({
     id,
     sourcePlatform,
     sourceId: input.sourceId || (youtubeVideoId ? `youtube:video:${youtubeVideoId}` : `${sourcePlatform}:${id}`),
@@ -265,8 +251,6 @@ export async function createTriageCapture(input: TriageCaptureInput) {
     },
     actionsTaken: [],
   });
-
-  const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
   await publishSemanticEntityUpsert('triage-item', id);
 
   // Fire-and-forget embed resolution (design: don't block capture)
@@ -277,7 +261,7 @@ export async function createTriageCapture(input: TriageCaptureInput) {
     enrichYouTubeCaptureAsync(id, input.url);
   }
 
-  return mapRow(created);
+  return created;
 }
 
 export async function createTriageImageCapture(input: TriageImageCaptureInput) {
@@ -310,7 +294,7 @@ export async function createTriageImageCapture(input: TriageImageCaptureInput) {
     rawMetadata,
   });
 
-  await db.insert(triageItems).values({
+  const created = await getTriagePersistenceRepositories().items.create({
     id,
     sourcePlatform,
     sourceId: input.requestId ? `image-request:${input.requestId}` : `image:${input.storageId}`,
@@ -331,24 +315,18 @@ export async function createTriageImageCapture(input: TriageImageCaptureInput) {
     rawMetadata,
     actionsTaken: [],
   });
-
-  const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
   await publishSemanticEntityUpsert('triage-item', id);
-  return mapRow(created);
+  return created;
 }
 
 export async function findTriageImageCaptureByRequestId(requestId: string) {
-  const [existing] = await db.select()
-    .from(triageItems)
-    .where(eq(triageItems.sourceId, `image-request:${requestId}`));
-  return existing ? mapRow(existing) : null;
+  return getTriagePersistenceRepositories().items.findBySourceId(
+    `image-request:${requestId}`,
+  );
 }
 
 export async function findTriageImageCaptureByImageUrl(imageUrl: string) {
-  const [existing] = await db.select()
-    .from(triageItems)
-    .where(eq(triageItems.sourceUrl, imageUrl));
-  return existing ? mapRow(existing) : null;
+  return getTriagePersistenceRepositories().items.findBySourceUrl(imageUrl);
 }
 
 export async function createTriageTextCapture(input: TriageTextCaptureInput) {
@@ -380,7 +358,7 @@ export async function createTriageTextCapture(input: TriageTextCaptureInput) {
     rawMetadata,
   });
 
-  await db.insert(triageItems).values({
+  const created = await getTriagePersistenceRepositories().items.create({
     id,
     sourcePlatform: 'ios_share',
     sourceId: `ios_share:${input.requestId}`,
@@ -400,8 +378,6 @@ export async function createTriageTextCapture(input: TriageTextCaptureInput) {
     rawMetadata,
     actionsTaken: [],
   });
-
-  const [created] = await db.select().from(triageItems).where(eq(triageItems.id, id));
   await publishSemanticEntityUpsert('triage-item', id);
-  return mapRow(created);
+  return created;
 }

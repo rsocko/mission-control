@@ -72,6 +72,8 @@ describe('triage embed backfill', () => {
         { id: 'd-missing' },
       ],
     });
+    expect(resolveAndStoreEmbed).not.toHaveBeenCalled();
+    expect(waitForSlot).not.toHaveBeenCalled();
   });
 
   it('supports deterministic force-mode resumption', async () => {

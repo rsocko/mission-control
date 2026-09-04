@@ -20,7 +20,7 @@ vi.mock('@/lib/triage/embed-resolver', () => ({
   resolveEmbed: vi.fn().mockResolvedValue({ success: false }),
 }));
 
-vi.mock('@/lib/semantic-index/publication', () => ({
+vi.mock('@/lib/semantic-index/publication-service', () => ({
   publishSemanticEntityUpsert: vi.fn().mockResolvedValue(undefined),
 }));
 

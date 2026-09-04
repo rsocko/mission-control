@@ -50,7 +50,7 @@ growing without an explicit exception.
 | Durable queue | raw claim/update SQL, SQLite time functions, immediate transactions, connector leases | `src/lib/sync/sqlite-job-repository.ts` and `src/lib/sync/sqlite-connector-operation-lease-repository.ts` | Critical. Queue mechanics live behind the sync-job and connector-operation lease repository facades. |
 | Search | FTS5 virtual tables, `MATCH`, `bm25`, `sqlite_master` | `src/lib/search/fts.ts` | High. Keyword search/indexing uses a backend-specific repository. |
 | Health and telemetry | `PRAGMA page_count`, page size, WAL checkpoints and SQLite observation | `src/lib/telemetry/**`, readiness route | High. Runtime health consumes a database-health probe result. |
-| Graph workspace | raw row mapping, JSON text, compare-and-swap writes and checkpoints | `src/lib/graph-workspace/sqlite-repository.ts` | Migrated (L16). Both backends implement `IdeationWorkspaceRepository`; the SQLite adapter is one of two composed behind the `ideationWorkspaces` worker slot. |
+| Graph workspace | raw row mapping, JSON text, compare-and-swap writes and checkpoints | `src/lib/graph-workspace/sqlite-repository.ts` | Medium. An existing repository seam is the representative portable workflow. |
 | Tasks and projects | Drizzle queries plus shared `runTransaction` | task APIs and project services | Medium. Migrate by canonical workflow, not table-by-table. |
 | Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. L13 migrated seven notification web routes and the writeback dispatcher behind `NotificationWebPersistence` (attached as `notificationDelivery.web`). |
 | Finance, external identity, AI runs and agents | concentrated raw SQL and synchronous transactions | corresponding `src/lib` domains | High, but outside the representative migration. Preserve as documented legacy exceptions until each workflow moves. |
@@ -516,10 +516,6 @@ Ideation workspaces are the first representative vertical slice. The same
 pattern should later be applied to canonical task moves, project hierarchy,
 notification writeback, connector configuration, and durable queue workflows.
 It is not a mandate to create repositories for every table.
-
-That slice is now complete on both backends: see
-[Layer L16](#webapi-postgresql-parity-layer-l16-ideation-workspace-persistence)
-below.
 
 ## Web/API PostgreSQL parity: Layer L01 (composition seams, transactions, codecs, ratchet)
 
@@ -1520,72 +1516,42 @@ clean with no Tier B reclassification. The mixed inbound webhook receiver
 awaits the portable result service but remains outside this layer because its
 task/notification transaction boundary is not yet portable.
 
-## Web/API PostgreSQL parity: Layer L16 (Ideation workspace persistence)
+## Web/API PostgreSQL parity: Layer L08a (triage web persistence)
 
-The Ideation workspace domain — named, versioned, server-persisted documents
-with optimistic concurrency — now selects its backend through the composed
-worker persistence facade. `IdeationWorkspaceRepository` (unchanged since it was
-introduced) is published as the top-level `ideationWorkspaces` slot on
-`WorkerPersistenceRepositories`, and both a SQLite and a PostgreSQL adapter
-implement it. `src/lib/persistence/sqlite-runtime.ts`, a SQLite-only composition
-root that existed solely for this domain and had exactly one consumer, is
-deleted rather than relocated.
+Layer L08a routes non-action triage web persistence through the existing
+atomic `TriagePersistenceRepositories` composition. The backend-neutral
+contract owns queue filters and facets, captures and enrichment, content-type
+overrides, digest and health snapshots, and lifecycle/storage maintenance.
+SQLite and PostgreSQL adapters preserve the observable ordering, null,
+pagination, malformed-JSON, compare-and-set, and deletion-result semantics.
+Feature modules receive domain records and outcomes only; no raw driver,
+Drizzle transaction, generic query facade, fallback, or dual write crosses
+the boundary.
 
-The slot is top-level rather than nested (L15 nested
-`projectAutomation.hierarchy`) because `graph_workspaces` and
-`graph_workspace_versions` share no rows and no serialization namespace with any
-other worker surface. `IdeationWorkspaceService` now holds an async repository
-resolver instead of a constructed repository, so it evaluates no driver at
-import time. All five `/api/ideation/workspaces` route handlers and their shared
-`route-errors.ts` helper are unchanged: none of them ever imported the `@/db`
-namespace, so the whole decrement is transitive.
+Filesystem cleanup, image and thumbnail storage, remote embed resolution,
+webhook delivery, logging, and semantic publication remain service-owned and
+occur outside repository transactions. Semantic updates use the composed
+publication service established by the runtime-publication prerequisite;
+this layer does not own or modify registry, global-slot, instrumentation, or
+runtime-lifecycle infrastructure.
 
-No DDL changed in L16. `graph_workspaces`, `graph_workspace_versions`, both
-unique indexes, both plain indexes, and the cascade foreign key already ship in
-`drizzle/postgres/0000`, and the PostgreSQL schema module was already
-column-for-column identical to the SQLite one.
+The two AI-linked action routes (`/api/triage/[id]` and
+`/api/triage/[id]/extract-actions`) and `/api/notifications/triage` remain
+explicit Tier A exclusions. Their call graphs still reach SQLite-backed AI or
+notification behavior, so hiding those edges behind deferred imports would
+only relocate taint. Native Share Sheet persistence is likewise deferred to
+stacked Layer L08b; `/api/triage/capture` therefore remains Tier A in L08a.
 
-Concurrency and ordering parity:
-
-- Compare-and-swap commands (`updateContent`, `restore`) and `deleteArchived`
-  take a single `SELECT ... FOR UPDATE` row lock inside one `READ COMMITTED`
-  transaction. Every command touches exactly one `graph_workspaces` row, so
-  `SERIALIZABLE` and a retry loop would add no protection.
-- SQLite's `deleteArchived` reads and then deletes without a transaction.
-  Single-threaded behaviour is identical in both backends; PostgreSQL is
-  intentionally stronger under concurrency, and SQLite's transaction behaviour
-  was deliberately not expanded.
-- `duplicate` deliberately remains a non-atomic read-then-create in both
-  backends, preserving current behaviour rather than opportunistically
-  hardening it.
-- `create` inserts the workspace and its revision-1 version row in one
-  transaction. A duplicate `migration_source` aborts that transaction; the
-  adapter rolls back and releases its pooled client before the service's
-  `findByMigrationSource` recovery runs, so a concurrent tab that lost the
-  unique insert still resolves the winner.
-- The checkpoint cadence lives in `shouldCheckpointIdeationRevision` in the
-  neutral contract module and is called by both adapters, so it cannot drift.
-- SQLite orders the library by `name COLLATE NOCASE`, which folds only ASCII
-  `A-Z` and then compares bytes. PostgreSQL reproduces this with
-  `translate(name, 'A-Z', 'a-z') COLLATE "C"`; a locale-aware `lower(name)`
-  would silently reorder non-ASCII names, digits, and punctuation. Both
-  backends append an `id` tiebreaker, which defines an order that SQLite
-  previously left unspecified for rows sharing an archived flag, timestamp, and
-  folded name.
-- Documents are JSON text in SQLite and `jsonb` in PostgreSQL. `jsonb`
-  normalises key order and numeric literals, but every read path ends in
-  `ideationWorkspaceDocumentSchema.parse(...)`, so parsed documents compare
-  equal structurally.
-
-The graph ratchet is exactly `266/181/26/59/124/57/125/83/0/264`: five routes,
-two libraries, and one shared API helper became clean with no Tier B
-reclassification. `taintedApiHelpers` reaches its declared `finalTarget` of 0
-and is the first ratchet field in the programme to be fully retired.
-`directTaintSourceRoutes` and `directDbNamespaceRoutes` are unchanged.
-
-`/api/ideation/convert` and `/api/ideation/expand` share the URL prefix but
-remain Tier A: they are tainted through `src/lib/ai/ideation-expand.ts` and
-`src/lib/ai/config-resolver.ts`, which belong to the AI provider layer.
+Composed on the merged L09, L05, L07, L13, L14, and L15 baselines, the
+committed L08a graph is exactly 266 API routes, 172 Tier A, 18 Tier B, 76
+clean, 119 direct taint-source routes, 53 transitive-only Tier A routes, 120
+direct `@/db` namespace routes, 78 tainted libraries, one tainted API helper,
+and 251 total migration units. The layer adds no Tier B route.
+`triage-native-web-persistence-boundary.test.ts` pins the exact route and
+library removals plus the explicit exclusions. The shared persistence
+contract runs against SQLite and live PostgreSQL, and representative
+live-PostgreSQL route tests poison `@/db` before route import to prove that
+the web surface consumes only the registered post-publication composition.
 
 ## Web/API PostgreSQL parity: Layer L17 (derived analytics: stats and insights)
 

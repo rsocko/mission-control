@@ -490,6 +490,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  ideationWorkspaces: new Proxy({} as WorkerPersistenceRepositories['ideationWorkspaces'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().ideationWorkspaces[
+        property as keyof WorkerPersistenceRepositories['ideationWorkspaces']
+      ]
+    ),
+  }),
 };
 const semanticPublicationRuntimeService: SemanticPublicationService = {
   upsert: async (entityType, entityId) => {

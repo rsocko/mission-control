@@ -109,15 +109,15 @@ describe('L05 task-read taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 186,
+      tierARoutes: 181,
       tierBRoutes: 26,
-      cleanRoutes: 54,
+      cleanRoutes: 59,
       directTaintSourceRoutes: 124,
-      transitiveOnlyTaintSourceRoutes: 62,
+      transitiveOnlyTaintSourceRoutes: 57,
       directDbNamespaceRoutes: 125,
-      taintedLibA: 85,
-      taintedApiHelpers: 1,
-      totalMigrationUnits: 272,
+      taintedLibA: 83,
+      taintedApiHelpers: 0,
+      totalMigrationUnits: 264,
     });
   });
 });

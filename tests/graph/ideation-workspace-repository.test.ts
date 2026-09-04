@@ -38,7 +38,9 @@ describeIdeationWorkspaceRepositoryContract('SQLite', () => {
   const harness = createRepository();
   return {
     repository: harness.repository,
-    close: () => harness.sqlite.close(),
+    close: () => {
+      harness.sqlite.close();
+    },
   };
 });
 

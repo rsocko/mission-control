@@ -12,6 +12,7 @@ import { PostgresSettingsRepository } from './settings-repository';
 import { PostgresHoustonMemoryRepository } from './houston-memory-repository';
 import { PostgresSyncRunRepository } from './sync-run-repository';
 import { PostgresTaskRepository } from './task-repository';
+import { createPostgresIdeationWorkspaceRepository } from './ideation-workspace-repository';
 import { createPostgresConnectorExecutionRepositories } from './connector-execution-repositories';
 import { createPostgresGitHubIdentityRepositories } from './github-identity-repositories';
 import { createPostgresGitHubIdentityOperatorRepositories } from './github-identity-operator-repositories';
@@ -176,5 +177,6 @@ export function createPostgresWorkerPersistenceRepositories(
       },
       recovery: createPostgresFinanceConnectionRecoveryPersistence(pool),
     },
+    ideationWorkspaces: createPostgresIdeationWorkspaceRepository(pool),
   };
 }

@@ -55,3 +55,26 @@ export class IdeationWorkspaceConflictError extends Error {
     this.name = 'IdeationWorkspaceConflictError';
   }
 }
+
+/**
+ * A content save writes a `checkpoint` version row at most once per interval,
+ * so a rapidly autosaving canvas produces a bounded history rather than one
+ * row per keystroke.
+ */
+export const IDEATION_CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Whether a content save must also write a `checkpoint` version row (L16).
+ *
+ * Both the SQLite and PostgreSQL adapters call this instead of re-deriving the
+ * interval, so the checkpoint cadence has exactly one implementation and can
+ * never drift between backends. `lastVersionCreatedAt` is `null` when the
+ * workspace has no version rows at all, which always checkpoints.
+ */
+export function shouldCheckpointIdeationRevision(
+  now: string,
+  lastVersionCreatedAt: string | null,
+): boolean {
+  if (lastVersionCreatedAt === null) return true;
+  return Date.parse(now) - Date.parse(lastVersionCreatedAt) >= IDEATION_CHECKPOINT_INTERVAL_MS;
+}

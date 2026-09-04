@@ -14,7 +14,7 @@ import {
 export async function GET(request: Request) {
   try {
     requireTrustedMutation(request);
-    expireDispatches();
+    await expireDispatches();
     const params = new URL(request.url).searchParams;
     return NextResponse.json({
       dispatches: (await listDispatches({
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
 export async function DELETE(request: Request) {
   try {
     requireTrustedMutation(request);
-    return NextResponse.json({ deleted: cleanupExpiredDispatches() });
+    return NextResponse.json({ deleted: await cleanupExpiredDispatches() });
   } catch (error) {
     return externalAgentErrorResponse(error);
   }

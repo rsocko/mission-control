@@ -61,6 +61,7 @@ import {
 } from './sqlite-finance-insight-notification-lifecycle';
 import { loadFinanceInsightProjectionFacts } from './sqlite-finance-insight-projection-facts';
 import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-query';
+import { createSqliteExternalAgentControlRepository } from './sqlite-external-agent-control-repository';
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
@@ -178,6 +179,7 @@ export function createSqliteWorkerPersistenceRepositories(
     eventDelivery: createSqliteEventDeliveryRepositories(sqlite),
     notificationEntityLinking: createSqliteNotificationEntityLinkingRepository(sqlite),
     notificationEnrichment: createSqliteNotificationEnrichmentRepository(sqlite),
+    externalAgentControl: createSqliteExternalAgentControlRepository(sqlite),
     finance,
   };
   return repositories;

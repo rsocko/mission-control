@@ -5,7 +5,7 @@ import type {
   AgentDispatchResult,
   AgentDispatchStatus,
   ExternalAgentTransport,
-} from '@/db/schema';
+} from './contracts';
 import type { ExternalAgent } from './registry';
 import { resolveAgentCredential } from './registry';
 import { canonicalJson, redactForPersistence } from './policy';

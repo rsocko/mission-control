@@ -23,7 +23,7 @@ export async function POST(request: Request, { params }: Context) {
       await requireAgentAuthentication(request, dispatch.externalAgentId);
       agentAuthenticated = true;
     }
-    const result = submitDispatchResult(
+    const result = await submitDispatchResult(
       id,
       await request.json() as DispatchResultInput,
       { claimToken, agentAuthenticated },

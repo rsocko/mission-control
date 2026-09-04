@@ -27,21 +27,23 @@ const requiredFields = [
 ];
 
 beforeAll(async () => {
+  const databaseModule = await import('@/db');
+  const runtimeModule = await import('@/db/runtime');
+  await runtimeModule.initializeRuntimeDatabase();
   const modules = await Promise.all([
-    import('@/db'),
     import('@/db/schema'),
     import('@/lib/external-agents/registry'),
     import('@/lib/external-agents/service'),
     import('@/lib/external-agents/transports'),
     import('@/app/api/inbound-webhooks/[id]/receive/route'),
   ]);
-  db = modules[0].default;
-  sqlite = modules[0].sqlite;
-  schema = modules[1];
-  registry = modules[2];
-  service = modules[3];
-  transports = modules[4];
-  receiveInboundResult = modules[5].POST;
+  db = databaseModule.default;
+  sqlite = databaseModule.sqlite;
+  schema = modules[0];
+  registry = modules[1];
+  service = modules[2];
+  transports = modules[3];
+  receiveInboundResult = modules[4].POST;
   sqlite.prepare('SELECT 1').get();
 });
 
@@ -63,7 +65,8 @@ beforeEach(() => {
   `);
 });
 
-afterAll(() => {
+afterAll(async () => {
+  await (await import('@/db/runtime')).shutdownRuntimeDatabase();
   sqlite.close();
   delete process.env.MC_DB_PATH;
   delete process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON;
@@ -238,14 +241,14 @@ describe('disclosure preview and manual result review', () => {
     const first = await service.createDispatchPreview({
       agentId: 'manual-agent',
       instruction: 'Review token=instruction-secret and propose work',
-      scope: { taskIds: ['task-1'], repository: 'owner/repo' },
+      scope: { taskIds: ['task-1', 'task-1'], repository: 'owner/repo' },
       allowedActions: ['propose_tasks'],
       idempotencyKey: 'preview-once',
     });
     const duplicate = await service.createDispatchPreview({
       agentId: 'manual-agent',
       instruction: 'Review token=instruction-secret and propose work',
-      scope: { taskIds: ['task-1'], repository: 'owner/repo' },
+      scope: { taskIds: ['task-1', 'task-1'], repository: 'owner/repo' },
       allowedActions: ['propose_tasks'],
       idempotencyKey: 'preview-once',
     });
@@ -325,21 +328,21 @@ describe('disclosure preview and manual result review', () => {
       },
     };
 
-    expect(service.submitDispatchResult(
+    await expect(service.submitDispatchResult(
       preview.id,
       result,
       { agentAuthenticated: true },
-    )).toEqual({ duplicate: false, status: 'completed' });
-    expect(() => service.submitDispatchResult(
+    )).resolves.toEqual({ duplicate: false, status: 'completed' });
+    await expect(service.submitDispatchResult(
       preview.id,
       result,
       { agentAuthenticated: false },
-    )).toThrowError(expect.objectContaining({ code: 'UNAUTHORIZED' }));
-    expect(service.submitDispatchResult(
+    )).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(service.submitDispatchResult(
       preview.id,
       result,
       { agentAuthenticated: true },
-    )).toEqual({ duplicate: true, status: 'completed' });
+    )).resolves.toEqual({ duplicate: true, status: 'completed' });
 
     const dispatch = await service.getDispatch(preview.id);
     expect(dispatch).toMatchObject({
@@ -357,7 +360,7 @@ describe('disclosure preview and manual result review', () => {
     expect(stored).not.toContain('result-secret');
     expect(stored).not.toContain('result-key');
     expect(stored).not.toContain('provider-secret');
-    service.reviewDispatchResult(preview.id, 'accepted');
+    await service.reviewDispatchResult(preview.id, 'accepted');
     expect((await service.getDispatch(preview.id))?.resultStatus).toBe('accepted');
   });
 });
@@ -372,50 +375,50 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       idempotencyKey: 'pull-complete',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
-    const claim = service.claimNextDispatch('pull-agent')!;
+    const claim = (await service.claimNextDispatch('pull-agent'))!;
 
     expect(claim.dispatchId).toBe(preview.id);
-    expect(service.claimNextDispatch('pull-agent')).toBeNull();
-    expect(() => service.submitDispatchResult(
+    await expect(service.claimNextDispatch('pull-agent')).resolves.toBeNull();
+    await expect(service.submitDispatchResult(
       preview.id,
       { status: 'in_progress', providerState: 'running' },
       { claimToken: 'wrong' },
-    )).toThrow(/Invalid claim token/);
-    expect(() => service.submitDispatchResult(
+    )).rejects.toThrow(/Invalid claim token/);
+    await expect(service.submitDispatchResult(
       preview.id,
       { status: 'queued', providerState: 'requeue' },
       { claimToken: claim.claimToken },
-    )).toThrow(/cannot return an active claim to the queue/);
-    expect(service.submitDispatchResult(
+    )).rejects.toThrow(/cannot return an active claim to the queue/);
+    await expect(service.submitDispatchResult(
       preview.id,
       { status: 'waiting_for_user', providerState: 'waiting_for_user' },
       { claimToken: claim.claimToken },
-    )).toMatchObject({ status: 'waiting_for_user' });
-    expect(service.submitDispatchResult(
+    )).resolves.toMatchObject({ status: 'waiting_for_user' });
+    await expect(service.submitDispatchResult(
       preview.id,
       { status: 'in_progress', providerState: 'resumed' },
       { claimToken: claim.claimToken },
-    )).toMatchObject({ status: 'in_progress' });
+    )).resolves.toMatchObject({ status: 'in_progress' });
     const completion = {
       status: 'completed' as const,
       summary: 'Proposed one task',
       tasks: [{ title: 'One task' }],
     };
-    expect(service.submitDispatchResult(
+    await expect(service.submitDispatchResult(
       preview.id,
       completion,
       { claimToken: claim.claimToken },
-    )).toEqual({ duplicate: false, status: 'completed' });
-    expect(() => service.submitDispatchResult(
+    )).resolves.toEqual({ duplicate: false, status: 'completed' });
+    await expect(service.submitDispatchResult(
       preview.id,
       completion,
       { claimToken: 'wrong' },
-    )).toThrowError(expect.objectContaining({ code: 'UNAUTHORIZED' }));
-    expect(service.submitDispatchResult(
+    )).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    await expect(service.submitDispatchResult(
       preview.id,
       completion,
       { claimToken: claim.claimToken },
-    )).toEqual({ duplicate: true, status: 'completed' });
+    )).resolves.toEqual({ duplicate: true, status: 'completed' });
   });
 
   it('dead-letters an expired final lease and permits only an explicit retry', async () => {
@@ -427,13 +430,13 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       maxAttempts: 1,
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
-    service.claimNextDispatch('pull-agent', { leaseMs: 1 });
+    await service.claimNextDispatch('pull-agent', { leaseMs: 1 });
     await new Promise((resolve) => setTimeout(resolve, 5));
 
-    expect(service.claimNextDispatch('pull-agent')).toBeNull();
+    await expect(service.claimNextDispatch('pull-agent')).resolves.toBeNull();
     expect((await service.getDispatch(preview.id))?.status).toBe('dead_letter');
     await service.retryDispatch(preview.id);
-    const retry = service.claimNextDispatch('pull-agent');
+    const retry = await service.claimNextDispatch('pull-agent');
     expect(retry).toMatchObject({ attempt: 2, dispatchId: preview.id });
   });
 
@@ -445,8 +448,8 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       idempotencyKey: 'cancel-me',
     });
     await service.confirmDispatch(cancelled.id, cancelled.previewHash);
-    expect(service.cancelDispatch(cancelled.id)).toBe(true);
-    expect(service.cancelDispatch(cancelled.id)).toBe(false);
+    await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(true);
+    await expect(service.cancelDispatch(cancelled.id)).resolves.toBe(false);
     expect((await service.getDispatch(cancelled.id))?.status).toBe('cancelled');
 
     const timed = await service.createDispatchPreview({
@@ -457,7 +460,7 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
     });
     await service.confirmDispatch(timed.id, timed.previewHash);
     await new Promise((resolve) => setTimeout(resolve, 5));
-    expect(service.expireDispatches()).toBe(1);
+    await expect(service.expireDispatches()).resolves.toBe(1);
     expect((await service.getDispatch(timed.id))?.status).toBe('timed_out');
   });
 
@@ -469,17 +472,17 @@ describe('pull lifecycle, retries, cancellation, and timeout', () => {
       idempotencyKey: 'late-result',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
-    const claim = service.claimNextDispatch('pull-agent')!;
+    const claim = (await service.claimNextDispatch('pull-agent'))!;
     sqlite.prepare(`
       UPDATE agent_dispatches SET deadline_at = ?
       WHERE id = ?
     `).run(new Date(Date.now() - 1_000).toISOString(), preview.id);
 
-    expect(() => service.submitDispatchResult(
+    await expect(service.submitDispatchResult(
       preview.id,
       { status: 'completed', summary: 'Too late' },
       { claimToken: claim.claimToken },
-    )).toThrowError(expect.objectContaining({ code: 'DEADLINE_EXPIRED' }));
+    )).rejects.toMatchObject({ code: 'DEADLINE_EXPIRED' });
 
     const dispatch = await service.getDispatch(preview.id);
     expect(dispatch).toMatchObject({
@@ -610,7 +613,7 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       transportResolver: resolver,
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
 
-    service.cancelDispatch(preview.id);
+    await service.cancelDispatch(preview.id);
     await expect(service.retryDispatch(preview.id, {
       transportResolver: resolver,
     })).rejects.toMatchObject({ code: 'RATE_LIMITED' });
@@ -671,7 +674,7 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       idempotencyKey: 'cleanup',
     });
     await service.confirmDispatch(preview.id, preview.previewHash);
-    service.submitDispatchResult(
+    await service.submitDispatchResult(
       preview.id,
       { status: 'failed', errorMessage: 'old failure' },
       { agentAuthenticated: true },
@@ -682,7 +685,7 @@ describe('push credentials, provider detail, rate limits, and cleanup', () => {
       WHERE id = ?
     `).run(preview.id);
 
-    expect(service.cleanupExpiredDispatches()).toBe(1);
+    await expect(service.cleanupExpiredDispatches()).resolves.toBe(1);
     expect(await service.getDispatch(preview.id)).toBeNull();
   });
 

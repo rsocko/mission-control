@@ -17,20 +17,21 @@ let resultRoute: typeof import('@/app/api/external-agents/dispatches/[id]/result
 let detailRoute: typeof import('@/app/api/external-agents/dispatches/[id]/route');
 
 beforeAll(async () => {
+  const databaseModule = await import('@/db');
+  await (await import('@/db/runtime')).initializeRuntimeDatabase();
   const modules = await Promise.all([
-    import('@/db'),
     import('@/app/api/external-agents/route'),
     import('@/app/api/external-agents/dispatch/route'),
     import('@/app/api/external-agents/dispatches/claim/route'),
     import('@/app/api/external-agents/dispatches/[id]/result/route'),
     import('@/app/api/external-agents/dispatches/[id]/route'),
   ]);
-  sqlite = modules[0].sqlite;
-  registryRoute = modules[1];
-  dispatchRoute = modules[2];
-  claimRoute = modules[3];
-  resultRoute = modules[4];
-  detailRoute = modules[5];
+  sqlite = databaseModule.sqlite;
+  registryRoute = modules[0];
+  dispatchRoute = modules[1];
+  claimRoute = modules[2];
+  resultRoute = modules[3];
+  detailRoute = modules[4];
   sqlite.prepare('SELECT 1').get();
 });
 
@@ -43,7 +44,8 @@ beforeEach(() => {
   `);
 });
 
-afterAll(() => {
+afterAll(async () => {
+  await (await import('@/db/runtime')).shutdownRuntimeDatabase();
   sqlite.close();
   delete process.env.MC_DB_PATH;
   delete process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON;

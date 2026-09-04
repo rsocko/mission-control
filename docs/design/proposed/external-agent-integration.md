@@ -2,7 +2,7 @@
 title: "External Agent Integration"
 status: proposed
 created: 2026-07-19
-last_reviewed: 2026-08-19
+last_reviewed: 2026-09-04
 category: design
 related:
   - "[AI & Agent Architecture (consolidated)](../active/ai-agent-architecture.md)"
@@ -83,6 +83,21 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
                      │  Custom agents: MCP / REST / n8n        │
                      └─────────────────────────────────────────┘
 ```
+
+### Implemented persistence boundary
+
+The external-agent control plane is backend-neutral. One
+`ExternalAgentControlPersistence` aggregate is registered in the existing
+worker composition and selects either the SQLite or PostgreSQL adapter. It owns
+registry CRUD, protected inbound-webhook reference validation, immutable
+payload snapshots, and the complete dispatch state machine. There is no
+process-global agent registry, SQLite fallback, dual write, or schema change.
+
+All network and MCP work occurs after an attempt-begin transaction commits and
+before a fenced finalize transaction starts. Pull claims store only a
+SHA-256 token hash. Result callbacks, transport responses, errors, provider
+details, and event details are bounded and redacted before persistence.
+Terminal result replay succeeds only for the same canonical digest.
 
 ---
 

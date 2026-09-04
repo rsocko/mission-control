@@ -1485,6 +1485,37 @@ L01 above; the ratchet's own numbers were independently verified the same
 way, by executing `computeWebPersistenceGraph` directly against the current
 worktree.
 
+## Web/API PostgreSQL parity: Layer L14 (external-agent control plane)
+
+External-agent registration, payload snapshots, preview/confirmation, delivery
+attempts, pull claims, result submission, review, retry, expiration, and cleanup
+now resolve through one `ExternalAgentControlPersistence` member of the existing
+worker composition. SQLite and PostgreSQL adapters own all SQL and every
+multi-row transition. The application registry and state-machine modules return
+pure domain records and never receive a driver handle.
+
+The composition is atomic: `externalAgentControl` is constructed with the other
+worker repositories for the selected backend. PostgreSQL selection has no
+SQLite fallback, dual write, or compatibility import. Callback registration
+validates the referenced inbound webhook's enabled state and non-empty HMAC
+secret in the same transaction as the agent write.
+
+Attempt begin/resume commits before HTTP, MCP, or manual transport work starts.
+The result or failure is finalized in a second transaction fenced by dispatch
+status and attempt number. Pull claims use row locking, persist only the token
+hash, and return the plaintext token once. Lease recovery, deadline expiry,
+review, cancellation, retry, event insertion, and retention deletion are also
+adapter-owned transactions. Result retries are idempotent only when the
+canonical digest matches; stale transport completions cannot overwrite newer
+state.
+
+No DDL changed in L14 because both schemas already contained the agent control
+tables. The graph ratchet is exactly
+`266/202/26/38/135/67/136/89/1/292`; eight routes and five libraries became
+clean with no Tier B reclassification. The mixed inbound webhook receiver
+awaits the portable result service but remains outside this layer because its
+task/notification transaction boundary is not yet portable.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

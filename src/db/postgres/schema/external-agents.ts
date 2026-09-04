@@ -1,108 +1,50 @@
 import { boolean, jsonb, serial } from 'drizzle-orm/pg-core';
 import { index, integer, pgTable, text, uniqueIndex } from 'drizzle-orm/pg-core';
+import {
+  EXTERNAL_AGENT_TYPES,
+  EXTERNAL_AGENT_TRANSPORTS,
+  EXTERNAL_AGENT_LOCALITIES,
+  EXTERNAL_AGENT_AUTH_TYPES,
+  AGENT_DATA_CLASSIFICATIONS,
+  AGENT_DISPATCH_STATUSES,
+  AGENT_RESULT_STATUSES,
+  type ExternalAgentType,
+  type ExternalAgentTransport,
+  type ExternalAgentLocality,
+  type ExternalAgentAuthType,
+  type ExternalAgentCapabilities,
+  type ExternalAgentDataPolicy,
+  type AgentDataClassification,
+  type AgentDispatchScope,
+  type AgentDispatchStatus,
+  type AgentDispatchResult,
+  type AgentResultReference,
+  type AgentResultStatus,
+} from '@/lib/external-agents/contracts';
 
-export const EXTERNAL_AGENT_TYPES = [
-  'copilot-cloud',
-  'copilot-sdk-workspace',
-  'webhook-roundtrip',
-  'mcp',
-  'pull-queue',
-  'manual',
-  'inference',
-] as const;
-
-export const EXTERNAL_AGENT_TRANSPORTS = ['push', 'pull', 'mcp', 'manual'] as const;
-export const EXTERNAL_AGENT_LOCALITIES = [
-  'inference',
-  'mission-control-host',
-  'github-hosted',
-  'external',
-] as const;
-export const EXTERNAL_AGENT_AUTH_TYPES = [
-  'none',
-  'bearer',
-  'hmac',
-  'github-user',
-  'github-app',
-] as const;
-export const AGENT_DATA_CLASSIFICATIONS = ['standard', 'restricted', 'local-only'] as const;
-export const AGENT_DISPATCH_STATUSES = [
-  'needs_confirmation',
-  'queued',
-  'claimed',
-  'in_progress',
-  'waiting_for_user',
-  'completed',
-  'failed',
-  'timed_out',
-  'dead_letter',
-  'cancelled',
-] as const;
-export const AGENT_RESULT_STATUSES = [
-  'pending_review',
-  'accepted',
-  'rejected',
-  'partial',
-] as const;
-
-export type ExternalAgentType = (typeof EXTERNAL_AGENT_TYPES)[number];
-export type ExternalAgentTransport = (typeof EXTERNAL_AGENT_TRANSPORTS)[number];
-export type ExternalAgentLocality = (typeof EXTERNAL_AGENT_LOCALITIES)[number];
-export type ExternalAgentAuthType = (typeof EXTERNAL_AGENT_AUTH_TYPES)[number];
-export type AgentDataClassification = (typeof AGENT_DATA_CLASSIFICATIONS)[number];
-export type AgentDispatchStatus = (typeof AGENT_DISPATCH_STATUSES)[number];
-export type AgentResultStatus = (typeof AGENT_RESULT_STATUSES)[number];
-
-export interface ExternalAgentCapabilities {
-  canAnalyzeCode?: boolean;
-  canWriteCode?: boolean;
-  canRunCommands?: boolean;
-  canPush?: boolean;
-  canCreatePullRequest?: boolean;
-  canProposeTasks?: boolean;
-  canProposePhases?: boolean;
-}
-
-export interface ExternalAgentDataPolicy {
-  allowedClassifications: AgentDataClassification[];
-  fieldAllowlist: string[];
-  retentionDays: number;
-  maxRequestsPerMinute: number;
-}
-
-export interface AgentDispatchScope {
-  projectId?: string;
-  taskIds?: string[];
-  repository?: string;
-  defaultBranch?: string;
-  baseRef?: string;
-  createPullRequest?: boolean;
-}
-
-export interface AgentResultReference {
-  name: string;
-  status?: string;
-  url?: string;
-  mediaType?: string;
-}
-
-export interface AgentDispatchResult {
-  summary: string;
-  tasks?: Array<Record<string, unknown>>;
-  phases?: Array<Record<string, unknown>>;
-  modifications?: Array<Record<string, unknown>>;
-  suggestedClosures?: Array<Record<string, unknown>>;
-  codeChange?: {
-    repository: string;
-    baseRef?: string;
-    branchRef?: string;
-    commitSha?: string;
-    pullRequestUrl?: string;
-    checks?: AgentResultReference[];
-    artifacts?: AgentResultReference[];
-  };
-  providerDetail?: Record<string, unknown>;
-}
+export {
+  EXTERNAL_AGENT_TYPES,
+  EXTERNAL_AGENT_TRANSPORTS,
+  EXTERNAL_AGENT_LOCALITIES,
+  EXTERNAL_AGENT_AUTH_TYPES,
+  AGENT_DATA_CLASSIFICATIONS,
+  AGENT_DISPATCH_STATUSES,
+  AGENT_RESULT_STATUSES,
+};
+export type {
+  ExternalAgentType,
+  ExternalAgentTransport,
+  ExternalAgentLocality,
+  ExternalAgentAuthType,
+  ExternalAgentCapabilities,
+  ExternalAgentDataPolicy,
+  AgentDataClassification,
+  AgentDispatchScope,
+  AgentDispatchStatus,
+  AgentDispatchResult,
+  AgentResultReference,
+  AgentResultStatus,
+};
 
 export const externalAgents = pgTable('external_agents', {
   id: text('id').primaryKey(),

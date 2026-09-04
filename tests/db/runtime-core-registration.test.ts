@@ -113,6 +113,7 @@ const mocks = vi.hoisted(() => {
         notificationEntityLinking:
           {} as WorkerPersistenceRepositories['notificationEntityLinking'],
         notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
+        externalAgentControl: {} as WorkerPersistenceRepositories['externalAgentControl'],
         finance: {} as WorkerPersistenceRepositories['finance'],
       };
       workerRepositories.push(repository);

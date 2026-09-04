@@ -38,6 +38,7 @@ import { createPostgresNotificationEnrichmentRepository } from './notification-e
 import {
   createPostgresNotificationEntityLinkingRepository,
 } from './notification-entity-linking-repository';
+import { createPostgresExternalAgentControlRepository } from './external-agent-control-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -80,6 +81,7 @@ export {
 export {
   createPostgresNotificationEntityLinkingRepository,
 } from './notification-entity-linking-repository';
+export { createPostgresExternalAgentControlRepository } from './external-agent-control-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -161,6 +163,7 @@ export function createPostgresWorkerPersistenceRepositories(
     eventDelivery: createPostgresEventDeliveryRepositories(pool),
     notificationEntityLinking: createPostgresNotificationEntityLinkingRepository(pool),
     notificationEnrichment: createPostgresNotificationEnrichmentRepository(pool),
+    externalAgentControl: createPostgresExternalAgentControlRepository(pool),
     finance: {
       ...financeCore,
       insights: {

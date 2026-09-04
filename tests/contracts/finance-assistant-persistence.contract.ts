@@ -591,15 +591,15 @@ export function describeFinanceAssistantPersistenceContract(
           ) as { counts: Record<string, number>; taintedLibA: string[] };
           expect(baseline.counts).toMatchObject({
             apiRoutes: 266,
-            tierARoutes: 205,
+            tierARoutes: 198,
             tierBRoutes: 26,
-            cleanRoutes: 35,
-            directTaintSourceRoutes: 132,
+            cleanRoutes: 42,
+            directTaintSourceRoutes: 125,
             transitiveOnlyTaintSourceRoutes: 73,
-            directDbNamespaceRoutes: 133,
-            taintedLibA: 92,
+            directDbNamespaceRoutes: 126,
+            taintedLibA: 91,
             taintedApiHelpers: 1,
-            totalMigrationUnits: 298,
+            totalMigrationUnits: 290,
           });
           for (const removed of [
             'src/lib/ai/finance-approval-store.ts',

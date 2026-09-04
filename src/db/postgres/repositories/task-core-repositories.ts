@@ -94,6 +94,7 @@ import {
   type TaskAttachmentInsert,
   type TaskAttachmentMetadataRow,
   type TaskAttachmentRow,
+  type TaskCollectionProjectPhaseMembership,
   type TaskCollectionReadRepository,
   type TaskCollectionResult,
   type TaskCollectionRow,
@@ -2038,22 +2039,24 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
           subtaskTotal: children.get(task.id)?.total ?? 0,
           subtaskDone: children.get(task.id)?.done ?? 0,
           projectIds: (projectsByTask.get(task.id) ?? []).map((row) => row.projectId),
-          projectPhaseMemberships: (projectsByTask.get(task.id) ?? []).flatMap((project) => {
-            const phases = phasesByTaskProject.get(`${task.id}:${project.projectId}`) ?? [];
-            return phases.length
-              ? phases.map((phase) => ({
-                  projectId: project.projectId,
-                  projectName: project.projectName ?? 'Unknown Project',
-                  phaseId: phase.phaseId,
-                  phaseName: phase.phaseName,
-                }))
-              : [{
-                  projectId: project.projectId,
-                  projectName: project.projectName ?? 'Unknown Project',
-                  phaseId: null,
-                  phaseName: null,
-                }];
-          }),
+          projectPhaseMemberships: (projectsByTask.get(task.id) ?? []).flatMap(
+            (project): TaskCollectionProjectPhaseMembership[] => {
+              const phases = phasesByTaskProject.get(`${task.id}:${project.projectId}`) ?? [];
+              return phases.length
+                ? phases.map((phase) => ({
+                    projectId: project.projectId,
+                    projectName: project.projectName ?? 'Unknown Project',
+                    phaseId: phase.phaseId,
+                    phaseName: phase.phaseName,
+                  }))
+                : [{
+                    projectId: project.projectId,
+                    projectName: project.projectName ?? 'Unknown Project',
+                    phaseId: null,
+                    phaseName: null,
+                  }];
+            },
+          ),
           linkedSourceCount: linked.get(task.id) ?? 0,
           tags: (tagsByTask.get(task.id) ?? []).map((tag) => ({
             ...tag,

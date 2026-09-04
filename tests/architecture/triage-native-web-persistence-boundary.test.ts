@@ -8,6 +8,7 @@ const CLEANED_TIER_A_ROUTES = [
   'src/app/api/triage/backfill-thumbnails/route.ts',
   'src/app/api/triage/capture/image/[id]/route.ts',
   'src/app/api/triage/capture/image/route.ts',
+  'src/app/api/triage/capture/route.ts',
   'src/app/api/triage/content-types/route.ts',
   'src/app/api/triage/digest/route.ts',
   'src/app/api/triage/digest/send/route.ts',
@@ -18,6 +19,9 @@ const CLEANED_TIER_A_ROUTES = [
   'src/app/api/triage/reclassify/route.ts',
   'src/app/api/triage/route.ts',
   'src/app/api/triage/storage/route.ts',
+  'src/app/api/native/logout/route.ts',
+  'src/app/api/native/push/registrations/[registrationId]/route.ts',
+  'src/app/api/native/push/registrations/route.ts',
 ] as const;
 
 const CLEANED_TIER_B_ROUTES = [
@@ -39,6 +43,10 @@ const PORTABLE_LIBRARIES = [
   'src/lib/triage/lifecycle.ts',
   'src/lib/triage/shared.ts',
   'src/lib/triage/staleness.ts',
+  'src/lib/native/apns-registration-service.ts',
+  'src/lib/native/installation-auth.ts',
+  'src/lib/native/share-capture-auth.ts',
+  'src/lib/native/share-capture-service.ts',
 ] as const;
 
 const CLEANED_DIRECT_DB_ROUTES = [
@@ -59,7 +67,7 @@ function source(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8');
 }
 
-describe('Layer L08a triage web persistence boundary', () => {
+describe('Layer L08b triage native persistence boundary', () => {
   const graph = computeWebPersistenceGraph(process.cwd());
 
   it('pins the approved graph delta without adding deferred taint', () => {
@@ -76,19 +84,19 @@ describe('Layer L08a triage web persistence boundary', () => {
       totalMigrationUnits: graph.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 143,
+      tierARoutes: 139,
       tierBRoutes: 19,
-      cleanRoutes: 104,
+      cleanRoutes: 108,
       directTaintSourceRoutes: 101,
-      transitiveOnlyTaintSourceRoutes: 42,
+      transitiveOnlyTaintSourceRoutes: 38,
       directDbNamespaceRoutes: 102,
-      taintedLibA: 71,
+      taintedLibA: 67,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 214,
+      totalMigrationUnits: 206,
     });
   });
 
-  it('removes exactly the approved triage routes from static and deferred taint', () => {
+  it('removes exactly the approved triage and native routes from static and deferred taint', () => {
     for (const route of [...CLEANED_TIER_A_ROUTES, ...CLEANED_TIER_B_ROUTES]) {
       expect(graph.tierARoutes, route).not.toContain(route);
       expect(graph.tierBRoutes, route).not.toContain(route);

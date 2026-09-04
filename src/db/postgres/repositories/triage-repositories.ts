@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, ne, or, sql } from 'drizzle-orm';
 import type {
   TriageActionRecord,
   TriageItem,
@@ -28,6 +28,16 @@ import {
   type TriageMaintenanceRepository,
   type TriageMergeMetadataOptions,
   type TriageMissingThumbnailCandidate,
+  type NativeApnsRepository,
+  type NativeApnsRegistrationOutcome,
+  type NativeApnsRegistrationStoredResponse,
+  type NativeApnsUnregistrationOutcome,
+  type NativeApnsUnregistrationStoredResponse,
+  type NativeCredentialRepository,
+  type NativeRequestOutcome,
+  type NativeShareCaptureClaim,
+  type NativeShareCaptureClaimInput,
+  type NativeShareCaptureRepository,
   type TriagePersistenceRepositories,
   type TriageQueueFacetStats,
   type TriageQueueHealthPendingSnapshotEntry,
@@ -41,8 +51,18 @@ import {
   type TriageSyncStateRecord,
   type TriageSyncStateRepository,
 } from '@/db/persistence/triage-repositories';
-import type { PostgresDatabase } from '../runtime';
-import { connectorConfigs, triageContentTypes, triageItems, triageSyncState } from '../schema';
+import type { PostgresDatabase, PostgresTransaction } from '../runtime';
+import {
+  apnsRegistrations,
+  connectorConfigs,
+  nativeInstallationCredentials,
+  nativePushRequests,
+  nativeShareCaptureRequests,
+  nativeShareCredentials,
+  triageContentTypes,
+  triageItems,
+  triageSyncState,
+} from '../schema';
 
 type TriageItemRow = typeof triageItems.$inferSelect;
 type TriageSyncStateRow = typeof triageSyncState.$inferSelect;
@@ -990,6 +1010,426 @@ class PostgresTriageMaintenanceRepository implements TriageMaintenanceRepository
   }
 }
 
+class PostgresNativeCredentialRepository implements NativeCredentialRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async findInstallationCredential(id: string) {
+    const [row] = await this.db.select({
+      id: nativeInstallationCredentials.id,
+      installationId: nativeInstallationCredentials.installationId,
+      tokenHash: nativeInstallationCredentials.tokenHash,
+      scopes: nativeInstallationCredentials.scopes,
+      expiresAt: nativeInstallationCredentials.expiresAt,
+      revokedAt: nativeInstallationCredentials.revokedAt,
+    }).from(nativeInstallationCredentials)
+      .where(eq(nativeInstallationCredentials.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findShareCredential(id: string) {
+    const [row] = await this.db.select({
+      id: nativeShareCredentials.id,
+      tokenHash: nativeShareCredentials.tokenHash,
+      scope: nativeShareCredentials.scope,
+      expiresAt: nativeShareCredentials.expiresAt,
+      revokedAt: nativeShareCredentials.revokedAt,
+    }).from(nativeShareCredentials)
+      .where(eq(nativeShareCredentials.id, id))
+      .limit(1);
+    return row ?? null;
+  }
+}
+
+class PostgresNativeShareCaptureRepository implements NativeShareCaptureRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async claim(input: NativeShareCaptureClaimInput): Promise<NativeShareCaptureClaim> {
+    return this.db.transaction(async (tx): Promise<NativeShareCaptureClaim> => {
+      await this.lock(tx, input.credentialId);
+      await tx.delete(nativeShareCaptureRequests)
+        .where(lt(nativeShareCaptureRequests.createdAt, input.retentionCutoff));
+
+      const [existing] = await tx.select({
+        payloadHash: nativeShareCaptureRequests.payloadHash,
+        itemId: nativeShareCaptureRequests.itemId,
+      }).from(nativeShareCaptureRequests).where(and(
+        eq(nativeShareCaptureRequests.credentialId, input.credentialId),
+        eq(nativeShareCaptureRequests.requestId, input.requestId),
+      )).limit(1);
+      if (existing) {
+        if (existing.payloadHash !== input.payloadHash) return { status: 'replay' };
+        if (existing.itemId) return { status: 'duplicate', itemId: existing.itemId };
+        return { status: 'pending' };
+      }
+
+      const [recent] = await tx.select({ count: sql<number>`count(*)` })
+        .from(nativeShareCaptureRequests)
+        .where(and(
+          eq(nativeShareCaptureRequests.credentialId, input.credentialId),
+          gte(nativeShareCaptureRequests.createdAt, input.rateWindowStart),
+        ));
+      if (toNumber(recent?.count) >= input.maximumCaptures) {
+        return { status: 'rateLimited' };
+      }
+
+      await tx.insert(nativeShareCaptureRequests).values({
+        credentialId: input.credentialId,
+        requestId: input.requestId,
+        payloadHash: input.payloadHash,
+        reservationId: input.reservationId,
+        itemId: null,
+        createdAt: input.now,
+        completedAt: null,
+      });
+      return { status: 'acquired', reservationId: input.reservationId };
+    });
+  }
+
+  async complete(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly reservationId: string;
+    readonly payloadHash: string;
+    readonly itemId: string;
+    readonly completedAt: string;
+  }): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      await this.lock(tx, input.credentialId);
+      const changed = await tx.update(nativeShareCaptureRequests).set({
+        itemId: input.itemId,
+        completedAt: input.completedAt,
+      }).where(and(
+        eq(nativeShareCaptureRequests.credentialId, input.credentialId),
+        eq(nativeShareCaptureRequests.requestId, input.requestId),
+        eq(nativeShareCaptureRequests.reservationId, input.reservationId),
+        eq(nativeShareCaptureRequests.payloadHash, input.payloadHash),
+        isNull(nativeShareCaptureRequests.itemId),
+      )).returning({ credentialId: nativeShareCaptureRequests.credentialId });
+      if (changed.length === 1) return true;
+
+      const [existing] = await tx.select({
+        reservationId: nativeShareCaptureRequests.reservationId,
+        payloadHash: nativeShareCaptureRequests.payloadHash,
+        itemId: nativeShareCaptureRequests.itemId,
+      }).from(nativeShareCaptureRequests).where(and(
+        eq(nativeShareCaptureRequests.credentialId, input.credentialId),
+        eq(nativeShareCaptureRequests.requestId, input.requestId),
+      )).limit(1);
+      return existing?.reservationId === input.reservationId
+        && existing.payloadHash === input.payloadHash
+        && existing.itemId === input.itemId;
+    });
+  }
+
+  async release(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly reservationId: string;
+  }): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      await this.lock(tx, input.credentialId);
+      const deleted = await tx.delete(nativeShareCaptureRequests).where(and(
+        eq(nativeShareCaptureRequests.credentialId, input.credentialId),
+        eq(nativeShareCaptureRequests.requestId, input.requestId),
+        eq(nativeShareCaptureRequests.reservationId, input.reservationId),
+        isNull(nativeShareCaptureRequests.itemId),
+      )).returning({ credentialId: nativeShareCaptureRequests.credentialId });
+      return deleted.length === 1;
+    });
+  }
+
+  private async lock(tx: PostgresTransaction, credentialId: string): Promise<void> {
+    await tx.execute(sql`
+      SELECT pg_advisory_xact_lock(
+        hashtext(${`mission-control:native-share:${credentialId}`})
+      )
+    `);
+  }
+}
+
+class PostgresNativeApnsRepository implements NativeApnsRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async register(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly payloadHash: string;
+    readonly legacyPayloadHash: string;
+    readonly registrationId: string;
+    readonly installationId: string;
+    readonly tokenCiphertext: string;
+    readonly tokenHash: string;
+    readonly environment: string;
+    readonly topic: string;
+    readonly appVersion: string;
+    readonly buildNumber: number;
+    readonly locale: string;
+    readonly timeZone: string;
+    readonly now: string;
+  }): Promise<NativeApnsRegistrationOutcome> {
+    return this.db.transaction(
+      async (tx): Promise<NativeApnsRegistrationOutcome> => {
+        await this.lock(tx);
+        const prior = await this.replay(
+          tx,
+          input.credentialId,
+          input.requestId,
+          'register',
+          input.payloadHash,
+          input.legacyPayloadHash,
+        );
+        if (prior) return prior;
+        const [activeCredential] = await tx.select({ id: nativeInstallationCredentials.id })
+          .from(nativeInstallationCredentials)
+          .where(and(
+            eq(nativeInstallationCredentials.id, input.credentialId),
+            eq(nativeInstallationCredentials.installationId, input.installationId),
+            isNull(nativeInstallationCredentials.revokedAt),
+          ))
+          .limit(1);
+        if (!activeCredential) return { status: 'credentialRevoked' };
+
+        const [existing] = await tx.select({
+          id: apnsRegistrations.id,
+          tokenHash: apnsRegistrations.tokenHash,
+          tokenCiphertext: apnsRegistrations.tokenCiphertext,
+          invalidatedAt: apnsRegistrations.invalidatedAt,
+        }).from(apnsRegistrations).where(and(
+          eq(apnsRegistrations.installationId, input.installationId),
+          eq(apnsRegistrations.environment, input.environment),
+          eq(apnsRegistrations.topic, input.topic),
+        )).limit(1);
+        const registrationId = existing?.id ?? input.registrationId;
+
+        await tx.update(apnsRegistrations).set({
+          invalidatedAt: input.now,
+          invalidationReason: 'token_reassigned',
+          updatedAt: input.now,
+        }).where(and(
+          eq(apnsRegistrations.tokenHash, input.tokenHash),
+          eq(apnsRegistrations.environment, input.environment),
+          eq(apnsRegistrations.topic, input.topic),
+          isNull(apnsRegistrations.invalidatedAt),
+          ne(apnsRegistrations.id, registrationId),
+        ));
+        await tx.update(apnsRegistrations).set({
+          invalidatedAt: input.now,
+          invalidationReason: 'target_changed',
+          updatedAt: input.now,
+        }).where(and(
+          eq(apnsRegistrations.installationId, input.installationId),
+          isNull(apnsRegistrations.invalidatedAt),
+          ne(apnsRegistrations.id, registrationId),
+        ));
+
+        const state = existing && !existing.invalidatedAt && existing.tokenHash !== input.tokenHash
+          ? 'rotated' as const
+          : 'registered' as const;
+        if (existing) {
+          await tx.update(apnsRegistrations).set({
+            tokenCiphertext: existing.tokenHash === input.tokenHash
+              ? existing.tokenCiphertext
+              : input.tokenCiphertext,
+            tokenHash: input.tokenHash,
+            appVersion: input.appVersion,
+            buildNumber: input.buildNumber,
+            locale: input.locale,
+            timeZone: input.timeZone,
+            updatedAt: input.now,
+            lastSeenAt: input.now,
+            invalidatedAt: null,
+            invalidationReason: null,
+          }).where(eq(apnsRegistrations.id, registrationId));
+        } else {
+          await tx.insert(apnsRegistrations).values({
+            id: registrationId,
+            installationId: input.installationId,
+            tokenCiphertext: input.tokenCiphertext,
+            tokenHash: input.tokenHash,
+            environment: input.environment,
+            topic: input.topic,
+            appVersion: input.appVersion,
+            buildNumber: input.buildNumber,
+            locale: input.locale,
+            timeZone: input.timeZone,
+            createdAt: input.now,
+            updatedAt: input.now,
+            lastSeenAt: input.now,
+            invalidatedAt: null,
+            invalidationReason: null,
+          });
+        }
+
+        const responseBody: NativeApnsRegistrationStoredResponse = {
+          kind: 'registration',
+          registrationId,
+          state,
+          updatedAt: input.now,
+        };
+        const response = {
+          responseStatus: existing ? 200 : 201,
+          responseBody,
+        };
+        await this.store(
+          tx,
+          input.credentialId,
+          input.requestId,
+          'register',
+          input.payloadHash,
+          response,
+          input.now,
+        );
+        return { status: 'applied', response };
+      },
+    );
+  }
+
+  async unregister(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly payloadHash: string;
+    readonly legacyPayloadHash: string;
+    readonly registrationId: string;
+    readonly installationId: string;
+    readonly now: string;
+  }): Promise<NativeApnsUnregistrationOutcome> {
+    const operation = `unregister:${input.registrationId}`;
+    return this.db.transaction(async (tx): Promise<NativeApnsUnregistrationOutcome> => {
+      await this.lock(tx);
+      const prior = await this.replay(
+        tx,
+        input.credentialId,
+        input.requestId,
+        operation,
+        input.payloadHash,
+        input.legacyPayloadHash,
+      );
+      if (prior) return prior;
+      const [registration] = await tx.select({ id: apnsRegistrations.id })
+        .from(apnsRegistrations)
+        .where(and(
+          eq(apnsRegistrations.id, input.registrationId),
+          eq(apnsRegistrations.installationId, input.installationId),
+        ))
+        .limit(1);
+      if (!registration) return { status: 'notOwned' };
+
+      await tx.update(apnsRegistrations).set({
+        invalidatedAt: sql`COALESCE(${apnsRegistrations.invalidatedAt}, ${input.now})`,
+        invalidationReason: sql`COALESCE(${apnsRegistrations.invalidationReason}, 'user_unregistered')`,
+        updatedAt: input.now,
+      }).where(eq(apnsRegistrations.id, registration.id));
+      const responseBody: NativeApnsUnregistrationStoredResponse = {
+        kind: 'unregistration',
+        registrationId: registration.id,
+        state: 'unregistered',
+        updatedAt: input.now,
+      };
+      const response = { responseStatus: 200, responseBody };
+      await this.store(
+        tx,
+        input.credentialId,
+        input.requestId,
+        operation,
+        input.payloadHash,
+        response,
+        input.now,
+      );
+      return { status: 'applied', response };
+    });
+  }
+
+  async logout(input: { readonly installationId: string; readonly now: string }) {
+    return this.db.transaction(async (tx) => {
+      await this.lock(tx);
+      const installationCredentials = await tx.update(nativeInstallationCredentials).set({
+        revokedAt: input.now,
+      }).where(and(
+        eq(nativeInstallationCredentials.installationId, input.installationId),
+        isNull(nativeInstallationCredentials.revokedAt),
+      )).returning({ id: nativeInstallationCredentials.id });
+      const shareCredentials = await tx.update(nativeShareCredentials).set({
+        revokedAt: input.now,
+      }).where(and(
+        eq(nativeShareCredentials.installationId, input.installationId),
+        isNull(nativeShareCredentials.revokedAt),
+      )).returning({ id: nativeShareCredentials.id });
+      const registrations = await tx.update(apnsRegistrations).set({
+        invalidatedAt: input.now,
+        invalidationReason: 'logout',
+        updatedAt: input.now,
+      }).where(and(
+        eq(apnsRegistrations.installationId, input.installationId),
+        isNull(apnsRegistrations.invalidatedAt),
+      )).returning({ id: apnsRegistrations.id });
+      return {
+        credentialsRevoked: installationCredentials.length + shareCredentials.length,
+        registrationsRetired: registrations.length,
+      };
+    });
+  }
+
+  private async lock(tx: PostgresTransaction): Promise<void> {
+    await tx.execute(sql`
+      SELECT pg_advisory_xact_lock(hashtext('mission-control:native-apns'))
+    `);
+  }
+
+  private async replay(
+    tx: PostgresTransaction,
+    credentialId: string,
+    requestId: string,
+    operation: string,
+    payloadHash: string,
+    legacyPayloadHash: string,
+  ): Promise<NativeRequestOutcome<never> | null> {
+    const [prior] = await tx.select({
+      operation: nativePushRequests.operation,
+      payloadHash: nativePushRequests.payloadHash,
+      responseStatus: nativePushRequests.responseStatus,
+      responseBody: nativePushRequests.responseBody,
+    }).from(nativePushRequests).where(and(
+      eq(nativePushRequests.credentialId, credentialId),
+      eq(nativePushRequests.requestId, requestId),
+    )).limit(1);
+    if (!prior) return null;
+    if (
+      prior.operation !== operation
+      || (prior.payloadHash !== payloadHash && prior.payloadHash !== legacyPayloadHash)
+    ) {
+      return { status: 'mismatch' };
+    }
+    return {
+      status: 'replay',
+      response: {
+        responseStatus: prior.responseStatus,
+        responseBody: prior.responseBody,
+      },
+    };
+  }
+
+  private async store(
+    tx: PostgresTransaction,
+    credentialId: string,
+    requestId: string,
+    operation: string,
+    payloadHash: string,
+    response: { readonly responseStatus: number; readonly responseBody: unknown },
+    now: string,
+  ): Promise<void> {
+    await tx.insert(nativePushRequests).values({
+      credentialId,
+      requestId,
+      operation,
+      payloadHash,
+      responseStatus: response.responseStatus,
+      responseBody: response.responseBody,
+      createdAt: now,
+    });
+  }
+}
+
 export function createPostgresTriagePersistenceRepositories(
   db: PostgresDatabase,
 ): TriagePersistenceRepositories {
@@ -1001,5 +1441,10 @@ export function createPostgresTriagePersistenceRepositories(
     contentTypes: new PostgresTriageContentTypeRepository(db),
     health: new PostgresTriageQueueHealthRepository(db),
     maintenance: new PostgresTriageMaintenanceRepository(db),
+    native: {
+      credentials: new PostgresNativeCredentialRepository(db),
+      shareCapture: new PostgresNativeShareCaptureRepository(db),
+      apns: new PostgresNativeApnsRepository(db),
+    },
   };
 }

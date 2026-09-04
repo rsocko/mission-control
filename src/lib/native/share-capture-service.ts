@@ -1,7 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { and, eq, gte, isNull, lt, sql } from 'drizzle-orm';
-import db from '@/db';
-import { nativeShareCaptureRequests } from '@/db/schema';
+import type { NativeShareCaptureClaim } from '@/db/persistence/triage-repositories';
 import {
   nativeApiErrorEnvelopeSchema,
   shareSheetCaptureRequestSchema,
@@ -9,6 +7,7 @@ import {
   type ShareSheetCaptureRequest,
   type ShareSheetCaptureResponse,
 } from '@/lib/native/contract';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 import {
   authenticateNativeShareCredential,
   type NativeShareAuthentication,
@@ -22,20 +21,13 @@ import {
 const idempotencyRetentionMilliseconds = 24 * 60 * 60 * 1_000;
 const maximumCapturesPerMinute = 30;
 
-type CaptureClaim =
-  | { status: 'acquired'; reservationId: string }
-  | { status: 'duplicate'; itemId: string }
-  | { status: 'pending' }
-  | { status: 'rateLimited' }
-  | { status: 'replay' };
-
 export interface IOSShareCaptureDependencies {
   authenticate(authorization: string | null): Promise<NativeShareAuthentication>;
   claim(
     credentialId: string,
     requestId: string,
     payloadHash: string,
-  ): Promise<CaptureClaim>;
+  ): Promise<NativeShareCaptureClaim>;
   complete(
     credentialId: string,
     requestId: string,
@@ -266,131 +258,36 @@ const defaultDependencies: IOSShareCaptureDependencies = {
   authenticate: authenticateNativeShareCredential,
   async claim(credentialId, requestId, payloadHash) {
     const now = new Date();
-    await db.delete(nativeShareCaptureRequests).where(
-      lt(
-        nativeShareCaptureRequests.createdAt,
-        new Date(now.getTime() - idempotencyRetentionMilliseconds).toISOString(),
-      ),
-    );
-    const [existing] = await db.select().from(nativeShareCaptureRequests).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        eq(nativeShareCaptureRequests.requestId, requestId),
-      ),
-    ).limit(1);
-    if (existing) {
-      if (existing.payloadHash !== payloadHash) {
-        return { status: 'replay' };
-      }
-      if (existing.itemId) {
-        return { status: 'duplicate', itemId: existing.itemId };
-      }
-      return { status: 'pending' };
-    }
-
-    const [recent] = await db.select({
-      count: sql<number>`count(*)`,
-    }).from(nativeShareCaptureRequests).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        gte(
-          nativeShareCaptureRequests.createdAt,
-          new Date(now.getTime() - 60_000).toISOString(),
-        ),
-      ),
-    );
-    if (Number(recent?.count ?? 0) >= maximumCapturesPerMinute) {
-      return { status: 'rateLimited' };
-    }
-
     const reservationId = randomUUID();
-    const insertion = db.insert(nativeShareCaptureRequests).values({
+    return getTriagePersistenceRepositories().native.shareCapture.claim({
       credentialId,
       requestId,
       payloadHash,
       reservationId,
-      createdAt: now.toISOString(),
-    }).onConflictDoNothing().run();
-    if (insertion.changes === 1) {
-      return { status: 'acquired', reservationId };
-    }
-
-    const [racedExisting] = await db.select().from(nativeShareCaptureRequests).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        eq(nativeShareCaptureRequests.requestId, requestId),
-      ),
-    ).limit(1);
-    if (!racedExisting || racedExisting.payloadHash !== payloadHash) {
-      return { status: 'replay' };
-    }
-    if (racedExisting.itemId) {
-      return { status: 'duplicate', itemId: racedExisting.itemId };
-    }
-    return { status: 'pending' };
+      now: now.toISOString(),
+      retentionCutoff: new Date(
+        now.getTime() - idempotencyRetentionMilliseconds,
+      ).toISOString(),
+      rateWindowStart: new Date(now.getTime() - 60_000).toISOString(),
+      maximumCaptures: maximumCapturesPerMinute,
+    });
   },
   async complete(credentialId, requestId, reservationId, payloadHash, itemId) {
-    const completedAt = new Date().toISOString();
-    let result = db.update(nativeShareCaptureRequests).set({
-      itemId,
-      completedAt,
-    }).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        eq(nativeShareCaptureRequests.requestId, requestId),
-        eq(nativeShareCaptureRequests.reservationId, reservationId),
-        eq(nativeShareCaptureRequests.payloadHash, payloadHash),
-        isNull(nativeShareCaptureRequests.itemId),
-      ),
-    ).run();
-    if (result.changes === 1) {
-      return true;
-    }
-
-    result = db.update(nativeShareCaptureRequests).set({
-      itemId,
-      completedAt,
-    }).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        eq(nativeShareCaptureRequests.requestId, requestId),
-        eq(nativeShareCaptureRequests.payloadHash, payloadHash),
-        isNull(nativeShareCaptureRequests.itemId),
-      ),
-    ).run();
-    if (result.changes === 1) {
-      return true;
-    }
-
-    const insertion = db.insert(nativeShareCaptureRequests).values({
+    return getTriagePersistenceRepositories().native.shareCapture.complete({
       credentialId,
       requestId,
-      payloadHash,
       reservationId,
+      payloadHash,
       itemId,
-      createdAt: completedAt,
-      completedAt,
-    }).onConflictDoNothing().run();
-    if (insertion.changes === 1) {
-      return true;
-    }
-
-    const [existing] = await db.select().from(nativeShareCaptureRequests).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        eq(nativeShareCaptureRequests.requestId, requestId),
-      ),
-    ).limit(1);
-    return existing?.payloadHash === payloadHash && existing.itemId === itemId;
+      completedAt: new Date().toISOString(),
+    });
   },
   async release(credentialId, requestId, reservationId) {
-    await db.delete(nativeShareCaptureRequests).where(
-      and(
-        eq(nativeShareCaptureRequests.credentialId, credentialId),
-        eq(nativeShareCaptureRequests.requestId, requestId),
-        eq(nativeShareCaptureRequests.reservationId, reservationId),
-      ),
-    );
+    await getTriagePersistenceRepositories().native.shareCapture.release({
+      credentialId,
+      requestId,
+      reservationId,
+    });
   },
   async createCapture(payload) {
     if (payload.contentType === 'text') {

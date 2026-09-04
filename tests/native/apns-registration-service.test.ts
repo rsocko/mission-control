@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
@@ -148,6 +148,60 @@ describe('native APNs registration lifecycle', () => {
       status: 409,
       body: { error: { code: 'REPLAY_DETECTED' } },
     });
+  });
+
+  it('fails closed on malformed stored replay payloads without leaking token material', async () => {
+    const body = registrationBody();
+    await service.processApnsRegistration(request(body.requestId), body, baseTime);
+    db.update(schema.nativePushRequests).set({
+      responseBody: {
+        kind: 'registration',
+        state: 'registered',
+        privateToken: deviceToken,
+      },
+    }).run();
+
+    const replay = await service.processApnsRegistration(
+      request(body.requestId),
+      body,
+      new Date(baseTime.getTime() + 1_000),
+    );
+
+    expect(replay).toMatchObject({
+      status: 500,
+      body: { error: { code: 'INTERNAL_ERROR', retryable: true } },
+    });
+    expect(JSON.stringify(replay)).not.toContain(deviceToken);
+  });
+
+  it('replays pre-migration APNs request hashes and stored HTTP envelopes', async () => {
+    const body = registrationBody();
+    const stored = {
+      version: 1,
+      requestId: body.requestId,
+      ok: true,
+      data: {
+        registrationId: '77777777-7777-4777-8777-777777777777',
+        state: 'registered',
+        updatedAt: baseTime.toISOString(),
+      },
+    };
+    db.insert(schema.nativePushRequests).values({
+      credentialId,
+      requestId: body.requestId,
+      operation: 'register',
+      payloadHash: createHash('sha256')
+        .update(`register\n${JSON.stringify(body)}`, 'utf8')
+        .digest('hex'),
+      responseStatus: 201,
+      responseBody: stored,
+      createdAt: baseTime.toISOString(),
+    }).run();
+
+    await expect(
+      service.processApnsRegistration(request(body.requestId), body, baseTime),
+    ).resolves.toEqual({ status: 201, body: stored });
+    expect(db.select().from(schema.apnsRegistrations).all()).toEqual([]);
   });
 
     it('retires a token reassigned to a new installation after reinstall', async () => {

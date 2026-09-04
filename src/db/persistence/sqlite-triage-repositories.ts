@@ -28,6 +28,16 @@ import {
   type TriageMaintenanceRepository,
   type TriageMergeMetadataOptions,
   type TriageMissingThumbnailCandidate,
+  type NativeApnsRepository,
+  type NativeApnsRegistrationOutcome,
+  type NativeApnsRegistrationStoredResponse,
+  type NativeApnsUnregistrationOutcome,
+  type NativeApnsUnregistrationStoredResponse,
+  type NativeCredentialRepository,
+  type NativeRequestOutcome,
+  type NativeShareCaptureClaim,
+  type NativeShareCaptureClaimInput,
+  type NativeShareCaptureRepository,
   type TriagePersistenceRepositories,
   type TriageQueueFacetStats,
   type TriageQueueHealthPendingSnapshotEntry,
@@ -1203,6 +1213,464 @@ class SqliteTriageMaintenanceRepository implements TriageMaintenanceRepository {
   }
 }
 
+interface NativeInstallationCredentialRow {
+  id: string;
+  installation_id: string;
+  token_hash: string;
+  scopes: unknown;
+  expires_at: string;
+  revoked_at: string | null;
+}
+
+interface NativeShareCredentialRow {
+  id: string;
+  token_hash: string;
+  scope: string;
+  expires_at: string;
+  revoked_at: string | null;
+}
+
+class SqliteNativeCredentialRepository implements NativeCredentialRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  async findInstallationCredential(id: string) {
+    const row = this.db.prepare(`
+      SELECT id, installation_id, token_hash, scopes, expires_at, revoked_at
+      FROM native_installation_credentials
+      WHERE id = ?
+      LIMIT 1
+    `).get(id) as NativeInstallationCredentialRow | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      installationId: row.installation_id,
+      tokenHash: row.token_hash,
+      scopes: parseJson(row.scopes, 'native_installation_credentials.scopes'),
+      expiresAt: row.expires_at,
+      revokedAt: row.revoked_at,
+    };
+  }
+
+  async findShareCredential(id: string) {
+    const row = this.db.prepare(`
+      SELECT id, token_hash, scope, expires_at, revoked_at
+      FROM native_share_credentials
+      WHERE id = ?
+      LIMIT 1
+    `).get(id) as NativeShareCredentialRow | undefined;
+    return row
+      ? {
+          id: row.id,
+          tokenHash: row.token_hash,
+          scope: row.scope,
+          expiresAt: row.expires_at,
+          revokedAt: row.revoked_at,
+        }
+      : null;
+  }
+}
+
+interface NativeShareCaptureRequestRow {
+  payload_hash: string;
+  reservation_id: string;
+  item_id: string | null;
+}
+
+class SqliteNativeShareCaptureRepository implements NativeShareCaptureRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  async claim(input: NativeShareCaptureClaimInput): Promise<NativeShareCaptureClaim> {
+    const transaction = this.db.transaction((): NativeShareCaptureClaim => {
+      this.db.prepare(`
+        DELETE FROM native_share_capture_requests
+        WHERE created_at < ?
+      `).run(input.retentionCutoff);
+
+      const existing = this.find(input.credentialId, input.requestId);
+      if (existing) return this.classify(existing, input.payloadHash);
+
+      const recent = this.db.prepare(`
+        SELECT count(*) AS count
+        FROM native_share_capture_requests
+        WHERE credential_id = ? AND created_at >= ?
+      `).get(input.credentialId, input.rateWindowStart) as { count: number };
+      if (recent.count >= input.maximumCaptures) return { status: 'rateLimited' };
+
+      this.db.prepare(`
+        INSERT INTO native_share_capture_requests (
+          credential_id, request_id, payload_hash, reservation_id, item_id,
+          created_at, completed_at
+        ) VALUES (?, ?, ?, ?, NULL, ?, NULL)
+      `).run(
+        input.credentialId,
+        input.requestId,
+        input.payloadHash,
+        input.reservationId,
+        input.now,
+      );
+      return { status: 'acquired', reservationId: input.reservationId };
+    });
+    return transaction.immediate();
+  }
+
+  async complete(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly reservationId: string;
+    readonly payloadHash: string;
+    readonly itemId: string;
+    readonly completedAt: string;
+  }): Promise<boolean> {
+    const transaction = this.db.transaction(() => {
+      const changed = this.db.prepare(`
+        UPDATE native_share_capture_requests
+        SET item_id = ?, completed_at = ?
+        WHERE credential_id = ?
+          AND request_id = ?
+          AND reservation_id = ?
+          AND payload_hash = ?
+          AND item_id IS NULL
+      `).run(
+        input.itemId,
+        input.completedAt,
+        input.credentialId,
+        input.requestId,
+        input.reservationId,
+        input.payloadHash,
+      ).changes;
+      if (changed === 1) return true;
+      const existing = this.find(input.credentialId, input.requestId);
+      return existing?.reservation_id === input.reservationId
+        && existing.payload_hash === input.payloadHash
+        && existing.item_id === input.itemId;
+    });
+    return transaction.immediate();
+  }
+
+  async release(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly reservationId: string;
+  }): Promise<boolean> {
+    return this.db.prepare(`
+      DELETE FROM native_share_capture_requests
+      WHERE credential_id = ?
+        AND request_id = ?
+        AND reservation_id = ?
+        AND item_id IS NULL
+    `).run(input.credentialId, input.requestId, input.reservationId).changes === 1;
+  }
+
+  private find(credentialId: string, requestId: string) {
+    return this.db.prepare(`
+      SELECT payload_hash, reservation_id, item_id
+      FROM native_share_capture_requests
+      WHERE credential_id = ? AND request_id = ?
+      LIMIT 1
+    `).get(credentialId, requestId) as NativeShareCaptureRequestRow | undefined;
+  }
+
+  private classify(
+    row: NativeShareCaptureRequestRow,
+    payloadHash: string,
+  ): NativeShareCaptureClaim {
+    if (row.payload_hash !== payloadHash) return { status: 'replay' };
+    if (row.item_id) return { status: 'duplicate', itemId: row.item_id };
+    return { status: 'pending' };
+  }
+}
+
+interface NativePushRequestRow {
+  operation: string;
+  payload_hash: string;
+  response_status: number;
+  response_body: unknown;
+}
+
+interface ApnsRegistrationRow {
+  id: string;
+  token_hash: string;
+  token_ciphertext: string;
+  invalidated_at: string | null;
+  invalidation_reason: string | null;
+}
+
+class SqliteNativeApnsRepository implements NativeApnsRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  async register(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly payloadHash: string;
+    readonly legacyPayloadHash: string;
+    readonly registrationId: string;
+    readonly installationId: string;
+    readonly tokenCiphertext: string;
+    readonly tokenHash: string;
+    readonly environment: string;
+    readonly topic: string;
+    readonly appVersion: string;
+    readonly buildNumber: number;
+    readonly locale: string;
+    readonly timeZone: string;
+    readonly now: string;
+  }): Promise<NativeApnsRegistrationOutcome> {
+    const transaction = this.db.transaction(
+      (): NativeApnsRegistrationOutcome => {
+        const prior = this.replay(
+          input.credentialId,
+          input.requestId,
+          'register',
+          input.payloadHash,
+          input.legacyPayloadHash,
+        );
+        if (prior) return prior;
+        const activeCredential = this.db.prepare(`
+          SELECT id
+          FROM native_installation_credentials
+          WHERE id = ? AND installation_id = ? AND revoked_at IS NULL
+          LIMIT 1
+        `).get(input.credentialId, input.installationId) as { id: string } | undefined;
+        if (!activeCredential) return { status: 'credentialRevoked' };
+
+        const existing = this.db.prepare(`
+          SELECT id, token_hash, token_ciphertext, invalidated_at, invalidation_reason
+          FROM apns_registrations
+          WHERE installation_id = ? AND environment = ? AND topic = ?
+          LIMIT 1
+        `).get(
+          input.installationId,
+          input.environment,
+          input.topic,
+        ) as ApnsRegistrationRow | undefined;
+        const registrationId = existing?.id ?? input.registrationId;
+
+        this.db.prepare(`
+          UPDATE apns_registrations
+          SET invalidated_at = ?, invalidation_reason = 'token_reassigned', updated_at = ?
+          WHERE token_hash = ?
+            AND environment = ?
+            AND topic = ?
+            AND invalidated_at IS NULL
+            AND id <> ?
+        `).run(
+          input.now,
+          input.now,
+          input.tokenHash,
+          input.environment,
+          input.topic,
+          registrationId,
+        );
+        this.db.prepare(`
+          UPDATE apns_registrations
+          SET invalidated_at = ?, invalidation_reason = 'target_changed', updated_at = ?
+          WHERE installation_id = ? AND invalidated_at IS NULL AND id <> ?
+        `).run(input.now, input.now, input.installationId, registrationId);
+
+        const state = existing && !existing.invalidated_at && existing.token_hash !== input.tokenHash
+          ? 'rotated' as const
+          : 'registered' as const;
+        if (existing) {
+          this.db.prepare(`
+            UPDATE apns_registrations
+            SET token_ciphertext = ?,
+                token_hash = ?,
+                app_version = ?,
+                build_number = ?,
+                locale = ?,
+                time_zone = ?,
+                updated_at = ?,
+                last_seen_at = ?,
+                invalidated_at = NULL,
+                invalidation_reason = NULL
+            WHERE id = ?
+          `).run(
+            existing.token_hash === input.tokenHash
+              ? existing.token_ciphertext
+              : input.tokenCiphertext,
+            input.tokenHash,
+            input.appVersion,
+            input.buildNumber,
+            input.locale,
+            input.timeZone,
+            input.now,
+            input.now,
+            registrationId,
+          );
+        } else {
+          this.db.prepare(`
+            INSERT INTO apns_registrations (
+              id, installation_id, token_ciphertext, token_hash, environment,
+              topic, app_version, build_number, locale, time_zone, created_at,
+              updated_at, last_seen_at, invalidated_at, invalidation_reason
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+          `).run(
+            registrationId,
+            input.installationId,
+            input.tokenCiphertext,
+            input.tokenHash,
+            input.environment,
+            input.topic,
+            input.appVersion,
+            input.buildNumber,
+            input.locale,
+            input.timeZone,
+            input.now,
+            input.now,
+            input.now,
+          );
+        }
+
+        const responseBody: NativeApnsRegistrationStoredResponse = {
+          kind: 'registration',
+          registrationId,
+          state,
+          updatedAt: input.now,
+        };
+        const response = {
+          responseStatus: existing ? 200 : 201,
+          responseBody,
+        };
+        this.store(input.credentialId, input.requestId, 'register', input.payloadHash, response, input.now);
+        return { status: 'applied', response };
+      },
+    );
+    return transaction.immediate();
+  }
+
+  async unregister(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly payloadHash: string;
+    readonly legacyPayloadHash: string;
+    readonly registrationId: string;
+    readonly installationId: string;
+    readonly now: string;
+  }): Promise<NativeApnsUnregistrationOutcome> {
+    const operation = `unregister:${input.registrationId}`;
+    const transaction = this.db.transaction((): NativeApnsUnregistrationOutcome => {
+      const prior = this.replay(
+        input.credentialId,
+        input.requestId,
+        operation,
+        input.payloadHash,
+        input.legacyPayloadHash,
+      );
+      if (prior) return prior;
+      const registration = this.db.prepare(`
+        SELECT id
+        FROM apns_registrations
+        WHERE id = ? AND installation_id = ?
+        LIMIT 1
+      `).get(input.registrationId, input.installationId) as { id: string } | undefined;
+      if (!registration) return { status: 'notOwned' };
+
+      this.db.prepare(`
+        UPDATE apns_registrations
+        SET invalidated_at = COALESCE(invalidated_at, ?),
+            invalidation_reason = COALESCE(invalidation_reason, 'user_unregistered'),
+            updated_at = ?
+        WHERE id = ?
+      `).run(input.now, input.now, registration.id);
+      const responseBody: NativeApnsUnregistrationStoredResponse = {
+        kind: 'unregistration',
+        registrationId: registration.id,
+        state: 'unregistered',
+        updatedAt: input.now,
+      };
+      const response = { responseStatus: 200, responseBody };
+      this.store(
+        input.credentialId,
+        input.requestId,
+        operation,
+        input.payloadHash,
+        response,
+        input.now,
+      );
+      return { status: 'applied', response };
+    });
+    return transaction.immediate();
+  }
+
+  async logout(input: { readonly installationId: string; readonly now: string }) {
+    const transaction = this.db.transaction(() => {
+      const installationCredentials = this.db.prepare(`
+        UPDATE native_installation_credentials
+        SET revoked_at = ?
+        WHERE installation_id = ? AND revoked_at IS NULL
+      `).run(input.now, input.installationId).changes;
+      const shareCredentials = this.db.prepare(`
+        UPDATE native_share_credentials
+        SET revoked_at = ?
+        WHERE installation_id = ? AND revoked_at IS NULL
+      `).run(input.now, input.installationId).changes;
+      const registrationsRetired = this.db.prepare(`
+        UPDATE apns_registrations
+        SET invalidated_at = ?, invalidation_reason = 'logout', updated_at = ?
+        WHERE installation_id = ? AND invalidated_at IS NULL
+      `).run(input.now, input.now, input.installationId).changes;
+      return {
+        credentialsRevoked: installationCredentials + shareCredentials,
+        registrationsRetired,
+      };
+    });
+    return transaction.immediate();
+  }
+
+  private replay(
+    credentialId: string,
+    requestId: string,
+    operation: string,
+    payloadHash: string,
+    legacyPayloadHash: string,
+  ): NativeRequestOutcome<never> | null {
+    const prior = this.db.prepare(`
+      SELECT operation, payload_hash, response_status, response_body
+      FROM native_push_requests
+      WHERE credential_id = ? AND request_id = ?
+      LIMIT 1
+    `).get(credentialId, requestId) as NativePushRequestRow | undefined;
+    if (!prior) return null;
+    if (
+      prior.operation !== operation
+      || (prior.payload_hash !== payloadHash && prior.payload_hash !== legacyPayloadHash)
+    ) {
+      return { status: 'mismatch' };
+    }
+    return {
+      status: 'replay',
+      response: {
+        responseStatus: prior.response_status,
+        responseBody: JSON.parse(String(prior.response_body)) as unknown,
+      },
+    };
+  }
+
+  private store(
+    credentialId: string,
+    requestId: string,
+    operation: string,
+    payloadHash: string,
+    response: { readonly responseStatus: number; readonly responseBody: unknown },
+    now: string,
+  ): void {
+    this.db.prepare(`
+      INSERT INTO native_push_requests (
+        credential_id, request_id, operation, payload_hash, response_status,
+        response_body, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      credentialId,
+      requestId,
+      operation,
+      payloadHash,
+      response.responseStatus,
+      JSON.stringify(response.responseBody),
+      now,
+    );
+  }
+}
+
 export function createSqliteTriagePersistenceRepositories(
   db: SqliteDatabase,
 ): TriagePersistenceRepositories {
@@ -1214,5 +1682,10 @@ export function createSqliteTriagePersistenceRepositories(
     contentTypes: new SqliteTriageContentTypeRepository(db),
     health: new SqliteTriageQueueHealthRepository(db),
     maintenance: new SqliteTriageMaintenanceRepository(db),
+    native: {
+      credentials: new SqliteNativeCredentialRepository(db),
+      shareCapture: new SqliteNativeShareCaptureRepository(db),
+      apns: new SqliteNativeApnsRepository(db),
+    },
   };
 }

@@ -129,6 +129,15 @@ describe.sequential('finance attribution exception APIs', () => {
     ), { params: Promise.resolve({ id: connectorId }) });
     expect(invalidCursor.status).toBe(400);
     expect(await invalidCursor.json()).toMatchObject({ code: 'invalid_cursor' });
+
+    const missingConnectorWithInvalidCursor = await GET(new Request(
+      'https://mc.example/api/connectors/missing-finance/finance/attribution-exceptions?cursor=invalid',
+      { headers: trustedHeaders() },
+    ), { params: Promise.resolve({ id: 'missing-finance' }) });
+    expect(missingConnectorWithInvalidCursor.status).toBe(404);
+    expect(await missingConnectorWithInvalidCursor.json()).toMatchObject({
+      code: 'connector_not_found',
+    });
   });
 
   it('fails closed when a same-origin request supplies an invalid API credential', async () => {
@@ -330,7 +339,9 @@ describe.sequential('finance attribution exception APIs', () => {
     expect(sqlite.prepare(`
       SELECT status FROM finance_attribution_exceptions WHERE id = ?
     `).get(exceptionId)).toEqual({ status: 'retry_requested' });
-    expect(requestRetryMock).toHaveBeenCalledTimes(2);
+    // Retry scheduling happens strictly after the first committed retry, never
+    // for the idempotent replay.
+    expect(requestRetryMock).toHaveBeenCalledTimes(1);
     expect(requestRetryMock).toHaveBeenCalledWith(connectorId);
     expect(sqlite.prepare(`
       SELECT count(*) AS count, max(full) AS full

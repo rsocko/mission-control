@@ -1,6 +1,6 @@
 import { and, eq, isNull } from 'drizzle-orm';
 import type { ConnectorConfig } from '@/types';
-import type { ConnectorRepository } from '@/db/persistence/core-repositories';
+import type { ConnectorRepository, ConnectorTestResultCommand } from '@/db/persistence/core-repositories';
 import { RepositoryError } from '@/db/persistence/contracts';
 import {
   mergeConnectorSettings,
@@ -144,6 +144,24 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       .where(and(eq(connectorConfigs.id, id), isNull(connectorConfigs.deletedAt)))
       .returning({ id: connectorConfigs.id });
     return updated.length > 0;
+  }
+
+  async recordTestResult(
+    command: ConnectorTestResultCommand,
+  ): Promise<{ recorded: boolean }> {
+    const updated = await this.db
+      .update(connectorConfigs)
+      .set({
+        lastTestStatus: command.status,
+        lastTestError: command.status === 'success' ? null : command.error,
+        lastTestAt: command.testedAt,
+      })
+      .where(and(
+        eq(connectorConfigs.id, command.connectorId),
+        isNull(connectorConfigs.deletedAt),
+      ))
+      .returning({ id: connectorConfigs.id });
+    return { recorded: updated.length === 1 };
   }
 
   async mergeSettings(

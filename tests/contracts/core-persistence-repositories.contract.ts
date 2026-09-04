@@ -254,6 +254,45 @@ export function describeCorePersistenceRepositoriesContract(
         });
     });
 
+    it('records a connection-test outcome without touching unrelated state', async () => {
+      await harness.repositories.connectors.upsert(coreConnectorFixture);
+
+      await expect(harness.repositories.connectors.recordTestResult({
+        connectorId: coreConnectorFixture.id,
+        status: 'success',
+        // A success must clear any previous error even if one is supplied.
+        error: 'stale failure text',
+        testedAt: '2026-08-26T01:00:00.000Z',
+      })).resolves.toEqual({ recorded: true });
+      await expect(harness.repositories.connectors.get(coreConnectorFixture.id))
+        .resolves.toEqual(coreConnectorFixture);
+
+      await expect(harness.repositories.connectors.recordTestResult({
+        connectorId: coreConnectorFixture.id,
+        status: 'failed',
+        error: 'Connection timed out (10s)',
+        testedAt: '2026-08-26T02:00:00.000Z',
+      })).resolves.toEqual({ recorded: true });
+      await expect(harness.repositories.connectors.get(coreConnectorFixture.id))
+        .resolves.toEqual(coreConnectorFixture);
+
+      // Unknown and soft-deleted connectors are a no-op, never a throw, so the
+      // route's non-fatal badge persistence holds identically on both backends.
+      await expect(harness.repositories.connectors.recordTestResult({
+        connectorId: 'connector-absent',
+        status: 'failed',
+        error: 'Connection test failed',
+        testedAt: '2026-08-26T03:00:00.000Z',
+      })).resolves.toEqual({ recorded: false });
+      await harness.repositories.connectors.delete(coreConnectorFixture.id);
+      await expect(harness.repositories.connectors.recordTestResult({
+        connectorId: coreConnectorFixture.id,
+        status: 'success',
+        error: null,
+        testedAt: '2026-08-26T04:00:00.000Z',
+      })).resolves.toEqual({ recorded: false });
+    });
+
     it('round trips notification JSON and pending actions', async () => {
       expect(await harness.repositories.notifications.upsert(coreNotificationFixture))
         .toMatchObject(coreNotificationFixture);

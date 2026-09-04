@@ -84,6 +84,14 @@ curl --fail-with-body \
 Before repair, record the returned stable blockers and metadata counts. Do not
 continue if the response contains private finance content or key material.
 
+The readiness, health, recovery, attribution-review, manual KID, and cutover
+web paths use the same backend-selected Finance persistence composition as the
+worker. PostgreSQL deployments fail closed if that complete composition is not
+registered; they never read or write the SQLite compatibility database. These
+metadata reads do not claim work or mutate leases. Cutover and rollback remain
+single atomic database operations, and notification dispatcher wake occurs only
+after a successful commit.
+
 ## 4. Repair PR #1563 projections
 
 Follow [Finance Attention Projection Repair](./finance-attention-repair.md)

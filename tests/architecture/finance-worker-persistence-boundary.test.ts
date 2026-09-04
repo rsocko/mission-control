@@ -11,6 +11,7 @@ const CONTRACTS = [
   'src/db/persistence/finance-snapshot.ts',
   'src/db/persistence/finance-datasets.ts',
   'src/db/persistence/finance-attribution.ts',
+  'src/db/persistence/finance-operator.ts',
   'src/db/persistence/finance-insights.ts',
   'src/db/persistence/finance-attention.ts',
 ] as const;
@@ -90,12 +91,18 @@ describe('Layer 5C finance persistence boundary', () => {
 
     expect(finance).toContain('readonly insights:');
     expect(finance).toContain('readonly attention:');
+    expect(finance).toContain('readonly operator:');
     expect(worker).toContain('finance: FinanceWorkerPersistence');
     expect(sqliteRuntime).toContain(
       "from './sqlite-finance-worker-repositories'",
     );
+    expect(sqliteRuntime).toContain(
+      "from './sqlite-finance-operator-repository'",
+    );
+    expect(sqliteRuntime).toContain('createSqliteFinanceOperatorPersistence({ sqlite, db })');
     expect(sqliteRuntime).toContain('finance,');
     expect(postgres).toContain('createPostgresFinanceWorkerPersistence(pool)');
+    expect(postgres).toContain('createPostgresFinanceOperatorPersistence(pool)');
     expect(runtime).toContain(
       "finance: new Proxy({} as WorkerPersistenceRepositories['finance']",
     );

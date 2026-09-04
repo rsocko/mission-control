@@ -698,6 +698,252 @@ export function describeFinanceWorkerPersistenceContract(
         Array.from({ length: 501 }, (_, index) => snapshotTransaction(`item-${index}`)),
       ))).rejects.toThrow('maximum batch size');
     });
+
+    /**
+     * L12b: the API-shaped attribution mutations. Every validation, CAS, and
+     * idempotency decision must happen inside the adapter's own write
+     * transaction, identically on both backends.
+     */
+    describe('API-shaped attribution mutations', () => {
+      const GENERATION = 'attribution-api-generation';
+
+      async function seedException(): Promise<{
+        transactionId: string;
+        exceptionId: string;
+      }> {
+        await harness.repositories.snapshots.start(startInput(GENERATION));
+        await harness.repositories.snapshots.upsertPage(pageInput(
+          GENERATION,
+          [snapshotTransaction('api-attribution')],
+        ));
+        const rows = await harness.repositories.attribution.readRows(
+          CONNECTOR_ID,
+          ['api-attribution'],
+        );
+        const row = rows.get('api-attribution')!;
+        // Creates the projected subject the manual decision must validate against.
+        await harness.repositories.attribution.applyResults({
+          connectorId: CONNECTOR_ID,
+          generationId: GENERATION,
+          now: '2026-08-30T12:20:00.000Z',
+          provenance: 'contract-test',
+          items: [{
+            transactionId: row.id,
+            sourceFingerprint: row.sourceFingerprint,
+            sourceRef: 'transaction-v1:api',
+            stateSnapshot: attributionSnapshot(row),
+            hasManualDecision: false,
+            manualResultMatches: true,
+            result: {
+              contractVersion: '2.0',
+              sourceRef: 'transaction-v1:api',
+              status: 'pending',
+              kidId: 'kid-one',
+              confidence: 'likely',
+              method: 'merchant-rule',
+              explanation: 'Needs review',
+              reviewStatus: 'pending',
+              reasons: ['low-confidence'],
+              decisionSource: 'automated',
+              policyVersion: 7,
+              engineVersion: '2.0.0',
+              evaluatedAt: '2026-08-30T12:19:00.000Z',
+            },
+          }],
+        });
+        const page = await harness.repositories.attribution.listExceptions({
+          connectorId: CONNECTOR_ID,
+          status: 'current',
+          limit: 50,
+          cursor: null,
+        });
+        return { transactionId: row.id, exceptionId: page.exceptions[0]!.id };
+      }
+
+      it('lists only public exception fields with bounded cursor pagination', async () => {
+        const { exceptionId } = await seedException();
+        const page = await harness.repositories.attribution.listExceptions({
+          connectorId: CONNECTOR_ID,
+          status: 'current',
+          limit: 1,
+          cursor: null,
+        });
+
+        expect(page.hasMore).toBe(false);
+        expect(page.exceptions).toHaveLength(1);
+        expect(page.exceptions[0]).toMatchObject({
+          id: exceptionId,
+          reasonCode: 'low-confidence',
+          retryable: false,
+          reasons: ['low-confidence'],
+        });
+        expect(page.exceptions[0]).not.toHaveProperty('transactionId');
+        expect(page.exceptions[0]).not.toHaveProperty('sourceFingerprint');
+        expect(page.subjects).toEqual([
+          expect.objectContaining({ kidId: 'kid-one' }),
+        ]);
+
+        // A cursor past the only row returns an empty page, not an error.
+        const empty = await harness.repositories.attribution.listExceptions({
+          connectorId: CONNECTOR_ID,
+          status: 'current',
+          limit: 1,
+          cursor: { updatedAt: '2000-01-01T00:00:00.000Z', id: 'a' },
+        });
+        expect(empty.exceptions).toEqual([]);
+        expect(empty.hasMore).toBe(false);
+      });
+
+      it('rejects an unknown connector for every API-shaped operation', async () => {
+        await expect(harness.repositories.attribution.listExceptions({
+          connectorId: 'connector-absent',
+          status: 'all',
+          limit: 10,
+          cursor: null,
+        })).rejects.toMatchObject({ code: 'connector_not_found', status: 404 });
+      });
+
+      it('commits a manual decision once and replays it exactly', async () => {
+        const { transactionId } = await seedException();
+        const command = {
+          connectorId: CONNECTOR_ID,
+          transactionId,
+          action: 'assign-kid' as const,
+          kidId: 'kid-one',
+          idempotencyKey: 'contract-manual-0001',
+          auditAction: 'manual-resolve' as const,
+          actorType: 'service' as const,
+          exceptionId: null,
+          expectedExceptionUpdatedAt: null,
+          expectedTransactionVersion: null,
+          now: '2026-08-30T12:30:00.000Z',
+        };
+
+        await expect(harness.repositories.attribution.applyManualDecision(command))
+          .resolves.toMatchObject({ status: 'resolved', replayed: false });
+        await expect(harness.repositories.attribution.applyManualDecision(command))
+          .resolves.toMatchObject({ status: 'resolved', replayed: true });
+        expect(await harness.transaction('api-attribution')).toMatchObject({
+          assignedKidId: 'kid-one',
+          kidAssignmentMethod: 'manual',
+          manualDecisionAction: 'assign-kid',
+        });
+
+        // Same key, different payload is a conflict, not a silent second write.
+        await expect(harness.repositories.attribution.applyManualDecision({
+          ...command,
+          action: 'parent-expense',
+          kidId: null,
+        })).rejects.toMatchObject({ code: 'idempotency_conflict', status: 409 });
+      });
+
+      it('validates decision shape, transaction existence, and projected subjects', async () => {
+        const { transactionId } = await seedException();
+        const base = {
+          connectorId: CONNECTOR_ID,
+          transactionId,
+          idempotencyKey: 'contract-manual-0002',
+          auditAction: 'manual-resolve' as const,
+          actorType: 'service' as const,
+          exceptionId: null,
+          expectedExceptionUpdatedAt: null,
+          expectedTransactionVersion: null,
+          now: '2026-08-30T12:31:00.000Z',
+        };
+
+        await expect(harness.repositories.attribution.applyManualDecision({
+          ...base,
+          action: 'parent-expense',
+          kidId: 'kid-one',
+        })).rejects.toMatchObject({ code: 'invalid_manual_decision', status: 400 });
+        await expect(harness.repositories.attribution.applyManualDecision({
+          ...base,
+          action: 'assign-kid',
+          kidId: null,
+        })).rejects.toMatchObject({ code: 'invalid_manual_decision', status: 400 });
+        await expect(harness.repositories.attribution.applyManualDecision({
+          ...base,
+          action: 'assign-kid',
+          kidId: 'kid-unknown',
+        })).rejects.toMatchObject({ code: 'unknown_attribution_subject', status: 409 });
+        await expect(harness.repositories.attribution.applyManualDecision({
+          ...base,
+          transactionId: 'transaction-absent',
+          action: 'parent-expense',
+          kidId: null,
+        })).rejects.toMatchObject({ code: 'transaction_not_found', status: 404 });
+      });
+
+      it('enforces exception CAS, action legality, and after-commit retry signalling', async () => {
+        const { exceptionId } = await seedException();
+        const page = await harness.repositories.attribution.listExceptions({
+          connectorId: CONNECTOR_ID,
+          status: 'current',
+          limit: 10,
+          cursor: null,
+        });
+        const expectedUpdatedAt = page.exceptions[0]!.updatedAt;
+
+        await expect(harness.repositories.attribution.actOnException({
+          connectorId: CONNECTOR_ID,
+          exceptionId,
+          action: 'dismiss',
+          kidId: null,
+          expectedUpdatedAt: '1999-01-01T00:00:00.000Z',
+          idempotencyKey: 'contract-action-stale',
+          actorType: 'service',
+          now: '2026-08-30T12:40:00.000Z',
+        })).rejects.toMatchObject({ code: 'exception_conflict', status: 409 });
+
+        // The seeded exception is not retryable, so a retry is a stable 409.
+        await expect(harness.repositories.attribution.actOnException({
+          connectorId: CONNECTOR_ID,
+          exceptionId,
+          action: 'retry',
+          kidId: null,
+          expectedUpdatedAt,
+          idempotencyKey: 'contract-action-retry',
+          actorType: 'service',
+          now: '2026-08-30T12:41:00.000Z',
+        })).rejects.toMatchObject({ code: 'exception_not_retryable', status: 409 });
+
+        await expect(harness.repositories.attribution.actOnException({
+          connectorId: CONNECTOR_ID,
+          exceptionId: 'exception-absent',
+          action: 'dismiss',
+          kidId: null,
+          expectedUpdatedAt,
+          idempotencyKey: 'contract-action-missing',
+          actorType: 'service',
+          now: '2026-08-30T12:42:00.000Z',
+        })).rejects.toMatchObject({ code: 'exception_not_found', status: 404 });
+
+        const dismissCommand = {
+          connectorId: CONNECTOR_ID,
+          exceptionId,
+          action: 'dismiss' as const,
+          kidId: null,
+          expectedUpdatedAt,
+          idempotencyKey: 'contract-action-dismiss',
+          actorType: 'service' as const,
+          now: '2026-08-30T12:43:00.000Z',
+        };
+        await expect(harness.repositories.attribution.actOnException(dismissCommand))
+          .resolves.toMatchObject({
+            status: 'dismissed',
+            replayed: false,
+            retryScheduled: false,
+          });
+        await expect(harness.repositories.attribution.actOnException(dismissCommand))
+          .resolves.toMatchObject({
+            status: 'dismissed',
+            replayed: true,
+            retryScheduled: false,
+          });
+        expect(await harness.attributionException('api-attribution'))
+          .toMatchObject({ status: 'dismissed' });
+      });
+    });
   });
 }
 

@@ -189,12 +189,12 @@ describe('L04 task-core taint decrement', () => {
       cleanRoutes: current.cleanRoutes.length,
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
-      taintedLibA: 92,
+      taintedLibA: 88,
       taintedApiHelpers: 1,
-      tierARoutes: 215,
+      tierARoutes: 208,
       tierBRoutes: 26,
-      cleanRoutes: 25,
-      totalMigrationUnits: 308,
+      cleanRoutes: 32,
+      totalMigrationUnits: 297,
     });
   });
 });

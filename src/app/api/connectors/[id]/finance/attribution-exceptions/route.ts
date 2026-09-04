@@ -15,7 +15,7 @@ export async function GET(
   }
   try {
     const { searchParams } = new URL(request.url);
-    return NextResponse.json(listAttributionExceptions((await params).id, {
+    return NextResponse.json(await listAttributionExceptions((await params).id, {
       status: searchParams.get('status'),
       limit: searchParams.get('limit'),
       cursor: searchParams.get('cursor'),

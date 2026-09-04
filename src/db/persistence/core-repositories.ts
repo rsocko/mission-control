@@ -24,10 +24,31 @@ export interface ProjectRepository {
   delete(id: string): Promise<boolean>;
 }
 
+export type ConnectorTestStatus = 'success' | 'failed';
+
+export interface ConnectorTestResultCommand {
+  connectorId: string;
+  status: ConnectorTestStatus;
+  /** Redacted, caller-facing failure summary. `null` on success. */
+  error: string | null;
+  testedAt: string;
+}
+
 export interface ConnectorRepository {
   get(id: string): Promise<ConnectorConfig | null>;
   listEnabled(): Promise<ConnectorConfig[]>;
   upsert(connector: ConnectorConfig): Promise<ConnectorConfig>;
+  /**
+   * Records the outcome of a manual connection test so the settings connection
+   * badge reflects real, current status instead of only "credentials are
+   * stored". The write is a single bounded statement and never throws for an
+   * unknown or soft-deleted connector: it resolves `{ recorded: false }` so the
+   * caller's non-fatal badge semantics hold. Only the redacted `error` summary
+   * is stored — never credentials or a raw provider body.
+   */
+  recordTestResult(
+    command: ConnectorTestResultCommand,
+  ): Promise<{ recorded: boolean }>;
   /** Updates credentials and atomically merges an optional authentication settings patch. */
   updateCredentials(
     id: string,

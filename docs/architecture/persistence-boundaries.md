@@ -1391,6 +1391,34 @@ L01 above; the ratchet's own numbers were independently verified the same
 way, by executing `computeWebPersistenceGraph` directly against the current
 worktree.
 
+## Web/API PostgreSQL parity: Layer L12b (finance connector/operator)
+
+Layer L12b extends the existing atomic `FinanceWorkerPersistence` composition
+with a driver-free `finance.operator` sub-port. The port owns the bounded
+connector health snapshot, connection-test result persistence, cutover
+readiness, atomic cutover enable, and atomic rollback operations. It is
+registered with the rest of the finance composition; it is not a runtime slot,
+generic query facade, or raw database handle.
+
+The existing `FinanceAttributionPersistence` port also owns bounded cursor
+pagination and the manual attribution/exception commands used by the Finance
+web APIs. SQLite and PostgreSQL adapters preserve the same compare-and-swap,
+generation fence, action legality, retryability, and idempotent replay rules.
+PostgreSQL locks the affected rows; SQLite uses its serialized write
+transaction. Provider calls, retry scheduling, bounded recovery sync, and
+notification-dispatcher wakes remain outside adapter transactions and run only
+after the required durable commit.
+
+The seven Finance connector/operator routes consume the backend-selected core
+and finance compositions without importing `@/db`. Dataset health reuses
+`FinanceDatasetPersistence.listState()`, recovery reuses
+`FinanceConnectionRecoveryPersistence`, and scheduler controls continue to use
+`SyncOperatorControlRepository`. The generic connector test route has one
+narrow core seam, `ConnectorRepository.recordTestResult`, so connector badge
+state remains owned by the selected core backend. Composition is fail closed:
+PostgreSQL never falls back to SQLite, and no schema or deployment change is
+part of this layer.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

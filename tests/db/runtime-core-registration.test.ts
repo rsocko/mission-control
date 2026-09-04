@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => {
             settings: { [key]: patch },
             state: patch,
           })),
+          recordTestResult: vi.fn(async () => ({ recorded: true })),
         },
         notifications: {
           get: vi.fn(async () => null),

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
 
 const mocks = vi.hoisted(() => {
   const sqliteTouch = vi.fn();
@@ -10,7 +11,26 @@ const mocks = vi.hoisted(() => {
   const core = {
     tasks: {},
     projects: {},
-    connectors: {},
+    connectors: {
+      get: vi.fn(async (id: string) => (
+        id === 'missing'
+          ? null
+          : {
+              id,
+              type: 'finance-manager',
+              name: 'Finance',
+              enabled: true,
+              syncMode: 'pull',
+              pollIntervalMinutes: 240,
+              capabilities: { read: true, write: false, delete: false },
+              credentials: {},
+              settings: {},
+              syncedLists: [],
+            }
+      )),
+      listEnabled: vi.fn(async () => []),
+      recordTestResult: vi.fn(async () => ({ recorded: true })),
+    },
     notifications: {},
     settings: {
       get: vi.fn(async () => null),
@@ -18,6 +38,58 @@ const mocks = vi.hoisted(() => {
       delete: vi.fn(async () => false),
     },
     houstonMemories: {},
+  };
+  const financeOperator = {
+    isLegacyAnomalyProductionEnabled: vi.fn(async () => true),
+    readHealthSnapshot: vi.fn(async () => ({
+      sync: null,
+      attribution: null,
+      activeJob: null,
+      capture: null,
+      evaluation: null,
+    })),
+    readCutoverReadiness: vi.fn(async () => ({
+      connector: {
+        id: 'finance',
+        type: 'finance-manager',
+        enabled: true,
+        settings: { householdCurrency: 'USD' },
+      },
+      enabledFinanceConnectorCount: 1,
+      publication: null,
+      cutover: null,
+    })),
+    readCutoverGeneration: vi.fn(async () => null),
+    enableCutover: vi.fn(async () => ({
+      outcome: 'blocked' as const,
+      blockers: ['finance_insight_cutover_generation_unavailable'],
+    })),
+    rollbackCutover: vi.fn(async () => ({
+      outcome: 'rolled-back' as const,
+      legacyExpiredCount: 0,
+      importedCount: 0,
+      suppressedDeliveryCount: 0,
+      replayed: false,
+    })),
+  };
+  const financeAttribution = {
+    assertConnector: vi.fn(async () => undefined),
+    listExceptions: vi.fn(async () => ({ exceptions: [], hasMore: false, subjects: [] })),
+    applyManualDecision: vi.fn(async () => ({
+      status: 'resolved' as const,
+      transactionId: 'transaction',
+      kidId: null,
+      replayed: false,
+    })),
+    actOnException: vi.fn(async () => ({
+      status: 'dismissed',
+      exceptionId: 'exception',
+      replayed: false,
+      retryScheduled: false,
+    })),
+  };
+  const financeDatasets = {
+    listState: vi.fn(async () => []),
   };
   const worker = {
     connectors: core.connectors,
@@ -33,7 +105,19 @@ const mocks = vi.hoisted(() => {
     eventDelivery: {},
     notificationEntityLinking: {},
     notificationEnrichment: {},
-    finance: {},
+    finance: {
+      attribution: financeAttribution,
+      datasets: financeDatasets,
+      operator: financeOperator,
+      insights: {
+        connectors: {
+          resolveSingleEnabledConnectorId: vi.fn(async () => 'finance'),
+        },
+        notifications: {
+          isDeliveryEnabled: vi.fn(async () => false),
+        },
+      },
+    },
   };
   const queue = {
     countQueued: vi.fn(async () => 0),
@@ -56,6 +140,9 @@ const mocks = vi.hoisted(() => {
     stopSemantic,
     core,
     worker,
+    financeOperator,
+    financeAttribution,
+    financeDatasets,
     queue,
     lease,
     keyword,
@@ -281,5 +368,127 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
       'unavailable for the selected backend',
     );
     expect(mocks.sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  /**
+   * L12b: every owned finance connector/operator route and library must be
+   * importable *and* callable — read and mutation paths alike — under
+   * `MC_DATABASE_BACKEND=postgres` with a throwing `@/db`. Any static or
+   * dynamic SQLite reach fails immediately through the poisoned module.
+   */
+  describe('finance connector/operator web surface', () => {
+    const financeRequest = (url: string, init?: RequestInit) => new Request(url, {
+      ...init,
+      headers: {
+        origin: 'http://localhost:3000',
+        host: 'localhost:3000',
+        ...(init?.headers ?? {}),
+      },
+    });
+
+    it('serves every owned route without evaluating SQLite', async () => {
+      const [health, test, operations, recovery, exceptions, exceptionAction, kid] =
+        await Promise.all([
+          import('@/app/api/connectors/[id]/health/route'),
+          import('@/app/api/connectors/[id]/test/route'),
+          import('@/app/api/connectors/[id]/finance-operations/route'),
+          import('@/app/api/connectors/[id]/finance/recovery/route'),
+          import('@/app/api/connectors/[id]/finance/attribution-exceptions/route'),
+          import('@/app/api/connectors/[id]/finance/attribution-exceptions/[exceptionId]/route'),
+          import('@/app/api/finance/transactions/[id]/kid/route'),
+        ]);
+      const params = Promise.resolve({ id: 'finance' });
+
+      expect((await health.GET(
+        financeRequest('http://localhost:3000/api/connectors/missing/health'),
+        { params: Promise.resolve({ id: 'missing' }) },
+      )).status).toBe(404);
+      expect((await test.POST(
+        financeRequest('http://localhost:3000/api/connectors/missing/test', { method: 'POST' }),
+        { params: Promise.resolve({ id: 'missing' }) },
+      )).status).toBe(404);
+      expect((await operations.GET(
+        new NextRequest('http://localhost:3000/api/connectors/finance/finance-operations'),
+        { params },
+      )).status).toBe(403);
+      expect((await recovery.POST(
+        new Request('http://localhost:3000/api/connectors/finance/finance/recovery', {
+          method: 'POST',
+        }),
+        { params },
+      )).status).toBe(403);
+      expect((await exceptions.GET(
+        new Request(
+          'http://localhost:3000/api/connectors/finance/finance/attribution-exceptions',
+        ),
+        { params },
+      )).status).toBe(403);
+      expect((await exceptionAction.POST(
+        new Request('http://localhost:3000/api/connectors/finance/x', { method: 'POST' }),
+        { params: Promise.resolve({ id: 'finance', exceptionId: 'exception' }) },
+      )).status).toBe(403);
+      expect((await kid.PATCH(
+        new Request('http://localhost:3000/api/finance/transactions/t/kid', { method: 'PATCH' }),
+        { params: Promise.resolve({ id: 'transaction' }) },
+      )).status).toBe(403);
+      expect(mocks.sqliteTouch).not.toHaveBeenCalled();
+    });
+
+    it('runs every owned library read and mutation path without evaluating SQLite', async () => {
+      const [attribution, datasets, cutover, cutoverOperator] = await Promise.all([
+        import('@/lib/connectors/monarch-money/attribution-service'),
+        import('@/lib/connectors/monarch-money/dataset-sync'),
+        import('@/lib/finance-insights/cutover'),
+        import('@/lib/finance-insights/cutover-operator'),
+      ]);
+
+      await expect(attribution.listAttributionExceptions('finance', {})).resolves.toEqual({
+        exceptions: [],
+        nextCursor: null,
+        subjects: [],
+      });
+      await expect(attribution.applyManualAttributionDecision({
+        connectorId: 'finance',
+        transactionId: 'transaction',
+        action: 'parent-expense',
+        kidId: null,
+        idempotencyKey: 'idempotency-key-1',
+        actorType: 'service',
+      })).resolves.toMatchObject({ status: 'resolved', replayed: false });
+      await expect(attribution.actOnAttributionException({
+        connectorId: 'finance',
+        exceptionId: 'exception',
+        action: 'dismiss',
+        expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+        idempotencyKey: 'idempotency-key-2',
+        actorType: 'service',
+      })).resolves.toMatchObject({ status: 'dismissed', retryScheduled: false });
+
+      const health = await datasets.getFinanceDatasetHealth('finance');
+      expect(health.aggregate).toBe('unavailable');
+      expect(health.datasets).toHaveLength(6);
+
+      await expect(cutover.isFinanceInsightDeliveryEnabled('finance')).resolves.toBe(false);
+      await expect(cutover.resolveSingleFinanceConnectorId()).resolves.toBe('finance');
+      await expect(cutover.enableFinanceInsightCutover({
+        connectorId: 'finance',
+        sourceGeneration: 'generation',
+      })).rejects.toThrow('finance_insight_cutover_generation_unavailable');
+      await expect(cutover.rollbackFinanceInsightCutover({
+        connectorId: 'finance',
+        sourceGeneration: 'generation',
+      })).resolves.toMatchObject({ status: 'rolled-back' });
+
+      const readiness = await cutoverOperator.getFinanceInsightCutoverReadiness('finance');
+      expect(readiness.readiness.ready).toBe(false);
+      await expect(cutoverOperator.rollbackFinanceInsightCutoverForOperator({
+        connectorId: 'finance',
+        sourceGeneration: 'generation',
+        actorType: 'service',
+        idempotencyKey: 'operator-idempotency-key-1',
+      })).resolves.toMatchObject({ status: 'rolled-back' });
+      expect(mocks.financeOperator.rollbackCutover).toHaveBeenCalled();
+      expect(mocks.sqliteTouch).not.toHaveBeenCalled();
+    });
   });
 });

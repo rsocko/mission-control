@@ -18,6 +18,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
         settings: { [key]: patch },
         state: patch,
       })),
+      recordTestResult: vi.fn(async () => ({ recorded: true })),
     },
     syncRuns: {
       listLatestSuccessfulPulls: vi.fn(async () => []),
@@ -64,6 +65,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
         routing: {},
         repair: {},
       },
+      operator: {},
     } as WorkerPersistenceRepositories['finance'],
   };
 }

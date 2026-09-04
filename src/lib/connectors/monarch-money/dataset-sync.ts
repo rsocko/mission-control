@@ -1,10 +1,10 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { sqlite } from '@/db';
 import {
   FINANCE_DATASETS,
   type FinanceDataset,
+  type FinanceDatasetState,
   type FinanceFreshnessState,
   type FinanceDatasetPersistence,
   type FinanceDatasetPublicationMetadata,
@@ -149,71 +149,57 @@ function aggregateFreshness(states: DatasetStatus[]): FinanceFreshnessState {
   return 'partial';
 }
 
-export function getFinanceDatasetHealth(
-    connectorId: string,
-    now = new Date(),
-  ): { aggregate: FinanceFreshnessState; datasets: FinanceDatasetHealth[] } {
-    const rows = sqlite.prepare(`
-      SELECT dataset, last_attempt_at AS lastAttemptAt,
-             last_attempt_outcome AS lastAttemptOutcome,
-             last_successful_at AS lastSuccessfulAt,
-             source_as_of AS sourceAsOf, fresh_until AS freshUntil,
-             coverage_start AS coverageStart, coverage_end AS coverageEnd,
-             current_generation_id AS currentGenerationId,
-             schema_version AS schemaVersion, config_version AS configVersion,
-             published_item_count AS publishedItemCount, source_limit AS sourceLimit,
-             last_error_code AS lastErrorCode
-      FROM finance_dataset_sync_state
-      WHERE connector_id = ?
-    `).all(connectorId) as Array<{
-      dataset: FinanceDataset;
-      lastAttemptAt: string | null;
-      lastAttemptOutcome: 'succeeded' | 'failed' | null;
-      lastSuccessfulAt: string | null;
-      sourceAsOf: string | null;
-      freshUntil: string | null;
-      coverageStart: string | null;
-      coverageEnd: string | null;
-      currentGenerationId: string | null;
-      schemaVersion: string;
-      configVersion: number;
-      publishedItemCount: number;
-      sourceLimit: number;
-      lastErrorCode: string | null;
-    }>;
-    const byDataset = new Map(rows.map((row) => [row.dataset, row]));
-    const datasets = FINANCE_DATASETS.map((dataset): FinanceDatasetHealth => {
-      const row = byDataset.get(dataset);
-      return {
-        dataset,
-        provenance: 'monarch-bridge',
-        state: financeDatasetFreshness(row, now),
-        itemCount: row?.publishedItemCount ?? 0,
-        sourceLimit: row?.sourceLimit ?? MONARCH_DATASET_LIMITS[dataset],
-        coverage: row?.coverageStart && row.coverageEnd
-          ? { start: row.coverageStart, end: row.coverageEnd }
-          : null,
-        lastAttemptAt: row?.lastAttemptAt ?? null,
-        lastSuccessfulAt: row?.lastSuccessfulAt ?? null,
-        sourceAsOf: row?.sourceAsOf ?? null,
-        freshUntil: row?.freshUntil ?? null,
-        generationId: row?.currentGenerationId ?? null,
-        schemaVersion: row?.schemaVersion ?? DATASET_SCHEMA_VERSION,
-        configVersion: row?.configVersion ?? DATASET_CONFIG_VERSION,
-        warning: row?.lastAttemptOutcome === 'failed' ? row.lastErrorCode : null,
-      };
-    });
-    const statuses = datasets.map((dataset) => ({
-      dataset: dataset.dataset,
-      state: dataset.state,
-      warning: dataset.warning,
-    }));
+export async function getFinanceDatasetHealth(
+  connectorId: string,
+  now = new Date(),
+): Promise<{ aggregate: FinanceFreshnessState; datasets: FinanceDatasetHealth[] }> {
+  const persistence = (await getWorkerPersistenceRepositories()).finance.datasets;
+  return financeDatasetHealthFromState(await persistence.listState(connectorId), now);
+}
+
+/**
+ * Derives the existing public dataset-health shape from the portable
+ * `FinanceDatasetPersistence.listState()` projection. Pure, so both the health
+ * route and the synchronizer's own status roll-up read identically on either
+ * backend.
+ */
+export function financeDatasetHealthFromState(
+  states: readonly FinanceDatasetState[],
+  now = new Date(),
+): { aggregate: FinanceFreshnessState; datasets: FinanceDatasetHealth[] } {
+  const byDataset = new Map(states.map((state) => [state.dataset, state]));
+  const datasets = FINANCE_DATASETS.map((dataset): FinanceDatasetHealth => {
+    const row = byDataset.get(dataset);
     return {
-      aggregate: statuses.some((status) => status.warning)
-        ? 'partial'
-        : aggregateFreshness(statuses),
-      datasets,
+      dataset,
+      provenance: 'monarch-bridge',
+      state: financeDatasetFreshness(row, now),
+      itemCount: row?.publishedItemCount ?? 0,
+      sourceLimit: row?.sourceLimit ?? MONARCH_DATASET_LIMITS[dataset],
+      coverage: row?.coverageStart && row.coverageEnd
+        ? { start: row.coverageStart, end: row.coverageEnd }
+        : null,
+      lastAttemptAt: row?.lastAttemptAt ?? null,
+      lastSuccessfulAt: row?.lastSuccessfulAt ?? null,
+      sourceAsOf: row?.sourceAsOf ?? null,
+      freshUntil: row?.freshUntil ?? null,
+      generationId: row?.currentGenerationId ?? null,
+      schemaVersion: row?.schemaVersion ?? DATASET_SCHEMA_VERSION,
+      configVersion: row?.configVersion ?? DATASET_CONFIG_VERSION,
+      warning: row?.lastAttemptOutcome === 'failed' ? row.lastErrorCode : null,
     };
+  });
+  const statuses = datasets.map((dataset) => ({
+    dataset: dataset.dataset,
+    state: dataset.state,
+    warning: dataset.warning,
+  }));
+  return {
+    aggregate: statuses.some((status) => status.warning)
+      ? 'partial'
+      : aggregateFreshness(statuses),
+    datasets,
+  };
 }
 
 export class FinanceDatasetSynchronizer {

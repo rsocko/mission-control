@@ -294,6 +294,17 @@ shows aggregate and per-dataset observability while keeping transaction snapshot
 health separate. It does not expose dataset contents, balances, upstream or
 generation identifiers, raw errors, or finance-management mutations.
 
+Finance connector health, connection tests, recovery, scheduler operations,
+attribution review, manual KID decisions, and Finance Insight cutover now use
+the backend-selected core and `FinanceWorkerPersistence` compositions in both
+web and worker processes. The `finance.operator` sub-port owns bounded
+health/test/cutover persistence, while the attribution, dataset, recovery, and
+sync-operator sub-ports retain their existing domain ownership. SQLite and
+PostgreSQL expose the same public responses, trusted Finance authorization,
+redaction, compare-and-swap and generation fences, idempotency, and recovery
+semantics. Bridge and Tyrion calls, bounded recovery sync, retry scheduling,
+and dispatcher wakes remain outside database transactions.
+
 See [Monarch dataset sync operations](../operations/monarch-dataset-sync.md) for
 ordering, retries, status fields, and recovery.
 

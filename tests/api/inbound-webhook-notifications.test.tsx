@@ -11,6 +11,7 @@ describe('generic inbound webhook notifications', () => {
   let listNotifications: typeof import('@/app/api/notifications/route').GET;
   let executeAction: typeof import('@/app/api/notifications/[id]/actions/[actionId]/route').POST;
   let shutdownRuntimeDatabase: typeof import('@/db/runtime').shutdownRuntimeDatabase;
+  let closeSqlite: () => void;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
@@ -32,6 +33,7 @@ describe('generic inbound webhook notifications', () => {
     ]);
     db = dbModule.default;
     sqlite = dbModule.sqlite;
+    closeSqlite = sqlite.close.bind(sqlite);
     schema = schemaModule;
     receive = receiveModule.POST;
     listNotifications = notificationsModule.GET;
@@ -62,7 +64,7 @@ describe('generic inbound webhook notifications', () => {
 
   afterAll(async () => {
     await shutdownRuntimeDatabase();
-    sqlite.close();
+    closeSqlite();
     delete process.env.MC_DB_PATH;
   });
 

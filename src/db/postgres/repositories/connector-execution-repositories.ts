@@ -34,6 +34,7 @@ import type {
   ConnectorTaskUpdate,
   DeletionCandidateRecord,
   DeletionIdentityState,
+  DeletionSnapshotRecord,
   GitHubDeletionFenceRecord,
   PullTag,
   RetentionDetailRecord,
@@ -46,6 +47,7 @@ import {
 import { reconcileNotificationEnrichmentMetadata } from '@/db/persistence/notification-enrichment';
 import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
 import { cleanupTaskAssociations } from './task-deletion';
+import { createPostgresConnectorManagementRepository } from './connector-management-repository';
 
 type Client = Pool | PoolClient;
 
@@ -418,6 +420,43 @@ async function assertGenericTaskMutationSupported(
 }
 
 type CapturedGitHubDeletionFence = Omit<GitHubDeletionFenceRecord, 'sourceId'>;
+type GitHubRecoveryPreflight = NonNullable<
+  Parameters<ConnectorExecutionRepositories['deletions']['restoreDeletionSnapshot']>[2]
+>;
+
+interface PostgresDeletionRecoverySnapshot {
+  id: string;
+  originalTaskId: string;
+  connectorId: string;
+  taskData: ConnectorTaskRecord;
+  relationshipData: Record<string, unknown>;
+  restoredTaskId: string | null;
+  recoveryState: string;
+  quarantineReason: string | null;
+  identityMode: string | null;
+  identityModeRevision: number | null;
+  issueEntityId: string | null;
+  repositoryEntityId: string | null;
+  locatorRevision: number | null;
+  bindingRevision: string | null;
+}
+
+const DELETION_RECOVERY_SNAPSHOT_COLUMNS = `
+  id,
+  original_task_id AS "originalTaskId",
+  connector_id AS "connectorId",
+  task_data AS "taskData",
+  relationship_data AS "relationshipData",
+  restored_task_id AS "restoredTaskId",
+  recovery_state AS "recoveryState",
+  quarantine_reason AS "quarantineReason",
+  identity_mode AS "identityMode",
+  identity_mode_revision AS "identityModeRevision",
+  issue_entity_id AS "issueEntityId",
+  repository_entity_id AS "repositoryEntityId",
+  locator_revision AS "locatorRevision",
+  binding_revision AS "bindingRevision"
+`;
 
 /**
  * Freezes the GitHub identity facts a deletion is authorized against: the
@@ -493,6 +532,203 @@ function sameGitHubDeletionFence(
     && current.locatorRevision === expected.locatorRevision
     && current.bindingState === expected.bindingState
     && current.bindingRevision === expected.bindingRevision;
+}
+
+function isFencedGitHubRecovery(mode: string | null): boolean {
+  return mode !== null && mode !== 'legacy';
+}
+
+async function quarantineDeletionSnapshot(
+  client: Client,
+  snapshotId: string,
+  reason: string,
+): Promise<void> {
+  await client.query(
+    `
+      UPDATE sync_deletion_snapshots
+      SET recovery_state = 'quarantined',
+          quarantine_reason = $1,
+          recovery_validation = 'blocked'
+      WHERE id = $2
+        AND restored_task_id IS NULL
+        AND recovery_state IN ('pending', 'restoring')
+    `,
+    [reason, snapshotId],
+  );
+}
+
+async function validateGitHubRecoveryFence(
+  client: Client,
+  snapshot: PostgresDeletionRecoverySnapshot,
+): Promise<string | null> {
+  if (!isFencedGitHubRecovery(snapshot.identityMode)) return null;
+  if (!snapshot.issueEntityId || !snapshot.repositoryEntityId || !snapshot.locatorRevision) {
+    return 'missing_snapshot_identity';
+  }
+
+  const [control] = await query<{ modeRevision: number }>(
+    client,
+    `
+      SELECT mode_revision AS "modeRevision"
+      FROM github_identity_controls
+      WHERE connector_instance_id = $1
+      LIMIT 1
+    `,
+    [snapshot.connectorId],
+  );
+  if ((control?.modeRevision ?? 0) !== snapshot.identityModeRevision) {
+    return 'stale_mode_revision';
+  }
+
+  const [binding] = await query<{ state: string; verifiedAt: string | null }>(
+    client,
+    `
+      SELECT state, verified_at AS "verifiedAt"
+      FROM external_entity_bindings
+      WHERE connector_instance_id = $1
+        AND binding_type = 'task'
+        AND local_id = $2
+        AND external_entity_id = $3
+        AND state IN ('shadow', 'active')
+      LIMIT 1
+    `,
+    [snapshot.connectorId, snapshot.originalTaskId, snapshot.issueEntityId],
+  );
+  if (!binding) return 'missing_or_collision_binding';
+  if (snapshot.identityMode === 'stable' && binding.state !== 'active') {
+    return 'stable_binding_not_active';
+  }
+  if (!binding.verifiedAt || binding.verifiedAt !== snapshot.bindingRevision) {
+    return 'binding_revision_changed';
+  }
+
+  const [locator] = await query<{
+    repositoryEntityId: string | null;
+    locatorRevision: number | null;
+  }>(
+    client,
+    `
+      SELECT
+        repository_entity_id AS "repositoryEntityId",
+        locator_revision AS "locatorRevision"
+      FROM external_entity_locators
+      WHERE external_entity_id = $1
+        AND valid_to IS NULL
+      LIMIT 1
+    `,
+    [snapshot.issueEntityId],
+  );
+  if (
+    !locator
+    || locator.repositoryEntityId !== snapshot.repositoryEntityId
+    || locator.locatorRevision !== snapshot.locatorRevision
+  ) {
+    return 'locator_replaced';
+  }
+
+  const [activeLease] = await query<{ id: string }>(
+    client,
+    `
+      SELECT id
+      FROM task_source_write_leases
+      WHERE connector_instance_id = $1
+        AND task_id = $2
+        AND state IN ('claimed', 'authorized', 'dispatched', 'unknown')
+      LIMIT 1
+    `,
+    [snapshot.connectorId, snapshot.originalTaskId],
+  );
+  return activeLease ? 'active_or_unknown_write_lease' : null;
+}
+
+async function loadGitHubRecoveryPreflight(
+  client: Client,
+  snapshot: PostgresDeletionRecoverySnapshot,
+): Promise<{
+  targets: ReadonlyArray<{
+    role: 'primary_issue';
+    owner: string;
+    repository: string;
+    issueNumber: number;
+  }>;
+  issueStableId: string;
+  repositoryStableId: string;
+}> {
+  const [row] = await query<{
+    owner: string | null;
+    repository: string | null;
+    issueNumber: number | null;
+    issueStableId: string;
+    repositoryStableId: string;
+  }>(
+    client,
+    `
+      SELECT
+        locator.owner,
+        locator.repository,
+        locator.issue_number AS "issueNumber",
+        issue.stable_id AS "issueStableId",
+        repository.stable_id AS "repositoryStableId"
+      FROM external_entity_locators AS locator
+      INNER JOIN external_entities AS issue
+        ON issue.id = locator.external_entity_id
+      INNER JOIN external_entities AS repository
+        ON repository.id = locator.repository_entity_id
+      WHERE locator.external_entity_id = $1
+        AND locator.repository_entity_id = $2
+        AND locator.valid_to IS NULL
+      LIMIT 1
+    `,
+    [snapshot.issueEntityId, snapshot.repositoryEntityId],
+  );
+  if (!row || !row.owner || !row.repository || row.issueNumber === null) {
+    throw new Error('remote_identity_inaccessible');
+  }
+  return {
+    targets: [{
+      role: 'primary_issue',
+      owner: row.owner,
+      repository: row.repository,
+      issueNumber: row.issueNumber,
+    }],
+    issueStableId: row.issueStableId,
+    repositoryStableId: row.repositoryStableId,
+  };
+}
+
+async function preflightGitHubRecovery(
+  pool: Pool,
+  snapshot: PostgresDeletionRecoverySnapshot,
+  mode: 'local' | 'source',
+  preflight: GitHubRecoveryPreflight | undefined,
+): Promise<void> {
+  const validation = await validateGitHubRecoveryFence(pool, snapshot);
+  if (validation) {
+    await quarantineDeletionSnapshot(pool, snapshot.id, validation);
+    throw new Error(`GitHub recovery fenced: ${validation}`);
+  }
+  if (mode !== 'source') return;
+  if (!preflight) {
+    await quarantineDeletionSnapshot(pool, snapshot.id, 'missing_remote_identity_preflight');
+    throw new Error('GitHub recovery fenced: missing_remote_identity_preflight');
+  }
+
+  try {
+    const expected = await loadGitHubRecoveryPreflight(pool, snapshot);
+    const observed = await preflight({ targets: expected.targets });
+    if (
+      observed.targets.primary_issue?.issueStableId !== expected.issueStableId
+      || observed.targets.primary_issue?.repositoryStableId !== expected.repositoryStableId
+    ) {
+      throw new Error('remote_identity_disagreement');
+    }
+  } catch (error) {
+    const reason = error instanceof Error && error.message === 'remote_identity_disagreement'
+      ? error.message
+      : 'remote_identity_inaccessible';
+    await quarantineDeletionSnapshot(pool, snapshot.id, reason);
+    throw new Error(`GitHub recovery fenced: ${reason}`, { cause: error });
+  }
 }
 
 async function deleteTaskRows(client: Client, taskId: string): Promise<void> {
@@ -1216,6 +1452,7 @@ export function createPostgresConnectorExecutionRepositories(
   pool: Pool,
 ): ConnectorExecutionRepositories {
   return {
+    management: createPostgresConnectorManagementRepository(pool),
     lists: {
       async list(connectorId) {
         return query<SourceListRecord>(
@@ -1844,6 +2081,45 @@ export function createPostgresConnectorExecutionRepositories(
     },
 
     deletions: {
+      async getSnapshot(snapshotId) {
+        return (await query<DeletionSnapshotRecord>(
+          pool,
+          `
+            SELECT
+              id,
+              original_task_id AS "originalTaskId",
+              connector_id AS "connectorId",
+              source_id AS "sourceId",
+              task_title AS "taskTitle",
+              task_data AS "taskData",
+              reason,
+              deleted_at AS "deletedAt",
+              restored_at AS "restoredAt",
+              restored_task_id AS "restoredTaskId",
+              restore_mode AS "restoreMode"
+            FROM sync_deletion_snapshots
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [snapshotId],
+        ))[0] ?? null;
+      },
+
+      async getRestoreParent(taskId) {
+        return (await query<{ connectorInstanceId: string; sourceId: string }>(
+          pool,
+          `
+            SELECT
+              connector_instance_id AS "connectorInstanceId",
+              source_id AS "sourceId"
+            FROM tasks
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [taskId],
+        ))[0] ?? null;
+      },
+
       async listCandidates(connectorId) {
         return query<DeletionCandidateRecord>(
           pool,
@@ -2155,30 +2431,43 @@ export function createPostgresConnectorExecutionRepositories(
         });
       },
 
-      async restoreDeletionSnapshot(snapshotId, mode) {
+      async restoreDeletionSnapshot(snapshotId, mode, githubPreflight) {
+        const [initialSnapshot] = await query<PostgresDeletionRecoverySnapshot>(
+          pool,
+          `
+            SELECT ${DELETION_RECOVERY_SNAPSHOT_COLUMNS}
+            FROM sync_deletion_snapshots
+            WHERE id = $1
+            LIMIT 1
+          `,
+          [snapshotId],
+        );
+        if (!initialSnapshot) throw new Error('Removed task snapshot not found');
+        if (initialSnapshot.restoredTaskId) {
+          return { taskId: initialSnapshot.restoredTaskId, alreadyRestored: true };
+        }
+        if (initialSnapshot.recoveryState === 'quarantined') {
+          throw new Error(
+            `Removed task snapshot is quarantined: ${
+              initialSnapshot.quarantineReason ?? 'identity_validation_failed'
+            }`,
+          );
+        }
+        if (
+          initialSnapshot.taskData.connectorType === 'github-issues'
+          && isFencedGitHubRecovery(initialSnapshot.identityMode)
+        ) {
+          await preflightGitHubRecovery(pool, initialSnapshot, mode, githubPreflight);
+        }
+
         const outcome = await transaction(pool, async (client) => {
-          const [snapshot] = await query<{
-            id: string;
-            originalTaskId: string;
-            connectorId: string;
-            taskData: ConnectorTaskRecord;
-            relationshipData: Record<string, unknown>;
-            restoredTaskId: string | null;
-            recoveryState: string;
-            quarantineReason: string | null;
-          }>(
+          const [snapshot] = await query<PostgresDeletionRecoverySnapshot>(
             client,
             `
-              SELECT
-                id,
-                original_task_id AS "originalTaskId",
-                connector_id AS "connectorId",
-                task_data AS "taskData",
-                relationship_data AS "relationshipData",
-                restored_task_id AS "restoredTaskId",
-                recovery_state AS "recoveryState",
-                quarantine_reason AS "quarantineReason"
-              FROM sync_deletion_snapshots WHERE id = $1 FOR UPDATE
+              SELECT ${DELETION_RECOVERY_SNAPSHOT_COLUMNS}
+              FROM sync_deletion_snapshots
+              WHERE id = $1
+              FOR UPDATE
             `,
             [snapshotId],
           );
@@ -2191,8 +2480,15 @@ export function createPostgresConnectorExecutionRepositories(
               `Removed task snapshot is quarantined: ${snapshot.quarantineReason ?? 'identity_validation_failed'}`,
             );
           }
-          if (snapshot.taskData.connectorType === 'github-issues') {
-            throw new UnsupportedConnectorExecutionError('GitHub identity-backed restore');
+          if (
+            snapshot.taskData.connectorType === 'github-issues'
+            && isFencedGitHubRecovery(snapshot.identityMode)
+          ) {
+            const validation = await validateGitHubRecoveryFence(client, snapshot);
+            if (validation) {
+              await quarantineDeletionSnapshot(client, snapshotId, validation);
+              return { fenceError: validation };
+            }
           }
           const relations = objectValue(snapshot.relationshipData);
           if (
@@ -2336,6 +2632,9 @@ export function createPostgresConnectorExecutionRepositories(
           return { taskId: restored.id, alreadyRestored: false };
         });
         if ('conflict' in outcome) throw new Error(outcome.conflict);
+        if ('fenceError' in outcome) {
+          throw new Error(`GitHub recovery fenced: ${outcome.fenceError}`);
+        }
         return outcome;
       },
     },

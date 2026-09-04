@@ -57,6 +57,29 @@ import type {
 
 type Client = Pool | PoolClient;
 
+export async function initializePostgresGitHubConnectorIdentityStateInTransaction(
+  client: PoolClient,
+  connectorInstanceId: string,
+  now: string,
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO github_identity_migrations (connector_instance_id, phase, updated_at)
+      VALUES ($1, 'shadow_write', $2)
+      ON CONFLICT (connector_instance_id) DO NOTHING
+    `,
+    [connectorInstanceId, now],
+  );
+  await client.query(
+    `
+      INSERT INTO github_identity_controls (connector_instance_id, mode_revision, updated_at)
+      VALUES ($1, 1, $2)
+      ON CONFLICT (connector_instance_id) DO NOTHING
+    `,
+    [connectorInstanceId, now],
+  );
+}
+
 async function query<T>(
   client: Client,
   text: string,

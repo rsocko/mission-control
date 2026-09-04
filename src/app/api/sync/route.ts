@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
 import { syncScheduler } from '@/lib/sync';
-import db from '@/db';
-import { syncLog } from '@/db/schema';
-import { desc, lt } from 'drizzle-orm';
 import { syncLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { isDemoMode } from '@/lib/mode';
@@ -10,13 +7,16 @@ import {
   getSyncJobRepository,
   isDurableSyncMode,
 } from '@/lib/sync/job-queue';
-import { getRuntimeTelemetry } from '@/lib/telemetry/runtime';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import { getLocalToday } from '@/lib/utils/date';
 
 async function getScheduleHealth() {
   const jobRepository = await getSyncJobRepository();
   const schedules = await jobRepository.getScheduleHealth();
   const overdue = schedules.filter((schedule) => schedule.overdue);
-  const worker = (await getRuntimeTelemetry()).find((runtime) => runtime.role === 'worker');
+  const worker = await (
+    await getConnectorManagementPersistence()
+  ).getSyncWorkerHeartbeat();
   const telemetryStaleMs = Math.max(
     30_000,
     Number(process.env.MC_TELEMETRY_STALE_MS) || 30_000,
@@ -122,7 +122,6 @@ export async function POST(request: Request) {
     // Also trigger My Day sync (best-effort, non-blocking for the response)
     try {
       const baseUrl = request.url.replace(/\/api\/sync.*$/, '');
-      const { getLocalToday } = await import('@/lib/utils/date');
       await fetch(`${baseUrl}/api/my-day/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -150,13 +149,9 @@ export async function GET(request: Request) {
     const activeSyncs = await syncScheduler.getActiveSyncs();
     const jobRepository = await getSyncJobRepository();
 
-    const baseQuery = before
-      ? db.select().from(syncLog).where(lt(syncLog.syncedAt, before))
-      : db.select().from(syncLog);
-    // Fetch one extra to determine if there are more pages
-    const rows = await baseQuery.orderBy(desc(syncLog.syncedAt)).limit(limit + 1);
-    const hasMore = rows.length > limit;
-    const history = hasMore ? rows.slice(0, limit) : rows;
+    const { history, hasMore } = await (
+      await getConnectorManagementPersistence()
+    ).listSyncHistory({ limit, before });
 
     return NextResponse.json({
       status,

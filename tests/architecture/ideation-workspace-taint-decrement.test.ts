@@ -169,15 +169,15 @@ describe('L16 ideation-workspace taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 175,
+      tierARoutes: 167,
       tierBRoutes: 27,
-      cleanRoutes: 64,
-      directTaintSourceRoutes: 124,
+      cleanRoutes: 72,
+      directTaintSourceRoutes: 116,
       transitiveOnlyTaintSourceRoutes: 51,
-      directDbNamespaceRoutes: 125,
+      directDbNamespaceRoutes: 117,
       taintedLibA: 78,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 253,
+      totalMigrationUnits: 245,
     });
   });
 });

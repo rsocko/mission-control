@@ -1,16 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { sourceRankings } from '@/db/schema';
-import { eq, asc } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 export async function GET() {
   try {
-    const rankings = db
-      .select()
-      .from(sourceRankings)
-      .orderBy(asc(sourceRankings.rank))
-      .all();
+    const rankings = await (await getConnectorManagementPersistence()).listSourceRankings();
 
     return NextResponse.json({ rankings });
   } catch (error) {
@@ -27,28 +21,8 @@ export async function PUT(request: Request) {
       return ApiErrors.badRequest('rankings array is required');
     }
 
-    const now = new Date().toISOString();
-
-    for (const ranking of rankings) {
-      const existing = db.select().from(sourceRankings).where(eq(sourceRankings.id, ranking.id)).get();
-
-      if (existing) {
-        db.update(sourceRankings)
-          .set({ rank: ranking.rank, name: ranking.name || existing.name, updatedAt: now })
-          .where(eq(sourceRankings.id, ranking.id))
-          .run();
-      } else {
-        db.insert(sourceRankings).values({
-          id: ranking.id,
-          connectorType: ranking.connectorType,
-          name: ranking.name,
-          rank: ranking.rank,
-          updatedAt: now,
-        }).run();
-      }
-    }
-
-    const updated = db.select().from(sourceRankings).orderBy(asc(sourceRankings.rank)).all();
+    const updated = await (await getConnectorManagementPersistence())
+      .putSourceRankings(rankings, new Date().toISOString());
     return NextResponse.json({ rankings: updated });
   } catch (error) {
     return ApiErrors.internal('Failed to update source rankings', error);

@@ -294,7 +294,36 @@ export interface ArchiveTaskResult {
   sourceId: string;
 }
 
+export interface DeletionSnapshotRecord {
+  id: string;
+  originalTaskId: string;
+  connectorId: string;
+  sourceId: string;
+  taskTitle: string;
+  taskData: Pick<
+    ConnectorTaskRecord,
+    | 'description'
+    | 'status'
+    | 'priority'
+    | 'dueDate'
+    | 'connectorType'
+    | 'sourceListName'
+    | 'isChecklistItem'
+    | 'parentId'
+  >;
+  reason: string;
+  deletedAt: string;
+  restoredAt: string | null;
+  restoredTaskId: string | null;
+  restoreMode: string | null;
+}
+
 export interface DeletionPersistence {
+  getSnapshot(snapshotId: string): Promise<DeletionSnapshotRecord | null>;
+  getRestoreParent(taskId: string): Promise<{
+    connectorInstanceId: string;
+    sourceId: string;
+  } | null>;
   listCandidates(connectorId: string): Promise<DeletionCandidateRecord[]>;
   listIdentityStates(connectorId: string): Promise<DeletionIdentityState[]>;
   clearCandidate(connectorId: string, sourceId: string): Promise<void>;
@@ -555,6 +584,7 @@ export interface ConnectorExecutionSupport {
 }
 
 export interface ConnectorExecutionRepositories {
+  readonly management: import('./connector-management').ConnectorManagementPersistence;
   readonly lists: SourceListPersistence;
   readonly pushes: TaskPushPersistence;
   readonly pulls: TaskPullPersistence;

@@ -4,6 +4,37 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 
+const connectorManagement = vi.hoisted(() => ({
+  createConnector: vi.fn().mockResolvedValue(undefined),
+  getConnector: vi.fn().mockResolvedValue({
+    id: 'test-id',
+    type: 'github-issues',
+    name: 'Test Connector',
+    enabled: true,
+    syncMode: 'poll',
+    pollIntervalMinutes: 5,
+    capabilities: {},
+    credentials: {},
+    settings: {},
+    syncedLists: [],
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z',
+    deletedAt: null,
+  }),
+  getSyncWorkerHeartbeat: vi.fn().mockResolvedValue(null),
+  hardDeleteConnector: vi.fn().mockResolvedValue(undefined),
+  listSyncHistory: vi.fn().mockResolvedValue({ history: [], hasMore: false }),
+  softDeleteConnector: vi.fn().mockResolvedValue({
+    affectedTasks: 0,
+    affectedLists: 0,
+  }),
+  updateConnector: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock('@/lib/connectors/management-service', () => ({
+  getConnectorManagementPersistence: vi.fn().mockResolvedValue(connectorManagement),
+}));
+
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────
 
 type ChainableProxy = Record<PropertyKey, unknown>;

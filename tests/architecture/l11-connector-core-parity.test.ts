@@ -3,54 +3,59 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { computeWebPersistenceGraph } from './web-persistence-graph';
 
-const TRANSFER_BRIDGE = 'src/lib/connectors/transfer-identity.ts';
-const RELEASED_CALLER = 'src/lib/tasks/task-move-write-through.ts';
-const REMOVED_TAINT = [TRANSFER_BRIDGE, RELEASED_CALLER] as const;
+const OWNED_ROUTES = [
+  'src/app/api/connectors/route.ts',
+  'src/app/api/source-lists/[id]/route.ts',
+  'src/app/api/source-lists/[id]/rename/route.ts',
+  'src/app/api/source-lists/rename/route.ts',
+  'src/app/api/source-lists/reorder/route.ts',
+  'src/app/api/source-rankings/route.ts',
+  'src/app/api/sync/deletions/[id]/route.ts',
+  'src/app/api/sync/route.ts',
+] as const;
 
 const baseline = JSON.parse(
   readFileSync(join(process.cwd(), 'tests/architecture/web-persistence-baseline.json'), 'utf8'),
 ) as {
-  counts: Record<string, number>;
   decrementHistory?: Array<{
     layer: string;
     totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTaintedLibA: string[];
     removedTierARoutes: string[];
     newlyCleanRoutes: string[];
     tierBReclassifications: string[];
     notMigratedFromTheOwnedFileSet: string[];
   }>;
-  taintedLibA: string[];
 };
 const current = computeWebPersistenceGraph(process.cwd());
 
-describe('L06b transfer identity taint decrement', () => {
-  it('records exactly the direct bridge and its transitive caller', () => {
-    const entry = baseline.decrementHistory?.find((record) => record.layer === 'L06b');
+describe('L11 connector-core PostgreSQL parity', () => {
+  it('records the exact eight-route decrement with no deferrals or reclassification', () => {
+    const entry = baseline.decrementHistory?.find(({ layer }) => layer === 'L11');
     expect(entry).toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 325, to: 323, delta: -2 });
-    expect(entry?.removedTaintedLibA).toEqual([...REMOVED_TAINT]);
-    expect(entry?.removedTierARoutes).toEqual([]);
-    expect(entry?.newlyCleanRoutes).toEqual([]);
+    expect(entry?.totalMigrationUnits).toEqual({ from: 313, to: 305, delta: -8 });
+    expect(entry?.removedTierARoutes).toEqual([...OWNED_ROUTES]);
+    expect(entry?.newlyCleanRoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.tierBReclassifications).toEqual([]);
     expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
   });
 
-  it.each(REMOVED_TAINT)('%s is absent from every taint set', (file) => {
-    expect(current.taintedLibA).not.toContain(file);
-    expect(current.taintedApiHelpers).not.toContain(file);
-    expect(current.tierARoutes).not.toContain(file);
-    expect(current.tierBRoutes).not.toContain(file);
+  it.each(OWNED_ROUTES)('%s is fully clean rather than deferred to Tier B', (route) => {
+    expect(current.tierARoutes).not.toContain(route);
+    expect(current.tierBRoutes).not.toContain(route);
+    expect(current.cleanRoutes).toContain(route);
   });
 
-  it('keeps the bridge backend-neutral without a hidden deferred fallback', () => {
-    const source = readFileSync(join(process.cwd(), TRANSFER_BRIDGE), 'utf8');
-    expect(source).not.toMatch(/from\s+['"]@\/db['"]/);
+  it.each(OWNED_ROUTES)('%s uses the connector composition seam without @/db', (route) => {
+    const source = readFileSync(join(process.cwd(), route), 'utf8');
+    expect(source).toContain('@/lib/connectors/management-service');
+    expect(source).not.toMatch(
+      /(?:^|\n)\s*import\s+(?!type\b)[^;]*from\s+['"]@\/db(?:['"/])/,
+    );
     expect(source).not.toMatch(/import\(\s*['"]@\/db/);
-    expect(source).not.toMatch(/better-sqlite3|drizzle-orm/);
+    expect(source).not.toMatch(/better-sqlite3/);
   });
 
-  it('pins the exact graph decrement without route reclassification', () => {
+  it('pins the approved post-L11 graph exactly', () => {
     expect({
       apiRoutes: current.apiRoutes.length,
       tierARoutes: current.tierARoutes.length,
@@ -74,6 +79,5 @@ describe('L06b transfer identity taint decrement', () => {
       taintedApiHelpers: 0,
       totalMigrationUnits: 245,
     });
-    expect(current.taintedLibA).toEqual(baseline.taintedLibA);
   });
 });

@@ -20,10 +20,12 @@ import type {
   ConnectorTaskUpdate,
   DeletionCandidateRecord,
   DeletionIdentityState,
+  DeletionSnapshotRecord,
   PullTag,
   RetentionDetailRecord,
   SourceListRecord,
 } from './connector-execution';
+import { createSqliteConnectorManagementRepository } from './sqlite-connector-management-repository';
 
 type SqliteDatabase = Database.Database;
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
@@ -423,6 +425,7 @@ export function createSqliteConnectorExecutionRepositories(
   drizzle: SqliteDrizzle,
 ): ConnectorExecutionRepositories {
   return {
+    management: createSqliteConnectorManagementRepository(database, drizzle),
     lists: {
       async list(connectorId) {
         return (database.prepare(`
@@ -896,6 +899,40 @@ export function createSqliteConnectorExecutionRepositories(
     },
 
     deletions: {
+      async getSnapshot(snapshotId) {
+        const row = database.prepare(`
+          SELECT
+            id,
+            original_task_id AS originalTaskId,
+            connector_id AS connectorId,
+            source_id AS sourceId,
+            task_title AS taskTitle,
+            task_data AS taskData,
+            reason,
+            deleted_at AS deletedAt,
+            restored_at AS restoredAt,
+            restored_task_id AS restoredTaskId,
+            restore_mode AS restoreMode
+          FROM sync_deletion_snapshots
+          WHERE id = ?
+          LIMIT 1
+        `).get(snapshotId) as (
+          Omit<DeletionSnapshotRecord, 'taskData'> & { taskData: unknown }
+        ) | undefined;
+        return row ? { ...row, taskData: parseObject(row.taskData) } as DeletionSnapshotRecord : null;
+      },
+
+      async getRestoreParent(taskId) {
+        return database.prepare(`
+          SELECT
+            connector_instance_id AS connectorInstanceId,
+            source_id AS sourceId
+          FROM tasks
+          WHERE id = ?
+          LIMIT 1
+        `).get(taskId) as { connectorInstanceId: string; sourceId: string } | undefined ?? null;
+      },
+
       async listCandidates(connectorId) {
         return database.prepare(`
           SELECT

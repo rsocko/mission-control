@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { sourceLists } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 /**
  * Bulk-update source list sortOrder values within a group.
@@ -17,14 +15,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'orderedIds must be a non-empty array' }, { status: 400 });
     }
 
-    runTransaction((tx) => {
-      for (let i = 0; i < orderedIds.length; i++) {
-        tx.update(sourceLists)
-          .set({ sortOrder: i })
-          .where(eq(sourceLists.id, orderedIds[i]))
-          .run();
-      }
-    });
+    await (await getConnectorManagementPersistence()).reorderSourceLists(orderedIds);
 
     return NextResponse.json({ success: true });
   } catch (error) {

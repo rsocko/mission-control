@@ -10,6 +10,8 @@ describe('generic inbound webhook notifications', () => {
   let receive: typeof import('@/app/api/inbound-webhooks/[id]/receive/route').POST;
   let listNotifications: typeof import('@/app/api/notifications/route').GET;
   let executeAction: typeof import('@/app/api/notifications/[id]/actions/[actionId]/route').POST;
+  let shutdownRuntimeDatabase: typeof import('@/db/runtime').shutdownRuntimeDatabase;
+  let closeSqlite: () => void;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
@@ -18,19 +20,25 @@ describe('generic inbound webhook notifications', () => {
     vi.doUnmock('crypto');
     vi.resetModules();
 
-    const [dbModule, schemaModule, receiveModule, notificationsModule, actionModule] = await Promise.all([
+    const [dbModule, schemaModule, runtimeModule] = await Promise.all([
       import('@/db'),
       import('@/db/schema'),
+      import('@/db/runtime'),
+    ]);
+    await runtimeModule.initializeRuntimeDatabase();
+    const [receiveModule, notificationsModule, actionModule] = await Promise.all([
       import('@/app/api/inbound-webhooks/[id]/receive/route'),
       import('@/app/api/notifications/route'),
       import('@/app/api/notifications/[id]/actions/[actionId]/route'),
     ]);
     db = dbModule.default;
     sqlite = dbModule.sqlite;
+    closeSqlite = sqlite.close.bind(sqlite);
     schema = schemaModule;
     receive = receiveModule.POST;
     listNotifications = notificationsModule.GET;
     executeAction = actionModule.POST;
+    shutdownRuntimeDatabase = runtimeModule.shutdownRuntimeDatabase;
   });
 
   beforeEach(async () => {
@@ -54,8 +62,9 @@ describe('generic inbound webhook notifications', () => {
     });
   });
 
-  afterAll(() => {
-    sqlite.close();
+  afterAll(async () => {
+    await shutdownRuntimeDatabase();
+    closeSqlite();
     delete process.env.MC_DB_PATH;
   });
 

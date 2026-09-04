@@ -34,6 +34,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     for (const id of connectorIds) {
       await backend.context.pool.query('DELETE FROM sync_log WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM sync_jobs WHERE connector_id = $1', [id]);
+      await backend.context.pool.query('DELETE FROM sync_schedules WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_operation_leases WHERE connector_id = $1', [id]);
       await backend.context.pool.query('DELETE FROM connector_configs WHERE id = $1', [id]);
     }
@@ -377,7 +378,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
         [connectorId],
       );
 
-      enqueuePromise = repository.enqueueDueSchedules(new Date());
+      enqueuePromise = repository.enqueueDueSchedules(new Date().toISOString());
       await waitForAdvisoryLockWaiter();
 
       await rowProbe.query('BEGIN');

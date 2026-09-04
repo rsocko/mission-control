@@ -105,7 +105,9 @@ describePostgres('PostgreSQL sync operator-control integration', () => {
       connector: { id: connectorId, enabled: false },
       scheduler: { state: 'quarantined', queued: 0, running: 0 },
     });
-    await expect(jobs.getSchedules()).resolves.toEqual([]);
+    expect(
+      (await jobs.getSchedules()).filter((schedule) => schedule.connectorId === connectorId),
+    ).toEqual([]);
     await expect(jobs.enqueue(connectorId, { source: 'api' }))
       .rejects.toThrow('connector_sync_quarantined');
     const queued = await backend.context.pool.query(
@@ -149,7 +151,9 @@ describePostgres('PostgreSQL sync operator-control integration', () => {
       actorType: 'service',
       idempotencyKey: `pg-operator-release-${randomUUID()}`,
     })).resolves.toEqual({ status: 'released', replayed: false });
-    await expect(jobs.getSchedules()).resolves.toEqual([
+    expect(
+      (await jobs.getSchedules()).filter((schedule) => schedule.connectorId === connectorId),
+    ).toEqual([
       expect.objectContaining({ connectorId, intervalMinutes: 240 }),
     ]);
   });

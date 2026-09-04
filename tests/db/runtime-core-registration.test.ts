@@ -66,6 +66,7 @@ const mocks = vi.hoisted(() => {
             settings: { [key]: patch },
             state: patch,
           })),
+          recordTestResult: vi.fn(async () => ({ recorded: true })),
         },
         notifications: {
           get: vi.fn(async () => null),
@@ -234,6 +235,12 @@ describe('PostgreSQL runtime core repository registration', () => {
     const registeredComposition = mocks.registerCore.mock.calls[0][0];
     const registeredWorkerComposition = mocks.registerWorker.mock.calls[0][0];
     await getPostgresCoreRepositories().tasks.get('task-1');
+    await registeredComposition.connectors.recordTestResult({
+      connectorId: 'connector-1',
+      status: 'success',
+      error: null,
+      testedAt: '2026-09-04T21:45:00.000Z',
+    });
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
     await registeredWorkerComposition.reminders.cancelInvalidated({
@@ -242,6 +249,12 @@ describe('PostgreSQL runtime core repository registration', () => {
     });
     await registeredWorkerComposition.triage.syncState.getAll();
     expect(mocks.repositories[0].tasks.get).toHaveBeenCalledWith('task-1');
+    expect(mocks.repositories[0].connectors.recordTestResult).toHaveBeenCalledWith({
+      connectorId: 'connector-1',
+      status: 'success',
+      error: null,
+      testedAt: '2026-09-04T21:45:00.000Z',
+    });
     expect(mocks.workerRepositories[0].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].notificationDelivery.getNextWakeAt)
@@ -266,6 +279,12 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.registerWorker.mock.calls[1][0]).toBe(registeredWorkerComposition);
     expect(mocks.resumeSemantic).toHaveBeenCalledTimes(2);
     await getPostgresCoreRepositories().tasks.get('task-1');
+    await registeredComposition.connectors.recordTestResult({
+      connectorId: 'connector-2',
+      status: 'failed',
+      error: 'sanitized failure',
+      testedAt: '2026-09-04T21:46:00.000Z',
+    });
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
     await registeredWorkerComposition.reminders.cancelInvalidated({
@@ -274,6 +293,12 @@ describe('PostgreSQL runtime core repository registration', () => {
     });
     await registeredWorkerComposition.triage.syncState.getAll();
     expect(mocks.repositories[1].tasks.get).toHaveBeenCalledWith('task-1');
+    expect(mocks.repositories[1].connectors.recordTestResult).toHaveBeenCalledWith({
+      connectorId: 'connector-2',
+      status: 'failed',
+      error: 'sanitized failure',
+      testedAt: '2026-09-04T21:46:00.000Z',
+    });
     expect(mocks.workerRepositories[1].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[1].notificationDelivery.getNextWakeAt)

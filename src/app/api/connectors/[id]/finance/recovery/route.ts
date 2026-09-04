@@ -1,14 +1,9 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
-import {
-  financeConnectorConfigFromRow,
-  isFinanceConnectorType,
-} from '@/lib/connectors/monarch-money/config';
+import { isFinanceConnectorType } from '@/lib/connectors/monarch-money/config';
 import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
 import { verifyFinanceConnectionRecovery } from '@/lib/connectors/monarch-money/connection-recovery';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 
 export async function POST(
   request: Request,
@@ -39,10 +34,8 @@ export async function POST(
   }
 
   const { id } = await params;
-  const [connector] = await db.select().from(connectorConfigs)
-    .where(eq(connectorConfigs.id, id))
-    .limit(1);
-  if (!connector || connector.deletedAt || !isFinanceConnectorType(connector.type)) {
+  const connector = await getCorePersistenceRepositories().connectors.get(id);
+  if (!connector || !isFinanceConnectorType(connector.type)) {
     return ApiErrors.notFound('Finance connector');
   }
   if (!connector.enabled) {
@@ -51,7 +44,7 @@ export async function POST(
 
   try {
     const result = await verifyFinanceConnectionRecovery({
-      config: financeConnectorConfigFromRow(connector),
+      config: connector,
       signal: request.signal,
     });
     return NextResponse.json(result, { status: result.recovered ? 200 : 409 });

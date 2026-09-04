@@ -51,6 +51,7 @@ import { createSqliteEventDeliveryRepositories } from './sqlite-event-outbox-rep
 import { createSqliteNotificationEnrichmentRepository } from './sqlite-notification-enrichment-repository';
 import { createSqliteNotificationEntityLinkingRepository } from './sqlite-notification-entity-linking-repository';
 import { createSqliteFinanceWorkerPersistence } from './sqlite-finance-worker-repositories';
+import { createSqliteFinanceOperatorPersistence } from './sqlite-finance-operator-repository';
 import { createSqliteFinanceConnectionRecoveryPersistence } from './sqlite-finance-recovery-repository';
 import { createSqliteFinanceInsightPersistence } from './sqlite-finance-insights-repositories';
 import {
@@ -155,6 +156,7 @@ export function createSqliteWorkerPersistenceRepositories(
       repair: createSqliteFinanceAttentionRepairPersistence(sqlite),
     },
     recovery: createSqliteFinanceConnectionRecoveryPersistence(sqlite, db),
+    operator: createSqliteFinanceOperatorPersistence({ sqlite, db }),
   };
   repositories = {
     connectors: coreRepositories.connectors,

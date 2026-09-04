@@ -130,7 +130,7 @@ afterAll(() => {
 });
 
 describe.sequential('FinanceSnapshotSynchronizer', () => {
-  it('accepts the legacy Finance connector alias for manual attribution', () => {
+  it('accepts the legacy Finance connector alias for manual attribution', async () => {
     const observedAt = new Date().toISOString();
     const transactionId = `finance:${connectorConfig.id}:legacy-alias-transaction`;
     sqlite.prepare(`
@@ -153,14 +153,14 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       .run(connectorConfig.id);
 
     try {
-      expect(applyManualAttributionDecision({
+      await expect(applyManualAttributionDecision({
         connectorId: connectorConfig.id,
         transactionId,
         action: 'parent-expense',
         kidId: null,
         idempotencyKey: 'legacy-alias-manual-decision',
         actorType: 'parent-admin',
-      })).toMatchObject({
+      })).resolves.toMatchObject({
         status: 'resolved',
         transactionId,
         replayed: false,
@@ -558,7 +558,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
   });
 
   it('never overwrites a newer validated manual decision', async () => {
-    applyManualAttributionDecision({
+    await applyManualAttributionDecision({
       connectorId: connectorConfig.id,
       transactionId: `finance:${connectorConfig.id}:attributed-transaction`,
       action: 'assign-kid',
@@ -578,7 +578,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
         action: 'assign-kid',
         kidId: 'kid-one',
       });
-      applyManualAttributionDecision({
+      await applyManualAttributionDecision({
         connectorId: connectorConfig.id,
         transactionId: `finance:${connectorConfig.id}:attributed-transaction`,
         action: 'parent-expense',
@@ -634,7 +634,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
   });
 
   it('does not let an in-flight failure downgrade a newer manual decision', async () => {
-    applyManualAttributionDecision({
+    await applyManualAttributionDecision({
       connectorId: connectorConfig.id,
       transactionId: `finance:${connectorConfig.id}:attributed-transaction`,
       action: 'assign-kid',
@@ -647,7 +647,7 @@ describe.sequential('FinanceSnapshotSynchronizer', () => {
       if (url.hostname !== 'tyrion-operations-ui') {
         return page([transaction('attributed-transaction')], null);
       }
-      applyManualAttributionDecision({
+      await applyManualAttributionDecision({
         connectorId: connectorConfig.id,
         transactionId: `finance:${connectorConfig.id}:attributed-transaction`,
         action: 'parent-expense',

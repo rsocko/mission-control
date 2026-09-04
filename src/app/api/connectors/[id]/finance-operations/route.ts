@@ -63,7 +63,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   try {
     return NextResponse.json({
       sync: await getFinanceSyncControlStatus(id),
-      cutover: getFinanceInsightCutoverReadiness(id, sourceGeneration),
+      cutover: await getFinanceInsightCutoverReadiness(id, sourceGeneration),
     });
   } catch (error) {
     return errorResponse(error);
@@ -125,14 +125,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
           idempotencyKey,
         }));
       case 'enable-insight-cutover':
-        return NextResponse.json(enableFinanceInsightCutoverForOperator({
+        return NextResponse.json(await enableFinanceInsightCutoverForOperator({
           connectorId: id,
           sourceGeneration: body.data.sourceGeneration,
           actorType: actor,
           idempotencyKey,
         }));
       case 'rollback-insight-cutover':
-        return NextResponse.json(rollbackFinanceInsightCutoverForOperator({
+        return NextResponse.json(await rollbackFinanceInsightCutoverForOperator({
           connectorId: id,
           sourceGeneration: body.data.sourceGeneration,
           actorType: actor,

@@ -1,14 +1,21 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import {
   FINANCE_ATTRIBUTION_READ_MAX,
   FINANCE_ATTRIBUTION_WRITE_MAX,
   FinanceAttributionFenceError,
+  FinanceAttributionMutationError,
   type FinanceAttributionApplyItem,
+  type FinanceAttributionExceptionActionCommand,
+  type FinanceAttributionExceptionView,
+  type FinanceAttributionManualDecisionCommand,
   type FinanceAttributionPersistence,
   type FinanceAttributionRow,
   type FinanceAttributionStateSnapshot,
+  type FinanceAttributionSubjectView,
   type FinanceAttributionUnavailableItem,
+  type FinanceManualAction,
 } from './finance-attribution';
 import {
   FinanceDatasetFenceError,
@@ -249,6 +256,314 @@ function resolveCurrentException(
         updated_at = ?
     WHERE connector_id = ? AND transaction_id = ?
   `).run(now, now, connectorId, transactionId);
+}
+
+// ─── API-shaped attribution mutation helpers ────────────────────────────────
+
+const financeTypePlaceholders = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ');
+
+function parseReasons(value: string | null): readonly string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) ? parsed.map(String) : [];
+  } catch {
+    return [];
+  }
+}
+
+function requireFinanceConnector(sqlite: SqliteDatabase, connectorId: string): void {
+  const connector = sqlite.prepare(`
+    SELECT 1 FROM connector_configs
+    WHERE id = ? AND type IN (${financeTypePlaceholders})
+      AND enabled = 1 AND deleted_at IS NULL
+  `).get(connectorId, ...FINANCE_PROVIDER_ALIASES);
+  if (!connector) {
+    throw new FinanceAttributionMutationError(
+      'connector_not_found',
+      'Finance connector was not found',
+      404,
+    );
+  }
+}
+
+interface AttributionActionAuditRow {
+  transactionId: string;
+  exceptionId: string | null;
+  action: string;
+  requestedKidId: string | null;
+  requestedDecision: FinanceManualAction | null;
+  resultStatus: string;
+}
+
+function findAttributionActionAudit(
+  sqlite: SqliteDatabase,
+  connectorId: string,
+  idempotencyKey: string,
+): AttributionActionAuditRow | undefined {
+  return sqlite.prepare(`
+    SELECT transaction_id AS transactionId, exception_id AS exceptionId,
+           action, requested_kid_id AS requestedKidId,
+           requested_decision AS requestedDecision,
+           result_status AS resultStatus
+    FROM finance_attribution_audit
+    WHERE connector_id = ? AND idempotency_key = ?
+  `).get(connectorId, idempotencyKey) as AttributionActionAuditRow | undefined;
+}
+
+function idempotencyConflict(message: string): never {
+  throw new FinanceAttributionMutationError('idempotency_conflict', message, 409);
+}
+
+function assertManualDecisionShape(
+  action: FinanceManualAction,
+  kidId: string | null,
+): void {
+  if (action === 'assign-kid' && (!kidId || !isAttributionIdentifier(kidId))) {
+    throw new FinanceAttributionMutationError(
+      'invalid_manual_decision',
+      'A valid Tyrion kid identifier is required',
+      400,
+    );
+  }
+  if (action === 'parent-expense' && kidId !== null) {
+    throw new FinanceAttributionMutationError(
+      'invalid_manual_decision',
+      'Parent expense decisions cannot include a kid identifier',
+      400,
+    );
+  }
+}
+
+function isAttributionIdentifier(value: string): boolean {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value)
+    && !['__proto__', 'constructor', 'prototype'].includes(value);
+}
+
+function assertManualDecisionReplay(
+  audit: AttributionActionAuditRow,
+  command: FinanceAttributionManualDecisionCommand,
+): void {
+  if (
+    audit.transactionId !== command.transactionId
+    || audit.requestedKidId !== command.kidId
+    || audit.requestedDecision !== command.action
+    || audit.action !== command.auditAction
+  ) {
+    idempotencyConflict('Idempotency key was already used for another decision');
+  }
+}
+
+function assertExceptionActionReplay(
+  audit: AttributionActionAuditRow,
+  command: FinanceAttributionExceptionActionCommand,
+): void {
+  const requestedKidId = command.action === 'manual-resolve' ? command.kidId ?? null : null;
+  if (
+    audit.exceptionId !== command.exceptionId
+    || audit.action !== command.action
+    || (command.action === 'manual-resolve' && audit.requestedKidId !== requestedKidId)
+  ) {
+    idempotencyConflict('Idempotency key was already used for another action');
+  }
+}
+
+function readExceptionForAction(
+  sqlite: SqliteDatabase,
+  command: FinanceAttributionExceptionActionCommand,
+): { id: string; transactionId: string; assignedKidId: string | null } {
+  requireFinanceConnector(sqlite, command.connectorId);
+  const exception = sqlite.prepare(`
+    SELECT e.id, e.transaction_id AS transactionId,
+           t.assigned_kid_id AS assignedKidId
+    FROM finance_attribution_exceptions e
+    INNER JOIN finance_transactions t
+      ON t.id = e.transaction_id
+      AND t.connector_instance_id = e.connector_id
+    WHERE e.id = ? AND e.connector_id = ?
+  `).get(command.exceptionId, command.connectorId) as
+    | { id: string; transactionId: string; assignedKidId: string | null }
+    | undefined;
+  if (!exception) {
+    throw new FinanceAttributionMutationError(
+      'exception_not_found',
+      'Attribution exception was not found',
+      404,
+    );
+  }
+  return exception;
+}
+
+/**
+ * The manual-decision write. It runs inside the caller's serialized write
+ * transaction so connector ownership, transaction existence, expected-version
+ * CAS, projected-subject membership, exception CAS, the state mutation, and the
+ * audit row are all committed or all abandoned together. Returns `true` when a
+ * concurrent writer already committed this exact idempotency key.
+ */
+function applyManualDecisionInTransaction(
+  sqlite: SqliteDatabase,
+  idFactory: () => string,
+  command: FinanceAttributionManualDecisionCommand,
+): boolean {
+  const concurrentAudit = findAttributionActionAudit(
+    sqlite,
+    command.connectorId,
+    command.idempotencyKey,
+  );
+  if (concurrentAudit) {
+    assertManualDecisionReplay(concurrentAudit, command);
+    return true;
+  }
+  requireFinanceConnector(sqlite, command.connectorId);
+  const transaction = sqlite.prepare(`
+    SELECT id, source_fingerprint AS sourceFingerprint,
+           last_seen_at AS lastSeenAt, assigned_kid_id AS assignedKidId,
+           confirmed_category AS confirmedCategory,
+           manual_decided_at AS manualDecidedAt
+    FROM finance_transactions
+    WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
+  `).get(command.transactionId, command.connectorId) as
+    | {
+        id: string;
+        sourceFingerprint: string;
+        lastSeenAt: string;
+        assignedKidId: string | null;
+        confirmedCategory: string | null;
+        manualDecidedAt: string | null;
+      }
+    | undefined;
+  if (!transaction) {
+    throw new FinanceAttributionMutationError(
+      'transaction_not_found',
+      'Finance transaction was not found',
+      404,
+    );
+  }
+  const expectedVersion = command.expectedTransactionVersion;
+  if (
+    expectedVersion
+    && (
+      transaction.sourceFingerprint !== expectedVersion.sourceFingerprint
+      || transaction.lastSeenAt !== expectedVersion.lastSeenAt
+      || transaction.assignedKidId !== expectedVersion.assignedKidId
+      || transaction.confirmedCategory !== expectedVersion.confirmedCategory
+      || transaction.manualDecidedAt !== expectedVersion.manualDecidedAt
+    )
+  ) {
+    throw new FinanceAttributionMutationError(
+      'transaction_conflict',
+      'Finance transaction changed after approval',
+      409,
+    );
+  }
+  if (command.action === 'assign-kid') {
+    const projected = sqlite.prepare(`
+      SELECT 1
+      FROM finance_attribution_subjects subjects
+      INNER JOIN finance_sync_state state
+        ON state.connector_id = subjects.connector_id
+        AND state.attribution_policy_version = subjects.policy_version
+      WHERE subjects.connector_id = ? AND subjects.kid_id = ?
+    `).get(command.connectorId, command.kidId);
+    if (!projected) {
+      throw new FinanceAttributionMutationError(
+        'unknown_attribution_subject',
+        'Kid identifier is not present in the current Tyrion projection',
+        409,
+      );
+    }
+  }
+  if (command.exceptionId) {
+    const currentException = sqlite.prepare(`
+      SELECT status, updated_at AS updatedAt
+      FROM finance_attribution_exceptions
+      WHERE id = ? AND connector_id = ? AND transaction_id = ?
+    `).get(command.exceptionId, command.connectorId, command.transactionId) as
+      | { status: string; updatedAt: string }
+      | undefined;
+    if (!currentException || !['open', 'retry_requested'].includes(currentException.status)) {
+      throw new FinanceAttributionMutationError(
+        'exception_conflict',
+        'This exception was already resolved by a newer decision',
+        409,
+      );
+    }
+    if (currentException.updatedAt !== command.expectedExceptionUpdatedAt) {
+      throw new FinanceAttributionMutationError(
+        'exception_conflict',
+        'This exception changed after it was loaded',
+        409,
+      );
+    }
+    if (
+      transaction.manualDecidedAt
+      && Date.parse(transaction.manualDecidedAt) > Date.parse(currentException.updatedAt)
+    ) {
+      throw new FinanceAttributionMutationError(
+        'manual_decision_superseded',
+        'A newer manual decision already exists',
+        409,
+      );
+    }
+  }
+  sqlite.prepare(`
+    UPDATE finance_transactions
+    SET assigned_kid_id = ?, kid_assignment_method = 'manual',
+        manual_decision_action = ?, manual_decided_at = ?,
+        attribution_status = ?, attribution_confidence = 'definite',
+        attribution_method = 'manual',
+        attribution_explanation = 'Confirmed by parent administrator',
+        attribution_reasons = '[]', attribution_decision_source = 'manual',
+        attribution_evaluated_at = ?, attribution_review_state = 'resolved',
+        attribution_provenance = 'mission-control-manual-v1',
+        attribution_last_error_code = NULL, attribution_retryable = 0,
+        attribution_updated_at = ?, triage_status = 'confirmed'
+    WHERE id = ? AND connector_instance_id = ?
+  `).run(
+    command.kidId,
+    command.action,
+    command.now,
+    command.action === 'assign-kid' ? 'attributed' : 'unassigned',
+    command.now,
+    command.now,
+    command.transactionId,
+    command.connectorId,
+  );
+  sqlite.prepare(`
+    UPDATE finance_attribution_exceptions
+    SET status = 'resolved', review_state = 'resolved',
+        resolution = ?, resolved_at = ?, updated_at = ?
+    WHERE connector_id = ? AND transaction_id = ?
+      AND (? IS NULL OR id = ?)
+  `).run(
+    command.auditAction === 'approve' ? 'approved' : 'manual',
+    command.now,
+    command.now,
+    command.connectorId,
+    command.transactionId,
+    command.exceptionId ?? null,
+    command.exceptionId ?? null,
+  );
+  sqlite.prepare(`
+    INSERT INTO finance_attribution_audit (
+      id, connector_id, transaction_id, exception_id, idempotency_key,
+      action, actor_type, requested_kid_id, requested_decision,
+      result_status, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'resolved', ?)
+  `).run(
+    idFactory(),
+    command.connectorId,
+    command.transactionId,
+    command.exceptionId ?? null,
+    command.idempotencyKey,
+    command.auditAction,
+    command.actorType,
+    command.kidId,
+    command.action,
+    command.now,
+  );
+  return false;
 }
 
 function createSnapshotPersistence(
@@ -1126,6 +1441,10 @@ function createAttributionPersistence(
   }
 
   return {
+    async assertConnector(connectorId) {
+      requireFinanceConnector(sqlite, connectorId);
+    },
+
     async readRows(connectorId, upstreamTransactionIds) {
       assertBatch(
         upstreamTransactionIds.length,
@@ -1406,6 +1725,277 @@ function createAttributionPersistence(
           : [command.generationId, command.generationId]),
       );
       return { recorded: result.changes === 1 };
+    },
+
+    async listExceptions(query) {
+      requireFinanceConnector(sqlite, query.connectorId);
+      const conditions = [
+        'e.connector_id = ?',
+        ...(query.status === 'all'
+          ? []
+          : query.status === 'current'
+            ? [`e.status IN ('open', 'retry_requested')`]
+            : ['e.status = ?']),
+        ...(query.cursor ? ['(e.updated_at < ? OR (e.updated_at = ? AND e.id < ?))'] : []),
+      ];
+      const parameters: Array<string | number> = [
+        query.connectorId,
+        ...(query.status === 'all' || query.status === 'current' ? [] : [query.status]),
+        ...(query.cursor
+          ? [query.cursor.updatedAt, query.cursor.updatedAt, query.cursor.id]
+          : []),
+        query.limit + 1,
+      ];
+      const rows = sqlite.prepare(`
+        SELECT e.id, e.status,
+               e.reason_code AS reasonCode, e.retryable, e.review_state AS reviewState,
+               e.policy_version AS policyVersion,
+               e.occurrence_count AS occurrenceCount,
+               e.first_observed_at AS firstObservedAt,
+               e.last_observed_at AS lastObservedAt, e.updated_at AS updatedAt,
+               t.date, t.merchant_name AS merchantName,
+               t.assigned_kid_id AS assignedKidId,
+               t.attribution_status AS attributionStatus,
+               t.attribution_confidence AS confidence,
+               t.attribution_method AS method,
+               t.attribution_explanation AS explanation,
+               t.attribution_reasons AS reasons,
+               t.attribution_decision_source AS decisionSource,
+               t.attribution_engine_version AS engineVersion,
+               t.attribution_evaluated_at AS evaluatedAt
+        FROM finance_attribution_exceptions e
+        INNER JOIN finance_transactions t
+          ON t.id = e.transaction_id
+          AND t.connector_instance_id = e.connector_id
+        WHERE ${conditions.join(' AND ')}
+        ORDER BY e.updated_at DESC, e.id DESC
+        LIMIT ?
+      `).all(...parameters) as Array<
+        Omit<FinanceAttributionExceptionView, 'retryable' | 'reasons'>
+        & { retryable: number; reasons: string }
+      >;
+      const hasMore = rows.length > query.limit;
+      const page = hasMore ? rows.slice(0, query.limit) : rows;
+      const subjects = sqlite.prepare(`
+        SELECT subjects.kid_id AS kidId,
+               COALESCE(NULLIF(profiles.name, ''), 'Household member') AS name
+        FROM finance_attribution_subjects subjects
+        INNER JOIN finance_sync_state state
+          ON state.connector_id = subjects.connector_id
+          AND state.attribution_policy_version = subjects.policy_version
+        LEFT JOIN kid_profiles profiles ON profiles.id = subjects.kid_id
+        WHERE subjects.connector_id = ?
+        ORDER BY name, subjects.kid_id
+      `).all(query.connectorId) as FinanceAttributionSubjectView[];
+      return {
+        exceptions: page.map((row) => ({
+          ...row,
+          retryable: row.retryable === 1,
+          reasons: parseReasons(row.reasons),
+        })),
+        hasMore,
+        subjects,
+      };
+    },
+
+    async applyManualDecision(command) {
+      assertManualDecisionShape(command.action, command.kidId);
+      const existingAudit = findAttributionActionAudit(
+        sqlite,
+        command.connectorId,
+        command.idempotencyKey,
+      );
+      if (existingAudit) {
+        assertManualDecisionReplay(existingAudit, command);
+        return {
+          status: 'resolved',
+          transactionId: command.transactionId,
+          kidId: command.kidId,
+          replayed: true,
+        };
+      }
+      const replayed = sqlite.transaction(() => (
+        applyManualDecisionInTransaction(sqlite, idFactory, command)
+      )).immediate();
+      return {
+        status: 'resolved',
+        transactionId: command.transactionId,
+        kidId: command.kidId,
+        replayed,
+      };
+    },
+
+    async actOnException(command) {
+      const existingAudit = findAttributionActionAudit(
+        sqlite,
+        command.connectorId,
+        command.idempotencyKey,
+      );
+      if (existingAudit) {
+        assertExceptionActionReplay(existingAudit, command);
+        return {
+          status: existingAudit.resultStatus,
+          exceptionId: command.exceptionId,
+          replayed: true,
+          retryScheduled: false,
+        };
+      }
+      if (command.action === 'approve' || command.action === 'manual-resolve') {
+        const auditAction = command.action;
+        const outcome = sqlite.transaction(() => {
+          const exception = readExceptionForAction(sqlite, command);
+          const kidId = auditAction === 'approve'
+            ? exception.assignedKidId
+            : command.kidId ?? null;
+          const action: FinanceManualAction = kidId ? 'assign-kid' : 'parent-expense';
+          assertManualDecisionShape(action, kidId);
+          const replayed = applyManualDecisionInTransaction(sqlite, idFactory, {
+            connectorId: command.connectorId,
+            transactionId: exception.transactionId,
+            action,
+            kidId,
+            idempotencyKey: command.idempotencyKey,
+            auditAction,
+            actorType: command.actorType,
+            exceptionId: exception.id,
+            expectedExceptionUpdatedAt: command.expectedUpdatedAt,
+            expectedTransactionVersion: null,
+            now: command.now,
+          });
+          return { replayed };
+        }).immediate();
+        return {
+          status: 'resolved',
+          exceptionId: command.exceptionId,
+          replayed: outcome.replayed,
+          retryScheduled: false,
+        };
+      }
+      const action = command.action;
+      const replayed = sqlite.transaction(() => {
+        const concurrentAudit = findAttributionActionAudit(
+          sqlite,
+          command.connectorId,
+          command.idempotencyKey,
+        );
+        if (concurrentAudit) {
+          assertExceptionActionReplay(concurrentAudit, command);
+          return true;
+        }
+        requireFinanceConnector(sqlite, command.connectorId);
+        const currentException = sqlite.prepare(`
+          SELECT e.id, e.transaction_id AS transactionId, e.status, e.retryable,
+                 e.updated_at AS updatedAt,
+                 t.manual_decided_at AS manualDecidedAt
+          FROM finance_attribution_exceptions e
+          INNER JOIN finance_transactions t
+            ON t.id = e.transaction_id
+            AND t.connector_instance_id = e.connector_id
+          WHERE e.id = ? AND e.connector_id = ?
+        `).get(command.exceptionId, command.connectorId) as
+          | {
+              id: string;
+              transactionId: string;
+              status: string;
+              retryable: number;
+              updatedAt: string;
+              manualDecidedAt: string | null;
+            }
+          | undefined;
+        if (!currentException) {
+          throw new FinanceAttributionMutationError(
+            'exception_not_found',
+            'Attribution exception was not found',
+            404,
+          );
+        }
+        if (!['open', 'retry_requested'].includes(currentException.status)) {
+          throw new FinanceAttributionMutationError(
+            'exception_conflict',
+            'This exception was already resolved by a newer decision',
+            409,
+          );
+        }
+        if (currentException.updatedAt !== command.expectedUpdatedAt) {
+          throw new FinanceAttributionMutationError(
+            'exception_conflict',
+            'This exception changed after it was loaded',
+            409,
+          );
+        }
+        if (action === 'retry' && currentException.retryable !== 1) {
+          throw new FinanceAttributionMutationError(
+            'exception_not_retryable',
+            'Attribution exception is not retryable',
+            409,
+          );
+        }
+        if (
+          currentException.manualDecidedAt
+          && Date.parse(currentException.manualDecidedAt)
+            > Date.parse(currentException.updatedAt)
+        ) {
+          throw new FinanceAttributionMutationError(
+            'manual_decision_superseded',
+            'A newer manual decision already exists',
+            409,
+          );
+        }
+        sqlite.prepare(`
+          UPDATE finance_attribution_exceptions
+          SET status = ?, review_state = ?, resolution = ?,
+              resolved_at = ?, updated_at = ?
+          WHERE id = ? AND connector_id = ?
+        `).run(
+          action === 'retry' ? 'retry_requested' : 'dismissed',
+          action === 'retry' ? 'pending' : 'resolved',
+          action === 'dismiss' ? 'dismissed' : null,
+          action === 'dismiss' ? command.now : null,
+          command.now,
+          currentException.id,
+          command.connectorId,
+        );
+        if (action === 'retry') {
+          sqlite.prepare(`
+            UPDATE finance_transactions
+            SET attribution_status = 'pending',
+                attribution_review_state = 'pending',
+                attribution_updated_at = ?
+            WHERE id = ? AND connector_instance_id = ?
+          `).run(command.now, currentException.transactionId, command.connectorId);
+        } else {
+          sqlite.prepare(`
+            UPDATE finance_transactions
+            SET attribution_review_state = 'resolved',
+                attribution_updated_at = ?
+            WHERE id = ? AND connector_instance_id = ?
+          `).run(command.now, currentException.transactionId, command.connectorId);
+        }
+        sqlite.prepare(`
+          INSERT INTO finance_attribution_audit (
+            id, connector_id, transaction_id, exception_id, idempotency_key,
+            action, actor_type, requested_kid_id, requested_decision,
+            result_status, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+        `).run(
+          idFactory(),
+          command.connectorId,
+          currentException.transactionId,
+          currentException.id,
+          command.idempotencyKey,
+          action,
+          command.actorType,
+          action === 'retry' ? 'retry_requested' : 'dismissed',
+          command.now,
+        );
+        return false;
+      }).immediate();
+      return {
+        status: action === 'retry' ? 'retry_requested' : 'dismissed',
+        exceptionId: command.exceptionId,
+        replayed,
+        retryScheduled: action === 'retry' && !replayed,
+      };
     },
   };
 }

@@ -70,7 +70,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.getCutoverReadiness.mockReturnValue({ ready: true });
+  mocks.getCutoverReadiness.mockResolvedValue({ ready: true });
 });
 
 describe('finance operator route async compatibility', () => {

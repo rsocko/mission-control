@@ -4,6 +4,7 @@ import type { FinanceAttentionPersistence } from './finance-attention';
 import type { FinanceConnectionRecoveryPersistence } from './finance-recovery';
 import type { FinanceDatasetPersistence } from './finance-datasets';
 import type { FinanceInsightPersistence } from './finance-insights';
+import type { FinanceOperatorPersistence } from './finance-operator';
 import type { FinanceSnapshotPersistence } from './finance-snapshot';
 
 export const FINANCE_IDENTITY_NAMESPACE_CREDENTIAL = 'identityNamespace';
@@ -43,4 +44,11 @@ export interface FinanceWorkerPersistence extends FinanceCorePersistence {
   readonly insights: FinanceInsightPersistence;
   readonly attention: FinanceAttentionPersistence;
   readonly recovery: FinanceConnectionRecoveryPersistence;
+  /**
+   * Layer 5B connector/operator web surface: the bounded finance health
+   * snapshot and insight-cutover readiness/enable/rollback. Composed here (not
+   * registered as its own runtime slot) so a backend still supplies either
+   * every finance member or none of them.
+   */
+  readonly operator: FinanceOperatorPersistence;
 }

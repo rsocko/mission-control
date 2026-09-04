@@ -238,7 +238,7 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
         bridgeContractVersion: 'bridge-v1',
       },
     ]);
-    expect(getFinanceDatasetHealth('dataset-a', now)).toMatchObject({
+    expect(await getFinanceDatasetHealth('dataset-a', now)).toMatchObject({
       aggregate: 'fresh',
       datasets: expect.arrayContaining([
         expect.objectContaining({
@@ -296,7 +296,7 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
              sum(CASE WHEN is_current = 1 THEN 1 ELSE 0 END) AS currentRows
       FROM finance_recurring_obligations WHERE connector_id = 'dataset-a'
     `).get()).toEqual({ generations: 1, currentRows: 0 });
-    expect(getFinanceDatasetHealth('dataset-a', now).datasets)
+    expect((await getFinanceDatasetHealth('dataset-a', now)).datasets)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ dataset: 'accounts', state: 'fresh', itemCount: 0 }),
         expect.objectContaining({ dataset: 'recurring', state: 'fresh', itemCount: 0 }),
@@ -337,7 +337,7 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       status: 'partial',
       datasetErrors: { tags: 'invalid_contract' },
     });
-    expect(getFinanceDatasetHealth('dataset-b', now)).toMatchObject({
+    expect(await getFinanceDatasetHealth('dataset-b', now)).toMatchObject({
       aggregate: 'partial',
       datasets: expect.arrayContaining([
         expect.objectContaining({ dataset: 'accounts', state: 'fresh', warning: null }),
@@ -385,11 +385,11 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
     mockDatasets();
     await new FinanceDatasetSynchronizer(connector('dataset-c'), () => now)
       .sync({ full: true });
-    expect(getFinanceDatasetHealth(
+    expect((await getFinanceDatasetHealth(
       'dataset-c',
       new Date('2026-08-12T13:00:00.000Z'),
-    ).aggregate).toBe('stale');
-    expect(getFinanceDatasetHealth('not-synchronized', now).aggregate).toBe('unavailable');
+    )).aggregate).toBe('stale');
+    expect((await getFinanceDatasetHealth('not-synchronized', now)).aggregate).toBe('unavailable');
     expect(financeDatasetFreshness({
       currentGenerationId: 'future-generation',
       sourceAsOf: '2026-08-10T12:06:00.000Z',

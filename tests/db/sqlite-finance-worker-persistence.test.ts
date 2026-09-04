@@ -42,6 +42,9 @@ async function createHarness(): Promise<FinanceWorkerContractHarness> {
     repositories,
     async reset() {
       database.prepare(
+        `DELETE FROM finance_attribution_audit WHERE connector_id = ?`,
+      ).run(CONNECTOR_ID);
+      database.prepare(
         `DELETE FROM finance_attribution_exceptions WHERE connector_id = ?`,
       ).run(CONNECTOR_ID);
       database.prepare(

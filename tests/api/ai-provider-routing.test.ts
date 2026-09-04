@@ -6,50 +6,61 @@ const state = vi.hoisted(() => ({
     model: 'azure/gpt-4o-mini',
     baseUrl: 'https://bifrost.test/v1',
     apiKey: 'server-secret',
-  } as Record<string, string | boolean>,
+  } as Record<string, string | boolean | number>,
   writes: [] as Array<{ key: string; value: unknown }>,
-}));
-
-const routingPolicy = {
-  policies: {
-    'local-only': { allowedRoutes: ['ollama'] },
-    restricted: { allowedRoutes: ['ollama', 'azure-private'] },
-    standard: { allowedRoutes: ['bifrost-copilot', 'ollama'] },
-  },
-  featureDefaults: {},
-  sourceDefaults: {},
-};
-
-vi.mock('@/db/schema', () => ({
-  appSettings: { key: 'key' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(() => 'condition'),
-  sql: vi.fn(() => 'sql'),
-}));
-
-vi.mock('@/db', () => {
-  const selectChain = {
-    from: () => selectChain,
-    where: () => selectChain,
-    limit: async () => [{ value: state.saved }],
-  };
-  const tx = {
-    insert: () => ({
-      values: (value: { key: string; value: unknown }) => {
-        state.writes.push(value);
-        return { onConflictDoUpdate: () => ({ run: () => undefined }) };
-      },
-    }),
-  };
-  return {
-    default: {
-      select: () => selectChain,
-      transaction: (callback: (transaction: typeof tx) => void) => callback(tx),
+  failWrites: false,
+  routingPolicy: {
+    policies: {
+      'local-only': { allowedRoutes: ['ollama'] },
+      restricted: { allowedRoutes: ['ollama', 'azure-private'] },
+      standard: { allowedRoutes: ['bifrost-copilot', 'ollama'] },
     },
-  };
-});
+    featureDefaults: {},
+    sourceDefaults: {},
+  },
+}));
+
+const routingPolicy = state.routingPolicy;
+
+vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositories: () => ({
+    settings: {
+      get: async (key: string) => (
+        key === 'ai_provider_config' ? state.saved : state.routingPolicy
+      ),
+      getMany: async (keys: readonly string[]) => Object.fromEntries(
+        keys.map((key) => [
+          key,
+          key === 'ai_provider_config' ? state.saved : state.routingPolicy,
+        ]),
+      ),
+      set: vi.fn(),
+      setMany: async (entries: ReadonlyArray<readonly [string, unknown]>) => {
+        if (state.failWrites) throw new Error('forced settings write failure');
+        for (const [key, value] of entries) {
+          state.writes.push({ key, value });
+          if (key === 'ai_provider_config') {
+            state.saved = value as typeof state.saved;
+          } else if (key === 'ai_routing_policy') {
+            state.routingPolicy = value as typeof state.routingPolicy;
+          }
+        }
+      },
+      delete: vi.fn(),
+      getActiveEmbeddingIdentity: async () => null,
+    },
+  }),
+}));
+
+vi.mock('@/db', () => ({
+  sqlite: {
+    prepare: () => ({
+      get: (key: string) => ({
+        value: key === 'ai_provider_config' ? state.saved : state.routingPolicy,
+      }),
+    }),
+  },
+}));
 
 vi.mock('@/lib/ai/sensitivity-policy', async () => {
   const actual = await vi.importActual<
@@ -61,39 +72,7 @@ vi.mock('@/lib/ai/sensitivity-policy', async () => {
   };
 });
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getAIRoutingPolicy: () => routingPolicy,
-  getResolvedAIConfig: () => ({
-    provider: 'bifrost',
-    model: 'azure/gpt-4o-mini',
-    embeddingProvider: 'bifrost',
-    embeddingModel: 'azure/text-embedding-3-small',
-    embeddingBaseUrl: 'https://bifrost.test/v1',
-    embeddingApiKey: 'embedding-secret',
-    embeddingConfigured: true,
-    semanticSearchEnabled: false,
-    baseUrl: 'https://bifrost.test/v1',
-    apiKey: 'server-secret',
-    configured: true,
-  }),
-  invalidateAIConfigCache: vi.fn(),
-}));
-
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getProviderInfo: () => ({
-    provider: 'bifrost',
-    model: 'azure/gpt-4o-mini',
-    baseUrl: 'https://bifrost.test/v1',
-    configured: true,
-    embeddingModel: 'ollama/nomic-embed-text:latest',
-    semanticSearchEnabled: false,
-  }),
-  getAIRequestContext: vi.fn(),
-  getAIRouteOutcome: vi.fn(),
-  getAIRoutingHeaders: vi.fn(),
-}));
-
-vi.mock('@/lib/search/semantic', () => ({
+vi.mock('@/lib/search/embedding-provider-status', () => ({
   getEmbeddingOperationalStatus: () => ({
     available: true,
     state: 'ready',
@@ -113,15 +92,18 @@ vi.mock('@/lib/search/semantic', () => ({
 }));
 
 describe('AI provider routing settings', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.stubEnv('BIFROST_BASE_URL', 'https://bifrost.test/v1');
     state.writes.length = 0;
+    state.failWrites = false;
     state.saved = {
       provider: 'bifrost',
       model: 'azure/gpt-4o-mini',
       baseUrl: 'https://bifrost.test/v1',
       apiKey: 'server-secret',
     };
+    const service = await import('@/lib/ai/provider-configuration-service');
+    service.invalidateAIProviderConfigurationCache();
   });
 
   it('never returns a saved provider credential to the client', async () => {
@@ -137,6 +119,8 @@ describe('AI provider routing settings', () => {
       embeddingModel: 'azure/text-embedding-3-small',
       embeddingBaseUrl: 'https://bifrost.test/v1',
       semanticSearchEnabled: false,
+      houstonMemoryEnabled: false,
+      houstonMemoryRetentionDays: 90,
       hasApiKey: true,
       embeddingHasApiKey: true,
     });
@@ -149,6 +133,30 @@ describe('AI provider routing settings', () => {
       status: 'unknown',
     });
     expect(JSON.stringify(body)).not.toContain('server-secret');
+  });
+
+  it('reports an unconfigured embedding route without failing the settings response', async () => {
+    vi.stubEnv('BIFROST_BASE_URL', '');
+    state.saved = {
+      provider: 'openai',
+      model: 'gpt-4.1',
+      baseUrl: '',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/text-embedding-3-small',
+      embeddingBaseUrl: '',
+      embeddingApiKey: '',
+      semanticSearchEnabled: false,
+    };
+    const { GET } = await import('@/app/api/ai/provider/route');
+
+    const response = await GET();
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      providerHealth: expect.arrayContaining([
+        { route: 'azure-private', status: 'unavailable' },
+      ]),
+    });
   });
 
   it('preserves an existing credential when saving a redacted value', async () => {
@@ -429,5 +437,44 @@ describe('AI provider routing settings', () => {
 
     expect(response.status).toBe(400);
     expect(state.writes).toHaveLength(0);
+  });
+
+  it('invalidates isolated legacy caches only after a committed pair', async () => {
+    state.saved = {
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'old-secret',
+    };
+    const firstResolver = await import('@/lib/ai/config-resolver');
+    const firstService = await import('@/lib/ai/provider-configuration-service');
+    expect(firstResolver.getResolvedAIConfig().model).toBe('gpt-4o-mini');
+    expect((await firstService.loadAIProviderConfiguration()).resolved.model).toBe('gpt-4o-mini');
+
+    vi.resetModules();
+    const secondResolver = await import('@/lib/ai/config-resolver');
+    expect(secondResolver.getResolvedAIConfig().model).toBe('gpt-4o-mini');
+    const epoch = await import('@/lib/ai/provider-routing-core');
+    const beforeCommit = epoch.getAIConfigInvalidationEpoch();
+    const service = await import('@/lib/ai/provider-configuration-service');
+
+    await service.saveAIProviderConfiguration({
+      provider: 'openai',
+      model: 'gpt-4.1',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'new-secret',
+    }, routingPolicy);
+
+    expect(epoch.getAIConfigInvalidationEpoch()).toBe(beforeCommit + 1);
+    expect(firstResolver.getResolvedAIConfig().model).toBe('gpt-4.1');
+    expect(secondResolver.getResolvedAIConfig().model).toBe('gpt-4.1');
+    expect((await firstService.loadAIProviderConfiguration()).resolved.model).toBe('gpt-4.1');
+
+    state.failWrites = true;
+    await expect(service.saveAIProviderConfiguration({
+      provider: 'openai',
+      model: 'must-not-commit',
+    }, routingPolicy)).rejects.toThrow('forced settings write failure');
+    expect(epoch.getAIConfigInvalidationEpoch()).toBe(beforeCommit + 1);
   });
 });

@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 139,
+    "tierARoutes": 137,
     "tierBRoutes": 19,
-    "cleanRoutes": 108,
-    "directTaintSourceRoutes": 101,
-    "transitiveOnlyTaintSourceRoutes": 38,
-    "directDbNamespaceRoutes": 102,
+    "cleanRoutes": 110,
+    "directTaintSourceRoutes": 100,
+    "transitiveOnlyTaintSourceRoutes": 37,
+    "directDbNamespaceRoutes": 101,
     "taintedLibA": 67,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 206
+    "totalMigrationUnits": 204
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -340,9 +340,7 @@
     "src/app/api/ai/daily-digest/route.ts",
     "src/app/api/ai/dispatch/route.ts",
     "src/app/api/ai/infer-tags/route.ts",
-    "src/app/api/ai/models/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/provider/route.ts",
     "src/app/api/ai/route.ts",
     "src/app/api/ai/search/route.ts",
     "src/app/api/ai/smart-priority/route.ts",
@@ -496,6 +494,8 @@
     "src/app/api/telemetry/runtime/route.ts"
   ],
   "cleanRoutes": [
+    "src/app/api/ai/models/route.ts",
+    "src/app/api/ai/provider/route.ts",
     "src/app/api/assets/thumbnails/[filename]/route.ts",
     "src/app/api/auth/microsoft/callback/route.ts",
     "src/app/api/auth/microsoft/connect/route.ts",
@@ -609,7 +609,6 @@
     "src/app/api/ai/context-tasks/route.ts",
     "src/app/api/ai/context-triage/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/provider/route.ts",
     "src/app/api/ai/search/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
@@ -713,7 +712,6 @@
     "src/app/api/ai/daily-digest/route.ts",
     "src/app/api/ai/dispatch/route.ts",
     "src/app/api/ai/infer-tags/route.ts",
-    "src/app/api/ai/models/route.ts",
     "src/app/api/ai/route.ts",
     "src/app/api/ai/smart-priority/route.ts",
     "src/app/api/ai/suggest-micro-status/route.ts",
@@ -752,7 +750,6 @@
     "src/app/api/ai/context-tasks/route.ts",
     "src/app/api/ai/context-triage/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/provider/route.ts",
     "src/app/api/ai/search/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
@@ -1026,6 +1023,48 @@
         }
       ],
       "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the post-L06b worktree; entry-set diff shows zero additions to any taint set and zero Tier A -> Tier B reclassifications attributable to L04. L06b resolved the one recorded foreign-layer blocker without changing L04's owned migration accounting."
+    },
+    {
+      "layer": "L09",
+      "title": "Houston finance-assistant PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 313,
+        "to": 310,
+        "delta": -3
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/ai/finance-approval-store.ts",
+        "src/lib/ai/tools/finance-tools.ts",
+        "src/lib/finance/houston-tools.ts"
+      ],
+      "removedTierARoutes": [],
+      "newlyCleanRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact L09 recomputation removes only the three owned Houston finance-assistant persistence modules from taintedLibA, leaves route tiers unchanged, and reduces total migration units from 313 to 310."
+    },
+    {
+      "layer": "L10",
+      "title": "AI provider configuration PostgreSQL web/API parity",
+      "totalMigrationUnits": {
+        "from": 206,
+        "to": 204,
+        "delta": -2
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [],
+      "removedTierARoutes": [
+        "src/app/api/ai/models/route.ts",
+        "src/app/api/ai/provider/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/ai/models/route.ts",
+        "src/app/api/ai/provider/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation removes only the AI model-discovery and provider-configuration routes from Tier A, adds both to cleanRoutes, leaves Tier B and tainted libraries unchanged, and reduces total migration units from 206 to 204."
     },
     {
       "layer": "L06b",

@@ -62,6 +62,22 @@ export interface SettingsRepository {
   get(key: string): Promise<PersistenceJson | null>;
   set(key: string, value: PersistenceJson): Promise<void>;
   delete(key: string): Promise<boolean>;
+  getMany?(keys: readonly string[]): Promise<Record<string, PersistenceJson | null>>;
+  setMany?(entries: ReadonlyArray<readonly [string, PersistenceJson]>): Promise<void>;
+  getActiveEmbeddingIdentity?(): Promise<ActiveEmbeddingIdentity | null>;
+}
+
+export interface AtomicSettingsRepository extends SettingsRepository {
+  getMany(keys: readonly string[]): Promise<Record<string, PersistenceJson | null>>;
+  setMany(entries: ReadonlyArray<readonly [string, PersistenceJson]>): Promise<void>;
+  getActiveEmbeddingIdentity(): Promise<ActiveEmbeddingIdentity | null>;
+}
+
+export interface ActiveEmbeddingIdentity {
+  provider: string;
+  model: string;
+  dimensions: number;
+  vectorCount: number;
 }
 
 export interface CorePersistenceRepositories {

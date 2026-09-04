@@ -1,6 +1,10 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { normalizeMessages } from '@/app/api/ai/route';
-import { sqlite } from '@/db';
+import {
+  initializeSqlitePersistenceComposition,
+  shutdownSqlitePersistenceComposition,
+  sqlite,
+} from '@/db';
 import { persistHoustonFinanceApproval } from '@/lib/ai/finance-approval-store';
 
 const mutationInput = {
@@ -34,13 +38,21 @@ function approvalMessage(input: unknown = mutationInput, approved = true) {
   };
 }
 
+beforeAll(async () => {
+  await initializeSqlitePersistenceComposition();
+});
+
+afterAll(async () => {
+  await shutdownSqlitePersistenceComposition();
+});
+
 beforeEach(() => {
   sqlite.prepare('DELETE FROM houston_finance_pending_approvals').run();
 });
 
 describe('Houston message normalization', () => {
   it('resumes an unsigned approval from the server-owned proposal', async () => {
-    persistHoustonFinanceApproval({
+    await persistHoustonFinanceApproval({
       approvalId: 'invented-approval-id',
       toolCallId: 'invented-call-id',
       toolName: 'assignFinanceTransactionKid',
@@ -93,7 +105,7 @@ describe('Houston message normalization', () => {
     await expect(normalizeMessages([approvalMessage()]))
       .rejects.toThrow('The finance approval is invalid, expired, or has already been used.');
 
-    persistHoustonFinanceApproval({
+    await persistHoustonFinanceApproval({
       approvalId: 'invented-approval-id',
       toolCallId: 'invented-call-id',
       toolName: 'assignFinanceTransactionKid',
@@ -106,7 +118,7 @@ describe('Houston message normalization', () => {
   });
 
   it('consumes denied approvals so they cannot be replayed', async () => {
-    persistHoustonFinanceApproval({
+    await persistHoustonFinanceApproval({
       approvalId: 'invented-approval-id',
       toolCallId: 'invented-call-id',
       toolName: 'assignFinanceTransactionKid',

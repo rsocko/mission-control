@@ -106,7 +106,7 @@ export async function POST(request: Request) {
 
     const normalized = await normalizeMessages(messages);
     for (const denied of normalized.financeApprovals.filter(item => !item.approved)) {
-      recordHoustonFinanceApprovalAudit({
+      await recordHoustonFinanceApprovalAudit({
         approvalId: denied.approvalId,
         correlationId: requestCorrelationId,
         toolName: denied.toolName,
@@ -128,7 +128,7 @@ export async function POST(request: Request) {
       financeMutationsAllowed: normalized.financeApprovals.length === 0,
       financeApprovalIds: normalized.financeApprovalIds,
       correlationId: requestCorrelationId,
-      onStepFinish: ({ content }) => {
+      onStepFinish: async ({ content }) => {
         for (const part of content) {
           if (
             part.type !== 'tool-approval-request'
@@ -136,7 +136,7 @@ export async function POST(request: Request) {
           ) {
             continue;
           }
-          persistHoustonFinanceApproval({
+          await persistHoustonFinanceApproval({
             approvalId: part.approvalId,
             toolCallId: part.toolCall.toolCallId,
             toolName: part.toolCall.toolName,
@@ -161,7 +161,7 @@ export async function POST(request: Request) {
     finishOperation();
     if (error instanceof InvalidHoustonFinanceApprovalError) {
       if (error.toolName && error.decision) {
-        recordHoustonFinanceApprovalAudit({
+        await recordHoustonFinanceApprovalAudit({
           approvalId: error.approvalId,
           correlationId: requestCorrelationId,
           toolName: error.toolName,
@@ -251,7 +251,7 @@ export async function normalizeMessages(messages: unknown): Promise<{
   )) {
     throw new InvalidAIChatMessagesError();
   }
-  const financeApprovals = consumeFinanceApprovalParts(validated.data);
+  const financeApprovals = await consumeFinanceApprovalParts(validated.data);
   return {
     uiMessages: validated.data,
     modelMessages: await convertToModelMessages(validated.data, { tools }),
@@ -262,15 +262,15 @@ export async function normalizeMessages(messages: unknown): Promise<{
   };
 }
 
-function consumeFinanceApprovalParts(
+async function consumeFinanceApprovalParts(
   messages: HoustonUIMessage[],
-): Array<{
+): Promise<Array<{
   approvalId: string;
   toolName: FinanceMutationToolName;
   toolCallId: string;
   toolInput: unknown;
   approved: boolean;
-}> {
+}>> {
   const approvals: Array<{
     approvalId: string;
     toolName: FinanceMutationToolName;
@@ -291,9 +291,9 @@ function consumeFinanceApprovalParts(
           ? assignFinanceTransactionKidInputSchema.safeParse(part.input)
           : updateFinanceTransactionCategoryInputSchema.safeParse(part.input);
         if (!parsed.success) throw new InvalidAIChatMessagesError();
-        let consumed: ReturnType<typeof consumeHoustonFinanceApproval>;
+        let consumed: Awaited<ReturnType<typeof consumeHoustonFinanceApproval>>;
         try {
-          consumed = consumeHoustonFinanceApproval({
+          consumed = await consumeHoustonFinanceApproval({
             approvalId: part.approval.id,
             toolName,
             toolCallId: part.toolCallId,

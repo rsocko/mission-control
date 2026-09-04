@@ -5,6 +5,7 @@ import {
   inArray,
   isNotNull,
   isNull,
+  like,
   lt,
   lte,
   not,

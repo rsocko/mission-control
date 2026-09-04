@@ -349,8 +349,13 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
   },
   settings: {
     get: (key) => requirePostgresRepositories().settings.get(key),
+    getMany: (keys) => requirePostgresRepositories().settings.getMany!(keys),
     set: (key, value) => requirePostgresRepositories().settings.set(key, value),
+    setMany: (entries) => requirePostgresRepositories().settings.setMany!(entries),
     delete: (key) => requirePostgresRepositories().settings.delete(key),
+    getActiveEmbeddingIdentity: () => (
+      requirePostgresRepositories().settings.getActiveEmbeddingIdentity!()
+    ),
   },
   houstonMemories: {
     get: (id, authorizationScope) => (

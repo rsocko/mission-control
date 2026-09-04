@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
+  failure: null as Error | null,
   config: {
     provider: 'bifrost',
     model: 'azure/gpt-4o-mini',
@@ -10,8 +11,23 @@ const state = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => state.config,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => {
+    if (state.failure) throw state.failure;
+    return {
+      saved: {},
+      resolved: state.config,
+      routingPolicy: {
+        policies: {
+          'local-only': { allowedRoutes: ['ollama'] },
+          restricted: { allowedRoutes: ['ollama', 'azure-private'] },
+          standard: { allowedRoutes: ['bifrost-copilot', 'ollama'] },
+        },
+        featureDefaults: {},
+        sourceDefaults: {},
+      },
+    };
+  },
 }));
 
 describe('AI model discovery', () => {
@@ -19,6 +35,7 @@ describe('AI model discovery', () => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
     vi.stubEnv('BIFROST_BASE_URL', 'https://bifrost.test/v1');
+    state.failure = null;
     state.config = {
       provider: 'bifrost',
       model: 'azure/gpt-4o-mini',
@@ -95,6 +112,23 @@ describe('AI model discovery', () => {
     ));
 
     expect(response.status).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a structured error when provider configuration cannot be loaded', async () => {
+    state.failure = new Error('settings unavailable');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { GET } = await import('@/app/api/ai/models/route');
+    const response = await GET(new Request(
+      'http://localhost/api/ai/models?provider=bifrost',
+    ));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: 'Failed to load Bifrost models: settings unavailable',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });

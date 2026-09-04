@@ -12,6 +12,7 @@ import {
   parseSavedAIProviderConfig,
   resolveAIConfig,
 } from './config-values';
+import { getAIConfigInvalidationEpoch } from './provider-routing-core';
 
 const SETTINGS_KEY = 'ai_provider_config';
 const ROUTING_POLICY_SETTINGS_KEY = 'ai_routing_policy';
@@ -22,6 +23,7 @@ let cachedConfig: ResolvedAIConfig | null = null;
 let cachedRoutingPolicy: AIRoutingPolicyConfig | null = null;
 let cacheTime = 0;
 let routingPolicyCacheTime = 0;
+let observedInvalidationEpoch = -1;
 
 function loadSavedAIProviderConfigSync(): SavedAIProviderConfig {
   try {
@@ -42,7 +44,15 @@ export function invalidateAIConfigCache() {
   routingPolicyCacheTime = 0;
 }
 
+function observeSharedInvalidationEpoch(): void {
+  const epoch = getAIConfigInvalidationEpoch();
+  if (epoch === observedInvalidationEpoch) return;
+  invalidateAIConfigCache();
+  observedInvalidationEpoch = epoch;
+}
+
 export function getResolvedAIConfig(): ResolvedAIConfig {
+  observeSharedInvalidationEpoch();
   if (cachedConfig && Date.now() - cacheTime < CONFIG_CACHE_TTL) {
     return cachedConfig;
   }
@@ -55,6 +65,7 @@ export function getResolvedAIConfig(): ResolvedAIConfig {
 }
 
 export function getAIRoutingPolicy(): AIRoutingPolicyConfig {
+  observeSharedInvalidationEpoch();
   if (cachedRoutingPolicy && Date.now() - routingPolicyCacheTime < CONFIG_CACHE_TTL) {
     return cachedRoutingPolicy;
   }

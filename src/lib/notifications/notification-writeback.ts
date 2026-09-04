@@ -185,7 +185,7 @@ async function loadConnector(instanceId: string) {
 
   const repositories = await getWorkerPersistenceRepositories();
   const config = await repositories.connectors.get(instanceId);
-  if (!config || config.deletedAt) return null;
+  if (!config) return null;
 
   const storedCapabilities = parseRecord(config.capabilities);
   const capabilities = {

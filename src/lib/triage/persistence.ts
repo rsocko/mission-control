@@ -3,9 +3,22 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
-let repositories: TriagePersistenceRepositories | null = null;
-let repositoriesAccessed = false;
+interface TriagePersistenceRegistry {
+  repositories: TriagePersistenceRepositories | null;
+  accessed: boolean;
+}
+
+const REGISTRY_KEY = 'mission-control.triage-persistence-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): TriagePersistenceRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repositories: null,
+    accessed: false,
+  }));
+}
 
 export interface TriagePersistenceRegistration {
   repositories: TriagePersistenceRepositories;
@@ -16,14 +29,15 @@ export function registerTriagePersistenceRepositories(
   nextRepositories: TriagePersistenceRepositories,
 ): void {
   assertCanRegisterTriagePersistenceRepositories(nextRepositories);
-  repositories = nextRepositories;
+  registry().repositories = nextRepositories;
 }
 
 export function assertCanRegisterTriagePersistenceRepositories(
   nextRepositories: TriagePersistenceRepositories,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (repositories && repositories !== nextRepositories && repositoriesAccessed) {
+  const state = registry();
+  if (state.repositories && state.repositories !== nextRepositories && state.accessed) {
     throw new Error('Triage persistence repositories are already registered');
   }
 }
@@ -31,22 +45,25 @@ export function assertCanRegisterTriagePersistenceRepositories(
 export function clearTriagePersistenceRepositories(
   expectedRepositories: TriagePersistenceRepositories,
 ): void {
-  if (repositories === expectedRepositories) repositories = null;
-  if (!repositories) repositoriesAccessed = false;
+  const state = registry();
+  if (state.repositories === expectedRepositories) state.repositories = null;
+  if (!state.repositories) state.accessed = false;
 }
 
 export function getTriagePersistenceRegistrationForComposition():
   TriagePersistenceRegistration | null {
   assertPersistenceCompositionPublicationAllowed();
-  if (!repositories) return null;
-  return { repositories, accessed: repositoriesAccessed };
+  const state = registry();
+  if (!state.repositories) return null;
+  return { repositories: state.repositories, accessed: state.accessed };
 }
 
 export function getTriagePersistenceRepositories(): TriagePersistenceRepositories {
   assertPersistenceCompositionAccessAllowed();
-  repositoriesAccessed = true;
-  if (!repositories) {
+  const state = registry();
+  state.accessed = true;
+  if (!state.repositories) {
     throw new Error('Triage persistence repositories have not been registered');
   }
-  return repositories;
+  return state.repositories;
 }

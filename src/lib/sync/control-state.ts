@@ -4,6 +4,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import type { SyncJobSource } from './job-repository';
 
 export { ConnectorSyncControlError } from './control-state-error';
@@ -17,25 +18,39 @@ export interface SyncControlStateRepository {
   ): Promise<void>;
 }
 
-let repository: SyncControlStateRepository | null = null;
+interface SyncControlStateRuntimeRegistry {
+  repository: SyncControlStateRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.sync-control-state-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): SyncControlStateRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
 
 export function registerSyncControlStateRepository(next: SyncControlStateRepository): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (repository && repository !== next) {
+  const selected = registry().repository;
+  if (selected && selected !== next) {
     throw new Error('Sync control-state repository is already selected');
   }
-  repository = next;
+  registry().repository = next;
 }
 
 export function clearSyncControlStateRepository(
   expectedRepository?: SyncControlStateRepository,
 ): void {
-  if (expectedRepository && repository !== expectedRepository) return;
-  repository = null;
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
 }
 
 export async function getSyncControlStateRepository(): Promise<SyncControlStateRepository> {
   assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
   if (!repository) {
     throw new Error('Sync control-state repository has not been registered');
   }

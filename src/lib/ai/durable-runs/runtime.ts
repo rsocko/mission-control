@@ -4,36 +4,66 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
-let sqliteRepositoryPromise: Promise<DurableAiRunRepository> | null = null;
-let postgresRepository: DurableAiRunRepository | null = null;
+interface DurableAiRunRuntimeRegistry {
+  sqliteRepositoryPromise: Promise<DurableAiRunRepository> | null;
+  postgresRepository: DurableAiRunRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.durable-ai-run-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): DurableAiRunRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    sqliteRepositoryPromise: null,
+    postgresRepository: null,
+  }));
+}
 
 export function registerPostgresDurableAiRunRepository(
   repository: DurableAiRunRepository,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (postgresRepository && postgresRepository !== repository) {
+  const runtime = registry();
+  if (runtime.postgresRepository && runtime.postgresRepository !== repository) {
     throw new Error('PostgreSQL durable AI run repository is already registered');
   }
-  postgresRepository = repository;
+  runtime.postgresRepository = repository;
 }
 
 export function clearPostgresDurableAiRunRepository(
   expectedRepository?: DurableAiRunRepository,
 ): void {
-  if (expectedRepository && postgresRepository !== expectedRepository) return;
-  postgresRepository = null;
+  const runtime = registry();
+  if (expectedRepository && runtime.postgresRepository !== expectedRepository) return;
+  runtime.postgresRepository = null;
+}
+
+export function getRegisteredSqliteDurableAiRunRepository():
+  | Promise<DurableAiRunRepository>
+  | null {
+  return registry().sqliteRepositoryPromise;
+}
+
+export function clearSqliteDurableAiRunRepository(
+  expectedRepository: Promise<DurableAiRunRepository>,
+): void {
+  const runtime = registry();
+  if (runtime.sqliteRepositoryPromise !== expectedRepository) return;
+  runtime.sqliteRepositoryPromise = null;
 }
 
 export async function getDurableAiRunRepository(): Promise<DurableAiRunRepository> {
   assertPersistenceCompositionAccessAllowed();
+  const runtime = registry();
   if (resolveDatabaseBackend() === 'postgres') {
-    if (!postgresRepository) {
+    if (!runtime.postgresRepository) {
       throw new Error('PostgreSQL durable AI run repository has not been registered');
     }
-    return postgresRepository;
+    return runtime.postgresRepository;
   }
-  sqliteRepositoryPromise ??= import('./sqlite-adapter')
+  runtime.sqliteRepositoryPromise ??= import('./sqlite-adapter')
     .then(({ SqliteDurableAiRunRepository }) => new SqliteDurableAiRunRepository());
-  return sqliteRepositoryPromise;
+  return runtime.sqliteRepositoryPromise;
 }

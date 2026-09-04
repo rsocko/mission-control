@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DurableAiRunRepository } from '@/lib/ai/durable-runs/repository';
+import type { KeywordSearchRepository } from '@/lib/search/repository';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
+import {
+  resetModulesPreservingProcessRuntimeRegistries,
+  resetProcessRuntimeRegistries,
+} from '../helpers/process-runtime-registries';
 
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
@@ -174,11 +179,40 @@ vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
 
 describe('PostgreSQL runtime core repository registration', () => {
   beforeEach(() => {
-    vi.resetModules();
+    resetProcessRuntimeRegistries();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     vi.clearAllMocks();
     mocks.backend.generation = 0;
     mocks.repositories.length = 0;
     mocks.workerRepositories.length = 0;
+  });
+
+  it('shares PostgreSQL runtime handles across isolated module evaluations', async () => {
+    const firstRuntime = await import('@/db/runtime');
+    await firstRuntime.initializeRuntimeDatabase();
+
+    const expectedBackend = firstRuntime.getPostgresPersistenceBackend();
+    const expectedSyncJobs = firstRuntime.getPostgresSyncJobRepository();
+    const firstDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
+    const expectedDurableRuns = await firstDurableRuntime.getDurableAiRunRepository();
+
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
+    const secondRuntime = await import('@/db/runtime');
+    const secondDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
+
+    expect(secondRuntime.getPostgresPersistenceBackend()).toBe(expectedBackend);
+    expect(secondRuntime.getPostgresSyncJobRepository()).toBe(expectedSyncJobs);
+    expect(await secondDurableRuntime.getDurableAiRunRepository()).toBe(expectedDurableRuns);
+    const replacementSearch = {} as KeywordSearchRepository;
+    secondRuntime.registerPostgresKeywordSearchRepository(replacementSearch);
+    const keywordRuntime = await import('@/lib/search/keyword-runtime');
+    expect(secondRuntime.getPostgresKeywordSearchRepository()).toBe(replacementSearch);
+    expect(keywordRuntime.getKeywordSearchRepository()).toBe(replacementSearch);
+
+    await secondRuntime.shutdownRuntimeDatabase();
+    await firstRuntime.initializeRuntimeDatabase();
+    expect(mocks.backend.initialize).toHaveBeenCalledTimes(2);
+    await firstRuntime.shutdownRuntimeDatabase();
   });
 
   it('keeps the neutral registration identity stable while replacing the live delegate', async () => {
@@ -377,5 +411,32 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.resumeSemantic).toHaveBeenCalledOnce();
     expect(() => getPostgresSyncJobRepository()).not.toThrow();
     await shutdownRuntimeDatabase();
+  });
+
+  it('cancels queued reinitialization when shutdown is requested again', async () => {
+    const {
+      getPostgresSyncJobRepository,
+      initializeRuntimeDatabase,
+      shutdownRuntimeDatabase,
+    } = await import('@/db/runtime');
+    await initializeRuntimeDatabase();
+    let finishShutdown!: () => void;
+    mocks.backend.shutdown.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      finishShutdown = resolve;
+    }));
+
+    const shutdown = shutdownRuntimeDatabase();
+    const queuedReinitialization = initializeRuntimeDatabase();
+    const repeatedShutdown = shutdownRuntimeDatabase();
+    expect(repeatedShutdown).toBe(shutdown);
+    await vi.waitFor(() => expect(finishShutdown).toBeTypeOf('function'));
+
+    finishShutdown();
+    await Promise.all([shutdown, queuedReinitialization, repeatedShutdown]);
+
+    expect(mocks.backend.initialize).toHaveBeenCalledOnce();
+    expect(() => getPostgresSyncJobRepository()).toThrow(
+      'Persistence composition is unavailable until initializeRuntimeDatabase() completes',
+    );
   });
 });

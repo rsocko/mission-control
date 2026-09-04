@@ -24,6 +24,7 @@
  * below are guaranteed to be registered.
  */
 import type { RelativeReminderTimezoneRepository } from '@/db/persistence/relative-reminder-timezone';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 /**
  * The three demo/seed-only commands reachable from `POST
@@ -37,28 +38,41 @@ export interface DemoSeedCommandService {
   clearTriageSampleData(): Promise<number>;
 }
 
-let demoSeedCommandService: DemoSeedCommandService | null = null;
+interface ModeRouteServiceRegistry {
+  demoSeedCommandService: DemoSeedCommandService | null;
+  relativeReminderTimezoneRepository: RelativeReminderTimezoneRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.mode-route-service-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): ModeRouteServiceRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    demoSeedCommandService: null,
+    relativeReminderTimezoneRepository: null,
+  }));
+}
 
 export function registerDemoSeedCommandService(service: DemoSeedCommandService): void {
-  demoSeedCommandService = service;
+  registry().demoSeedCommandService = service;
 }
 
 export function getDemoSeedCommandService(): DemoSeedCommandService {
+  const { demoSeedCommandService } = registry();
   if (!demoSeedCommandService) {
     throw new Error('Demo seed command service has not been registered');
   }
   return demoSeedCommandService;
 }
 
-let relativeReminderTimezoneRepository: RelativeReminderTimezoneRepository | null = null;
-
 export function registerRelativeReminderTimezoneRepository(
   repository: RelativeReminderTimezoneRepository,
 ): void {
-  relativeReminderTimezoneRepository = repository;
+  registry().relativeReminderTimezoneRepository = repository;
 }
 
 export function getRelativeReminderTimezoneRepository(): RelativeReminderTimezoneRepository {
+  const { relativeReminderTimezoneRepository } = registry();
   if (!relativeReminderTimezoneRepository) {
     throw new Error('Relative reminder timezone repository has not been registered');
   }
@@ -67,6 +81,7 @@ export function getRelativeReminderTimezoneRepository(): RelativeReminderTimezon
 
 /** Test-only reset hook so unit tests can exercise registration in isolation. */
 export function _resetModeRouteServicesForTests(): void {
-  demoSeedCommandService = null;
-  relativeReminderTimezoneRepository = null;
+  const state = registry();
+  state.demoSeedCommandService = null;
+  state.relativeReminderTimezoneRepository = null;
 }

@@ -5,6 +5,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 export type SyncOperatorErrorCode =
   | 'invalid_operator_idempotency_key'
@@ -173,28 +174,42 @@ export const sqliteSyncOperatorControlRepository: SyncOperatorControlRepository 
     requireCapability().rollbackFinanceOperatorCanary(input),
 };
 
-let repository: SyncOperatorControlRepository | null = null;
+interface SyncOperatorControlRuntimeRegistry {
+  repository: SyncOperatorControlRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.sync-operator-control-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): SyncOperatorControlRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
 
 export function registerSyncOperatorControlRepository(
   next: SyncOperatorControlRepository,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (repository && repository !== next) {
+  const selected = registry().repository;
+  if (selected && selected !== next) {
     throw new Error('Sync operator-control repository is already selected');
   }
-  repository = next;
+  registry().repository = next;
 }
 
 export function clearSyncOperatorControlRepository(
   expectedRepository?: SyncOperatorControlRepository,
 ): void {
-  if (expectedRepository && repository !== expectedRepository) return;
-  repository = null;
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
 }
 
 async function getSyncOperatorControlRepository():
 Promise<SyncOperatorControlRepository> {
   assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
   if (!repository) {
     throw new Error('Sync operator-control repository has not been registered');
   }

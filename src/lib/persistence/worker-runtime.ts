@@ -9,28 +9,45 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from './composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
-let selectedWorkerPersistenceRepositories: WorkerPersistenceRepositories | null = null;
-let workerPersistenceAccessed = false;
-let selectedWorkerOwnsTriage = false;
+interface WorkerPersistenceRegistry {
+  selected: WorkerPersistenceRepositories | null;
+  accessed: boolean;
+  ownsTriage: boolean;
+}
+
+// Next.js may evaluate instrumentation and route handlers in separate bundles.
+const REGISTRY_KEY = 'mission-control.worker-persistence-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): WorkerPersistenceRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    selected: null,
+    accessed: false,
+    ownsTriage: false,
+  }));
+}
 
 export function registerWorkerPersistenceRepositories(
   repositories: WorkerPersistenceRepositories,
 ): void {
   assertCanRegisterWorkerPersistenceRepositories(repositories);
   registerTriagePersistenceRepositories(repositories.triage);
-  selectedWorkerPersistenceRepositories = repositories;
-  selectedWorkerOwnsTriage = true;
+  const state = registry();
+  state.selected = repositories;
+  state.ownsTriage = true;
 }
 
 export function assertCanRegisterWorkerPersistenceRepositories(
   repositories: WorkerPersistenceRepositories,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
+  const state = registry();
   if (
-    selectedWorkerPersistenceRepositories
-    && selectedWorkerPersistenceRepositories !== repositories
-    && workerPersistenceAccessed
+    state.selected
+    && state.selected !== repositories
+    && state.accessed
   ) {
     throw new Error('Worker persistence repositories are already selected');
   }
@@ -41,10 +58,11 @@ export function assertCanRegisterWorkerPersistenceRepositoriesWithBorrowedTriage
   repositories: WorkerPersistenceRepositories,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
+  const state = registry();
   if (
-    selectedWorkerPersistenceRepositories
-    && selectedWorkerPersistenceRepositories !== repositories
-    && workerPersistenceAccessed
+    state.selected
+    && state.selected !== repositories
+    && state.accessed
   ) {
     throw new Error('Worker persistence repositories are already selected');
   }
@@ -61,29 +79,32 @@ export function registerWorkerPersistenceRepositoriesWithBorrowedTriage(
   repositories: WorkerPersistenceRepositories,
 ): void {
   assertCanRegisterWorkerPersistenceRepositoriesWithBorrowedTriage(repositories);
-  selectedWorkerPersistenceRepositories = repositories;
-  selectedWorkerOwnsTriage = false;
+  const state = registry();
+  state.selected = repositories;
+  state.ownsTriage = false;
 }
 
 export function clearWorkerPersistenceRepositories(
   repositories: WorkerPersistenceRepositories,
 ): void {
-  if (selectedWorkerPersistenceRepositories !== repositories) return;
-  if (selectedWorkerOwnsTriage) {
+  const state = registry();
+  if (state.selected !== repositories) return;
+  if (state.ownsTriage) {
     clearTriagePersistenceRepositories(repositories.triage);
   }
-  selectedWorkerPersistenceRepositories = null;
-  workerPersistenceAccessed = false;
-  selectedWorkerOwnsTriage = false;
+  state.selected = null;
+  state.accessed = false;
+  state.ownsTriage = false;
 }
 
 export async function getWorkerPersistenceRepositories(): Promise<
   WorkerPersistenceRepositories
 > {
   assertPersistenceCompositionAccessAllowed();
-  workerPersistenceAccessed = true;
-  if (selectedWorkerPersistenceRepositories) {
-    return selectedWorkerPersistenceRepositories;
+  const state = registry();
+  state.accessed = true;
+  if (state.selected) {
+    return state.selected;
   }
   throw new Error(
     'Worker persistence repositories must be registered before worker persistence is accessed',

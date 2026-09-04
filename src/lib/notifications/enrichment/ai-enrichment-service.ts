@@ -6,6 +6,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 export type { AIEnrichmentResult } from './ai-enrichment-policy';
 
@@ -16,23 +17,36 @@ export interface AIEnrichmentService {
   ): Promise<AIEnrichmentResult | null>;
 }
 
-let selectedService: AIEnrichmentService | null = null;
+interface AIEnrichmentRegistry {
+  selected: AIEnrichmentService | null;
+}
+
+const REGISTRY_KEY = 'mission-control.ai-enrichment-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): AIEnrichmentRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    selected: null,
+  }));
+}
 
 export function registerAIEnrichmentService(service: AIEnrichmentService): void {
   assertCanRegisterAIEnrichmentService(service);
-  selectedService = service;
+  registry().selected = service;
 }
 
 export function assertCanRegisterAIEnrichmentService(service: AIEnrichmentService): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (selectedService && selectedService !== service) {
+  const selected = registry().selected;
+  if (selected && selected !== service) {
     throw new Error('AI enrichment service is already selected');
   }
 }
 
 export function clearAIEnrichmentService(expectedService?: AIEnrichmentService): void {
-  if (expectedService && selectedService !== expectedService) return;
-  selectedService = null;
+  const state = registry();
+  if (expectedService && state.selected !== expectedService) return;
+  state.selected = null;
 }
 
 export function enrichWithAI(
@@ -40,8 +54,9 @@ export function enrichWithAI(
   options?: { signal?: AbortSignal },
 ): Promise<AIEnrichmentResult | null> {
   assertPersistenceCompositionAccessAllowed();
-  if (!selectedService) {
+  const selected = registry().selected;
+  if (!selected) {
     throw new Error('AI enrichment service is unavailable for the selected backend');
   }
-  return selectedService.enrich(input, options);
+  return selected.enrich(input, options);
 }

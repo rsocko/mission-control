@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 /**
  * Proves the `src/app/api/settings/mode/route.ts` (Layer L02) service
@@ -73,6 +74,7 @@ vi.mock('@/lib/triage/lifecycle', () => {
 
 describe('initializeRuntimeDatabase PostgreSQL branch: mode-route-services registration', () => {
   beforeEach(() => {
+    resetProcessRuntimeRegistries();
     // `initializeRuntimeDatabase()` registers process-wide composition-root
     // singletons (see `tests/db/sqlite-core-repositories.test.ts`'s
     // "rejects replacement" tests for the same pattern), so each test needs

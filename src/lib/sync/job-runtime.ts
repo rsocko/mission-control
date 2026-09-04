@@ -4,6 +4,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 export type {
   EnqueueSyncJobOptions,
@@ -20,23 +21,37 @@ export type {
   SyncScheduleHealth,
 } from './job-repository';
 
-let repository: SyncJobRepository | null = null;
+interface SyncJobRuntimeRegistry {
+  repository: SyncJobRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.sync-job-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): SyncJobRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
 
 export function registerSyncJobRepository(next: SyncJobRepository): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (repository && repository !== next) {
+  const selected = registry().repository;
+  if (selected && selected !== next) {
     throw new Error('Sync job repository is already selected');
   }
-  repository = next;
+  registry().repository = next;
 }
 
 export function clearSyncJobRepository(expectedRepository?: SyncJobRepository): void {
-  if (expectedRepository && repository !== expectedRepository) return;
-  repository = null;
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
 }
 
 export async function getSyncJobRepository(): Promise<SyncJobRepository> {
   assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
   if (!repository) {
     throw new Error('Sync job repository has not been registered');
   }

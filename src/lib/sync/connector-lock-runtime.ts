@@ -4,6 +4,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import type {
   ConnectorOperationLeaseRepository,
   ConnectorOperationType,
@@ -30,28 +31,42 @@ export {
   getConnectorOperationLeaseMs,
 } from './connector-lock-values';
 
-let repository: ConnectorOperationLeaseRepository | null = null;
+interface ConnectorOperationLeaseRuntimeRegistry {
+  repository: ConnectorOperationLeaseRepository | null;
+}
+
+const REGISTRY_KEY = 'mission-control.connector-operation-lease-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): ConnectorOperationLeaseRuntimeRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    repository: null,
+  }));
+}
 
 export function registerConnectorOperationLeaseRepository(
   next: ConnectorOperationLeaseRepository,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (repository && repository !== next) {
+  const selected = registry().repository;
+  if (selected && selected !== next) {
     throw new Error('Connector operation lease repository is already selected');
   }
-  repository = next;
+  registry().repository = next;
 }
 
 export function clearConnectorOperationLeaseRepository(
   expectedRepository?: ConnectorOperationLeaseRepository,
 ): void {
-  if (expectedRepository && repository !== expectedRepository) return;
-  repository = null;
+  const state = registry();
+  if (expectedRepository && state.repository !== expectedRepository) return;
+  state.repository = null;
 }
 
 export async function getConnectorOperationLeaseRepository():
 Promise<ConnectorOperationLeaseRepository> {
   assertPersistenceCompositionAccessAllowed();
+  const repository = registry().repository;
   if (!repository) {
     throw new Error('Connector operation lease repository has not been registered');
   }

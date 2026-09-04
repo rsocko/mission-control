@@ -75,15 +75,15 @@ describe('L14 external-agent taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 202,
+      tierARoutes: 190,
       tierBRoutes: 26,
-      cleanRoutes: 38,
-      directTaintSourceRoutes: 135,
-      transitiveOnlyTaintSourceRoutes: 67,
-      directDbNamespaceRoutes: 136,
-      taintedLibA: 89,
+      cleanRoutes: 50,
+      directTaintSourceRoutes: 125,
+      transitiveOnlyTaintSourceRoutes: 65,
+      directDbNamespaceRoutes: 126,
+      taintedLibA: 86,
       taintedApiHelpers: 1,
-      totalMigrationUnits: 292,
+      totalMigrationUnits: 277,
     });
   });
 });

@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 181,
-    "tierBRoutes": 26,
-    "cleanRoutes": 59,
+    "tierARoutes": 175,
+    "tierBRoutes": 27,
+    "cleanRoutes": 64,
     "directTaintSourceRoutes": 124,
-    "transitiveOnlyTaintSourceRoutes": 57,
+    "transitiveOnlyTaintSourceRoutes": 51,
     "directDbNamespaceRoutes": 125,
-    "taintedLibA": 83,
+    "taintedLibA": 78,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 264
+    "totalMigrationUnits": 253
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -370,7 +370,6 @@
     "src/app/api/connectors/github-repos/route.ts",
     "src/app/api/connectors/route.ts",
     "src/app/api/daily-completions/route.ts",
-    "src/app/api/dashboard/kpis/route.ts",
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
@@ -400,8 +399,6 @@
     "src/app/api/inbound-webhooks/[id]/receive/route.ts",
     "src/app/api/inbound-webhooks/[id]/route.ts",
     "src/app/api/inbound-webhooks/route.ts",
-    "src/app/api/insights/observations/route.ts",
-    "src/app/api/insights/route.ts",
     "src/app/api/integrations/alertmanager/route.ts",
     "src/app/api/integrations/alertmanager/test/route.ts",
     "src/app/api/integrations/alertmanager/webhook/route.ts",
@@ -469,14 +466,12 @@
     "src/app/api/source-lists/rename/route.ts",
     "src/app/api/source-lists/reorder/route.ts",
     "src/app/api/source-rankings/route.ts",
-    "src/app/api/stats/route.ts",
     "src/app/api/subtask-templates/route.ts",
     "src/app/api/sync/cleanup/route.ts",
     "src/app/api/sync/deletions/[id]/route.ts",
     "src/app/api/sync/health/route.ts",
     "src/app/api/sync/route.ts",
     "src/app/api/sync/tasks/resolve/route.ts",
-    "src/app/api/tag-insights/route.ts",
     "src/app/api/tags/merge/route.ts",
     "src/app/api/tags/push/route.ts",
     "src/app/api/tags/remove-from-source/route.ts",
@@ -513,8 +508,7 @@
     "src/app/api/triage/reclassify/route.ts",
     "src/app/api/triage/route.ts",
     "src/app/api/triage/storage/route.ts",
-    "src/app/api/webhooks/[connectorId]/route.ts",
-    "src/app/api/word-insights/route.ts"
+    "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "tierBRoutes": [
     "src/app/api/ai/intake-document/route.ts",
@@ -530,6 +524,7 @@
     "src/app/api/health/ready/route.ts",
     "src/app/api/health/route.ts",
     "src/app/api/health/runtime/route.ts",
+    "src/app/api/insights/observations/route.ts",
     "src/app/api/metrics/route.ts",
     "src/app/api/sync/retained/resolve/route.ts",
     "src/app/api/tasks/[id]/move/route.ts",
@@ -550,6 +545,7 @@
     "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
     "src/app/api/connectors/[id]/work-todo/route.ts",
     "src/app/api/connectors/test-pre-save/route.ts",
+    "src/app/api/dashboard/kpis/route.ts",
     "src/app/api/external-agents/[id]/route.ts",
     "src/app/api/external-agents/dispatch/route.ts",
     "src/app/api/external-agents/dispatches/[id]/result/route.ts",
@@ -568,6 +564,7 @@
     "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
     "src/app/api/ideation/workspaces/[id]/versions/route.ts",
     "src/app/api/ideation/workspaces/route.ts",
+    "src/app/api/insights/route.ts",
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/mcp/tasks/[id]/route.ts",
@@ -585,7 +582,9 @@
     "src/app/api/settings/mode/route.ts",
     "src/app/api/settings/shortcuts/route.ts",
     "src/app/api/shortcut/version/route.ts",
+    "src/app/api/stats/route.ts",
     "src/app/api/sync/stream/route.ts",
+    "src/app/api/tag-insights/route.ts",
     "src/app/api/tasks/[id]/attachments/[attachmentId]/route.ts",
     "src/app/api/tasks/[id]/document-preview/route.ts",
     "src/app/api/tasks/[id]/hard-delete/route.ts",
@@ -600,6 +599,7 @@
     "src/app/api/tasks/route.ts",
     "src/app/api/triage/rules/route.ts",
     "src/app/api/triage/sources/route.ts",
+    "src/app/api/word-insights/route.ts",
     "src/app/api/work-todo/ack/route.ts",
     "src/app/api/work-todo/changes/route.ts",
     "src/app/api/work-todo/ingest/route.ts",
@@ -745,7 +745,6 @@
     "src/app/api/connectors/[id]/finance-operations/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/[exceptionId]/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/route.ts",
-    "src/app/api/dashboard/kpis/route.ts",
     "src/app/api/finance/alerts/[id]/dismiss/route.ts",
     "src/app/api/finance/alerts/route.ts",
     "src/app/api/finance/overview/route.ts",
@@ -753,8 +752,6 @@
     "src/app/api/graph/nodes/[nodeId]/neighbors/route.ts",
     "src/app/api/graph/universe/route.ts",
     "src/app/api/ideation/expand/route.ts",
-    "src/app/api/insights/observations/route.ts",
-    "src/app/api/insights/route.ts",
     "src/app/api/integrations/alertmanager/route.ts",
     "src/app/api/integrations/alertmanager/test/route.ts",
     "src/app/api/integrations/alertmanager/webhook/route.ts",
@@ -771,8 +768,6 @@
     "src/app/api/scout/reconcile/route.ts",
     "src/app/api/scout/reconciliation/suggestions/[id]/route.ts",
     "src/app/api/scout/reconciliation/suggestions/route.ts",
-    "src/app/api/stats/route.ts",
-    "src/app/api/tag-insights/route.ts",
     "src/app/api/tasks/[id]/owl/route.ts",
     "src/app/api/tasks/[id]/relationships/[relationshipId]/route.ts",
     "src/app/api/tasks/[id]/relationships/route.ts",
@@ -787,8 +782,7 @@
     "src/app/api/triage/health/route.ts",
     "src/app/api/triage/import/bulk/route.ts",
     "src/app/api/triage/reclassify/route.ts",
-    "src/app/api/triage/route.ts",
-    "src/app/api/word-insights/route.ts"
+    "src/app/api/triage/route.ts"
   ],
   "directDbNamespaceRoutes": [
     "src/app/api/ai/context-tasks/route.ts",
@@ -985,10 +979,6 @@
     "src/lib/semantic-index/index.ts",
     "src/lib/semantic-index/runtime.ts",
     "src/lib/semantic-index/sensitivity.ts",
-    "src/lib/stats/flow-query.ts",
-    "src/lib/stats/index.ts",
-    "src/lib/stats/insights.ts",
-    "src/lib/tag-insights/service.ts",
     "src/lib/triage/actions.ts",
     "src/lib/triage/actions/ms-todo.ts",
     "src/lib/triage/capture.ts",
@@ -999,8 +989,7 @@
     "src/lib/triage/lifecycle.ts",
     "src/lib/triage/query.ts",
     "src/lib/triage/shared.ts",
-    "src/lib/triage/staleness.ts",
-    "src/lib/word-insights/service.ts"
+    "src/lib/triage/staleness.ts"
   ],
   "taintedApiHelpers": [],
   "decrementHistory": [
@@ -1290,6 +1279,42 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Recomputed with computeWebPersistenceGraph at L16: 266 routes, 181 Tier A, 26 Tier B, 59 clean, 124 direct, 57 transitive-only, 125 direct @/db, 83 tainted libraries, 0 tainted API helpers, and 264 total migration units. taintedApiHelpers reaches the declared finalTarget of 0."
+    },
+    {
+      "layer": "L17",
+      "title": "derived-analytics (stats/insights) web/API PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 264,
+        "to": 253,
+        "delta": -11
+      },
+      "removedTaintedLibA": [
+        "src/lib/stats/flow-query.ts",
+        "src/lib/stats/index.ts",
+        "src/lib/stats/insights.ts",
+        "src/lib/tag-insights/service.ts",
+        "src/lib/word-insights/service.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/dashboard/kpis/route.ts",
+        "src/app/api/insights/observations/route.ts",
+        "src/app/api/insights/route.ts",
+        "src/app/api/stats/route.ts",
+        "src/app/api/tag-insights/route.ts",
+        "src/app/api/word-insights/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/dashboard/kpis/route.ts",
+        "src/app/api/insights/route.ts",
+        "src/app/api/stats/route.ts",
+        "src/app/api/tag-insights/route.ts",
+        "src/app/api/word-insights/route.ts"
+      ],
+      "tierBReclassifications": [
+        "src/app/api/insights/observations/route.ts"
+      ],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Recomputed with computeWebPersistenceGraph at L17: 266 routes, 175 Tier A, 27 Tier B, 64 clean, 124 direct, 51 transitive-only, 125 direct @/db, 78 tainted libraries, 0 tainted API helpers, and 253 total migration units. Six Tier A routes and five libraries were migrated; five routes became clean and one (src/app/api/insights/observations/route.ts) reclassified to Tier B because its only residual reach is the deferred AI provider config import inside src/lib/stats/observations.ts, which belongs to the held AI provider layer. directTaintSourceRoutes and directDbNamespaceRoutes are unchanged because no route file was modified and none ever imported the @/db namespace."
     }
   ],
   "layerUpdates": [
@@ -1316,6 +1341,21 @@
         "src/db/postgres/repositories/ideation-workspace-repository.ts is added. No schema migration was required: graph_workspaces and graph_workspace_versions, both unique indexes, both plain indexes, and the cascade foreign key already ship in drizzle/postgres/0000.",
         "Both adapters share shouldCheckpointIdeationRevision from the neutral contract module, and both order the library by (archived, updated_at DESC, ASCII-folded name, id). The trailing id tiebreaker defines an order that was previously unspecified in SQLite; PostgreSQL reproduces SQLite COLLATE NOCASE with ASCII-only translate(...) COLLATE \"C\" rather than a locale-aware lower(name).",
         "PostgreSQL deleteArchived runs inside one FOR UPDATE transaction where SQLite reads then deletes non-transactionally. Single-threaded behaviour is identical; PostgreSQL is intentionally stronger under concurrency. duplicate deliberately stays non-atomic in both backends."
+      ]
+    },
+    {
+      "layer": "L17",
+      "summary": "Web/API PostgreSQL parity: the read-only derived-analytics surfaces (dashboard/reset KPIs, the /insights query layer, cumulative flow, and the tag/word insight services) now select their backend through the composed worker persistence facade.",
+      "changes": [
+        "WorkerPersistenceRepositories gains a top-level `analytics` slot holding five sub-repositories (kpis, insights, flow, tagInsights, wordInsights). It is top-level because these read models share no rows and no serialization namespace with any other worker surface, and one slot rather than five because they are registered atomically: a backend supports every analytics surface or none.",
+        "src/lib/stats/index.ts, src/lib/stats/insights.ts, src/lib/stats/flow-query.ts, src/lib/tag-insights/service.ts, and src/lib/word-insights/service.ts exit taintedLibA. Each now holds an async repository resolver over getWorkerPersistenceRepositories() and evaluates no driver at import time. Every exported signature, JavaScript reducer, date and timezone computation, clamp, and error string is unchanged.",
+        "All six owned routes exit tierARoutes with no source change: none of them ever imported the @/db namespace, so the entire decrement is transitive and directTaintSourceRoutes (124) and directDbNamespaceRoutes (125) are unchanged.",
+        "src/app/api/insights/observations/route.ts reclassifies from Tier A to Tier B rather than becoming clean. Its residual reach is a deferred import() of @/lib/ai/config-resolver inside src/lib/stats/observations.ts, which is owned by the held AI provider layer and was deliberately not touched.",
+        "No schema migration was required. The layer is read-only: no column, table, constraint, default, or index changed, and every table it reads (tasks, task_projects, task_tags, tags, hub_projects, project_phases, project_phase_items, task_history_events, routines, routine_completions, notifications, triage_items, my_day_items, focus_items, connector_configs) already ships in drizzle/postgres.",
+        "Neither backend opens a transaction, takes a row lock, or raises the isolation level. The multi-query composites (computeKpis and the eleven-way insights summary fan-out) were non-atomic under SQLite and stay non-atomic under PostgreSQL; a snapshot would give callers a consistency guarantee they do not have today. The per-project and per-day query loops are preserved deliberately rather than collapsed.",
+        "PostgreSQL reproduces SQLite julianday() instant comparison with a guarded CASE using pg_input_is_valid, so unparsable text yields NULL (row excluded) instead of raising, and offsetless text is read as UTC via ::timestamp AT TIME ZONE 'UTC' rather than the session TimeZone. Every text ORDER BY, window ORDER BY, and row_number() partition order is pinned with COLLATE \"C\" to reproduce SQLite BINARY byte ordering, and the synthetic-tag prefix scan uses ASCII-only translate(...) rather than a locale-aware lower(). Explicit tiebreakers were added in both adapters for the source breakdown, active/visible projects, delivery filter options, delivery records, active routines, and the unbounded routine-completion reads, defining an order SQLite previously left unspecified.",
+        "The PostgreSQL adapter reproduces the Drizzle notificationNeedsAttention() predicate, not the sibling NOTIFICATION_NEEDS_ATTENTION_SQL text constant, whose digest clause excludes rows with a NULL level. notifications.level is NOT NULL DEFAULT 'fyi' in both schemas so no live row diverges; the shared contract pins the distinction anyway.",
+        "src/db/task-history.ts is unchanged and keeps both of its consumers. The SQLite adapter calls getTaskTransitionsInRange directly, so no read model is split across two owners and a later burn-report layer inherits it as is."
       ]
     }
   ]

@@ -3,14 +3,33 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { MAX_VALUES_PER_SOURCE_PER_TASK } from '@/lib/word-insights/extract';
+import type { AnalyticsPersistence } from '@/db/persistence/analytics';
 
 const databasePath = path.join(os.tmpdir(), `mission-control-word-insights-${randomUUID()}.db`);
+
+/**
+ * The service now selects its backend through the composed worker persistence
+ * facade, so this suite publishes the SQLite analytics adapter over the same
+ * temporary database it seeds. The SQL under test is unchanged.
+ */
+const composition = vi.hoisted(() => ({ analytics: null as AnalyticsPersistence | null }));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => {
+    if (!composition.analytics) throw new Error('Analytics persistence is not registered');
+    return { analytics: composition.analytics };
+  },
+}));
 
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.doUnmock('drizzle-orm');
   vi.resetModules();
-  const { sqlite } = await import('@/db');
+  const { sqlite, default: db } = await import('@/db');
+  const { createSqliteAnalyticsPersistence } = await import(
+    '@/db/persistence/sqlite-analytics-repositories'
+  );
+  composition.analytics = createSqliteAnalyticsPersistence(db);
   const now = '2026-07-31T00:00:00.000Z';
   const insertConnector = sqlite.prepare(`
     INSERT INTO connector_configs

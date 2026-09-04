@@ -67,6 +67,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
       },
     } as WorkerPersistenceRepositories['finance'],
     ideationWorkspaces: {} as WorkerPersistenceRepositories['ideationWorkspaces'],
+    analytics: {} as WorkerPersistenceRepositories['analytics'],
   };
 }
 

@@ -1,39 +1,30 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { InsightsAnalyticsRepository } from '@/db/persistence/analytics';
 
-const mocks = vi.hoisted(() => {
-  const terminals: unknown[] = [];
+/**
+ * The insights query layer reads through the composed `analytics.insights`
+ * repository, so these cases stub that repository rather than a SQLite handle.
+ * The timezone behaviour under test is unchanged: local period boundaries are
+ * still resolved in this module and handed to persistence as instants.
+ */
 
-  function chainable(terminal: unknown) {
-    const chain = new Proxy<Record<PropertyKey, unknown>>({}, {
-      get(_, property) {
-        if (property === 'then') {
-          return (resolve: (value: unknown) => unknown) => resolve(terminal);
-        }
-        return vi.fn(() => chain);
-      },
-    });
-    return chain;
-  }
-
-  return {
-    terminals,
-    select: vi.fn(() => chainable(terminals.shift() ?? [])),
-  };
-});
-
-vi.mock('@/db', () => ({
-  default: { select: mocks.select },
+const mocks = vi.hoisted(() => ({
+  countTasksCompletedIn: vi.fn(),
+  countTopLevelTasksCreatedIn: vi.fn(),
+  listCompletedTimestampsIn: vi.fn(),
+  listCreatedTimestampsIn: vi.fn(),
+  listCompletionSpansIn: vi.fn(),
+  listCompletedTimestampsSince: vi.fn(),
+  sourceBreakdownIn: vi.fn(),
+  listOpenTaskCreatedTimestamps: vi.fn(),
+  listPlanningFrictionEvents: vi.fn(),
+  listTaskTagNames: vi.fn(),
 }));
 
-vi.mock('@/db/schema', () => ({
-  tasks: new Proxy({}, { get: (_, property) => String(property) }),
-  routines: new Proxy({}, { get: (_, property) => String(property) }),
-  routineCompletions: new Proxy({}, { get: (_, property) => String(property) }),
-  taskProjects: new Proxy({}, { get: (_, property) => String(property) }),
-  taskHistoryEvents: new Proxy({}, { get: (_, property) => String(property) }),
-  taskTags: new Proxy({}, { get: (_, property) => String(property) }),
-  tags: new Proxy({}, { get: (_, property) => String(property) }),
-  hubProjects: new Proxy({}, { get: (_, property) => String(property) }),
+const insights = mocks as unknown as InsightsAnalyticsRepository;
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({ analytics: { insights } }),
 }));
 
 vi.mock('@/lib/utils/date', () => ({
@@ -52,32 +43,25 @@ vi.mock('@/lib/utils/date', () => ({
   ),
 }));
 
-vi.mock('@/lib/utils/sqlite-date', () => ({
-  timestampGte: vi.fn(() => ({})),
-  timestampLt: vi.fn(() => ({})),
-}));
-
 describe('insights configured-timezone bucketing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.terminals.length = 0;
+    mocks.countTasksCompletedIn.mockResolvedValue(0);
+    mocks.countTopLevelTasksCreatedIn.mockResolvedValue(0);
+    mocks.listCompletedTimestampsIn.mockResolvedValue([]);
+    mocks.listCreatedTimestampsIn.mockResolvedValue([]);
+    mocks.listCompletionSpansIn.mockResolvedValue([]);
+    mocks.listCompletedTimestampsSince.mockResolvedValue([]);
+    mocks.sourceBreakdownIn.mockResolvedValue([]);
+    mocks.listOpenTaskCreatedTimestamps.mockResolvedValue([]);
+    mocks.listPlanningFrictionEvents.mockResolvedValue([]);
+    mocks.listTaskTagNames.mockResolvedValue([]);
   });
 
   it('uses configured today and buckets bare UTC timestamps into local dates', async () => {
-    mocks.terminals.push(
-      [{ count: 1 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [],
-      [],
-      [{ completedAt: '2026-08-17T01:00:00.0000000' }],
-      [{ timestamp: '2026-08-17T01:00:00.0000000' }],
-      [],
-      [],
-      [],
-      [],
-    );
+    mocks.countTasksCompletedIn.mockResolvedValue(1);
+    mocks.listCompletedTimestampsIn.mockResolvedValue(['2026-08-17T01:00:00.0000000']);
+    mocks.listCompletedTimestampsSince.mockResolvedValue(['2026-08-17T01:00:00.0000000']);
     const { computeInsightsSection } = await import('@/lib/stats/insights');
 
     const result = await computeInsightsSection('summary', 7);
@@ -87,48 +71,39 @@ describe('insights configured-timezone bucketing', () => {
       completed: 1,
     });
     expect(result.kpis.streak.value).toBe(1);
+    expect(mocks.listCompletedTimestampsIn).toHaveBeenCalledWith({
+      startInclusive: '2026-08-10T04:00:00.000Z',
+      endExclusive: '2026-08-16T-next04:00:00.000Z',
+    });
   });
 
   it('summarizes later due-date moves into task, list, and tag patterns', async () => {
-    mocks.terminals.push(
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [],
-      [],
-      [],
-      [],
-      [],
-      [],
-      [
-        {
-          taskId: 'task-1',
-          eventType: 'due_date_pushed',
-          previousValue: '2026-08-10',
-          newValue: '2026-08-14',
-          title: 'Plan launch',
-          dueDate: '2026-08-20',
-          pushCount: 3,
-          sourceListName: 'Work',
-        },
-        {
-          taskId: 'task-1',
-          eventType: 'due_date_pushed',
-          previousValue: '2026-08-14',
-          newValue: '2026-08-20',
-          title: 'Plan launch',
-          dueDate: '2026-08-20',
-          pushCount: 3,
-          sourceListName: 'Work',
-        },
-      ],
-      [],
-      [
-        { taskId: 'task-1', name: 'planning' },
-        { taskId: 'task-1', name: 'priority:high' },
-      ],
-    );
+    mocks.listPlanningFrictionEvents.mockResolvedValue([
+      {
+        taskId: 'task-1',
+        eventType: 'due_date_pushed',
+        previousValue: '2026-08-10',
+        newValue: '2026-08-14',
+        title: 'Plan launch',
+        dueDate: '2026-08-20',
+        pushCount: 3,
+        sourceListName: 'Work',
+      },
+      {
+        taskId: 'task-1',
+        eventType: 'due_date_pushed',
+        previousValue: '2026-08-14',
+        newValue: '2026-08-20',
+        title: 'Plan launch',
+        dueDate: '2026-08-20',
+        pushCount: 3,
+        sourceListName: 'Work',
+      },
+    ]);
+    mocks.listTaskTagNames.mockResolvedValue([
+      { taskId: 'task-1', name: 'planning' },
+      { taskId: 'task-1', name: 'priority:high' },
+    ]);
     const { computeInsightsSection } = await import('@/lib/stats/insights');
 
     const result = await computeInsightsSection('summary', 7);

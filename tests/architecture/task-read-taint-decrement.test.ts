@@ -76,16 +76,23 @@ describe('L05 task-read taint decrement', () => {
     const digest = (entries: string[]) => createHash('sha256')
       .update(JSON.stringify(entries))
       .digest('hex');
-    // The Tier B digest is the load-bearing one here and is unchanged: no
-    // later layer has reclassified an import-time failure into a call-time
-    // one. The two non-route digests below moved once, at L16, which removed
-    // `graph-workspace/service.ts` and `persistence/sqlite-runtime.ts` from
-    // taintedLibA and retired the last tainted shared API helper (so
-    // taintedApiHelpers is now the empty set).
+    // The Tier B digest is the load-bearing one here. It moved once, at L17,
+    // which reclassified exactly one route -
+    // `src/app/api/insights/observations/route.ts` - from an import-time
+    // failure to a call-time one, because its only residual reach is a
+    // deferred `import()` of the AI provider config resolver. That single
+    // reclassification is declared in the baseline's `decrementHistory` and
+    // asserted by `analytics-taint-decrement.test.ts`; no other layer has
+    // moved a route between the tiers. The `taintedLibA` digest has moved
+    // twice: at L16, which removed `graph-workspace/service.ts` and
+    // `persistence/sqlite-runtime.ts` and retired the last tainted shared API
+    // helper (so `taintedApiHelpers` is now the empty set, and its digest is
+    // unchanged since), and at L17, which removed the five derived-analytics
+    // libraries.
     expect(digest(current.tierBRoutes))
-      .toBe('dbf5405c2e0d0829788e8359ec21c76229969ddad055257fdd6b25babda34b59');
+      .toBe('abe2edee60700ac382732fa464bdf0711a8d7bd4f78c92c7b8da61de6e08a8a3');
     expect(digest(current.taintedLibA))
-      .toBe('19e3b149cafc9d2b86f883e082a122932116e536975e89f0d0f4df360278cc74');
+      .toBe('37f7aaeceba5168bd2b9cc64e8f9e9360e3d39615847a3b95543947db71a78b2');
     expect(digest(current.taintedApiHelpers))
       .toBe('4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945');
     expect(current.taintedApiHelpers).toEqual([]);
@@ -116,15 +123,15 @@ describe('L05 task-read taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 181,
-      tierBRoutes: 26,
-      cleanRoutes: 59,
+      tierARoutes: 175,
+      tierBRoutes: 27,
+      cleanRoutes: 64,
       directTaintSourceRoutes: 124,
-      transitiveOnlyTaintSourceRoutes: 57,
+      transitiveOnlyTaintSourceRoutes: 51,
       directDbNamespaceRoutes: 125,
-      taintedLibA: 83,
+      taintedLibA: 78,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 264,
+      totalMigrationUnits: 253,
     });
   });
 });

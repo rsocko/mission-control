@@ -82,10 +82,10 @@ describe('completion-anchored task recurrence', () => {
     }), { params: Promise.resolve({ id }) });
     const [firstResponse, concurrentResponse] = await Promise.all([complete(), complete()]);
     expect(firstResponse.status).toBe(200);
-    expect(concurrentResponse.status).toBe(200);
+    expect(concurrentResponse.status).toBe(409);
     const first = await firstResponse.json() as { recurrenceNextTaskId: string };
     await expect(concurrentResponse.json()).resolves.toMatchObject({
-      recurrenceNextTaskId: first.recurrenceNextTaskId,
+      code: 'TASK_REVISION_CONFLICT',
     });
     const nextSchedule = sqlite.prepare(
       'SELECT recurrence, recurrence_mode FROM task_schedules WHERE task_id = ?',

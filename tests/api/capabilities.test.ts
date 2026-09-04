@@ -255,20 +255,24 @@ describe('task route capability enforcement', () => {
   });
 
   it.each([
-    ['unavailable', null],
+    ['unavailable', null, 'lease-1'],
     ['deferred', {
       type: 'microsoft-todo',
       writeDelivery: 'deferred',
       createTask: vi.fn(),
-    }],
+    }, 'lease-1'],
     ['ordinary failure', {
       type: 'microsoft-todo',
       writeDelivery: 'immediate',
       createTask: vi.fn(async () => {
         throw new Error('source unavailable');
       }),
-    }],
-  ])('leaves remote creation pending after %s connector handling', async (_label, connector) => {
+    }, 'lease-2'],
+  ] as const)('leaves remote creation pending after %s connector handling', async (
+    _label,
+    connector,
+    expectedLeaseToken,
+  ) => {
     registerFakeTaskCorePersistence({
       creates: {
         resolveTaskCreateTarget: vi.fn(async () => ({
@@ -301,7 +305,7 @@ describe('task route capability enforcement', () => {
     await vi.waitFor(() => {
       expect(leaseMocks.release).toHaveBeenCalledWith(
         expect.any(String),
-        'lease-1',
+        expectedLeaseToken,
         'pending_push',
         expect.any(String),
       );

@@ -1910,24 +1910,24 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
     return {
       rows: ordered.map((raw) => {
         const task = toMoveTaskRow(raw);
-        const memberships: TaskCollectionProjectPhaseMembership[] = (
-          projectsByTask.get(task.id) ?? []
-        ).flatMap((project) => {
-          const phases = phasesByTaskProject.get(`${task.id}:${project.projectId}`) ?? [];
-          return phases.length
-            ? phases.map((phase) => ({
-                projectId: project.projectId,
-                projectName: project.projectName ?? 'Unknown Project',
-                phaseId: phase.phaseId,
-                phaseName: phase.phaseName,
-              }))
-            : [{
-                projectId: project.projectId,
-                projectName: project.projectName ?? 'Unknown Project',
-                phaseId: null,
-                phaseName: null,
-              }];
-        });
+        const memberships = (projectsByTask.get(task.id) ?? []).flatMap(
+          (project): TaskCollectionProjectPhaseMembership[] => {
+            const phases = phasesByTaskProject.get(`${task.id}:${project.projectId}`) ?? [];
+            return phases.length
+              ? phases.map((phase) => ({
+                  projectId: project.projectId,
+                  projectName: project.projectName ?? 'Unknown Project',
+                  phaseId: phase.phaseId,
+                  phaseName: phase.phaseName,
+                }))
+              : [{
+                  projectId: project.projectId,
+                  projectName: project.projectName ?? 'Unknown Project',
+                  phaseId: null,
+                  phaseName: null,
+                }];
+          },
+        );
         return {
           ...task,
           parentTitle: task.parentId ? parents.get(task.parentId) ?? null : null,

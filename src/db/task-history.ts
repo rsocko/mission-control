@@ -1,6 +1,7 @@
 import db from '@/db';
 import * as schema from '@/db/schema';
 import { taskHistoryEvents } from '@/db/schema';
+import type { PlanningSignalInput } from '@/db/persistence/planning-signals';
 import { and, asc, eq, gte, inArray, lt, lte, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 
@@ -32,6 +33,7 @@ export const TASK_HISTORY_EVENT_TYPES = [
 export type TaskHistoryEventType = typeof TASK_HISTORY_EVENT_TYPES[number];
 export type TaskHistoryEvent = typeof taskHistoryEvents.$inferSelect;
 export type TaskHistoryDatabase = BetterSQLite3Database<typeof schema>;
+type TaskHistoryWriter = Pick<TaskHistoryDatabase, 'insert'>;
 
 export interface TaskHistoryRange {
   start: string;
@@ -53,6 +55,25 @@ export interface TaskStateAtTime {
   phaseIds: string[];
   asOf: string;
   historicalBoundaryAt: string;
+}
+
+export function appendPlanningSignalInTransaction(
+  database: TaskHistoryWriter,
+  input: PlanningSignalInput,
+): boolean {
+  const result = database.insert(taskHistoryEvents).values({
+    taskId: input.taskId,
+    eventType: input.eventType,
+    fieldName: 'planningDate',
+    previousValue: null,
+    newValue: input.date,
+    occurredAt: input.occurredAt,
+    recordedAt: new Date().toISOString(),
+    provenance: input.provenance,
+    metadata: input.metadata,
+  }).onConflictDoNothing().run();
+
+  return result.changes > 0;
 }
 
 interface BaselineValue {

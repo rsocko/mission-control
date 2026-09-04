@@ -6,6 +6,7 @@ describe('GET /api/my-day suggestions', () => {
   let sqlite: typeof import('@/db').sqlite;
   let schema: typeof import('@/db/schema');
   let getMyDay: typeof import('@/app/api/my-day/route').GET;
+  let postMyDay: typeof import('@/app/api/my-day/route').POST;
   let deleteMyDay: typeof import('@/app/api/my-day/route').DELETE;
 
   beforeAll(async () => {
@@ -21,6 +22,15 @@ describe('GET /api/my-day suggestions', () => {
     vi.doUnmock('@/db/schema');
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
+    vi.doMock('@/lib/planning-signals', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/planning-signals')>();
+      return {
+        ...actual,
+        getPlanningSignalRepository: async () => {
+          throw new Error('Mutation routes must not open a second persistence connection');
+        },
+      };
+    });
     vi.resetModules();
 
     const [dbModule, schemaModule, routeModule] = await Promise.all([
@@ -32,6 +42,7 @@ describe('GET /api/my-day suggestions', () => {
     sqlite = dbModule.sqlite;
     schema = schemaModule;
     getMyDay = routeModule.GET;
+    postMyDay = routeModule.POST;
     deleteMyDay = routeModule.DELETE;
 
     const recent = '2026-08-04T12:00:00.000Z';
@@ -144,6 +155,7 @@ describe('GET /api/my-day suggestions', () => {
         status: 'done',
         completedAt: '2026-08-05T17:00:00.000Z',
       }),
+      task('manual-suggestion'),
     ]);
 
     const myDayItem = (id: string, taskId: string, date: string, order: number) => ({
@@ -177,7 +189,45 @@ describe('GET /api/my-day suggestions', () => {
   afterAll(() => {
     sqlite.close();
     vi.doUnmock('@/lib/mode');
+    vi.doUnmock('@/lib/planning-signals');
     delete process.env.MC_DB_PATH;
+  });
+
+  it('records add and remove planning signals in the My Day transaction', async () => {
+    const addResponse = await postMyDay(new Request('http://localhost/api/my-day', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId: 'manual-suggestion', date: '2026-08-05' }),
+    }));
+    expect(addResponse.status).toBe(201);
+
+    const addedItem = sqlite.prepare(
+      'SELECT id FROM my_day_items WHERE task_id = ? AND date = ?',
+    ).get('manual-suggestion', '2026-08-05') as { id: string };
+    expect(addedItem.id).toBeTruthy();
+    expect(sqlite.prepare(`
+      SELECT event_type AS eventType, new_value AS date
+      FROM task_history_events
+      WHERE task_id = ? AND event_type IN ('my_day_committed', 'my_day_withdrawn')
+      ORDER BY id
+    `).all('manual-suggestion')).toEqual([
+      { eventType: 'my_day_committed', date: '2026-08-05' },
+    ]);
+
+    const removeResponse = await deleteMyDay(new Request(
+      `http://localhost/api/my-day?id=${addedItem.id}`,
+      { method: 'DELETE' },
+    ));
+    expect(removeResponse.status).toBe(200);
+    expect(sqlite.prepare(`
+      SELECT event_type AS eventType, new_value AS date
+      FROM task_history_events
+      WHERE task_id = ? AND event_type IN ('my_day_committed', 'my_day_withdrawn')
+      ORDER BY id
+    `).all('manual-suggestion')).toEqual([
+      { eventType: 'my_day_committed', date: '2026-08-05' },
+      { eventType: 'my_day_withdrawn', date: '2026-08-05' },
+    ]);
   });
 
   it('returns only top-level tasks in every suggestion group', async () => {

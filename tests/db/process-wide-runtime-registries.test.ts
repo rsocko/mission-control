@@ -8,11 +8,14 @@ import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-ope
 import type { SyncControlStateRepository } from '@/lib/sync/control-state';
 import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
 import type { SyncOperatorControlRepository } from '@/lib/sync/operator-control';
-import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
+import {
+  resetModulesPreservingProcessRuntimeRegistries,
+  resetProcessRuntimeRegistries,
+} from '../helpers/process-runtime-registries';
 
 afterEach(() => {
   resetProcessRuntimeRegistries();
-  vi.resetModules();
+  resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
 });
 
 describe('process-wide runtime registries', () => {
@@ -20,7 +23,7 @@ describe('process-wide runtime registries', () => {
     const firstLifecycle = await import('@/lib/persistence/composition-lifecycle');
     firstLifecycle.blockPersistenceComposition();
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondLifecycle = await import('@/lib/persistence/composition-lifecycle');
 
     expect(() => secondLifecycle.assertPersistenceCompositionAccessAllowed())
@@ -34,7 +37,7 @@ describe('process-wide runtime registries', () => {
     const selected = { marker: 'triage' } as unknown as TriagePersistenceRepositories;
     firstRuntime.registerTriagePersistenceRepositories(selected);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/lib/triage/persistence');
 
     expect(secondRuntime.getTriagePersistenceRepositories()).toBe(selected);
@@ -51,7 +54,7 @@ describe('process-wide runtime registries', () => {
     };
     firstRuntime.registerConnectorRegistry(selected);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/lib/connectors/registry-runtime');
 
     expect(secondRuntime.getConnectorRegistry()).toBe(selected);
@@ -81,7 +84,7 @@ describe('process-wide runtime registries', () => {
       delete: vi.fn(async () => undefined),
     });
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondSearch = await import('@/lib/search/keyword-runtime');
     const secondEnrichment = await import(
       '@/lib/notifications/enrichment/ai-enrichment-service'
@@ -116,7 +119,7 @@ describe('process-wide runtime registries', () => {
     firstRuntime.registerDemoSeedCommandService(demoService);
     firstRuntime.registerRelativeReminderTimezoneRepository(timezoneRepository);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/lib/settings/mode-route-services');
 
     expect(secondRuntime.getDemoSeedCommandService()).toBe(demoService);
@@ -133,7 +136,7 @@ describe('process-wide runtime registries', () => {
     } satisfies LegacySearchIndexingService;
     firstIndexing.registerLegacySearchIndexingService(indexingService);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondIndexing = await import('@/lib/search/indexing-service');
 
     expect(secondIndexing.getLegacySearchIndexingService()).toBe(indexingService);
@@ -160,7 +163,7 @@ describe('process-wide runtime registries', () => {
     firstMaintenance.registerConnectorMaintenanceLockRepository(maintenance);
     firstOperator.registerSyncOperatorControlRepository(operator);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondJobs = await import('@/lib/sync/job-runtime');
     const secondLeases = await import('@/lib/sync/connector-lock-runtime');
     const secondControl = await import('@/lib/sync/control-state');

@@ -20,7 +20,28 @@ const processRegistryKeys = [
   'mission-control.sync-operator-control-runtime-registry',
 ];
 
+const preserveAcrossModuleResetKey = Symbol.for(
+  'mission-control.test.preserve-process-runtime-registries-across-module-reset',
+);
+
 export function resetProcessRuntimeRegistries(): void {
   const host = globalThis as typeof globalThis & { [key: symbol]: unknown };
   for (const key of processRegistryKeys) delete host[Symbol.for(key)];
+}
+
+export function shouldPreserveProcessRuntimeRegistriesAcrossModuleReset(): boolean {
+  const host = globalThis as typeof globalThis & { [key: symbol]: unknown };
+  return host[preserveAcrossModuleResetKey] === true;
+}
+
+export function resetModulesPreservingProcessRuntimeRegistries(
+  resetModules: () => void,
+): void {
+  const host = globalThis as typeof globalThis & { [key: symbol]: unknown };
+  host[preserveAcrossModuleResetKey] = true;
+  try {
+    resetModules();
+  } finally {
+    delete host[preserveAcrossModuleResetKey];
+  }
 }

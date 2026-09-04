@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
-import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
+import {
+  resetModulesPreservingProcessRuntimeRegistries,
+  resetProcessRuntimeRegistries,
+} from '../helpers/process-runtime-registries';
 
 function createCoreRepositories(): CorePersistenceRepositories {
   return {
@@ -15,7 +18,7 @@ function createCoreRepositories(): CorePersistenceRepositories {
 
 afterEach(() => {
   resetProcessRuntimeRegistries();
-  vi.resetModules();
+  resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
 });
 
 describe('core persistence runtime', () => {
@@ -24,7 +27,7 @@ describe('core persistence runtime', () => {
     const selected = createCoreRepositories();
     firstRuntime.registerCorePersistenceRepositories(selected);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/lib/persistence/runtime');
 
     expect(secondRuntime.getCorePersistenceRepositories()).toBe(selected);
@@ -48,7 +51,7 @@ describe('core persistence runtime', () => {
     };
     firstRuntime.registerCorePersistenceRepositories(selected);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const {
       getConnectorCapabilities,
       isConnectorEnabled,
@@ -65,7 +68,7 @@ describe('core persistence runtime', () => {
     firstRuntime.registerCorePersistenceRepositories(selected);
     expect(firstRuntime.getCorePersistenceRepositories()).toBe(selected);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/lib/persistence/runtime');
 
     expect(() => secondRuntime.registerCorePersistenceRepositories(createCoreRepositories()))
@@ -93,7 +96,7 @@ describe('core persistence runtime', () => {
       accessed: false,
     };
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const runtime = await import('@/lib/persistence/runtime');
 
     expect(() => runtime.getCorePersistenceRepositories()).toThrow(

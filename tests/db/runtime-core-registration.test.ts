@@ -4,7 +4,10 @@ import type { KeywordSearchRepository } from '@/lib/search/repository';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
-import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
+import {
+  resetModulesPreservingProcessRuntimeRegistries,
+  resetProcessRuntimeRegistries,
+} from '../helpers/process-runtime-registries';
 
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
@@ -177,7 +180,7 @@ vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
 describe('PostgreSQL runtime core repository registration', () => {
   beforeEach(() => {
     resetProcessRuntimeRegistries();
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     vi.clearAllMocks();
     mocks.backend.generation = 0;
     mocks.repositories.length = 0;
@@ -193,7 +196,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     const firstDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
     const expectedDurableRuns = await firstDurableRuntime.getDurableAiRunRepository();
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/db/runtime');
     const secondDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
 

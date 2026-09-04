@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
-import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
+import {
+  resetModulesPreservingProcessRuntimeRegistries,
+  resetProcessRuntimeRegistries,
+} from '../helpers/process-runtime-registries';
 
 function createWorkerRepositories(): WorkerPersistenceRepositories {
   return {
@@ -67,7 +70,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
 
 afterEach(() => {
   resetProcessRuntimeRegistries();
-  vi.resetModules();
+  resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
 });
 
 describe('worker persistence runtime', () => {
@@ -109,7 +112,7 @@ describe('worker persistence runtime', () => {
     const selected = createWorkerRepositories();
     firstRuntime.registerWorkerPersistenceRepositories(selected);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/lib/persistence/worker-runtime');
 
     await expect(secondRuntime.getWorkerPersistenceRepositories()).resolves.toBe(selected);

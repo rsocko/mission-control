@@ -1,7 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
-import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
+import {
+  resetModulesPreservingProcessRuntimeRegistries,
+  resetProcessRuntimeRegistries,
+} from '../helpers/process-runtime-registries';
 
 describe('SQLite runtime composition', () => {
   beforeEach(() => {
@@ -11,7 +14,7 @@ describe('SQLite runtime composition', () => {
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.doUnmock('@/db/bootstrap/connection');
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
   });
 
   afterEach(() => {
@@ -84,7 +87,7 @@ describe('SQLite runtime composition', () => {
       provider: legacyProvider,
       revision: 7,
     };
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
 
     const taskCoreRuntime = await import('@/lib/tasks/core/runtime');
     expect(taskCoreRuntime.getRegisteredTaskCorePersistence()).toBe(selected);
@@ -145,7 +148,7 @@ describe('SQLite runtime composition', () => {
     await firstRuntime.initializeRuntimeDatabase();
     const closeFirst = firstDatabase.sqlite.close.bind(firstDatabase.sqlite);
 
-    vi.resetModules();
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
     const secondRuntime = await import('@/db/runtime');
     await secondRuntime.shutdownRuntimeDatabase();
     closeFirst();

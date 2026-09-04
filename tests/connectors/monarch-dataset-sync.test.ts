@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-monarch-datasets-'));
@@ -148,7 +149,7 @@ function mockDatasets(
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.resetModules();
-  sqlite = (await import('@/db')).sqlite;
+  sqlite = (await importInitializedSqliteDatabase()).sqlite;
   const datasetModule = await import('@/lib/connectors/monarch-money/dataset-sync');
   FinanceDatasetSynchronizer = datasetModule.FinanceDatasetSynchronizer;
   getFinanceDatasetHealth = datasetModule.getFinanceDatasetHealth;

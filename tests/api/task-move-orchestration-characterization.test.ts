@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 const connectorMocks = vi.hoisted(() => {
   const target = {
@@ -74,7 +75,7 @@ describe('task move orchestration characterization', () => {
     vi.resetModules();
 
     const [dbModule, executeRoute, legacyRoute] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/app/api/tasks/move/execute/route'),
       import('@/app/api/tasks/[id]/move/route'),
     ]);

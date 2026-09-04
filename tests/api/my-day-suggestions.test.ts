@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('GET /api/my-day suggestions', () => {
   let db: typeof import('@/db').default;
@@ -23,7 +24,7 @@ describe('GET /api/my-day suggestions', () => {
     vi.resetModules();
 
     const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/app/api/my-day/route'),
     ]);

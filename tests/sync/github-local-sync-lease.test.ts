@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { IConnector } from '@/lib/connectors';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
 import type { SourceList } from '@/types';
@@ -37,7 +38,7 @@ describe('local GitHub sync operation visibility', () => {
 
   it('holds a durable sync lease until identity evidence is finalized', async () => {
     const [{ default: db }, schema, sync, identity] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync'),
       import('@/lib/external-identities'),
@@ -108,7 +109,7 @@ describe('local GitHub sync operation visibility', () => {
 
   it('keeps a persisted source-list collision fail-closed on retry', async () => {
     const [{ default: db }, schema, sync, primaryIdentity] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync'),
       import('@/lib/external-identities/primary-identity'),

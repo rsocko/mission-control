@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 process.env.MC_DB_PATH = ':memory:';
@@ -11,7 +12,7 @@ let eq: typeof import('drizzle-orm').eq;
 const NOW = new Date('2026-08-20T12:00:00.000Z');
 
 beforeAll(async () => {
-  db = (await import('@/db')).default;
+  db = (await importInitializedSqliteDatabase()).default;
   schema = await import('@/db/schema');
   ({ runDueTaskReminders } = await import('@/lib/push/task-reminders'));
   ({ eq } = await import('drizzle-orm'));

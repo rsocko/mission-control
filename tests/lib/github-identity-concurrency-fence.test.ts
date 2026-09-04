@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('GitHub identity persistence concurrency fences', () => {
   beforeEach(() => {
@@ -15,7 +16,7 @@ describe('GitHub identity persistence concurrency fences', () => {
 
   it('rejects stale identity writes and records, then cancels stale run completion', async () => {
     const [{ default: db }, schema, identity, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/external-identities'),
       import('drizzle-orm'),

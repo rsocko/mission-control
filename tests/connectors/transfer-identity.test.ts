@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { decodeLenientJsonObject } from '@/db/persistence/value-codecs';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('@/db');
@@ -20,7 +21,7 @@ describe('task transfer identity persistence', () => {
       { reconcileTransferIdentity },
       { canTransferGitHubIssueSafely },
     ] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
       import('@/lib/connectors/github-issues/repoint-service'),
@@ -102,7 +103,7 @@ describe('task transfer identity persistence', () => {
 
   it('reconciles task-only refreshes when external identity evidence is absent', async () => {
     const [{ default: db }, schema, { reconcileTransferIdentity }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
     ]);
@@ -150,7 +151,7 @@ describe('task transfer identity persistence', () => {
 
   it('rolls back source-list, identity, and task effects after a late task failure', async () => {
     const [{ default: db }, schema, { reconcileTransferIdentity }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
     ]);
@@ -235,7 +236,7 @@ describe('task transfer identity persistence', () => {
 
   it('rejects an oversized batch without partial effects', async () => {
     const [{ default: db }, schema, { reconcileTransferIdentity }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
     ]);
@@ -294,7 +295,7 @@ describe('task transfer identity persistence', () => {
 
   it('returns a promise and the tasks route awaits the new identity write', async () => {
     const [{ default: db }, schema, { persistCreatedTaskIdentity }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
     ]);

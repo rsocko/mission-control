@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-finance-insight-history-'));
@@ -82,7 +83,7 @@ function bridgePage(
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.resetModules();
-  sqlite = (await import('@/db')).sqlite;
+  sqlite = (await importInitializedSqliteDatabase()).sqlite;
   ({
     FinanceInsightHistorySynchronizer,
     buildFinanceInsightHistoryWindows,

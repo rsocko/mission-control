@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { eq } from 'drizzle-orm';
 import type {
   ExternalIdentityObservation,
@@ -25,7 +26,7 @@ let identities: typeof import('@/lib/external-identities');
 let service: typeof import('@/lib/connectors/github-issues/repoint-service');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   const { registerSqliteGitHubRepointBackupVerifier } = await import(
     '@/lib/connectors/github-issues/backup-verifier'
   );

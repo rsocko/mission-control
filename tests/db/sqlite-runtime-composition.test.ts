@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 
 describe('SQLite runtime composition', () => {
   beforeEach(() => {
@@ -16,14 +17,14 @@ describe('SQLite runtime composition', () => {
     delete process.env.MC_DB_PATH;
   });
 
-  it('documents the temporary cold-access publication that L03a2 must remove', async () => {
+  it('keeps raw SQLite access from publishing persistence composition', async () => {
     const source = readFileSync('src/db/index.ts', 'utf8');
-    expect(source).toContain(
-      '// Temporary L03a1 bridge. L03a2 removes this call from raw SQLite access.',
+    const initDatabaseSource = source.slice(
+      source.indexOf('function initDatabase('),
+      source.indexOf('export function initializeDatabase()'),
     );
-    expect(source).toMatch(
-      /function initDatabase\(\)[\s\S]*publishTemporarySqliteCompatibilityComposition\(\)/,
-    );
+    expect(source).not.toContain('publishTemporarySqliteCompatibilityComposition');
+    expect(initDatabaseSource).not.toContain('publishSqliteComposition');
     const connectorSource = readFileSync('src/lib/connectors/index.ts', 'utf8');
     const runtimeSource = readFileSync('src/db/runtime.ts', 'utf8');
     const semanticSource = readFileSync('src/lib/semantic-index/publication.ts', 'utf8');
@@ -35,16 +36,65 @@ describe('SQLite runtime composition', () => {
 
     const database = await import('@/db');
     const workerRuntime = await import('@/lib/persistence/worker-runtime');
+    const taskCoreRuntime = await import('@/lib/tasks/core/runtime');
     await expect(workerRuntime.getWorkerPersistenceRepositories()).rejects.toThrow(
       'Worker persistence repositories must be registered before worker persistence is accessed',
     );
+    await expect(taskCoreRuntime.getTaskCorePersistence()).rejects.toThrow(
+      'Task-core persistence has not been registered',
+    );
 
     database.sqlite.prepare('SELECT 1').get();
-    await expect(workerRuntime.getWorkerPersistenceRepositories()).resolves.toBeDefined();
+    await expect(workerRuntime.getWorkerPersistenceRepositories()).rejects.toThrow(
+      'Worker persistence repositories must be registered before worker persistence is accessed',
+    );
+    await expect(taskCoreRuntime.getTaskCorePersistence()).rejects.toThrow(
+      'Task-core persistence has not been registered',
+    );
 
     const close = database.sqlite.close.bind(database.sqlite);
-    await (await import('@/db/runtime')).shutdownRuntimeDatabase();
+    const runtime = await import('@/db/runtime');
+    await runtime.initializeRuntimeDatabase();
+    await expect(workerRuntime.getWorkerPersistenceRepositories()).resolves.toBeDefined();
+    await expect(taskCoreRuntime.getTaskCorePersistence()).resolves.toBeDefined();
+    await runtime.shutdownRuntimeDatabase();
     close();
+  });
+
+  it('retires a legacy lazy task-core provider without clearing its selected composition', async () => {
+    const legacyKey = Symbol.for('mission-control.task-core-persistence-registry');
+    const currentKey = Symbol.for('mission-control.task-core-persistence-registry.v2');
+    const host = globalThis as typeof globalThis & {
+      [legacyKey]?: {
+        selected: TaskCorePersistence | null;
+        provider: (() => TaskCorePersistence) | null;
+        revision: number;
+      };
+      [currentKey]?: unknown;
+    };
+    const selected = { marker: 'postgres' } as unknown as TaskCorePersistence;
+    const legacyProvider = vi.fn(
+      () => ({ marker: 'sqlite' }) as unknown as TaskCorePersistence,
+    );
+    delete host[currentKey];
+    host[legacyKey] = {
+      selected,
+      provider: legacyProvider,
+      revision: 7,
+    };
+    vi.resetModules();
+
+    const taskCoreRuntime = await import('@/lib/tasks/core/runtime');
+    expect(taskCoreRuntime.getRegisteredTaskCorePersistence()).toBe(selected);
+    await expect(taskCoreRuntime.getTaskCorePersistence()).resolves.toBe(selected);
+    expect(legacyProvider).not.toHaveBeenCalled();
+
+    taskCoreRuntime.clearSelectedTaskCorePersistence(selected);
+    await expect(taskCoreRuntime.getTaskCorePersistence()).rejects.toThrow(
+      'Task-core persistence has not been registered',
+    );
+    expect(legacyProvider).not.toHaveBeenCalled();
+    delete host[legacyKey];
   });
 
   it('shares initialization, fences the full stop interval, and reuses one generation', async () => {

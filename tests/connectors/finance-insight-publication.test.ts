@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import {
   buildFinanceInsightHistoryWindows,
@@ -438,7 +439,7 @@ function resolvedSummary(
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.resetModules();
-  sqlite = (await import('@/db')).sqlite;
+  sqlite = (await importInitializedSqliteDatabase()).sqlite;
   ({
     captureFinanceInsightPublication,
     loadFinanceInsightPublication,

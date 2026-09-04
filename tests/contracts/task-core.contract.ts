@@ -6,8 +6,8 @@ import type {
 } from '@/lib/tasks/core/contracts';
 
 /**
- * Shared, backend-neutral contract suite for the L04 task-core persistence
- * composition.
+ * Shared, backend-neutral contract suite for the task-core persistence
+ * composition (L04 core behavior plus L05 endpoint-oriented reads).
  *
  * The same assertions run against the SQLite adapter (in-process, real
  * better-sqlite3) and the PostgreSQL adapter (guarded live integration).
@@ -38,6 +38,7 @@ export interface SeedTask {
   sourceListName?: string | null;
   assignee?: string | null;
   microStatus?: string | null;
+  snoozedUntil?: string | null;
   metadata?: Record<string, unknown>;
   syncStatus?: string;
   lastSyncedAt?: string;
@@ -64,7 +65,9 @@ export interface SeedSourceList {
   type?: string;
   userDisplayName?: string | null;
   groupId?: string | null;
+  icon?: string | null;
   iconColor?: string | null;
+  hidden?: boolean;
 }
 
 export interface SeedConnector {
@@ -72,6 +75,7 @@ export interface SeedConnector {
   type: string;
   name?: string;
   enabled?: boolean;
+  credentials?: Record<string, unknown>;
   settings?: Record<string, unknown>;
   syncedLists?: string[];
   deletedAt?: string | null;
@@ -106,6 +110,34 @@ export interface SeedSchedule {
   recurrenceMode?: 'schedule' | 'completion';
 }
 
+export interface SeedLinkedSource {
+  id: string;
+  taskId: string;
+  connectorType: string;
+  connectorInstanceId: string;
+  sourceId: string;
+  title: string;
+  linkedAt?: string;
+  matchConfidence?: number | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface SeedProjectPhase {
+  id: string;
+  projectId?: string | null;
+  name: string;
+  isProposed?: boolean;
+  taskIds?: string[];
+}
+
+export interface SeedSourceRanking {
+  id: string;
+  connectorType: string;
+  name: string;
+  rank: number;
+  updatedAt?: string;
+}
+
 export interface TaskCoreContractHarness {
   readonly persistence: TaskCorePersistence;
   reset(): Promise<void>;
@@ -122,6 +154,16 @@ export interface TaskCoreContractHarness {
   insertPriorityEntities(rows: SeedPriorityEntity[]): Promise<void>;
   insertMyDayExclusion(row: { id: string; taskId: string; date: string }): Promise<void>;
   insertTaskSchedules(rows: SeedSchedule[]): Promise<void>;
+  insertLinkedSources(rows: SeedLinkedSource[]): Promise<void>;
+  insertProjectPhases(rows: SeedProjectPhase[]): Promise<void>;
+  insertSourceRankings(rows: SeedSourceRanking[]): Promise<void>;
+  insertQuickSortLogs(rows: Array<{
+    id: string;
+    taskId: string;
+    action: string;
+    triagedAt: string;
+    reversedAt?: string | null;
+  }>): Promise<void>;
   listTaskIds(): Promise<string[]>;
   listTaskTagIds(taskId: string): Promise<string[]>;
   listTaskProjectIds(taskId: string): Promise<string[]>;
@@ -1495,6 +1537,407 @@ export function describeTaskCoreContract(
         ]);
         expect(await harness.persistence.sourceListNames.listSourceListDisplayNames([]))
           .toEqual([]);
+      });
+    });
+
+    describe('endpoint-oriented task reads', () => {
+      it('loads task-scoped attachment and document-preview contexts', async () => {
+        await harness.insertTasks([
+          {
+            id: 'read-task',
+            sourceId: 'remote:read-task',
+            connectorType: 'document-intelligence',
+            connectorInstanceId: 'owl-read',
+            metadata: { documentId: 42 },
+          },
+          {
+            id: 'disabled-task',
+            connectorType: 'document-intelligence',
+            connectorInstanceId: 'owl-disabled',
+            metadata: { documentId: 99 },
+          },
+          {
+            id: 'deleted-task',
+            connectorType: 'document-intelligence',
+            connectorInstanceId: 'owl-deleted',
+            metadata: { documentId: 100 },
+          },
+          {
+            id: 'wrong-connector-task',
+            connectorType: 'document-intelligence',
+            connectorInstanceId: 'wrong-connector',
+            metadata: { documentId: 101 },
+          },
+        ]);
+        await harness.insertAttachments([{
+          id: 'attachment-read',
+          taskId: 'read-task',
+          name: 'read.pdf',
+          contentType: 'application/pdf',
+          size: 8,
+          contentBase64: 'JVBERi0=',
+          sourceAttachmentId: 'remote-attachment',
+        }]);
+        await harness.insertConnectors([
+          {
+            id: 'owl-read',
+            type: 'document-intelligence',
+            credentials: { apiKey: 'key' },
+            settings: { baseUrl: 'https://owl.example' },
+          },
+          {
+            id: 'owl-disabled',
+            type: 'document-intelligence',
+            enabled: false,
+          },
+          {
+            id: 'owl-deleted',
+            type: 'document-intelligence',
+            deletedAt: NOW,
+          },
+          {
+            id: 'wrong-connector',
+            type: 'github-issues',
+          },
+        ]);
+
+        expect(await harness.persistence.taskReads.getAttachmentReadContext(
+          'read-task',
+          'attachment-read',
+        )).toEqual({
+          task: {
+            sourceId: 'remote:read-task',
+            connectorType: 'document-intelligence',
+            connectorInstanceId: 'owl-read',
+          },
+          attachment: {
+            name: 'read.pdf',
+            contentType: 'application/pdf',
+            contentBase64: 'JVBERi0=',
+            sourceAttachmentId: 'remote-attachment',
+          },
+        });
+        expect(await harness.persistence.taskReads.getAttachmentReadContext(
+          'disabled-task',
+          'attachment-read',
+        )).toMatchObject({ attachment: null });
+        expect(await harness.persistence.taskReads.getAttachmentReadContext(
+          'missing-task',
+          'attachment-read',
+        )).toEqual({ task: null, attachment: null });
+
+        expect(await harness.persistence.taskReads.getDocumentPreviewContext('read-task'))
+          .toEqual({
+            task: {
+              connectorType: 'document-intelligence',
+              connectorInstanceId: 'owl-read',
+              metadata: { documentId: 42 },
+            },
+            connector: {
+              credentials: { apiKey: 'key' },
+              settings: { baseUrl: 'https://owl.example' },
+            },
+          });
+        expect(await harness.persistence.taskReads.getDocumentPreviewContext('disabled-task'))
+          .toMatchObject({ connector: null });
+        expect(await harness.persistence.taskReads.getDocumentPreviewContext('deleted-task'))
+          .toMatchObject({ connector: null });
+        expect(await harness.persistence.taskReads.getDocumentPreviewContext('wrong-connector-task'))
+          .toMatchObject({ connector: null });
+      });
+
+      it('returns linked-source DTOs without requiring the task to exist', async () => {
+        await harness.insertLinkedSources([{
+          id: 'linked-1',
+          taskId: 'not-present',
+          connectorType: 'github-issues',
+          connectorInstanceId: 'gh-1',
+          sourceId: 'issue:1',
+          title: 'Linked issue',
+          linkedAt: NOW,
+          matchConfidence: 0.8,
+          metadata: { repository: 'owner/repo' },
+        }]);
+
+        expect(await harness.persistence.taskReads.listLinkedSources('not-present')).toEqual([{
+          id: 'linked-1',
+          taskId: 'not-present',
+          connectorType: 'github-issues',
+          connectorInstanceId: 'gh-1',
+          sourceId: 'issue:1',
+          title: 'Linked issue',
+          linkedAt: NOW,
+          matchConfidence: 0.8,
+          metadata: { repository: 'owner/repo' },
+        }]);
+        expect(await harness.persistence.taskReads.listLinkedSources('missing')).toEqual([]);
+      });
+
+      it('searches relationship candidates with SQLite LIKE wildcard and binary ordering', async () => {
+        await harness.insertTasks([
+          { id: 'source', title: 'Source task' },
+          { id: 'candidate-b', title: 'alpha task' },
+          { id: 'candidate-a', title: 'Alpha task' },
+          { id: 'candidate-other', title: 'Other' },
+        ]);
+        await harness.insertProjects([{ id: 'project-read', name: 'Read Project' }]);
+        await harness.insertTaskProjects([
+          { taskId: 'candidate-a', projectId: 'project-read' },
+        ]);
+
+        const candidates = await harness.persistence.taskReads.searchRelationshipCandidates({
+          taskId: 'source',
+          query: 'ALPHA',
+          limit: 50,
+        });
+        expect(candidates?.map((candidate) => candidate.id))
+          .toEqual(['candidate-a', 'candidate-b']);
+        expect(candidates?.[0]).toMatchObject({
+          projectIds: ['project-read'],
+          projectNames: ['Read Project'],
+        });
+        expect(await harness.persistence.taskReads.searchRelationshipCandidates({
+          taskId: 'source',
+          query: '%',
+          limit: 1,
+        })).toHaveLength(1);
+        expect(await harness.persistence.taskReads.searchRelationshipCandidates({
+          taskId: 'missing',
+          query: '',
+          limit: 20,
+        })).toBeNull();
+      });
+
+      it('preserves duplicate candidate visibility and binary assignee ordering', async () => {
+        await harness.insertTasks([
+          { id: 'open-a', status: 'todo', assignee: 'alice' },
+          { id: 'open-b', status: 'in_progress', assignee: ' Bob ' },
+          { id: 'closed', status: 'done', assignee: 'alice' },
+          { id: 'blank', status: 'todo', assignee: '   ' },
+        ]);
+
+        expect((await harness.persistence.taskReads.listDuplicateDetectionTasks({
+          includeClosedTasks: false,
+        })).map((task) => task.id).sort()).toEqual(['blank', 'open-a', 'open-b']);
+        expect(await harness.persistence.taskReads.listDuplicateDetectionTasks({
+          includeClosedTasks: true,
+        })).toHaveLength(4);
+        expect(await harness.persistence.taskReads.listDistinctTaskAssignees())
+          .toEqual(['   ', ' Bob ', 'alice']);
+      });
+
+      it('computes scalar and many-to-many groups with canonical visibility', async () => {
+        await harness.insertTasks([
+          {
+            id: 'group-a',
+            title: 'Group A',
+            priority: 'high',
+            planningHorizon: 'next',
+            dueDate: TODAY,
+            sourceListId: 'list-a',
+            sourceListName: 'Raw List',
+            effort: 2,
+          },
+          {
+            id: 'group-b',
+            title: 'Group B',
+            status: 'in_progress',
+            priority: '',
+            connectorType: '',
+            dueDate: null,
+            effort: null,
+          },
+        ]);
+        await harness.insertSourceLists([{
+          id: 'source-list-a',
+          connectorInstanceId: 'local',
+          sourceId: 'list-a',
+          name: 'List A',
+          userDisplayName: 'Pretty List',
+        }]);
+        await harness.insertTags([{ id: 'group-tag', name: 'Grouped', slug: 'grouped' }]);
+        await harness.insertTaskTags([{ taskId: 'group-a', tagId: 'group-tag' }]);
+        await harness.insertProjects([{ id: 'group-project', name: 'Project' }]);
+        await harness.insertTaskProjects([{ taskId: 'group-a', projectId: 'group-project' }]);
+        await harness.insertProjectPhases([{
+          id: 'group-phase',
+          projectId: 'group-project',
+          name: 'Phase',
+          taskIds: ['group-a'],
+        }]);
+
+        const expected = {
+          status: { 'To Do': 1, 'In Progress': 1 },
+          priority: { high: 1, none: 1 },
+          planningHorizon: { Next: 1, 'Not set': 1 },
+          source: { local: 2 },
+          list: { 'Pretty List': 1, 'No List': 1 },
+          effort: { '2': 1, 'No Effort': 1 },
+          dueDate: { Today: 1, 'No Due Date': 1 },
+          tag: { Grouped: 1, Untagged: 1 },
+          project: { 'Project › Phase': 1, 'No Project': 1 },
+        } as const;
+        for (const groupBy of Object.keys(expected) as Array<keyof typeof expected>) {
+          expect(await harness.persistence.taskReads.getGroupCounts({
+            spec: makeSpec(),
+            groupBy,
+          })).toEqual(expected[groupBy]);
+        }
+      });
+
+      it('applies quick-sort scope, ordering, associations, and skip boundaries', async () => {
+        const now = '2026-08-10T12:00:00.000Z';
+        const skipCutoff = '2026-08-03T12:00:00.000Z';
+        await harness.insertTasks([
+          {
+            id: 'queue-b',
+            title: 'Queue B',
+            priority: 'none',
+            createdAt: '2026-08-09T00:00:00.000Z',
+            sourceListId: 'list-a',
+            sourceListName: 'Raw List',
+          },
+          {
+            id: 'queue-a',
+            title: 'Queue A',
+            priority: 'none',
+            createdAt: '2026-08-09T00:00:00.000Z',
+            sourceListId: 'list-a',
+            sourceListName: 'Raw List',
+          },
+          { id: 'queue-closed', status: 'done', priority: 'none' },
+          { id: 'queue-child', parentId: 'queue-a', priority: 'none' },
+          { id: 'queue-snoozed', snoozedUntil: '2026-08-11T00:00:00.000Z', priority: 'none' },
+          { id: 'queue-skipped', priority: 'none' },
+          { id: 'queue-boundary', priority: 'none' },
+          {
+            id: 'queue-notification',
+            connectorType: 'outlook-email',
+            connectorInstanceId: 'mail-1',
+            priority: 'none',
+          },
+          {
+            id: 'queue-deleted',
+            connectorType: 'github-issues',
+            connectorInstanceId: 'deleted-connector',
+            priority: 'none',
+          },
+        ]);
+        await harness.insertConnectors([{
+          id: 'deleted-connector',
+          type: 'github-issues',
+          deletedAt: '2026-08-09T00:00:00.000Z',
+        }]);
+        await harness.insertQuickSortLogs([{
+          id: 'skip-log',
+          taskId: 'queue-skipped',
+          action: 'skipped',
+          triagedAt: '2026-08-09T00:00:00.000Z',
+        }, {
+          id: 'boundary-log',
+          taskId: 'queue-boundary',
+          action: 'skipped',
+          triagedAt: skipCutoff,
+        }]);
+        await harness.insertTags([{ id: 'queue-tag', name: 'Queue', slug: 'queue' }]);
+        await harness.insertTaskTags([{ taskId: 'queue-a', tagId: 'queue-tag' }]);
+        await harness.insertProjects([{ id: 'queue-project', name: 'Queue Project' }]);
+        await harness.insertTaskProjects([{ taskId: 'queue-a', projectId: 'queue-project' }]);
+        await harness.insertProjectPhases([{
+          id: 'queue-phase',
+          projectId: 'queue-project',
+          name: 'Queue Phase',
+          taskIds: ['queue-a'],
+        }]);
+        await harness.insertSourceLists([{
+          id: 'queue-list',
+          connectorInstanceId: 'local',
+          sourceId: 'list-a',
+          name: 'Raw List',
+          userDisplayName: 'Queue List',
+          icon: 'list',
+        }]);
+        const scope = {
+          now,
+          skipCutoff,
+          sourceTypes: [] as string[],
+          sourceListId: null,
+          sourceListName: null,
+          connectorInstanceId: null,
+        };
+
+        expect(await harness.persistence.taskReads.getQuickSortCounts(scope)).toEqual({
+          no_priority: 4,
+          quadrant: 4,
+          no_effort: 4,
+          no_tags: 3,
+          no_planning_horizon: 4,
+        });
+        const queue = await harness.persistence.taskReads.listQuickSortTasks({
+          ...scope,
+          mode: 'no_priority',
+          order: 'newest',
+          limit: 50,
+        });
+        expect(queue.map((task) => task.id))
+          .toEqual(['queue-a', 'queue-b', 'queue-boundary', 'queue-notification']);
+        expect(queue[0]).toMatchObject({
+          tags: [{ id: 'queue-tag', name: 'Queue', slug: 'queue', color: null }],
+          projects: [{ id: 'queue-project', name: 'Queue Project' }],
+          phases: [{ id: 'queue-phase', name: 'Queue Phase', projectId: 'queue-project' }],
+        });
+        expect((await harness.persistence.taskReads.listQuickSortTasks({
+          ...scope,
+          mode: 'no_tags',
+          order: 'smart',
+          limit: 50,
+        })).map((task) => task.id)).toEqual([
+          'queue-boundary',
+          'queue-notification',
+          'queue-b',
+        ]);
+
+        const sources = await harness.persistence.taskReads.listQuickSortSources({ now, skipCutoff });
+        expect(sources.rows.reduce((total, row) => total + row.count, 0)).toBe(4);
+        expect(sources.definitions).toContainEqual(expect.objectContaining({
+          sourceId: 'list-a',
+          userDisplayName: 'Queue List',
+          hidden: false,
+        }));
+      });
+
+      it('returns deterministic quick-sort suggestion inputs', async () => {
+        await harness.insertTasks([
+          { id: 'suggestion-task', title: 'Fix bug', priority: 'none' },
+          { id: 'other-task', title: 'Other task' },
+        ]);
+        await harness.insertTags([
+          { id: 'tag-b', name: 'B', slug: 'b' },
+          { id: 'tag-a', name: 'A', slug: 'a' },
+        ]);
+        await harness.insertTaskTags([
+          { taskId: 'suggestion-task', tagId: 'tag-a' },
+          { taskId: 'other-task', tagId: 'tag-b' },
+        ]);
+        await harness.insertSourceRankings([{
+          id: 'local',
+          connectorType: 'local',
+          name: 'Local',
+          rank: 1,
+        }]);
+
+        const inputs = await harness.persistence.taskReads
+          .getQuickSortSuggestionInputs(['suggestion-task', 'missing']);
+        expect(inputs.tasks.map((task) => task.id)).toEqual(['suggestion-task']);
+        expect(inputs.sourceRankings).toEqual([{
+          id: 'local',
+          connectorType: 'local',
+          name: 'Local',
+          rank: 1,
+          updatedAt: NOW,
+        }]);
+        expect(inputs.tags.map((tag) => tag.id)).toEqual(['tag-a', 'tag-b']);
+        expect(inputs.taskTags).toHaveLength(2);
       });
     });
 

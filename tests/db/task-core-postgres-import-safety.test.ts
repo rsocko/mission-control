@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 
 /**
- * Poisoned-SQLite proof for the L04 task-core surface.
+ * Poisoned-SQLite proof for the L04/L05 task-core surface.
  *
  * `@/db` (the module that opens better-sqlite3) is replaced with a module that
  * throws the moment anything imports it, and the backend is switched to
@@ -18,6 +18,26 @@ const poisonState = vi.hoisted(() => ({ triggered: false }));
 vi.mock('@/db', () => {
   poisonState.triggered = true;
   throw new Error('POISONED: @/db must not be imported by migrated task-core consumers');
+});
+vi.mock('@/db/index', () => {
+  poisonState.triggered = true;
+  throw new Error('POISONED: src/db/index.ts must not be imported');
+});
+vi.mock('@/db/bootstrap/connection', () => {
+  poisonState.triggered = true;
+  throw new Error('POISONED: SQLite bootstrap must not be imported');
+});
+vi.mock('@/db/persistence/sqlite-task-core-repositories', () => {
+  poisonState.triggered = true;
+  throw new Error('POISONED: SQLite task-core adapter must not be imported');
+});
+vi.mock('better-sqlite3', () => {
+  poisonState.triggered = true;
+  throw new Error('POISONED: better-sqlite3 must not be imported');
+});
+vi.mock('drizzle-orm/better-sqlite3', () => {
+  poisonState.triggered = true;
+  throw new Error('POISONED: the SQLite Drizzle driver must not be imported');
 });
 
 /**
@@ -37,6 +57,9 @@ const originalBackend = process.env.MC_DATABASE_BACKEND;
 
 let runtime: typeof import('@/lib/tasks/core/runtime');
 let corePersistenceRuntime: typeof import('@/lib/persistence/runtime');
+let createPostgresTaskCorePersistence:
+  typeof import('@/db/postgres/repositories/task-core-repositories')
+    .createPostgresTaskCorePersistence;
 let modules: {
   scoutHardDelete: typeof import('@/lib/tasks/scout-hard-delete');
   lifecycle: typeof import('@/lib/tasks/local-task-lifecycle');
@@ -51,9 +74,71 @@ let modules: {
   statsComputer: typeof import('@/app/api/tasks/stats-computer');
   pendingSyncMove: typeof import('@/lib/tasks/task-move-pending-sync');
   writeThroughMove: typeof import('@/lib/tasks/task-move-write-through');
+  attachmentContent: typeof import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
+  documentPreview: typeof import('@/app/api/tasks/[id]/document-preview/route');
+  linkedSources: typeof import('@/app/api/tasks/[id]/linked-sources/route');
+  relationshipCandidates: typeof import('@/app/api/tasks/[id]/relationship-candidates/route');
+  duplicateDetection: typeof import('@/app/api/tasks/detect-duplicates/route');
+  filterOptions: typeof import('@/app/api/tasks/filter-options/route');
+  groupCounts: typeof import('@/app/api/tasks/group-counts/route');
+  quickSort: typeof import('@/app/api/tasks/quick-sort/route');
+  quickSortSuggestions: typeof import('@/app/api/tasks/quick-sort/suggestions/route');
 };
 
 const calls: string[] = [];
+
+function createPostgresReadDatabaseDouble() {
+  const select = vi.fn((selection: Record<string, unknown>) => {
+    const keys = Object.keys(selection);
+    const terminal = keys.includes('attachmentId')
+      ? [{
+          sourceId: 'local:task-1',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+          attachmentId: 'attachment-1',
+          attachmentName: 'proof.txt',
+          attachmentContentType: 'text/plain',
+          attachmentContentBase64: 'cHJvb2Y=',
+          sourceAttachmentId: null,
+        }]
+      : keys.includes('documentConnectorId')
+        ? [{
+            connectorType: 'local',
+            connectorInstanceId: 'local',
+            metadata: {},
+            documentConnectorId: null,
+            credentials: null,
+            settings: null,
+          }]
+        : keys.includes('linkedAt')
+          ? []
+          : keys.length === 1 && keys[0] === 'id'
+            ? [{ id: 'task-1' }]
+            : keys.includes('sourceListName') && !keys.includes('createdAt')
+              ? []
+              : keys.includes('snoozedUntil')
+                ? []
+                : keys.includes('createdAt')
+                  ? []
+                  : keys.includes('assignee')
+                    ? []
+                    : keys.includes('group')
+                      ? [{ group: 'To Do', count: 1 }]
+                      : keys.length === 1 && keys[0] === 'count'
+                        ? [{ count: 0 }]
+                        : [];
+    const chain = new Proxy<Record<PropertyKey, unknown>>({}, {
+      get(_, property) {
+        if (property === 'then') {
+          return (resolve: (value: unknown) => unknown) => resolve(terminal);
+        }
+        return () => chain;
+      },
+    });
+    return chain;
+  });
+  return { select };
+}
 
 function fakePersistence(): TaskCorePersistence {
   const record = <T>(name: string, value: T) => {
@@ -62,6 +147,52 @@ function fakePersistence(): TaskCorePersistence {
   };
 
   return {
+    taskReads: {
+      getAttachmentReadContext: () => record('getAttachmentReadContext', {
+        task: {
+          sourceId: 'local:task-1',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+        },
+        attachment: {
+          name: 'proof.txt',
+          contentType: 'text/plain',
+          contentBase64: 'cHJvb2Y=',
+          sourceAttachmentId: null,
+        },
+      }),
+      getDocumentPreviewContext: () => record('getDocumentPreviewContext', {
+        task: {
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+          metadata: {},
+        },
+        connector: null,
+      }),
+      listLinkedSources: () => record('listLinkedSources', []),
+      searchRelationshipCandidates: () => record('searchRelationshipCandidates', []),
+      listDuplicateDetectionTasks: () => record('listDuplicateDetectionTasks', []),
+      listDistinctTaskAssignees: () => record('listDistinctTaskAssignees', []),
+      getGroupCounts: () => record('getGroupCounts', { 'To Do': 1 }),
+      listQuickSortSources: () => record('listQuickSortSources', {
+        rows: [],
+        definitions: [],
+      }),
+      getQuickSortCounts: () => record('getQuickSortCounts', {
+        no_priority: 0,
+        quadrant: 0,
+        no_effort: 0,
+        no_tags: 0,
+        no_planning_horizon: 0,
+      }),
+      listQuickSortTasks: () => record('listQuickSortTasks', []),
+      getQuickSortSuggestionInputs: () => record('getQuickSortSuggestionInputs', {
+        tasks: [],
+        sourceRankings: [],
+        tags: [],
+        taskTags: [],
+      }),
+    },
     filterInputs: {
       listMyDayTaskIds: () => record('listMyDayTaskIds', ['task-1']),
       listAssignedGitHubUsernames: () => record('listAssignedGitHubUsernames', ['octocat']),
@@ -165,6 +296,14 @@ function fakePersistence(): TaskCorePersistence {
         userDisplayName: 'Pretty',
       }]),
     },
+    transferIdentity: {
+      resolveIdentityTargets: () => record('resolveIdentityTargets', {
+        taskExists: false,
+        taskMetadata: {},
+        sourceLists: [],
+      }),
+      reconcileTaskRefresh: () => record('reconcileTaskRefresh', false),
+    },
   };
 }
 
@@ -175,6 +314,9 @@ beforeAll(async () => {
 
   runtime = await import('@/lib/tasks/core/runtime');
   runtime.registerTaskCorePersistence(fakePersistence());
+  ({ createPostgresTaskCorePersistence } = await import(
+    '@/db/postgres/repositories/task-core-repositories'
+  ));
 
   // The move resolves connector configuration through the L01 core
   // repositories, which are backend-selected the same way.
@@ -204,6 +346,15 @@ beforeAll(async () => {
     statsComputer: await import('@/app/api/tasks/stats-computer'),
     pendingSyncMove: await import('@/lib/tasks/task-move-pending-sync'),
     writeThroughMove: await import('@/lib/tasks/task-move-write-through'),
+    attachmentContent: await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route'),
+    documentPreview: await import('@/app/api/tasks/[id]/document-preview/route'),
+    linkedSources: await import('@/app/api/tasks/[id]/linked-sources/route'),
+    relationshipCandidates: await import('@/app/api/tasks/[id]/relationship-candidates/route'),
+    duplicateDetection: await import('@/app/api/tasks/detect-duplicates/route'),
+    filterOptions: await import('@/app/api/tasks/filter-options/route'),
+    groupCounts: await import('@/app/api/tasks/group-counts/route'),
+    quickSort: await import('@/app/api/tasks/quick-sort/route'),
+    quickSortSuggestions: await import('@/app/api/tasks/quick-sort/suggestions/route'),
   };
 });
 
@@ -303,6 +454,47 @@ describe('task-core under PostgreSQL with a poisoned SQLite module', () => {
     expect(calls).toContain('getStats');
     expect(calls).toContain('getSourceCounts');
     expect(calls).toContain('getAvailableTags');
+  });
+
+  it('executes all nine L05 routes through the genuine PostgreSQL adapter', async () => {
+    const database = createPostgresReadDatabaseDouble();
+    runtime.registerTaskCorePersistence(createPostgresTaskCorePersistence(database as never));
+    try {
+      const routeContext = { params: Promise.resolve({ id: 'task-1' }) };
+      const attachmentResponse = await modules.attachmentContent.GET(
+        new Request('http://localhost/api/tasks/task-1/attachments/attachment-1'),
+        { params: Promise.resolve({ id: 'task-1', attachmentId: 'attachment-1' }) },
+      );
+      expect(await attachmentResponse.text()).toBe('proof');
+      expect((await modules.documentPreview.GET(
+        new Request('http://localhost/api/tasks/task-1/document-preview'),
+        routeContext,
+      )).status).toBe(400);
+      expect((await modules.linkedSources.GET(
+        new Request('http://localhost/api/tasks/task-1/linked-sources'),
+        routeContext,
+      )).status).toBe(200);
+      expect((await modules.relationshipCandidates.GET(
+        new Request('http://localhost/api/tasks/task-1/relationship-candidates'),
+        routeContext,
+      )).status).toBe(200);
+      expect((await modules.duplicateDetection.GET(
+        new Request('http://localhost/api/tasks/detect-duplicates'),
+      )).status).toBe(200);
+      expect((await modules.filterOptions.GET()).status).toBe(200);
+      expect((await modules.groupCounts.GET(
+        new Request('http://localhost/api/tasks/group-counts?groupBy=status'),
+      )).status).toBe(200);
+      expect((await modules.quickSort.GET(
+        new Request('http://localhost/api/tasks/quick-sort?counts=true'),
+      )).status).toBe(200);
+      expect((await modules.quickSortSuggestions.GET(
+        new Request('http://localhost/api/tasks/quick-sort/suggestions?taskIds=task-1'),
+      )).status).toBe(200);
+      expect(database.select).toHaveBeenCalled();
+    } finally {
+      runtime.registerTaskCorePersistence(fakePersistence());
+    }
   });
 
   it('runs both task-move strategies without a SQLite handle', async () => {

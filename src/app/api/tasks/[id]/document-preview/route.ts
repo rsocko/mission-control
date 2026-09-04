@@ -1,12 +1,10 @@
-import { eq } from 'drizzle-orm';
-import db from '@/db';
-import { connectorConfigs, tasks } from '@/db/schema';
 import { apiError, ApiErrors } from '@/lib/api-error';
 import {
   getDocumentIntelligenceApiKey,
   getDocumentIntelligenceBaseUrl,
 } from '@/lib/connectors/document-intelligence';
 import logger from '@/lib/logger';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
 
 const MAX_PREVIEW_BYTES = 100 * 1024 * 1024;
@@ -49,11 +47,8 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [task] = await db.select({
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-      metadata: tasks.metadata,
-    }).from(tasks).where(eq(tasks.id, id)).limit(1);
+    const { taskReads } = await getTaskCorePersistence();
+    const { task, connector } = await taskReads.getDocumentPreviewContext(id);
 
     if (!task) return ApiErrors.notFound('Task');
     if (task.connectorType !== 'document-intelligence') {
@@ -66,22 +61,7 @@ export async function GET(
       return ApiErrors.badRequest('The OWL task does not contain a valid document ID');
     }
 
-    const [connector] = await db.select({
-      type: connectorConfigs.type,
-      enabled: connectorConfigs.enabled,
-      deletedAt: connectorConfigs.deletedAt,
-      credentials: connectorConfigs.credentials,
-      settings: connectorConfigs.settings,
-    }).from(connectorConfigs)
-      .where(eq(connectorConfigs.id, task.connectorInstanceId))
-      .limit(1);
-
-    if (
-      !connector
-      || connector.type !== 'document-intelligence'
-      || !connector.enabled
-      || connector.deletedAt
-    ) {
+    if (!connector) {
       return ApiErrors.notFound('OWL connector');
     }
 

@@ -1,4 +1,19 @@
-import { and, asc, desc, eq, inArray, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import db, { runTransaction } from '@/db';
 import * as schema from '@/db/schema';
@@ -6,6 +21,7 @@ import {
   appSettings,
   connectorConfigs,
   focusItems,
+  hubProjects,
   myDayExclusions,
   myDayItems,
   notifications,
@@ -13,12 +29,14 @@ import {
   prioritySyncLog,
   projectAutoIncludeExclusions,
   projectPhaseItems,
+  projectPhases,
   quickSortLog,
   quickSortOperations,
   scoutReconciliationEvaluations,
   scoutReconciliationSuggestions,
   scoutReconciliationTaskState,
   sourceLists,
+  sourceRankings,
   syncDeletionCandidates,
   syncDeletionSnapshots,
   tags,
@@ -36,6 +54,7 @@ import {
 } from '@/db/schema';
 import { detachTaskDescendants } from '@/lib/tasks/task-hierarchy-deletion';
 import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
+import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
 import {
   reconcileSqliteTaskTransferIdentityRefreshForRepository,
@@ -73,8 +92,10 @@ import {
   type TaskAttachmentRow,
   type TaskCorePersistence,
   type TaskDependencyEndpoints,
+  type TaskDuplicateDetectionRow,
   type TaskFilterInputRepository,
   type TaskFilterSpec,
+  type TaskGroupMode,
   type TaskListPage,
   type TaskMoveClaimReleaseRequest,
   type TaskMoveClaimRequest,
@@ -93,6 +114,13 @@ import {
   type TaskPolicyIdentityRepository,
   type TaskQueryRepository,
   type TaskQueryScope,
+  type TaskQuickSortOrder,
+  type TaskQuickSortQueueMode,
+  type TaskQuickSortQueueRow,
+  type TaskQuickSortScope,
+  type TaskQuickSortSuggestionInputs,
+  type TaskReadRepository,
+  type TaskRelationshipCandidateRow,
   type TaskScheduleRow,
   type TaskSourceIdentityRow,
   type TaskSourceCounts,
@@ -412,6 +440,656 @@ class SqliteTaskQueryRepository implements TaskQueryRepository {
       confirmed: Boolean(row.confirmed),
       count: Number(row.count ?? 0),
     }));
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Endpoint-oriented task reads
+ * ------------------------------------------------------------------ */
+
+function sqliteListGroupExpression(): SQL<string> {
+  return sql<string>`COALESCE(
+    NULLIF((
+      SELECT COALESCE(NULLIF(${sourceLists.userDisplayName}, ''), NULLIF(${sourceLists.name}, ''))
+      FROM ${sourceLists}
+      WHERE ${sourceLists.connectorInstanceId} = ${tasks.connectorInstanceId}
+        AND ${sourceLists.sourceId} = ${tasks.sourceListId}
+      LIMIT 1
+    ), ''),
+    NULLIF(${tasks.sourceListName}, ''),
+    'No List'
+  )`;
+}
+
+function sqliteScalarGroupExpression(
+  groupBy: Exclude<TaskGroupMode, 'tag' | 'project' | 'dueDate'>,
+): SQL<string> {
+  if (groupBy === 'status') {
+    return sql<string>`CASE
+      WHEN ${tasks.status} = 'done' THEN 'Completed'
+      WHEN ${tasks.status} = 'cancelled' THEN 'Cancelled'
+      WHEN ${tasks.status} = 'in_progress' THEN 'In Progress'
+      ELSE 'To Do'
+    END`;
+  }
+  if (groupBy === 'priority') {
+    return sql<string>`COALESCE(NULLIF(${tasks.priority}, ''), 'none')`;
+  }
+  if (groupBy === 'planningHorizon') {
+    return sql<string>`CASE ${tasks.planningHorizon}
+      WHEN 'next' THEN 'Next'
+      WHEN 'soon' THEN 'Soon'
+      WHEN 'later' THEN 'Later'
+      WHEN 'someday' THEN 'Someday'
+      ELSE 'Not set'
+    END`;
+  }
+  if (groupBy === 'source') {
+    return sql<string>`COALESCE(NULLIF(${tasks.connectorType}, ''), 'local')`;
+  }
+  if (groupBy === 'list') return sqliteListGroupExpression();
+  if (groupBy === 'effort') {
+    return sql<string>`CASE
+      WHEN ${tasks.effort} IS NULL THEN ${NO_EFFORT_GROUP_LABEL}
+      ELSE CAST(${tasks.effort} AS TEXT)
+    END`;
+  }
+  const exhaustive: never = groupBy;
+  throw new Error(`Unsupported task group: ${exhaustive}`);
+}
+
+class SqliteTaskReadRepository implements TaskReadRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly filterInputs: TaskFilterInputRepository,
+  ) {}
+
+  private async resolveInputs(spec: TaskFilterSpec): Promise<CanonicalTaskFilterInputs> {
+    const [myDayTaskIds, assignedGitHubUsernames, inboxListEntries] = await Promise.all([
+      this.filterInputs.listMyDayTaskIds(spec.myDayDate),
+      this.filterInputs.listAssignedGitHubUsernames(),
+      this.filterInputs.listInboxListEntries(),
+    ]);
+    return { myDayTaskIds, assignedGitHubUsernames, inboxListEntries };
+  }
+
+  async getAttachmentReadContext(taskId: string, attachmentId: string) {
+    const [row] = await this.database.select({
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      attachmentId: taskAttachments.id,
+      attachmentName: taskAttachments.name,
+      attachmentContentType: taskAttachments.contentType,
+      attachmentContentBase64: taskAttachments.contentBase64,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+    }).from(tasks).leftJoin(
+      taskAttachments,
+      and(
+        eq(taskAttachments.taskId, tasks.id),
+        eq(taskAttachments.id, attachmentId),
+      ),
+    ).where(eq(tasks.id, taskId)).limit(1);
+
+    if (!row) return { task: null, attachment: null };
+    return {
+      task: {
+        sourceId: row.sourceId,
+        connectorType: row.connectorType,
+        connectorInstanceId: row.connectorInstanceId,
+      },
+      attachment: row.attachmentId === null
+        ? null
+        : {
+            name: row.attachmentName!,
+            contentType: row.attachmentContentType!,
+            contentBase64: row.attachmentContentBase64 ?? null,
+            sourceAttachmentId: row.sourceAttachmentId ?? null,
+          },
+    };
+  }
+
+  async getDocumentPreviewContext(taskId: string) {
+    const [row] = await this.database.select({
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      metadata: tasks.metadata,
+      documentConnectorId: connectorConfigs.id,
+      credentials: connectorConfigs.credentials,
+      settings: connectorConfigs.settings,
+    }).from(tasks).leftJoin(
+      connectorConfigs,
+      and(
+        eq(tasks.connectorType, 'document-intelligence'),
+        eq(connectorConfigs.id, tasks.connectorInstanceId),
+        eq(connectorConfigs.type, 'document-intelligence'),
+        eq(connectorConfigs.enabled, true),
+        isNull(connectorConfigs.deletedAt),
+      ),
+    ).where(eq(tasks.id, taskId)).limit(1);
+
+    if (!row) return { task: null, connector: null };
+    return {
+      task: {
+        connectorType: row.connectorType,
+        connectorInstanceId: row.connectorInstanceId,
+        metadata: decodeLenientJsonObject(row.metadata),
+      },
+      connector: row.documentConnectorId === null
+        ? null
+        : {
+            credentials: decodeLenientJsonObject(row.credentials),
+            settings: decodeLenientJsonObject(row.settings),
+          },
+    };
+  }
+
+  async listLinkedSources(taskId: string) {
+    const rows = await this.database.select({
+      id: taskLinkedSources.id,
+      taskId: taskLinkedSources.taskId,
+      connectorType: taskLinkedSources.connectorType,
+      connectorInstanceId: taskLinkedSources.connectorInstanceId,
+      sourceId: taskLinkedSources.sourceId,
+      title: taskLinkedSources.title,
+      linkedAt: taskLinkedSources.linkedAt,
+      matchConfidence: taskLinkedSources.matchConfidence,
+      metadata: taskLinkedSources.metadata,
+    }).from(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId));
+
+    return rows.map((row) => ({
+      ...row,
+      matchConfidence: row.matchConfidence ?? null,
+      metadata: decodeLenientJsonObject(row.metadata),
+    }));
+  }
+
+  async searchRelationshipCandidates(input: {
+    readonly taskId: string;
+    readonly query: string;
+    readonly limit: number;
+  }): Promise<TaskRelationshipCandidateRow[] | null> {
+    const [sourceTask] = await this.database
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId))
+      .limit(1);
+    if (!sourceTask) return null;
+
+    const boundedLimit = Math.max(1, Math.min(input.limit, 50));
+    const normalizedQuery = input.query.trim();
+    const candidateRows = await this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      connectorType: tasks.connectorType,
+      sourceListName: tasks.sourceListName,
+    }).from(tasks).where(and(
+      ne(tasks.id, input.taskId),
+      normalizedQuery ? like(tasks.title, `%${normalizedQuery}%`) : undefined,
+    )).orderBy(
+      asc(sql`${tasks.title} COLLATE BINARY`),
+      asc(sql`${tasks.id} COLLATE BINARY`),
+    ).limit(boundedLimit);
+
+    const candidateIds = candidateRows.map((candidate) => candidate.id);
+    if (candidateIds.length === 0) return [];
+    const membershipRows = await this.database.select({
+      taskId: taskProjects.taskId,
+      projectId: taskProjects.projectId,
+    }).from(taskProjects).where(inArray(taskProjects.taskId, candidateIds));
+    const projectIds = [...new Set(membershipRows.map((row) => row.projectId))];
+    const projectRows = projectIds.length > 0
+      ? await this.database.select({
+          id: hubProjects.id,
+          name: hubProjects.name,
+        }).from(hubProjects).where(inArray(hubProjects.id, projectIds))
+      : [];
+    const projectNameById = new Map(projectRows.map((project) => [project.id, project.name]));
+    const membershipsByTask = new Map<string, string[]>();
+    for (const membership of membershipRows) {
+      const ids = membershipsByTask.get(membership.taskId) ?? [];
+      ids.push(membership.projectId);
+      membershipsByTask.set(membership.taskId, ids);
+    }
+
+    return candidateRows.map((candidate) => {
+      const candidateProjectIds = membershipsByTask.get(candidate.id) ?? [];
+      return {
+        ...candidate,
+        sourceListName: candidate.sourceListName ?? null,
+        projectIds: candidateProjectIds,
+        projectNames: candidateProjectIds
+          .map((projectId) => projectNameById.get(projectId))
+          .filter((name): name is string => Boolean(name)),
+      };
+    });
+  }
+
+  async listDuplicateDetectionTasks(input: {
+    readonly includeClosedTasks: boolean;
+  }): Promise<TaskDuplicateDetectionRow[]> {
+    return this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      createdAt: tasks.createdAt,
+    }).from(tasks).where(
+      input.includeClosedTasks
+        ? undefined
+        : inArray(tasks.status, ['todo', 'in_progress']),
+    );
+  }
+
+  async listDistinctTaskAssignees(): Promise<string[]> {
+    const rows = await this.database
+      .select({ assignee: tasks.assignee })
+      .from(tasks)
+      .where(isNotNull(tasks.assignee))
+      .groupBy(tasks.assignee)
+      .orderBy(asc(sql`${tasks.assignee} COLLATE BINARY`));
+    return rows.map((row) => row.assignee!);
+  }
+
+  async getGroupCounts(input: {
+    readonly spec: TaskFilterSpec;
+    readonly groupBy: TaskGroupMode;
+  }): Promise<Record<string, number>> {
+    const compiled = compileCanonicalTaskFilter(
+      input.spec,
+      await this.resolveInputs(input.spec),
+    );
+    const taskWhere = compiled.taskWhere;
+
+    if (input.groupBy === 'tag') {
+      const [taggedRows, untaggedRows] = await Promise.all([
+        this.database.select({
+          group: tags.name,
+          count: sql<number>`count(DISTINCT ${tasks.id})`,
+        }).from(tasks)
+          .innerJoin(taskTags, eq(taskTags.taskId, tasks.id))
+          .innerJoin(tags, eq(tags.id, taskTags.tagId))
+          .where(taskWhere)
+          .groupBy(tags.name),
+        this.database.select({ count: sql<number>`count(*)` })
+          .from(tasks)
+          .where(and(
+            taskWhere,
+            sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`,
+          )),
+      ]);
+      const counts: Record<string, number> = {};
+      for (const row of taggedRows) counts[row.group] = Number(row.count);
+      const untaggedCount = Number(untaggedRows[0]?.count ?? 0);
+      if (untaggedCount > 0) counts.Untagged = untaggedCount;
+      return counts;
+    }
+
+    if (input.groupBy === 'project') {
+      const projectRows = await this.database.select({
+        taskId: taskProjects.taskId,
+        projectId: taskProjects.projectId,
+        projectName: hubProjects.name,
+      }).from(tasks)
+        .innerJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
+        .innerJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
+        .where(taskWhere);
+      const taskIds = [...new Set(projectRows.map((row) => row.taskId))];
+      const phaseRows = taskIds.length > 0
+        ? await this.database.select({
+            taskId: projectPhaseItems.taskId,
+            phaseName: projectPhases.name,
+            projectId: projectPhases.projectId,
+          }).from(projectPhaseItems)
+            .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
+            .where(inArray(projectPhaseItems.taskId, taskIds))
+        : [];
+      const phasesByMembership = new Map<string, string[]>();
+      for (const phase of phaseRows) {
+        if (!phase.projectId) continue;
+        const key = `${phase.taskId}:${phase.projectId}`;
+        const names = phasesByMembership.get(key) ?? [];
+        names.push(phase.phaseName);
+        phasesByMembership.set(key, names);
+      }
+      const taskIdsByGroup = new Map<string, Set<string>>();
+      for (const project of projectRows) {
+        const phaseNames = phasesByMembership.get(`${project.taskId}:${project.projectId}`);
+        for (const group of phaseNames?.length
+          ? phaseNames.map((phaseName) => `${project.projectName} › ${phaseName}`)
+          : [`${project.projectName} › Unphased`]) {
+          const ids = taskIdsByGroup.get(group) ?? new Set<string>();
+          ids.add(project.taskId);
+          taskIdsByGroup.set(group, ids);
+        }
+      }
+      const counts = Object.fromEntries(
+        [...taskIdsByGroup].map(([group, ids]) => [group, ids.size]),
+      );
+      const [unprojected] = await this.database.select({ count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(and(
+          taskWhere,
+          sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`,
+        ));
+      const unprojectedCount = Number(unprojected?.count ?? 0);
+      if (unprojectedCount > 0) counts['No Project'] = unprojectedCount;
+      return counts;
+    }
+
+    const expression = input.groupBy === 'dueDate'
+      ? sql<string>`CASE
+          WHEN ${tasks.dueDate} IS NULL OR ${tasks.dueDate} = '' THEN 'No Due Date'
+          WHEN ${tasks.dueDate} < ${input.spec.today} THEN 'Overdue'
+          WHEN ${tasks.dueDate} = ${input.spec.today} THEN 'Today'
+          ELSE ${tasks.dueDate}
+        END`
+      : sqliteScalarGroupExpression(input.groupBy);
+    const rows = await this.database.select({
+      group: expression.as('group_key'),
+      count: sql<number>`count(*)`,
+    }).from(tasks).where(taskWhere).groupBy(sql`group_key`);
+    return Object.fromEntries(rows.map((row) => [row.group, Number(row.count)]));
+  }
+
+  private quickSortScopeConditions(input: TaskQuickSortScope): SQL[] {
+    const conditions: SQL[] = [
+      sql`${tasks.connectorInstanceId} NOT IN (
+        SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
+        WHERE ${connectorConfigs.deletedAt} IS NOT NULL
+      )`,
+      notInArray(tasks.status, ['done', 'cancelled']),
+      isNull(tasks.parentId),
+      or(isNull(tasks.snoozedUntil), lte(tasks.snoozedUntil, input.now))!,
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${quickSortLog}
+        WHERE ${quickSortLog.taskId} = ${tasks.id}
+          AND ${quickSortLog.action} = 'skipped'
+          AND ${quickSortLog.reversedAt} IS NULL
+          AND ${quickSortLog.triagedAt} > ${input.skipCutoff}
+      )`,
+    ];
+    if (input.sourceTypes.length === 1) {
+      conditions.push(eq(tasks.connectorType, input.sourceTypes[0]));
+    } else if (input.sourceTypes.length > 1) {
+      conditions.push(inArray(tasks.connectorType, [...input.sourceTypes]));
+    }
+    if (input.sourceListId) {
+      conditions.push(eq(tasks.sourceListId, input.sourceListId));
+    } else if (input.sourceListName) {
+      conditions.push(eq(tasks.sourceListName, input.sourceListName));
+    }
+    if (input.connectorInstanceId) {
+      conditions.push(eq(tasks.connectorInstanceId, input.connectorInstanceId));
+    }
+    return conditions;
+  }
+
+  async listQuickSortSources(input: { readonly now: string; readonly skipCutoff: string }) {
+    const scope: TaskQuickSortScope = {
+      ...input,
+      sourceTypes: [],
+      sourceListId: null,
+      sourceListName: null,
+      connectorInstanceId: null,
+    };
+    const rows = await this.database.select({
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
+      sourceListName: tasks.sourceListName,
+      count: sql<number>`count(*)`,
+    }).from(tasks)
+      .where(and(...this.quickSortScopeConditions(scope)))
+      .groupBy(
+        tasks.connectorType,
+        tasks.connectorInstanceId,
+        tasks.sourceListId,
+        tasks.sourceListName,
+      )
+      .orderBy(desc(sql`count(*)`));
+    const definitions = await this.database.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      type: sourceLists.type,
+      icon: sourceLists.icon,
+      iconColor: sourceLists.iconColor,
+      hidden: sourceLists.hidden,
+    }).from(sourceLists);
+    return {
+      rows: rows.map((row) => ({ ...row, count: Number(row.count) })),
+      definitions: definitions.map((definition) => ({
+        ...definition,
+        userDisplayName: definition.userDisplayName ?? null,
+        icon: definition.icon ?? null,
+        iconColor: definition.iconColor ?? null,
+        hidden: Boolean(definition.hidden),
+      })),
+    };
+  }
+
+  async getQuickSortCounts(input: TaskQuickSortScope) {
+    const scope = this.quickSortScopeConditions(input);
+    const countWhere = async (condition: SQL): Promise<number> => {
+      const [row] = await this.database.select({ count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(and(...scope, condition));
+      return Number(row?.count ?? 0);
+    };
+    const [noPriority, noEffort, noTags, noPlanningHorizon] = await Promise.all([
+      countWhere(eq(tasks.priority, 'none')),
+      countWhere(isNull(tasks.effort)),
+      countWhere(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`),
+      countWhere(isNull(tasks.planningHorizon)),
+    ]);
+    return {
+      no_priority: noPriority,
+      quadrant: noPriority,
+      no_effort: noEffort,
+      no_tags: noTags,
+      no_planning_horizon: noPlanningHorizon,
+    };
+  }
+
+  async listQuickSortTasks(
+    input: TaskQuickSortScope & {
+      readonly mode: TaskQuickSortQueueMode;
+      readonly order: TaskQuickSortOrder;
+      readonly limit: number;
+    },
+  ): Promise<TaskQuickSortQueueRow[]> {
+    const conditions = this.quickSortScopeConditions(input);
+    if (input.mode === 'no_priority' || input.mode === 'quadrant') {
+      conditions.push(eq(tasks.priority, 'none'));
+    } else if (input.mode === 'no_effort') {
+      conditions.push(isNull(tasks.effort));
+    } else if (input.mode === 'no_tags') {
+      conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`);
+    } else {
+      conditions.push(isNull(tasks.planningHorizon));
+    }
+
+    const priorityOrder = sql`CASE ${tasks.priority}
+      WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
+      WHEN 'low' THEN 4 ELSE 5 END`;
+    let orderClauses: SQL[];
+    if (input.order === 'priority') {
+      orderClauses = [
+        asc(priorityOrder),
+        desc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE BINARY`),
+      ];
+    } else if (input.order === 'oldest') {
+      orderClauses = [asc(tasks.createdAt), asc(sql`${tasks.id} COLLATE BINARY`)];
+    } else if (input.order === 'newest') {
+      orderClauses = [desc(tasks.createdAt), asc(sql`${tasks.id} COLLATE BINARY`)];
+    } else if (input.order === 'random') {
+      orderClauses = [sql`RANDOM()`];
+    } else if (input.mode === 'no_priority' || input.mode === 'quadrant') {
+      orderClauses = [desc(tasks.createdAt), asc(sql`${tasks.id} COLLATE BINARY`)];
+    } else if (input.mode === 'no_effort' || input.mode === 'no_planning_horizon') {
+      orderClauses = [
+        asc(priorityOrder),
+        desc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE BINARY`),
+      ];
+    } else {
+      orderClauses = [
+        asc(sql`CASE WHEN ${tasks.sourceListName} IS NULL THEN 0 ELSE 1 END`),
+        asc(sql`${tasks.sourceListName} COLLATE BINARY`),
+        desc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE BINARY`),
+      ];
+    }
+
+    const rows = await this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      description: tasks.description,
+      priority: tasks.priority,
+      effort: tasks.effort,
+      status: tasks.status,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceId: tasks.sourceId,
+      sourceListId: tasks.sourceListId,
+      sourceListName: tasks.sourceListName,
+      dueDate: tasks.dueDate,
+      planningHorizon: tasks.planningHorizon,
+      createdAt: tasks.createdAt,
+      localDisposition: tasks.localDisposition,
+    }).from(tasks)
+      .where(and(...conditions))
+      .orderBy(...orderClauses)
+      .limit(input.limit);
+    const taskIds = rows.map((row) => row.id);
+    if (taskIds.length === 0) return [];
+
+    const [tagRows, projectRows, phaseRows] = await Promise.all([
+      this.database.select({
+        taskId: taskTags.taskId,
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        color: tags.color,
+      }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(inArray(taskTags.taskId, taskIds)),
+      this.database.select({
+        taskId: taskProjects.taskId,
+        id: hubProjects.id,
+        name: hubProjects.name,
+        color: hubProjects.color,
+      }).from(taskProjects)
+        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+        .where(inArray(taskProjects.taskId, taskIds)),
+      this.database.select({
+        taskId: projectPhaseItems.taskId,
+        id: projectPhases.id,
+        name: projectPhases.name,
+        projectId: projectPhases.projectId,
+      }).from(projectPhaseItems)
+        .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
+        .where(and(
+          inArray(projectPhaseItems.taskId, taskIds),
+          eq(projectPhaseItems.isProposed, false),
+        )),
+    ]);
+
+    const tagsByTask = new Map<string, TaskQuickSortQueueRow['tags']>();
+    for (const { taskId, ...tag } of tagRows) {
+      const entries = tagsByTask.get(taskId) ?? [];
+      entries.push({ ...tag, color: tag.color ?? null });
+      tagsByTask.set(taskId, entries);
+    }
+    const projectsByTask = new Map<string, TaskQuickSortQueueRow['projects']>();
+    for (const { taskId, ...project } of projectRows) {
+      const entries = projectsByTask.get(taskId) ?? [];
+      entries.push(project);
+      projectsByTask.set(taskId, entries);
+    }
+    const phasesByTask = new Map<string, TaskQuickSortQueueRow['phases']>();
+    for (const { taskId, ...phase } of phaseRows) {
+      const entries = phasesByTask.get(taskId) ?? [];
+      entries.push({ ...phase, projectId: phase.projectId ?? null });
+      phasesByTask.set(taskId, entries);
+    }
+
+    return rows.map((row) => ({
+      ...row,
+      description: row.description ?? null,
+      effort: row.effort ?? null,
+      sourceListId: row.sourceListId ?? null,
+      sourceListName: row.sourceListName ?? null,
+      dueDate: row.dueDate ?? null,
+      planningHorizon: row.planningHorizon ?? null,
+      tags: tagsByTask.get(row.id) ?? [],
+      projects: projectsByTask.get(row.id) ?? [],
+      phases: phasesByTask.get(row.id) ?? [],
+    }));
+  }
+
+  async getQuickSortSuggestionInputs(
+    taskIds: readonly string[],
+  ): Promise<TaskQuickSortSuggestionInputs> {
+    if (taskIds.length === 0) {
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+    }
+    const taskRows = await this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      description: tasks.description,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListName: tasks.sourceListName,
+      assignee: tasks.assignee,
+      snoozedUntil: tasks.snoozedUntil,
+      effort: tasks.effort,
+    }).from(tasks).where(inArray(tasks.id, [...taskIds]));
+    if (taskRows.length === 0) {
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+    }
+
+    const [rankingRows, tagRows, assignmentRows] = await Promise.all([
+      this.database.select({
+        id: sourceRankings.id,
+        connectorType: sourceRankings.connectorType,
+        name: sourceRankings.name,
+        rank: sourceRankings.rank,
+        updatedAt: sourceRankings.updatedAt,
+      }).from(sourceRankings),
+      this.database.select({
+        id: tags.id,
+        name: tags.name,
+      }).from(tags).orderBy(asc(sql`${tags.id} COLLATE BINARY`)),
+      this.database.select({
+        taskId: taskTags.taskId,
+        tagId: taskTags.tagId,
+      }).from(taskTags),
+    ]);
+    return {
+      tasks: taskRows.map((row) => ({
+        ...row,
+        description: row.description ?? null,
+        priority: row.priority as TaskQuickSortSuggestionInputs['tasks'][number]['priority'],
+        dueDate: row.dueDate ?? null,
+        sourceListName: row.sourceListName ?? null,
+        assignee: row.assignee ?? null,
+        snoozedUntil: row.snoozedUntil ?? null,
+        effort: row.effort ?? null,
+      })),
+      sourceRankings: rankingRows,
+      tags: tagRows,
+      taskTags: assignmentRows,
+    };
   }
 }
 
@@ -1476,6 +2154,7 @@ export function createSqliteTaskCorePersistence(
 ): TaskCorePersistence {
   const filterInputs = new SqliteTaskFilterInputRepository(database);
   return {
+    taskReads: new SqliteTaskReadRepository(database, filterInputs),
     filterInputs,
     queries: new SqliteTaskQueryRepository(database, filterInputs),
     policyIdentities: new SqliteTaskPolicyIdentityRepository(database),

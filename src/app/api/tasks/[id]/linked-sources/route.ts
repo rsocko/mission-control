@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { taskLinkedSources } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
 /**
  * GET /api/tasks/[id]/linked-sources
@@ -12,11 +10,8 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-
-  const linked = await db
-    .select()
-    .from(taskLinkedSources)
-    .where(eq(taskLinkedSources.taskId, id));
+  const { taskReads } = await getTaskCorePersistence();
+  const linked = await taskReads.listLinkedSources(id);
 
   return NextResponse.json({ linkedSources: linked });
 }

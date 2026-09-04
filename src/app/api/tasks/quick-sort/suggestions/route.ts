@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, taskTags, tags, sourceRankings } from '@/db/schema';
-import { inArray } from 'drizzle-orm';
 import { computeSmartScore, type PriorityEntity, type SourceRanking } from '@/lib/smart-score';
 import type { TaskPriority } from '@/types';
 import { getResolvedPriorityEntities } from '@/lib/priority-entities';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
 /**
  * GET /api/tasks/quick-sort/suggestions?taskIds=id1,id2,...
@@ -22,27 +20,20 @@ export async function GET(request: Request) {
   }
 
   const taskIds = taskIdsParam.split(',').slice(0, 50);
-
-  const taskRows = await db
-    .select()
-    .from(tasks)
-    .where(inArray(tasks.id, taskIds));
+  const { taskReads } = await getTaskCorePersistence();
+  const {
+    tasks: taskRows,
+    sourceRankings: rankings,
+    tags: allTags,
+    taskTags: allTaskTags,
+  } = await taskReads.getQuickSortSuggestionInputs(taskIds);
 
   if (taskRows.length === 0) {
     return NextResponse.json({ suggestions: {} });
   }
 
   // Fetch priority entities and source rankings for SmartScore
-  const [entities, rankings] = await Promise.all([
-    getResolvedPriorityEntities() as Promise<PriorityEntity[]>,
-    db.select().from(sourceRankings) as Promise<SourceRanking[]>,
-  ]);
-
-  // Fetch all tags + task-tag assignments for frequency-based suggestion
-  const [allTags, allTaskTags] = await Promise.all([
-    db.select().from(tags),
-    db.select({ taskId: taskTags.taskId, tagId: taskTags.tagId }).from(taskTags),
-  ]);
+  const entities = await getResolvedPriorityEntities() as PriorityEntity[];
 
   // Tag frequency map
   const tagFrequency = new Map<string, number>();
@@ -80,7 +71,7 @@ export async function GET(request: Request) {
         effort: task.effort,
       },
       entities,
-      rankings,
+      rankings as SourceRanking[],
     );
 
     // Priority suggestion — use title heuristics and smart score together

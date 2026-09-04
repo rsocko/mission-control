@@ -1,29 +1,19 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import {
-  hubProjects,
-  projectPhaseItems,
-  projectPhases,
-  taskProjects,
-  tasks,
-  taskTags,
-  tags,
-  sourceLists,
-} from '@/db/schema';
-import { eq, and, isNull, notInArray, asc, desc, inArray, lte, or, sql } from 'drizzle-orm';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
 import { QUICK_SORT_SKIP_MS } from '@/lib/quick-sort/constants';
 import { buildQuickSortSourceData } from '@/lib/quick-sort/source-options';
 import { taskSourceTypesForFilter } from '@/lib/tasks/source-hierarchy';
+import type {
+  TaskQuickSortOrder,
+  TaskQuickSortQueueMode,
+  TaskQuickSortScope,
+} from '@/lib/tasks/core/contracts';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
-export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon';
-export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
+export type QuickSortQueueMode = TaskQuickSortQueueMode;
+export type QuickSortOrder = TaskQuickSortOrder;
 
 const LIMIT = 50;
-
-const PRIORITY_ORDER = sql`CASE ${tasks.priority}
-  WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
-  WHEN 'low' THEN 4 ELSE 5 END`;
 
 /**
  * GET /api/tasks/quick-sort?mode=no_priority|quadrant|no_effort|no_tags|no_planning_horizon
@@ -51,126 +41,31 @@ export async function GET(request: Request) {
   const sourceListIdFilter = searchParams.get('sourceListId');
   const connectorIdFilter = searchParams.get('connectorId');
 
-  // Exclude tasks from soft-deleted connectors
-  const activeConnectorCondition = sql`${tasks.connectorInstanceId} NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`;
-  const openCondition = notInArray(tasks.status, ['done', 'cancelled'] as string[]);
-  // Exclude subtasks — only top-level tasks should appear in quick sort
-  const notSubtaskCondition = isNull(tasks.parentId);
-  const availableCondition = or(
-    isNull(tasks.snoozedUntil),
-    lte(tasks.snoozedUntil, new Date().toISOString()),
-  );
+  const now = new Date().toISOString();
   const skipCutoff = new Date(Date.now() - QUICK_SORT_SKIP_MS).toISOString();
-  const notRecentlySkippedCondition = sql`NOT EXISTS (
-    SELECT 1 FROM task_triage_log
-    WHERE task_id = ${tasks.id}
-      AND action = 'skipped'
-      AND reversed_at IS NULL
-      AND triaged_at > ${skipCutoff}
-  )`;
+  const { taskReads } = await getTaskCorePersistence();
 
   // Return available sources for scope filter UI
   if (searchParams.get('sources') === 'true') {
-    const sourceRows = await db
-      .select({
-        connectorType: tasks.connectorType,
-        connectorInstanceId: tasks.connectorInstanceId,
-        sourceListId: tasks.sourceListId,
-        sourceListName: tasks.sourceListName,
-        count: sql<number>`COUNT(*)`.as('count'),
-      })
-      .from(tasks)
-      .where(and(
-        activeConnectorCondition,
-        openCondition,
-        notSubtaskCondition,
-        availableCondition,
-        notRecentlySkippedCondition,
-      ))
-      .groupBy(tasks.connectorType, tasks.connectorInstanceId, tasks.sourceListId, tasks.sourceListName)
-      .orderBy(sql`COUNT(*) DESC`);
-
-    const sourceListDefinitions = await db.select({
-      connectorInstanceId: sourceLists.connectorInstanceId,
-      sourceId: sourceLists.sourceId,
-      name: sourceLists.name,
-      userDisplayName: sourceLists.userDisplayName,
-      type: sourceLists.type,
-      icon: sourceLists.icon,
-      iconColor: sourceLists.iconColor,
-      hidden: sourceLists.hidden,
-    }).from(sourceLists);
+    const { rows, definitions } = await taskReads.listQuickSortSources({ now, skipCutoff });
 
     return NextResponse.json({
-      sources: buildQuickSortSourceData(sourceRows, sourceListDefinitions),
+      sources: buildQuickSortSourceData(rows, definitions),
     });
   }
 
-  // Build scope conditions
-  const scopeConditions = [
-    activeConnectorCondition,
-    openCondition,
-    notSubtaskCondition,
-    availableCondition,
-    notRecentlySkippedCondition,
-  ];
-  if (sourceFilter) {
-    const sourceTypes = taskSourceTypesForFilter(sourceFilter);
-    scopeConditions.push(sourceTypes.length === 1
-      ? eq(tasks.connectorType, sourceTypes[0])
-      : inArray(tasks.connectorType, sourceTypes));
-  }
-  if (sourceListIdFilter) {
-    scopeConditions.push(eq(tasks.sourceListId, sourceListIdFilter));
-  } else if (sourceListFilter) {
-    scopeConditions.push(eq(tasks.sourceListName, sourceListFilter));
-  }
-  if (connectorIdFilter) {
-    scopeConditions.push(eq(tasks.connectorInstanceId, connectorIdFilter));
-  }
+  const scope: TaskQuickSortScope = {
+    now,
+    skipCutoff,
+    sourceTypes: sourceFilter ? taskSourceTypesForFilter(sourceFilter) : [],
+    sourceListId: sourceListIdFilter,
+    sourceListName: sourceListIdFilter ? null : sourceListFilter,
+    connectorInstanceId: connectorIdFilter,
+  };
 
   if (countsOnly) {
-    const [noPriorityCount, noEffortCount, noTagsCount, noPlanningHorizonCount] = await Promise.all([
-      db
-        .select({ count: sql<number>`COUNT(*)`.as('count') })
-        .from(tasks)
-        .where(and(...scopeConditions, eq(tasks.priority, 'none')))
-        .then((r) => r[0]?.count ?? 0),
-      db
-        .select({ count: sql<number>`COUNT(*)`.as('count') })
-        .from(tasks)
-        .where(and(...scopeConditions, isNull(tasks.effort)))
-        .then((r) => r[0]?.count ?? 0),
-      db
-        .select({ count: sql<number>`COUNT(*)`.as('count') })
-        .from(tasks)
-        .where(
-          and(
-            ...scopeConditions,
-            sql`${tasks.id} NOT IN (SELECT task_id FROM task_tags)`
-          )
-        )
-        .then((r) => r[0]?.count ?? 0),
-      db
-        .select({ count: sql<number>`COUNT(*)`.as('count') })
-        .from(tasks)
-        .where(
-          and(
-            ...scopeConditions,
-            isNull(tasks.planningHorizon)
-          )
-        )
-        .then((r) => r[0]?.count ?? 0),
-    ]);
-
     return NextResponse.json({
-      counts: {
-        no_priority: noPriorityCount,
-        quadrant: noPriorityCount,
-        no_effort: noEffortCount,
-        no_tags: noTagsCount,
-        no_planning_horizon: noPlanningHorizonCount,
-      },
+      counts: await taskReads.getQuickSortCounts(scope),
     });
   }
 
@@ -178,139 +73,19 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid mode' }, { status: 400 });
   }
 
-  const conditions = [...scopeConditions];
-
-  if (mode === 'no_priority' || mode === 'quadrant') {
-    conditions.push(eq(tasks.priority, 'none'));
-  } else if (mode === 'no_effort') {
-    conditions.push(isNull(tasks.effort));
-  } else if (mode === 'no_tags') {
-    conditions.push(sql`${tasks.id} NOT IN (SELECT task_id FROM task_tags)`);
-  } else if (mode === 'no_planning_horizon') {
-    conditions.push(isNull(tasks.planningHorizon));
-  }
-
-  // Smart sort per mode (default), or user-selected order
-  let orderClauses;
-  if (order === 'priority') {
-    orderClauses = [PRIORITY_ORDER, desc(tasks.createdAt)];
-  } else if (order === 'oldest') {
-    orderClauses = [asc(tasks.createdAt)];
-  } else if (order === 'newest') {
-    orderClauses = [desc(tasks.createdAt)];
-  } else if (order === 'random') {
-    orderClauses = [sql`RANDOM()`];
-  } else {
-    // "smart" — per-mode defaults
-    orderClauses =
-      mode === 'no_priority' || mode === 'quadrant'
-        ? [desc(tasks.createdAt)]                           // newest first
-        : mode === 'no_effort' || mode === 'no_planning_horizon'
-          ? [PRIORITY_ORDER, desc(tasks.createdAt)]         // highest priority, then newest
-          : [asc(tasks.sourceListName), desc(tasks.createdAt)]; // group by list, newest within
-  }
-
-  const rows = await db
-    .select({
-      id: tasks.id,
-      title: tasks.title,
-      description: tasks.description,
-      priority: tasks.priority,
-      effort: tasks.effort,
-      status: tasks.status,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-      sourceId: tasks.sourceId,
-      sourceListId: tasks.sourceListId,
-      sourceListName: tasks.sourceListName,
-      dueDate: tasks.dueDate,
-      planningHorizon: tasks.planningHorizon,
-      createdAt: tasks.createdAt,
-      localDisposition: tasks.localDisposition,
-    })
-    .from(tasks)
-    .where(and(...conditions))
-    .orderBy(...orderClauses)
-    .limit(LIMIT);
+  const rows = await taskReads.listQuickSortTasks({ ...scope, mode, order, limit: LIMIT });
   const editPolicies = await resolveTaskEditPolicies(rows);
-
-  // Fetch compact context for all returned tasks
-  const taskIds = rows.map((r) => r.id);
-  const [tagRows, projectRows, phaseRows] = taskIds.length > 0
-    ? await Promise.all([
-        db
-          .select({
-            taskId: taskTags.taskId,
-            tagId: tags.id,
-            tagName: tags.name,
-            tagSlug: tags.slug,
-            tagColor: tags.color,
-          })
-          .from(taskTags)
-          .innerJoin(tags, eq(taskTags.tagId, tags.id))
-          .where(inArray(taskTags.taskId, taskIds)),
-        db
-          .select({
-            taskId: taskProjects.taskId,
-            projectId: hubProjects.id,
-            projectName: hubProjects.name,
-            projectColor: hubProjects.color,
-          })
-          .from(taskProjects)
-          .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-          .where(inArray(taskProjects.taskId, taskIds)),
-        db
-          .select({
-            taskId: projectPhaseItems.taskId,
-            phaseId: projectPhases.id,
-            phaseName: projectPhases.name,
-            projectId: projectPhases.projectId,
-          })
-          .from(projectPhaseItems)
-          .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
-          .where(and(
-            inArray(projectPhaseItems.taskId, taskIds),
-            eq(projectPhaseItems.isProposed, false),
-          )),
-      ])
-    : [[], [], []];
-
-  const tagsByTask = new Map<string, Array<{ id: string; name: string; slug: string; color: string | null }>>();
-  for (const row of tagRows) {
-    if (!tagsByTask.has(row.taskId)) tagsByTask.set(row.taskId, []);
-    tagsByTask.get(row.taskId)!.push({ id: row.tagId, name: row.tagName, slug: row.tagSlug, color: row.tagColor });
-  }
-
-  const projectsByTask = new Map<string, Array<{ id: string; name: string; color: string }>>();
-  for (const row of projectRows) {
-    if (!projectsByTask.has(row.taskId)) projectsByTask.set(row.taskId, []);
-    projectsByTask.get(row.taskId)!.push({
-      id: row.projectId,
-      name: row.projectName,
-      color: row.projectColor,
-    });
-  }
-
-  const phasesByTask = new Map<string, Array<{ id: string; name: string; projectId: string | null }>>();
-  for (const row of phaseRows) {
-    if (!phasesByTask.has(row.taskId)) phasesByTask.set(row.taskId, []);
-    phasesByTask.get(row.taskId)!.push({
-      id: row.phaseId,
-      name: row.phaseName,
-      projectId: row.projectId,
-    });
-  }
 
   return NextResponse.json({
     tasks: rows.map((row) => {
-      const { description, ...task } = row;
+      const { description, projects, phases, tags, ...task } = row;
       const editPolicy = requireTaskEditPolicy(editPolicies, row.id);
       return {
         ...task,
         hasNotes: Boolean(description?.trim()),
-        projects: projectsByTask.get(row.id) ?? [],
-        phases: phasesByTask.get(row.id) ?? [],
-        tags: tagsByTask.get(row.id) ?? [],
+        projects,
+        phases,
+        tags,
         taskSourceModel: editPolicy.sourceModel,
         editPolicy,
       };

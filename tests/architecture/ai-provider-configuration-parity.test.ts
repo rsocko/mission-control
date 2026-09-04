@@ -21,6 +21,7 @@ const OWNED_TEST_PATHS = [
   'tests/api/ai-models-route.test.ts',
   'tests/api/ai-provider-routing.test.ts',
   'tests/architecture/ai-provider-configuration-parity.test.ts',
+  'tests/architecture/analytics-taint-decrement.test.ts',
   'tests/architecture/external-agent-taint-decrement.test.ts',
   'tests/architecture/ideation-workspace-taint-decrement.test.ts',
   'tests/architecture/notification-web-taint-decrement.test.ts',
@@ -58,9 +59,9 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L10 AI provider configuration parity', () => {
-  it('pins the exact approved 28-path ownership boundary', () => {
+  it('pins the exact approved 29-path ownership boundary', () => {
     expect(OWNED_PRODUCTION_PATHS).toHaveLength(11);
-    expect(OWNED_TEST_PATHS).toHaveLength(17);
+    expect(OWNED_TEST_PATHS).toHaveLength(18);
     for (const path of [...OWNED_PRODUCTION_PATHS, ...OWNED_TEST_PATHS]) {
       expect(existsSync(join(process.cwd(), path)), `${path} must exist`).toBe(true);
     }
@@ -69,7 +70,7 @@ describe('L10 AI provider configuration parity', () => {
   it('records exactly the two-route decrement with no Tier B reclassification', () => {
     const entry = baseline.decrementHistory?.find((record) => record.layer === 'L10');
     expect(entry).toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 264, to: 262, delta: -2 });
+    expect(entry?.totalMigrationUnits).toEqual({ from: 253, to: 251, delta: -2 });
     expect(entry?.removedTierARoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.newlyCleanRoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.removedTaintedLibA).toEqual([]);
@@ -114,15 +115,15 @@ describe('L10 AI provider configuration parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 179,
-      tierBRoutes: 26,
-      cleanRoutes: 61,
+      tierARoutes: 173,
+      tierBRoutes: 27,
+      cleanRoutes: 66,
       directTaintSourceRoutes: 123,
-      transitiveOnlyTaintSourceRoutes: 56,
+      transitiveOnlyTaintSourceRoutes: 50,
       directDbNamespaceRoutes: 124,
-      taintedLibA: 83,
+      taintedLibA: 78,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 262,
+      totalMigrationUnits: 251,
     });
   });
 });

@@ -22,7 +22,7 @@ type RepositoryTransactionRunner = <T>(
 function resolveSqliteTaskTransferIdentityTargets(
   database: SqliteDatabase | SqliteTransaction,
   input: ResolveInput,
-): TransactionResolveResult {
+): ResolveResult {
   const orderedUniqueSourceIds = [...new Set(input.sourceListIds.filter(Boolean))];
   const localIdBySourceId = new Map<string, string>();
   if (orderedUniqueSourceIds.length > 0) {
@@ -39,27 +39,17 @@ function resolveSqliteTaskTransferIdentityTargets(
     .filter((sourceId) => localIdBySourceId.has(sourceId))
     .map((sourceId) => ({ sourceId, localId: localIdBySourceId.get(sourceId)! }));
 
-  const taskRow = database.select({
-    connectorInstanceId: tasks.connectorInstanceId,
-    metadata: tasks.metadata,
-  })
+  const taskRow = database.select({ metadata: tasks.metadata })
     .from(tasks)
-    .where(eq(tasks.id, input.taskId))
+    .where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.connectorInstanceId, input.connectorInstanceId),
+    ))
     .limit(1)
     .get();
-  let taskOwnership: TransactionResolveResult['taskOwnership'];
-  if (!taskRow) {
-    taskOwnership = 'absent';
-  } else if (taskRow.connectorInstanceId === input.connectorInstanceId) {
-    taskOwnership = 'owned';
-  } else {
-    taskOwnership = 'foreign';
-  }
-  const taskExists = taskOwnership === 'owned';
   return {
-    taskExists,
-    taskOwnership,
-    taskMetadata: taskRow && taskExists ? decodeLenientJsonObject(taskRow.metadata) : {},
+    taskExists: Boolean(taskRow),
+    taskMetadata: taskRow ? decodeLenientJsonObject(taskRow.metadata) : {},
     sourceLists: resolvedSourceLists,
   };
 }
@@ -76,7 +66,26 @@ export function resolveSqliteTaskTransferIdentityTargetsInTransaction(
   transaction: SqliteTransaction,
   input: ResolveInput,
 ): TransactionResolveResult {
-  return resolveSqliteTaskTransferIdentityTargets(transaction, input);
+  const targets = resolveSqliteTaskTransferIdentityTargets(transaction, input);
+  const taskRow = transaction.select({
+    connectorInstanceId: tasks.connectorInstanceId,
+  })
+    .from(tasks)
+    .where(eq(tasks.id, input.taskId))
+    .limit(1)
+    .get();
+  let taskOwnership: TransactionResolveResult['taskOwnership'];
+  if (!taskRow) {
+    taskOwnership = 'absent';
+  } else if (taskRow.connectorInstanceId === input.connectorInstanceId) {
+    taskOwnership = 'owned';
+  } else {
+    taskOwnership = 'foreign';
+  }
+  return {
+    ...targets,
+    taskOwnership,
+  };
 }
 
 function reconcileSqliteTaskTransferIdentityRefresh(

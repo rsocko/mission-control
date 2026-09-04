@@ -55,7 +55,7 @@ async function resolvePostgresTaskTransferIdentityTargetsInternal(
   database: TransactionDatabase,
   input: ResolveInput,
   lockRows: boolean,
-): Promise<TransactionResolveResult> {
+): Promise<ResolveResult> {
   const orderedUniqueSourceIds = [...new Set(input.sourceListIds.filter(Boolean))];
   const localIdBySourceId = new Map<string, string>();
   if (orderedUniqueSourceIds.length > 0) {
@@ -73,27 +73,17 @@ async function resolvePostgresTaskTransferIdentityTargetsInternal(
     .filter((sourceId) => localIdBySourceId.has(sourceId))
     .map((sourceId) => ({ sourceId, localId: localIdBySourceId.get(sourceId)! }));
 
-  const taskQuery = database.select({
-    connectorInstanceId: tasks.connectorInstanceId,
-    metadata: tasks.metadata,
-  })
+  const taskQuery = database.select({ metadata: tasks.metadata })
     .from(tasks)
-    .where(eq(tasks.id, input.taskId))
+    .where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.connectorInstanceId, input.connectorInstanceId),
+    ))
     .limit(1);
   const [taskRow] = lockRows ? await taskQuery.for('update') : await taskQuery;
-  let taskOwnership: TransactionResolveResult['taskOwnership'];
-  if (!taskRow) {
-    taskOwnership = 'absent';
-  } else if (taskRow.connectorInstanceId === input.connectorInstanceId) {
-    taskOwnership = 'owned';
-  } else {
-    taskOwnership = 'foreign';
-  }
-  const taskExists = taskOwnership === 'owned';
   return {
-    taskExists,
-    taskOwnership,
-    taskMetadata: taskRow && taskExists ? asRecord(taskRow.metadata) : {},
+    taskExists: Boolean(taskRow),
+    taskMetadata: taskRow ? asRecord(taskRow.metadata) : {},
     sourceLists: resolvedSourceLists,
   };
 }
@@ -109,15 +99,34 @@ export function resolvePostgresTaskTransferIdentityTargets(
  * Only call with a handle already bound to the adapter's owning transaction.
  * Source-list and task rows are locked in deterministic order before writes.
  */
-export function resolvePostgresTaskTransferIdentityTargetsInTransaction(
+export async function resolvePostgresTaskTransferIdentityTargetsInTransaction(
   transaction: PostgresTaskTransferIdentityTransaction,
   input: ResolveInput,
 ): Promise<TransactionResolveResult> {
-  return resolvePostgresTaskTransferIdentityTargetsInternal(
+  const targets = await resolvePostgresTaskTransferIdentityTargetsInternal(
     transaction.database,
     input,
     true,
   );
+  const [taskRow] = await transaction.database.select({
+    connectorInstanceId: tasks.connectorInstanceId,
+  })
+    .from(tasks)
+    .where(eq(tasks.id, input.taskId))
+    .limit(1)
+    .for('update');
+  let taskOwnership: TransactionResolveResult['taskOwnership'];
+  if (!taskRow) {
+    taskOwnership = 'absent';
+  } else if (taskRow.connectorInstanceId === input.connectorInstanceId) {
+    taskOwnership = 'owned';
+  } else {
+    taskOwnership = 'foreign';
+  }
+  return {
+    ...targets,
+    taskOwnership,
+  };
 }
 
 /** Only call with a handle already bound to the adapter's owning transaction. */

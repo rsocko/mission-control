@@ -6,8 +6,11 @@ import {
   describeTaskCoreContract,
   type SeedAttachment,
   type SeedConnector,
+  type SeedLinkedSource,
   type SeedPriorityEntity,
+  type SeedProjectPhase,
   type SeedSourceList,
+  type SeedSourceRanking,
   type SeedTag,
   type SeedTask,
   type TaskCoreContractHarness,
@@ -49,13 +52,17 @@ beforeAll(async () => {
       const tables = [
         schema.taskIngestSuppressions,
         schema.taskAttachments,
+        schema.taskLinkedSources,
         schema.taskSchedules,
         schema.projectPhaseItems,
+        schema.projectPhases,
         schema.taskProjects,
         schema.taskTags,
         schema.myDayExclusions,
         schema.myDayItems,
         schema.priorityEntities,
+        schema.sourceRankings,
+        schema.quickSortLog,
         schema.sourceLists,
         schema.connectorConfigs,
         schema.appSettings,
@@ -89,10 +96,64 @@ beforeAll(async () => {
         sourceListName: row.sourceListName ?? null,
         assignee: row.assignee ?? null,
         microStatus: row.microStatus ?? null,
+        snoozedUntil: row.snoozedUntil ?? null,
         metadata: row.metadata ?? {},
         syncStatus: row.syncStatus ?? 'synced',
         lastSyncedAt: row.lastSyncedAt ?? DEFAULT_NOW,
         effort: row.effort ?? null,
+      })));
+    },
+    async insertLinkedSources(rows: SeedLinkedSource[]) {
+      if (rows.length === 0) return;
+      await db.insert(schema.taskLinkedSources).values(rows.map((row) => ({
+        id: row.id,
+        taskId: row.taskId,
+        connectorType: row.connectorType,
+        connectorInstanceId: row.connectorInstanceId,
+        sourceId: row.sourceId,
+        title: row.title,
+        linkedAt: row.linkedAt ?? DEFAULT_NOW,
+        matchConfidence: row.matchConfidence ?? null,
+        metadata: row.metadata ?? {},
+      })));
+    },
+    async insertProjectPhases(rows: SeedProjectPhase[]) {
+      for (const row of rows) {
+        await db.insert(schema.projectPhases).values({
+          id: row.id,
+          projectId: row.projectId ?? null,
+          name: row.name,
+          createdAt: DEFAULT_NOW,
+          updatedAt: DEFAULT_NOW,
+        });
+        if (row.taskIds?.length) {
+          await db.insert(schema.projectPhaseItems).values(row.taskIds.map((taskId, index) => ({
+            id: `${row.id}:${taskId}`,
+            phaseId: row.id,
+            taskId,
+            isProposed: row.isProposed ?? false,
+            sortOrder: index,
+            createdAt: DEFAULT_NOW,
+          })));
+        }
+      }
+    },
+    async insertSourceRankings(rows: SeedSourceRanking[]) {
+      if (rows.length === 0) return;
+      await db.insert(schema.sourceRankings).values(rows.map((row) => ({
+        ...row,
+        updatedAt: row.updatedAt ?? DEFAULT_NOW,
+      })));
+    },
+    async insertQuickSortLogs(rows) {
+      if (rows.length === 0) return;
+      await db.insert(schema.quickSortLog).values(rows.map((row) => ({
+        id: row.id,
+        taskId: row.taskId,
+        mode: 'no_priority',
+        action: row.action,
+        triagedAt: row.triagedAt,
+        reversedAt: row.reversedAt ?? null,
       })));
     },
     async insertTags(rows: SeedTag[]) {
@@ -136,7 +197,9 @@ beforeAll(async () => {
         type: row.type ?? 'list',
         userDisplayName: row.userDisplayName ?? null,
         groupId: row.groupId ?? null,
+        icon: row.icon ?? null,
         iconColor: row.iconColor ?? null,
+        hidden: row.hidden ?? false,
       })));
     },
     async insertMyDayItems(rows) {
@@ -176,7 +239,7 @@ beforeAll(async () => {
         name: row.name ?? row.id,
         enabled: row.enabled ?? true,
         capabilities: {},
-        credentials: {},
+        credentials: row.credentials ?? {},
         settings: row.settings ?? {},
         syncedLists: row.syncedLists ?? [],
         createdAt: DEFAULT_NOW,

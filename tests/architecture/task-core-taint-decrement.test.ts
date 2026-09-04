@@ -33,8 +33,8 @@ const OWNED = [
 ] as const;
 
 /**
- * The four helpers that still *compile Drizzle predicates* for the task
- * routes L05/L07 have not migrated yet. They evaluate no database handle and
+ * The four helpers that still *compile Drizzle predicates* for the remaining
+ * L07 task routes. They evaluate no database handle and
  * no driver — `@/db/schema` is table metadata and
  * `@/db/persistence/sqlite-task-filter` is a handle-free predicate compiler —
  * which is why the census already counts them as clean. Pinning the list
@@ -191,10 +191,10 @@ describe('L04 task-core taint decrement', () => {
     }).toEqual({
       taintedLibA: 92,
       taintedApiHelpers: 1,
-      tierARoutes: 217,
+      tierARoutes: 208,
       tierBRoutes: 26,
-      cleanRoutes: 23,
-      totalMigrationUnits: 310,
+      cleanRoutes: 32,
+      totalMigrationUnits: 301,
     });
   });
 });

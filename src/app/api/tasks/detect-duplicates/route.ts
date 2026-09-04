@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { inArray } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
 const MAX_GLOBAL_COMPARISONS = 100_000;
 const YIELD_EVERY_COMPARISONS = 1_000;
@@ -79,18 +77,8 @@ export async function GET(request: Request) {
     const threshold = Math.min(1, Math.max(0, parseFloat(searchParams.get('threshold') ?? '0.85')));
     const includeClosedTasks = searchParams.get('includeClosedTasks') === 'true';
 
-    // Fetch relevant tasks
-    let allTasks;
-    if (includeClosedTasks) {
-      allTasks = await db
-        .select({ id: tasks.id, title: tasks.title, status: tasks.status, sourceId: tasks.sourceId, connectorType: tasks.connectorType, createdAt: tasks.createdAt })
-        .from(tasks);
-    } else {
-      allTasks = await db
-        .select({ id: tasks.id, title: tasks.title, status: tasks.status, sourceId: tasks.sourceId, connectorType: tasks.connectorType, createdAt: tasks.createdAt })
-        .from(tasks)
-        .where(inArray(tasks.status, ['todo', 'in_progress']));
-    }
+    const { taskReads } = await getTaskCorePersistence();
+    const allTasks = await taskReads.listDuplicateDetectionTasks({ includeClosedTasks });
 
     if (targetTaskId) {
       // Only find duplicates for this specific task

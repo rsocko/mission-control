@@ -5,8 +5,11 @@ import {
   describeTaskCoreContract,
   type SeedAttachment,
   type SeedConnector,
+  type SeedLinkedSource,
   type SeedPriorityEntity,
+  type SeedProjectPhase,
   type SeedSourceList,
+  type SeedSourceRanking,
   type SeedTag,
   type SeedTask,
   type TaskCoreContractHarness,
@@ -69,13 +72,17 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         TRUNCATE TABLE
           task_ingest_suppressions,
           task_attachments,
+          task_linked_sources,
           task_schedules,
+          task_triage_log,
           project_phase_items,
+          project_phases,
           task_projects,
           task_tags,
           my_day_exclusions,
           my_day_items,
           priority_entities,
+          source_rankings,
           source_lists,
           connector_configs,
           app_settings,
@@ -93,9 +100,9 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             status, local_disposition, priority, planning_horizon, due_date,
             created_at, updated_at, completed_at, parent_id, depth, is_checklist_item,
             source_list_id, source_list_name, assignee, micro_status, metadata,
-            sync_status, last_synced_at, effort
+            sync_status, last_synced_at, effort, snoozed_until
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
           )`,
           [
             row.id,
@@ -123,6 +130,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.syncStatus ?? 'synced',
             row.lastSyncedAt ?? DEFAULT_NOW,
             row.effort ?? null,
+            row.snoozedUntil ?? null,
           ],
         );
       }
@@ -174,8 +182,9 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
       for (const row of rows) {
         await client.query(
           `INSERT INTO source_lists (
-            id, connector_instance_id, source_id, name, type, user_display_name, group_id, icon_color
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+            id, connector_instance_id, source_id, name, type, user_display_name, group_id,
+            icon, icon_color, hidden
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [
             row.id,
             row.connectorInstanceId,
@@ -184,7 +193,9 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.type ?? 'list',
             row.userDisplayName ?? null,
             row.groupId ?? null,
+            row.icon ?? null,
             row.iconColor ?? null,
+            row.hidden ?? false,
           ],
         );
       }
@@ -235,7 +246,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.name ?? row.id,
             row.enabled ?? true,
             '{}',
-            '{}',
+            JSON.stringify(row.credentials ?? {}),
             JSON.stringify(row.settings ?? {}),
             JSON.stringify(row.syncedLists ?? []),
             DEFAULT_NOW,
@@ -267,6 +278,77 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.contentBase64 ?? null,
             row.sourceAttachmentId ?? null,
             row.createdAt ?? DEFAULT_NOW,
+          ],
+        );
+      }
+    },
+    async insertLinkedSources(rows: SeedLinkedSource[]) {
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO task_linked_sources (
+            id, task_id, connector_type, connector_instance_id, source_id, title,
+            linked_at, match_confidence, metadata
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [
+            row.id,
+            row.taskId,
+            row.connectorType,
+            row.connectorInstanceId,
+            row.sourceId,
+            row.title,
+            row.linkedAt ?? DEFAULT_NOW,
+            row.matchConfidence ?? null,
+            JSON.stringify(row.metadata ?? {}),
+          ],
+        );
+      }
+    },
+    async insertProjectPhases(rows: SeedProjectPhase[]) {
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO project_phases (id, project_id, name, created_at, updated_at)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [row.id, row.projectId ?? null, row.name, DEFAULT_NOW, DEFAULT_NOW],
+        );
+        for (const [index, taskId] of (row.taskIds ?? []).entries()) {
+          await client.query(
+            `INSERT INTO project_phase_items (
+              id, phase_id, task_id, sort_order, is_proposed, created_at
+            ) VALUES ($1,$2,$3,$4,$5,$6)`,
+            [
+              `${row.id}:${taskId}`,
+              row.id,
+              taskId,
+              index,
+              row.isProposed ?? false,
+              DEFAULT_NOW,
+            ],
+          );
+        }
+      }
+    },
+    async insertSourceRankings(rows: SeedSourceRanking[]) {
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO source_rankings (id, connector_type, name, rank, updated_at)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [row.id, row.connectorType, row.name, row.rank, row.updatedAt ?? DEFAULT_NOW],
+        );
+      }
+    },
+    async insertQuickSortLogs(rows) {
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO task_triage_log (
+            id, task_id, mode, action, triaged_at, reversed_at
+          ) VALUES ($1,$2,$3,$4,$5,$6)`,
+          [
+            row.id,
+            row.taskId,
+            'no_priority',
+            row.action,
+            row.triagedAt,
+            row.reversedAt ?? null,
           ],
         );
       }

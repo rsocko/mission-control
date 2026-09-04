@@ -1,122 +1,53 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { desc, inArray, isNull, lte } from 'drizzle-orm';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
-const mocks = vi.hoisted(() => {
-  const terminals: unknown[] = [];
-  const orderBy = vi.fn();
-
-  function chainable(terminal: unknown) {
-    const chain = new Proxy<Record<PropertyKey, unknown>>({}, {
-      get(_, prop) {
-        if (prop === 'then') {
-          return (resolve: (value: unknown) => unknown) => resolve(terminal);
-        }
-        if (prop === 'orderBy') {
-          return (...args: unknown[]) => {
-            orderBy(...args);
-            return chain;
-          };
-        }
-        return vi.fn(() => chain);
-      },
-    });
-    return chain;
-  }
-
-  return {
-    terminals,
-    orderBy,
-    select: vi.fn(() => chainable(terminals.shift() ?? [])),
-  };
-});
-
-vi.mock('@/db', () => ({
-  default: {
-    select: mocks.select,
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: {
-    id: 'id',
-    title: 'title',
-    description: 'description',
-    priority: 'priority',
-    effort: 'effort',
-    status: 'status',
-    connectorType: 'connectorType',
-    connectorInstanceId: 'connectorInstanceId',
-    sourceListId: 'sourceListId',
-    sourceListName: 'sourceListName',
-    dueDate: 'dueDate',
-    planningHorizon: 'planningHorizon',
-    createdAt: 'createdAt',
-    parentId: 'parentId',
-    snoozedUntil: 'snoozedUntil',
-  },
-  taskTags: { taskId: 'taskId', tagId: 'tagId' },
-  taskProjects: { taskId: 'taskId', projectId: 'projectId' },
-  tags: { id: 'tagId', name: 'tagName', slug: 'tagSlug', color: 'tagColor' },
-  hubProjects: { id: 'projectId', name: 'projectName', color: 'projectColor' },
-  projectPhaseItems: { taskId: 'taskId', phaseId: 'phaseId', isProposed: 'isProposed' },
-  projectPhases: { id: 'phaseId', name: 'phaseName', projectId: 'phaseProjectId' },
-  sourceLists: {
-    connectorInstanceId: 'sourceListConnectorInstanceId',
-    sourceId: 'sourceListSourceId',
-    name: 'sourceListDefinitionName',
-    userDisplayName: 'sourceListUserDisplayName',
-    type: 'sourceListType',
-    icon: 'sourceListIcon',
-    iconColor: 'sourceListIconColor',
-    hidden: 'sourceListHidden',
-  },
+const taskReads = vi.hoisted(() => ({
+  listQuickSortTasks: vi.fn(),
+  getQuickSortCounts: vi.fn(),
+  listQuickSortSources: vi.fn(),
 }));
 
 describe('GET /api/tasks/quick-sort', () => {
   beforeEach(() => {
-    mocks.terminals.length = 0;
-    mocks.select.mockClear();
-    mocks.orderBy.mockClear();
-    vi.mocked(inArray).mockClear();
-    vi.mocked(isNull).mockClear();
-    vi.mocked(lte).mockClear();
-    vi.mocked(desc).mockClear();
+    vi.clearAllMocks();
+    taskReads.listQuickSortTasks.mockResolvedValue([]);
+    taskReads.getQuickSortCounts.mockResolvedValue({
+      no_priority: 0,
+      quadrant: 0,
+      no_effort: 0,
+      no_tags: 0,
+      no_planning_horizon: 0,
+    });
+    taskReads.listQuickSortSources.mockResolvedValue({ rows: [], definitions: [] });
+    registerFakeTaskCorePersistence({ taskReads });
   });
 
-  it('returns tasks without planning horizons in priority-first order', async () => {
-    mocks.terminals.push([
-      {
-        id: 'critical-task',
-        title: 'Critical task',
-        description: 'Important context',
-        priority: 'critical',
-        effort: 2,
-        status: 'todo',
-        connectorType: 'local',
-        connectorInstanceId: 'local',
-        sourceListId: null,
-        sourceListName: null,
-        dueDate: null,
-        planningHorizon: null,
-        createdAt: '2026-07-30T12:00:00.000Z',
-      },
-    ],
-    [],
-    [{
-      taskId: 'critical-task',
-      projectId: 'project-1',
-      projectName: 'Launch',
-      projectColor: '#6366f1',
-    }],
-    [{
-      taskId: 'critical-task',
-      phaseId: 'phase-1',
-      phaseName: 'Delivery',
-      projectId: 'project-1',
+  it('returns repository queue rows with policy and compact context', async () => {
+    taskReads.listQuickSortTasks.mockResolvedValue([{
+      id: 'critical-task',
+      title: 'Critical task',
+      description: 'Important context',
+      priority: 'critical',
+      effort: 2,
+      status: 'todo',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      sourceId: 'local:critical-task',
+      sourceListId: null,
+      sourceListName: null,
+      dueDate: null,
+      planningHorizon: null,
+      createdAt: '2026-07-30T12:00:00.000Z',
+      localDisposition: 'active',
+      tags: [],
+      projects: [{ id: 'project-1', name: 'Launch', color: '#6366f1' }],
+      phases: [{ id: 'phase-1', name: 'Delivery', projectId: 'project-1' }],
     }]);
 
     const { GET } = await import('@/app/api/tasks/quick-sort/route');
-    const response = await GET(new Request('http://localhost/api/tasks/quick-sort?mode=no_planning_horizon'));
+    const response = await GET(new Request(
+      'http://localhost/api/tasks/quick-sort?mode=no_planning_horizon',
+    ));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -125,39 +56,59 @@ describe('GET /api/tasks/quick-sort', () => {
       hasNotes: true,
       projects: [{ id: 'project-1', name: 'Launch', color: '#6366f1' }],
       phases: [{ id: 'phase-1', name: 'Delivery', projectId: 'project-1' }],
+      taskSourceModel: 'mc-owned',
     });
     expect(body.tasks[0].description).toBeUndefined();
-    expect(isNull).toHaveBeenCalledWith('planningHorizon');
-    expect(isNull).toHaveBeenCalledWith('snoozedUntil');
-    expect(lte).toHaveBeenCalledWith('snoozedUntil', expect.any(String));
-    expect(desc).toHaveBeenCalledWith('createdAt');
-    expect(mocks.orderBy).toHaveBeenCalled();
+    expect(taskReads.listQuickSortTasks).toHaveBeenCalledWith(expect.objectContaining({
+      mode: 'no_planning_horizon',
+      order: 'smart',
+      limit: 50,
+      sourceTypes: [],
+    }));
   });
 
-  it('includes the plan/schedule queue in badge counts', async () => {
-    mocks.terminals.push(
-      [{ count: 1 }],
-      [{ count: 2 }],
-      [{ count: 3 }],
-      [{ count: 4 }],
-    );
-
-    const { GET } = await import('@/app/api/tasks/quick-sort/route');
-    const response = await GET(new Request('http://localhost/api/tasks/quick-sort?counts=true'));
-    const body = await response.json();
-
-    expect(body.counts).toEqual({
+  it('returns badge counts before mode validation', async () => {
+    taskReads.getQuickSortCounts.mockResolvedValue({
       no_priority: 1,
       quadrant: 1,
       no_effort: 2,
       no_tags: 3,
       no_planning_horizon: 4,
     });
+
+    const { GET } = await import('@/app/api/tasks/quick-sort/route');
+    const response = await GET(new Request('http://localhost/api/tasks/quick-sort?counts=true'));
+
+    await expect(response.json()).resolves.toEqual({
+      counts: {
+        no_priority: 1,
+        quadrant: 1,
+        no_effort: 2,
+        no_tags: 3,
+        no_planning_horizon: 4,
+      },
+    });
+    expect(taskReads.listQuickSortTasks).not.toHaveBeenCalled();
   });
 
-  it('groups legacy Mission Control tasks under Local and includes list icon metadata', async () => {
-    mocks.terminals.push(
-      [
+  it('preserves source-list-id precedence in the repository scope', async () => {
+    const { GET } = await import('@/app/api/tasks/quick-sort/route');
+    await GET(new Request(
+      'http://localhost/api/tasks/quick-sort?mode=no_tags'
+        + '&source=github&sourceList=Legacy&sourceListId=repo-1&connectorId=gh-1',
+    ));
+
+    expect(taskReads.listQuickSortTasks).toHaveBeenCalledWith(expect.objectContaining({
+      sourceListId: 'repo-1',
+      sourceListName: null,
+      connectorInstanceId: 'gh-1',
+      sourceTypes: expect.any(Array),
+    }));
+  });
+
+  it('groups legacy Mission Control sources under Local and keeps list metadata', async () => {
+    taskReads.listQuickSortSources.mockResolvedValue({
+      rows: [
         {
           connectorType: 'mission-control',
           connectorInstanceId: 'mc-local',
@@ -179,37 +130,18 @@ describe('GET /api/tasks/quick-sort', () => {
           sourceListName: 'rsocko/mission-control',
           count: 4,
         },
-        {
-          connectorType: 'microsoft-todo',
-          connectorInstanceId: 'todo',
-          sourceListId: null,
-          sourceListName: 'Work',
-          count: 6,
-        },
       ],
-      [
-        {
-          connectorInstanceId: 'github',
-          sourceId: 'rsocko/mission-control',
-          name: 'rsocko/mission-control',
-          userDisplayName: null,
-          type: 'repo',
-          icon: 'dash:github',
-          iconColor: null,
-          hidden: false,
-        },
-        {
-          connectorInstanceId: 'todo',
-          sourceId: 'work-list',
-          name: 'Work',
-          userDisplayName: null,
-          type: 'list',
-          icon: 'mdi:briefcase',
-          iconColor: '#60a5fa',
-          hidden: false,
-        },
-      ],
-    );
+      definitions: [{
+        connectorInstanceId: 'github',
+        sourceId: 'rsocko/mission-control',
+        name: 'rsocko/mission-control',
+        userDisplayName: null,
+        type: 'repo',
+        icon: 'dash:github',
+        iconColor: null,
+        hidden: false,
+      }],
+    });
 
     const { GET } = await import('@/app/api/tasks/quick-sort/route');
     const response = await GET(new Request('http://localhost/api/tasks/quick-sort?sources=true'));
@@ -226,14 +158,6 @@ describe('GET /api/tasks/quick-sort', () => {
       icon: 'dash:github',
       iconColor: null,
     }]);
-    expect(body.sources['microsoft-todo'].lists).toEqual([{
-      connectorId: 'todo',
-      sourceListId: 'work-list',
-      name: 'Work',
-      count: 6,
-      type: 'list',
-      icon: 'mdi:briefcase',
-      iconColor: '#60a5fa',
-    }]);
+    expect(taskReads.getQuickSortCounts).not.toHaveBeenCalled();
   });
 });

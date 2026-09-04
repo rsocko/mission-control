@@ -157,6 +157,240 @@ export interface InboxListEntry {
 }
 
 /* ------------------------------------------------------------------ *
+ * Endpoint-oriented task reads
+ * ------------------------------------------------------------------ */
+
+export interface TaskAttachmentReadContext {
+  readonly task: {
+    readonly sourceId: string;
+    readonly connectorType: string;
+    readonly connectorInstanceId: string;
+  } | null;
+  readonly attachment: {
+    readonly name: string;
+    readonly contentType: string;
+    readonly contentBase64: string | null;
+    readonly sourceAttachmentId: string | null;
+  } | null;
+}
+
+export interface TaskDocumentPreviewContext {
+  readonly task: {
+    readonly connectorType: string;
+    readonly connectorInstanceId: string;
+    readonly metadata: Record<string, unknown>;
+  } | null;
+  /**
+   * Present only when the task's connector is an enabled, non-deleted
+   * document-intelligence connector with the exact stored instance id.
+   */
+  readonly connector: {
+    readonly credentials: Record<string, unknown>;
+    readonly settings: Record<string, unknown>;
+  } | null;
+}
+
+export interface TaskLinkedSourceRow {
+  readonly id: string;
+  readonly taskId: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceId: string;
+  readonly title: string;
+  readonly linkedAt: string;
+  readonly matchConfidence: number | null;
+  readonly metadata: Record<string, unknown>;
+}
+
+export interface TaskRelationshipCandidateRow {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly connectorType: string;
+  readonly sourceListName: string | null;
+  readonly projectIds: string[];
+  readonly projectNames: string[];
+}
+
+export interface TaskDuplicateDetectionRow {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly createdAt: string;
+}
+
+export type TaskGroupMode =
+  | 'status'
+  | 'priority'
+  | 'planningHorizon'
+  | 'source'
+  | 'list'
+  | 'effort'
+  | 'dueDate'
+  | 'tag'
+  | 'project';
+
+export type TaskQuickSortQueueMode =
+  | 'no_priority'
+  | 'quadrant'
+  | 'no_effort'
+  | 'no_tags'
+  | 'no_planning_horizon';
+
+export type TaskQuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
+
+export interface TaskQuickSortScope {
+  readonly now: string;
+  readonly skipCutoff: string;
+  readonly sourceTypes: readonly string[];
+  readonly sourceListId: string | null;
+  readonly sourceListName: string | null;
+  readonly connectorInstanceId: string | null;
+}
+
+export interface TaskQuickSortSourceRow {
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceListId: string | null;
+  readonly sourceListName: string | null;
+  readonly count: number;
+}
+
+export interface TaskQuickSortSourceListDefinition {
+  readonly connectorInstanceId: string;
+  readonly sourceId: string;
+  readonly name: string;
+  readonly userDisplayName: string | null;
+  readonly type: string;
+  readonly icon: string | null;
+  readonly iconColor: string | null;
+  readonly hidden: boolean;
+}
+
+export interface TaskQuickSortCounts {
+  readonly no_priority: number;
+  readonly quadrant: number;
+  readonly no_effort: number;
+  readonly no_tags: number;
+  readonly no_planning_horizon: number;
+}
+
+export interface TaskQuickSortQueueRow {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly priority: string;
+  readonly effort: number | null;
+  readonly status: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceId: string;
+  readonly sourceListId: string | null;
+  readonly sourceListName: string | null;
+  readonly dueDate: string | null;
+  readonly planningHorizon: string | null;
+  readonly createdAt: string;
+  readonly localDisposition: LocalDisposition;
+  readonly tags: Array<{
+    readonly id: string;
+    readonly name: string;
+    readonly slug: string;
+    readonly color: string | null;
+  }>;
+  readonly projects: Array<{
+    readonly id: string;
+    readonly name: string;
+    readonly color: string;
+  }>;
+  readonly phases: Array<{
+    readonly id: string;
+    readonly name: string;
+    readonly projectId: string | null;
+  }>;
+}
+
+export interface TaskQuickSortSuggestionTask {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly priority: TaskPriority;
+  readonly dueDate: string | null;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceListName: string | null;
+  readonly assignee: string | null;
+  readonly snoozedUntil: string | null;
+  readonly effort: number | null;
+}
+
+export interface TaskQuickSortSuggestionInputs {
+  readonly tasks: TaskQuickSortSuggestionTask[];
+  readonly sourceRankings: Array<{
+    readonly id: string;
+    readonly connectorType: string;
+    readonly name: string;
+    readonly rank: number;
+    readonly updatedAt: string;
+  }>;
+  readonly tags: Array<{
+    readonly id: string;
+    readonly name: string;
+  }>;
+  readonly taskTags: Array<{
+    readonly taskId: string;
+    readonly tagId: string;
+  }>;
+}
+
+/**
+ * Narrow read surface for the nine L05 task-read endpoints. Inputs and results
+ * are plain domain data; SQL expressions and backend handles never cross it.
+ */
+export interface TaskReadRepository {
+  getAttachmentReadContext(
+    taskId: string,
+    attachmentId: string,
+  ): Promise<TaskAttachmentReadContext>;
+  getDocumentPreviewContext(taskId: string): Promise<TaskDocumentPreviewContext>;
+  listLinkedSources(taskId: string): Promise<TaskLinkedSourceRow[]>;
+  searchRelationshipCandidates(input: {
+    readonly taskId: string;
+    readonly query: string;
+    readonly limit: number;
+  }): Promise<TaskRelationshipCandidateRow[] | null>;
+  listDuplicateDetectionTasks(input: {
+    readonly includeClosedTasks: boolean;
+  }): Promise<TaskDuplicateDetectionRow[]>;
+  listDistinctTaskAssignees(): Promise<string[]>;
+  getGroupCounts(input: {
+    readonly spec: TaskFilterSpec;
+    readonly groupBy: TaskGroupMode;
+  }): Promise<Record<string, number>>;
+  listQuickSortSources(input: {
+    readonly now: string;
+    readonly skipCutoff: string;
+  }): Promise<{
+    readonly rows: TaskQuickSortSourceRow[];
+    readonly definitions: TaskQuickSortSourceListDefinition[];
+  }>;
+  getQuickSortCounts(input: TaskQuickSortScope): Promise<TaskQuickSortCounts>;
+  listQuickSortTasks(
+    input: TaskQuickSortScope & {
+      readonly mode: TaskQuickSortQueueMode;
+      readonly order: TaskQuickSortOrder;
+      readonly limit: number;
+    },
+  ): Promise<TaskQuickSortQueueRow[]>;
+  getQuickSortSuggestionInputs(
+    taskIds: readonly string[],
+  ): Promise<TaskQuickSortSuggestionInputs>;
+}
+
+/* ------------------------------------------------------------------ *
  * Repositories
  * ------------------------------------------------------------------ */
 
@@ -760,11 +994,12 @@ export interface TaskTransferIdentityRepository {
 }
 
 /**
- * The whole L04 task-core composition. Adapters build this atomically:
+ * The task-core composition (L04 core plus L05 endpoint reads). Adapters build this atomically:
  * either every member resolves for a backend or the backend registers
  * nothing, so there is never a half-migrated task-core surface.
  */
 export interface TaskCorePersistence {
+  readonly taskReads: TaskReadRepository;
   readonly filterInputs: TaskFilterInputRepository;
   readonly queries: TaskQueryRepository;
   readonly policyIdentities: TaskPolicyIdentityRepository;

@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, and L08a triage web persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, and L08a triage web persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "5924944eec1651ee42cd11ee61bf65a8fb58de93+L08a",
+  "generatedFromCommit": "5b219993cdd01b5abde5fee69a6ff1b4c3320264+L08a",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 172,
+    "tierARoutes": 167,
     "tierBRoutes": 18,
-    "cleanRoutes": 76,
+    "cleanRoutes": 81,
     "directTaintSourceRoutes": 119,
-    "transitiveOnlyTaintSourceRoutes": 53,
+    "transitiveOnlyTaintSourceRoutes": 48,
     "directDbNamespaceRoutes": 120,
-    "taintedLibA": 78,
-    "taintedApiHelpers": 1,
-    "totalMigrationUnits": 251
+    "taintedLibA": 76,
+    "taintedApiHelpers": 0,
+    "totalMigrationUnits": 243
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -396,11 +396,6 @@
     "src/app/api/hub-projects/route.ts",
     "src/app/api/ideation/convert/route.ts",
     "src/app/api/ideation/expand/route.ts",
-    "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
-    "src/app/api/ideation/workspaces/[id]/route.ts",
-    "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
-    "src/app/api/ideation/workspaces/[id]/versions/route.ts",
-    "src/app/api/ideation/workspaces/route.ts",
     "src/app/api/inbound-webhooks/[id]/log/route.ts",
     "src/app/api/inbound-webhooks/[id]/receive/route.ts",
     "src/app/api/inbound-webhooks/[id]/route.ts",
@@ -546,6 +541,11 @@
     "src/app/api/finance/insights/route.ts",
     "src/app/api/finance/sync/route.ts",
     "src/app/api/hub-projects/[id]/tasks/route.ts",
+    "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
+    "src/app/api/ideation/workspaces/[id]/route.ts",
+    "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
+    "src/app/api/ideation/workspaces/[id]/versions/route.ts",
+    "src/app/api/ideation/workspaces/route.ts",
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/mcp/tasks/[id]/route.ts",
@@ -748,11 +748,6 @@
     "src/app/api/graph/nodes/[nodeId]/neighbors/route.ts",
     "src/app/api/graph/universe/route.ts",
     "src/app/api/ideation/expand/route.ts",
-    "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
-    "src/app/api/ideation/workspaces/[id]/route.ts",
-    "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
-    "src/app/api/ideation/workspaces/[id]/versions/route.ts",
-    "src/app/api/ideation/workspaces/route.ts",
     "src/app/api/insights/observations/route.ts",
     "src/app/api/insights/route.ts",
     "src/app/api/integrations/alertmanager/route.ts",
@@ -940,7 +935,6 @@
     "src/lib/finance-insights/cutover-operator.ts",
     "src/lib/finance-insights/cutover.ts",
     "src/lib/finance/operations.ts",
-    "src/lib/graph-workspace/service.ts",
     "src/lib/graph/filtered-subgraph.ts",
     "src/lib/graph/neighbors-service.ts",
     "src/lib/graph/service.ts",
@@ -959,7 +953,6 @@
     "src/lib/notifications/quiet-hours.ts",
     "src/lib/notifications/service.ts",
     "src/lib/notifications/workflow-executor.ts",
-    "src/lib/persistence/sqlite-runtime.ts",
     "src/lib/projects-overview/index.ts",
     "src/lib/public-demo-runtime.ts",
     "src/lib/push/scheduler.ts",
@@ -983,9 +976,7 @@
     "src/lib/triage/query.ts",
     "src/lib/word-insights/service.ts"
   ],
-  "taintedApiHelpers": [
-    "src/app/api/ideation/workspaces/route-errors.ts"
-  ],
+  "taintedApiHelpers": [],
   "decrementHistory": [
     {
       "layer": "L07",
@@ -1242,11 +1233,44 @@
       "verification": "Recomputed with computeWebPersistenceGraph after landing L15 on main: 266 routes, 186 Tier A, 26 Tier B, 54 clean, 124 direct, 62 transitive-only, 125 direct @/db, 85 tainted libraries, 1 tainted API helper, and 272 total migration units."
     },
     {
+      "layer": "L16",
+      "title": "ideation-workspace web/API PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 272,
+        "to": 264,
+        "delta": -8
+      },
+      "removedTaintedApiHelpers": [
+        "src/app/api/ideation/workspaces/route-errors.ts"
+      ],
+      "removedTaintedLibA": [
+        "src/lib/graph-workspace/service.ts",
+        "src/lib/persistence/sqlite-runtime.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
+        "src/app/api/ideation/workspaces/[id]/route.ts",
+        "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
+        "src/app/api/ideation/workspaces/[id]/versions/route.ts",
+        "src/app/api/ideation/workspaces/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
+        "src/app/api/ideation/workspaces/[id]/route.ts",
+        "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
+        "src/app/api/ideation/workspaces/[id]/versions/route.ts",
+        "src/app/api/ideation/workspaces/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Recomputed with computeWebPersistenceGraph at L16: 266 routes, 181 Tier A, 26 Tier B, 59 clean, 124 direct, 57 transitive-only, 125 direct @/db, 83 tainted libraries, 0 tainted API helpers, and 264 total migration units. taintedApiHelpers reaches the declared finalTarget of 0."
+    },
+    {
       "layer": "L08a",
       "title": "triage web PostgreSQL persistence parity",
       "totalMigrationUnits": {
-        "from": 272,
-        "to": 251,
+        "from": 264,
+        "to": 243,
         "delta": -21
       },
       "removedTaintedApiHelpers": [],
@@ -1324,7 +1348,7 @@
         "src/app/api/triage/[id]/route.ts",
         "src/app/api/triage/capture/route.ts"
       ],
-      "verification": "computeWebPersistenceGraph reports exactly 266 routes, A172/B18/clean76, direct119/transitive53/directDB120, 78 tainted libraries, one helper, and 251 total migration units after composing with merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, and L15 project-hierarchy parity. No route moved from Tier A to Tier B."
+      "verification": "computeWebPersistenceGraph reports exactly 266 routes, A167/B18/clean81, direct119/transitive48/directDB120, 76 tainted libraries, zero helpers, and 243 total migration units after composing with merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, and L16 ideation-workspace parity. No route moved from Tier A to Tier B."
     }
   ],
   "layerUpdates": [
@@ -1337,6 +1361,20 @@
         "src/lib/tasks/relative-reminder-timezone-runtime.ts (a transitional lazy dynamic-import resolver) was deleted; its role is now split between the pure registry (`@/lib/settings/mode-route-services`, owned by this layer, not `src/lib/tasks/` which is owned by a later layer) and the composition-root wiring in `src/db/runtime.ts`.",
         "src/lib/triage/lifecycle.ts and src/lib/triage/shared.ts are unchanged in tier (still Tier A/tainted): their normal, non-demo functions (updateTriageItemThumbnail, hardDeleteTriageItem, hardDeleteTriageItems, purgeDismissedItems, ensureSeedData, and others) are explicitly NOT migrated by L02 and are NOT given a fail-closed guard merely because they share a module with clearTriageSampleData (the one genuine seed/demo exception in that file); they remain an explicit later-layer target, not narrowed L02 taint.",
         "The notification entity-linking repository files (src/db/persistence/notification-entity-linking.ts and its SQLite/Postgres adapters) gained an ASCII-fold suffix-match parity fix and a JSON-string-type guard; neither file is on the tainted-graph census path (they are called from webhook/worker code already migrated by prior layers), so this change does not affect any count in this baseline."
+      ]
+    },
+    {
+      "layer": "L16",
+      "summary": "Web/API PostgreSQL parity: the Ideation workspace domain now selects its backend through the composed worker persistence facade instead of a hardcoded SQLite composition root, retiring the last tainted shared API helper.",
+      "changes": [
+        "src/lib/persistence/sqlite-runtime.ts is deleted. It was a SQLite-only composition root that existed solely for ideation workspaces and had exactly one consumer; the SQLite adapter is now composed in src/db/persistence/sqlite-worker-runtime.ts alongside every other backend-selected repository.",
+        "WorkerPersistenceRepositories gains a top-level `ideationWorkspaces` slot. It is not nested under an existing slot (as L15 nested projectAutomation.hierarchy) because graph_workspaces and graph_workspace_versions share no rows and no serialization namespace with any other worker surface.",
+        "src/lib/graph-workspace/service.ts exits taintedLibA: it now holds an async repository resolver over getWorkerPersistenceRepositories() rather than a constructed SQLite repository, so it evaluates no driver at import time.",
+        "All five src/app/api/ideation/workspaces/** routes exit tierARoutes and enter cleanRoutes with no source change: none of them ever imported the @/db namespace, so the entire decrement is transitive (directTaintSourceRoutes and directDbNamespaceRoutes are unchanged at 124 and 125).",
+        "src/app/api/ideation/workspaces/route-errors.ts exits taintedApiHelpers, which reaches the declared finalTarget of 0 and is the first ratchet field in the programme to be fully retired.",
+        "src/db/postgres/repositories/ideation-workspace-repository.ts is added. No schema migration was required: graph_workspaces and graph_workspace_versions, both unique indexes, both plain indexes, and the cascade foreign key already ship in drizzle/postgres/0000.",
+        "Both adapters share shouldCheckpointIdeationRevision from the neutral contract module, and both order the library by (archived, updated_at DESC, ASCII-folded name, id). The trailing id tiebreaker defines an order that was previously unspecified in SQLite; PostgreSQL reproduces SQLite COLLATE NOCASE with ASCII-only translate(...) COLLATE \"C\" rather than a locale-aware lower(name).",
+        "PostgreSQL deleteArchived runs inside one FOR UPDATE transaction where SQLite reads then deletes non-transactionally. Single-threaded behaviour is identical; PostgreSQL is intentionally stronger under concurrency. duplicate deliberately stays non-atomic in both backends."
       ]
     },
     {

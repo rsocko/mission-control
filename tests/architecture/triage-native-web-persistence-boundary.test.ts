@@ -76,15 +76,15 @@ describe('Layer L08a triage web persistence boundary', () => {
       totalMigrationUnits: graph.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 161,
+      tierARoutes: 153,
       tierBRoutes: 19,
-      cleanRoutes: 86,
-      directTaintSourceRoutes: 119,
+      cleanRoutes: 94,
+      directTaintSourceRoutes: 111,
       transitiveOnlyTaintSourceRoutes: 42,
-      directDbNamespaceRoutes: 120,
+      directDbNamespaceRoutes: 112,
       taintedLibA: 71,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 232,
+      totalMigrationUnits: 224,
     });
   });
 

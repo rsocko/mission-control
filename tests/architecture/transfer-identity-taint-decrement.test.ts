@@ -70,9 +70,9 @@ describe('L06b transfer identity taint decrement', () => {
       directTaintSourceRoutes: 142,
       transitiveOnlyTaintSourceRoutes: 75,
       directDbNamespaceRoutes: 143,
-      taintedLibA: 95,
+      taintedLibA: 92,
       taintedApiHelpers: 1,
-      totalMigrationUnits: 313,
+      totalMigrationUnits: 310,
     });
     expect(current.taintedLibA).toEqual(baseline.taintedLibA);
   });

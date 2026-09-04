@@ -47,9 +47,9 @@
     "directTaintSourceRoutes": 142,
     "transitiveOnlyTaintSourceRoutes": 75,
     "directDbNamespaceRoutes": 143,
-    "taintedLibA": 95,
+    "taintedLibA": 92,
     "taintedApiHelpers": 1,
-    "totalMigrationUnits": 313
+    "totalMigrationUnits": 310
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -988,11 +988,9 @@
     "src/lib/ai/features/smart-priority.ts",
     "src/lib/ai/features/tag-inference.ts",
     "src/lib/ai/features/whats-next.ts",
-    "src/lib/ai/finance-approval-store.ts",
     "src/lib/ai/ideation-expand.ts",
     "src/lib/ai/index.ts",
     "src/lib/ai/provider-factory.ts",
-    "src/lib/ai/tools/finance-tools.ts",
     "src/lib/ai/tools/index.ts",
     "src/lib/ai/tools/intake-tools.ts",
     "src/lib/ai/tools/notification-tools.ts",
@@ -1014,7 +1012,6 @@
     "src/lib/external-agents/transports.ts",
     "src/lib/finance-insights/cutover-operator.ts",
     "src/lib/finance-insights/cutover.ts",
-    "src/lib/finance/houston-tools.ts",
     "src/lib/finance/operations.ts",
     "src/lib/graph-workspace/service.ts",
     "src/lib/graph/filtered-subgraph.ts",

@@ -33,6 +33,7 @@ import {
 } from '@/db/persistence/finance-worker';
 import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import { MONARCH_BRIDGE_CONTRACT_VERSION } from '@/lib/connectors/monarch-money/constants';
+import { createPostgresFinanceAssistantPersistence } from './finance-assistant-repository';
 import { readPostgresFinanceInsightProjectionFacts } from './finance-insights-repositories';
 
 type Client = Pool | PoolClient;
@@ -1608,5 +1609,6 @@ export function createPostgresFinanceWorkerPersistence(
     snapshots: createSnapshotPersistence(pool),
     datasets: createDatasetPersistence(pool),
     attribution: createAttributionPersistence(pool, idFactory),
+    assistant: createPostgresFinanceAssistantPersistence(pool, { idFactory }),
   };
 }

@@ -241,6 +241,16 @@ describe('task transfer identity persistence', () => {
     const now = '2026-08-12T20:00:00.000Z';
     const connectorInstanceId = 'oversized-batch-connector';
     await insertConnector(db, schema, connectorInstanceId, now);
+    await db.insert(schema.tasks).values({
+      id: 'oversized-task',
+      sourceId: 'acme/repo-0:1',
+      connectorType: 'github-issues',
+      connectorInstanceId,
+      title: 'Oversized batch task',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
     const entityCountBefore = (await db.select().from(schema.externalEntities)).length;
     const bindingCountBefore = (await db.select().from(schema.externalEntityBindings)).length;
     const sourceListRows: (typeof schema.sourceLists.$inferInsert)[] = [];

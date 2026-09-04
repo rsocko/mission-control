@@ -63,7 +63,7 @@ describe('L10 AI provider configuration parity', () => {
   it('records exactly the two-route decrement with no Tier B reclassification', () => {
     const entry = baseline.decrementHistory?.find((record) => record.layer === 'L10');
     expect(entry).toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 310, to: 308, delta: -2 });
+    expect(entry?.totalMigrationUnits).toEqual({ from: 272, to: 270, delta: -2 });
     expect(entry?.removedTierARoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.newlyCleanRoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.removedTaintedLibA).toEqual([]);
@@ -108,15 +108,15 @@ describe('L10 AI provider configuration parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 215,
+      tierARoutes: 184,
       tierBRoutes: 26,
-      cleanRoutes: 25,
-      directTaintSourceRoutes: 141,
-      transitiveOnlyTaintSourceRoutes: 74,
-      directDbNamespaceRoutes: 142,
-      taintedLibA: 92,
+      cleanRoutes: 56,
+      directTaintSourceRoutes: 123,
+      transitiveOnlyTaintSourceRoutes: 61,
+      directDbNamespaceRoutes: 124,
+      taintedLibA: 85,
       taintedApiHelpers: 1,
-      totalMigrationUnits: 308,
+      totalMigrationUnits: 270,
     });
   });
 });

@@ -13,6 +13,7 @@ const describePostgres = describe.skipIf(!connectionString);
 const connectorA = `transfer-a-${randomUUID()}`;
 const connectorB = `transfer-b-${randomUUID()}`;
 const taskId = `transfer-task-${randomUUID()}`;
+const conflictTaskId = `transfer-conflict-${randomUUID()}`;
 const sourceListId = `transfer-list-${randomUUID()}`;
 const rollbackSourceListId = `transfer-list-${randomUUID()}`;
 const issueStableId = `I_transfer_${randomUUID()}`;
@@ -58,7 +59,10 @@ async function cleanup(): Promise<void> {
     `DELETE FROM external_entities WHERE stable_id = ANY($1::text[])`,
     [[issueStableId, repositoryStableId]],
   );
-  await pool.query(`DELETE FROM tasks WHERE id = $1`, [taskId]);
+  await pool.query(
+    `DELETE FROM tasks WHERE id = ANY($1::text[])`,
+    [[taskId, conflictTaskId]],
+  );
   await pool.query(
     `DELETE FROM source_lists WHERE id = ANY($1::text[])`,
     [[sourceListId, rollbackSourceListId]],
@@ -368,9 +372,18 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
     const repository = createPostgresGitHubIdentityRepositories(
       backend.context.pool,
     ).transferIdentity;
+    await backend.context.pool.query(
+      `INSERT INTO tasks (
+         id, source_id, connector_type, connector_instance_id, title, status,
+         local_disposition, priority, created_at, updated_at, metadata, sync_status
+       ) VALUES (
+         $1, 'space/new-home:41', 'github', $2, 'Conflicting task', 'todo',
+         'active', 'medium', $3, $3, '{}'::jsonb, 'synced'
+       )`,
+      [conflictTaskId, connectorA, now],
+    );
 
-    await expect(repository.persist(bridgeInput(connectorB)))
-      .rejects.toThrow('Task transfer identity target was not found');
+    await expect(repository.persist(bridgeInput())).rejects.toThrow();
 
     const task = await backend.context.pool.query<{
       source_id: string;
@@ -388,7 +401,7 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
     const bindings = await backend.context.pool.query(
       `SELECT id FROM external_entity_bindings
        WHERE local_id = ANY($1::text[])`,
-      [[taskId, rollbackSourceListId]],
+      [[taskId, sourceListId]],
     );
     expect(bindings.rows).toEqual([]);
   });

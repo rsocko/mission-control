@@ -4176,10 +4176,10 @@ export function createPostgresGitHubIdentityRepositories(
             sourceListIds: sourceListIdsForGitHubTransferIdentity(input),
           },
         );
-        if (input.taskEvidence && !targets.taskExists) {
+        const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
+        if (writes.length > 0 && !targets.taskExists) {
           throw new Error('Task transfer identity target was not found');
         }
-        const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
         validatePrimaryIdentityBatch(input.connectorInstanceId, writes);
         if (writes.length > 0) {
           const modeRevision = await readModeRevisionForShare(

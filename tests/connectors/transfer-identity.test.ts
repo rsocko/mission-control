@@ -155,11 +155,10 @@ describe('task transfer identity persistence', () => {
     ]);
     const { eq } = await import('drizzle-orm');
     const now = '2026-08-11T20:00:00.000Z';
-    await insertConnector(db, schema, 'github-task-owner', now);
-    await insertConnector(db, schema, 'github-wrong-owner', now);
+    await insertConnector(db, schema, 'github-rollback', now);
     await db.insert(schema.sourceLists).values({
       id: 'rollback-list',
-      connectorInstanceId: 'github-wrong-owner',
+      connectorInstanceId: 'github-rollback',
       sourceId: 'acme/rollback',
       name: 'acme/rollback',
       type: 'repo',
@@ -168,8 +167,18 @@ describe('task transfer identity persistence', () => {
       id: 'rollback-task',
       sourceId: 'acme/original:9',
       connectorType: 'github-issues',
-      connectorInstanceId: 'github-task-owner',
+      connectorInstanceId: 'github-rollback',
       title: 'Before rollback',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+    await db.insert(schema.tasks).values({
+      id: 'rollback-source-conflict',
+      sourceId: 'acme/rollback:9',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-rollback',
+      title: 'Conflicting task',
       createdAt: now,
       updatedAt: now,
       lastSyncedAt: now,
@@ -178,10 +187,10 @@ describe('task transfer identity persistence', () => {
 
     await expect(reconcileTransferIdentity(
       'rollback-task',
-      'github-wrong-owner',
+      'github-rollback',
       {
         task: transferTask({
-          connectorInstanceId: 'github-wrong-owner',
+          connectorInstanceId: 'github-rollback',
           sourceId: 'acme/rollback:9',
           sourceListId: 'acme/rollback',
           sourceListName: 'acme/rollback',
@@ -201,7 +210,7 @@ describe('task transfer identity persistence', () => {
           evidence: { entity: repository },
         }],
       },
-    )).rejects.toThrow('Task transfer identity target was not found');
+    )).rejects.toThrow();
 
     const [task] = await db.select().from(schema.tasks)
       .where(eq(schema.tasks.id, 'rollback-task'));

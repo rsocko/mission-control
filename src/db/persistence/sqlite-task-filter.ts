@@ -5,8 +5,10 @@ import {
   inArray,
   isNotNull,
   isNull,
+  like,
   lt,
   lte,
+  ne,
   not,
   notInArray,
   or,
@@ -16,7 +18,9 @@ import {
 } from 'drizzle-orm';
 import {
   connectorConfigs,
+  hubProjects,
   projectPhaseItems,
+  projectPhases,
   sourceLists,
   tags,
   taskProjects,
@@ -27,6 +31,7 @@ import { parseFilterQuery, type FilterToken } from '@/lib/utils/parseFilterQuery
 import { getLocalDaysFromNow } from '@/lib/utils/date';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
+import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import {
   CLOSED_TASK_STATUSES,
   HIGH_PRIORITY_VALUES,
@@ -125,6 +130,119 @@ export function getProjectFilterCondition(projectId: string): SQL {
   return sql`${tasks.id} IN (
     SELECT ${taskProjects.taskId} FROM ${taskProjects}
     WHERE ${taskProjects.projectId} = ${projectId}
+  )`;
+}
+
+function getCollectionSearchCondition(search: string): SQL {
+  const stripped = search.startsWith('#') ? search.slice(1) : '';
+  const conditions: SQL[] = [
+    containsLiteral(tasks.title, search),
+    containsLiteral(tasks.sourceId, search),
+    containsLiteral(tasks.assignee, search),
+    containsLiteral(tasks.sourceListName, search),
+    containsLiteral(tasks.metadata, search),
+    getTagTextCondition(search),
+  ];
+  if (/^\d+$/.test(stripped)) {
+    conditions.push(
+      like(tasks.sourceId, `%:${stripped}`),
+      like(tasks.metadata, `%"issueNumber":${stripped}%`),
+      like(tasks.metadata, `%"issueNumber": ${stripped}%`),
+    );
+  }
+  return or(...conditions)!;
+}
+
+function getCollectionGroupCondition(spec: TaskFilterSpec): SQL | undefined {
+  const group = spec.group;
+  if (!group) return undefined;
+  const value = group.value;
+  if (group.mode === 'status') {
+    if (value === 'Completed') return eq(tasks.status, 'done');
+    if (value === 'Cancelled') return eq(tasks.status, 'cancelled');
+    if (value === 'In Progress') return eq(tasks.status, 'in_progress');
+    if (value === 'To Do') return notInArray(tasks.status, ['done', 'cancelled', 'in_progress']);
+    return undefined;
+  }
+  if (group.mode === 'priority') {
+    return value === 'none'
+      ? or(isNull(tasks.priority), eq(tasks.priority, ''), eq(tasks.priority, 'none'))!
+      : eq(tasks.priority, value);
+  }
+  if (group.mode === 'planningHorizon') {
+    const byLabel = { Next: 'next', Soon: 'soon', Later: 'later', Someday: 'someday' } as const;
+    return value === 'Not set'
+      ? isNull(tasks.planningHorizon)
+      : byLabel[value as keyof typeof byLabel]
+        ? eq(tasks.planningHorizon, byLabel[value as keyof typeof byLabel])
+        : sql`1 = 0`;
+  }
+  if (group.mode === 'source') {
+    return value === 'local'
+      ? or(isNull(tasks.connectorType), eq(tasks.connectorType, ''), eq(tasks.connectorType, 'local'))!
+      : eq(tasks.connectorType, value);
+  }
+  if (group.mode === 'list') {
+    return sql`COALESCE(
+      NULLIF((SELECT COALESCE(NULLIF(${sourceLists.userDisplayName}, ''), NULLIF(${sourceLists.name}, ''))
+        FROM ${sourceLists}
+        WHERE ${sourceLists.connectorInstanceId} = ${tasks.connectorInstanceId}
+          AND ${sourceLists.sourceId} = ${tasks.sourceListId} LIMIT 1), ''),
+      NULLIF(${tasks.sourceListName}, ''), 'No List'
+    ) = ${value}`;
+  }
+  if (group.mode === 'effort') {
+    if (value === NO_EFFORT_GROUP_LABEL) return isNull(tasks.effort);
+    const effort = Number(value);
+    return Number.isInteger(effort) ? eq(tasks.effort, effort) : sql`1 = 0`;
+  }
+  if (group.mode === 'dueDate') {
+    if (value === 'No Due Date') return or(isNull(tasks.dueDate), eq(tasks.dueDate, ''))!;
+    if (value === 'Overdue') {
+      return and(isNotNull(tasks.dueDate), ne(tasks.dueDate, ''), lt(tasks.dueDate, spec.today))!;
+    }
+    return eq(tasks.dueDate, value === 'Today' ? spec.today : value);
+  }
+  if (group.mode === 'tag') {
+    if (value === 'Untagged') {
+      return sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`;
+    }
+    return sql`${tasks.id} IN (
+      SELECT ${taskTags.taskId} FROM ${taskTags}
+      INNER JOIN ${tags} ON ${taskTags.tagId} = ${tags.id}
+      WHERE ${tags.name} = ${value}
+    )`;
+  }
+  if (value === 'No Project') {
+    return sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`;
+  }
+  const separator = value.lastIndexOf(' › ');
+  if (separator < 0) return sql`1 = 0`;
+  const projectName = value.slice(0, separator);
+  const phaseName = value.slice(separator + 3);
+  if (phaseName === 'Unphased') {
+    return and(
+      sql`${tasks.id} IN (
+        SELECT ${taskProjects.taskId} FROM ${taskProjects}
+        INNER JOIN ${hubProjects} ON ${taskProjects.projectId} = ${hubProjects.id}
+        WHERE ${hubProjects.name} = ${projectName}
+      )`,
+      sql`${tasks.id} NOT IN (
+        SELECT ${projectPhaseItems.taskId} FROM ${projectPhaseItems}
+        INNER JOIN ${projectPhases} ON ${projectPhaseItems.phaseId} = ${projectPhases.id}
+        INNER JOIN ${hubProjects} ON ${projectPhases.projectId} = ${hubProjects.id}
+        WHERE ${hubProjects.name} = ${projectName}
+      )`,
+    );
+  }
+  return sql`${tasks.id} IN (
+    SELECT ${projectPhaseItems.taskId} FROM ${projectPhaseItems}
+    INNER JOIN ${projectPhases} ON ${projectPhaseItems.phaseId} = ${projectPhases.id}
+    INNER JOIN ${hubProjects} ON ${projectPhases.projectId} = ${hubProjects.id}
+    INNER JOIN ${taskProjects}
+      ON ${taskProjects.taskId} = ${projectPhaseItems.taskId}
+      AND ${taskProjects.projectId} = ${projectPhases.projectId}
+    WHERE ${hubProjects.name} = ${projectName} AND ${projectPhases.name} = ${phaseName}
   )`;
 }
 
@@ -680,6 +798,16 @@ export function compileCanonicalTaskFilter(
   if (spec.projectId) {
     conditions.push(getProjectFilterCondition(spec.projectId));
   }
+  if (spec.search) conditions.push(getCollectionSearchCondition(spec.search));
+  if (spec.effort !== undefined && spec.effort !== null) {
+    conditions.push(Number.isNaN(spec.effort) ? sql`1 = 0` : eq(tasks.effort, spec.effort));
+  }
+  if (spec.tagIds?.length) conditions.push(getTagIdsFilterCondition([...spec.tagIds]));
+  if (spec.noProject) {
+    conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`);
+  }
+  const groupCondition = getCollectionGroupCondition(spec);
+  if (groupCondition) conditions.push(groupCondition);
 
   const quickFilterCondition = compileQuickFilterCondition(
     spec.quickFilter,

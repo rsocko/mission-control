@@ -3,6 +3,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  publishSemanticEntityDelete: vi.fn(async () => undefined),
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
+}));
 
 let db: typeof import('@/db').default;
 let schema: typeof import('@/db/schema');
@@ -14,12 +18,14 @@ let eq: typeof import('drizzle-orm').eq;
 const NOW = '2026-08-21T19:00:00.000Z';
 
 beforeAll(async () => {
-  db = (await import('@/db')).default;
+  const dbModule = await import('@/db');
+  db = dbModule.default;
   schema = await import('@/db/schema');
   ({ POST, getRemindLaterTarget } = await import(
     '@/app/api/notifications/[id]/actions/[actionId]/route'
   ));
   ({ eq } = await import('drizzle-orm'));
+  await dbModule.initializeSqlitePersistenceComposition();
 });
 
 beforeEach(() => {

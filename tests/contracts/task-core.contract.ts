@@ -2,12 +2,13 @@ import { describe, expect, it, beforeEach } from 'vitest';
 import type {
   PendingSyncTaskMoveRequest,
   TaskCorePersistence,
+  TaskCoreTaskRow,
   TaskFilterSpec,
 } from '@/lib/tasks/core/contracts';
 
 /**
  * Shared, backend-neutral contract suite for the task-core persistence
- * composition (L04 core behavior plus L05 endpoint-oriented reads).
+ * composition (L04/L05 behavior plus L07 collection/detail writes).
  *
  * The same assertions run against the SQLite adapter (in-process, real
  * better-sqlite3) and the PostgreSQL adapter (guarded live integration).
@@ -146,6 +147,11 @@ export interface TaskCoreContractHarness {
   insertTaskTags(rows: Array<{ taskId: string; tagId: string }>): Promise<void>;
   insertProjects(rows: Array<{ id: string; name: string }>): Promise<void>;
   insertTaskProjects(rows: Array<{ taskId: string; projectId: string }>): Promise<void>;
+  insertTaskDependencies(rows: Array<{
+    id: string;
+    taskId: string;
+    dependsOnTaskId: string;
+  }>): Promise<void>;
   insertSourceLists(rows: SeedSourceList[]): Promise<void>;
   insertMyDayItems(rows: Array<{ id: string; taskId: string; date: string }>): Promise<void>;
   insertConnectors(rows: SeedConnector[]): Promise<void>;
@@ -167,10 +173,19 @@ export interface TaskCoreContractHarness {
   listTaskIds(): Promise<string[]>;
   listTaskTagIds(taskId: string): Promise<string[]>;
   listTaskProjectIds(taskId: string): Promise<string[]>;
+  listTaskDependencyIds(taskId: string): Promise<string[]>;
+  listProjectPhaseIds(taskId: string): Promise<string[]>;
   listIngestSuppressions(): Promise<Array<{ connectorInstanceId: string; sourceId: string }>>;
   listAttachmentTaskIds(): Promise<string[]>;
   listMyDayTaskIds(): Promise<string[]>;
   getTaskUpdatedAt(taskId: string): Promise<string | null>;
+  countOutboxEvents(stableKey: string): Promise<number>;
+  insertTriageItem(input: {
+    id: string;
+    title: string;
+    url: string;
+    status?: string;
+  }): Promise<void>;
   countMyDayItems(): Promise<number>;
 }
 
@@ -266,6 +281,48 @@ function baseTasks(): SeedTask[] {
   ];
 }
 
+function writableTask(id: string, title = id): TaskCoreTaskRow {
+  const timestamp = '2025-03-01T12:00:00.000Z';
+  return {
+    id,
+    sourceId: `local:${id}`,
+    connectorType: 'local',
+    connectorInstanceId: 'local',
+    title,
+    description: null,
+    status: 'todo',
+    localDisposition: 'active',
+    priority: 'medium',
+    planningHorizon: null,
+    dueDate: null,
+    pushCount: 0,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    completedAt: null,
+    recurrenceGeneratedFromTaskId: null,
+    parentId: null,
+    depth: 0,
+    isChecklistItem: false,
+    sourceListId: null,
+    sourceListName: null,
+    assignee: null,
+    microStatus: null,
+    statusReason: null,
+    metadata: {},
+    syncStatus: 'local',
+    lastSyncedAt: timestamp,
+    pushRetryCount: 0,
+    kanbanColumn: null,
+    kanbanOrder: null,
+    snoozedUntil: null,
+    reminderAt: null,
+    reminderRelative: null,
+    reminderDueTime: null,
+    effort: null,
+    isBulkImport: false,
+  };
+}
+
 export function describeTaskCoreContract(
   label: string,
   createHarness: () => Promise<TaskCoreContractHarness>,
@@ -276,6 +333,321 @@ export function describeTaskCoreContract(
     beforeEach(async () => {
       harness = await createHarness();
       await harness.reset();
+    });
+
+    describe('collection, detail, and write transactions', () => {
+      it('hydrates collection/detail data and treats search metacharacters literally', async () => {
+        await harness.insertTasks([
+          ...baseTasks(),
+          { id: 'task-literal', title: 'Literal 100%_ complete', sourceId: 'local:literal' },
+        ]);
+        await harness.insertTags([
+          { id: 'tag-api', name: 'API', slug: 'api' },
+          { id: 'tag-selected', name: 'Selected', slug: 'selected' },
+        ]);
+        await harness.insertTaskTags([{ taskId: 'task-literal', tagId: 'tag-api' }]);
+        await harness.insertProjects([{ id: 'project-1', name: 'Project One' }]);
+        await harness.insertTaskProjects([{ taskId: 'task-literal', projectId: 'project-1' }]);
+        await harness.insertTaskSchedules([{
+          taskId: 'task-literal',
+          scheduledDate: TODAY,
+          estimatedDuration: 45,
+        }]);
+        await harness.insertMyDayItems([{ id: 'my-day-literal', taskId: 'task-literal', date: TODAY }]);
+
+        const collection = await harness.persistence.collections.readTaskCollection({
+          spec: makeSpec({ search: '100%_' }),
+          page: { order: { field: 'createdAt', direction: 'asc' }, limit: 20, offset: 0 },
+          includeTags: true,
+          includeScoreInputs: false,
+          countsOnly: false,
+          smartScoreCandidateLimit: 100,
+        });
+        expect(collection.rows.map((row) => row.id)).toEqual(['task-literal']);
+        expect(collection.rows[0]).toMatchObject({
+          estimatedDuration: 45,
+          projectIds: ['project-1'],
+        });
+        expect(collection.rows[0].tags.map((tag) => tag.id)).toEqual(['tag-api']);
+
+        const detail = await harness.persistence.details.getTaskDetail('task-literal', TODAY);
+        expect(detail).toMatchObject({
+          tagIds: ['tag-api'],
+          projectIds: ['project-1'],
+          isInMyDay: true,
+          schedule: { estimatedDuration: 45 },
+        });
+        expect(await harness.persistence.mutations.getTaskWriteContext(
+          'task-literal',
+          ['tag-selected'],
+        )).toMatchObject({
+          tagIds: ['tag-api'],
+          tagNamesById: {
+            'tag-api': 'API',
+            'tag-selected': 'Selected',
+          },
+        });
+      });
+
+      it('creates once from triage and replays without duplicating the task or event', async () => {
+        await harness.insertTriageItem({
+          id: 'triage-create',
+          title: 'Create me',
+          url: 'https://example.test/create',
+        });
+        const task = writableTask('created-from-triage');
+        const input = {
+          task,
+          tagIds: [],
+          tagSlugs: ['Needs Review'],
+          tagCreationMode: 'freeform' as const,
+          projectIds: [],
+          schedule: null,
+          triageItemId: 'triage-create',
+          triageClaimId: 'claim-create',
+          requireConnectorEnabled: true,
+          requireSelectedSourceList: true,
+          event: {
+            stableKey: 'task-created:created-from-triage',
+            type: 'task.created' as const,
+            timestamp: task.createdAt,
+            payload: { taskId: task.id },
+          },
+        };
+
+        expect(await harness.persistence.creates.createTask(input)).toMatchObject({
+          kind: 'committed',
+        });
+        expect(await harness.persistence.creates.createTask(input)).toEqual({
+          kind: 'triage-replay',
+          taskId: task.id,
+        });
+        expect((await harness.listTaskIds()).filter((id) => id === task.id)).toHaveLength(1);
+        expect(await harness.countOutboxEvents(input.event.stableKey)).toBe(1);
+      });
+
+      it('releases a triage claim when validation rejects the create', async () => {
+        await harness.insertTriageItem({
+          id: 'triage-retry',
+          title: 'Retry me',
+          url: 'https://example.test/retry',
+        });
+        const invalid = {
+          ...writableTask('invalid-create'),
+          connectorType: 'missing',
+          connectorInstanceId: 'missing',
+        };
+        const event = {
+          stableKey: 'task-created:triage-retry',
+          type: 'task.created' as const,
+          timestamp: invalid.createdAt,
+          payload: { taskId: invalid.id },
+        };
+        const baseInput = {
+          tagIds: [],
+          tagSlugs: [],
+          tagCreationMode: 'freeform' as const,
+          projectIds: [],
+          schedule: null,
+          triageItemId: 'triage-retry',
+          triageClaimId: 'claim-retry',
+          requireConnectorEnabled: true,
+          requireSelectedSourceList: true,
+          event,
+        };
+        expect(await harness.persistence.creates.createTask({ ...baseInput, task: invalid }))
+          .toEqual({ kind: 'connector-not-found' });
+
+        const retry = writableTask('valid-create');
+        expect(await harness.persistence.creates.createTask({
+          ...baseInput,
+          task: retry,
+          event: { ...event, payload: { taskId: retry.id } },
+        })).toMatchObject({ kind: 'committed' });
+      });
+
+      it('rolls back a triage claim when task insertion fails', async () => {
+        await harness.insertTasks([{ id: 'duplicate-create' }]);
+        await harness.insertTriageItem({
+          id: 'triage-rollback',
+          title: 'Retry after rollback',
+          url: 'https://example.test/rollback',
+        });
+        const request = (task: TaskCoreTaskRow) => ({
+          task,
+          tagIds: [],
+          tagSlugs: [],
+          tagCreationMode: 'freeform' as const,
+          projectIds: [],
+          schedule: null,
+          triageItemId: 'triage-rollback',
+          triageClaimId: 'claim-rollback',
+          requireConnectorEnabled: false,
+          requireSelectedSourceList: false,
+          event: {
+            stableKey: `task-created:${task.id}`,
+            type: 'task.created' as const,
+            timestamp: task.createdAt,
+            payload: { taskId: task.id },
+          },
+        });
+
+        await expect(harness.persistence.creates.createTask(
+          request(writableTask('duplicate-create')),
+        )).rejects.toThrow();
+        expect(await harness.persistence.creates.createTask(
+          request(writableTask('create-after-rollback')),
+        )).toMatchObject({ kind: 'committed' });
+      });
+
+      it('fences concurrent patches with updatedAt CAS and deduplicates outbox events', async () => {
+        await harness.insertTasks([{ id: 'task-cas', title: 'Before', updatedAt: NOW }]);
+        const event = {
+          stableKey: 'task-updated:task-cas:one',
+          type: 'task.updated' as const,
+          timestamp: '2026-08-05T12:01:00.000Z',
+          payload: { taskId: 'task-cas' },
+        };
+        const first = await harness.persistence.mutations.mutateTask({
+          taskId: 'task-cas',
+          expectedUpdatedAt: NOW,
+          expectedStatusForTerminalTransition: null,
+          now: event.timestamp,
+          patch: { title: 'After' },
+          events: [event, event],
+        });
+        expect(first).toMatchObject({ kind: 'committed', task: { title: 'After' } });
+        expect(await harness.persistence.mutations.mutateTask({
+          taskId: 'task-cas',
+          expectedUpdatedAt: NOW,
+          expectedStatusForTerminalTransition: null,
+          now: '2026-08-05T12:02:00.000Z',
+          patch: { title: 'Stale' },
+        })).toEqual({
+          kind: 'revision-conflict',
+          currentUpdatedAt: event.timestamp,
+        });
+        expect(await harness.countOutboxEvents(event.stableKey)).toBe(1);
+      });
+
+      it('creates one recurrence successor and copies local relationships', async () => {
+        await harness.insertTasks([{ id: 'task-recurring', updatedAt: NOW }]);
+        await harness.insertTags([{ id: 'tag-recurring', name: 'Recurring', slug: 'recurring' }]);
+        await harness.insertTaskTags([{ taskId: 'task-recurring', tagId: 'tag-recurring' }]);
+        await harness.insertProjects([{ id: 'project-recurring', name: 'Recurring Project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'task-recurring',
+          projectId: 'project-recurring',
+        }]);
+        await harness.insertProjectPhases([{
+          id: 'phase-recurring',
+          projectId: 'project-recurring',
+          name: 'Recurring Phase',
+          taskIds: ['task-recurring'],
+        }]);
+        await harness.insertTasks([{ id: 'task-prerequisite' }]);
+        await harness.insertTaskDependencies([{
+          id: 'dependency-recurring',
+          taskId: 'task-recurring',
+          dependsOnTaskId: 'task-prerequisite',
+        }]);
+        await harness.insertTaskSchedules([{
+          taskId: 'task-recurring',
+          scheduledDate: TODAY,
+          estimatedDuration: 30,
+          recurrence: 'FREQ=DAILY',
+        }]);
+        await harness.insertAttachments([{
+          id: 'attachment-recurring',
+          taskId: 'task-recurring',
+          name: 'context.txt',
+          size: 7,
+        }]);
+        const firstNow = '2026-08-05T12:01:00.000Z';
+        const first = await harness.persistence.mutations.mutateTask({
+          taskId: 'task-recurring',
+          expectedUpdatedAt: NOW,
+          expectedStatusForTerminalTransition: 'todo',
+          now: firstNow,
+          patch: { status: 'done', completedAt: firstNow },
+          recurrenceSuccessor: {
+            id: 'task-successor',
+            dueDate: WEEK,
+            scheduledDate: WEEK,
+            scheduledTime: null,
+            reminderAt: null,
+            metadata: { recurrence: 'FREQ=DAILY' },
+          },
+        });
+        expect(first).toMatchObject({
+          kind: 'committed',
+          recurrenceNextTaskId: 'task-successor',
+        });
+        expect(await harness.listTaskTagIds('task-successor')).toEqual(['tag-recurring']);
+        expect(await harness.listTaskProjectIds('task-successor')).toEqual(['project-recurring']);
+        expect(await harness.listProjectPhaseIds('task-successor')).toEqual(['phase-recurring']);
+        expect(await harness.listTaskDependencyIds('task-successor')).toEqual(['task-prerequisite']);
+        expect(await harness.listAttachmentTaskIds()).toContain('task-successor');
+
+        const second = await harness.persistence.mutations.mutateTask({
+          taskId: 'task-recurring',
+          expectedUpdatedAt: firstNow,
+          expectedStatusForTerminalTransition: null,
+          now: '2026-08-05T12:02:00.000Z',
+          patch: {},
+          recurrenceSuccessor: {
+            id: 'task-successor-duplicate',
+            dueDate: WEEK,
+            scheduledDate: WEEK,
+            scheduledTime: null,
+            reminderAt: null,
+            metadata: {},
+          },
+        });
+        expect(second).toMatchObject({
+          kind: 'committed',
+          recurrenceNextTaskId: 'task-successor',
+        });
+        expect(await harness.listTaskIds()).not.toContain('task-successor-duplicate');
+      });
+
+      it('deletes a local task atomically and rejects a stale deletion', async () => {
+        await harness.insertTasks([{ id: 'task-delete', updatedAt: NOW }]);
+        expect(await harness.persistence.removals.applyTaskRemoval({
+          taskId: 'task-delete',
+          expectedUpdatedAt: 'stale',
+          mode: 'local-delete',
+          now: NOW,
+        })).toEqual({ kind: 'revision-conflict', currentUpdatedAt: NOW });
+        expect(await harness.persistence.removals.applyTaskRemoval({
+          taskId: 'task-delete',
+          expectedUpdatedAt: NOW,
+          mode: 'local-delete',
+          now: NOW,
+        })).toEqual({ kind: 'committed', action: 'deleted', taskVersion: null });
+        expect(await harness.persistence.details.getTaskDetail('task-delete', TODAY)).toBeNull();
+      });
+
+      it('fences remote deletion finalization by both lease and task version', async () => {
+        await harness.insertTasks([{
+          id: 'task-remote-delete',
+          connectorType: 'microsoft-todo',
+          connectorInstanceId: 'todo-1',
+          syncStatus: 'pushing',
+          lastSyncedAt: 'lease-token',
+          updatedAt: NOW,
+        }]);
+        expect(await harness.persistence.removals.finalizeRemoteTaskRemoval({
+          taskId: 'task-remote-delete',
+          leaseToken: 'stale-token',
+          expectedUpdatedAt: NOW,
+        })).toEqual({ kind: 'revision-conflict', currentUpdatedAt: NOW });
+        expect(await harness.persistence.removals.finalizeRemoteTaskRemoval({
+          taskId: 'task-remote-delete',
+          leaseToken: 'lease-token',
+          expectedUpdatedAt: NOW,
+        })).toEqual({ kind: 'committed', action: 'deleted', taskVersion: null });
+      });
     });
 
     describe('canonical filter semantics', () => {

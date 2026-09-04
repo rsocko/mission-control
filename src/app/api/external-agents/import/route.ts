@@ -17,7 +17,7 @@ export async function POST(request: Request) {
       throw new ExternalAgentError('dispatchId is required', 'VALIDATION_ERROR', 422);
     }
     const { dispatchId, ...result } = body;
-    const processed = submitDispatchResult(
+    const processed = await submitDispatchResult(
       dispatchId,
       result,
       { agentAuthenticated: true },

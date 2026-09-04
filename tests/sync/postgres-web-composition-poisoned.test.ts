@@ -33,6 +33,7 @@ const mocks = vi.hoisted(() => {
     eventDelivery: {},
     notificationEntityLinking: {},
     notificationEnrichment: {},
+    externalAgentControl: {},
     finance: {},
   };
   const queue = {
@@ -191,6 +192,9 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
       getCorePersistenceRepositories().settings.get('key'),
     ).resolves.toBeNull();
     await expect(getWorkerPersistenceRepositories()).resolves.toHaveProperty('execution');
+    await expect(getWorkerPersistenceRepositories()).resolves.toHaveProperty(
+      'externalAgentControl',
+    );
     await expect(getKeywordSearchRepository().search('query')).resolves.toEqual([]);
     await expect(enrichWithAI({
       notificationId: 'notification',

@@ -46,6 +46,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
     notificationEntityLinking:
       {} as WorkerPersistenceRepositories['notificationEntityLinking'],
     notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
+    externalAgentControl: {} as WorkerPersistenceRepositories['externalAgentControl'],
     finance: {
       identity: {},
       snapshots: {},

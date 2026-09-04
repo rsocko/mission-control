@@ -37,22 +37,22 @@ export async function PATCH(request: Request, { params }: Context) {
     let manualUrl: string | undefined;
     switch (body.action) {
       case 'cancel':
-        cancelDispatch(id);
+        await cancelDispatch(id);
         break;
       case 'retry':
         ({ manualUrl } = await retryDispatch(id));
         break;
       case 'waiting_for_user':
-        markDispatchWaiting(id, body.detail);
+        await markDispatchWaiting(id, body.detail);
         break;
       case 'accept':
-        reviewDispatchResult(id, 'accepted');
+        await reviewDispatchResult(id, 'accepted');
         break;
       case 'reject':
-        reviewDispatchResult(id, 'rejected');
+        await reviewDispatchResult(id, 'rejected');
         break;
       case 'partial':
-        reviewDispatchResult(id, 'partial');
+        await reviewDispatchResult(id, 'partial');
         break;
       default:
         throw new ExternalAgentError('Unknown dispatch action', 'VALIDATION_ERROR', 422);

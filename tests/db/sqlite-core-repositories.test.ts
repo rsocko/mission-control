@@ -447,6 +447,7 @@ describe('core persistence runtime selection', () => {
       triage: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['triage'],
       planningSignals: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['planningSignals'],
       projectAutomation: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['projectAutomation'],
+      externalAgentControl: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['externalAgentControl'],
       finance: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['finance'],
     };
     const replacementWorker = {
@@ -460,6 +461,7 @@ describe('core persistence runtime selection', () => {
       triage: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['triage'],
       planningSignals: selectedWorker.planningSignals,
       projectAutomation: selectedWorker.projectAutomation,
+      externalAgentControl: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['externalAgentControl'],
       finance: {} as import('@/db/persistence/worker-repositories').WorkerPersistenceRepositories['finance'],
     };
     try {

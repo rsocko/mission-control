@@ -7,7 +7,7 @@ import { dbLogger } from '@/lib/logger';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { ApiErrors } from '@/lib/api-error';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
-import { getPlanningSignalRepository } from '@/lib/planning-signals';
+import { appendPlanningSignalInTransaction } from '@/db/task-history';
 
 const MAX_SLOTS = 3;
 
@@ -176,7 +176,6 @@ export async function POST(request: Request) {
     const id = `focus-${crypto.randomUUID().slice(0, 8)}`;
 
     const addedAt = new Date().toISOString();
-    const planningSignals = await getPlanningSignalRepository();
     runTransaction((tx) => {
       tx.insert(focusItems).values({
         id,
@@ -188,7 +187,7 @@ export async function POST(request: Request) {
         isAiSuggested: isAiSuggested || false,
       }).run();
       if (scope === 'today') {
-        void planningSignals.append({
+        appendPlanningSignalInTransaction(tx, {
           taskId,
           eventType: 'focus_committed',
           date: effectiveDate,
@@ -217,14 +216,13 @@ export async function DELETE(request: Request) {
 
   try {
     const removedAt = new Date().toISOString();
-    const planningSignals = await getPlanningSignalRepository();
     if (itemId) {
       runTransaction((tx) => {
         const item = tx.select().from(focusItems).where(eq(focusItems.id, itemId)).get();
         if (!item) return;
         tx.delete(focusItems).where(eq(focusItems.id, itemId)).run();
         if (item.scope === 'today') {
-          void planningSignals.append({
+          appendPlanningSignalInTransaction(tx, {
             taskId: item.taskId,
             eventType: 'focus_withdrawn',
             date: item.date,
@@ -242,7 +240,7 @@ export async function DELETE(request: Request) {
           and(eq(focusItems.taskId, taskId), eq(focusItems.scope, scope), eq(focusItems.date, effectiveDate))
         ).run();
         if (scope === 'today' && result.changes > 0) {
-          void planningSignals.append({
+          appendPlanningSignalInTransaction(tx, {
             taskId,
             eventType: 'focus_withdrawn',
             date: effectiveDate,

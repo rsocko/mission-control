@@ -1613,11 +1613,11 @@ notification behavior, so hiding those edges behind deferred imports would
 only relocate taint. Native Share Sheet persistence is likewise deferred to
 stacked Layer L08b; `/api/triage/capture` therefore remains Tier A in L08a.
 
-Composed on the merged L09, L05, L07, L13, L14, L15, and L16 baselines, the
-committed L08a graph is exactly 266 API routes, 167 Tier A, 18 Tier B, 81
-clean, 119 direct taint-source routes, 48 transitive-only Tier A routes, 120
-direct `@/db` namespace routes, 76 tainted libraries, zero tainted API helpers,
-and 243 total migration units. The layer adds no Tier B route.
+Composed on the merged L09, L05, L07, L13, L14, L15, L16, and L17 baselines,
+the committed L08a graph is exactly 266 API routes, 161 Tier A, 19 Tier B, 86
+clean, 119 direct taint-source routes, 42 transitive-only Tier A routes, 120
+direct `@/db` namespace routes, 71 tainted libraries, zero tainted API helpers,
+and 232 total migration units. The layer adds no Tier B route.
 `triage-native-web-persistence-boundary.test.ts` pins the exact route and
 library removals plus the explicit exclusions. The shared persistence
 contract runs against SQLite and live PostgreSQL, and representative

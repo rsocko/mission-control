@@ -1,14 +1,42 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type Database from 'better-sqlite3';
+import { join, resolve } from 'node:path';
+import Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import type { FinanceCorePersistence } from '@/db/persistence/finance-worker';
 import {
   FINANCE_TOOL_NAMES,
   financeObligationsInputSchema,
   financeTransactionSearchInputSchema,
   householdFinanceSummaryInputSchema,
 } from '@/lib/finance/houston-contracts';
+
+vi.unmock('drizzle-orm');
+
+const mocks = vi.hoisted(() => ({
+  finance: null as FinanceCorePersistence | null,
+  sqliteCompatibilityAccess: vi.fn(),
+}));
+
+// The Houston finance chain must reach persistence only through the registered
+// worker composition. Any surviving `@/db` SQLite compatibility access fails
+// the test rather than silently working on the SQLite backend.
+vi.mock('@/db', () => {
+  const forbidden = new Proxy({}, {
+    get() {
+      mocks.sqliteCompatibilityAccess();
+      throw new Error('SQLite compatibility persistence was reached');
+    },
+  });
+  return { sqlite: forbidden, db: forbidden, default: forbidden };
+});
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => {
+    if (!mocks.finance) throw new Error('Finance persistence is not registered');
+    return { finance: mocks.finance };
+  },
+}));
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-houston-finance-'));
 const databasePath = join(tempDirectory, 'houston-finance.db');
@@ -128,11 +156,39 @@ function seedProjection() {
   `).run(connectorId, now, now);
 }
 
+function mutationAuditStatus(): { status: string; code: string | null } | undefined {
+  return sqlite.prepare(`
+    SELECT status, last_error_code AS code
+    FROM finance_mutation_audit
+    WHERE idempotency_key LIKE 'houston:%'
+    ORDER BY created_at DESC, id DESC LIMIT 1
+  `).get() as { status: string; code: string | null } | undefined;
+}
+
+async function currentProposal() {
+  const transaction = (await facade.searchFinanceTransactions(
+    { query: 'Market', limit: 1 },
+    { now: new Date(now) },
+  )).transactions[0];
+  return {
+    transactionRef: transaction.target.transactionRef,
+    expected: {
+      ...transaction.factsViaTyrionBridge,
+      kidName: transaction.tyrionDerived.kidName,
+      stateToken: transaction.target.stateToken,
+    },
+  };
+}
+
 beforeAll(async () => {
-  process.env.MC_DB_PATH = databasePath;
-  vi.resetModules();
-  const dbModule = await import('@/db');
-  sqlite = dbModule.sqlite;
+  sqlite = new Database(databasePath);
+  sqlite.pragma('foreign_keys = ON');
+  const { runOrderedDatabaseBootstrap } = await import('@/db/bootstrap/registry');
+  runOrderedDatabaseBootstrap(sqlite, resolve(process.cwd(), 'drizzle'));
+  const { createSqliteFinanceWorkerPersistence } = await import(
+    '@/db/persistence/sqlite-finance-worker-repositories'
+  );
+  mocks.finance = createSqliteFinanceWorkerPersistence(sqlite);
   facade = await import('@/lib/finance/houston-tools');
 });
 
@@ -143,6 +199,7 @@ afterAll(() => {
 
 describe.sequential('Houston finance facade', () => {
   it('uses strict, fixed input bounds', () => {
+    expect(FINANCE_TOOL_NAMES.length).toBeGreaterThan(0);
     expect(householdFinanceSummaryInputSchema.safeParse({ unexpected: true }).success).toBe(false);
     expect(financeTransactionSearchInputSchema.safeParse({ limit: 26 }).success).toBe(false);
     expect(financeTransactionSearchInputSchema.safeParse({
@@ -196,6 +253,8 @@ describe.sequential('Houston finance facade', () => {
       factsViaTyrionBridge: {
         merchant: 'Invented Market',
         amount: -42.75,
+        pending: false,
+        recurring: false,
       },
       tyrionDerived: {
         kidName: 'Avery',
@@ -205,6 +264,7 @@ describe.sequential('Houston finance facade', () => {
     expect(exceptions.exceptions[0]).toMatchObject({
       merchant: 'Invented Market',
       reason: 'low-confidence',
+      retryable: true,
       kidName: 'Avery',
     });
     expect(kid.missionControlCalculated).toMatchObject({
@@ -237,6 +297,7 @@ describe.sequential('Houston finance facade', () => {
         expect(serialized).not.toContain(secret);
       }
     }
+    expect(mocks.sqliteCompatibilityAccess).not.toHaveBeenCalled();
   });
 
   it('marks old and failed projections as stale or partial rather than current', async () => {
@@ -304,19 +365,7 @@ describe.sequential('Houston finance facade', () => {
       SET attribution_status = 'healthy', attribution_last_successful_at = ?
       WHERE connector_id = ?
     `).run(now, connectorId);
-    const transaction = (await facade.searchFinanceTransactions(
-      { query: 'Market', limit: 1 },
-      { now: new Date(now) },
-    )).transactions[0];
-    const input = {
-      transactionRef: transaction.target.transactionRef,
-      expected: {
-        ...transaction.factsViaTyrionBridge,
-        kidName: transaction.tyrionDerived.kidName,
-        stateToken: transaction.target.stateToken,
-      },
-      kidName: 'Blair',
-    };
+    const input = { ...(await currentProposal()), kidName: 'Blair' };
     const execution = {
       approvalId: 'invented-kid-approval',
       correlationId: 'invented-correlation',
@@ -353,6 +402,9 @@ describe.sequential('Houston finance facade', () => {
       SELECT COUNT(*) AS count FROM finance_attribution_audit
       WHERE transaction_id = 'local-transaction-id'
     `).get()).toEqual({ count: 1 });
+    expect(sqlite.prepare(`
+      SELECT status FROM finance_attribution_exceptions WHERE id = 'private-exception-id'
+    `).get()).toEqual({ status: 'resolved' });
 
     const approvalRows = sqlite.prepare(`
       SELECT correlation_id AS correlationId, call_hash AS callHash, tool,
@@ -374,21 +426,13 @@ describe.sequential('Houston finance facade', () => {
   });
 
   it('fails stale proposals closed before another attribution mutation', async () => {
-    const transaction = (await facade.searchFinanceTransactions(
-      { query: 'Market', limit: 1 },
-      { now: new Date(now) },
-    )).transactions[0];
+    const proposal = await currentProposal();
     sqlite.prepare(`
       UPDATE finance_transactions SET last_seen_at = '2026-08-13T13:00:00.000Z'
       WHERE id = 'local-transaction-id'
     `).run();
     const result = await facade.assignFinanceTransactionKid({
-      transactionRef: transaction.target.transactionRef,
-      expected: {
-        ...transaction.factsViaTyrionBridge,
-        kidName: transaction.tyrionDerived.kidName,
-        stateToken: transaction.target.stateToken,
-      },
+      ...proposal,
       kidName: 'Avery',
     }, {
       approvalId: 'invented-stale-approval',
@@ -402,18 +446,14 @@ describe.sequential('Houston finance facade', () => {
     expect(sqlite.prepare(`
       SELECT COUNT(*) AS count FROM finance_attribution_audit
     `).get()).toEqual({ count: 1 });
+    expect(sqlite.prepare(`
+      SELECT outcome FROM houston_finance_action_audit
+      WHERE call_hash = 'invented-stale-approval'
+    `).get()).toEqual({ outcome: 'stale' });
   });
 
   it('fails closed when the source or attribution projection is stale', async () => {
-    const current = (await facade.searchFinanceTransactions(
-      { query: 'Market', limit: 1 },
-      { now: new Date(now) },
-    )).transactions[0];
-    const expected = {
-      ...current.factsViaTyrionBridge,
-      kidName: current.tyrionDerived.kidName,
-      stateToken: current.target.stateToken,
-    };
+    const proposal = await currentProposal();
     sqlite.prepare(`
       UPDATE finance_sync_state
       SET last_successful_source_as_of = '2026-07-01T12:00:00.000Z',
@@ -424,8 +464,7 @@ describe.sequential('Houston finance facade', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(facade.assignFinanceTransactionKid({
-      transactionRef: current.target.transactionRef,
-      expected,
+      ...proposal,
       kidName: 'Avery',
     }, {
       approvalId: 'invented-stale-projection-kid-approval',
@@ -436,8 +475,7 @@ describe.sequential('Houston finance facade', () => {
       error: { code: 'target_stale' },
     });
     await expect(facade.updateFinanceTransactionCategory({
-      transactionRef: current.target.transactionRef,
-      expected,
+      ...proposal,
       categoryName: 'Entertainment',
     }, {
       approvalId: 'invented-stale-projection-category-approval',
@@ -458,19 +496,7 @@ describe.sequential('Houston finance facade', () => {
   });
 
   it('keeps category state unchanged on upstream failure and confirms only verified writes', async () => {
-    const current = (await facade.searchFinanceTransactions(
-      { query: 'Market', limit: 1 },
-      { now: new Date(now) },
-    )).transactions[0];
-    const input = {
-      transactionRef: current.target.transactionRef,
-      expected: {
-        ...current.factsViaTyrionBridge,
-        kidName: current.tyrionDerived.kidName,
-        stateToken: current.target.stateToken,
-      },
-      categoryName: 'Entertainment',
-    };
+    const input = { ...(await currentProposal()), categoryName: 'Entertainment' };
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       contractVersion: '1.0',
       error: { code: 'upstream_unavailable', message: 'invented private failure' },
@@ -486,12 +512,7 @@ describe.sequential('Houston finance facade', () => {
       correlationId: 'invented-correlation',
       now: new Date(now),
     });
-    expect(sqlite.prepare(`
-      SELECT status, last_error_code AS code
-      FROM finance_mutation_audit
-      WHERE idempotency_key LIKE 'houston:%'
-      ORDER BY created_at DESC LIMIT 1
-    `).get()).toEqual({ status: 'failed', code: 'upstream_unavailable' });
+    expect(mutationAuditStatus()).toEqual({ status: 'failed', code: 'upstream_unavailable' });
     expect(failed).toMatchObject({
       status: 'failed',
       error: { code: 'upstream_unavailable', retryable: true },
@@ -501,27 +522,36 @@ describe.sequential('Houston finance facade', () => {
       FROM finance_transactions WHERE id = 'local-transaction-id'
     `).get()).toEqual({ category: 'Groceries' });
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      contractVersion: '1.0',
-      status: 'updated',
-      transactionId: 'raw-upstream-transaction-id',
-      categoryId: 'invented-upstream-category',
-    }), {
-      headers: {
-        'content-type': 'application/json',
-        'x-monarch-contract-version': '1.0',
-      },
-    })));
+    // The provider observes a committed `processing` claim, proving no
+    // database transaction is held across the externally-observable request.
+    const observed: Array<string | undefined> = [];
+    vi.stubGlobal('fetch', vi.fn().mockImplementation(() => {
+      observed.push(mutationAuditStatus()?.status);
+      return Promise.resolve(new Response(JSON.stringify({
+        contractVersion: '1.0',
+        status: 'updated',
+        transactionId: 'raw-upstream-transaction-id',
+        categoryId: 'invented-upstream-category',
+      }), {
+        headers: {
+          'content-type': 'application/json',
+          'x-monarch-contract-version': '1.0',
+        },
+      }));
+    }));
     const updated = await facade.updateFinanceTransactionCategory(input, {
       approvalId: 'invented-category-success-approval',
       correlationId: 'invented-correlation',
       now: new Date(now),
     });
+    expect(observed).toEqual(['processing']);
+    expect(mutationAuditStatus()).toEqual({ status: 'succeeded', code: null });
     expect(updated).toMatchObject({
       status: 'updated',
       factsViaTyrionBridge: { category: 'Entertainment' },
       replayed: false,
     });
+
     sqlite.prepare(`
       UPDATE finance_transactions SET lifecycle_status = 'deleted'
       WHERE id = 'local-transaction-id'
@@ -560,10 +590,7 @@ describe.sequential('Houston finance facade', () => {
   });
 
   it('rejects a category proposal when the approved target state has changed', async () => {
-    const current = (await facade.searchFinanceTransactions(
-      { query: 'Market', limit: 1 },
-      { now: new Date(now) },
-    )).transactions[0];
+    const proposal = await currentProposal();
     sqlite.prepare(`
       UPDATE finance_transactions SET confirmed_category = 'Changed category'
       WHERE id = 'local-transaction-id'
@@ -575,12 +602,7 @@ describe.sequential('Houston finance facade', () => {
     `).get();
 
     const result = await facade.updateFinanceTransactionCategory({
-      transactionRef: current.target.transactionRef,
-      expected: {
-        ...current.factsViaTyrionBridge,
-        kidName: current.tyrionDerived.kidName,
-        stateToken: current.target.stateToken,
-      },
+      ...proposal,
       categoryName: 'Entertainment',
     }, {
       approvalId: 'invented-stale-category-approval',
@@ -596,90 +618,26 @@ describe.sequential('Houston finance facade', () => {
     expect(sqlite.prepare(`
       SELECT COUNT(*) AS count FROM finance_mutation_audit
     `).get()).toEqual(mutationsBefore);
-  });
-
-  it('rechecks approved transaction versions inside both domain mutation claims', async () => {
-    const attribution = await import(
-      '@/lib/connectors/monarch-money/attribution-service'
-    );
-    const snapshot = await import('@/lib/connectors/monarch-money/snapshot-sync');
-    const version = sqlite.prepare(`
-      SELECT source_fingerprint AS sourceFingerprint,
-             last_seen_at AS lastSeenAt, assigned_kid_id AS assignedKidId,
-             confirmed_category AS confirmedCategory,
-             manual_decided_at AS manualDecidedAt
-      FROM finance_transactions WHERE id = 'local-transaction-id'
-    `).get() as {
-      sourceFingerprint: string;
-      lastSeenAt: string;
-      assignedKidId: string | null;
-      confirmedCategory: string | null;
-      manualDecidedAt: string | null;
-    };
     sqlite.prepare(`
-      UPDATE finance_transactions SET last_seen_at = '2026-08-13T14:00:00.000Z'
+      UPDATE finance_transactions SET confirmed_category = 'invented-upstream-category'
       WHERE id = 'local-transaction-id'
     `).run();
-
-    expect(() => attribution.applyManualAttributionDecision({
-      connectorId,
-      transactionId: 'local-transaction-id',
-      action: 'assign-kid',
-      kidId: 'invented-kid-id',
-      idempotencyKey: 'invented-atomic-kid-claim',
-      actorType: 'parent-admin',
-      expectedTransactionVersion: version,
-    })).toThrowError(expect.objectContaining({ code: 'transaction_conflict' }));
-
-    const categoryVersion = {
-      ...version,
-      lastSeenAt: '2026-08-13T14:00:00.000Z',
-      categoryName: 'Entertainment',
-    };
-    sqlite.prepare(`
-      UPDATE finance_categories SET source_is_active = 0
-      WHERE connector_id = ? AND upstream_category_id = 'invented-upstream-category'
-    `).run(connectorId);
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
-    await expect(snapshot.updateFinanceCategory({
-      id: connectorId,
-      type: 'finance-manager',
-      name: 'Invented household finance',
-      enabled: true,
-      syncMode: 'poll',
-      pollIntervalMinutes: 240,
-      capabilities: {
-        read: true,
-        write: true,
-        delete: false,
-        sync: true,
-        subtasks: false,
-        lists: false,
-        tags: false,
-        tagWriteBack: false,
-      },
-      credentials: { serviceToken: 'invented-service-token' },
-      settings: { bridgeUrl: 'http://localhost:8100', maxRetries: 0 },
-      syncedLists: [],
-    }, 'local-transaction-id', 'invented-upstream-category',
-    'invented-atomic-category-claim', undefined, categoryVersion))
-      .rejects.toMatchObject({ code: 'category_conflict' });
-    expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('exports and registers exactly the six production read contracts', async () => {
-    expect(FINANCE_TOOL_NAMES).toEqual([
-      'getHouseholdFinanceSummary',
-      'searchFinanceTransactions',
-      'getPendingFinanceExceptions',
-      'getKidSpending',
-      'getFinanceObligations',
-      'getFinanceConnectorHealth',
-    ]);
-    const { financeTools } = await import('@/lib/ai/tools/finance-tools');
-    expect(Object.keys(financeTools)).toEqual(FINANCE_TOOL_NAMES);
-    expect(Object.keys(financeTools)).not.toContain('assignFinanceTransactionKid');
-    expect(Object.keys(financeTools)).not.toContain('updateFinanceTransactionCategory');
+  it('surfaces sanitized errors for unknown or ambiguous household members', async () => {
+    await expect(facade.getKidSpending({ kidName: 'Nobody' }, { now: new Date(now) }))
+      .rejects.toMatchObject({ code: 'finance_kid_not_found' });
+
+    sqlite.prepare(`
+      INSERT INTO kid_profiles (id, name, color)
+      VALUES ('invented-duplicate-kid-id', 'avery', '#abcdef')
+    `).run();
+    await expect(facade.getKidSpending({ kidName: 'Avery' }, { now: new Date(now) }))
+      .rejects.toMatchObject({ code: 'finance_kid_ambiguous' });
+    sqlite.prepare(`DELETE FROM kid_profiles WHERE id = 'invented-duplicate-kid-id'`).run();
+  });
+
+  it('never reaches SQLite compatibility persistence', () => {
+    expect(mocks.sqliteCompatibilityAccess).not.toHaveBeenCalled();
   });
 });

@@ -1,11 +1,19 @@
 import 'server-only';
 
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { sqlite } from '@/db';
-import type { FinanceFreshnessState } from '@/db/finance-schema';
-import { listAttributionExceptions } from '@/lib/connectors/monarch-money/attribution-service';
-import { getFinanceDatasetHealth } from '@/lib/connectors/monarch-money/dataset-sync';
-import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
+import { createHash, timingSafeEqual } from 'node:crypto';
+import {
+  FINANCE_DATASETS,
+  type FinanceDataset,
+  type FinanceDatasetState,
+  type FinanceFreshnessState,
+} from '@/db/persistence/finance-datasets';
+import type {
+  FinanceAssistantExpectedVersion,
+  FinanceAssistantMutationTool,
+  FinanceAssistantTransaction,
+} from '@/db/persistence/finance-assistant';
+import type { FinanceCorePersistence } from '@/db/persistence/finance-worker';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { formatDateInLocalTimezone } from '@/lib/utils/date';
 import {
   financeConnectorHealthOutputSchema,
@@ -34,14 +42,9 @@ import {
   updateFinanceTransactionCategoryOutputSchema,
 } from './houston-contracts';
 import {
-  applyManualAttributionDecision,
-  FinanceAttributionMutationError,
-} from '@/lib/connectors/monarch-money/attribution-service';
-import {
+  MonarchBridgeClient,
   MonarchBridgeError,
 } from '@/lib/connectors/monarch-money/client';
-import { updateFinanceCategory } from '@/lib/connectors/monarch-money/snapshot-sync';
-import type { ConnectorConfig } from '@/types';
 
 const MAX_OUTPUT_BYTES = 16 * 1024;
 const DAY_MS = 86_400_000;
@@ -63,10 +66,32 @@ export class HoustonFinanceToolError extends Error {
   }
 }
 
+/**
+ * Attribution mutation failure surfaced by the finance-assistant port. The
+ * codes mirror the persisted attribution decision vocabulary so the redacted
+ * tool-output mapping below stays byte-identical to the pre-port behavior.
+ */
+class HoustonFinanceAttributionError extends Error {
+  constructor(
+    readonly code:
+      | 'idempotency_conflict'
+      | 'connector_not_found'
+      | 'transaction_not_found'
+      | 'transaction_conflict'
+      | 'unknown_attribution_subject',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'HoustonFinanceAttributionError';
+  }
+}
+
 type ExecutionOptions = {
   signal?: AbortSignal;
   now?: Date;
 };
+
+type FinancePersistence = FinanceCorePersistence;
 
 type TransactionProjectionMeta = {
   sourceAsOf: string | null;
@@ -77,32 +102,18 @@ type TransactionProjectionMeta = {
   attributionLastSuccessfulAt: string | null;
 };
 
-type SafeTransactionRow = {
-  id: string;
-  connectorId: string;
-  date: string;
-  amount: number;
-  merchant: string | null;
-  category: string | null;
-  confirmedCategory: string | null;
-  pending: number;
-  recurring: number;
-  kidName: string | null;
-  attributionStatus: 'attributed' | 'unassigned' | 'pending' | 'unavailable';
-  confidence: 'definite' | 'likely' | 'none' | null;
-  method:
-    | 'manual'
-    | 'account-rule'
-    | 'merchant-rule'
-    | 'historical-pattern'
-    | 'unassigned'
-    | 'unavailable'
-    | null;
-  assignedKidId: string | null;
-  sourceFingerprint: string;
-  lastSeenAt: string;
-  manualDecidedAt: string | null;
+type DatasetHealth = {
+  dataset: FinanceDataset;
+  state: FinanceFreshnessState;
+  itemCount: number;
+  sourceAsOf: string | null;
+  coverage: { start: string; end: string } | null;
+  warning: string | null;
 };
+
+async function financePersistence(): Promise<FinancePersistence> {
+  return (await getWorkerPersistenceRepositories()).finance;
+}
 
 function safeText(value: unknown, fallback: string, maxLength: number): string {
   if (typeof value !== 'string') return fallback;
@@ -134,19 +145,12 @@ function resolveRange(
   return { startDate, endDate };
 }
 
-async function selectConnector(signal?: AbortSignal) {
+async function selectConnector(
+  finance: FinancePersistence,
+  signal?: AbortSignal,
+): Promise<{ id: string; pollIntervalMinutes: number | undefined }> {
   throwIfAborted(signal);
-  const connectors = sqlite.prepare(`
-    SELECT id, poll_interval_minutes AS pollIntervalMinutes
-    FROM connector_configs
-    WHERE type IN (${FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ')})
-      AND enabled = 1 AND deleted_at IS NULL
-    ORDER BY created_at, id
-    LIMIT 2
-  `).all(...FINANCE_PROVIDER_ALIASES) as Array<{
-    id: string;
-    pollIntervalMinutes: number | null;
-  }>;
+  const connectors = await finance.assistant.listEnabledConnectors();
   if (connectors.length === 0) {
     throw new HoustonFinanceToolError(
       'finance_not_configured',
@@ -167,54 +171,18 @@ async function selectConnector(signal?: AbortSignal) {
   };
 }
 
-function loadFinanceConnectorConfig(connectorId: string): ConnectorConfig {
-  const row = sqlite.prepare(`
-    SELECT id, type, name, enabled, sync_mode AS syncMode,
-           poll_interval_minutes AS pollIntervalMinutes, capabilities,
-           credentials, settings, synced_lists AS syncedLists
-    FROM connector_configs
-    WHERE id = ? AND enabled = 1 AND deleted_at IS NULL
-  `).get(connectorId) as {
-    id: string;
-    type: string;
-    name: string;
-    enabled: number;
-    syncMode: string;
-    pollIntervalMinutes: number | null;
-    capabilities: string;
-    credentials: string;
-    settings: string;
-    syncedLists: string;
-  } | undefined;
-  if (!row) {
+async function loadFinanceConnectorConfig(
+  finance: FinancePersistence,
+  connectorId: string,
+) {
+  const config = await finance.assistant.readConnectorConfig(connectorId);
+  if (!config) {
     throw new HoustonFinanceToolError(
       'finance_not_configured',
       'No enabled finance connector is configured.',
     );
   }
-  const capabilityValues = JSON.parse(row.capabilities) as Record<string, unknown>;
-  const capability = (name: string) => capabilityValues[name] === true;
-  return {
-    id: row.id,
-    type: row.type,
-    name: row.name,
-    enabled: row.enabled === 1,
-    syncMode: row.syncMode as ConnectorConfig['syncMode'],
-    pollIntervalMinutes: row.pollIntervalMinutes ?? undefined,
-    capabilities: {
-      read: capability('read'),
-      write: capability('write'),
-      delete: capability('delete'),
-      sync: capability('sync'),
-      subtasks: capability('subtasks'),
-      lists: capability('lists'),
-      tags: capability('tags'),
-      tagWriteBack: capability('tagWriteBack'),
-    },
-    credentials: JSON.parse(row.credentials) as Record<string, string>,
-    settings: JSON.parse(row.settings) as Record<string, unknown>,
-    syncedLists: JSON.parse(row.syncedLists) as string[],
-  };
+  return config;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -223,31 +191,13 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-function transactionMeta(
+async function transactionMeta(
+  finance: FinancePersistence,
   connectorId: string,
   pollIntervalMinutes: number | undefined,
   now: Date,
-): TransactionProjectionMeta {
-  const row = sqlite.prepare(`
-    SELECT last_successful_source_as_of AS sourceAsOf,
-           last_successful_projection_coverage_start AS coverageStart,
-           last_successful_projection_coverage_end AS coverageEnd,
-           last_successful_sync_at AS lastSuccessfulSyncAt,
-           status, last_error_code AS lastErrorCode,
-           attribution_status AS attributionStatus,
-           attribution_last_successful_at AS attributionLastSuccessfulAt
-    FROM finance_sync_state
-    WHERE connector_id = ?
-  `).get(connectorId) as {
-    sourceAsOf: string | null;
-    coverageStart: string | null;
-    coverageEnd: string | null;
-    lastSuccessfulSyncAt: string | null;
-    status: 'idle' | 'running' | 'succeeded' | 'failed';
-    lastErrorCode: string | null;
-    attributionStatus: 'idle' | 'healthy' | 'degraded' | 'unavailable';
-    attributionLastSuccessfulAt: string | null;
-  } | undefined;
+): Promise<TransactionProjectionMeta> {
+  const row = await finance.assistant.readProjectionState(connectorId);
 
   let freshness: FinanceFreshnessState = 'unavailable';
   if (row?.sourceAsOf && Number.isFinite(Date.parse(row.sourceAsOf))) {
@@ -267,6 +217,57 @@ function transactionMeta(
     attributionStatus: row?.attributionStatus ?? 'idle',
     attributionLastSuccessfulAt: row?.attributionLastSuccessfulAt ?? null,
   };
+}
+
+/**
+ * Per-dataset freshness for the persisted Monarch reference collections.
+ * Mirrors the finance dataset publication rule: a dataset is only current
+ * when it has a published generation whose source timestamp is in the past
+ * and whose freshness window has not closed.
+ */
+function datasetFreshness(
+  state: Pick<FinanceDatasetState, 'currentGenerationId' | 'sourceAsOf' | 'freshUntil'> | undefined,
+  now: Date,
+): FinanceFreshnessState {
+  if (!state?.currentGenerationId || !state.sourceAsOf || !state.freshUntil) {
+    return 'unavailable';
+  }
+  const sourceTime = Date.parse(state.sourceAsOf);
+  return sourceTime <= now.getTime() && Date.parse(state.freshUntil) >= now.getTime()
+    ? 'fresh'
+    : 'stale';
+}
+
+function aggregateDatasetFreshness(datasets: DatasetHealth[]): FinanceFreshnessState {
+  if (datasets.some((dataset) => dataset.warning)) return 'partial';
+  if (datasets.length === 0 || datasets.every((dataset) => dataset.state === 'unavailable')) {
+    return 'unavailable';
+  }
+  const states = new Set(datasets.map((dataset) => dataset.state));
+  return states.size === 1 ? datasets[0].state : 'partial';
+}
+
+async function datasetHealth(
+  finance: FinancePersistence,
+  connectorId: string,
+  now: Date,
+): Promise<{ aggregate: FinanceFreshnessState; datasets: DatasetHealth[] }> {
+  const rows = await finance.datasets.listState(connectorId);
+  const byDataset = new Map(rows.map((row) => [row.dataset, row]));
+  const datasets = FINANCE_DATASETS.map((dataset): DatasetHealth => {
+    const row = byDataset.get(dataset);
+    return {
+      dataset,
+      state: datasetFreshness(row, now),
+      itemCount: row?.publishedItemCount ?? 0,
+      sourceAsOf: row?.sourceAsOf ?? null,
+      coverage: row?.coverageStart && row.coverageEnd
+        ? { start: row.coverageStart, end: row.coverageEnd }
+        : null,
+      warning: row?.lastAttemptOutcome === 'failed' ? row.lastErrorCode : null,
+    };
+  });
+  return { aggregate: aggregateDatasetFreshness(datasets), datasets };
 }
 
 function provenance(
@@ -424,7 +425,7 @@ function output<T>(schema: { parse(value: unknown): T }, value: unknown): T {
   return parsed;
 }
 
-function safeTransaction(row: SafeTransactionRow) {
+function safeTransaction(row: FinanceAssistantTransaction) {
   const transactionRef = opaqueDigest('txn', row.connectorId, row.id);
   const stateToken = transactionStateToken(row);
   return {
@@ -434,8 +435,8 @@ function safeTransaction(row: SafeTransactionRow) {
       amount: roundCurrency(row.amount),
       merchant: safeText(row.merchant, 'Unknown merchant', 120),
       category: row.category ? safeText(row.category, 'Uncategorized', 100) : null,
-      pending: row.pending === 1,
-      recurring: row.recurring === 1,
+      pending: row.pending,
+      recurring: row.recurring,
     },
     tyrionDerived: {
       kidName: row.kidName ? safeText(row.kidName, 'Household member', 100) : null,
@@ -453,7 +454,7 @@ function opaqueDigest(prefix: 'txn' | 'state', ...values: Array<string | number 
   return `${prefix}_${digest}`;
 }
 
-function transactionStateToken(row: SafeTransactionRow): string {
+function transactionStateToken(row: FinanceAssistantTransaction): string {
   return opaqueDigest(
     'state',
     row.connectorId,
@@ -470,27 +471,8 @@ function transactionStateToken(row: SafeTransactionRow): string {
   );
 }
 
-function resolveKid(kidName: string): {
-  id: string;
-  name: string;
-  dailyLimit: number | null;
-  weeklyLimit: number | null;
-  monthlyLimit: number | null;
-} {
-  const rows = sqlite.prepare(`
-    SELECT id, name, daily_limit AS dailyLimit, weekly_limit AS weeklyLimit,
-           monthly_limit AS monthlyLimit
-    FROM kid_profiles
-    WHERE lower(name) = lower(?)
-    ORDER BY id
-    LIMIT 2
-  `).all(kidName) as Array<{
-    id: string;
-    name: string;
-    dailyLimit: number | null;
-    weeklyLimit: number | null;
-    monthlyLimit: number | null;
-  }>;
+async function resolveKid(finance: FinancePersistence, kidName: string) {
+  const rows = await finance.assistant.matchKidsByName(kidName);
   if (rows.length === 0) {
     throw new HoustonFinanceToolError(
       'finance_kid_not_found',
@@ -506,57 +488,22 @@ function resolveKid(kidName: string): {
   return rows[0];
 }
 
-function queryTransactions(
+async function queryTransactions(
+  finance: FinancePersistence,
   connectorId: string,
   input: FinanceTransactionSearchInput & { kidId?: string },
   range: { startDate: string; endDate: string },
-): { rows: SafeTransactionRow[]; truncated: boolean } {
-  const conditions = [
-    't.connector_instance_id = ?',
-    `t.lifecycle_status = 'active'`,
-    't.date >= ?',
-    't.date <= ?',
-  ];
-  const parameters: Array<string | number> = [connectorId, range.startDate, range.endDate];
-  if (input.query) {
-    conditions.push(`lower(COALESCE(t.merchant_name, '')) LIKE ? ESCAPE '\\'`);
-    parameters.push(`%${input.query.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`);
-  }
-  if (input.category) {
-    conditions.push('lower(COALESCE(categories.name, t.confirmed_category, t.original_category, ?)) = lower(?)');
-    parameters.push('', input.category);
-  }
-  if (input.kidId) {
-    conditions.push('t.assigned_kid_id = ?');
-    parameters.push(input.kidId);
-  }
-  if (input.triageStatus) {
-    conditions.push('t.triage_status = ?');
-    parameters.push(input.triageStatus);
-  }
-  const limit = input.limit ?? 15;
-  parameters.push(limit + 1);
-  const rows = sqlite.prepare(`
-    SELECT t.id, t.connector_instance_id AS connectorId,
-           t.date, t.amount, t.merchant_name AS merchant,
-           COALESCE(categories.name, t.confirmed_category, t.original_category) AS category,
-           t.confirmed_category AS confirmedCategory,
-           t.is_pending AS pending, t.is_recurring AS recurring,
-           profiles.name AS kidName, t.attribution_status AS attributionStatus,
-           t.attribution_confidence AS confidence, t.attribution_method AS method,
-           t.assigned_kid_id AS assignedKidId,
-           t.source_fingerprint AS sourceFingerprint, t.last_seen_at AS lastSeenAt,
-           t.manual_decided_at AS manualDecidedAt
-    FROM finance_transactions t
-    LEFT JOIN kid_profiles profiles ON profiles.id = t.assigned_kid_id
-    LEFT JOIN finance_categories categories
-      ON categories.connector_id = t.connector_instance_id
-      AND categories.upstream_category_id = t.confirmed_category
-    WHERE ${conditions.join(' AND ')}
-    ORDER BY t.date DESC, t.id DESC
-    LIMIT ?
-  `).all(...parameters) as SafeTransactionRow[];
-  return { rows: rows.slice(0, limit), truncated: rows.length > limit };
+) {
+  return finance.assistant.searchTransactions({
+    connectorId,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    merchantQuery: input.query,
+    categoryName: input.category,
+    kidId: input.kidId,
+    triageStatus: input.triageStatus,
+    limit: input.limit ?? 15,
+  });
 }
 
 export async function getHouseholdFinanceSummary(
@@ -564,75 +511,36 @@ export async function getHouseholdFinanceSummary(
   options: ExecutionOptions = {},
 ): Promise<HouseholdFinanceSummaryOutput> {
   const now = options.now ?? new Date();
-  const connector = await selectConnector(options.signal);
+  const finance = await financePersistence();
+  const connector = await selectConnector(finance, options.signal);
   const range = resolveRange(input, now);
   const projection = applyAttributionFreshness(
     applyRangeCoverage(
-      transactionMeta(connector.id, connector.pollIntervalMinutes, now),
+      await transactionMeta(finance, connector.id, connector.pollIntervalMinutes, now),
       range,
     ),
     connector.pollIntervalMinutes,
     now,
   );
-  const total = sqlite.prepare(`
-    SELECT COALESCE(SUM(ABS(amount)), 0) AS amount, COUNT(*) AS transactionCount
-    FROM finance_transactions
-    WHERE connector_instance_id = ? AND lifecycle_status = 'active'
-      AND date >= ? AND date <= ?
-  `).get(connector.id, range.startDate, range.endDate) as {
-    amount: number;
-    transactionCount: number;
-  };
-  const categoryRows = sqlite.prepare(`
-    SELECT COALESCE(categories.name, transactions.confirmed_category,
-                    transactions.original_category, 'Uncategorized') AS category,
-           COALESCE(SUM(ABS(transactions.amount)), 0) AS amount,
-           COUNT(*) AS transactionCount
-    FROM finance_transactions transactions
-    LEFT JOIN finance_categories categories
-      ON categories.connector_id = transactions.connector_instance_id
-      AND categories.upstream_category_id = transactions.confirmed_category
-    WHERE transactions.connector_instance_id = ?
-      AND transactions.lifecycle_status = 'active'
-      AND transactions.date >= ? AND transactions.date <= ?
-    GROUP BY COALESCE(categories.name, transactions.confirmed_category,
-                      transactions.original_category, 'Uncategorized')
-    ORDER BY amount DESC, category
-    LIMIT 13
-  `).all(connector.id, range.startDate, range.endDate) as Array<{
-    category: string;
-    amount: number;
-    transactionCount: number;
-  }>;
-  const kidRows = sqlite.prepare(`
-    SELECT profiles.name AS kidName, COALESCE(SUM(ABS(t.amount)), 0) AS amount,
-           COUNT(*) AS transactionCount
-    FROM finance_transactions t
-    INNER JOIN kid_profiles profiles ON profiles.id = t.assigned_kid_id
-    WHERE t.connector_instance_id = ? AND t.lifecycle_status = 'active'
-      AND t.date >= ? AND t.date <= ?
-    GROUP BY profiles.id, profiles.name
-    ORDER BY amount DESC, profiles.name
-    LIMIT 13
-  `).all(connector.id, range.startDate, range.endDate) as Array<{
-    kidName: string;
-    amount: number;
-    transactionCount: number;
-  }>;
+  const summary = await finance.assistant.readSpendingSummary({
+    connectorId: connector.id,
+    startDate: range.startDate,
+    endDate: range.endDate,
+  });
   throwIfAborted(options.signal);
-  const truncated = categoryRows.length > 12 || kidRows.length > 12;
+  const truncated = summary.byCategory.length > 12 || summary.byKid.length > 12;
   return output(householdFinanceSummaryOutputSchema, {
     kind: 'household-finance-summary',
     period: range,
     missionControlCalculated: {
-      totalSpending: roundCurrency(total.amount),
-      transactionCount: total.transactionCount,
-      byCategory: categoryRows.slice(0, 12).map((row) => ({
+      totalSpending: roundCurrency(summary.totalAmount),
+      transactionCount: summary.transactionCount,
+      byCategory: summary.byCategory.slice(0, 12).map((row) => ({
         category: safeText(row.category, 'Uncategorized', 100),
         amount: roundCurrency(row.amount),
         transactionCount: row.transactionCount,
       })),
-      byKid: kidRows.slice(0, 12).map((row) => ({
+      byKid: summary.byKid.slice(0, 12).map((row) => ({
         kidName: safeText(row.kidName, 'Household member', 100),
         amount: roundCurrency(row.amount),
         transactionCount: row.transactionCount,
@@ -647,13 +555,19 @@ export async function searchFinanceTransactions(
   options: ExecutionOptions = {},
 ): Promise<FinanceTransactionSearchOutput> {
   const now = options.now ?? new Date();
-  const connector = await selectConnector(options.signal);
+  const finance = await financePersistence();
+  const connector = await selectConnector(finance, options.signal);
   const range = resolveRange(input, now);
-  const kid = input.kidName ? resolveKid(input.kidName) : null;
-  const result = queryTransactions(connector.id, { ...input, kidId: kid?.id }, range);
+  const kid = input.kidName ? await resolveKid(finance, input.kidName) : null;
+  const result = await queryTransactions(
+    finance,
+    connector.id,
+    { ...input, kidId: kid?.id },
+    range,
+  );
   const projection = applyAttributionFreshness(
     applyRangeCoverage(
-      transactionMeta(connector.id, connector.pollIntervalMinutes, now),
+      await transactionMeta(finance, connector.id, connector.pollIntervalMinutes, now),
       range,
     ),
     connector.pollIntervalMinutes,
@@ -662,7 +576,7 @@ export async function searchFinanceTransactions(
   throwIfAborted(options.signal);
   return output(financeTransactionSearchOutputSchema, {
     kind: 'finance-transaction-search',
-    transactions: result.rows.map(safeTransaction),
+    transactions: result.transactions.map(safeTransaction),
     meta: meta(projection, result.truncated, '/finance', [true, true, false]),
   });
 }
@@ -672,27 +586,23 @@ export async function getPendingFinanceExceptions(
   options: ExecutionOptions = {},
 ): Promise<PendingFinanceExceptionsOutput> {
   const now = options.now ?? new Date();
-  const connector = await selectConnector(options.signal);
+  const finance = await financePersistence();
+  const connector = await selectConnector(finance, options.signal);
   const limit = input.limit ?? 10;
-  const result = listAttributionExceptions(connector.id, {
-    status: 'current',
-    limit: String(limit),
+  const result = await finance.assistant.listAttributionExceptions({
+    connectorId: connector.id,
+    limit,
   });
   const projection = applyAttributionFreshness(
-    transactionMeta(connector.id, connector.pollIntervalMinutes, now),
+    await transactionMeta(finance, connector.id, connector.pollIntervalMinutes, now),
     connector.pollIntervalMinutes,
     now,
   );
-  const subjects = new Map(
-    (result.subjects as Array<{ kidId: string; name: string }>).map((subject) => [
-      subject.kidId,
-      subject.name,
-    ]),
-  );
+  const subjects = new Map(result.subjects.map((subject) => [subject.kidId, subject.name]));
   throwIfAborted(options.signal);
   return output(pendingFinanceExceptionsOutputSchema, {
     kind: 'pending-finance-exceptions',
-    exceptions: (result.exceptions as Array<Record<string, unknown>>).map((exception) => {
+    exceptions: result.exceptions.map((exception) => {
       const reason = safeAttributionReason(exception.reasonCode);
       return {
         date: exception.date,
@@ -707,7 +617,7 @@ export async function getPendingFinanceExceptions(
         observedAt: exception.lastObservedAt,
       };
     }),
-    meta: meta(projection, result.nextCursor !== null, '/finance/review', [true, true, false]),
+    meta: meta(projection, result.truncated, '/finance/review', [true, true, false]),
   });
 }
 
@@ -716,26 +626,25 @@ export async function getKidSpending(
   options: ExecutionOptions = {},
 ): Promise<KidSpendingOutput> {
   const now = options.now ?? new Date();
-  const connector = await selectConnector(options.signal);
-  const kid = resolveKid(input.kidName);
+  const finance = await financePersistence();
+  const connector = await selectConnector(finance, options.signal);
+  const kid = await resolveKid(finance, input.kidName);
   const range = resolveRange(input, now);
-  const result = queryTransactions(
+  const result = await queryTransactions(
+    finance,
     connector.id,
     { ...input, kidId: kid.id },
     range,
   );
-  const totals = sqlite.prepare(`
-    SELECT COALESCE(SUM(ABS(amount)), 0) AS amount, COUNT(*) AS transactionCount
-    FROM finance_transactions
-    WHERE connector_instance_id = ? AND lifecycle_status = 'active'
-      AND assigned_kid_id = ? AND date >= ? AND date <= ?
-  `).get(connector.id, kid.id, range.startDate, range.endDate) as {
-    amount: number;
-    transactionCount: number;
-  };
+  const totals = await finance.assistant.readKidSpendingTotal({
+    connectorId: connector.id,
+    kidId: kid.id,
+    startDate: range.startDate,
+    endDate: range.endDate,
+  });
   const projection = applyAttributionFreshness(
     applyRangeCoverage(
-      transactionMeta(connector.id, connector.pollIntervalMinutes, now),
+      await transactionMeta(finance, connector.id, connector.pollIntervalMinutes, now),
       range,
     ),
     connector.pollIntervalMinutes,
@@ -747,13 +656,13 @@ export async function getKidSpending(
     kidName: safeText(kid.name, 'Household member', 100),
     period: range,
     missionControlCalculated: {
-      totalSpending: roundCurrency(totals.amount),
+      totalSpending: roundCurrency(totals.totalAmount),
       transactionCount: totals.transactionCount,
       dailyLimit: kid.dailyLimit === null ? null : roundCurrency(kid.dailyLimit),
       weeklyLimit: kid.weeklyLimit === null ? null : roundCurrency(kid.weeklyLimit),
       monthlyLimit: kid.monthlyLimit === null ? null : roundCurrency(kid.monthlyLimit),
     },
-    recentTransactions: result.rows.map(safeTransaction),
+    recentTransactions: result.transactions.map(safeTransaction),
     meta: meta(projection, result.truncated, '/finance', [true, true, true]),
   });
 }
@@ -763,49 +672,25 @@ export async function getFinanceObligations(
   options: ExecutionOptions = {},
 ): Promise<FinanceObligationsOutput> {
   const now = options.now ?? new Date();
-  const connector = await selectConnector(options.signal);
-  const health = getFinanceDatasetHealth(connector.id, now);
+  const finance = await financePersistence();
+  const connector = await selectConnector(finance, options.signal);
+  const health = await datasetHealth(finance, connector.id, now);
   const recurringHealth = health.datasets.find((dataset) => dataset.dataset === 'recurring');
   const limit = input.limit ?? 15;
   const horizonDays = input.horizonDays ?? 90;
   const horizonStart = formatDateInLocalTimezone(now);
   const horizonEnd = formatDateInLocalTimezone(new Date(now.getTime() + horizonDays * DAY_MS));
-  const rows = sqlite.prepare(`
-    SELECT merchant, amount, frequency, next_expected_date AS nextExpectedDate,
-           category_name AS category
-    FROM finance_recurring_obligations
-    WHERE connector_id = ? AND is_current = 1
-      AND next_expected_date >= ? AND next_expected_date <= ?
-    ORDER BY next_expected_date, merchant
-    LIMIT ?
-  `).all(connector.id, horizonStart, horizonEnd, limit + 1) as Array<{
-    merchant: string;
-    amount: number;
-    frequency: string;
-    nextExpectedDate: string | null;
-    category: string | null;
-  }>;
-  const page = rows.slice(0, limit);
-  const aggregate = sqlite.prepare(`
-    SELECT COALESCE(SUM(ABS(amount) * CASE lower(frequency)
-      WHEN 'weekly' THEN 52.0 / 12.0
-      WHEN 'biweekly' THEN 26.0 / 12.0
-      WHEN 'every two weeks' THEN 26.0 / 12.0
-      WHEN 'quarterly' THEN 1.0 / 3.0
-      WHEN 'annual' THEN 1.0 / 12.0
-      WHEN 'annually' THEN 1.0 / 12.0
-      WHEN 'yearly' THEN 1.0 / 12.0
-      ELSE 1.0
-    END), 0) AS estimatedMonthlyAmount
-    FROM finance_recurring_obligations
-    WHERE connector_id = ? AND is_current = 1
-      AND next_expected_date >= ? AND next_expected_date <= ?
-  `).get(connector.id, horizonStart, horizonEnd) as { estimatedMonthlyAmount: number };
+  const page = await finance.assistant.listRecurringObligations({
+    connectorId: connector.id,
+    horizonStart,
+    horizonEnd,
+    limit,
+  });
   throwIfAborted(options.signal);
   return output(financeObligationsOutputSchema, {
     kind: 'finance-obligations',
     horizonDays,
-    obligations: page.map((row) => ({
+    obligations: page.obligations.map((row) => ({
       factsViaTyrionBridge: {
         merchant: safeText(row.merchant, 'Unknown merchant', 120),
         amount: roundCurrency(row.amount),
@@ -815,13 +700,13 @@ export async function getFinanceObligations(
       },
     })),
     missionControlCalculated: {
-      estimatedMonthlyAmount: roundCurrency(aggregate.estimatedMonthlyAmount),
+      estimatedMonthlyAmount: roundCurrency(page.estimatedMonthlyAmount),
     },
     meta: {
       sourceAsOf: recurringHealth?.sourceAsOf ?? null,
       coverage: recurringHealth?.coverage ?? null,
       freshness: recurringHealth?.state ?? 'unavailable',
-      truncated: rows.length > limit,
+      truncated: page.truncated,
       deepLink: '/finance',
       provenance: provenance(true, false, true),
     },
@@ -833,13 +718,14 @@ export async function getFinanceConnectorHealth(
   options: ExecutionOptions = {},
 ): Promise<FinanceConnectorHealthOutput> {
   const now = options.now ?? new Date();
-  const connector = await selectConnector(options.signal);
+  const finance = await financePersistence();
+  const connector = await selectConnector(finance, options.signal);
   const projection = applyAttributionFreshness(
-    transactionMeta(connector.id, connector.pollIntervalMinutes, now),
+    await transactionMeta(finance, connector.id, connector.pollIntervalMinutes, now),
     connector.pollIntervalMinutes,
     now,
   );
-  const health = getFinanceDatasetHealth(connector.id, now);
+  const health = await datasetHealth(finance, connector.id, now);
   const freshnessStates = [projection.freshness, health.aggregate];
   const overall = freshnessStates.every((state) => state === 'fresh')
     ? 'healthy'
@@ -904,28 +790,24 @@ export type HoustonFinanceApprovalAuditOutcome =
   | 'stale'
   | 'invalid-approval';
 
-export function recordHoustonFinanceApprovalAudit(input: {
+export async function recordHoustonFinanceApprovalAudit(input: {
   approvalId: string;
   correlationId: string;
-  toolName: string;
+  toolName: FinanceAssistantMutationTool;
   decision: 'approve' | 'deny';
   outcome: HoustonFinanceApprovalAuditOutcome;
   durationMs: number;
-}): void {
-  sqlite.prepare(`
-    INSERT INTO houston_finance_action_audit (
-      id, correlation_id, call_hash, tool, decision, outcome, duration_ms, created_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    randomUUID(),
-    safeText(input.correlationId, 'unavailable', 128),
-    input.approvalId,
-    input.toolName,
-    input.decision,
-    input.outcome,
-    Math.max(0, Math.round(input.durationMs)),
-    new Date().toISOString(),
-  );
+}): Promise<void> {
+  const finance = await financePersistence();
+  await finance.assistant.recordApprovalAudit({
+    correlationId: safeText(input.correlationId, 'unavailable', 128),
+    callHash: input.approvalId,
+    tool: input.toolName,
+    decision: input.decision,
+    outcome: input.outcome,
+    durationMs: Math.max(0, Math.round(input.durationMs)),
+    createdAt: new Date().toISOString(),
+  });
 }
 
 type MutationExecutionOptions = {
@@ -935,32 +817,17 @@ type MutationExecutionOptions = {
   now?: Date;
 };
 
-function findMutationTarget(
+async function findMutationTarget(
+  finance: FinancePersistence,
   connectorId: string,
   transactionRef: string,
   expected: AssignFinanceTransactionKidInput['expected'],
-): SafeTransactionRow {
-  const rows = sqlite.prepare(`
-    SELECT t.id, t.connector_instance_id AS connectorId,
-           t.date, t.amount, t.merchant_name AS merchant,
-           COALESCE(categories.name, t.confirmed_category, t.original_category) AS category,
-           t.confirmed_category AS confirmedCategory,
-           t.is_pending AS pending, t.is_recurring AS recurring,
-           profiles.name AS kidName, t.attribution_status AS attributionStatus,
-           t.attribution_confidence AS confidence, t.attribution_method AS method,
-           t.assigned_kid_id AS assignedKidId,
-           t.source_fingerprint AS sourceFingerprint, t.last_seen_at AS lastSeenAt,
-           t.manual_decided_at AS manualDecidedAt
-    FROM finance_transactions t
-    LEFT JOIN kid_profiles profiles ON profiles.id = t.assigned_kid_id
-    LEFT JOIN finance_categories categories
-      ON categories.connector_id = t.connector_instance_id
-      AND categories.upstream_category_id = t.confirmed_category
-    WHERE t.connector_instance_id = ? AND t.lifecycle_status = 'active'
-      AND t.date = ? AND t.amount = ?
-    ORDER BY t.id
-    LIMIT 50
-  `).all(connectorId, expected.date, expected.amount) as SafeTransactionRow[];
+): Promise<FinanceAssistantTransaction> {
+  const rows = await finance.assistant.findApprovedMutationTargets({
+    connectorId,
+    date: expected.date,
+    amount: expected.amount,
+  });
   const target = rows.find(row => opaqueEqual(
     opaqueDigest('txn', row.connectorId, row.id),
     transactionRef,
@@ -975,7 +842,7 @@ function findMutationTarget(
 }
 
 function assertExpectedTransactionState(
-  target: SafeTransactionRow,
+  target: FinanceAssistantTransaction,
   expected: AssignFinanceTransactionKidInput['expected'],
 ): void {
   const safe = safeTransaction(target);
@@ -994,13 +861,14 @@ function assertExpectedTransactionState(
   }
 }
 
-function assertMutationProjectionFresh(
+async function assertMutationProjectionFresh(
+  finance: FinancePersistence,
   connectorId: string,
   pollIntervalMinutes: number | undefined,
   requireAttribution: boolean,
   now: Date,
-): void {
-  const base = transactionMeta(connectorId, pollIntervalMinutes, now);
+): Promise<void> {
+  const base = await transactionMeta(finance, connectorId, pollIntervalMinutes, now);
   const projection = requireAttribution
     ? applyAttributionFreshness(base, pollIntervalMinutes, now)
     : base;
@@ -1018,19 +886,12 @@ function opaqueEqual(left: string, right: string): boolean {
   return leftBytes.length === rightBytes.length && timingSafeEqual(leftBytes, rightBytes);
 }
 
-function resolveProjectedKid(connectorId: string, kidName: string) {
-  const rows = sqlite.prepare(`
-    SELECT profiles.id, profiles.name
-    FROM kid_profiles profiles
-    INNER JOIN finance_attribution_subjects subjects
-      ON subjects.kid_id = profiles.id AND subjects.connector_id = ?
-    INNER JOIN finance_sync_state state
-      ON state.connector_id = subjects.connector_id
-      AND state.attribution_policy_version = subjects.policy_version
-    WHERE lower(profiles.name) = lower(?)
-    ORDER BY profiles.id
-    LIMIT 2
-  `).all(connectorId, kidName) as Array<{ id: string; name: string }>;
+async function resolveProjectedKid(
+  finance: FinancePersistence,
+  connectorId: string,
+  kidName: string,
+) {
+  const rows = await finance.assistant.matchProjectedKidsByName({ connectorId, name: kidName });
   if (rows.length === 0) {
     throw new HoustonFinanceToolError('finance_kid_not_found', 'No current household member matches that name.');
   }
@@ -1040,15 +901,15 @@ function resolveProjectedKid(connectorId: string, kidName: string) {
   return rows[0];
 }
 
-function resolveProjectedCategory(connectorId: string, categoryName: string) {
-  const rows = sqlite.prepare(`
-    SELECT upstream_category_id AS upstreamCategoryId, name
-    FROM finance_categories
-    WHERE connector_id = ? AND is_active = 1 AND source_is_active = 1
-      AND lower(name) = lower(?)
-    ORDER BY upstream_category_id
-    LIMIT 2
-  `).all(connectorId, categoryName) as Array<{ upstreamCategoryId: string; name: string }>;
+async function resolveProjectedCategory(
+  finance: FinancePersistence,
+  connectorId: string,
+  categoryName: string,
+) {
+  const rows = await finance.assistant.matchProjectedCategoriesByName({
+    connectorId,
+    name: categoryName,
+  });
   if (rows.length === 0) {
     throw new HoustonFinanceToolError('finance_unavailable', 'No current finance category matches that name.');
   }
@@ -1062,6 +923,18 @@ function mutationIdempotencyKey(
   options: MutationExecutionOptions,
 ): string {
   return `houston:${options.approvalId}`;
+}
+
+function expectedTransactionVersion(
+  transaction: FinanceAssistantTransaction,
+): FinanceAssistantExpectedVersion {
+  return {
+    sourceFingerprint: transaction.sourceFingerprint,
+    lastSeenAt: transaction.lastSeenAt,
+    assignedKidId: transaction.assignedKidId,
+    confirmedCategory: transaction.confirmedCategory,
+    manualDecidedAt: transaction.manualDecidedAt,
+  };
 }
 
 function mutationFailure(
@@ -1088,7 +961,7 @@ function mutationFailure(
     else if (/No current finance category/.test(error.message)) code = 'category_not_found';
     else if (/More than one current finance category/.test(error.message)) code = 'category_ambiguous';
     message = error.message;
-  } else if (error instanceof FinanceAttributionMutationError) {
+  } else if (error instanceof HoustonFinanceAttributionError) {
     code = /conflict|superseded|idempotency/.test(error.code)
       ? 'mutation_conflict'
       : 'mutation_unavailable';
@@ -1112,19 +985,15 @@ function mutationFailure(
   };
 }
 
-function replayedKidAssignment(idempotencyKey: string): string | null {
-  const rows = sqlite.prepare(`
-    SELECT profiles.name AS kidName
-    FROM finance_attribution_audit audit
-    LEFT JOIN kid_profiles profiles ON profiles.id = audit.requested_kid_id
-    WHERE audit.idempotency_key = ? AND audit.result_status = 'resolved'
-    LIMIT 2
-  `).all(idempotencyKey) as Array<{ kidName: string | null }>;
+async function replayedKidAssignment(
+  finance: FinancePersistence,
+  idempotencyKey: string,
+): Promise<string | null> {
+  const rows = await finance.assistant.findReplayedKidAssignments(idempotencyKey);
   if (rows.length > 1) {
-    throw new FinanceAttributionMutationError(
+    throw new HoustonFinanceAttributionError(
       'idempotency_conflict',
       'Approval identity matched more than one attribution decision',
-      409,
     );
   }
   return rows.length === 1
@@ -1132,16 +1001,11 @@ function replayedKidAssignment(idempotencyKey: string): string | null {
     : null;
 }
 
-function replayedCategoryUpdate(idempotencyKey: string): string | null {
-  const rows = sqlite.prepare(`
-    SELECT categories.name AS categoryName
-    FROM finance_mutation_audit audit
-    LEFT JOIN finance_categories categories
-      ON categories.connector_id = audit.connector_id
-      AND categories.upstream_category_id = audit.requested_value
-    WHERE audit.idempotency_key = ? AND audit.status = 'succeeded'
-    LIMIT 2
-  `).all(idempotencyKey) as Array<{ categoryName: string | null }>;
+async function replayedCategoryUpdate(
+  finance: FinancePersistence,
+  idempotencyKey: string,
+): Promise<string | null> {
+  const rows = await finance.assistant.findReplayedCategoryUpdates(idempotencyKey);
   if (rows.length > 1) {
     throw new MonarchBridgeError(
       'idempotency_conflict',
@@ -1155,6 +1019,17 @@ function replayedCategoryUpdate(idempotencyKey: string): string | null {
     : null;
 }
 
+/** Mirrors the finance sync failure vocabulary persisted for mutation audit. */
+function providerFailureDetails(error: unknown): { code: string; message: string } {
+  if (error instanceof MonarchBridgeError) {
+    return { code: error.code, message: error.message };
+  }
+  if (error instanceof Error && /cancel/i.test(error.message)) {
+    return { code: 'sync_cancelled', message: 'Finance sync was cancelled' };
+  }
+  return { code: 'sync_failed', message: 'Finance snapshot sync failed' };
+}
+
 export async function assignFinanceTransactionKid(
   input: AssignFinanceTransactionKidInput,
   options: MutationExecutionOptions,
@@ -1163,8 +1038,9 @@ export async function assignFinanceTransactionKid(
   let outcome: HoustonFinanceApprovalAuditOutcome = 'failed';
   try {
     throwIfAborted(options.signal);
+    const finance = await financePersistence();
     const idempotencyKey = mutationIdempotencyKey(options);
-    const replayedKidName = replayedKidAssignment(idempotencyKey);
+    const replayedKidName = await replayedKidAssignment(finance, idempotencyKey);
     if (replayedKidName) {
       outcome = 'succeeded';
       return assignFinanceTransactionKidOutputSchema.parse({
@@ -1175,37 +1051,51 @@ export async function assignFinanceTransactionKid(
         provenance: mutationProvenance(true),
       });
     }
-    const connector = await selectConnector(options.signal);
-    const transaction = findMutationTarget(connector.id, input.transactionRef, input.expected);
-    const kid = resolveProjectedKid(connector.id, input.kidName);
-    assertMutationProjectionFresh(
+    const connector = await selectConnector(finance, options.signal);
+    const transaction = await findMutationTarget(
+      finance,
+      connector.id,
+      input.transactionRef,
+      input.expected,
+    );
+    const kid = await resolveProjectedKid(finance, connector.id, input.kidName);
+    await assertMutationProjectionFresh(
+      finance,
       connector.id,
       connector.pollIntervalMinutes,
       true,
       options.now ?? new Date(),
     );
     assertExpectedTransactionState(transaction, input.expected);
-    const result = applyManualAttributionDecision({
+    const result = await finance.assistant.applyManualKidAssignment({
       connectorId: connector.id,
       transactionId: transaction.id,
-      action: 'assign-kid',
       kidId: kid.id,
       idempotencyKey,
       actorType: 'parent-admin',
-      expectedTransactionVersion: {
-        sourceFingerprint: transaction.sourceFingerprint,
-        lastSeenAt: transaction.lastSeenAt,
-        assignedKidId: transaction.assignedKidId,
-        confirmedCategory: transaction.confirmedCategory,
-        manualDecidedAt: transaction.manualDecidedAt,
-      },
+      decidedAt: new Date().toISOString(),
+      expectedVersion: expectedTransactionVersion(transaction),
     });
+    if (result.status !== 'applied' && result.status !== 'replayed') {
+      throw new HoustonFinanceAttributionError(
+        result.status === 'idempotency-conflict'
+          ? 'idempotency_conflict'
+          : result.status === 'connector-not-found'
+            ? 'connector_not_found'
+            : result.status === 'transaction-not-found'
+              ? 'transaction_not_found'
+              : result.status === 'transaction-conflict'
+                ? 'transaction_conflict'
+                : 'unknown_attribution_subject',
+        'The approved kid assignment could not be applied',
+      );
+    }
     outcome = 'succeeded';
     return assignFinanceTransactionKidOutputSchema.parse({
       kind: 'finance-kid-assignment',
       status: 'updated',
       missionControlConfirmed: { kidName: safeText(kid.name, 'Household member', 100) },
-      replayed: result.replayed,
+      replayed: result.status === 'replayed',
       provenance: mutationProvenance(true),
     });
   } catch (error) {
@@ -1215,7 +1105,7 @@ export async function assignFinanceTransactionKid(
         && /changed after it was proposed|projection is not current/.test(error.message)
       )
       || (
-        error instanceof FinanceAttributionMutationError
+        error instanceof HoustonFinanceAttributionError
         && error.code === 'transaction_conflict'
       )
     ) {
@@ -1225,7 +1115,7 @@ export async function assignFinanceTransactionKid(
       mutationFailure('finance-kid-assignment', error),
     );
   } finally {
-    recordHoustonFinanceApprovalAudit({
+    await recordHoustonFinanceApprovalAudit({
       approvalId: options.approvalId,
       correlationId: options.correlationId,
       toolName: 'assignFinanceTransactionKid',
@@ -1244,8 +1134,9 @@ export async function updateFinanceTransactionCategory(
   let outcome: HoustonFinanceApprovalAuditOutcome = 'failed';
   try {
     throwIfAborted(options.signal);
+    const finance = await financePersistence();
     const idempotencyKey = mutationIdempotencyKey(options);
-    const replayedCategoryName = replayedCategoryUpdate(idempotencyKey);
+    const replayedCategoryName = await replayedCategoryUpdate(finance, idempotencyKey);
     if (replayedCategoryName) {
       outcome = 'succeeded';
       return updateFinanceTransactionCategoryOutputSchema.parse({
@@ -1256,32 +1147,65 @@ export async function updateFinanceTransactionCategory(
         provenance: mutationProvenance(true),
       });
     }
-    const connector = await selectConnector(options.signal);
-    const transaction = findMutationTarget(connector.id, input.transactionRef, input.expected);
-    const category = resolveProjectedCategory(connector.id, input.categoryName);
-    assertMutationProjectionFresh(
+    const connector = await selectConnector(finance, options.signal);
+    const transaction = await findMutationTarget(
+      finance,
+      connector.id,
+      input.transactionRef,
+      input.expected,
+    );
+    const category = await resolveProjectedCategory(finance, connector.id, input.categoryName);
+    await assertMutationProjectionFresh(
+      finance,
       connector.id,
       connector.pollIntervalMinutes,
       false,
       options.now ?? new Date(),
     );
     assertExpectedTransactionState(transaction, input.expected);
-    const config = loadFinanceConnectorConfig(connector.id);
-    await updateFinanceCategory(
-      config,
-      transaction.id,
-      category.upstreamCategoryId,
+    const config = await loadFinanceConnectorConfig(finance, connector.id);
+    const claim = await finance.assistant.claimCategoryMutation({
+      connectorId: connector.id,
+      transactionId: transaction.id,
+      categoryId: category.upstreamCategoryId,
+      expectedCategoryName: category.name,
       idempotencyKey,
-      options.signal,
-      {
-        sourceFingerprint: transaction.sourceFingerprint,
-        lastSeenAt: transaction.lastSeenAt,
-        assignedKidId: transaction.assignedKidId,
-        confirmedCategory: transaction.confirmedCategory,
-        manualDecidedAt: transaction.manualDecidedAt,
-        categoryName: category.name,
-      },
-    );
+      claimedAt: new Date().toISOString(),
+      expectedVersion: expectedTransactionVersion(transaction),
+    });
+    if (claim.status !== 'already-succeeded') {
+      if (claim.status !== 'claimed') throw categoryClaimError(claim.status);
+      // The claim is committed before any provider I/O: no database
+      // transaction is held across the externally-observable Tyrion request,
+      // and success is only reported after the bridge verifies the update.
+      try {
+        await new MonarchBridgeClient(config).updateCategory(
+          claim.upstreamTransactionId,
+          category.upstreamCategoryId,
+          options.signal,
+        );
+        const completed = await finance.assistant.completeCategoryMutation({
+          connectorId: connector.id,
+          transactionId: transaction.id,
+          categoryId: category.upstreamCategoryId,
+          idempotencyKey,
+          claimToken: claim.claimToken,
+          completedAt: new Date().toISOString(),
+        });
+        if (!completed) throw categoryClaimError('mutation-in-progress');
+      } catch (error) {
+        const failure = providerFailureDetails(error);
+        await finance.assistant.failCategoryMutation({
+          connectorId: connector.id,
+          idempotencyKey,
+          claimToken: claim.claimToken,
+          errorCode: failure.code,
+          errorMessage: failure.message,
+          failedAt: new Date().toISOString(),
+        });
+        throw error;
+      }
+    }
     outcome = 'succeeded';
     return updateFinanceTransactionCategoryOutputSchema.parse({
       kind: 'finance-category-update',
@@ -1307,7 +1231,7 @@ export async function updateFinanceTransactionCategory(
       mutationFailure('finance-category-update', error),
     );
   } finally {
-    recordHoustonFinanceApprovalAudit({
+    await recordHoustonFinanceApprovalAudit({
       approvalId: options.approvalId,
       correlationId: options.correlationId,
       toolName: 'updateFinanceTransactionCategory',
@@ -1315,6 +1239,27 @@ export async function updateFinanceTransactionCategory(
       outcome,
       durationMs: performance.now() - startedAt,
     });
+  }
+}
+
+function categoryClaimError(
+  status: 'idempotency-conflict'
+    | 'transaction-not-found'
+    | 'transaction-conflict'
+    | 'category-conflict'
+    | 'mutation-in-progress',
+): MonarchBridgeError {
+  switch (status) {
+    case 'idempotency-conflict':
+      return new MonarchBridgeError('idempotency_conflict', 'Idempotency key was already used', false, 409);
+    case 'transaction-not-found':
+      return new MonarchBridgeError('transaction_not_found', 'Finance transaction was not found', false, 404);
+    case 'transaction-conflict':
+      return new MonarchBridgeError('transaction_conflict', 'Finance transaction changed after approval', false, 409);
+    case 'category-conflict':
+      return new MonarchBridgeError('category_conflict', 'Finance category changed after approval', false, 409);
+    case 'mutation-in-progress':
+      return new MonarchBridgeError('mutation_in_progress', 'Category update is already in progress', true, 409);
   }
 }
 

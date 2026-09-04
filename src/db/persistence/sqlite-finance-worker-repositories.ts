@@ -33,6 +33,7 @@ import {
   FINANCE_IDENTITY_NAMESPACE_CREDENTIAL,
   type FinanceCorePersistence,
 } from './finance-worker';
+import { createSqliteFinanceAssistantPersistence } from './sqlite-finance-assistant-repository';
 
 type SqliteDatabase = Database.Database;
 
@@ -1443,5 +1444,6 @@ export function createSqliteFinanceWorkerPersistence(
     snapshots: createSnapshotPersistence(sqlite, options.projectionProofs),
     datasets: createDatasetPersistence(sqlite, options.projectionProofs),
     attribution: createAttributionPersistence(sqlite, idFactory),
+    assistant: createSqliteFinanceAssistantPersistence(sqlite, { idFactory }),
   };
 }

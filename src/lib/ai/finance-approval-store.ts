@@ -1,6 +1,7 @@
 import 'server-only';
 
-import { sqlite } from '@/db';
+import type { FinanceAssistantPersistence } from '@/db/persistence/finance-assistant';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   assignFinanceTransactionKidInputSchema,
   updateFinanceTransactionCategoryInputSchema,
@@ -33,6 +34,10 @@ export class InvalidHoustonFinanceApprovalError extends Error {
   }
 }
 
+async function assistantPersistence(): Promise<FinanceAssistantPersistence> {
+  return (await getWorkerPersistenceRepositories()).finance.assistant;
+}
+
 function parseToolInput(toolName: FinanceMutationToolName, input: unknown): unknown {
   return toolName === 'assignFinanceTransactionKid'
     ? assignFinanceTransactionKidInputSchema.parse(input)
@@ -49,110 +54,59 @@ function canonicalJson(value: unknown): string {
     .join(',')}}`;
 }
 
-export function persistHoustonFinanceApproval(
+/**
+ * Idempotently records one server-owned finance approval proposal. Persisting
+ * the identical proposal again is a no-op; reusing an approval identity for
+ * different arguments is rejected without disturbing the stored proposal.
+ */
+export async function persistHoustonFinanceApproval(
   approval: PendingApproval & { correlationId: string; now?: Date },
-): void {
+): Promise<void> {
   const now = approval.now ?? new Date();
   const toolInput = parseToolInput(approval.toolName, approval.toolInput);
-  const storedInput = canonicalJson(toolInput);
-  const expiresAt = new Date(now.getTime() + APPROVAL_TTL_MS).toISOString();
+  const persistence = await assistantPersistence();
 
-  sqlite.transaction(() => {
-    sqlite.prepare(`
-      DELETE FROM houston_finance_pending_approvals
-      WHERE expires_at <= ?
-    `).run(now.toISOString());
-
-    const existing = sqlite.prepare(`
-      SELECT tool_call_id AS toolCallId, tool, tool_input AS toolInput
-      FROM houston_finance_pending_approvals
-      WHERE approval_id = ?
-    `).get(approval.approvalId) as {
-      toolCallId: string;
-      tool: FinanceMutationToolName;
-      toolInput: string;
-    } | undefined;
-
-    if (existing) {
-      if (
-        existing.toolCallId !== approval.toolCallId
-        || existing.tool !== approval.toolName
-        || existing.toolInput !== storedInput
-      ) {
-        throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
-      }
-      return;
-    }
-
-    sqlite.prepare(`
-      INSERT INTO houston_finance_pending_approvals (
-        approval_id, tool_call_id, tool, tool_input, correlation_id,
-        expires_at, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      approval.approvalId,
-      approval.toolCallId,
-      approval.toolName,
-      storedInput,
-      approval.correlationId,
-      expiresAt,
-      now.toISOString(),
-    );
-  })();
-}
-
-export function consumeHoustonFinanceApproval(
-  approval: PendingApproval & { now?: Date },
-): PendingApproval {
-  const now = approval.now ?? new Date();
-  const consumed = sqlite.transaction((): PendingApproval | null => {
-    const stored = sqlite.prepare(`
-      SELECT approval_id AS approvalId, tool_call_id AS toolCallId,
-             tool AS toolName, tool_input AS toolInput, expires_at AS expiresAt
-      FROM houston_finance_pending_approvals
-      WHERE approval_id = ?
-    `).get(approval.approvalId) as {
-      approvalId: string;
-      toolCallId: string;
-      toolName: FinanceMutationToolName;
-      toolInput: string;
-      expiresAt: string;
-    } | undefined;
-
-    const submittedInput = parseToolInput(approval.toolName, approval.toolInput);
-    if (stored && stored.expiresAt <= now.toISOString()) {
-      sqlite.prepare(`
-        DELETE FROM houston_finance_pending_approvals
-        WHERE approval_id = ?
-      `).run(approval.approvalId);
-      return null;
-    }
-    if (
-      !stored
-      || stored.toolCallId !== approval.toolCallId
-      || stored.toolName !== approval.toolName
-      || stored.toolInput !== canonicalJson(submittedInput)
-    ) {
-      throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
-    }
-
-    const deleted = sqlite.prepare(`
-      DELETE FROM houston_finance_pending_approvals
-      WHERE approval_id = ?
-    `).run(approval.approvalId);
-    if (deleted.changes !== 1) {
-      throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
-    }
-
-    return {
-      approvalId: stored.approvalId,
-      toolCallId: stored.toolCallId,
-      toolName: stored.toolName,
-      toolInput: JSON.parse(stored.toolInput) as unknown,
-    };
-  })();
-  if (!consumed) {
+  const result = await persistence.persistPendingApproval({
+    approvalId: approval.approvalId,
+    toolCallId: approval.toolCallId,
+    tool: approval.toolName,
+    toolInput: canonicalJson(toolInput),
+    correlationId: approval.correlationId,
+    createdAt: now.toISOString(),
+    expiresAt: new Date(now.getTime() + APPROVAL_TTL_MS).toISOString(),
+  });
+  if (result.status === 'conflict') {
     throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
   }
-  return consumed;
+}
+
+/**
+ * Consumes a matching, unexpired proposal exactly once. Expired, unknown,
+ * mismatched, and already-consumed proposals all fail closed with the same
+ * sanitized error so the client cannot distinguish them.
+ */
+export async function consumeHoustonFinanceApproval(
+  approval: PendingApproval & { now?: Date },
+): Promise<PendingApproval> {
+  const now = approval.now ?? new Date();
+  const submittedInput = parseToolInput(approval.toolName, approval.toolInput);
+  const persistence = await assistantPersistence();
+
+  const consumed = await persistence.consumePendingApproval({
+    approvalId: approval.approvalId,
+    toolCallId: approval.toolCallId,
+    tool: approval.toolName,
+    toolInput: canonicalJson(submittedInput),
+    now: now.toISOString(),
+  });
+  if (consumed.status !== 'consumed') {
+    throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
+  }
+
+  return {
+    approvalId: approval.approvalId,
+    toolCallId: approval.toolCallId,
+    toolName: approval.toolName,
+    toolInput: JSON.parse(consumed.toolInput) as unknown,
+  };
 }

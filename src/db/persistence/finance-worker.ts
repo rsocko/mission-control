@@ -1,3 +1,4 @@
+import type { FinanceAssistantPersistence } from './finance-assistant';
 import type { FinanceAttributionPersistence } from './finance-attribution';
 import type { FinanceAttentionPersistence } from './finance-attention';
 import type { FinanceConnectionRecoveryPersistence } from './finance-recovery';
@@ -24,6 +25,13 @@ export interface FinanceCorePersistence {
   readonly snapshots: FinanceSnapshotPersistence;
   readonly datasets: FinanceDatasetPersistence;
   readonly attribution: FinanceAttributionPersistence;
+  /**
+   * Houston finance-assistant reads, approval-gated mutations, pending
+   * approval lifecycle, and redacted approval audit. Composed here rather
+   * than registered separately so a backend still supplies either every
+   * finance member or none of them.
+   */
+  readonly assistant: FinanceAssistantPersistence;
 }
 
 /**

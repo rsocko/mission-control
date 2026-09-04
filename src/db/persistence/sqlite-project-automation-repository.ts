@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { SourceBinding } from '@/types';
+import { createSqliteProjectHierarchyRepository } from './sqlite-project-hierarchy-repository';
 import {
   matchProjectAutomationTasks,
   type AutoIncludeRule,
@@ -238,5 +239,6 @@ export function createSqliteProjectAutomationRepository(
       }).immediate();
       return Promise.resolve();
     },
+    hierarchy: createSqliteProjectHierarchyRepository(sqlite),
   };
 }

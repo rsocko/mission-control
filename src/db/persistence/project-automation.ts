@@ -1,4 +1,5 @@
 import type { SourceBinding } from '@/types';
+import type { ProjectHierarchyPersistence } from './project-hierarchy';
 
 export interface AutoIncludeRule {
   type: 'tag' | 'title_contains' | 'source_list' | 'connector';
@@ -26,6 +27,14 @@ export interface ProjectAutomationRepository {
   evaluateProject(projectId: string): Promise<ProjectRuleEvaluation>;
   previewProject(projectId: string): Promise<ProjectRuleMatch[]>;
   evaluateTasks(taskIds: readonly string[]): Promise<void>;
+  /**
+   * Layer 15: the project-hierarchy command/read boundary. It is nested here
+   * (rather than published as its own worker slot) because hierarchy commands
+   * and rule evaluation mutate the same `task_projects` and
+   * `project_auto_include_exclusions` rows and must therefore share one
+   * backend selection and one per-project serialization namespace.
+   */
+  hierarchy: ProjectHierarchyPersistence;
 }
 
 export interface ProjectAutomationProject {

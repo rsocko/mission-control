@@ -255,7 +255,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(4);
+    expect(migrations).toHaveLength(5);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -338,5 +338,68 @@ describe('PostgreSQL schema', () => {
       createRunIndex,
     ]].sort((left, right) => left - right));
     expect(semanticKeyVersionSql.match(/--> statement-breakpoint/g)).toHaveLength(5);
+  });
+
+  it('ships the additive project-hierarchy integrity parity migration', () => {
+    const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
+    const journal = JSON.parse(readFileSync(
+      resolve(migrationDirectory, 'meta/_journal.json'),
+      'utf8',
+    )) as { entries: Array<{ idx: number; tag: string }> };
+    expect(journal.entries.at(-1)).toMatchObject({
+      idx: 4,
+      tag: '0004_project_hierarchy_integrity',
+    });
+
+    const sql = readFileSync(
+      resolve(migrationDirectory, '0004_project_hierarchy_integrity.sql'),
+      'utf8',
+    );
+
+    for (const fn of [
+      'project_hierarchy_bump_revision',
+      'project_phase_items_one_phase_guard_insert',
+      'project_phase_items_one_phase_guard_update',
+      'project_phase_items_membership_guard',
+      'project_phases_reparent_assignment_guard',
+      'project_phases_reparent_membership_guard',
+      'project_membership_phase_cleanup',
+      'project_hierarchy_revision_phase',
+      'project_hierarchy_revision_phase_item',
+      'project_hierarchy_revision_task_project',
+    ]) {
+      expect(sql, fn).toContain(`CREATE OR REPLACE FUNCTION ${fn}(`);
+    }
+
+    // Trigger-name parity with the SQLite hierarchy integrity triggers
+    // (drizzle/0032_project_hierarchy_commands.sql).
+    const sqliteHierarchySql = readFileSync(
+      resolve(process.cwd(), 'drizzle/0032_project_hierarchy_commands.sql'),
+      'utf8',
+    );
+    const sqliteTriggers = [...sqliteHierarchySql.matchAll(
+      /CREATE TRIGGER IF NOT EXISTS `([^`]+)`/g,
+    )].map((match) => match[1]).sort();
+    const postgresTriggers = [...sql.matchAll(/CREATE TRIGGER ([a-z0-9_]+)/g)]
+      .map((match) => match[1]).sort();
+    expect(postgresTriggers).toEqual(sqliteTriggers);
+    expect(postgresTriggers).toHaveLength(17);
+
+    // Every trigger is dropped first so the migration stays replay-safe.
+    for (const trigger of postgresTriggers) {
+      expect(sql, trigger).toContain(`DROP TRIGGER IF EXISTS ${trigger} ON `);
+    }
+
+    // Out-of-band revision bumps are suppressed while an adapter-owned
+    // command holds a mutation-context row.
+    expect(sql).toMatch(
+      /SELECT 1 FROM project_hierarchy_mutation_context\s+WHERE project_id = target_project_id/,
+    );
+    expect(sql).toContain('SET hierarchy_revision = hierarchy_revision + 1');
+
+    // Additive parity only: functions and triggers over existing tables.
+    expect(sql).not.toMatch(
+      /CREATE TABLE|ALTER TABLE|DROP TABLE|CREATE INDEX|CREATE UNIQUE INDEX|DROP INDEX/,
+    );
   });
 });

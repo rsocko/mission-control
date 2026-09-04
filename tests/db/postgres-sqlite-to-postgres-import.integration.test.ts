@@ -1,5 +1,6 @@
 import {
   cpSync,
+  existsSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -374,6 +375,7 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
       });
       const journalPath = join(migrationDirectory, 'meta', '_journal.json');
       const journal = JSON.parse(readFileSync(journalPath, 'utf8')) as {
+        version: string;
         entries: Array<{
           idx: number;
           version: string;
@@ -382,16 +384,23 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
           breakpoints: boolean;
         }>;
       };
+      const probeIndex = Math.max(...journal.entries.map(({ idx }) => idx)) + 1;
+      const probeWhen = Math.max(...journal.entries.map(({ when }) => when)) + 1;
+      const probeTag = `${String(probeIndex).padStart(4, '0')}_atomicity_probe`;
+      const probePath = join(migrationDirectory, `${probeTag}.sql`);
+      if (journal.entries.some(({ tag }) => tag === probeTag) || existsSync(probePath)) {
+        throw new Error(`Synthetic migration probe collides with ${probeTag}`);
+      }
       journal.entries.push({
-        idx: 4,
-        version: '7',
-        when: 1788486400001,
-        tag: '0004_atomicity_probe',
+        idx: probeIndex,
+        version: journal.version,
+        when: probeWhen,
+        tag: probeTag,
         breakpoints: true,
       });
       writeFileSync(journalPath, `${JSON.stringify(journal, null, 2)}\n`);
       writeFileSync(
-        join(migrationDirectory, '0004_atomicity_probe.sql'),
+        probePath,
         'CREATE TABLE "migration_atomicity_probe" ("id" integer);--> statement-breakpoint\nSELECT missing_atomicity_probe_function();\n',
       );
 
@@ -405,12 +414,12 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
       const failedHistory = await pool.query<{ count: string }>(`
         SELECT COUNT(*)::text AS count
         FROM drizzle.__drizzle_migrations
-        WHERE created_at = 1788486400001
-      `);
+        WHERE created_at = $1
+      `, [probeWhen]);
       expect(failedHistory.rows[0]?.count).toBe('0');
 
       writeFileSync(
-        join(migrationDirectory, '0004_atomicity_probe.sql'),
+        probePath,
         'CREATE TABLE "migration_atomicity_probe" ("id" integer);\n',
       );
       await runPostgresMigrations(pool, { migrationsFolder: migrationDirectory });
@@ -418,8 +427,8 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
       const appliedHistory = await pool.query<{ count: string }>(`
         SELECT COUNT(*)::text AS count
         FROM drizzle.__drizzle_migrations
-        WHERE created_at = 1788486400001
-      `);
+        WHERE created_at = $1
+      `, [probeWhen]);
       expect(appliedHistory.rows[0]?.count).toBe('1');
     } finally {
       await pool.query('DROP TABLE IF EXISTS migration_atomicity_probe');

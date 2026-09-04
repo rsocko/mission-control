@@ -29,6 +29,13 @@
       "when": 1788486400000,
       "tag": "0003_semantic_idempotency_key_version",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788572800000,
+      "tag": "0004_project_hierarchy_integrity",
+      "breakpoints": true
     }
   ]
 }

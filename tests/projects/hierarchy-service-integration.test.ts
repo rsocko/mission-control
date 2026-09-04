@@ -496,7 +496,7 @@ describe('project hierarchy service', () => {
       },
     })).rejects.toThrow('Every task must belong to this project');
 
-    const hierarchy = getProjectHierarchySnapshot(projectId)!;
+    const hierarchy = (await getProjectHierarchySnapshot(projectId))!;
     expect(hierarchy.revision).toBe(0);
     expect(hierarchy.phaseItemsByPhase[phaseIds[0]].map((item) => item.taskId))
       .toEqual([taskIds[0], taskIds[1]]);

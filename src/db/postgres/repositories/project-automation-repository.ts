@@ -9,6 +9,7 @@ import {
   type ProjectRuleEvaluation,
   type ProjectRuleMatch,
 } from '@/db/persistence/project-automation';
+import { createPostgresProjectHierarchyRepository } from './project-hierarchy-repository';
 
 const QUERY_BATCH_SIZE = 500;
 const MAX_TRANSACTION_ATTEMPTS = 3;
@@ -280,5 +281,6 @@ export function createPostgresProjectAutomationRepository(
         });
       }
     },
+    hierarchy: createPostgresProjectHierarchyRepository(pool),
   };
 }

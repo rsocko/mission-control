@@ -76,12 +76,19 @@ describe('L05 task-read taint decrement', () => {
     const digest = (entries: string[]) => createHash('sha256')
       .update(JSON.stringify(entries))
       .digest('hex');
+    // The Tier B digest is the load-bearing one here and is unchanged: no
+    // later layer has reclassified an import-time failure into a call-time
+    // one. The two non-route digests below moved once, at L16, which removed
+    // `graph-workspace/service.ts` and `persistence/sqlite-runtime.ts` from
+    // taintedLibA and retired the last tainted shared API helper (so
+    // taintedApiHelpers is now the empty set).
     expect(digest(current.tierBRoutes))
       .toBe('dbf5405c2e0d0829788e8359ec21c76229969ddad055257fdd6b25babda34b59');
     expect(digest(current.taintedLibA))
-      .toBe('77ddad1d399193465a5923d89dfa36d6bc0629e7b1e94895211c5eab42535b08');
+      .toBe('19e3b149cafc9d2b86f883e082a122932116e536975e89f0d0f4df360278cc74');
     expect(digest(current.taintedApiHelpers))
-      .toBe('b412e594fc79dc685267810475becf3c8f4b27cb58343eecc8cbddd2360b3abf');
+      .toBe('4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945');
+    expect(current.taintedApiHelpers).toEqual([]);
     expect(current.tierBRoutes).toEqual(baseline.tierBRoutes);
   });
 

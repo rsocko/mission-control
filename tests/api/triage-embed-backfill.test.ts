@@ -33,6 +33,15 @@ describe('triage embed backfill', () => {
     db = dbModule.default;
     sqlite = dbModule.sqlite;
     schema = schemaModule;
+    const { createSqliteTriagePersistenceRepositories } = await import(
+      '@/db/persistence/sqlite-triage-repositories'
+    );
+    const { registerTriagePersistenceRepositories } = await import(
+      '@/lib/triage/persistence'
+    );
+    registerTriagePersistenceRepositories(
+      createSqliteTriagePersistenceRepositories(sqlite),
+    );
     post = routeModule.POST;
     resolveAndStoreEmbed = vi.mocked(triageModule.resolveAndStoreEmbed);
   }, 30_000);

@@ -24,6 +24,13 @@ beforeAll(async () => {
   registerTriagePersistenceRepositories(
     createSqliteTriagePersistenceRepositories(sqlite),
   );
+  const { registerSemanticPublicationService } = await import(
+    '@/lib/semantic-index/publication-service'
+  );
+  registerSemanticPublicationService({
+    upsert: async () => undefined,
+    delete: async () => undefined,
+  });
   ({ ingestTriageImports } = await import('@/lib/triage'));
 }, 30_000);
 

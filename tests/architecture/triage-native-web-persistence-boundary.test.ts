@@ -24,9 +24,9 @@ const CLEANED_TIER_B_ROUTES = [
   'src/app/api/triage/auto-sync/route.ts',
   'src/app/api/triage/cron/route.ts',
   'src/app/api/triage/import/document-intelligence/route.ts',
-  'src/app/api/triage/import/github/route.ts',
-  'src/app/api/triage/import/reddit/route.ts',
-  'src/app/api/triage/import/route.ts',
+  'src/app/api/triage/import/github-stars/route.ts',
+  'src/app/api/triage/import/reddit-saved/route.ts',
+  'src/app/api/triage/import/twitter-archive/route.ts',
   'src/app/api/triage/import/youtube/route.ts',
   'src/app/api/triage/sync-status/route.ts',
 ] as const;
@@ -76,15 +76,15 @@ describe('Layer L08a triage web persistence boundary', () => {
       totalMigrationUnits: graph.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 203,
+      tierARoutes: 172,
       tierBRoutes: 18,
-      cleanRoutes: 45,
-      directTaintSourceRoutes: 137,
-      transitiveOnlyTaintSourceRoutes: 66,
-      directDbNamespaceRoutes: 138,
-      taintedLibA: 88,
+      cleanRoutes: 76,
+      directTaintSourceRoutes: 119,
+      transitiveOnlyTaintSourceRoutes: 53,
+      directDbNamespaceRoutes: 120,
+      taintedLibA: 78,
       taintedApiHelpers: 1,
-      totalMigrationUnits: 292,
+      totalMigrationUnits: 251,
     });
   });
 

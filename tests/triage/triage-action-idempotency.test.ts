@@ -43,6 +43,7 @@ vi.mock('@/lib/connectors', () => ({
 }));
 
 let db: typeof import('@/db').default;
+let sqlite: typeof import('@/db').sqlite;
 let triageItems: typeof import('@/db/schema').triageItems;
 let triageActionClaims: typeof import('@/db/schema').triageActionClaims;
 let applyTriageAction: typeof import('@/lib/triage').applyTriageAction;
@@ -50,8 +51,15 @@ let undoTriageAction: typeof import('@/lib/triage').undoTriageAction;
 let TodoTaskCreationError: typeof import('@/lib/triage/actions/ms-todo').TodoTaskCreationError;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db, sqlite } = await import('@/db'));
   ({ triageItems, triageActionClaims } = await import('@/db/schema'));
+  const { createSqliteTriagePersistenceRepositories } = await import(
+    '@/db/persistence/sqlite-triage-repositories'
+  );
+  const { registerTriagePersistenceRepositories } = await import('@/lib/triage/persistence');
+  registerTriagePersistenceRepositories(
+    createSqliteTriagePersistenceRepositories(sqlite),
+  );
   ({ applyTriageAction, undoTriageAction } = await import('@/lib/triage'));
   ({ TodoTaskCreationError } = await import('@/lib/triage/actions/ms-todo'));
 

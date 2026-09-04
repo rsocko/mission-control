@@ -207,7 +207,7 @@ vi.mock('@/lib/triage/capture', () => ({
   createTriageCapture: vi.fn(() => Promise.resolve({ id: 'triage-1', url: 'https://example.com', status: 'pending' })),
 }));
 
-vi.mock('@/lib/triage/query', () => ({
+vi.mock('@/lib/triage/queue-query', () => ({
   listTriageItems: vi.fn(() => Promise.resolve({ items: [], total: 0 })),
   isValidTriageStatus: vi.fn((s: string) => ['pending', 'snoozed', 'actioned', 'dismissed', 'all'].includes(s)),
   isValidTriageSource: vi.fn((s: string) => ['reddit', 'youtube', 'github', 'web', 'all'].includes(s)),

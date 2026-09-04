@@ -7,6 +7,7 @@
 import db from '@/db';
 import { triageItems } from '@/db/schema';
 import { eq } from 'drizzle-orm';
+import type { TriageItem } from '@/types';
 import { ensureSeedData, mapRow } from './shared';
 
 export {

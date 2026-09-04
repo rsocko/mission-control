@@ -13,6 +13,7 @@ const merchantA = `merchant-v1_${'A'.repeat(43)}`;
 const merchantB = `merchant-v1_${'B'.repeat(43)}`;
 let sqlite: Database.Database;
 let getNotifications: (request: Request) => Promise<Response>;
+let shutdownRuntimeDatabase: typeof import('@/db/runtime').shutdownRuntimeDatabase;
 
 function insertNotification(input: {
   id: string;
@@ -68,7 +69,13 @@ describe('Finance notification filtering contract', () => {
   beforeAll(async () => {
     process.env.MC_DB_PATH = databasePath;
     vi.resetModules();
-    ({ sqlite } = await import('@/db'));
+    const [database, runtime] = await Promise.all([
+      import('@/db'),
+      import('@/db/runtime'),
+    ]);
+    sqlite = database.sqlite;
+    await runtime.initializeRuntimeDatabase();
+    shutdownRuntimeDatabase = runtime.shutdownRuntimeDatabase;
     ({ GET: getNotifications } = await import('@/app/api/notifications/route'));
 
     insertNotification({ id: 'merchant-a', merchantKey: merchantA, merchantLabel: 'Invented Market' });
@@ -102,7 +109,8 @@ describe('Finance notification filtering contract', () => {
     }
   });
 
-  afterAll(() => {
+  afterAll(async () => {
+    await shutdownRuntimeDatabase();
     sqlite.close();
     delete process.env.MC_DB_PATH;
     rmSync(directory, { recursive: true, force: true });

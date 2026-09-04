@@ -33,7 +33,6 @@ import {
   primeNotificationWebPersistenceForSynchronousCompatibility,
   wakeNotificationWritebackDispatcher,
 } from '@/lib/notifications/notification-writeback';
-import { primeNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
 
@@ -1223,7 +1222,6 @@ export function createSqliteNotificationWebRepository(
       wakeNotificationWritebackDispatcher();
     },
   };
-  primeNotificationWebPersistence(repository);
   primeNotificationWebPersistenceForSynchronousCompatibility(repository);
   return repository;
 }

@@ -522,94 +522,96 @@ export function describeFinanceAssistantPersistenceContract(
       };
     }
 
-    describeFinanceAssistantPersistenceContract('SQLite', createSqliteHarness);
+    if (backend !== 'SQLite') {
+      describeFinanceAssistantPersistenceContract('SQLite', createSqliteHarness);
 
-    function source(path: string): string {
-      return readFileSync(resolve(process.cwd(), path), 'utf8');
-    }
+      function source(path: string): string {
+        return readFileSync(resolve(process.cwd(), path), 'utf8');
+      }
 
-    describe('L09 Houston finance-assistant persistence boundary', () => {
-      const contractPath = 'src/db/persistence/finance-assistant.ts';
-      const adapters = [
-        'src/db/persistence/sqlite-finance-assistant-repository.ts',
-        'src/db/postgres/repositories/finance-assistant-repository.ts',
-      ] as const;
-      const migratedModules = [
-        'src/lib/finance/houston-tools.ts',
-        'src/lib/ai/finance-approval-store.ts',
-      ] as const;
-
-      it('keeps the contract and services backend-neutral and purpose-built', () => {
-        const contract = source(contractPath);
-        expect(contract).not.toMatch(
-          /from\s+['"](?:better-sqlite3|pg|drizzle-orm|@\/db(?:\/schema|\/finance-schema)?)['"]/,
-        );
-        for (const escapeHatch of [
-          /\bquery\s*\(\s*sql\b/,
-          /\bexecute\s*\(\s*(?:sql|statement|text)\b/,
-          /\bgetHandle\b/,
-          /\bgetConnection\b/,
-          /\bwithTransaction\b/,
-        ]) {
-          expect(contract, String(escapeHatch)).not.toMatch(escapeHatch);
-        }
-        for (const path of migratedModules) {
-          const contents = source(path);
-          expect(contents, path).not.toMatch(
-            /from\s+['"]@\/lib\/connectors\/monarch-money\/(?:attribution-service|dataset-sync|snapshot-sync)['"]/,
-          );
-          expect(contents, path).not.toMatch(/\bsqlite\.(?:prepare|transaction|exec|pragma)\b/);
-          expect(contents, path).toContain("from '@/lib/persistence/worker-runtime'");
-        }
-      });
-
-      it('keeps provider I/O out of adapters and after the durable claim', () => {
-        for (const path of adapters) {
-          const contents = source(path);
-          expect(contents, path).not.toMatch(/MonarchBridgeClient|\bfetch\s*\(/);
-          expect(contents, path).not.toMatch(/from\s+['"]@\/lib\/connectors\//);
-          expect(contents, path).not.toMatch(/resolveDatabaseBackend|dual[- ]?write/i);
-        }
-        const service = source('src/lib/finance/houston-tools.ts');
-        const claim = service.indexOf('finance.assistant.claimCategoryMutation');
-        const provider = service.indexOf('new MonarchBridgeClient(config).updateCategory');
-        expect(provider).toBeGreaterThan(claim);
-        expect(service.indexOf('finance.assistant.completeCategoryMutation')).toBeGreaterThan(provider);
-        expect(service.indexOf('finance.assistant.failCategoryMutation')).toBeGreaterThan(provider);
-      });
-
-      it('uses null-safe PostgreSQL CAS and records only the exact graph decrement', () => {
-        const postgres = source(adapters[1]);
-        expect(postgres).toContain('assigned_kid_id IS NOT DISTINCT FROM');
-        expect(postgres).toContain('confirmed_category IS NOT DISTINCT FROM');
-        expect(postgres).toContain('manual_decided_at IS NOT DISTINCT FROM');
-        expect(postgres).toContain('FOR UPDATE');
-
-        const baseline = JSON.parse(
-          source('tests/architecture/web-persistence-baseline.json'),
-        ) as { counts: Record<string, number>; taintedLibA: string[] };
-        expect(baseline.counts).toMatchObject({
-          tierARoutes: 217,
-          tierBRoutes: 26,
-          cleanRoutes: 23,
-          taintedLibA: 92,
-          totalMigrationUnits: 310,
-        });
-        for (const removed of [
-          'src/lib/ai/finance-approval-store.ts',
-          'src/lib/ai/tools/finance-tools.ts',
+      describe('L09 Houston finance-assistant persistence boundary', () => {
+        const contractPath = 'src/db/persistence/finance-assistant.ts';
+        const adapters = [
+          'src/db/persistence/sqlite-finance-assistant-repository.ts',
+          'src/db/postgres/repositories/finance-assistant-repository.ts',
+        ] as const;
+        const migratedModules = [
           'src/lib/finance/houston-tools.ts',
-        ]) {
-          expect(baseline.taintedLibA).not.toContain(removed);
-        }
-      });
-    });
+          'src/lib/ai/finance-approval-store.ts',
+        ] as const;
 
-    afterAll(() => {
-      sqlite?.close();
-      sqlite = null;
-      rmSync(sqliteDatabasePath, { force: true });
-    });
+        it('keeps the contract and services backend-neutral and purpose-built', () => {
+          const contract = source(contractPath);
+          expect(contract).not.toMatch(
+            /from\s+['"](?:better-sqlite3|pg|drizzle-orm|@\/db(?:\/schema|\/finance-schema)?)['"]/,
+          );
+          for (const escapeHatch of [
+            /\bquery\s*\(\s*sql\b/,
+            /\bexecute\s*\(\s*(?:sql|statement|text)\b/,
+            /\bgetHandle\b/,
+            /\bgetConnection\b/,
+            /\bwithTransaction\b/,
+          ]) {
+            expect(contract, String(escapeHatch)).not.toMatch(escapeHatch);
+          }
+          for (const path of migratedModules) {
+            const contents = source(path);
+            expect(contents, path).not.toMatch(
+              /from\s+['"]@\/lib\/connectors\/monarch-money\/(?:attribution-service|dataset-sync|snapshot-sync)['"]/,
+            );
+            expect(contents, path).not.toMatch(/\bsqlite\.(?:prepare|transaction|exec|pragma)\b/);
+            expect(contents, path).toContain("from '@/lib/persistence/worker-runtime'");
+          }
+        });
+
+        it('keeps provider I/O out of adapters and after the durable claim', () => {
+          for (const path of adapters) {
+            const contents = source(path);
+            expect(contents, path).not.toMatch(/MonarchBridgeClient|\bfetch\s*\(/);
+            expect(contents, path).not.toMatch(/from\s+['"]@\/lib\/connectors\//);
+            expect(contents, path).not.toMatch(/resolveDatabaseBackend|dual[- ]?write/i);
+          }
+          const service = source('src/lib/finance/houston-tools.ts');
+          const claim = service.indexOf('finance.assistant.claimCategoryMutation');
+          const provider = service.indexOf('new MonarchBridgeClient(config).updateCategory');
+          expect(provider).toBeGreaterThan(claim);
+          expect(service.indexOf('finance.assistant.completeCategoryMutation')).toBeGreaterThan(provider);
+          expect(service.indexOf('finance.assistant.failCategoryMutation')).toBeGreaterThan(provider);
+        });
+
+        it('uses null-safe PostgreSQL CAS and records only the exact graph decrement', () => {
+          const postgres = source(adapters[1]);
+          expect(postgres).toContain('assigned_kid_id IS NOT DISTINCT FROM');
+          expect(postgres).toContain('confirmed_category IS NOT DISTINCT FROM');
+          expect(postgres).toContain('manual_decided_at IS NOT DISTINCT FROM');
+          expect(postgres).toContain('FOR UPDATE');
+
+          const baseline = JSON.parse(
+            source('tests/architecture/web-persistence-baseline.json'),
+          ) as { counts: Record<string, number>; taintedLibA: string[] };
+          expect(baseline.counts).toMatchObject({
+            tierARoutes: 217,
+            tierBRoutes: 26,
+            cleanRoutes: 23,
+            taintedLibA: 92,
+            totalMigrationUnits: 310,
+          });
+          for (const removed of [
+            'src/lib/ai/finance-approval-store.ts',
+            'src/lib/ai/tools/finance-tools.ts',
+            'src/lib/finance/houston-tools.ts',
+          ]) {
+            expect(baseline.taintedLibA).not.toContain(removed);
+          }
+        });
+      });
+
+      afterAll(() => {
+        sqlite?.close();
+        sqlite = null;
+        rmSync(sqliteDatabasePath, { force: true });
+      });
+    }
 
     describe('connector selection and configuration', () => {
       it('returns nothing when no finance connector is enabled', async () => {

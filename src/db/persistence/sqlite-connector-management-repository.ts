@@ -540,8 +540,9 @@ export function createSqliteConnectorManagementRepository(
         ${input.before ? 'WHERE synced_at < ?' : ''}
         ORDER BY synced_at DESC, id DESC
         LIMIT ?
-      `).all(...(input.before ? [input.before, input.limit + 1] : [input.limit + 1]))
-        as SqliteSyncHistoryRow[];
+      `).all(
+        ...(input.before ? [input.before, input.limit + 1] : [input.limit + 1]),
+      ) as SqliteSyncHistoryRow[];
       const hasMore = rows.length > input.limit;
       return {
         history: rows.slice(0, input.limit).map(mapSyncHistory),

@@ -730,15 +730,17 @@ async function writeThrough(
             : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } as any);
-        const remoteIsTerminal = remoteResult?.status === 'done'
-          || remoteResult?.status === 'cancelled';
+        const remoteTerminalStatus = remoteResult?.status === 'done'
+          || remoteResult?.status === 'cancelled'
+          ? remoteResult.status
+          : null;
         const localNonTerminal = currentTask.status !== 'done'
           && currentTask.status !== 'cancelled';
         const explicitlySettingTerminal = updates.status === 'done'
           || updates.status === 'cancelled';
-        if (remoteIsTerminal && localNonTerminal && !explicitlySettingTerminal) {
+        if (remoteTerminalStatus && localNonTerminal && !explicitlySettingTerminal) {
           localUpdates = {
-            status: remoteResult.status,
+            status: remoteTerminalStatus,
             completedAt: remoteResult.completedAt || new Date().toISOString(),
           };
         }

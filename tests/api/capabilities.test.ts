@@ -78,6 +78,7 @@ vi.mock('@/lib/mode', () => ({
 vi.mock('@/lib/utils/date', () => ({ getLocalToday: vi.fn(() => '2026-07-17') }));
 vi.mock('@/lib/logger', () => ({
   default: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
 const WRITABLE_CAPS: ConnectorCapabilities = {

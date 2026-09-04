@@ -17,8 +17,10 @@ let triageItems: typeof import('@/db/schema').triageItems;
 let triageActionClaims: typeof import('@/db/schema').triageActionClaims;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  const dbModule = await import('@/db');
+  db = dbModule.default;
   ({ tasks, triageItems, triageActionClaims } = await import('@/db/schema'));
+  await dbModule.initializeSqlitePersistenceComposition();
 
   await db.insert(triageItems).values([
     {

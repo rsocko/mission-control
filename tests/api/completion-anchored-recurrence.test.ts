@@ -27,6 +27,7 @@ describe('completion-anchored task recurrence', () => {
     schema = schemaModule;
     createTask = createRoute.POST;
     patchTask = detailRoute.PATCH;
+    await dbModule.initializeSqlitePersistenceComposition();
   });
 
   afterAll(() => {

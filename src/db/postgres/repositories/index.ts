@@ -23,6 +23,7 @@ import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repo
 import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
 import { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 import { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
+import { createPostgresFinanceOperatorPersistence } from './finance-operator-repository';
 import { createPostgresFinanceInsightPersistence } from './finance-insights-repositories';
 import {
   createPostgresFinanceAttentionRepairPersistence,
@@ -60,6 +61,7 @@ export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repo
 export { createPostgresWorkTodoRepositories } from './work-todo-repositories';
 export { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 export { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
+export { createPostgresFinanceOperatorPersistence } from './finance-operator-repository';
 export { createPostgresFinanceInsightPersistence } from './finance-insights-repositories';
 export {
   createPostgresFinanceAttentionRepairPersistence,
@@ -178,6 +180,7 @@ export function createPostgresWorkerPersistenceRepositories(
         repair: createPostgresFinanceAttentionRepairPersistence(pool),
       },
       recovery: createPostgresFinanceConnectionRecoveryPersistence(pool),
+      operator: createPostgresFinanceOperatorPersistence(pool),
     },
     ideationWorkspaces: createPostgresIdeationWorkspaceRepository(pool),
     analytics: createPostgresAnalyticsPersistence(pool),

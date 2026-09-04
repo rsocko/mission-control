@@ -35,7 +35,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'A valid manual decision is required' }, { status: 400 });
     }
     const config = await getPersistedFinanceConnectorConfig(parsed.data.connectorId);
-    const result = applyManualAttributionDecision({
+    const result = await applyManualAttributionDecision({
       connectorId: config.id,
       transactionId: (await params).id,
       action: parsed.data.action,

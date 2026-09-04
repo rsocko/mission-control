@@ -117,11 +117,11 @@ afterAll(() => {
 });
 
 describe.sequential('Finance Insight cutover operator', () => {
-  it('reports local metadata readiness without contacting Monarch', () => {
+  it('reports local metadata readiness without contacting Monarch', async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
 
-    expect(cutover.getFinanceInsightCutoverReadiness(connectorId, generation))
+    expect(await cutover.getFinanceInsightCutoverReadiness(connectorId, generation))
       .toMatchObject({
         connector: {
           id: connectorId,
@@ -144,11 +144,12 @@ describe.sequential('Finance Insight cutover operator', () => {
     vi.unstubAllGlobals();
   });
 
-  it('fails closed on disabled, unconfigured, ambiguous, gated, and stale states', () => {
+  it('fails closed on disabled, unconfigured, ambiguous, gated, and stale states', async () => {
     sqlite.prepare(`UPDATE connector_configs SET enabled = 0, settings = '{}' WHERE id = ?`)
       .run(connectorId);
     process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED = 'true';
-    expect(cutover.getFinanceInsightCutoverReadiness(connectorId, 'stale-generation').readiness)
+    expect((await cutover.getFinanceInsightCutoverReadiness(connectorId, 'stale-generation'))
+      .readiness)
       .toEqual({
         ready: false,
         blockers: [
@@ -162,19 +163,20 @@ describe.sequential('Finance Insight cutover operator', () => {
 
     sqlite.prepare(`UPDATE connector_configs SET enabled = 1 WHERE id = ?`).run(connectorId);
     seedConnector({ id: 'finance-second' });
-    expect(cutover.getFinanceInsightCutoverReadiness(connectorId, generation).readiness.blockers)
+    expect((await cutover.getFinanceInsightCutoverReadiness(connectorId, generation))
+      .readiness.blockers)
       .toContain('finance_insight_connector_unavailable');
   });
 
-  it('enables one exact generation idempotently and rejects key conflicts', () => {
-    const first = cutover.enableFinanceInsightCutoverForOperator({
+  it('enables one exact generation idempotently and rejects key conflicts', async () => {
+    const first = await cutover.enableFinanceInsightCutoverForOperator({
       connectorId,
       sourceGeneration: generation,
       actorType: 'service',
       idempotencyKey: key('enable'),
       now: new Date(now),
     });
-    const replay = cutover.enableFinanceInsightCutoverForOperator({
+    const replay = await cutover.enableFinanceInsightCutoverForOperator({
       connectorId,
       sourceGeneration: generation,
       actorType: 'service',
@@ -189,12 +191,12 @@ describe.sequential('Finance Insight cutover operator', () => {
       replayed: false,
     });
     expect(replay).toMatchObject({ status: 'enabled', replayed: true });
-    expect(() => cutover.rollbackFinanceInsightCutoverForOperator({
+    await expect(cutover.rollbackFinanceInsightCutoverForOperator({
       connectorId,
       sourceGeneration: generation,
       actorType: 'service',
       idempotencyKey: key('enable'),
-    })).toThrowError(expect.objectContaining({ code: 'cutover_idempotency_conflict' }));
+    })).rejects.toMatchObject({ code: 'cutover_idempotency_conflict' });
     expect(sqlite.prepare(`
       SELECT operation, actor_type AS actorType, result_code AS resultCode,
              blocker_codes AS blockerCodes
@@ -207,8 +209,8 @@ describe.sequential('Finance Insight cutover operator', () => {
     }]);
   });
 
-  it('rolls back only the explicit active generation and suppresses in-flight delivery', () => {
-    cutover.enableFinanceInsightCutoverForOperator({
+  it('rolls back only the explicit active generation and suppresses in-flight delivery', async () => {
+    await cutover.enableFinanceInsightCutoverForOperator({
       connectorId,
       sourceGeneration: generation,
       actorType: 'parent-admin',
@@ -236,21 +238,21 @@ describe.sequential('Finance Insight cutover operator', () => {
       )
     `).run(now);
 
-    expect(() => cutover.rollbackFinanceInsightCutoverForOperator({
+    await expect(cutover.rollbackFinanceInsightCutoverForOperator({
       connectorId,
       sourceGeneration: 'different-generation',
       actorType: 'service',
       idempotencyKey: key('rollback-stale'),
-    })).toThrowError(expect.objectContaining({
+    })).rejects.toMatchObject({
       code: 'finance_insight_cutover_generation_stale',
-    }));
-    expect(cutover.rollbackFinanceInsightCutoverForOperator({
+    });
+    await expect(cutover.rollbackFinanceInsightCutoverForOperator({
       connectorId,
       sourceGeneration: generation,
       actorType: 'service',
       idempotencyKey: key('rollback'),
       now: new Date(now),
-    })).toMatchObject({
+    })).resolves.toMatchObject({
       status: 'rolled-back',
       suppressedDeliveryCount: 1,
       replayed: false,

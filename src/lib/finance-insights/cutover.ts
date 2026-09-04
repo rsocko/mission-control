@@ -1,266 +1,241 @@
 import 'server-only';
 
-import { sqlite, runTransaction } from '@/db';
-import { createNotificationsInTransaction, wakeNotificationDeliveryDispatcher } from '@/lib/notifications/service';
+import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
+import type { CreateNotificationInput } from '@/lib/notifications/service';
+import type { ConnectorNotificationInput } from '@/db/persistence/connector-execution';
+import type {
+  FinanceInsightNotificationIngestItem,
+  FinanceInsightNotificationReconcileItem,
+} from '@/db/persistence/finance-insights';
 import {
-  reconcileFinanceInsightNotificationLifecycle,
-  syncFinanceProviderPresentation,
-} from '@/db/persistence/sqlite-finance-insight-notification-lifecycle';
+  FinanceOperatorPersistenceError,
+  type FinanceOperatorActorType,
+  type FinanceOperatorPersistence,
+} from '@/db/persistence/finance-operator';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { insightOccurrenceSummarySchema, type InsightOccurrenceSummaryV1 } from './contract';
 import { FINANCE_PROVIDER_ALIASES } from './provider';
 import { selectFinanceInsightNotificationInputs } from './notification-ingestion';
+import {
+  isOccurrenceNotificationEligible,
+  notificationMetadata,
+} from './notification-shared';
 
-const financeTypePlaceholders = FINANCE_PROVIDER_ALIASES.map(() => '?').join(', ');
+/**
+ * Finance Insight cutover policy.
+ *
+ * All persistence goes through `FinanceWorkerPersistence.operator`, which owns
+ * the single transaction that fences readiness/generation, records the optional
+ * idempotency audit, expires the legacy anomaly notifications, runs the insight
+ * notification lifecycle, and switches the cutover state. What remains here is
+ * request-independent policy: occurrence-summary parsing, latest-revision
+ * selection, notification input construction, and the wake-after-commit of the
+ * notification delivery dispatcher.
+ */
 
-function enabledFinanceConnectorIds(): string[] {
-  return (sqlite.prepare(`
-    SELECT id FROM connector_configs
-    WHERE enabled = 1 AND deleted_at IS NULL
-      AND type IN (${financeTypePlaceholders})
-    ORDER BY id
-  `).all(...FINANCE_PROVIDER_ALIASES) as Array<{ id: string }>).map((row) => row.id);
+async function operatorPersistence(): Promise<FinanceOperatorPersistence> {
+  return (await getWorkerPersistenceRepositories()).finance.operator;
 }
 
-export function resolveSingleFinanceConnectorId(): string {
-  const connectorIds = enabledFinanceConnectorIds();
-  if (connectorIds.length !== 1) {
-    throw new Error('finance_insight_connector_unavailable');
-  }
-  return connectorIds[0];
+export async function resolveSingleFinanceConnectorId(): Promise<string> {
+  const { finance } = await getWorkerPersistenceRepositories();
+  const connectorId = await finance.insights.connectors.resolveSingleEnabledConnectorId(
+    FINANCE_PROVIDER_ALIASES,
+  );
+  if (!connectorId) throw new Error('finance_insight_connector_unavailable');
+  return connectorId;
 }
 
-export function isFinanceInsightDeliveryEnabled(connectorId: string): boolean {
-  const row = sqlite.prepare(`
-    SELECT delivery_enabled AS deliveryEnabled
-    FROM finance_insight_cutovers WHERE connector_id = ?
-  `).get(connectorId) as { deliveryEnabled: number } | undefined;
-  return row?.deliveryEnabled === 1;
+export async function isFinanceInsightDeliveryEnabled(connectorId: string): Promise<boolean> {
+  const { finance } = await getWorkerPersistenceRepositories();
+  return finance.insights.notifications.isDeliveryEnabled(connectorId);
 }
 
-export function isLegacyFinanceAnomalyProductionEnabled(): boolean {
-  const row = sqlite.prepare(`
-    SELECT 1 AS disabled
-    FROM finance_insight_cutovers
-    WHERE legacy_disabled = 1
-    LIMIT 1
-  `).get() as { disabled: number } | undefined;
-  return row === undefined;
+/**
+ * True while no connector has completed the cutover, i.e. while the legacy
+ * finance anomaly production path is still the delivered surface.
+ */
+export async function isLegacyFinanceAnomalyProductionEnabled(): Promise<boolean> {
+  return (await operatorPersistence()).isLegacyAnomalyProductionEnabled();
 }
 
-export function enableFinanceInsightCutover(input: {
-  connectorId: string;
-  sourceGeneration: string;
-  now?: Date;
-}): {
-  status: 'enabled';
-  legacyExpiredCount: number;
-  importedCount: number;
-} {
-  const now = input.now ?? new Date();
-  const nowIso = now.toISOString();
-  const result = runTransaction((transaction) => {
-    if (resolveSingleFinanceConnectorId() !== input.connectorId) {
-      throw new Error('finance_insight_connector_unavailable');
-    }
-    const existingCutover = sqlite.prepare(`
-      SELECT source_generation AS sourceGeneration, source_sequence AS sourceSequence,
-             delivery_enabled AS deliveryEnabled,
-             legacy_expired_count AS legacyExpiredCount, imported_count AS importedCount
-      FROM finance_insight_cutovers
-      WHERE connector_id = ?
-    `).get(input.connectorId) as {
-      sourceGeneration: string;
-      sourceSequence: number;
-      deliveryEnabled: number;
-      legacyExpiredCount: number;
-      importedCount: number;
-    } | undefined;
-    if (existingCutover) {
-      if (
-        existingCutover.sourceGeneration === input.sourceGeneration
-        && existingCutover.deliveryEnabled === 1
-      ) {
-        return {
-          status: 'enabled' as const,
-          legacyExpiredCount: existingCutover.legacyExpiredCount,
-          importedCount: existingCutover.importedCount,
-          hasPendingDelivery: false,
-        };
-      }
-      if (
-        existingCutover.sourceGeneration === input.sourceGeneration
-        && existingCutover.deliveryEnabled === 0
-      ) {
-        throw new Error('finance_insight_cutover_generation_stale');
-      }
-    }
-    const publication = sqlite.prepare(`
-      SELECT publication.source_sequence AS sourceSequence
-      FROM finance_insight_publications publication
-      INNER JOIN finance_insight_publication_delivery delivery
-        ON delivery.publication_id = publication.id
-        AND delivery.connector_id = publication.connector_id
-        AND delivery.source_sequence = publication.source_sequence
-      INNER JOIN finance_insight_occurrence_cache_state cache
-        ON cache.connector_id = publication.connector_id
-        AND cache.source_generation = publication.id
-        AND cache.source_sequence = publication.source_sequence
-      WHERE publication.connector_id = ? AND publication.id = ?
-        AND delivery.evaluation_state = 'completed'
-    `).get(input.connectorId, input.sourceGeneration) as { sourceSequence: number } | undefined;
-    if (!publication) throw new Error('finance_insight_cutover_generation_unavailable');
-    if (
-      existingCutover
-      && (
-        existingCutover.sourceSequence > publication.sourceSequence
-        || (
-          existingCutover.sourceSequence === publication.sourceSequence
-          && existingCutover.sourceGeneration !== input.sourceGeneration
-        )
-      )
-    ) {
-      throw new Error('finance_insight_cutover_generation_stale');
-    }
-    const rows = sqlite.prepare(`
-      SELECT summary_payload AS summaryPayload
-      FROM finance_insight_occurrences
-      WHERE connector_id = ?
-        AND source_generation = ?
-        AND source_sequence = ?
-        AND is_tombstone = 0
-        AND summary_payload IS NOT NULL
-      ORDER BY source_updated_at DESC, occurrence_id
-    `).all(
-      input.connectorId,
-      input.sourceGeneration,
-      publication.sourceSequence,
-    ) as Array<{ summaryPayload: string }>;
-    const items = rows.map((row) => (
-      insightOccurrenceSummarySchema.parse(JSON.parse(row.summaryPayload))
-    ));
-    const latestByOccurrence = new Map<string, InsightOccurrenceSummaryV1>();
-    for (const item of items) {
-      const current = latestByOccurrence.get(item.occurrenceId);
-      if (!current || item.deliveryRevision > current.deliveryRevision) {
-        latestByOccurrence.set(item.occurrenceId, item);
-      }
-    }
-    const lifecycleItems = [...latestByOccurrence.values()];
-    const notificationInputs = selectFinanceInsightNotificationInputs(
-      input.connectorId,
-      lifecycleItems.filter((item) => item.sourceLifecycle === 'open'),
-      now,
-    );
-    reconcileFinanceInsightNotificationLifecycle(
-      transaction,
-      input.connectorId,
-      lifecycleItems,
-      now,
-    );
+function financeInsightNotificationSourceId(
+  connectorId: string,
+  occurrenceId: string,
+): string {
+  return `finance-insight:${connectorId}:${occurrenceId}`;
+}
 
-    const legacyExpired = sqlite.prepare(`
-      UPDATE notifications
-      SET source_state = 'resolved',
-          source_resolved_at = COALESCE(source_resolved_at, ?),
-          last_source_synced_at = ?,
-          state = CASE
-            WHEN disposition = 'dismissed' THEN 'dismissed'
-            WHEN disposition = 'handled' THEN 'archived'
-            ELSE 'resolved'
-          END
-      WHERE connector_type = 'finance'
-        AND connector_instance_id = 'finance-alerts'
-        AND template_key = 'anomaly'
-        AND source_state = 'active'
-    `).run(nowIso, nowIso);
-    const created = createNotificationsInTransaction(transaction, notificationInputs, {
-      now,
-      wakeDispatcher: false,
-    });
-    syncFinanceProviderPresentation(transaction, created);
-    const importedCount = created.filter((entry) => entry.created).length;
-    const legacyExpiredCount = Number(legacyExpired.changes);
-    const metadataOnlyResult = JSON.stringify({
-      status: 'enabled',
-      legacyExpiredCount,
-      importedCount,
-    });
-    sqlite.prepare(`
-      INSERT INTO finance_insight_cutovers (
-        connector_id, cutover_at, source_generation, source_sequence,
-        legacy_disabled, delivery_enabled, legacy_expired_count, imported_count,
-        result, rolled_back_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, NULL, ?, ?)
-      ON CONFLICT(connector_id) DO UPDATE SET
-        cutover_at = excluded.cutover_at,
-        source_generation = excluded.source_generation,
-        source_sequence = excluded.source_sequence,
-        legacy_disabled = 1,
-        delivery_enabled = 1,
-        legacy_expired_count = excluded.legacy_expired_count,
-        imported_count = excluded.imported_count,
-        result = excluded.result,
-        rolled_back_at = NULL,
-        updated_at = excluded.updated_at
-    `).run(
-      input.connectorId,
-      nowIso,
-      input.sourceGeneration,
-      publication.sourceSequence,
-      legacyExpiredCount,
-      importedCount,
-      metadataOnlyResult,
-      nowIso,
-      nowIso,
-    );
-    return {
-      status: 'enabled' as const,
-      legacyExpiredCount,
-      importedCount,
-      hasPendingDelivery: created.some((entry) => (
-        entry.deliveryEvents.some((event) => event.status === 'pending')
-      )),
-    };
-  });
-  if (result.hasPendingDelivery) wakeNotificationDeliveryDispatcher();
+function toConnectorNotificationInput(
+  input: CreateNotificationInput,
+): ConnectorNotificationInput {
+  const receivedAt = input.receivedAt ?? new Date().toISOString();
   return {
-    status: result.status,
-    legacyExpiredCount: result.legacyExpiredCount,
-    importedCount: result.importedCount,
+    id: input.id ?? crypto.randomUUID(),
+    sourceId: input.sourceId,
+    connectorType: input.connectorType,
+    connectorInstanceId: input.connectorInstanceId,
+    title: input.title,
+    body: input.body ?? null,
+    level: input.level ?? 'fyi',
+    category: input.category ?? 'finance',
+    templateKey: input.templateKey ?? null,
+    readState: input.readState ?? 'unread',
+    disposition: input.disposition,
+    sourceState: input.sourceState ?? 'active',
+    syncState: input.syncState,
+    sourceActivityAt: input.sourceActivityAt ?? null,
+    sourceActivityKey: input.sourceActivityKey ?? null,
+    reopenPolicy: input.reopenPolicy ?? 'handled_and_dismissed',
+    occurrenceKey: input.occurrenceKey ?? 'initial',
+    isActionable: input.isActionable ?? false,
+    primaryActionId: input.primaryActionId ?? null,
+    receivedAt,
+    sortAt: input.sortAt ?? receivedAt,
+    relatedTaskId: input.relatedTaskId ?? null,
+    relatedProjectId: input.relatedProjectId ?? null,
+    relatedEntityType: input.relatedEntityType ?? null,
+    relatedEntityId: input.relatedEntityId ?? null,
+    navigationTarget: input.navigationTarget ?? null,
+    metadata: input.metadata ?? {},
+    presentation: input.presentation ?? {},
   };
 }
 
-export function rollbackFinanceInsightCutover(
+function toIngestItem(input: CreateNotificationInput): FinanceInsightNotificationIngestItem {
+  return {
+    input: toConnectorNotificationInput(input),
+    groupKey: input.groupKey ?? null,
+    dedupeKey: input.dedupeKey ?? null,
+  };
+}
+
+function toReconcileItems(
   connectorId: string,
-  now = new Date(),
-): void {
-  const timestamp = now.toISOString();
-  runTransaction(() => {
-    const updated = sqlite.prepare(`
-      UPDATE finance_insight_cutovers
-      SET delivery_enabled = 0,
-          rolled_back_at = ?,
-          result = '{"status":"rolled-back"}',
-          updated_at = ?
-      WHERE connector_id = ?
-    `).run(timestamp, timestamp, connectorId);
-    if (updated.changes !== 1) throw new Error('finance_insight_cutover_unavailable');
-    sqlite.prepare(`
-      UPDATE notification_delivery_events
-      SET status = 'suppressed',
-          suppression_reason = 'finance_insight_cutover_rolled_back',
-          next_attempt_at = NULL,
-          lease_expires_at = NULL
-      WHERE status IN ('pending', 'sending')
-        AND notification_id IN (
-          SELECT id FROM notifications
-          WHERE connector_type = 'finance-manager'
-            AND connector_instance_id = ?
-            AND (
-              source_id LIKE 'finance-insight:%'
-              OR source_id LIKE 'finance-insight-digest:%'
-            )
-        )
-    `).run(connectorId);
+  items: readonly InsightOccurrenceSummaryV1[],
+  now: Date,
+): FinanceInsightNotificationReconcileItem[] {
+  return items
+    .filter((item) => !(
+      item.sourceLifecycle === 'open'
+      && isOccurrenceNotificationEligible(item, now, process.env)
+    ))
+    .map((item) => ({
+      sourceId: financeInsightNotificationSourceId(connectorId, item.occurrenceId),
+      lastSourceActivityAt: item.updatedAt,
+      lastSourceActivityKey: `${item.occurrenceId}:${item.deliveryRevision}`,
+      sourceResolvedAt: item.resolvedAt ?? null,
+      metadata: notificationMetadata(item),
+    }));
+}
+
+/** Latest delivery revision per occurrence, in delivered projection order. */
+function latestByOccurrence(payloads: readonly string[]): InsightOccurrenceSummaryV1[] {
+  const latest = new Map<string, InsightOccurrenceSummaryV1>();
+  for (const payload of payloads) {
+    const item = insightOccurrenceSummarySchema.parse(JSON.parse(payload));
+    const current = latest.get(item.occurrenceId);
+    if (!current || item.deliveryRevision > current.deliveryRevision) {
+      latest.set(item.occurrenceId, item);
+    }
+  }
+  return [...latest.values()];
+}
+
+export interface FinanceInsightCutoverEnableResult {
+  status: 'enabled';
+  legacyExpiredCount: number;
+  importedCount: number;
+  suppressedDeliveryCount: number;
+  replayed: boolean;
+}
+
+export async function enableFinanceInsightCutover(input: {
+  connectorId: string;
+  sourceGeneration: string;
+  now?: Date;
+  /** Operator identity. Omitted for a direct (non-operator) cutover. */
+  actorType?: FinanceOperatorActorType;
+  idempotencyKey?: string;
+  /** Readiness blockers already determined by the caller. */
+  blockers?: readonly string[];
+}): Promise<FinanceInsightCutoverEnableResult> {
+  const now = input.now ?? new Date();
+  const operator = await operatorPersistence();
+  const blockers = input.blockers ?? [];
+  const generation = blockers.length > 0
+    ? null
+    : await operator.readCutoverGeneration({
+      connectorId: input.connectorId,
+      sourceGeneration: input.sourceGeneration,
+    });
+  const lifecycleItems = generation ? latestByOccurrence(generation.summaryPayloads) : [];
+  const notificationInputs = generation
+    ? selectFinanceInsightNotificationInputs(
+      input.connectorId,
+      lifecycleItems.filter((item) => item.sourceLifecycle === 'open'),
+      now,
+    )
+    : [];
+
+  const outcome = await operator.enableCutover({
+    connectorId: input.connectorId,
+    sourceGeneration: input.sourceGeneration,
+    sourceSequence: generation?.sourceSequence ?? 0,
+    actorType: input.actorType ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    now: now.toISOString(),
+    blockers: blockers.length > 0
+      ? blockers
+      : generation
+        ? []
+        : ['finance_insight_cutover_generation_unavailable'],
+    reconcile: toReconcileItems(input.connectorId, lifecycleItems, now),
+    ingest: notificationInputs.map(toIngestItem),
   });
+  if (outcome.outcome === 'blocked') {
+    throw new FinanceOperatorPersistenceError(
+      outcome.blockers[0] ?? 'finance_insight_cutover_failed',
+    );
+  }
+  // Wake-after-commit only: never before the cutover transaction has landed,
+  // and never for a replay, which creates no new pending delivery.
+  if (outcome.hasPendingDelivery) wakeNotificationDeliveryDispatcher();
+  return {
+    status: 'enabled',
+    legacyExpiredCount: outcome.legacyExpiredCount,
+    importedCount: outcome.importedCount,
+    suppressedDeliveryCount: outcome.suppressedDeliveryCount,
+    replayed: outcome.replayed,
+  };
+}
+
+export async function rollbackFinanceInsightCutover(input: {
+  connectorId: string;
+  sourceGeneration: string;
+  now?: Date;
+  actorType?: FinanceOperatorActorType;
+  idempotencyKey?: string;
+}): Promise<{
+  status: 'rolled-back';
+  legacyExpiredCount: number;
+  importedCount: number;
+  suppressedDeliveryCount: number;
+  replayed: boolean;
+}> {
+  const operator = await operatorPersistence();
+  const result = await operator.rollbackCutover({
+    connectorId: input.connectorId,
+    sourceGeneration: input.sourceGeneration,
+    actorType: input.actorType ?? null,
+    idempotencyKey: input.idempotencyKey ?? null,
+    now: (input.now ?? new Date()).toISOString(),
+  });
+  return {
+    status: 'rolled-back',
+    legacyExpiredCount: result.legacyExpiredCount,
+    importedCount: result.importedCount,
+    suppressedDeliveryCount: result.suppressedDeliveryCount,
+    replayed: result.replayed,
+  };
 }

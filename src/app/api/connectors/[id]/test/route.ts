@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { financeConnectorConfigFromRow } from '@/lib/connectors/monarch-money/config';
 import { MonarchBridgeClient, MonarchBridgeError } from '@/lib/connectors/monarch-money/client';
 import { describeTyrionConnectionError } from '@/lib/connectors/monarch-money/connection-error';
 import { getDocumentIntelligenceBaseUrl, getDocumentIntelligenceApiKey } from '@/lib/connectors/document-intelligence';
+import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import logger from '@/lib/logger';
 import { isDemoMode } from '@/lib/mode';
 
 /**
@@ -14,23 +13,24 @@ import { isDemoMode } from '@/lib/mode';
  * Tests connectivity for a given connector by pinging its external API.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
 
   try {
-    const [connector] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await getCorePersistenceRepositories().connectors.get(id);
 
     if (!connector) {
       return NextResponse.json(
         { success: false, error: 'Connector not found' },
         { status: 404 }
       );
+    }
+
+    const isFinanceConnector = normalizeFinanceProviderAlias(connector.type) !== null;
+    if (isFinanceConnector && !trustedFinanceMutationActor(request)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // In demo mode, simulate a successful connection test
@@ -56,12 +56,12 @@ export async function POST(
       return NextResponse.json(demoResult);
     }
 
-    if (normalizeFinanceProviderAlias(connector.type)) {
+    if (isFinanceConnector) {
       const start = Date.now();
       try {
-        const health = await new MonarchBridgeClient(
-          financeConnectorConfigFromRow(connector),
-        ).getHealth();
+        // Provider I/O happens outside every transaction; only the redacted
+        // badge below is persisted afterwards.
+        const health = await new MonarchBridgeClient(connector).getHealth();
         const financeResult = health.authenticated
           ? {
               success: true,
@@ -88,9 +88,7 @@ export async function POST(
     }
 
     const credentials = connector.credentials as Record<string, string> | null;
-    const settings = typeof connector.settings === 'string'
-      ? JSON.parse(connector.settings)
-      : (connector.settings as Record<string, unknown> | null);
+    const settings = connector.settings ?? null;
     const result = await testConnector(connector.type, credentials || {}, settings || {});
     await persistTestResult(id, result);
 
@@ -112,18 +110,20 @@ async function persistTestResult(
   result: { success: boolean; error?: string },
 ): Promise<void> {
   try {
-    await db
-      .update(connectorConfigs)
-      .set({
-        lastTestStatus: result.success ? 'success' : 'failed',
-        lastTestError: result.success ? null : (result.error || 'Connection test failed'),
-        lastTestAt: new Date().toISOString(),
-      })
-      .where(eq(connectorConfigs.id, connectorId));
-  } catch (err) {
+    await getCorePersistenceRepositories().connectors.recordTestResult({
+      connectorId,
+      status: result.success ? 'success' : 'failed',
+      error: result.success ? null : (result.error || 'Connection test failed'),
+      testedAt: new Date().toISOString(),
+    });
+  } catch {
     // Non-fatal — the test result is still returned to the caller even if we
-    // can't persist it for the badge.
-    console.error('Failed to persist connector test result', err);
+    // can't persist it for the badge. Nothing about the failure is logged
+    // beyond the route identity, so no credential or provider body can leak.
+    logger.error(
+      { route: 'connector_test', failure: 'badge_persistence' },
+      'Failed to persist connector test result',
+    );
   }
 }
 

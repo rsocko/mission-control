@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('local task lifecycle', () => {
   const dbPath = join(process.cwd(), 'data', `local-task-lifecycle-${process.pid}-${Date.now()}.db`);
@@ -17,7 +18,7 @@ describe('local task lifecycle', () => {
     vi.doUnmock('crypto');
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
-    const dbModule = await import('@/db');
+    const dbModule = await importInitializedSqliteDatabase();
     db = dbModule.default;
     sqlite = dbModule.sqlite;
     ({ deleteTaskLocally } = await import('@/lib/tasks/local-task-lifecycle'));

@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getAuthUrl, resolveClientCredentials } from '@/lib/auth';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 const CONNECTOR_DEFAULTS: Record<string, { name: string; capabilities: object; scopes: string[] }> = {
   'microsoft-todo': {
@@ -49,13 +47,12 @@ export async function GET(request: Request) {
   const defaults = CONNECTOR_DEFAULTS[connectorType] || CONNECTOR_DEFAULTS['microsoft-todo'];
 
   // Ensure connector instance exists (create if needed)
-  const existing = await db.select().from(connectorConfigs).where(
-    eq(connectorConfigs.id, instanceId)
-  );
+  const persistence = await getConnectorManagementPersistence();
+  const existing = await persistence.getConnector(instanceId);
 
-  if (existing.length === 0) {
+  if (!existing) {
     const now = new Date().toISOString();
-    await db.insert(connectorConfigs).values({
+    await persistence.createConnector({
       id: instanceId,
       type: connectorType,
       name: customName || `${defaults.name} (${accountType})`,
@@ -69,9 +66,8 @@ export async function GET(request: Request) {
         tenantId,
         ...(connectorType === 'microsoft-todo' ? { syncMicroStatus: false } : {}),
       } as Record<string, unknown>,
-      syncedLists: [] as unknown[],
-      createdAt: now,
-      updatedAt: now,
+      syncedLists: [],
+      now,
     });
   }
 

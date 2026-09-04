@@ -1,10 +1,13 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { createGitHubClient } from '@/lib/connectors/github-issues/github-client';
 import { normalizeLabels } from '@/lib/connectors/github-issues/label-handler';
 import type { LabelNormalization } from '@/lib/connectors/github-issues/label-handler';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import { ApiErrors } from '@/lib/api-error';
+import {
+  ConnectorOperationBusyError,
+  runWithConnectorOperationLease,
+} from '@/lib/sync/connector-lock';
 
 /**
  * POST /api/connectors/[id]/label-normalize
@@ -29,14 +32,9 @@ export async function POST(
       return NextResponse.json({ error: 'No normalizations provided' }, { status: 400 });
     }
 
-    const [connector] = await db
-      .select({
-        type: connectorConfigs.type,
-        credentials: connectorConfigs.credentials,
-      })
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await (
+      await getConnectorManagementPersistence()
+    ).getConnector(id);
 
     if (!connector) {
       return NextResponse.json({ error: 'Connector not found' }, { status: 404 });
@@ -64,15 +62,17 @@ export async function POST(
     let totalFailed = 0;
     const allErrors: string[] = [];
 
-    for (const [repo, norms] of byRepo) {
-      const [owner, name] = repo.split('/');
-      if (!owner || !name) continue;
+    await runWithConnectorOperationLease(id, 'transfer', async () => {
+      for (const [repo, norms] of byRepo) {
+        const [owner, name] = repo.split('/');
+        if (!owner || !name) continue;
 
-      const result = await normalizeLabels(client, owner, name, norms);
-      totalSucceeded += result.succeeded;
-      totalFailed += result.failed;
-      allErrors.push(...result.errors);
-    }
+        const result = await normalizeLabels(client, owner, name, norms);
+        totalSucceeded += result.succeeded;
+        totalFailed += result.failed;
+        allErrors.push(...result.errors);
+      }
+    });
 
     return NextResponse.json({
       succeeded: totalSucceeded,
@@ -80,6 +80,9 @@ export async function POST(
       errors: allErrors,
     });
   } catch (err) {
+    if (err instanceof ConnectorOperationBusyError) {
+      return ApiErrors.conflict('Connector has an active operation');
+    }
     const message = err instanceof Error ? err.message : String(err);
     return NextResponse.json({ error: message }, { status: 500 });
   }

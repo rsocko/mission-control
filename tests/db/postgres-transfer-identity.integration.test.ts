@@ -108,10 +108,11 @@ async function seed(): Promise<void> {
   await pool.query(
     `INSERT INTO tasks (
        id, source_id, connector_type, connector_instance_id, title, status,
-       local_disposition, priority, created_at, updated_at, metadata, sync_status
+       local_disposition, priority, created_at, updated_at, metadata, sync_status,
+       last_synced_at
      ) VALUES (
        $1, 'octo/old#41', 'github', $2, 'Transfer me', 'todo',
-       'active', 'medium', $3, $3, '{"preserved":true}'::jsonb, 'synced'
+       'active', 'medium', $3, $3, '{"preserved":true}'::jsonb, 'synced', $3
      )`,
     [taskId, connectorA, now],
   );
@@ -375,10 +376,11 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
     await backend.context.pool.query(
       `INSERT INTO tasks (
          id, source_id, connector_type, connector_instance_id, title, status,
-         local_disposition, priority, created_at, updated_at, metadata, sync_status
+         local_disposition, priority, created_at, updated_at, metadata, sync_status,
+         last_synced_at
        ) VALUES (
          $1, 'space/new-home:41', 'github', $2, 'Conflicting task', 'todo',
-         'active', 'medium', $3, $3, '{}'::jsonb, 'synced'
+         'active', 'medium', $3, $3, '{}'::jsonb, 'synced', $3
        )`,
       [conflictTaskId, connectorA, now],
     );

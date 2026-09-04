@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('@/db');
@@ -93,7 +94,7 @@ describe('task transfer identity persistence', () => {
       title: 'Fresh issue, refreshed',
       sourceId: 'acme/source:7',
     });
-    expect(task.metadata).toEqual({
+    expect(decodeLenientJsonObject(task.metadata)).toEqual({
       preserved: true,
       refreshed: true,
     });
@@ -138,7 +139,7 @@ describe('task transfer identity persistence', () => {
       title: 'After',
       sourceId: 'acme/renamed:2',
     });
-    expect(task.metadata).toEqual({
+    expect(decodeLenientJsonObject(task.metadata)).toEqual({
       preserved: true,
       refreshed: true,
     });

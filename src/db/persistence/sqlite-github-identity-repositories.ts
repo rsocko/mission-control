@@ -395,7 +395,7 @@ export function createSqliteGitHubIdentityRepositories(
 
     async persistExternalIdentityBatch({ connectorInstanceId, modeSnapshot, writes }) {
       if (writes.length === 0) return [];
-      assertExternalIdentityBatchWithinLimit(writes);
+      assertExternalIdentityBatchWithinLimit([...writes]);
       if (writes.some((write) => (
         write.target.connectorInstanceId !== connectorInstanceId
       ))) {

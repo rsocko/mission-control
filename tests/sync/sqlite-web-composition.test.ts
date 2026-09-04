@@ -80,4 +80,38 @@ describe('SQLite web sync service composition', () => {
       publishSemanticEntityUpsert('task', 'l03-missing-task'),
     ).resolves.toBeUndefined();
   });
+
+  it('registers queue, lease, control, maintenance, and operator repositories', async () => {
+    const [
+      { getSyncJobRepository },
+      { getConnectorOperationLeaseRepository },
+      { isConnectorSyncQuarantinedAsync },
+      { getConnectorMaintenanceLockRepository },
+      { getFinanceSyncControlStatus, SyncOperatorError },
+    ] = await Promise.all([
+      import('@/lib/sync/job-runtime'),
+      import('@/lib/sync/connector-lock-runtime'),
+      import('@/lib/sync/control-state'),
+      import('@/lib/sync/maintenance-lock'),
+      import('@/lib/sync/operator-control'),
+    ]);
+    const connectorId = 'l03-web-composition-missing';
+
+    await expect((await getSyncJobRepository()).countQueued()).resolves.toBeGreaterThanOrEqual(0);
+    await expect((await getConnectorOperationLeaseRepository()).hasActiveSyncJobLease({
+      connectorId,
+      jobId: 'missing-job',
+      at: new Date().toISOString(),
+    })).resolves.toBe(false);
+    await expect(isConnectorSyncQuarantinedAsync(connectorId)).resolves.toBe(false);
+    await expect(
+      (await getConnectorMaintenanceLockRepository()).get(connectorId),
+    ).resolves.toBeNull();
+    await expect(getFinanceSyncControlStatus(connectorId)).rejects.toEqual(
+      expect.objectContaining({
+        name: SyncOperatorError.name,
+        code: 'finance_connector_not_found',
+      }),
+    );
+  });
 });

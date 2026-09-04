@@ -322,6 +322,10 @@ async function assertSearchInvariants(
     sqlite,
   }));
   try {
+    const { registerSqliteSyncInfrastructure } = await import(
+      '@/db/persistence/sqlite-sync-runtime'
+    );
+    registerSqliteSyncInfrastructure();
     const { sqliteKeywordSearchRepository } = await import(
       '@/lib/search/sqlite-fts-repository'
     );

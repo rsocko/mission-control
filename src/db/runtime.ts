@@ -1,6 +1,9 @@
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
+import type { SyncControlStateRepository } from '@/lib/sync/control-state';
+import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
+import type { SyncOperatorControlRepository } from '@/lib/sync/operator-control';
 import type { SyncJobRepository } from '@/lib/sync/job-repository';
 import type { KeywordSearchRepository } from '@/lib/search/repository';
 import type { SemanticIndexRepository } from '@/lib/semantic-index/contracts';
@@ -10,6 +13,26 @@ import {
   clearKeywordSearchRepository,
   registerKeywordSearchRepository,
 } from '@/lib/search/keyword-runtime';
+import {
+  clearSyncControlStateRepository,
+  registerSyncControlStateRepository,
+} from '@/lib/sync/control-state';
+import {
+  clearConnectorOperationLeaseRepository,
+  registerConnectorOperationLeaseRepository,
+} from '@/lib/sync/connector-lock-runtime';
+import {
+  clearSyncJobRepository,
+  registerSyncJobRepository as registerSelectedSyncJobRepository,
+} from '@/lib/sync/job-runtime';
+import {
+  clearConnectorMaintenanceLockRepository,
+  registerConnectorMaintenanceLockRepository,
+} from '@/lib/sync/maintenance-lock';
+import {
+  clearSyncOperatorControlRepository,
+  registerSyncOperatorControlRepository,
+} from '@/lib/sync/operator-control';
 import {
   clearAIEnrichmentService,
   registerAIEnrichmentService,
@@ -63,6 +86,9 @@ import {
 } from './postgres/repositories';
 import { createPostgresTaskCorePersistence } from './postgres/repositories/task-core-repositories';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
+import { createPostgresSyncControlStateRepository } from './postgres/sync/control-state-repository';
+import { createPostgresConnectorMaintenanceLockRepository } from './postgres/sync/maintenance-lock-repository';
+import { createPostgresSyncOperatorControlRepository } from './postgres/sync/operator-control-repository';
 import { createPostgresSyncJobRepository } from './postgres/sync/job-repository';
 import { createPostgresAIEnrichmentService } from './postgres/sync/notification-enrichment-service';
 import { createPostgresKeywordSearchRepository } from './postgres/search';
@@ -75,6 +101,9 @@ let postgresRepositories: CorePersistenceRepositories | null = null;
 let postgresWorkerRepositories: WorkerPersistenceRepositories | null = null;
 let postgresSyncJobRepository: SyncJobRepository | null = null;
 let postgresConnectorOperationLeaseRepository: ConnectorOperationLeaseRepository | null = null;
+let postgresSyncControlStateRepository: SyncControlStateRepository | null = null;
+let postgresConnectorMaintenanceLockRepository: ConnectorMaintenanceLockRepository | null = null;
+let postgresSyncOperatorControlRepository: SyncOperatorControlRepository | null = null;
 let postgresKeywordSearchRepository: KeywordSearchRepository | null = null;
 let postgresSemanticIndexRepository: SemanticIndexRepository | null = null;
 let postgresSemanticSourcePort: SemanticSourcePort | null = null;
@@ -135,6 +164,21 @@ function clearModeRouteServiceDelegates(): void {
 }
 
 function clearPostgresRuntimeComposition(): void {
+  if (postgresSyncOperatorControlRepository) {
+    clearSyncOperatorControlRepository(postgresSyncOperatorControlRepository);
+  }
+  if (postgresConnectorMaintenanceLockRepository) {
+    clearConnectorMaintenanceLockRepository(postgresConnectorMaintenanceLockRepository);
+  }
+  if (postgresSyncControlStateRepository) {
+    clearSyncControlStateRepository(postgresSyncControlStateRepository);
+  }
+  if (postgresConnectorOperationLeaseRepository) {
+    clearConnectorOperationLeaseRepository(postgresConnectorOperationLeaseRepository);
+  }
+  if (postgresSyncJobRepository) {
+    clearSyncJobRepository(postgresSyncJobRepository);
+  }
   if (postgresTaskCorePersistence) {
     clearSelectedTaskCorePersistence(postgresTaskCorePersistence);
   }
@@ -157,6 +201,9 @@ function clearPostgresRuntimeComposition(): void {
   postgresWorkerRepositories = null;
   postgresSyncJobRepository = null;
   postgresConnectorOperationLeaseRepository = null;
+  postgresSyncControlStateRepository = null;
+  postgresConnectorMaintenanceLockRepository = null;
+  postgresSyncOperatorControlRepository = null;
   postgresKeywordSearchRepository = null;
   postgresSemanticIndexRepository = null;
   postgresSemanticSourcePort = null;
@@ -400,6 +447,11 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
     const { initializeSqlitePersistenceComposition, default: sqliteDb } = await import('./index');
     await initializeSqlitePersistenceComposition();
     if (!isCurrentGeneration()) return;
+    const { registerSqliteSyncInfrastructure } = await import(
+      './persistence/sqlite-sync-runtime'
+    );
+    if (!isCurrentGeneration()) return;
+    registerSqliteSyncInfrastructure();
     await registerStableRuntimeServices();
     const [
       { createSqliteDemoSeedCommandService },
@@ -431,8 +483,19 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
     postgresRepositories,
   );
   registerWorkerPersistenceRepositories(postgresWorkerPersistenceRepositories);
-  postgresSyncJobRepository = createPostgresSyncJobRepository(pool);
+  const syncJobRepository = createPostgresSyncJobRepository(pool);
+  postgresSyncJobRepository = syncJobRepository;
   postgresConnectorOperationLeaseRepository = createPostgresConnectorOperationLeaseRepository(pool);
+  postgresSyncControlStateRepository = createPostgresSyncControlStateRepository(pool);
+  postgresConnectorMaintenanceLockRepository =
+    createPostgresConnectorMaintenanceLockRepository(pool);
+  postgresSyncOperatorControlRepository =
+    createPostgresSyncOperatorControlRepository(pool, syncJobRepository);
+  registerSelectedSyncJobRepository(syncJobRepository);
+  registerConnectorOperationLeaseRepository(postgresConnectorOperationLeaseRepository);
+  registerSyncControlStateRepository(postgresSyncControlStateRepository);
+  registerConnectorMaintenanceLockRepository(postgresConnectorMaintenanceLockRepository);
+  registerSyncOperatorControlRepository(postgresSyncOperatorControlRepository);
   postgresKeywordSearchRepository = createPostgresKeywordSearchRepository(pool);
   registerKeywordSearchRepository(postgresKeywordSearchRepository);
   postgresAIEnrichmentService = createPostgresAIEnrichmentService();
@@ -519,6 +582,11 @@ export function initializeRuntimeDatabase(): Promise<void> {
               'SQLite runtime initialization cleanup failed',
               { cause: error },
             );
+          } finally {
+            const { clearSqliteSyncInfrastructure } = await import(
+              './persistence/sqlite-sync-runtime'
+            );
+            clearSqliteSyncInfrastructure();
           }
         }
         throw error;
@@ -595,6 +663,10 @@ export function shutdownRuntimeDatabase(): Promise<void> {
       runtimeCleanupRequired = true;
       throw error;
     } finally {
+      const { clearSqliteSyncInfrastructure } = await import(
+        './persistence/sqlite-sync-runtime'
+      );
+      clearSqliteSyncInfrastructure();
       clearModeRouteServiceDelegates();
     }
   })().finally(() => {
@@ -666,6 +738,32 @@ export function getPostgresConnectorOperationLeaseRepository(): ConnectorOperati
     throw new Error('PostgreSQL connector-operation lease repository has not been registered');
   }
   return postgresConnectorOperationLeaseRepository;
+}
+
+export function getPostgresSyncControlStateRepository(): SyncControlStateRepository {
+  assertPersistenceCompositionAccessAllowed();
+  if (!postgresSyncControlStateRepository) {
+    throw new Error('PostgreSQL sync control-state repository has not been registered');
+  }
+  return postgresSyncControlStateRepository;
+}
+
+export function getPostgresConnectorMaintenanceLockRepository():
+ConnectorMaintenanceLockRepository {
+  assertPersistenceCompositionAccessAllowed();
+  if (!postgresConnectorMaintenanceLockRepository) {
+    throw new Error('PostgreSQL connector maintenance-lock repository has not been registered');
+  }
+  return postgresConnectorMaintenanceLockRepository;
+}
+
+export function getPostgresSyncOperatorControlRepository():
+SyncOperatorControlRepository {
+  assertPersistenceCompositionAccessAllowed();
+  if (!postgresSyncOperatorControlRepository) {
+    throw new Error('PostgreSQL sync operator-control repository has not been registered');
+  }
+  return postgresSyncOperatorControlRepository;
 }
 
 /**

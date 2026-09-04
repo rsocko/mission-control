@@ -269,7 +269,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     return withTransaction(this.pool, (client) => this.enqueueWithClient(client, connectorId, options));
   }
 
-  private async enqueueWithClient(
+  async enqueueWithClient(
     client: PoolClient,
     connectorId: string,
     options: EnqueueSyncJobOptions,
@@ -281,6 +281,11 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     const full = options.full === true;
     const source = options.source ?? 'api';
 
+    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [connectorId]);
+    await client.query(
+      'SELECT 1 FROM connector_configs WHERE id = $1 FOR UPDATE',
+      [connectorId],
+    );
     await assertConnectorSyncEnqueueAllowedInPostgres(client, connectorId, source, options.operatorCanaryRunId);
     const identityStamp = await captureGitHubIdentityStamp(client, connectorId);
 
@@ -291,8 +296,6 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     // (idx_sync_jobs_active_connector), turning what should be a graceful
     // merge into an existing job into an unhandled unique-violation error.
     // The lock is released automatically at transaction end.
-    await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [connectorId]);
-
     const [maintenanceLock] = await query<{ operationId: string }>(
       client,
       `SELECT operation_id AS "operationId" FROM connector_maintenance_locks WHERE connector_instance_id = $1`,
@@ -304,11 +307,11 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
       );
     }
 
-    let [existing] = await query<SyncJobDatabaseRow>(
+    let existing: SyncJobDatabaseRow | undefined = (await query<SyncJobDatabaseRow>(
       client,
       `SELECT ${JOB_COLUMNS} FROM sync_jobs WHERE connector_id = $1 AND status = 'queued' LIMIT 1 FOR UPDATE`,
       [connectorId],
-    );
+    ))[0];
 
     if (
       existing
@@ -326,7 +329,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
         `,
         [now, existing.id],
       );
-      existing = undefined as unknown as SyncJobDatabaseRow;
+      existing = undefined;
     }
 
     if (existing) {
@@ -528,7 +531,12 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     });
   }
 
-  async renewLease(jobId: string, owner: string, leaseMs = getSyncLeaseMs()): Promise<boolean> {
+  async renewLease(
+    jobId: string,
+    owner: string,
+    attempt: number,
+    leaseMs = getSyncLeaseMs(),
+  ): Promise<boolean> {
     return withTransaction(this.pool, async (client) => {
       const now = new Date();
       const nowIso = now.toISOString();
@@ -539,10 +547,11 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
         `
           SELECT connector_id AS "connectorId"
           FROM sync_jobs
-          WHERE id = $1 AND status = 'running' AND lease_owner = $2 AND lease_expires_at > $3
+          WHERE id = $1 AND status = 'running' AND lease_owner = $2 AND attempt = $3
+            AND lease_expires_at > $4
           FOR UPDATE
         `,
-        [jobId, owner, nowIso],
+        [jobId, owner, attempt, nowIso],
       );
       if (!job) return false;
 
@@ -582,26 +591,37 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     });
   }
 
-  async isCancellationRequested(jobId: string, owner: string): Promise<boolean> {
+  async isCancellationRequested(
+    jobId: string,
+    owner: string,
+    attempt: number,
+  ): Promise<boolean> {
     const [row] = await query<{ cancelRequestedAt: string | null }>(
       this.pool,
       `
         SELECT cancel_requested_at AS "cancelRequestedAt"
         FROM sync_jobs
-        WHERE id = $1 AND status = 'running' AND lease_owner = $2
+        WHERE id = $1 AND status = 'running' AND lease_owner = $2 AND attempt = $3
       `,
-      [jobId, owner],
+      [jobId, owner, attempt],
     );
     return row?.cancelRequestedAt !== null && row?.cancelRequestedAt !== undefined;
   }
 
-  async complete(jobId: string, owner: string, result: SyncResult): Promise<void> {
+  async complete(
+    jobId: string,
+    owner: string,
+    attempt: number,
+    result: SyncResult,
+  ): Promise<void> {
     await withTransaction(this.pool, async (client) => {
       const now = new Date().toISOString();
       const [job] = await query<{ connectorId: string }>(
         client,
-        `SELECT connector_id AS "connectorId" FROM sync_jobs WHERE id = $1 AND status = 'running' AND lease_owner = $2 FOR UPDATE`,
-        [jobId, owner],
+        `SELECT connector_id AS "connectorId" FROM sync_jobs
+         WHERE id = $1 AND status = 'running' AND lease_owner = $2 AND attempt = $3
+         FOR UPDATE`,
+        [jobId, owner, attempt],
       );
       const lockOwner = job ? connectorSyncLeaseOwner(jobId, owner) : null;
       const [lease] = job
@@ -653,10 +673,10 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
             connector_id AS "connectorId",
             lease_expires_at AS "leaseExpiresAt"
           FROM sync_jobs
-          WHERE id = $1 AND status = 'running' AND lease_owner = $2
+          WHERE id = $1 AND status = 'running' AND lease_owner = $2 AND attempt = $3
           FOR UPDATE
         `,
-        [job.id, owner],
+        [job.id, owner, job.attempt],
       );
       const now = new Date().toISOString();
       const lockOwner = connectorSyncLeaseOwner(job.id, owner);
@@ -722,9 +742,9 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
               updated_at = $2,
               lease_owner = NULL,
               lease_expires_at = NULL
-          WHERE id = $3 AND status = 'running' AND lease_owner = $4
+          WHERE id = $3 AND status = 'running' AND lease_owner = $4 AND attempt = $5
         `,
-        [JSON.stringify(result), now, job.id, owner],
+        [JSON.stringify(result), now, job.id, owner, job.attempt],
       );
       if (completed.rowCount !== 1) {
         throw new Error(`Sync job ${job.id} ownership was lost before completion`);
@@ -824,6 +844,10 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
       const now = new Date();
       const nowIso = now.toISOString();
       const lockOwner = connectorSyncLeaseOwner(job.id, owner);
+      await client.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [job.connectorId],
+      );
       const [lease] = await query(
         client,
         `SELECT 1 FROM connector_operation_leases WHERE connector_id = $1 AND owner = $2 AND lease_expires_at > $3`,
@@ -832,11 +856,6 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
       if (!lease) {
         throw new Error(`Sync job ${job.id} ownership was lost before failure was recorded`);
       }
-      await client.query(
-        'SELECT pg_advisory_xact_lock(hashtext($1))',
-        [job.connectorId],
-      );
-
       const [followUp] = await query(
         client,
         `SELECT 1 FROM sync_jobs WHERE connector_id = $1 AND status = 'queued' AND id <> $2 LIMIT 1`,
@@ -865,9 +884,9 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
               updated_at = $5,
               lease_owner = NULL,
               lease_expires_at = NULL
-          WHERE id = $6 AND status = 'running' AND lease_owner = $7
+          WHERE id = $6 AND status = 'running' AND lease_owner = $7 AND attempt = $8
         `,
-        [status, availableAt, error, completedAt, nowIso, job.id, owner],
+        [status, availableAt, error, completedAt, nowIso, job.id, owner, job.attempt],
       );
       if (updated.rowCount !== 1) {
         throw new Error(`Sync job ${job.id} ownership was lost before failure was recorded`);
@@ -892,19 +911,34 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     });
   }
 
-  async release(jobId: string, owner: string, reason: string): Promise<boolean> {
+  async release(
+    jobId: string,
+    owner: string,
+    attempt: number,
+    reason: string,
+  ): Promise<boolean> {
     return withTransaction(this.pool, async (client) => {
       const now = new Date().toISOString();
-      const [job] = await query<{ connectorId: string }>(
+      const [candidate] = await query<{ connectorId: string }>(
         client,
-        `SELECT connector_id AS "connectorId" FROM sync_jobs WHERE id = $1 AND status = 'running' AND lease_owner = $2 FOR UPDATE`,
-        [jobId, owner],
+        `SELECT connector_id AS "connectorId" FROM sync_jobs
+         WHERE id = $1 AND status = 'running' AND lease_owner = $2 AND attempt = $3`,
+        [jobId, owner, attempt],
       );
-      if (!job) return false;
+      if (!candidate) return false;
       await client.query(
         'SELECT pg_advisory_xact_lock(hashtext($1))',
-        [job.connectorId],
+        [candidate.connectorId],
       );
+      const [job] = await query<{ connectorId: string }>(
+        client,
+        `SELECT connector_id AS "connectorId" FROM sync_jobs
+         WHERE id = $1 AND connector_id = $2
+           AND status = 'running' AND lease_owner = $3 AND attempt = $4
+         FOR UPDATE`,
+        [jobId, candidate.connectorId, owner, attempt],
+      );
+      if (!job) return false;
       const lockOwner = connectorSyncLeaseOwner(jobId, owner);
       const [followUp] = await query(
         client,
@@ -922,7 +956,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
               updated_at = $2,
               lease_owner = NULL,
               lease_expires_at = NULL
-          WHERE id = $5 AND status = 'running' AND lease_owner = $6
+          WHERE id = $5 AND status = 'running' AND lease_owner = $6 AND attempt = $7
         `,
         [
           followUp ? 'failed' : 'queued',
@@ -931,6 +965,7 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
           followUp ? now : null,
           jobId,
           owner,
+          attempt,
         ],
       );
       if (updated.rowCount !== 1) return false;
@@ -978,8 +1013,12 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
   }
 
   async get(jobId: string): Promise<SyncJob | null> {
+    return this.getWithClient(this.pool, jobId);
+  }
+
+  async getWithClient(client: Client, jobId: string): Promise<SyncJob | null> {
     const [row] = await query<SyncJobDatabaseRow>(
-      this.pool,
+      client,
       `SELECT ${JOB_COLUMNS} FROM sync_jobs WHERE id = $1`,
       [jobId],
     );
@@ -1096,35 +1135,44 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
   }
 
   async registerSchedule(connectorId: string, intervalMinutes: number): Promise<void> {
-    await withTransaction(this.pool, async (client) => {
-      const [quarantined] = await query(
-        client,
-        `SELECT 1 FROM connector_sync_controls WHERE connector_id = $1 AND scheduler_state = 'quarantined'`,
-        [connectorId],
-      );
-      if (quarantined) {
-        await client.query(`DELETE FROM sync_schedules WHERE connector_id = $1`, [connectorId]);
-        return;
-      }
-      const now = new Date();
-      const nowIso = now.toISOString();
-      const nextDueAt = new Date(now.getTime() + intervalMinutes * 60_000).toISOString();
-      await client.query(
-        `
-          INSERT INTO sync_schedules (connector_id, interval_minutes, next_due_at, last_enqueued_at, updated_at)
-          VALUES ($1, $2, $3, NULL, $4)
-          ON CONFLICT (connector_id) DO UPDATE SET
-            interval_minutes = EXCLUDED.interval_minutes,
-            next_due_at = CASE
-              WHEN sync_schedules.interval_minutes <> EXCLUDED.interval_minutes
-                THEN EXCLUDED.next_due_at
-              ELSE sync_schedules.next_due_at
-            END,
-            updated_at = EXCLUDED.updated_at
-        `,
-        [connectorId, intervalMinutes, nextDueAt, nowIso],
-      );
-    });
+    await withTransaction(
+      this.pool,
+      (client) => this.registerScheduleWithClient(client, connectorId, intervalMinutes),
+    );
+  }
+
+  async registerScheduleWithClient(
+    client: PoolClient,
+    connectorId: string,
+    intervalMinutes: number,
+  ): Promise<void> {
+    const [quarantined] = await query(
+      client,
+      `SELECT 1 FROM connector_sync_controls WHERE connector_id = $1 AND scheduler_state = 'quarantined'`,
+      [connectorId],
+    );
+    if (quarantined) {
+      await client.query(`DELETE FROM sync_schedules WHERE connector_id = $1`, [connectorId]);
+      return;
+    }
+    const now = new Date();
+    const nowIso = now.toISOString();
+    const nextDueAt = new Date(now.getTime() + intervalMinutes * 60_000).toISOString();
+    await client.query(
+      `
+        INSERT INTO sync_schedules (connector_id, interval_minutes, next_due_at, last_enqueued_at, updated_at)
+        VALUES ($1, $2, $3, NULL, $4)
+        ON CONFLICT (connector_id) DO UPDATE SET
+          interval_minutes = EXCLUDED.interval_minutes,
+          next_due_at = CASE
+            WHEN sync_schedules.interval_minutes <> EXCLUDED.interval_minutes
+              THEN EXCLUDED.next_due_at
+            ELSE sync_schedules.next_due_at
+          END,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [connectorId, intervalMinutes, nextDueAt, nowIso],
+    );
   }
 
   async markScheduleEnqueued(connectorId: string): Promise<void> {
@@ -1347,6 +1395,6 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
  * `PostgresPersistenceBackend#context.pool` from `@/db/postgres/runtime`),
  * without callers needing to know the concrete class.
  */
-export function createPostgresSyncJobRepository(pool: Pool): SyncJobRepository {
+export function createPostgresSyncJobRepository(pool: Pool): PostgresSyncJobRepository {
   return new PostgresSyncJobRepository(pool);
 }

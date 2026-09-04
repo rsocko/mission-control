@@ -2,6 +2,7 @@ import {
   quarantineFinanceConnectorSync,
 } from '../../../src/lib/sync/operator-control';
 import { enqueueSyncJob } from '../../../src/lib/sync/sqlite-job-repository';
+import { registerSqliteSyncInfrastructure } from '../../../src/db/persistence/sqlite-sync-runtime';
 
 const [connectorId, action] = process.argv.slice(2);
 if (!connectorId || !action || !process.send) {
@@ -18,11 +19,12 @@ function send(message: object): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  registerSqliteSyncInfrastructure();
   await send({ ready: true });
   await new Promise<void>((resolve) => process.once('message', () => resolve()));
   try {
     if (action === 'quarantine') {
-      quarantineFinanceConnectorSync({
+      await quarantineFinanceConnectorSync({
         connectorId,
         actorType: 'service',
         idempotencyKey: 'finance-race-quarantine-key',

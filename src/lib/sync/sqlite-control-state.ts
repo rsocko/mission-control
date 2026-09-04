@@ -1,15 +1,36 @@
-import 'server-only';
-
-import { sqlite } from '@/db';
+import type { SyncControlStateRepository } from './control-state';
 import type { SyncJobSource } from './job-repository';
-import { ConnectorSyncControlError } from './control-state-error';
+
+export interface SynchronousSyncControlStateCapability {
+  isConnectorSyncQuarantined(connectorId: string): boolean;
+  assertConnectorSyncEnqueueAllowed(
+    connectorId: string,
+    source: SyncJobSource,
+    operatorCanaryRunId?: string,
+  ): void;
+}
+
+let capability: SynchronousSyncControlStateCapability | null = null;
+
+export function registerSqliteSyncControlStateCapability(
+  next: SynchronousSyncControlStateCapability,
+): void {
+  capability = next;
+}
+
+export function clearSqliteSyncControlStateCapability(): void {
+  capability = null;
+}
+
+function requireCapability(): SynchronousSyncControlStateCapability {
+  if (!capability) {
+    throw new Error('SQLite sync control-state capability has not been registered');
+  }
+  return capability;
+}
 
 export function isConnectorSyncQuarantined(connectorId: string): boolean {
-  return sqlite.prepare(`
-    SELECT 1
-    FROM connector_sync_controls
-    WHERE connector_id = ? AND scheduler_state = 'quarantined'
-  `).get(connectorId) !== undefined;
+  return requireCapability().isConnectorSyncQuarantined(connectorId);
 }
 
 export function assertConnectorSyncEnqueueAllowed(
@@ -17,31 +38,15 @@ export function assertConnectorSyncEnqueueAllowed(
   source: SyncJobSource,
   operatorCanaryRunId?: string,
 ): void {
-  const control = sqlite.prepare(`
-    SELECT quarantine_id AS quarantineId
-    FROM connector_sync_controls
-    WHERE connector_id = ? AND scheduler_state = 'quarantined'
-  `).get(connectorId) as { quarantineId: string | null } | undefined;
-
-  if (!control) {
-    if (source === 'operator-canary') {
-      throw new ConnectorSyncControlError('operator_canary_authorization_invalid');
-    }
-    return;
-  }
-  if (source !== 'operator-canary' || !operatorCanaryRunId) {
-    throw new ConnectorSyncControlError('connector_sync_quarantined');
-  }
-  const authorized = sqlite.prepare(`
-    SELECT 1
-    FROM connector_sync_operator_runs
-    WHERE id = ?
-      AND connector_id = ?
-      AND quarantine_id IS ?
-      AND operation = 'canary'
-      AND job_id IS NULL
-  `).get(operatorCanaryRunId, connectorId, control.quarantineId);
-  if (!authorized) {
-    throw new ConnectorSyncControlError('operator_canary_authorization_invalid');
-  }
+  requireCapability().assertConnectorSyncEnqueueAllowed(
+    connectorId,
+    source,
+    operatorCanaryRunId,
+  );
 }
+
+export const sqliteSyncControlStateRepository: SyncControlStateRepository = {
+  isQuarantined: async (connectorId) => isConnectorSyncQuarantined(connectorId),
+  assertEnqueueAllowed: async (connectorId, source, operatorCanaryRunId) =>
+    assertConnectorSyncEnqueueAllowed(connectorId, source, operatorCanaryRunId),
+};

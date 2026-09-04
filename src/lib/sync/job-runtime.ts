@@ -1,6 +1,9 @@
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
-import type { SyncJobRepository } from './job-repository';
+import type { SyncJob, SyncJobRepository } from './job-repository';
 import type { SyncResult } from '@/types';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
 
 export type {
   EnqueueSyncJobOptions,
@@ -17,13 +20,27 @@ export type {
   SyncScheduleHealth,
 } from './job-repository';
 
-export async function getSyncJobRepository(): Promise<SyncJobRepository> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const { getPostgresSyncJobRepository } = await import('@/db/runtime');
-    return getPostgresSyncJobRepository();
+let repository: SyncJobRepository | null = null;
+
+export function registerSyncJobRepository(next: SyncJobRepository): void {
+  assertPersistenceCompositionPublicationAllowed();
+  if (repository && repository !== next) {
+    throw new Error('Sync job repository is already selected');
   }
-  const { sqliteSyncJobRepository } = await import('./sqlite-job-repository');
-  return sqliteSyncJobRepository;
+  repository = next;
+}
+
+export function clearSyncJobRepository(expectedRepository?: SyncJobRepository): void {
+  if (expectedRepository && repository !== expectedRepository) return;
+  repository = null;
+}
+
+export async function getSyncJobRepository(): Promise<SyncJobRepository> {
+  assertPersistenceCompositionAccessAllowed();
+  if (!repository) {
+    throw new Error('Sync job repository has not been registered');
+  }
+  return repository;
 }
 
 function positiveInteger(value: string | undefined, fallback: number): number {
@@ -57,14 +74,9 @@ function waitFailedResult(connectorId: string, error: string): SyncResult {
 }
 
 export async function waitForSyncJob(
-  job: import('./job-repository').SyncJob,
+  job: SyncJob,
   options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<SyncResult> {
-  if (resolveDatabaseBackend() === 'sqlite') {
-    const { waitForSyncJob: sqliteWaitForSyncJob } = await import('./sqlite-job-repository');
-    return sqliteWaitForSyncJob(job, options);
-  }
-
   const timeoutMs = options.timeoutMs
     ?? positiveInteger(process.env.MC_SYNC_API_WAIT_TIMEOUT_MS, 15 * 60_000);
   const deadline = Date.now() + timeoutMs;

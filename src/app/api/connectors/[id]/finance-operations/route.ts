@@ -62,7 +62,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
   const sourceGeneration = request.nextUrl.searchParams.get('sourceGeneration') ?? undefined;
   try {
     return NextResponse.json({
-      sync: getFinanceSyncControlStatus(id),
+      sync: await getFinanceSyncControlStatus(id),
       cutover: getFinanceInsightCutoverReadiness(id, sourceGeneration),
     });
   } catch (error) {
@@ -92,14 +92,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const idempotencyKey = request.headers.get('idempotency-key');
     switch (body.data.action) {
       case 'quarantine-scheduler':
-        return NextResponse.json(quarantineFinanceConnectorSync({
+        return NextResponse.json(await quarantineFinanceConnectorSync({
           connectorId: id,
           actorType: actor,
           idempotencyKey,
         }));
       case 'authorize-canary':
         {
-          const result = enqueueFinanceOperatorCanary({
+          const result = await enqueueFinanceOperatorCanary({
             connectorId: id,
             actorType: actor,
             idempotencyKey,
@@ -113,13 +113,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
           }, { status: 202 });
         }
       case 'release-scheduler':
-        return NextResponse.json(releaseFinanceConnectorQuarantine({
+        return NextResponse.json(await releaseFinanceConnectorQuarantine({
           connectorId: id,
           actorType: actor,
           idempotencyKey,
         }));
       case 'rollback-canary':
-        return NextResponse.json(rollbackFinanceOperatorCanary({
+        return NextResponse.json(await rollbackFinanceOperatorCanary({
           connectorId: id,
           actorType: actor,
           idempotencyKey,

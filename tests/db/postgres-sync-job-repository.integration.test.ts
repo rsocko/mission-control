@@ -83,7 +83,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     const claimed = await repository.claimNext('worker-complete', 60_000);
     expect(claimed?.id).toBe(job.id);
 
-    await repository.complete(job.id, 'worker-complete', {
+    await repository.complete(job.id, 'worker-complete', claimed!.attempt, {
       connectorId,
       success: true,
       tasksAdded: 1,
@@ -103,7 +103,52 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     const nextJob = await repository.enqueue(connectorId);
     const nextClaim = await repository.claimNext('worker-complete-2', 60_000);
     expect(nextClaim?.id).toBe(nextJob.id);
-    await repository.release(nextJob.id, 'worker-complete-2', 'test cleanup');
+    await repository.release(
+      nextJob.id,
+      'worker-complete-2',
+      nextClaim!.attempt,
+      'test cleanup',
+    );
+  });
+
+  it('fences a stale attempt when a retry is reclaimed by the same owner', async () => {
+    const connectorId = await createConnector();
+    const queued = await repository.enqueue(connectorId, { maxAttempts: 2 });
+    const first = await repository.claimNext('worker-retry', 60_000);
+    expect(first?.id).toBe(queued.id);
+    await expect(repository.fail(first!, 'worker-retry', 'retry')).resolves.toBe('queued');
+    await backend.context.pool.query(
+      `UPDATE sync_jobs SET available_at = now() - interval '1 second' WHERE id = $1`,
+      [queued.id],
+    );
+    const second = await repository.claimNext('worker-retry', 60_000);
+    expect(second?.attempt).toBe(first!.attempt + 1);
+
+    await expect(repository.renewLease(
+      first!.id,
+      'worker-retry',
+      first!.attempt,
+      60_000,
+    )).resolves.toBe(false);
+    await expect(repository.complete(first!.id, 'worker-retry', first!.attempt, {
+      connectorId,
+      success: true,
+      tasksAdded: 0,
+      tasksUpdated: 0,
+      tasksRemoved: 0,
+      notificationsAdded: 0,
+      errors: [],
+      syncedAt: new Date().toISOString(),
+    })).rejects.toThrow(/ownership was lost/);
+    await expect(repository.fail(first!, 'worker-retry', 'stale failure'))
+      .rejects.toThrow(/ownership was lost/);
+    await expect(repository.release(
+      first!.id,
+      'worker-retry',
+      first!.attempt,
+      'stale release',
+    )).resolves.toBe(false);
+    expect((await repository.get(second!.id))?.status).toBe('running');
   });
 
     it('atomically links the exact owned log while completing and releasing', async () => {
@@ -194,7 +239,7 @@ describePostgres('PostgreSQL sync job repository integration', () => {
         trigger: null,
         attempt: null,
       });
-      await repository.release(job.id, 'worker-owner', 'test cleanup');
+      await repository.release(job.id, 'worker-owner', claimed!.attempt, 'test cleanup');
     });
 
     it('does not publish a provisional success after the job lease expires', async () => {
@@ -282,6 +327,11 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     const stillQueued = await repository.get(excludedJob.id);
     expect(stillQueued?.status).toBe('queued');
 
-    await repository.release(claimableJob.id, 'worker-exclusion', 'test cleanup');
+    await repository.release(
+      claimableJob.id,
+      'worker-exclusion',
+      claimed!.attempt,
+      'test cleanup',
+    );
   });
 });

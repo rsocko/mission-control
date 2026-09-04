@@ -214,8 +214,14 @@ export function buildTaskFilterSpec(
 
   const tagSlugs = csv('tagSlugs', ANY_NON_EMPTY_VALUE);
   const effort = legacyEffort(searchParams.get('effort'));
+  const search = searchParams.get('search')?.trim() || null;
+  const tagIds = csv('tagIds', ANY_NON_EMPTY_VALUE);
+  const noProject = searchParams.get('noProject') === 'true';
   const groupMode = searchParams.get('groupBy');
   const groupValue = searchParams.get('groupValue');
+  const group = groupMode && groupValue && TASK_GROUP_MODES.has(groupMode as TaskGroupMode)
+    ? { mode: groupMode as TaskGroupMode, value: groupValue }
+    : null;
 
   return {
     connectorTypes: resolvedConnectorTypes,
@@ -240,12 +246,10 @@ export function buildTaskFilterSpec(
     today: clock.today,
     weekFromNow: clock.weekFromNow,
     recentCutoff: clock.recentCutoff,
-    search: searchParams.get('search')?.trim() || null,
-    effort,
-    tagIds: csv('tagIds', ANY_NON_EMPTY_VALUE),
-    noProject: searchParams.get('noProject') === 'true',
-    group: groupMode && groupValue && TASK_GROUP_MODES.has(groupMode as TaskGroupMode)
-      ? { mode: groupMode as TaskGroupMode, value: groupValue }
-      : null,
+    ...(search ? { search } : {}),
+    ...(effort !== null ? { effort } : {}),
+    ...(tagIds.length ? { tagIds } : {}),
+    ...(noProject ? { noProject: true } : {}),
+    ...(group ? { group } : {}),
   };
 }

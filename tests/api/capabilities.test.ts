@@ -246,66 +246,71 @@ describe('task route capability enforcement', () => {
       syncStatus: 'pending_push',
       pushRetryCount: 0,
     });
-
-    it.each([
-      ['unavailable', null],
-      ['deferred', {
-        type: 'microsoft-todo',
-        writeDelivery: 'deferred',
-        createTask: vi.fn(),
-      }],
-      ['ordinary failure', {
-        type: 'microsoft-todo',
-        writeDelivery: 'immediate',
-        createTask: vi.fn(async () => {
-          throw new Error('source unavailable');
-        }),
-      }],
-    ])('leaves remote creation pending after %s connector handling', async (_label, connector) => {
-      registerFakeTaskCorePersistence({
-        creates: {
-          resolveTaskCreateTarget: vi.fn(async () => ({
-            kind: 'resolved' as const,
-            connectorInstanceId: task.connectorInstanceId,
-            capabilities: WRITABLE_CAPS,
-            settings: {},
-          })),
-          createTask: vi.fn(async (input: TaskCreateInput) => ({
-            kind: 'committed' as const,
-            task: input.task,
-            sourceTagNames: [],
-          })),
-        },
-      });
-      connectorMocks.getConnector.mockResolvedValue(connector);
-
-      const { POST } = await import('@/app/api/tasks/route');
-      const response = await POST(new Request('http://localhost:3099/api/tasks', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: 'Remote task',
-          connectorType: task.connectorType,
-          connectorInstanceId: task.connectorInstanceId,
-        }),
-        headers: { 'Content-Type': 'application/json' },
-      }));
-
-      expect(response.status).toBe(201);
-      await vi.waitFor(() => {
-        expect(leaseMocks.release).toHaveBeenCalledWith(
-          expect.any(String),
-          'lease-1',
-          'pending_push',
-          expect.any(String),
-        );
-      });
-      expect(leaseMocks.fail).not.toHaveBeenCalled();
-    });
     await vi.waitFor(() => expect(leaseMocks.claim).toHaveBeenCalledWith(task.id));
+  });
+
+  it.each([
+    ['unavailable', null],
+    ['deferred', {
+      type: 'microsoft-todo',
+      writeDelivery: 'deferred',
+      createTask: vi.fn(),
+    }],
+    ['ordinary failure', {
+      type: 'microsoft-todo',
+      writeDelivery: 'immediate',
+      createTask: vi.fn(async () => {
+        throw new Error('source unavailable');
+      }),
+    }],
+  ])('leaves remote creation pending after %s connector handling', async (_label, connector) => {
+    registerFakeTaskCorePersistence({
+      creates: {
+        resolveTaskCreateTarget: vi.fn(async () => ({
+          kind: 'resolved' as const,
+          connectorInstanceId: task.connectorInstanceId,
+          capabilities: WRITABLE_CAPS,
+          settings: {},
+        })),
+        createTask: vi.fn(async (input: TaskCreateInput) => ({
+          kind: 'committed' as const,
+          task: input.task,
+          sourceTagNames: [],
+        })),
+      },
+    });
+    connectorMocks.getConnector.mockResolvedValue(connector);
+
+    const { POST } = await import('@/app/api/tasks/route');
+    const response = await POST(new Request('http://localhost:3099/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: 'Remote task',
+        connectorType: task.connectorType,
+        connectorInstanceId: task.connectorInstanceId,
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(201);
+    await vi.waitFor(() => {
+      expect(leaseMocks.release).toHaveBeenCalledWith(
+        expect.any(String),
+        'lease-1',
+        'pending_push',
+        expect.any(String),
+      );
+    });
+    expect(leaseMocks.fail).not.toHaveBeenCalled();
   });
 
   it('blocks source writes without invoking the mutation repository', async () => {
     connectorMocks.capabilities = { ...READ_ONLY_CAPS };
+    task = {
+      ...task,
+      connectorType: 'legacy-read-only',
+      connectorInstanceId: 'legacy-read-only-1',
+    };
     const { PATCH } = await import('@/app/api/tasks/[id]/route');
     const response = await PATCH(
       patchRequest({ title: 'Blocked' }),
@@ -618,6 +623,15 @@ describe('task route capability enforcement', () => {
   it('falls back to updateTask when a connector has no completion method', async () => {
     const updateTask = vi.fn(async () => ({}));
     connectorMocks.connector = { updateTask };
+    connectorMocks.capabilities = {
+      ...WRITABLE_CAPS,
+      taskSourceModel: 'remote-managed',
+      statusWriteBack: 'direct',
+      taskFieldProfile: {
+        status: { authority: 'source', writeBack: 'direct' },
+        statusReason: { authority: 'source', writeBack: 'direct' },
+      },
+    };
     task = {
       ...task,
       connectorType: 'custom-rest',

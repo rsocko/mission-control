@@ -235,6 +235,6 @@ describe('task reopen reconciliation persistence', () => {
       recurrenceNextTaskId: 'next-occurrence',
     });
     expect(requests[0].recurrenceSuccessor).toBeDefined();
-    expect(requests[1].recurrenceSuccessor).toBeUndefined();
+    expect(requests[1].recurrenceSuccessor).toBeDefined();
   });
 });

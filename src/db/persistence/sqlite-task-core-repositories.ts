@@ -15,17 +15,19 @@ import {
   type SQL,
 } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import type Database from 'better-sqlite3';
 import db, { runTransaction } from '@/db';
 import * as schema from '@/db/schema';
 import {
   appSettings,
   connectorConfigs,
+  eventOutbox,
+  eventOutboxDeliveries,
   focusItems,
   hubProjects,
   myDayExclusions,
   myDayItems,
   notifications,
+  outboundWebhooks,
   priorityEntities,
   prioritySyncLog,
   projectAutoIncludeExclusions,
@@ -51,12 +53,14 @@ import {
   taskSchedules,
   taskTags,
   tasks,
+  triageActionClaims,
+  triageItems,
   weeklyOneThing,
 } from '@/db/schema';
 import { detachTaskDescendants } from '@/lib/tasks/task-hierarchy-deletion';
 import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
-import { enqueueSqliteEventOutbox } from './sqlite-event-outbox-repository';
+import { eventSubscriptionMatches, parseEventTypes } from './event-outbox';
 import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
 import {
@@ -1694,13 +1698,48 @@ function moveTaskInsertValues(task: TaskMoveTaskInsert) {
   };
 }
 
-function taskEventPayload(event: TaskCoreEvent) {
-  return {
+function enqueueTaskCoreEvent(tx: SqliteTransaction, event: TaskCoreEvent): void {
+  const inserted = tx.insert(eventOutbox).values({
     stableKey: event.stableKey,
     eventType: event.type,
     payload: event.payload,
     occurredAt: event.timestamp,
-  };
+    createdAt: new Date().toISOString(),
+  }).onConflictDoNothing({ target: eventOutbox.stableKey }).run();
+  if (inserted.changes === 0) return;
+
+  const row = tx.select({ sequence: eventOutbox.sequence }).from(eventOutbox)
+    .where(eq(eventOutbox.stableKey, event.stableKey)).get();
+  if (!row) {
+    throw new Error('Event outbox insert completed without a resolvable sequence');
+  }
+
+  const subscriptions = tx.select({
+    id: outboundWebhooks.id,
+    name: outboundWebhooks.name,
+    url: outboundWebhooks.url,
+    secret: outboundWebhooks.secret,
+    eventTypes: outboundWebhooks.eventTypes,
+    enabled: outboundWebhooks.enabled,
+  }).from(outboundWebhooks).where(eq(outboundWebhooks.enabled, true)).all();
+  const now = new Date().toISOString();
+  const deliveries = subscriptions
+    .filter((subscription) => eventSubscriptionMatches({
+      ...subscription,
+      eventTypes: parseEventTypes(subscription.eventTypes),
+    }, event.type))
+    .map((subscription) => ({
+      id: crypto.randomUUID(),
+      eventSequence: row.sequence,
+      webhookId: subscription.id,
+      status: 'pending',
+      attemptCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    }));
+  if (deliveries.length) {
+    tx.insert(eventOutboxDeliveries).values(deliveries).onConflictDoNothing().run();
+  }
 }
 
 class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
@@ -1970,14 +2009,10 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
 }
 
 class SqliteTaskCreateRepository implements TaskCreateRepository {
-  private readonly sqlite: Database.Database;
-
   constructor(
-    database: Drizzle,
+    private readonly database: Drizzle,
     private readonly runTransaction: SqliteTaskCoreTransactionRunner,
-  ) {
-    this.sqlite = (database as unknown as { $client: Database.Database }).$client;
-  }
+  ) {}
 
   async resolveTaskCreateTarget(input: {
     connectorType: string;
@@ -2222,21 +2257,17 @@ class SqliteTaskCreateRepository implements TaskCreateRepository {
             .filter((row) => row.type === 'source')
             .map((row) => row.name)
         : [];
-      enqueueSqliteEventOutbox(this.sqlite, taskEventPayload(input.event));
+      enqueueTaskCoreEvent(tx, input.event);
       return { kind: 'committed', task, sourceTagNames } as const;
     });
   }
 }
 
 class SqliteTaskMutationRepository implements TaskMutationRepository {
-  private readonly sqlite: Database.Database;
-
   constructor(
     private readonly database: Drizzle,
     private readonly runTransaction: SqliteTaskCoreTransactionRunner,
-  ) {
-    this.sqlite = (database as unknown as { $client: Database.Database }).$client;
-  }
+  ) {}
 
   async getTaskWriteContext(taskId: string, requestedTagIds: readonly string[] = []) {
     const [task, scheduleRows, tagRows, requestedTagRows, stateRows, evaluationRows] = await Promise.all([
@@ -2491,7 +2522,7 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
         }
       }
       for (const event of request.events ?? []) {
-        enqueueSqliteEventOutbox(this.sqlite, taskEventPayload(event));
+        enqueueTaskCoreEvent(tx, event);
       }
       const updated = tx.select(MOVE_TASK_COLUMNS).from(tasks)
         .where(eq(tasks.id, request.taskId)).get();
@@ -2506,14 +2537,10 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
 }
 
 class SqliteTaskRemovalRepository implements TaskRemovalRepository {
-  private readonly sqlite: Database.Database;
-
   constructor(
     private readonly database: Drizzle,
     private readonly runTransaction: SqliteTaskCoreTransactionRunner,
-  ) {
-    this.sqlite = (database as unknown as { $client: Database.Database }).$client;
-  }
+  ) {}
 
   async getTaskRemovalContext(taskId: string) {
     const [row] = await this.database.select(MOVE_TASK_COLUMNS).from(tasks)
@@ -2575,7 +2602,7 @@ class SqliteTaskRemovalRepository implements TaskRemovalRepository {
         }
       }
       for (const event of input.events ?? []) {
-        enqueueSqliteEventOutbox(this.sqlite, taskEventPayload(event));
+        enqueueTaskCoreEvent(tx, event);
       }
       return {
         kind: 'committed',

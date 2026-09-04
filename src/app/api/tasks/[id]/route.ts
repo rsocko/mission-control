@@ -332,7 +332,12 @@ export async function PATCH(
           fieldName,
           newValue: input[fieldName],
           currentSourceValue: currentTask[fieldName],
-          state: writeContext.fieldStates.find((state) => state.fieldName === fieldName),
+          state: (() => {
+            const state = writeContext.fieldStates.find(
+              (candidate) => candidate.fieldName === fieldName,
+            );
+            return state ? { ...state, taskId: id } : undefined;
+          })(),
           sourceObservedAt: currentTask.lastSyncedAt,
           now,
         }))

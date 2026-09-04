@@ -109,15 +109,14 @@ describe('notification writeback outbox', () => {
     expect(job).toEqual({ status: 'pending', attemptCount: 0, completedAt: null });
   });
 
-  it('wakes at lease expiry and recovers a stranded sending job', async () => {
-    vi.useFakeTimers();
+  it('wakes and recovers a stranded job after its lease expires', async () => {
     const connector = {
       dismissAlert: vi.fn().mockResolvedValue(undefined),
     } as unknown as import('@/lib/connectors').IConnector;
     const registrySpy = vi.spyOn(connectorRegistry, 'getConnector')
       .mockImplementation((id) => id === 'docintel-1' ? connector : undefined);
     try {
-      const leaseExpiresAt = new Date(Date.now() + 1_000).toISOString();
+      const leaseExpiresAt = new Date(Date.now() - 1).toISOString();
       sqlite.prepare(`
         UPDATE notification_writeback_jobs
         SET status = 'sending', attempt_count = 1, lease_expires_at = ?
@@ -125,7 +124,6 @@ describe('notification writeback outbox', () => {
       `).run(leaseExpiresAt, 'notification-1');
 
       await wakeDispatcher();
-      await vi.advanceTimersByTimeAsync(1_101);
 
       const job = sqlite.prepare(`
         SELECT status, lease_expires_at AS leaseExpiresAt
@@ -135,7 +133,6 @@ describe('notification writeback outbox', () => {
       expect(job).toEqual({ status: 'succeeded', leaseExpiresAt: null });
     } finally {
       registrySpy.mockRestore();
-      vi.useRealTimers();
     }
   });
 

@@ -194,7 +194,7 @@ export interface WritebackClaimRow {
   connectorInstanceId: string;
   connectorType: string;
   sourceId: string;
-  actionType: string;
+  actionType: NotificationWritebackAction;
   attemptCount: number;
   maxAttempts: number;
   leaseExpiresAt: string;

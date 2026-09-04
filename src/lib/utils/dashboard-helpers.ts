@@ -1,5 +1,6 @@
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 import type {
   DashboardTaskResponseViewModel as TaskResponse,
   DashboardTaskViewModel as Task,
@@ -112,7 +113,7 @@ export function isAssignedToMe(task: Pick<Task, 'connectorType' | 'assignee'>) {
 export function isDueThisWeek(dueDate: string) {
   const today = getClientToday();
   const d = new Date();
-  d.setDate(d.getDate() + 7);
+  d.setDate(d.getDate() + NEXT_7_DAYS);
   const weekFromNow = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   return dueDate >= today && dueDate <= weekFromNow;
 }

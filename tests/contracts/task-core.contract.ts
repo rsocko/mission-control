@@ -811,6 +811,24 @@ export function describeTaskCoreContract(
           .toBe(1);
       });
 
+      it('treats the week quick filter as today through seven days from now', async () => {
+        await harness.insertTasks([
+          {
+            ...writableTask('week-boundary'),
+            dueDate: WEEK,
+          },
+          {
+            ...writableTask('outside-week'),
+            dueDate: '2026-08-18',
+          },
+        ]);
+
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ quickFilter: 'week' }),
+          { includeQuickFilter: true },
+        )).toBe(2);
+      });
+
       it('computes every stat counter over the same base filter', async () => {
         const stats = await harness.persistence.queries.getStats(makeSpec());
         expect(stats.totalOpen).toBe(3);

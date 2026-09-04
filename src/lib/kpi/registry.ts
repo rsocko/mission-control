@@ -3,6 +3,8 @@
  * their visual types, accent colors, icons, and data source slugs.
  */
 
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
+
 export type KpiVisualType = 'counter' | 'fraction' | 'percentage' | 'counter_dots' | 'fraction_dots' | 'counter_sparkline';
 
 export interface KpiCardDefinition {
@@ -50,7 +52,7 @@ export const KPI_REGISTRY: Record<string, KpiCardDefinition> = {
   },
   'due-this-week': {
     slug: 'due-this-week',
-    label: 'Due This Week',
+    label: NEXT_7_DAYS_LABEL,
     visualType: 'counter',
     icon: 'CalendarDays',
     accent: 'amber',

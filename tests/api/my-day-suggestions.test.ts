@@ -104,6 +104,8 @@ describe('GET /api/my-day suggestions', () => {
         timestamp: old,
       }),
       task('top-week', { dueDate: '2026-08-07', timestamp: old }),
+      task('top-week-boundary', { dueDate: '2026-08-12', timestamp: old }),
+      task('top-outside-week', { dueDate: '2026-08-13', timestamp: old }),
       task('child-week', {
         dueDate: '2026-08-07',
         parentId: 'top-week',
@@ -250,6 +252,9 @@ describe('GET /api/my-day suggestions', () => {
     expect(body.suggestions.overdue.map(({ id }) => id)).toContain('top-overdue');
     expect(body.suggestions.dueToday.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.dueThisWeek.map(({ id }) => id)).toContain('top-week');
+    expect(body.suggestions.dueThisWeek.map(({ id }) => id)).toContain('top-week-boundary');
+    expect(body.suggestions.dueThisWeek.map(({ id }) => id)).not.toContain('top-outside-week');
+    expect(body.suggestions.dueThisWeek.map(({ id }) => id)).not.toContain('top-today');
     expect(body.suggestions.highPriority.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.aiRecommended.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.recentlyAdded.map(({ id }) => id)).toContain('top-today');

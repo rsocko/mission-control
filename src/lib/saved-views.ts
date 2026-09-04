@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 export interface SavedView {
   id: string;
@@ -20,7 +21,7 @@ const STORAGE_KEY = 'mission-control:saved-views';
 const DEFAULT_VIEWS: SavedView[] = [
   { id: 'overdue-all', name: 'All Overdue', icon: '🔥', filters: { tag: '__overdue' } },
   { id: 'high-priority', name: 'High Priority', icon: '⭐', filters: { tag: '__high' } },
-  { id: 'due-this-week', name: 'Due This Week', icon: '🕐', filters: { tag: '__week' } },
+  { id: 'due-this-week', name: NEXT_7_DAYS_LABEL, icon: '🕐', filters: { tag: '__week' } },
 ];
 
 export function useSavedViews() {

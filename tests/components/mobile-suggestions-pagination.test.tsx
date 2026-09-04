@@ -64,6 +64,22 @@ function replanningGroups(): SuggestionGroups {
 }
 
 describe('MobileSuggestions pagination', () => {
+  it('labels the rolling due-date group as Next 7 Days', () => {
+    render(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          dueThisWeek: [suggestion(1)],
+        }}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+        initialExpanded
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Next 7 Days (1)' })).toBeTruthy();
+  });
+
   it('keeps the current page when adding a suggestion changes the task list', () => {
     const onAddToDay = vi.fn();
     const overdue = Array.from({ length: 11 }, (_, index) => suggestion(index + 1));

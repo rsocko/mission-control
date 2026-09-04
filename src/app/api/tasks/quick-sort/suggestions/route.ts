@@ -3,6 +3,7 @@ import { computeSmartScore, type PriorityEntity, type SourceRanking } from '@/li
 import type { TaskPriority } from '@/types';
 import { getResolvedPriorityEntities } from '@/lib/priority-entities';
 import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 
 /**
  * GET /api/tasks/quick-sort/suggestions?taskIds=id1,id2,...
@@ -115,8 +116,8 @@ export async function GET(request: Request) {
           suggestedPriority = { value: 'critical', confidence: 0.8, reason: 'Overdue task' };
         } else if (daysUntilDue <= 2 && (!suggestedPriority || suggestedPriority.value === 'low' || suggestedPriority.value === 'medium')) {
           suggestedPriority = { value: 'high', confidence: 0.7, reason: 'Due very soon' };
-        } else if (daysUntilDue <= 7 && (!suggestedPriority || suggestedPriority.value === 'low')) {
-          suggestedPriority = { value: 'medium', confidence: 0.6, reason: 'Due this week' };
+        } else if (daysUntilDue <= NEXT_7_DAYS && (!suggestedPriority || suggestedPriority.value === 'low')) {
+          suggestedPriority = { value: 'medium', confidence: 0.6, reason: 'Due in the next 7 days' };
         }
       }
     }

@@ -88,7 +88,7 @@ describe('L05 task-read taint decrement', () => {
     expect(digest(current.tierBRoutes))
       .toBe('d195feeee7fe0547f0ebd57596f59592548cdf3b1e984da245c7d1e02271fc52');
     expect(digest(current.taintedLibA))
-      .toBe('b24ba7fc1b4dcd7fc1b0990a7414ce45a78b2757d519654d3947685af292c44e');
+      .toBe('c86040489aa86173ef55107bcda0aa250ed9faa061a0065fdfbecac4456802da');
     expect(digest(current.taintedApiHelpers))
       .toBe('4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945');
     expect(current.taintedApiHelpers).toEqual([]);

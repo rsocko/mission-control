@@ -5,7 +5,7 @@ import type {
   TriageSourcePlatform,
 } from '@/types';
 import logger from '@/lib/logger';
-import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication-service';
 import { resolveEmbed } from './embed-resolver';
 import { evaluateRules } from './suggestion-engine';
 import { detectBuiltInContentType } from './builtin-content-type-detection';

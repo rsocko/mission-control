@@ -33,6 +33,15 @@ describe('triage embed backfill', () => {
     db = dbModule.default;
     sqlite = dbModule.sqlite;
     schema = schemaModule;
+    const { createSqliteTriagePersistenceRepositories } = await import(
+      '@/db/persistence/sqlite-triage-repositories'
+    );
+    const { registerTriagePersistenceRepositories } = await import(
+      '@/lib/triage/persistence'
+    );
+    registerTriagePersistenceRepositories(
+      createSqliteTriagePersistenceRepositories(sqlite),
+    );
     post = routeModule.POST;
     resolveAndStoreEmbed = vi.mocked(triageModule.resolveAndStoreEmbed);
   }, 30_000);
@@ -72,6 +81,8 @@ describe('triage embed backfill', () => {
         { id: 'd-missing' },
       ],
     });
+    expect(resolveAndStoreEmbed).not.toHaveBeenCalled();
+    expect(waitForSlot).not.toHaveBeenCalled();
   });
 
   it('supports deterministic force-mode resumption', async () => {

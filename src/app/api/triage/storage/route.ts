@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { eq, sql, and, like, inArray } from 'drizzle-orm';
 import { getThumbnailCacheStats, removeOrphanedThumbnails } from '@/lib/triage/thumbnail-cache';
 import { purgeDismissedItems } from '@/lib/triage/lifecycle';
 import { cleanupTriageItemStorage } from '@/lib/triage/capture-image-lifecycle';
 import logger from '@/lib/logger';
-import { publishSemanticEntityDelete } from '@/lib/semantic-index/publication';
+import { publishSemanticEntityDelete } from '@/lib/semantic-index/publication-service';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 /**
  * GET /api/triage/storage
@@ -16,43 +14,23 @@ import { publishSemanticEntityDelete } from '@/lib/semantic-index/publication';
  */
 export async function GET() {
   try {
-    // Item counts by status
-    const statusCounts = await db.select({
-      status: triageItems.status,
-      count: sql<number>`count(*)`,
-    }).from(triageItems).groupBy(triageItems.status);
-
-    // Count items with cached thumbnails
-    const [cachedCount] = await db.select({
-      count: sql<number>`count(*)`,
-    }).from(triageItems).where(like(triageItems.thumbnailUrl, '/api/assets/thumbnails/%'));
-
-    // Count items with expired/external thumbnail URLs
-    const [externalCount] = await db.select({
-      count: sql<number>`count(*)`,
-    }).from(triageItems).where(
-      and(
-        sql`${triageItems.thumbnailUrl} IS NOT NULL`,
-        sql`${triageItems.thumbnailUrl} NOT LIKE '/api/assets/thumbnails/%'`,
-        sql`${triageItems.thumbnailUrl} NOT LIKE '/api/triage/capture/image/%'`,
-      ),
-    );
-
-    // Per-source platform counts
-    const sourceCounts = await db.select({
-      sourcePlatform: triageItems.sourcePlatform,
-      count: sql<number>`count(*)`,
-    }).from(triageItems).groupBy(triageItems.sourcePlatform);
+    const maintenance = getTriagePersistenceRepositories().maintenance;
+    const [statusCounts, sourceCounts, cachedCount, externalCount] = await Promise.all([
+      maintenance.countByStatus(),
+      maintenance.countBySource(),
+      maintenance.countCachedThumbnails(),
+      maintenance.countExternalThumbnails(),
+    ]);
 
     // Filesystem cache stats
     const cacheStats = await getThumbnailCacheStats();
 
     return NextResponse.json({
       items: {
-        byStatus: Object.fromEntries(statusCounts.map((r) => [r.status, r.count])),
-        bySource: Object.fromEntries(sourceCounts.map((r) => [r.sourcePlatform, r.count])),
-        withCachedThumbnail: cachedCount?.count ?? 0,
-        withExternalThumbnail: externalCount?.count ?? 0,
+        byStatus: statusCounts,
+        bySource: sourceCounts,
+        withCachedThumbnail: cachedCount,
+        withExternalThumbnail: externalCount,
       },
       cache: {
         fileCount: cacheStats.fileCount,
@@ -91,33 +69,19 @@ export async function POST(request: Request) {
       }
 
       case 'cleanup_orphans': {
-        // Get all valid cached thumbnail filenames from the DB
-        const rows = await db.select({
-          thumbnailUrl: triageItems.thumbnailUrl,
-        }).from(triageItems).where(like(triageItems.thumbnailUrl, '/api/assets/thumbnails/%'));
-
-        const validFilenames = new Set<string>();
-        for (const row of rows) {
-          if (row.thumbnailUrl) {
-            const filename = row.thumbnailUrl.split('/').pop();
-            if (filename) validFilenames.add(filename);
-          }
-        }
+        const validFilenames = new Set(
+          await getTriagePersistenceRepositories().maintenance.listCachedThumbnailFilenames(),
+        );
 
         const removed = await removeOrphanedThumbnails(validFilenames);
         return NextResponse.json({ action: 'cleanup_orphans', removed });
       }
 
       case 'clear_expired': {
-        // Clear external (non-cached) thumbnailUrls so the UI falls back to embed
-        const result = await db.update(triageItems).set({ thumbnailUrl: null }).where(
-          and(
-            sql`${triageItems.thumbnailUrl} IS NOT NULL`,
-            sql`${triageItems.thumbnailUrl} NOT LIKE '/api/assets/thumbnails/%'`,
-            sql`${triageItems.thumbnailUrl} NOT LIKE '/api/triage/capture/image/%'`,
-          ),
-        );
-        return NextResponse.json({ action: 'clear_expired', cleared: result.changes });
+        const cleared = await getTriagePersistenceRepositories()
+          .maintenance
+          .clearExternalThumbnails();
+        return NextResponse.json({ action: 'clear_expired', cleared });
       }
 
       case 'delete_by_source': {
@@ -129,21 +93,10 @@ export async function POST(request: Request) {
         }
 
         const includeActioned = body.includeActioned === true;
-        const statusFilter = includeActioned
-          ? eq(triageItems.sourcePlatform, source)
-          : and(
-              eq(triageItems.sourcePlatform, source),
-              inArray(triageItems.status, ['pending', 'dismissed']),
-            );
-
-        // Remove cached thumbnails for these items
-        const sourceItems = await db.select({
-          id: triageItems.id,
-          thumbnailUrl: triageItems.thumbnailUrl,
-          sourceUrl: triageItems.sourceUrl,
-        }).from(triageItems).where(statusFilter);
-
-        const result = await db.delete(triageItems).where(statusFilter);
+        const sourceItems = await getTriagePersistenceRepositories().maintenance.deleteBySource({
+          source,
+          includeActioned,
+        });
         await Promise.all(sourceItems.map(
           (item) => cleanupTriageItemStorage(item.thumbnailUrl || item.sourceUrl),
         ));
@@ -153,7 +106,7 @@ export async function POST(request: Request) {
         return NextResponse.json({
           action: 'delete_by_source',
           source,
-          deleted: result.changes,
+          deleted: sourceItems.length,
           includeActioned,
           preserved: includeActioned ? 0 : undefined,
         });

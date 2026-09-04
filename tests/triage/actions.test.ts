@@ -32,6 +32,7 @@ vi.mock('@/lib/triage/actions/document-intelligence', () => ({
 }));
 
 let db: typeof import('@/db').default;
+let sqlite: typeof import('@/db').sqlite;
 let triageItems: typeof import('@/db/schema').triageItems;
 let triageActionClaims: typeof import('@/db/schema').triageActionClaims;
 let isUndoableTriageAction: typeof import('@/lib/triage/actions').isUndoableTriageAction;
@@ -41,8 +42,15 @@ let releaseTriageTaskCreation: typeof import('@/lib/triage/actions').releaseTria
 let TriageActionInProgressError: typeof import('@/lib/triage/actions').TriageActionInProgressError;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db, sqlite } = await import('@/db'));
   ({ triageItems, triageActionClaims } = await import('@/db/schema'));
+  const { createSqliteTriagePersistenceRepositories } = await import(
+    '@/db/persistence/sqlite-triage-repositories'
+  );
+  const { registerTriagePersistenceRepositories } = await import('@/lib/triage/persistence');
+  registerTriagePersistenceRepositories(
+    createSqliteTriagePersistenceRepositories(sqlite),
+  );
   ({
     isUndoableTriageAction,
     reserveTriageTaskCreation,

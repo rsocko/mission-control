@@ -8,10 +8,8 @@
  * - Stale items warning
  * - Top pending suggestions awaiting action
  */
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { sql, and, eq, gte, desc } from 'drizzle-orm';
 import logger from '@/lib/logger';
+import { getTriagePersistenceRepositories } from './persistence';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -46,82 +44,19 @@ function formatAge(capturedAt: string): string {
 export async function generateTriageDigest(period: 'daily' | 'weekly'): Promise<DigestPayload> {
   const periodStart = getPeriodStart(period);
   const now = new Date().toISOString();
-
-  // New items ingested in period (by source)
-  const newItemRows = await db
-    .select({
-      sourcePlatform: triageItems.sourcePlatform,
-      count: sql<number>`count(*)`.as('count'),
-    })
-    .from(triageItems)
-    .where(gte(triageItems.ingestedAt, periodStart))
-    .groupBy(triageItems.sourcePlatform);
-
-  const bySource: Record<string, number> = {};
-  let totalNew = 0;
-  for (const row of newItemRows) {
-    bySource[row.sourcePlatform] = row.count;
-    totalNew += row.count;
-  }
-
-  // Items actioned in period
-  // actioned = status is 'actioned' or 'dismissed' and was updated in period
-  // We check items whose status changed in the period by looking at actionsTaken array
-  const actionedRows = await db
-    .select({
-      status: triageItems.status,
-      count: sql<number>`count(*)`.as('count'),
-    })
-    .from(triageItems)
-    .where(
-      and(
-        sql`${triageItems.status} IN ('actioned', 'dismissed')`,
-        gte(triageItems.ingestedAt, periodStart),
-      ),
-    )
-    .groupBy(triageItems.status);
-
-  const byAction: Record<string, number> = {};
-  let totalActioned = 0;
-  for (const row of actionedRows) {
-    byAction[row.status] = row.count;
-    totalActioned += row.count;
-  }
-
-  // Current queue depth (pending items)
-  const [depthResult] = await db
-    .select({ count: sql<number>`count(*)`.as('count') })
-    .from(triageItems)
-    .where(eq(triageItems.status, 'pending'));
-  const queueDepth = depthResult?.count ?? 0;
-
-  // Stale items (pending > 7 days old)
   const staleThreshold = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [staleResult] = await db
-    .select({ count: sql<number>`count(*)`.as('count') })
-    .from(triageItems)
-    .where(
-      and(
-        eq(triageItems.status, 'pending'),
-        sql`${triageItems.capturedAt} < ${staleThreshold}`,
-      ),
-    );
-  const staleCount = staleResult?.count ?? 0;
 
-  // Top pending items (oldest first, up to 10)
-  const topPendingRows = await db
-    .select({
-      id: triageItems.id,
-      title: triageItems.title,
-      capturedAt: triageItems.capturedAt,
-      aiSuggestedActions: triageItems.aiSuggestedActions,
-    })
-    .from(triageItems)
-    .where(eq(triageItems.status, 'pending'))
-    .orderBy(triageItems.capturedAt)
-    .limit(10);
+  const snapshot = await getTriagePersistenceRepositories().health.getDigestSnapshot({
+    periodStart,
+    staleBeforeAt: staleThreshold,
+    topPendingLimit: 10,
+  });
+  const totalNew = Object.values(snapshot.newItemsBySource)
+    .reduce((sum, count) => sum + count, 0);
+  const totalActioned = Object.values(snapshot.actionedByStatus)
+    .reduce((sum, count) => sum + count, 0);
 
-  const topPending = topPendingRows.map((row) => {
+  const topPending = snapshot.topPending.map((row) => {
     const suggestions = Array.isArray(row.aiSuggestedActions) ? row.aiSuggestedActions : [];
     const firstSuggestion = suggestions[0];
     return {
@@ -137,14 +72,20 @@ export async function generateTriageDigest(period: 'daily' | 'weekly'): Promise<
   const digest: DigestPayload = {
     period,
     generatedAt: now,
-    newItems: { total: totalNew, bySource },
-    actioned: { total: totalActioned, byAction },
-    queueDepth,
-    staleCount,
+    newItems: { total: totalNew, bySource: snapshot.newItemsBySource },
+    actioned: { total: totalActioned, byAction: snapshot.actionedByStatus },
+    queueDepth: snapshot.queueDepth,
+    staleCount: snapshot.staleCount,
     topPending,
   };
 
-  logger.info({ period, queueDepth, totalNew, totalActioned, staleCount }, 'Triage digest generated');
+  logger.info({
+    period,
+    queueDepth: snapshot.queueDepth,
+    totalNew,
+    totalActioned,
+    staleCount: snapshot.staleCount,
+  }, 'Triage digest generated');
   return digest;
 }
 

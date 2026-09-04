@@ -6,12 +6,12 @@
  * behavior of `seed-api.ts` opening its own private `better-sqlite3.Database`
  * unconditionally.
  *
- * Covers the two legitimate, narrowly-scoped SQLite-only exceptions
+ * Covers the remaining legitimate, narrowly-scoped SQLite-only exceptions
  * documented in `docs/architecture/persistence-boundaries.md` ("Web/API
  * PostgreSQL parity: Layer L02"): `seed-api.ts`'s `clearDatabase` /
- * `resetDemoDatabase`, and `triage/lifecycle.ts`'s `clearTriageSampleData`
- * (reachable only from `/api/settings/mode`'s demo-only
- * `clear-triage-samples` action).
+ * `resetDemoDatabase`. L08a makes triage sample cleanup backend-neutral;
+ * the tests below also prove that it uses the composed repository without
+ * touching the poisoned SQLite singleton.
  */
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -39,6 +39,8 @@ describe('seed/demo fail-closed under MC_DATABASE_BACKEND=postgres', () => {
     else process.env.MC_DB_PATH = originalDbPath;
     rmSync(scratchDir, { recursive: true, force: true });
     vi.doUnmock('@/db');
+    vi.doUnmock('@/lib/triage/persistence');
+    vi.doUnmock('@/lib/semantic-index/publication-service');
     vi.resetModules();
   });
 
@@ -77,10 +79,23 @@ describe('seed/demo fail-closed under MC_DATABASE_BACKEND=postgres', () => {
       );
     });
 
-    it('clearTriageSampleData fails closed without touching @/db', async () => {
+    it('clearTriageSampleData uses composed persistence without touching @/db', async () => {
+      const deleteByIds = vi.fn(async (ids: readonly string[]) => ids.map((id) => ({
+        id,
+        thumbnailUrl: null,
+        sourceUrl: `mc://sample/${id}`,
+      })));
+      vi.doMock('@/lib/triage/persistence', () => ({
+        getTriagePersistenceRepositories: () => ({ maintenance: { deleteByIds } }),
+      }));
+      vi.doMock('@/lib/semantic-index/publication-service', () => ({
+        publishSemanticEntityDelete: vi.fn(async () => undefined),
+      }));
+      const { SAMPLE_TRIAGE_ITEMS } = await import('@/lib/triage/seed-data');
       const { clearTriageSampleData } = await import('@/lib/triage/lifecycle');
-      await expect(clearTriageSampleData()).rejects.toThrow(
-        'Clearing triage demo/sample data is SQLite-only and is not available when MC_DATABASE_BACKEND=postgres',
+      await expect(clearTriageSampleData()).resolves.toBe(SAMPLE_TRIAGE_ITEMS.length);
+      expect(deleteByIds).toHaveBeenCalledWith(
+        SAMPLE_TRIAGE_ITEMS.map((item) => item.id),
       );
     });
   });
@@ -102,9 +117,19 @@ describe('seed/demo fail-closed under MC_DATABASE_BACKEND=postgres', () => {
       expect(existsSync(`${scratchDbPath}-shm`)).toBe(false);
     });
 
-    it('creates no .db/-wal/-shm file for clearTriageSampleData', async () => {
+    it('creates no .db/-wal/-shm file for portable clearTriageSampleData', async () => {
+      vi.doMock('@/lib/triage/persistence', () => ({
+        getTriagePersistenceRepositories: () => ({
+          maintenance: {
+            deleteByIds: vi.fn(async () => []),
+          },
+        }),
+      }));
+      vi.doMock('@/lib/semantic-index/publication-service', () => ({
+        publishSemanticEntityDelete: vi.fn(async () => undefined),
+      }));
       const { clearTriageSampleData } = await import('@/lib/triage/lifecycle');
-      await expect(clearTriageSampleData()).rejects.toThrow('MC_DATABASE_BACKEND=postgres');
+      await expect(clearTriageSampleData()).resolves.toBe(0);
       expect(existsSync(scratchDbPath)).toBe(false);
       expect(existsSync(`${scratchDbPath}-wal`)).toBe(false);
       expect(existsSync(`${scratchDbPath}-shm`)).toBe(false);

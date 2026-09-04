@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (L03b plan.md at session-state 534e75a2-3d4e-4f6b-9bb2-70120e6bbec2). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, and L08a triage web persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "427d66fa49cc21eb174d1e8d037159e2664b78bb+L11",
+  "generatedFromCommit": "96741e20236a3095b3ec15f4b34339faf831ad67+L08a",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 157,
-    "tierBRoutes": 27,
-    "cleanRoutes": 82,
-    "directTaintSourceRoutes": 106,
-    "transitiveOnlyTaintSourceRoutes": 51,
-    "directDbNamespaceRoutes": 107,
-    "taintedLibA": 78,
+    "tierARoutes": 143,
+    "tierBRoutes": 19,
+    "cleanRoutes": 104,
+    "directTaintSourceRoutes": 101,
+    "transitiveOnlyTaintSourceRoutes": 42,
+    "directDbNamespaceRoutes": 102,
+    "taintedLibA": 71,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 235
+    "totalMigrationUnits": 214
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -475,21 +475,7 @@
     "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/triage/[id]/extract-actions/route.ts",
     "src/app/api/triage/[id]/route.ts",
-    "src/app/api/triage/backfill-embeds/route.ts",
-    "src/app/api/triage/backfill-thumbnails/route.ts",
-    "src/app/api/triage/capture/image/[id]/route.ts",
-    "src/app/api/triage/capture/image/route.ts",
     "src/app/api/triage/capture/route.ts",
-    "src/app/api/triage/content-types/route.ts",
-    "src/app/api/triage/digest/route.ts",
-    "src/app/api/triage/digest/send/route.ts",
-    "src/app/api/triage/extension-config/route.ts",
-    "src/app/api/triage/health/route.ts",
-    "src/app/api/triage/import/bulk/route.ts",
-    "src/app/api/triage/maintenance/route.ts",
-    "src/app/api/triage/reclassify/route.ts",
-    "src/app/api/triage/route.ts",
-    "src/app/api/triage/storage/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "tierBRoutes": [
@@ -511,15 +497,7 @@
     "src/app/api/sync/retained/resolve/route.ts",
     "src/app/api/tasks/[id]/move/route.ts",
     "src/app/api/tasks/move/execute/route.ts",
-    "src/app/api/telemetry/runtime/route.ts",
-    "src/app/api/triage/auto-sync/route.ts",
-    "src/app/api/triage/cron/route.ts",
-    "src/app/api/triage/import/document-intelligence/route.ts",
-    "src/app/api/triage/import/github-stars/route.ts",
-    "src/app/api/triage/import/reddit-saved/route.ts",
-    "src/app/api/triage/import/twitter-archive/route.ts",
-    "src/app/api/triage/import/youtube/route.ts",
-    "src/app/api/triage/sync-status/route.ts"
+    "src/app/api/telemetry/runtime/route.ts"
   ],
   "cleanRoutes": [
     "src/app/api/assets/thumbnails/[filename]/route.ts",
@@ -597,8 +575,30 @@
     "src/app/api/tasks/quick-sort/route.ts",
     "src/app/api/tasks/quick-sort/suggestions/route.ts",
     "src/app/api/tasks/route.ts",
+    "src/app/api/triage/auto-sync/route.ts",
+    "src/app/api/triage/backfill-embeds/route.ts",
+    "src/app/api/triage/backfill-thumbnails/route.ts",
+    "src/app/api/triage/capture/image/[id]/route.ts",
+    "src/app/api/triage/capture/image/route.ts",
+    "src/app/api/triage/content-types/route.ts",
+    "src/app/api/triage/cron/route.ts",
+    "src/app/api/triage/digest/route.ts",
+    "src/app/api/triage/digest/send/route.ts",
+    "src/app/api/triage/extension-config/route.ts",
+    "src/app/api/triage/health/route.ts",
+    "src/app/api/triage/import/bulk/route.ts",
+    "src/app/api/triage/import/document-intelligence/route.ts",
+    "src/app/api/triage/import/github-stars/route.ts",
+    "src/app/api/triage/import/reddit-saved/route.ts",
+    "src/app/api/triage/import/twitter-archive/route.ts",
+    "src/app/api/triage/import/youtube/route.ts",
+    "src/app/api/triage/maintenance/route.ts",
+    "src/app/api/triage/reclassify/route.ts",
+    "src/app/api/triage/route.ts",
     "src/app/api/triage/rules/route.ts",
     "src/app/api/triage/sources/route.ts",
+    "src/app/api/triage/storage/route.ts",
+    "src/app/api/triage/sync-status/route.ts",
     "src/app/api/word-insights/route.ts",
     "src/app/api/work-todo/ack/route.ts",
     "src/app/api/work-todo/changes/route.ts",
@@ -706,11 +706,6 @@
     "src/app/api/tasks/quick-sort-stats/route.ts",
     "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
     "src/app/api/tasks/quick-sort/operations/route.ts",
-    "src/app/api/triage/backfill-embeds/route.ts",
-    "src/app/api/triage/backfill-thumbnails/route.ts",
-    "src/app/api/triage/extension-config/route.ts",
-    "src/app/api/triage/maintenance/route.ts",
-    "src/app/api/triage/storage/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "transitiveOnlyTaintSourceRoutes": [
@@ -755,16 +750,7 @@
     "src/app/api/tasks/[id]/relationships/route.ts",
     "src/app/api/triage/[id]/extract-actions/route.ts",
     "src/app/api/triage/[id]/route.ts",
-    "src/app/api/triage/capture/image/[id]/route.ts",
-    "src/app/api/triage/capture/image/route.ts",
-    "src/app/api/triage/capture/route.ts",
-    "src/app/api/triage/content-types/route.ts",
-    "src/app/api/triage/digest/route.ts",
-    "src/app/api/triage/digest/send/route.ts",
-    "src/app/api/triage/health/route.ts",
-    "src/app/api/triage/import/bulk/route.ts",
-    "src/app/api/triage/reclassify/route.ts",
-    "src/app/api/triage/route.ts"
+    "src/app/api/triage/capture/route.ts"
   ],
   "directDbNamespaceRoutes": [
     "src/app/api/ai/context-tasks/route.ts",
@@ -868,11 +854,6 @@
     "src/app/api/tasks/quick-sort-stats/route.ts",
     "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
     "src/app/api/tasks/quick-sort/operations/route.ts",
-    "src/app/api/triage/backfill-embeds/route.ts",
-    "src/app/api/triage/backfill-thumbnails/route.ts",
-    "src/app/api/triage/extension-config/route.ts",
-    "src/app/api/triage/maintenance/route.ts",
-    "src/app/api/triage/storage/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "taintedLibA": [
@@ -945,15 +926,8 @@
     "src/lib/semantic-index/sensitivity.ts",
     "src/lib/triage/actions.ts",
     "src/lib/triage/actions/ms-todo.ts",
-    "src/lib/triage/capture.ts",
-    "src/lib/triage/classification.ts",
-    "src/lib/triage/content-type-registry.ts",
-    "src/lib/triage/digest.ts",
     "src/lib/triage/index.ts",
-    "src/lib/triage/lifecycle.ts",
-    "src/lib/triage/query.ts",
-    "src/lib/triage/shared.ts",
-    "src/lib/triage/staleness.ts"
+    "src/lib/triage/query.ts"
   ],
   "taintedApiHelpers": [],
   "decrementHistory": [
@@ -1351,6 +1325,91 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation removes the ten connector-domain routes from Tier A without Tier B reclassification. L12a's historical standalone decrement remains 305 to 295; composed onto main 75fdbad5d2d9f8702d9cc4d0a97ec6939c944b50 after all landed layers through L17 and L11, the graph is 266 routes, A157/B27/clean82, direct taint 106, transitive-only 51, direct @/db 107, 78 tainted libraries, zero helpers, and 235 total migration units."
+    },
+    {
+      "layer": "L08a",
+      "title": "triage web PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 235,
+        "to": 214,
+        "delta": -21
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/triage/capture.ts",
+        "src/lib/triage/classification.ts",
+        "src/lib/triage/content-type-registry.ts",
+        "src/lib/triage/digest.ts",
+        "src/lib/triage/lifecycle.ts",
+        "src/lib/triage/shared.ts",
+        "src/lib/triage/staleness.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/triage/backfill-embeds/route.ts",
+        "src/app/api/triage/backfill-thumbnails/route.ts",
+        "src/app/api/triage/capture/image/[id]/route.ts",
+        "src/app/api/triage/capture/image/route.ts",
+        "src/app/api/triage/content-types/route.ts",
+        "src/app/api/triage/digest/route.ts",
+        "src/app/api/triage/digest/send/route.ts",
+        "src/app/api/triage/extension-config/route.ts",
+        "src/app/api/triage/health/route.ts",
+        "src/app/api/triage/import/bulk/route.ts",
+        "src/app/api/triage/maintenance/route.ts",
+        "src/app/api/triage/reclassify/route.ts",
+        "src/app/api/triage/route.ts",
+        "src/app/api/triage/storage/route.ts"
+      ],
+      "removedTierBRoutes": [
+        "src/app/api/triage/auto-sync/route.ts",
+        "src/app/api/triage/cron/route.ts",
+        "src/app/api/triage/import/document-intelligence/route.ts",
+        "src/app/api/triage/import/github/route.ts",
+        "src/app/api/triage/import/reddit/route.ts",
+        "src/app/api/triage/import/route.ts",
+        "src/app/api/triage/import/youtube/route.ts",
+        "src/app/api/triage/sync-status/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/triage/backfill-embeds/route.ts",
+        "src/app/api/triage/backfill-thumbnails/route.ts",
+        "src/app/api/triage/extension-config/route.ts",
+        "src/app/api/triage/maintenance/route.ts",
+        "src/app/api/triage/storage/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/triage/auto-sync/route.ts",
+        "src/app/api/triage/backfill-embeds/route.ts",
+        "src/app/api/triage/backfill-thumbnails/route.ts",
+        "src/app/api/triage/capture/image/[id]/route.ts",
+        "src/app/api/triage/capture/image/route.ts",
+        "src/app/api/triage/content-types/route.ts",
+        "src/app/api/triage/cron/route.ts",
+        "src/app/api/triage/digest/route.ts",
+        "src/app/api/triage/digest/send/route.ts",
+        "src/app/api/triage/extension-config/route.ts",
+        "src/app/api/triage/health/route.ts",
+        "src/app/api/triage/import/bulk/route.ts",
+        "src/app/api/triage/import/document-intelligence/route.ts",
+        "src/app/api/triage/import/github/route.ts",
+        "src/app/api/triage/import/reddit/route.ts",
+        "src/app/api/triage/import/route.ts",
+        "src/app/api/triage/import/youtube/route.ts",
+        "src/app/api/triage/maintenance/route.ts",
+        "src/app/api/triage/reclassify/route.ts",
+        "src/app/api/triage/route.ts",
+        "src/app/api/triage/storage/route.ts",
+        "src/app/api/triage/sync-status/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "explicitExclusions": [
+        "src/app/api/notifications/triage/route.ts",
+        "src/app/api/triage/[id]/extract-actions/route.ts",
+        "src/app/api/triage/[id]/route.ts",
+        "src/app/api/triage/capture/route.ts"
+      ],
+      "verification": "computeWebPersistenceGraph reports exactly 266 routes, A143/B19/clean104, direct101/transitive42/directDB102, 71 tainted libraries, zero helpers, and 214 total migration units after composing with merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, and L12a connector-domain parity. L08a adds no Tier B route."
     }
   ],
   "layerUpdates": [
@@ -1392,6 +1451,16 @@
         "PostgreSQL reproduces SQLite julianday() instant comparison with a guarded CASE using pg_input_is_valid, so unparsable text yields NULL (row excluded) instead of raising, and offsetless text is read as UTC via ::timestamp AT TIME ZONE 'UTC' rather than the session TimeZone. Every text ORDER BY, window ORDER BY, and row_number() partition order is pinned with COLLATE \"C\" to reproduce SQLite BINARY byte ordering, and the synthetic-tag prefix scan uses ASCII-only translate(...) rather than a locale-aware lower(). Explicit tiebreakers were added in both adapters for the source breakdown, active/visible projects, delivery filter options, delivery records, active routines, and the unbounded routine-completion reads, defining an order SQLite previously left unspecified.",
         "The PostgreSQL adapter reproduces the Drizzle notificationNeedsAttention() predicate, not the sibling NOTIFICATION_NEEDS_ATTENTION_SQL text constant, whose digest clause excludes rows with a NULL level. notifications.level is NOT NULL DEFAULT 'fyi' in both schemas so no live row diverges; the shared contract pins the distinction anyway.",
         "src/db/task-history.ts is unchanged and keeps both of its consumers. The SQLite adapter calls getTaskTransitionsInRange directly, so no read model is split across two owners and a later burn-report layer inherits it as is."
+      ]
+    },
+    {
+      "layer": "L08a",
+      "summary": "Web/API PostgreSQL parity: non-action triage queue, capture, classification, content types, digest, health, maintenance, storage, and importer publication consumption use composed backend-neutral repositories/services; AI-linked action routes and native Share Sheet capture remain explicit exclusions.",
+      "changes": [
+        "TriagePersistenceRepositories now exposes focused queue-item, content-type, health/digest, and maintenance capabilities implemented by both SQLite and PostgreSQL adapters.",
+        "Fourteen triage routes leave Tier A, eight triage routes leave Tier B, seven triage libraries leave taintedLibA, and five direct @/db route imports are removed without adding deferred taint.",
+        "Shared SQLite and live-PostgreSQL contracts cover filters, facets, ordering/nulls, pagination, enrichment, content types, lifecycle maintenance, idempotency, and concurrent metadata merging; representative PostgreSQL route tests poison SQLite.",
+        "The AI-linked /api/triage/[id] and /extract-actions routes, /api/notifications/triage, and native /api/triage/capture remain out of scope and retain their existing tier classification."
       ]
     }
   ]

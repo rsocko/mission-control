@@ -59,6 +59,9 @@ describePostgres('PostgreSQL triage persistence integration', () => {
              OR id LIKE 'cas-%'
              OR id = 'malformed-counts'
         `);
+        await backend.context.pool.query(
+          `DELETE FROM triage_content_types WHERE id LIKE 'content-type-%'`,
+        );
         for (const id of connectorIds) {
           await backend.context.pool.query(
             'DELETE FROM connector_configs WHERE id = $1',

@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { appSettings } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import type { PersistenceJson } from '@/db/persistence/contracts';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import logger from '@/lib/logger';
 
@@ -68,9 +67,11 @@ const PLATFORM_IDS: ExtensionScrapePlatform[] = ['reddit', 'instagram', 'faceboo
 
 async function loadConfig(): Promise<ExtensionScrapeConfig> {
   try {
-    const [row] = await db.select().from(appSettings).where(eq(appSettings.key, SETTINGS_KEY)).limit(1);
-    if (row?.value && typeof row.value === 'object') {
-      const stored = row.value as Partial<ExtensionScrapeConfig>;
+    const value = await (
+      await getCorePersistenceRepositoriesForBackend()
+    ).settings.get(SETTINGS_KEY);
+    if (value && typeof value === 'object' && !Array.isArray(value)) {
+      const stored = value as Partial<ExtensionScrapeConfig>;
       const platforms = {} as ExtensionScrapeConfig['platforms'];
       for (const id of PLATFORM_IDS) {
         platforms[id] = { ...DEFAULT_CONFIG.platforms[id], ...stored.platforms?.[id] };
@@ -125,14 +126,21 @@ export async function PUT(request: Request) {
     }
     const merged: ExtensionScrapeConfig = { platforms };
 
-    const now = new Date().toISOString();
-    await db
-      .insert(appSettings)
-      .values({ key: SETTINGS_KEY, value: merged, updatedAt: now })
-      .onConflictDoUpdate({
-        target: appSettings.key,
-        set: { value: merged, updatedAt: now },
-      });
+    const storedPlatforms: { [key: string]: PersistenceJson } = {};
+    for (const id of PLATFORM_IDS) {
+      const config = merged.platforms[id];
+      storedPlatforms[id] = {
+        enabled: config.enabled,
+        maxPages: config.maxPages,
+        batchSize: config.batchSize,
+        includedLists: [...config.includedLists],
+        excludedLists: [...config.excludedLists],
+      };
+    }
+    const storedConfig: PersistenceJson = { platforms: storedPlatforms };
+    await (
+      await getCorePersistenceRepositoriesForBackend()
+    ).settings.set(SETTINGS_KEY, storedConfig);
 
     return NextResponse.json({ config: merged });
   } catch (error) {

@@ -338,7 +338,7 @@ describe('ALLOWED_SOURCES', () => {
     // Read the source file and check the set contains our source
     const fs = await import('fs');
     const path = await import('path');
-    const filePath = path.resolve(__dirname, '../../src/lib/triage/query.ts');
+    const filePath = path.resolve(__dirname, '../../src/lib/triage/queue-query.ts');
     const content = fs.readFileSync(filePath, 'utf-8');
     expect(content).toContain("'document-intelligence'");
   });

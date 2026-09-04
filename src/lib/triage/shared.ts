@@ -5,12 +5,10 @@
  * mapping / seed-guard logic across the split modules, and to avoid
  * import cycles between them.
  */
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { sql } from 'drizzle-orm';
 import type { TriageActionRecord, TriageContentType, TriageItem, TriageSourcePlatform, TriageStatus, TriageSuggestedAction } from '@/types';
 import { SAMPLE_TRIAGE_ITEMS } from './seed-data';
 import { isDemoMode } from '@/lib/mode';
+import { getTriagePersistenceRepositories } from './persistence';
 
 export function safeJsonArray<T>(value: unknown): T[] {
   if (Array.isArray(value)) return value as T[];
@@ -48,7 +46,31 @@ export function toNumber(value: unknown): number {
   return 0;
 }
 
-export function mapRow(row: typeof triageItems.$inferSelect): TriageItem {
+interface LegacyTriageItemRow {
+  id: string;
+  sourcePlatform: string;
+  sourceId: string;
+  sourceUrl: string;
+  canonicalUrl: string | null;
+  title: string;
+  description: string | null;
+  thumbnailUrl: string | null;
+  contentType: string;
+  capturedAt: string;
+  ingestedAt: string;
+  status: string;
+  snoozedUntil: string | null;
+  aiSummary: string | null;
+  aiCategories: unknown;
+  aiSuggestedActions: unknown;
+  aiRelevanceScore: number;
+  aiUrgency: string;
+  rawMetadata: unknown;
+  actionsTaken: unknown;
+  sourceOrder: number | null;
+}
+
+export function mapRow(row: LegacyTriageItemRow): TriageItem {
   return {
     id: row.id,
     sourcePlatform: row.sourcePlatform as TriageSourcePlatform,
@@ -86,41 +108,9 @@ export async function ensureSeedData(): Promise<void> {
   if (seedPromise) return seedPromise;
 
   seedPromise = (async () => {
-    const rows = await db.select({ count: sql<number>`count(*)` }).from(triageItems);
-    const count = toNumber(rows[0]?.count);
-    if (count > 0) {
-      seedEnsured = true;
-      return;
-    }
-
-    // Only insert sample data in demo mode, matching the rest of the app
-    if (!isDemoMode()) {
-      seedEnsured = true;
-      return;
-    }
-
-    await db.insert(triageItems).values(SAMPLE_TRIAGE_ITEMS.map((item) => ({
-      id: item.id,
-      sourcePlatform: item.sourcePlatform,
-      sourceId: item.sourceId,
-      sourceUrl: item.sourceUrl,
-      canonicalUrl: item.canonicalUrl,
-      title: item.title,
-      description: item.description,
-      thumbnailUrl: item.thumbnailUrl,
-      contentType: item.contentType,
-      capturedAt: item.capturedAt,
-      ingestedAt: item.ingestedAt,
-      status: item.status,
-      snoozedUntil: item.snoozedUntil,
-      aiSummary: item.aiSummary,
-      aiCategories: item.aiCategories,
-      aiSuggestedActions: item.aiSuggestedActions,
-      aiRelevanceScore: item.aiRelevanceScore,
-      aiUrgency: item.aiUrgency,
-      rawMetadata: item.rawMetadata,
-      actionsTaken: item.actionsTaken,
-    })));
+    await getTriagePersistenceRepositories().items.seedIfEmpty(
+      isDemoMode() ? SAMPLE_TRIAGE_ITEMS : [],
+    );
     seedEnsured = true;
   })().finally(() => {
     seedPromise = null;

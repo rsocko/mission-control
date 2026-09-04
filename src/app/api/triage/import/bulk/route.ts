@@ -4,7 +4,7 @@ import {
   ingestTriageImports,
   type TriageImportInput,
 } from '@/lib/triage/import-capture';
-import { isValidTriageSource } from '@/lib/triage/query';
+import { isValidTriageSource } from '@/lib/triage/queue-query';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { cacheThumbnail } from '@/lib/triage/thumbnail-cache';
 import logger from '@/lib/logger';
@@ -114,7 +114,7 @@ async function importBulk(request: Request) {
         // Item exists but we have a fresh thumbnail — update it
         const existingItem = result.item;
         if (existingItem && input.thumbnailUrl !== existingItem.thumbnailUrl) {
-          const { updateTriageItemThumbnail } = await import('@/lib/triage');
+          const { updateTriageItemThumbnail } = await import('@/lib/triage/lifecycle');
           await updateTriageItemThumbnail(existingItem.id, input.thumbnailUrl);
           refreshed += 1;
         } else {

@@ -22,6 +22,7 @@ vi.mock('@/lib/triage/capture-image-lifecycle', () => ({
 }));
 
 let db: typeof import('@/db').default;
+let sqlite: typeof import('@/db').sqlite;
 let triageItems: typeof import('@/db/schema').triageItems;
 let hardDeleteTriageItem: typeof import('@/lib/triage/lifecycle').hardDeleteTriageItem;
 let hardDeleteTriageItems: typeof import('@/lib/triage/lifecycle').hardDeleteTriageItems;
@@ -30,8 +31,22 @@ let clearTriageSampleData: typeof import('@/lib/triage/lifecycle').clearTriageSa
 let updateTriageItemThumbnail: typeof import('@/lib/triage/lifecycle').updateTriageItemThumbnail;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db, sqlite } = await import('@/db'));
   ({ triageItems } = await import('@/db/schema'));
+  const { createSqliteTriagePersistenceRepositories } = await import(
+    '@/db/persistence/sqlite-triage-repositories'
+  );
+  const { registerTriagePersistenceRepositories } = await import('@/lib/triage/persistence');
+  registerTriagePersistenceRepositories(
+    createSqliteTriagePersistenceRepositories(sqlite),
+  );
+  const { registerSemanticPublicationService } = await import(
+    '@/lib/semantic-index/publication-service'
+  );
+  registerSemanticPublicationService({
+    upsert: async () => undefined,
+    delete: async () => undefined,
+  });
   ({
     hardDeleteTriageItem,
     hardDeleteTriageItems,

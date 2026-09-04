@@ -59,6 +59,21 @@ describeTriagePersistenceContract('SQLite', () => {
       created_at TEXT NOT NULL,
       deleted_at TEXT
     );
+
+    CREATE TABLE triage_content_types (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      icon TEXT,
+      color TEXT NOT NULL,
+      builtin INTEGER NOT NULL DEFAULT 0,
+      suppressed INTEGER NOT NULL DEFAULT 0,
+      priority INTEGER NOT NULL DEFAULT 0,
+      url_patterns TEXT NOT NULL DEFAULT '[]',
+      keyword_hints TEXT NOT NULL DEFAULT '[]',
+      description TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
 
   return {

@@ -1587,6 +1587,43 @@ and is the first ratchet field in the programme to be fully retired.
 remain Tier A: they are tainted through `src/lib/ai/ideation-expand.ts` and
 `src/lib/ai/config-resolver.ts`, which belong to the AI provider layer.
 
+## Web/API PostgreSQL parity: Layer L08a (triage web persistence)
+
+Layer L08a routes non-action triage web persistence through the existing
+atomic `TriagePersistenceRepositories` composition. The backend-neutral
+contract owns queue filters and facets, captures and enrichment, content-type
+overrides, digest and health snapshots, and lifecycle/storage maintenance.
+SQLite and PostgreSQL adapters preserve the observable ordering, null,
+pagination, malformed-JSON, compare-and-set, and deletion-result semantics.
+Feature modules receive domain records and outcomes only; no raw driver,
+Drizzle transaction, generic query facade, fallback, or dual write crosses
+the boundary.
+
+Filesystem cleanup, image and thumbnail storage, remote embed resolution,
+webhook delivery, logging, and semantic publication remain service-owned and
+occur outside repository transactions. Semantic updates use the composed
+publication service established by the runtime-publication prerequisite;
+this layer does not own or modify registry, global-slot, instrumentation, or
+runtime-lifecycle infrastructure.
+
+The two AI-linked action routes (`/api/triage/[id]` and
+`/api/triage/[id]/extract-actions`) and `/api/notifications/triage` remain
+explicit Tier A exclusions. Their call graphs still reach SQLite-backed AI or
+notification behavior, so hiding those edges behind deferred imports would
+only relocate taint. Native Share Sheet persistence is likewise deferred to
+stacked Layer L08b; `/api/triage/capture` therefore remains Tier A in L08a.
+
+Composed on the merged L09, L05, L07, L13, L14, L15, L16, L17, L11, and
+L12a baselines, the committed L08a graph is exactly 266 API routes, 143 Tier A,
+19 Tier B, 104 clean, 101 direct taint-source routes, 42 transitive-only Tier A
+routes, 102 direct `@/db` namespace routes, 71 tainted libraries, zero tainted
+API helpers, and 214 total migration units. The layer adds no Tier B route.
+`triage-native-web-persistence-boundary.test.ts` pins the exact route and
+library removals plus the explicit exclusions. The shared persistence
+contract runs against SQLite and live PostgreSQL, and representative
+live-PostgreSQL route tests poison `@/db` before route import to prove that
+the web surface consumes only the registered post-publication composition.
+
 ## Web/API PostgreSQL parity: Layer L17 (derived analytics: stats and insights)
 
 The read-only derived-analytics surfaces — dashboard and reset KPIs, the

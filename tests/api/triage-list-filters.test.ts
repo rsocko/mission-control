@@ -8,7 +8,7 @@ vi.mock('@/lib/triage/capture', () => ({
   createTriageCapture: vi.fn(),
 }));
 
-vi.mock('@/lib/triage/query', () => ({
+vi.mock('@/lib/triage/queue-query', () => ({
   isValidTriageSource: (value: string | null) => value === 'github',
   isValidTriageStatus: (value: string | null) => value === 'pending',
   listTriageItems,

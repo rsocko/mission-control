@@ -5,10 +5,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const {
+  findProjectPhaseItemTaskId,
+  listProjectPhaseItems,
   placeTasksInProjectPhase,
   removeTasksFromProjectPhase,
   updateProjectPhaseItem,
 } = vi.hoisted(() => ({
+  findProjectPhaseItemTaskId: vi.fn(),
+  listProjectPhaseItems: vi.fn(),
   placeTasksInProjectPhase: vi.fn(),
   removeTasksFromProjectPhase: vi.fn(),
   updateProjectPhaseItem: vi.fn(),
@@ -26,6 +30,8 @@ class MockProjectHierarchyServiceError extends Error {
 }
 
 vi.mock('@/lib/projects/hierarchy-service', () => ({
+  findProjectPhaseItemTaskId,
+  listProjectPhaseItems,
   placeTasksInProjectPhase,
   removeTasksFromProjectPhase,
   updateProjectPhaseItem,
@@ -116,10 +122,10 @@ const BASE = 'http://localhost:3099';
 
 // Reset mocks between tests so chainable terminals can be customised
 beforeEach(() => {
-  mockDb.select.mockImplementation(() => chainable([]));
-  mockDb.insert.mockImplementation(() => chainable([]));
-  mockDb.update.mockImplementation(() => chainable(undefined));
-  mockDb.delete.mockImplementation(() => chainable(undefined));
+  mockDb.select.mockReset().mockImplementation(() => chainable([]));
+  mockDb.insert.mockReset().mockImplementation(() => chainable([]));
+  mockDb.update.mockReset().mockImplementation(() => chainable(undefined));
+  mockDb.delete.mockReset().mockImplementation(() => chainable(undefined));
   placeTasksInProjectPhase.mockReset().mockImplementation(async ({
     phaseId,
     taskIds,
@@ -159,6 +165,8 @@ beforeEach(() => {
     },
   }));
   removeTasksFromProjectPhase.mockReset().mockResolvedValue({});
+  listProjectPhaseItems.mockReset().mockResolvedValue([]);
+  findProjectPhaseItemTaskId.mockReset().mockResolvedValue('task-1');
 });
 
 // ─── PROJECT PHASES - List ─────────────────────────────────────────────────
@@ -327,14 +335,33 @@ describe('DELETE /api/project-phases/[id]', () => {
 // ─── PHASE ITEMS - List ────────────────────────────────────────────────────
 
 describe('GET /api/project-phases/[id]/items', () => {
-  it('should return items for a phase', async () => {
+  it('should return items for a phase through the selected repository', async () => {
+    const items = [
+      { id: 'item-1', phaseId: 'phase-1', taskId: 'task-1', sortOrder: 0 },
+      { id: 'item-2', phaseId: 'phase-1', taskId: 'task-2', sortOrder: 1 },
+    ];
+    listProjectPhaseItems.mockResolvedValue(items);
+
     const { GET } = await import('@/app/api/project-phases/[id]/items/route');
     const request = new Request(`${BASE}/api/project-phases/phase-1/items`);
     const response = await GET(request, { params: Promise.resolve({ id: 'phase-1' }) });
     expect(response.status).toBe(200);
     const data = await response.json();
-    expect(data).toHaveProperty('items');
-    expect(Array.isArray(data.items)).toBe(true);
+    expect(data.items).toEqual(items);
+    expect(listProjectPhaseItems).toHaveBeenCalledWith('phase-1');
+    expect(mockDb.select).not.toHaveBeenCalled();
+  });
+
+  it('should surface a repository failure as an internal error', async () => {
+    listProjectPhaseItems.mockRejectedValue(new Error('backend unavailable'));
+
+    const { GET } = await import('@/app/api/project-phases/[id]/items/route');
+    const response = await GET(
+      new Request(`${BASE}/api/project-phases/phase-1/items`),
+      { params: Promise.resolve({ id: 'phase-1' }) },
+    );
+    expect(response.status).toBe(500);
+    expect(JSON.stringify(await response.json())).not.toContain('backend unavailable');
   });
 });
 
@@ -342,9 +369,6 @@ describe('GET /api/project-phases/[id]/items', () => {
 
 describe('POST /api/project-phases/[id]/items', () => {
   it('should add a task to a phase', async () => {
-    const item = { id: 'item-1', phaseId: 'phase-1', taskId: 'task-1', sortOrder: 0 };
-    mockDb.select.mockImplementation(() => chainable([item]));
-
     const { POST } = await import('@/app/api/project-phases/[id]/items/route');
     const request = new Request(`${BASE}/api/project-phases/phase-1/items`, {
       method: 'POST',
@@ -375,9 +399,6 @@ describe('POST /api/project-phases/[id]/items', () => {
   });
 
   it('should accept optional fields (sortOrder, estimatedEffortHours, isProposed)', async () => {
-    const item = { id: 'item-2', phaseId: 'phase-1', taskId: 'task-2', sortOrder: 5, estimatedEffortHours: 8, isProposed: true, proposalType: 'new_task' };
-    mockDb.select.mockImplementation(() => chainable([item]));
-
     const { POST } = await import('@/app/api/project-phases/[id]/items/route');
     const request = new Request(`${BASE}/api/project-phases/phase-1/items`, {
       method: 'POST',
@@ -402,8 +423,7 @@ describe('POST /api/project-phases/[id]/items', () => {
 
 describe('PATCH /api/project-phases/[id]/items', () => {
   it('should update a phase item with valid fields', async () => {
-    const item = { id: 'item-1', phaseId: 'phase-1', taskId: 'task-1', sortOrder: 3, estimatedEffortHours: 4 };
-    mockDb.select.mockImplementation(() => chainable([item]));
+    findProjectPhaseItemTaskId.mockResolvedValue('task-1');
 
     const { PATCH } = await import('@/app/api/project-phases/[id]/items/route');
     const request = new Request(`${BASE}/api/project-phases/phase-1/items?item_id=item-1`, {
@@ -416,6 +436,27 @@ describe('PATCH /api/project-phases/[id]/items', () => {
     const data = await response.json();
     expect(data).toHaveProperty('item');
     expect(data.item.sortOrder).toBe(3);
+    expect(findProjectPhaseItemTaskId).toHaveBeenCalledWith('phase-1', 'item-1');
+    expect(updateProjectPhaseItem).toHaveBeenCalledWith(expect.objectContaining({
+      phaseId: 'phase-1',
+      taskId: 'task-1',
+      toIndex: 3,
+    }));
+    expect(mockDb.select).not.toHaveBeenCalled();
+  });
+
+  it('should return 404 when the item does not belong to the phase', async () => {
+    findProjectPhaseItemTaskId.mockResolvedValue(null);
+
+    const { PATCH } = await import('@/app/api/project-phases/[id]/items/route');
+    const request = new Request(`${BASE}/api/project-phases/phase-1/items?item_id=item-9`, {
+      method: 'PATCH',
+      body: JSON.stringify({ estimatedEffortHours: 4 }),
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const response = await PATCH(request, { params: Promise.resolve({ id: 'phase-1' }) });
+    expect(response.status).toBe(404);
+    expect(updateProjectPhaseItem).not.toHaveBeenCalled();
   });
 
   it('should return 400 when item_id query param is missing', async () => {

@@ -159,7 +159,7 @@ export async function POST(request: Request) {
         return payload.id;
       },
       assignProjectTasks: async (projectId, taskIds) => {
-        const hierarchy = getProjectHierarchySnapshot(projectId);
+        const hierarchy = await getProjectHierarchySnapshot(projectId);
         if (!hierarchy) {
           throw new Error('The new project hierarchy is unavailable');
         }

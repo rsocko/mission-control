@@ -751,6 +751,16 @@ export function describeFinanceWorkerPersistenceContract(
             },
           }],
         });
+        await expect(harness.repositories.attribution.finish({
+          connectorId: CONNECTOR_ID,
+          generationId: GENERATION,
+          attemptedAt: '2026-08-30T12:21:00.000Z',
+          succeeded: true,
+          terminalFailureCode: null,
+          status: 'healthy',
+          policyVersion: 7,
+          engineVersion: '2.0.0',
+        })).resolves.toEqual({ recorded: true });
         const page = await harness.repositories.attribution.listExceptions({
           connectorId: CONNECTOR_ID,
           status: 'current',

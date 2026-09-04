@@ -1841,9 +1841,10 @@ function createAttributionPersistence(
         };
       }
       if (command.action === 'approve' || command.action === 'manual-resolve') {
+        const auditAction = command.action;
         const outcome = sqlite.transaction(() => {
           const exception = readExceptionForAction(sqlite, command);
-          const kidId = command.action === 'approve'
+          const kidId = auditAction === 'approve'
             ? exception.assignedKidId
             : command.kidId ?? null;
           const action: FinanceManualAction = kidId ? 'assign-kid' : 'parent-expense';
@@ -1854,7 +1855,7 @@ function createAttributionPersistence(
             action,
             kidId,
             idempotencyKey: command.idempotencyKey,
-            auditAction: command.action,
+            auditAction,
             actorType: command.actorType,
             exceptionId: exception.id,
             expectedExceptionUpdatedAt: command.expectedUpdatedAt,

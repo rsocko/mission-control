@@ -2008,10 +2008,11 @@ function createAttributionPersistence(
         };
       }
       if (command.action === 'approve' || command.action === 'manual-resolve') {
+        const auditAction = command.action;
         const replayed = await transaction(pool, async (client) => {
           await requireFinanceConnector(client, command.connectorId);
           const exception = await readExceptionForAction(client, command);
-          const kidId = command.action === 'approve'
+          const kidId = auditAction === 'approve'
             ? exception.assignedKidId
             : command.kidId ?? null;
           const action: FinanceManualAction = kidId ? 'assign-kid' : 'parent-expense';
@@ -2022,7 +2023,7 @@ function createAttributionPersistence(
             action,
             kidId,
             idempotencyKey: command.idempotencyKey,
-            auditAction: command.action,
+            auditAction,
             actorType: command.actorType,
             exceptionId: exception.id,
             expectedExceptionUpdatedAt: command.expectedUpdatedAt,

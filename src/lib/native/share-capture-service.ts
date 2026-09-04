@@ -185,25 +185,25 @@ export async function processIOSShareCapture(
       },
     };
   }
-  if (claim.status === 'replay') {
-    return errorResult(
-      payload.requestId,
-      409,
-      'REPLAY_DETECTED',
-      'The request ID was already used for different content.',
-      false,
-    );
-  }
-  if (claim.status === 'pending') {
-    return errorResult(
-      payload.requestId,
-      409,
-      'INTERNAL_ERROR',
-      'The capture is still processing. Try again shortly.',
-      true,
-    );
-  }
-  if (claim.status === 'rateLimited') {
+  if (claim.status !== 'acquired') {
+    if (claim.status === 'replay') {
+      return errorResult(
+        payload.requestId,
+        409,
+        'REPLAY_DETECTED',
+        'The request ID was already used for different content.',
+        false,
+      );
+    }
+    if (claim.status === 'pending') {
+      return errorResult(
+        payload.requestId,
+        409,
+        'INTERNAL_ERROR',
+        'The capture is still processing. Try again shortly.',
+        true,
+      );
+    }
     return errorResult(
       payload.requestId,
       429,

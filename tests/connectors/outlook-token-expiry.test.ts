@@ -62,6 +62,44 @@ describe('OutlookEmailConnector — auth failure surfacing', () => {
   });
 });
 
+describe('OutlookEmailConnector — folder scope', () => {
+  it('fetches notifications from Inbox only by default', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => (
+      Response.json({ value: [] }, { status: 200 })
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const connector = outlookEmailFactory.create();
+    await connector.initialize(makeConfig());
+
+    await connector.fetchNotifications(new Date('2026-09-01T00:00:00.000Z'));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toContain('/me/mailFolders/inbox/messages?');
+    expect(fetchMock.mock.calls[0][0]).not.toContain('/me/messages?');
+  });
+
+  it('fetches only explicitly configured folders when present', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => (
+      Response.json({ value: [] }, { status: 200 })
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const connector = outlookEmailFactory.create();
+    await connector.initialize(makeConfig({
+      syncedLists: ['conn-1:folder-a', 'folder-b'],
+    }));
+
+    await connector.fetchNotifications(new Date('2026-09-01T00:00:00.000Z'));
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      expect.stringContaining('/me/mailFolders/folder-a/messages?'),
+      expect.stringContaining('/me/mailFolders/folder-b/messages?'),
+    ]);
+  });
+});
+
 describe('OutlookCalendarConnector — auth failure surfacing', () => {
   it('throws instead of silently returning [] when the Graph token is expired (fetchNotifications)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 401 })));

@@ -56,7 +56,9 @@ const LOCATOR_PATH_CHUNK_SIZE = 100;
  * oversized batch is rejected before any transaction is opened everywhere
  * this ceiling is enforced, with no duplicated magic number.
  */
-export function assertExternalIdentityBatchWithinLimit(writes: ExternalIdentityWrite[]): void {
+export function assertExternalIdentityBatchWithinLimit(
+  writes: readonly ExternalIdentityWrite[],
+): void {
   if (writes.length > MAX_BATCH_SIZE) {
     throw new Error(`External identity batch exceeds the maximum of ${MAX_BATCH_SIZE}`);
   }

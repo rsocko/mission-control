@@ -29,6 +29,8 @@ runConnectorOperationLeaseRepositoryContract('SQLite connector-operation lease c
     database.sqlite.exec(`
       DELETE FROM connector_operation_leases;
       DELETE FROM connector_maintenance_locks;
+      DELETE FROM github_repository_repoints;
+      DELETE FROM external_entities;
       DELETE FROM connector_configs;
     `);
   },
@@ -55,11 +57,38 @@ runConnectorOperationLeaseRepositoryContract('SQLite connector-operation lease c
       return;
     }
     const now = new Date().toISOString();
+    const operationId = `lock-${connectorId}`;
+    const entityId = `entity-${connectorId}`;
+    database.sqlite.prepare(`
+      INSERT INTO external_entities (
+        id, provider, host_key, entity_type, stable_id, identity_version,
+        next_locator_revision, first_seen_at, last_seen_at
+      ) VALUES (?, 'github', 'github.com', 'repository', ?, 1, 1, ?, ?)
+    `).run(entityId, `R_${connectorId}`, now, now);
+    database.sqlite.prepare(`
+      INSERT INTO github_repository_repoints (
+        id, connector_instance_id, idempotency_key, phase, actor, host_key,
+        repository_entity_id, repository_stable_id, from_owner, from_repository,
+        to_owner, to_repository, connector_was_enabled, backup_proof, preflight,
+        rollback_snapshot, verification, last_error, created_at, updated_at, completed_at
+      ) VALUES (
+        ?, ?, ?, 'locked', 'contract', 'github.com', ?, ?,
+        'old', 'repo', 'new', 'repo', 1, '{}', '{}', '{}', NULL, NULL, ?, ?, NULL
+      )
+    `).run(
+      operationId,
+      connectorId,
+      `maintenance-${connectorId}`,
+      entityId,
+      `R_${connectorId}`,
+      now,
+      now,
+    );
     database.sqlite.prepare(`
       INSERT INTO connector_maintenance_locks (
         connector_instance_id, operation_id, actor, reason, acquired_at, updated_at
       ) VALUES (?, ?, 'contract', 'contract test', ?, ?)
-    `).run(connectorId, `lock-${connectorId}`, now, now);
+    `).run(connectorId, operationId, now, now);
   },
 });
 

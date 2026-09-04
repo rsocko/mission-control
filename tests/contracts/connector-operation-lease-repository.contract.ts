@@ -1,7 +1,7 @@
 import {
   afterAll,
+  afterEach,
   beforeAll,
-  beforeEach,
   describe,
   expect,
   it,
@@ -26,7 +26,7 @@ export function runConnectorOperationLeaseRepositoryContract(
 ): void {
   describe.skipIf(harness.enabled === false)(name, () => {
     beforeAll(() => harness.setup(), 120_000);
-    beforeEach(() => harness.reset());
+    afterEach(() => harness.reset());
     afterAll(() => harness.teardown());
 
     it('fences competing owners across renew and release', async () => {

@@ -34,7 +34,7 @@ interface ConnectorRow {
   enabled: boolean;
   syncMode: string;
   pollIntervalMinutes: number | null;
-  credentials: Record<string, unknown> | null;
+  credentials: Record<string, string> | null;
   settings: Record<string, unknown> | null;
 }
 

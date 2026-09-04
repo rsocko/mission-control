@@ -8,6 +8,7 @@ import {
   like,
   lt,
   lte,
+  ne,
   not,
   notInArray,
   or,

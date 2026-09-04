@@ -38,6 +38,7 @@ export interface NotificationRow {
   level: string;
   levelRank: number;
   category: string;
+  templateKey: string | null;
   state: string;
   readState: string;
   disposition: string;
@@ -48,18 +49,35 @@ export interface NotificationRow {
   readAt: string | null;
   dismissedAt: string | null;
   handledAt: string | null;
+  resolvedAt: string | null;
   archivedAt: string | null;
   snoozedUntil: string | null;
   mutedAt: string | null;
+  sourceResolvedAt: string | null;
   metadata: unknown;
   presentation: unknown;
   isActionable: boolean | number;
   primaryActionId: string | null;
+  aiSuggestedActionId: string | null;
   lastSourceActivityAt: string | null;
   lastSourceActivityKey: string | null;
   handledSourceActivityAt: string | null;
   handledSourceActivityKey: string | null;
-  [key: string]: unknown;
+  lastSourceSyncedAt: string | null;
+  expiresAt: string | null;
+  groupKey: string | null;
+  dedupeKey: string | null;
+  relatedTaskId: string | null;
+  relatedProjectId: string | null;
+  relatedEntityType: string | null;
+  relatedEntityId: string | null;
+  navigationTarget: string | null;
+  reconcileAttempts: number;
+  lastReconciledAt: string | null;
+  staleSince: string | null;
+  autoResolveReason: string | null;
+  enrichmentRevision: string | null;
+  enrichmentGeneration: number;
 }
 
 export interface NotificationActionRow {
@@ -68,9 +86,17 @@ export interface NotificationActionRow {
   isPrimary: boolean | number;
   actionType: string;
   label: string | null;
+  icon: string | null;
+  variant: string;
   sortOrder: number;
+  payload: unknown;
+  opensExternal: boolean | number;
+  requiresConfirmation: boolean | number;
+  createdBy: string;
   executionState: string;
-  [key: string]: unknown;
+  claimedAt: string | null;
+  completedAt: string | null;
+  lastError: string | null;
 }
 
 export interface NotificationStats {
@@ -192,7 +218,7 @@ export interface NotificationWebPersistence {
     cursor: string | null;
   }): Promise<NotificationQueryResult>;
 
-  recoverStaleActions(recoveryCutoff: string): void;
+  recoverStaleActions(recoveryCutoff: string): Promise<void>;
 
   // Single mutations
   restoreSnapshots(snapshots: RestoreSnapshot[]): Promise<{ updatedCount: number }>;
@@ -215,13 +241,27 @@ export interface NotificationWebPersistence {
   bulkHandleDemo(ids: string[], now: string): Promise<number>;
   bulkMarkReadDemo(ids: string[], now: string): Promise<number>;
 
-  // Writeback-integrated mutations
+  // Writeback-integrated mutations (backend-neutral async contract)
   mutateNotificationsAndEnqueueWritebacks(
     ids: string[],
     action: NotificationMutationAction,
     now: string,
-  ): NotificationMutationResult;
+  ): Promise<NotificationMutationResult>;
   dismissNotificationsAndEnqueueWritebacks(
+    ids: string[],
+    now: string,
+  ): Promise<{ updatedCount: number; queuedCount: number }>;
+
+  /**
+   * SQLite-only synchronous compatibility hook for the legacy notification
+   * action route, which dismisses and enqueues a writeback in a single
+   * synchronous request path and cannot be made async. Implemented only by the
+   * SQLite adapter (direct better-sqlite3 transaction); the PostgreSQL adapter
+   * intentionally omits it so that callers relying on it fail loudly rather
+   * than silently degrading. In-scope routes and the dispatcher use the async
+   * `dismissNotificationsAndEnqueueWritebacks` contract method instead.
+   */
+  dismissNotificationsAndEnqueueWritebacksSync?(
     ids: string[],
     now: string,
   ): { updatedCount: number; queuedCount: number };
@@ -242,30 +282,30 @@ export interface NotificationWebPersistence {
     selector: 'id' | 'notification_id',
     ids: string[],
     now: string,
-  ): { retried: Array<{ id: string; notificationId: string }> };
+  ): Promise<{ retried: Array<{ id: string; notificationId: string }> }>;
 
   // Web push subscriptions
   findSubscriptionByEndpoint(endpoint: string): Promise<{ id: string } | null>;
   registerSubscription(input: WebSubscriptionInput): Promise<string>;
   removeSubscription(endpoint: string): Promise<void>;
 
-  // Writeback dispatch internals
+  // Writeback dispatch internals (backend-neutral async contract)
   claimNextConnectorBatch(input: {
     batchSize: number;
     leaseMs: number;
     singleJobConnectorIds: ReadonlySet<string>;
-  }): WritebackClaimRow[];
-  completeWritebackJobs(jobs: WritebackClaimRow[]): void;
+  }): Promise<WritebackClaimRow[]>;
+  completeWritebackJobs(jobs: WritebackClaimRow[]): Promise<void>;
   failWritebackJobs(
     jobs: WritebackClaimRow[],
     error: { message: string; retryable: boolean; retryAt?: Date },
     maxRetryMs: number,
     retryBaseMs: number,
-  ): void;
-  renewWritebackLeases(jobs: WritebackClaimRow[], leaseMs: number): WritebackClaimRow[];
-  releaseUnattemptedWritebackJobs(jobs: WritebackClaimRow[]): void;
-  getNextScheduledWriteback(): { nextAttemptAt: string } | null;
-  refreshNotificationSyncState(notificationId: string): void;
+  ): Promise<void>;
+  renewWritebackLeases(jobs: WritebackClaimRow[], leaseMs: number): Promise<WritebackClaimRow[]>;
+  releaseUnattemptedWritebackJobs(jobs: WritebackClaimRow[]): Promise<void>;
+  getNextScheduledWriteback(): Promise<{ nextAttemptAt: string } | null>;
+  refreshNotificationSyncState(notificationId: string): Promise<void>;
 
   /** Lazily wakes the writeback dispatcher without importing tainted connector modules. */
   wakeWritebackDispatcher(): void;

@@ -24,8 +24,266 @@ import {
   MAX_NOTIFICATION_MERCHANT_FACETS,
 } from '@/lib/notifications/query';
 import { normalizeFinanceProviderFacets, financeProviderFilterValues } from '@/lib/finance-insights/provider';
+import { wakeNotificationWritebackDispatcher } from '@/lib/notifications/notification-writeback';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+
+const NOTIFICATION_SELECT_COLUMNS = `
+  id,
+  source_id AS "sourceId",
+  connector_type AS "connectorType",
+  connector_instance_id AS "connectorInstanceId",
+  title,
+  body,
+  level,
+  level_rank AS "levelRank",
+  category,
+  template_key AS "templateKey",
+  state,
+  read_state AS "readState",
+  disposition,
+  source_state AS "sourceState",
+  sync_state AS "syncState",
+  read_at AS "readAt",
+  handled_at AS "handledAt",
+  dismissed_at AS "dismissedAt",
+  resolved_at AS "resolvedAt",
+  archived_at AS "archivedAt",
+  muted_at AS "mutedAt",
+  snoozed_until AS "snoozedUntil",
+  source_resolved_at AS "sourceResolvedAt",
+  last_source_activity_at AS "lastSourceActivityAt",
+  last_source_activity_key AS "lastSourceActivityKey",
+  handled_source_activity_at AS "handledSourceActivityAt",
+  handled_source_activity_key AS "handledSourceActivityKey",
+  last_source_synced_at AS "lastSourceSyncedAt",
+  is_actionable AS "isActionable",
+  primary_action_id AS "primaryActionId",
+  ai_suggested_action_id AS "aiSuggestedActionId",
+  received_at AS "receivedAt",
+  sort_at AS "sortAt",
+  expires_at AS "expiresAt",
+  group_key AS "groupKey",
+  dedupe_key AS "dedupeKey",
+  related_task_id AS "relatedTaskId",
+  related_project_id AS "relatedProjectId",
+  related_entity_type AS "relatedEntityType",
+  related_entity_id AS "relatedEntityId",
+  navigation_target AS "navigationTarget",
+  reconcile_attempts AS "reconcileAttempts",
+  last_reconciled_at AS "lastReconciledAt",
+  stale_since AS "staleSince",
+  auto_resolve_reason AS "autoResolveReason",
+  metadata,
+  presentation,
+  enrichment_revision AS "enrichmentRevision",
+  enrichment_generation AS "enrichmentGeneration"
+`;
+
+const NOTIFICATION_ACTION_SELECT_COLUMNS = `
+  id,
+  notification_id AS "notificationId",
+  action_type AS "actionType",
+  label,
+  icon,
+  variant,
+  is_primary AS "isPrimary",
+  sort_order AS "sortOrder",
+  payload,
+  opens_external AS "opensExternal",
+  requires_confirmation AS "requiresConfirmation",
+  created_by AS "createdBy",
+  execution_state AS "executionState",
+  claimed_at AS "claimedAt",
+  completed_at AS "completedAt",
+  last_error AS "lastError"
+`;
+
+type WritebackSourceRow = {
+  id: string;
+  sourceId: string;
+  connectorType: string;
+  connectorInstanceId: string;
+};
+
+function isUniqueViolation(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === '23505'
+  );
+}
+
+/**
+ * PostgreSQL WHERE builder for bulk selection by query. Mirrors the SQLite
+ * `buildWhereClauses` reference (cursor-free) so bulk selection is
+ * backend-neutral. Appends bound values to `params` and returns the full
+ * `WHERE ...` clause (or an empty string when unconstrained).
+ */
+function buildBulkWhereClausesPg(query: NotificationQuery, params: unknown[]): string {
+  const now = new Date().toISOString();
+  const conditions: string[] = [];
+
+  if (!query.state) {
+    const inbox = inboxConditionPg(params.length + 1);
+    conditions.push(`(${inbox.sql})`);
+    params.push(now);
+  }
+  conditions.push(`connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`);
+
+  if (query.q) {
+    const i = params.length + 1;
+    conditions.push(`(position(lower($${i}) in lower(title)) > 0 OR position(lower($${i + 1}) in lower(COALESCE(body, ''))) > 0)`);
+    params.push(query.q, query.q);
+  }
+  if (query.source) {
+    const sourceTypes = financeProviderFilterValues(query.source);
+    if (sourceTypes.length === 1) {
+      conditions.push(`connector_type = $${params.length + 1}`);
+      params.push(sourceTypes[0]);
+    } else {
+      const start = params.length + 1;
+      const placeholders = sourceTypes.map((_, i) => `$${start + i}`).join(',');
+      conditions.push(`connector_type IN (${placeholders})`);
+      params.push(...sourceTypes);
+    }
+  }
+  if (query.sourceAccount) { conditions.push(`connector_instance_id = $${params.length + 1}`); params.push(query.sourceAccount); }
+  if (query.level) { conditions.push(`level = $${params.length + 1}`); params.push(query.level); }
+  if (query.category) { conditions.push(`category = $${params.length + 1}`); params.push(query.category); }
+  if (query.merchant) {
+    const m = merchantMetadataConditionPg(params.length + 1, query.merchant);
+    conditions.push(`(${m.sql})`);
+    params.push(...m.params);
+  }
+  switch (query.state) {
+    case 'unread': case 'read': {
+      conditions.push(`read_state = $${params.length + 1}`);
+      params.push(query.state);
+      const inbox = inboxConditionPg(params.length + 1);
+      conditions.push(`(${inbox.sql})`);
+      params.push(now);
+      break;
+    }
+    case 'dismissed': conditions.push(`disposition = 'dismissed'`); break;
+    case 'archived': conditions.push(`disposition = 'handled'`); conditions.push(`source_state IN ('active', 'unknown')`); break;
+    case 'resolved': conditions.push(`source_state IN ('resolved', 'deleted')`); conditions.push(`disposition <> 'dismissed'`); break;
+  }
+  if (query.actionableOnly) conditions.push(`is_actionable = true`);
+  if (query.repository) { conditions.push(`presentation->>'repository' = $${params.length + 1}`); params.push(query.repository); }
+  if (query.owner) { conditions.push(`split_part(presentation->>'repository', '/', 1) = $${params.length + 1}`); params.push(query.owner); }
+  if (query.reason) { conditions.push(`presentation->>'reason' = $${params.length + 1}`); params.push(query.reason); }
+  if (query.subjectType) { conditions.push(`presentation->>'subjectType' = $${params.length + 1}`); params.push(query.subjectType); }
+  if (query.participating) {
+    const start = params.length + 1;
+    const placeholders = PARTICIPATING_REASONS.map((_, i) => `$${start + i}`).join(',');
+    conditions.push(`presentation->>'reason' IN (${placeholders})`);
+    params.push(...PARTICIPATING_REASONS);
+  }
+  if (query.dateRange) {
+    const dateNow = new Date();
+    const since = query.dateRange === 'today'
+      ? new Date(dateNow.getFullYear(), dateNow.getMonth(), dateNow.getDate())
+      : new Date(dateNow.getTime() - (query.dateRange === 'week' ? 7 : 30) * 86_400_000);
+    conditions.push(`received_at >= $${params.length + 1}`); params.push(since.toISOString());
+  }
+  return conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+}
+
+/**
+ * PostgreSQL writeback mutation SQL builder. Mirrors the SQLite
+ * `mutationUpdateSql` reference. `idCount` is the number of notification ids
+ * appended after the SET-clause parameters; id placeholders are numbered
+ * immediately after the SET parameters.
+ */
+function mutationUpdateSqlPg(
+  action: NotificationMutationAction | 'dismiss',
+  idCount: number,
+): { sql: string; parameters: (changedAt: string) => string[] } {
+  const idPlaceholders = (offset: number) =>
+    Array.from({ length: idCount }, (_, i) => `$${offset + i + 1}`).join(',');
+  switch (action) {
+    case 'mark_read':
+      return {
+        sql: `UPDATE notifications
+          SET read_state = 'read',
+              read_at = COALESCE(read_at, $1),
+              state = CASE
+                WHEN disposition = 'dismissed' THEN 'dismissed'
+                WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                WHEN disposition = 'handled' THEN 'archived'
+                ELSE 'read'
+              END
+          WHERE id IN (${idPlaceholders(1)})`,
+        parameters: (changedAt) => [changedAt],
+      };
+    case 'mark_done':
+      return {
+        sql: `UPDATE notifications
+          SET disposition = 'handled',
+              handled_at = $1,
+              archived_at = $2,
+              handled_source_activity_at = last_source_activity_at,
+              handled_source_activity_key = last_source_activity_key,
+              state = CASE
+                WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                ELSE 'archived'
+              END
+          WHERE id IN (${idPlaceholders(2)})`,
+        parameters: (changedAt) => [changedAt, changedAt],
+      };
+    case 'mute':
+      return {
+        sql: `UPDATE notifications
+          SET read_state = 'read',
+              read_at = COALESCE(read_at, $1),
+              disposition = 'dismissed',
+              dismissed_at = $2,
+              muted_at = $3,
+              state = 'dismissed'
+          WHERE id IN (${idPlaceholders(3)})`,
+        parameters: (changedAt) => [changedAt, changedAt, changedAt],
+      };
+    case 'unmute':
+      return {
+        sql: `UPDATE notifications
+          SET disposition = 'inbox',
+              dismissed_at = NULL,
+              muted_at = NULL,
+              state = CASE
+                WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                WHEN read_state = 'unread' THEN 'unread'
+                ELSE 'read'
+              END
+          WHERE id IN (${idPlaceholders(0)})`,
+        parameters: () => [],
+      };
+    case 'dismiss':
+      return {
+        sql: `UPDATE notifications
+          SET read_state = 'read',
+              read_at = COALESCE(read_at, $1),
+              disposition = 'dismissed',
+              dismissed_at = $2,
+              state = 'dismissed'
+          WHERE id IN (${idPlaceholders(2)})`,
+        parameters: (changedAt) => [changedAt, changedAt],
+      };
+  }
+}
+
+const NOTIFICATION_SYNC_STATE_CASE_SQL = `CASE
+        WHEN EXISTS (
+          SELECT 1 FROM notification_writeback_jobs jobs
+          WHERE jobs.notification_id = notifications.id AND jobs.status = 'failed'
+        ) THEN 'failed'
+        WHEN EXISTS (
+          SELECT 1 FROM notification_writeback_jobs jobs
+          WHERE jobs.notification_id = notifications.id
+            AND jobs.status IN ('pending', 'sending')
+        ) THEN 'pending'
+        ELSE 'synced'
+      END`;
 
 function inboxConditionPg(paramIndex: number): { sql: string; nextParam: number } {
   return {
@@ -70,23 +328,113 @@ export function createPostgresNotificationWebRepository(
   pool: Pool,
 ): NotificationWebPersistence {
 
-  async function refreshSyncState(notificationId: string): Promise<void> {
-    await pool.query(`
+  type PgExecutor = {
+    query: (text: string, values?: unknown[]) => Promise<{ rows: Array<Record<string, unknown>>; rowCount: number | null }>;
+  };
+
+  async function refreshSyncStateOn(executor: PgExecutor, notificationId: string): Promise<void> {
+    await executor.query(`
       UPDATE notifications
-      SET sync_state = CASE
-        WHEN EXISTS (
-          SELECT 1 FROM notification_writeback_jobs jobs
-          WHERE jobs.notification_id = notifications.id AND jobs.status = 'failed'
-        ) THEN 'failed'
-        WHEN EXISTS (
-          SELECT 1 FROM notification_writeback_jobs jobs
-          WHERE jobs.notification_id = notifications.id
-            AND jobs.status IN ('pending', 'sending')
-        ) THEN 'pending'
-        ELSE 'synced'
-      END
+      SET sync_state = ${NOTIFICATION_SYNC_STATE_CASE_SQL}
       WHERE id = $1
     `, [notificationId]);
+  }
+
+  async function refreshSyncState(notificationId: string): Promise<void> {
+    await refreshSyncStateOn(pool, notificationId);
+  }
+
+  async function insertDismissalWritebackRowsPg(
+    executor: PgExecutor,
+    rows: WritebackSourceRow[],
+    now: string,
+  ): Promise<number> {
+    let queued = 0;
+    for (const row of rows) {
+      const result = await executor.query(`
+        INSERT INTO notification_writeback_jobs (
+          id, notification_id, connector_instance_id, connector_type, source_id,
+          action_type, dedupe_key, status, attempt_count, max_attempts, next_attempt_at,
+          created_at, updated_at
+        ) VALUES ($1, $2, $3, $4, $5, 'mark_done', $6, 'pending', 0, 3, $7, $8, $9)
+        ON CONFLICT (dedupe_key) DO UPDATE SET
+          status = 'pending',
+          attempt_count = 0,
+          next_attempt_at = EXCLUDED.next_attempt_at,
+          lease_expires_at = NULL,
+          last_error = NULL,
+          completed_at = NULL,
+          updated_at = EXCLUDED.updated_at
+        WHERE notification_writeback_jobs.status = 'failed'
+      `, [
+        crypto.randomUUID(), row.id, row.connectorInstanceId, row.connectorType,
+        normalizeWritebackSourceId(row.sourceId), `dismiss:${row.id}`, now, now, now,
+      ]);
+      queued += result.rowCount ?? 0;
+    }
+    return queued;
+  }
+
+  async function insertTypedWritebackRowPg(
+    executor: PgExecutor,
+    row: WritebackSourceRow,
+    action: string,
+    now: string,
+  ): Promise<{ queued: number; pending: boolean }> {
+    const baseDedupeKey = `${action}:${row.id}:${now}`;
+    const existing = await executor.query(`
+      SELECT jobs.status
+      FROM notification_writeback_jobs jobs
+      WHERE jobs.dedupe_key = $1
+        AND NOT EXISTS (
+          SELECT 1
+          FROM notification_writeback_jobs newer
+          WHERE newer.notification_id = jobs.notification_id
+            AND (newer.created_at, newer.id) > (jobs.created_at, jobs.id)
+            AND newer.status <> 'superseded'
+        )
+    `, [baseDedupeKey]);
+    const existingStatus = existing.rows[0]?.status as string | undefined;
+    if (existingStatus && ['pending', 'sending', 'succeeded'].includes(existingStatus)) {
+      return {
+        queued: 0,
+        pending: existingStatus === 'pending' || existingStatus === 'sending',
+      };
+    }
+    const clash = await executor.query(
+      `SELECT 1 FROM notification_writeback_jobs WHERE dedupe_key = $1`,
+      [baseDedupeKey],
+    );
+    const dedupeKey = (clash.rowCount ?? 0) > 0
+      ? `${baseDedupeKey}:${crypto.randomUUID()}`
+      : baseDedupeKey;
+    if (action === 'mute' || action === 'unmute') {
+      await executor.query(`
+        UPDATE notification_writeback_jobs
+        SET status = 'superseded',
+            retryable = false,
+            completed_at = $1,
+            updated_at = $2,
+            last_error = 'Superseded by a newer notification action'
+        WHERE notification_id = $3
+          AND status IN ('pending', 'failed')
+          AND action_type IN ('mute', 'unmute')
+          AND action_type <> $4
+      `, [now, now, row.id, action]);
+    }
+    const inserted = await executor.query(`
+      INSERT INTO notification_writeback_jobs (
+        id, notification_id, connector_instance_id, connector_type, source_id,
+        action_type, dedupe_key, status, retryable, attempt_count, max_attempts,
+        next_attempt_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', true, 0, 5, $8, $9, $10)
+      ON CONFLICT (dedupe_key) DO NOTHING
+    `, [
+      crypto.randomUUID(), row.id, row.connectorInstanceId, row.connectorType,
+      normalizeWritebackSourceId(row.sourceId), action, dedupeKey, now, now, now,
+    ]);
+    const queued = inserted.rowCount ?? 0;
+    return { queued, pending: queued === 1 };
   }
 
   return {
@@ -208,7 +556,7 @@ export function createPostgresNotificationWebRepository(
       const orderDir = query.sort === 'oldest' ? 'ASC' : 'DESC';
       params.push(limit + 1);
       const queryResult = await pool.query(
-        `SELECT * FROM notifications ${paginatedWhere} ORDER BY sort_at ${orderDir}, id ${orderDir} LIMIT $${paramIdx}`,
+        `SELECT ${NOTIFICATION_SELECT_COLUMNS} FROM notifications ${paginatedWhere} ORDER BY sort_at ${orderDir}, id ${orderDir} LIMIT $${paramIdx}`,
         params,
       );
       const rows = queryResult.rows as NotificationRow[];
@@ -221,7 +569,7 @@ export function createPostgresNotificationWebRepository(
       if (notificationIds.length > 0) {
         const ph = notificationIds.map((_, i) => `$${i + 1}`).join(',');
         const actionResult = await pool.query(
-          `SELECT * FROM notification_actions WHERE notification_id IN (${ph}) AND execution_state = 'pending' ORDER BY sort_order ASC`,
+          `SELECT ${NOTIFICATION_ACTION_SELECT_COLUMNS} FROM notification_actions WHERE notification_id IN (${ph}) AND execution_state = 'pending' ORDER BY sort_order ASC`,
           notificationIds,
         );
         actions = actionResult.rows as NotificationActionRow[];
@@ -378,18 +726,26 @@ export function createPostgresNotificationWebRepository(
 
     async selectForBulkByIds(ids, limit) {
       const ph = ids.map((_, i) => `$${i + 1}`).join(',');
-      ids.push(String(limit));
+      const params = [...ids, limit];
       const result = await pool.query(`
         SELECT id, read_state AS "readState", disposition, source_state AS "sourceState", muted_at AS "mutedAt"
         FROM notifications WHERE id IN (${ph})
           AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
-        LIMIT $${ids.length}
-      `, ids);
+        LIMIT $${ids.length + 1}
+      `, params);
       return result.rows as BulkSelectedRow[];
     },
 
-    async selectForBulkByQuery(_query, _limit) {
-      throw new Error('selectForBulkByQuery: PostgreSQL implementation deferred to runtime composition');
+    async selectForBulkByQuery(query, limit) {
+      const params: unknown[] = [];
+      const where = buildBulkWhereClausesPg(query, params);
+      params.push(limit);
+      const result = await pool.query(`
+        SELECT id, read_state AS "readState", disposition, source_state AS "sourceState", muted_at AS "mutedAt"
+        FROM notifications ${where}
+        LIMIT $${params.length}
+      `, params);
+      return result.rows as BulkSelectedRow[];
     },
 
     async validateMerchantExists(merchant) {
@@ -464,12 +820,86 @@ export function createPostgresNotificationWebRepository(
       return result.rowCount ?? 0;
     },
 
-    mutateNotificationsAndEnqueueWritebacks() {
-      throw new Error('Writeback mutations use the SQLite runtime composition');
+    async mutateNotificationsAndEnqueueWritebacks(notificationIds, action, changedAt) {
+      if (notificationIds.length === 0) return { updatedCount: 0, queuedCount: 0, results: [] };
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const ph = notificationIds.map((_, i) => `$${i + 1}`).join(',');
+        const rowsResult = await client.query(`
+          SELECT id, source_id AS "sourceId", connector_type AS "connectorType",
+                 connector_instance_id AS "connectorInstanceId"
+          FROM notifications WHERE id IN (${ph})
+        `, notificationIds);
+        const rows = rowsResult.rows as WritebackSourceRow[];
+        const rowById = new Map(rows.map(r => [r.id, r]));
+        const queuedIds = new Set<string>();
+        let queuedCount = 0;
+        if (action !== 'dismiss') {
+          for (const row of rows) {
+            if (row.connectorType !== 'github-issues') continue;
+            const writeback = await insertTypedWritebackRowPg(client, row, action, changedAt);
+            queuedCount += writeback.queued;
+            if (writeback.pending) queuedIds.add(row.id);
+          }
+        }
+        const update = mutationUpdateSqlPg(action, notificationIds.length);
+        const updateResult = await client.query(update.sql, [
+          ...update.parameters(changedAt), ...notificationIds,
+        ]);
+        for (const row of rows) await refreshSyncStateOn(client, row.id);
+        await client.query('COMMIT');
+        return {
+          updatedCount: updateResult.rowCount ?? 0,
+          queuedCount,
+          results: notificationIds.map(id => {
+            const row = rowById.get(id);
+            return {
+              id,
+              localStatus: row ? 'updated' as const : 'not_found' as const,
+              writebackStatus: row && queuedIds.has(id) ? 'pending' as const : 'not_required' as const,
+            };
+          }),
+        };
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
-    dismissNotificationsAndEnqueueWritebacks() {
-      throw new Error('Writeback mutations use the SQLite runtime composition');
+    async dismissNotificationsAndEnqueueWritebacks(notificationIds, dismissedAt) {
+      if (notificationIds.length === 0) return { updatedCount: 0, queuedCount: 0 };
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const ph = notificationIds.map((_, i) => `$${i + 1}`).join(',');
+        const rowsResult = await client.query(`
+          SELECT id, source_id AS "sourceId", connector_type AS "connectorType",
+                 connector_instance_id AS "connectorInstanceId"
+          FROM notifications WHERE id IN (${ph})
+        `, notificationIds);
+        const queuedCount = await insertDismissalWritebackRowsPg(
+          client, rowsResult.rows as WritebackSourceRow[], dismissedAt,
+        );
+        const idPh = notificationIds.map((_, i) => `$${i + 3}`).join(',');
+        const updateResult = await client.query(`
+          UPDATE notifications
+          SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
+              sync_state = ${NOTIFICATION_SYNC_STATE_CASE_SQL},
+              read_at = COALESCE(read_at, $1),
+              dismissed_at = $2
+          WHERE id IN (${idPh})
+        `, [dismissedAt, dismissedAt, ...notificationIds]);
+        await client.query('COMMIT');
+        return { updatedCount: updateResult.rowCount ?? 0, queuedCount };
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
     async listSavedViews() {
@@ -482,10 +912,17 @@ export function createPostgresNotificationWebRepository(
 
     async createSavedView(input) {
       const queryStr = JSON.stringify(input.query);
-      await pool.query(`
-        INSERT INTO notification_saved_views (id, name, query, created_at, updated_at)
-        VALUES ($1, $2, $3, $4, $5)
-      `, [input.id, input.name, queryStr, input.now, input.now]);
+      try {
+        await pool.query(`
+          INSERT INTO notification_saved_views (id, name, query, created_at, updated_at)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [input.id, input.name, queryStr, input.now, input.now]);
+      } catch (error) {
+        if (isUniqueViolation(error)) {
+          throw new Error('UNIQUE constraint failed: notification_saved_views.name');
+        }
+        throw error;
+      }
       return { id: input.id, name: input.name, query: queryStr, createdAt: input.now, updatedAt: input.now };
     },
 
@@ -519,8 +956,44 @@ export function createPostgresNotificationWebRepository(
       };
     },
 
-    retryWritebacks() {
-      throw new Error('Writeback retry uses the SQLite runtime composition');
+    async retryWritebacks(selector, ids, now) {
+      if (ids.length === 0) return { retried: [] };
+      const selectorColumn = selector === 'notification_id' ? 'notification_id' : 'id';
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const ph = ids.map((_, i) => `$${i + 1}`).join(',');
+        const retryableResult = await client.query(`
+          SELECT jobs.id, jobs.notification_id AS "notificationId"
+          FROM notification_writeback_jobs jobs
+          WHERE jobs.${selectorColumn} IN (${ph})
+            AND jobs.status = 'failed'
+            AND jobs.retryable = true
+            AND NOT EXISTS (
+              SELECT 1 FROM notification_writeback_jobs newer
+              WHERE newer.notification_id = jobs.notification_id
+                AND (newer.created_at, newer.id) > (jobs.created_at, jobs.id)
+                AND newer.status <> 'superseded'
+            )
+        `, ids);
+        const retried = retryableResult.rows as Array<{ id: string; notificationId: string }>;
+        for (const job of retried) {
+          await client.query(`
+            UPDATE notification_writeback_jobs
+            SET status = 'pending', attempt_count = 0, next_attempt_at = $1,
+                lease_expires_at = NULL, last_error = NULL, completed_at = NULL, updated_at = $2
+            WHERE id = $3
+          `, [now, now, job.id]);
+          await client.query(`UPDATE notifications SET sync_state = 'pending' WHERE id = $1`, [job.notificationId]);
+        }
+        await client.query('COMMIT');
+        return { retried };
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
     async findSubscriptionByEndpoint(endpoint) {
@@ -541,36 +1014,249 @@ export function createPostgresNotificationWebRepository(
       await pool.query(`DELETE FROM push_subscriptions WHERE endpoint = $1`, [endpoint]);
     },
 
-    claimNextConnectorBatch() {
-      throw new Error('Writeback claim uses the SQLite runtime composition');
+    async claimNextConnectorBatch(input) {
+      const { batchSize, leaseMs, singleJobConnectorIds } = input;
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`
+          UPDATE notification_writeback_jobs
+          SET status = 'pending', lease_expires_at = NULL, updated_at = $1
+          WHERE status = 'sending' AND lease_expires_at <= $2
+        `, [nowIso, nowIso]);
+
+        const candidateResult = await client.query(`
+          SELECT jobs.connector_instance_id AS "connectorInstanceId"
+          FROM notification_writeback_jobs jobs
+          INNER JOIN notifications notification
+            ON notification.id = jobs.notification_id
+            AND notification.connector_instance_id = jobs.connector_instance_id
+            AND notification.connector_type = jobs.connector_type
+          WHERE jobs.status = 'pending' AND jobs.next_attempt_at <= $1
+            AND NOT EXISTS (
+              SELECT 1 FROM notification_writeback_jobs earlier
+              WHERE earlier.notification_id = jobs.notification_id
+                AND (earlier.created_at, earlier.id) < (jobs.created_at, jobs.id)
+                AND earlier.status IN ('pending', 'sending')
+            )
+          ORDER BY jobs.next_attempt_at, jobs.created_at, jobs.id
+          LIMIT 1
+        `, [nowIso]);
+        const candidate = candidateResult.rows[0] as { connectorInstanceId: string } | undefined;
+        if (!candidate) { await client.query('COMMIT'); return []; }
+
+        const claimLimit = singleJobConnectorIds.has(candidate.connectorInstanceId) ? 1 : batchSize;
+        const rowsResult = await client.query(`
+          SELECT jobs.id, jobs.notification_id AS "notificationId",
+                 jobs.connector_instance_id AS "connectorInstanceId",
+                 jobs.connector_type AS "connectorType", jobs.source_id AS "sourceId",
+                 jobs.action_type AS "actionType", jobs.attempt_count AS "attemptCount",
+                 jobs.max_attempts AS "maxAttempts", jobs.lease_expires_at AS "leaseExpiresAt"
+          FROM notification_writeback_jobs jobs
+          INNER JOIN notifications notification
+            ON notification.id = jobs.notification_id
+            AND notification.connector_instance_id = jobs.connector_instance_id
+            AND notification.connector_type = jobs.connector_type
+          WHERE jobs.connector_instance_id = $1
+            AND jobs.status = 'pending' AND jobs.next_attempt_at <= $2
+            AND NOT EXISTS (
+              SELECT 1 FROM notification_writeback_jobs earlier
+              WHERE earlier.notification_id = jobs.notification_id
+                AND (earlier.created_at, earlier.id) < (jobs.created_at, jobs.id)
+                AND earlier.status IN ('pending', 'sending')
+            )
+          ORDER BY jobs.created_at, jobs.id
+          LIMIT $3
+          FOR UPDATE OF jobs SKIP LOCKED
+        `, [candidate.connectorInstanceId, nowIso, claimLimit]);
+        const rows = rowsResult.rows as WritebackClaimRow[];
+        if (rows.length === 0) { await client.query('COMMIT'); return []; }
+
+        const idPh = rows.map((_, i) => `$${i + 3}`).join(',');
+        await client.query(`
+          UPDATE notification_writeback_jobs
+          SET status = 'sending', attempt_count = attempt_count + 1,
+              lease_expires_at = $1, last_error = NULL, updated_at = $2
+          WHERE id IN (${idPh}) AND status = 'pending'
+        `, [leaseExpiresAt, nowIso, ...rows.map(r => r.id)]);
+        await client.query('COMMIT');
+        return rows.map(r => ({ ...r, attemptCount: r.attemptCount + 1, leaseExpiresAt }));
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
-    completeWritebackJobs() {
-      throw new Error('Writeback completion uses the SQLite runtime composition');
+    async completeWritebackJobs(jobs) {
+      if (jobs.length === 0) return;
+      const now = new Date().toISOString();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const job of jobs) {
+          const completed = await client.query(`
+            UPDATE notification_writeback_jobs
+            SET status = 'succeeded', completed_at = $1, lease_expires_at = NULL, updated_at = $2
+            WHERE id = $3 AND status = 'sending' AND lease_expires_at = $4
+          `, [now, now, job.id, job.leaseExpiresAt]);
+          if ((completed.rowCount ?? 0) === 1) await refreshSyncStateOn(client, job.notificationId);
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
-    failWritebackJobs() {
-      throw new Error('Writeback failure uses the SQLite runtime composition');
+    async failWritebackJobs(jobs, error, maxRetryMs, retryBaseMs) {
+      if (jobs.length === 0) return;
+      const now = new Date();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const job of jobs) {
+          let hasNewerAction = false;
+          if (job.actionType === 'mute' || job.actionType === 'unmute') {
+            const newer = await client.query(`
+              SELECT 1 FROM notification_writeback_jobs newer
+              WHERE newer.notification_id = $1
+                AND (newer.created_at, newer.id) > (
+                  SELECT current.created_at, current.id
+                  FROM notification_writeback_jobs current WHERE current.id = $2
+                )
+                AND newer.status <> 'superseded'
+                AND newer.action_type IN ('mute', 'unmute') AND newer.action_type <> $3
+              LIMIT 1
+            `, [job.notificationId, job.id, job.actionType]);
+            hasNewerAction = (newer.rowCount ?? 0) > 0;
+          }
+          if (hasNewerAction) {
+            const superseded = await client.query(`
+              UPDATE notification_writeback_jobs
+              SET status = 'superseded', retryable = false, lease_expires_at = NULL,
+                  last_error = 'Superseded by a newer notification action',
+                  completed_at = $1, updated_at = $2
+              WHERE id = $3 AND status = 'sending' AND lease_expires_at = $4
+            `, [now.toISOString(), now.toISOString(), job.id, job.leaseExpiresAt]);
+            if ((superseded.rowCount ?? 0) === 1) await refreshSyncStateOn(client, job.notificationId);
+            continue;
+          }
+          const terminal = !error.retryable || job.attemptCount >= job.maxAttempts;
+          const delay = Math.min(maxRetryMs, retryBaseMs * 2 ** Math.max(0, job.attemptCount - 1));
+          const nextAttemptAt = error.retryAt && error.retryAt > now
+            ? error.retryAt : new Date(now.getTime() + delay);
+          const failed = await client.query(`
+            UPDATE notification_writeback_jobs
+            SET status = $1, retryable = $2, next_attempt_at = $3,
+                lease_expires_at = NULL, last_error = $4,
+                completed_at = $5, updated_at = $6
+            WHERE id = $7 AND status = 'sending' AND lease_expires_at = $8
+          `, [
+            terminal ? 'failed' : 'pending',
+            error.retryable,
+            terminal ? now.toISOString() : nextAttemptAt.toISOString(),
+            error.message.slice(0, 1_000),
+            terminal ? now.toISOString() : null,
+            now.toISOString(),
+            job.id, job.leaseExpiresAt,
+          ]);
+          if ((failed.rowCount ?? 0) === 1) await refreshSyncStateOn(client, job.notificationId);
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
-    renewWritebackLeases() {
-      throw new Error('Writeback lease renewal uses the SQLite runtime composition');
+    async renewWritebackLeases(jobs, leaseMs) {
+      if (jobs.length === 0) return [];
+      const now = new Date();
+      const nowIso = now.toISOString();
+      const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
+      const renewed: WritebackClaimRow[] = [];
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const job of jobs) {
+          const result = await client.query(`
+            UPDATE notification_writeback_jobs
+            SET lease_expires_at = $1, updated_at = $2
+            WHERE id = $3 AND status = 'sending' AND lease_expires_at = $4
+          `, [leaseExpiresAt, nowIso, job.id, job.leaseExpiresAt]);
+          if ((result.rowCount ?? 0) === 1) renewed.push({ ...job, leaseExpiresAt });
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
+      return renewed;
     },
 
-    releaseUnattemptedWritebackJobs() {
-      throw new Error('Writeback release uses the SQLite runtime composition');
+    async releaseUnattemptedWritebackJobs(jobs) {
+      if (jobs.length === 0) return;
+      const now = new Date().toISOString();
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        for (const job of jobs) {
+          await client.query(`
+            UPDATE notification_writeback_jobs
+            SET status = 'pending', attempt_count = GREATEST(0, attempt_count - 1),
+                lease_expires_at = NULL, updated_at = $1
+            WHERE id = $2 AND status = 'sending' AND lease_expires_at = $3
+          `, [now, job.id, job.leaseExpiresAt]);
+        }
+        await client.query('COMMIT');
+      } catch (e) {
+        await client.query('ROLLBACK');
+        throw e;
+      } finally {
+        client.release();
+      }
     },
 
-    getNextScheduledWriteback() {
-      throw new Error('Writeback scheduling uses the SQLite runtime composition');
+    async getNextScheduledWriteback() {
+      const nextPending = await pool.query(`
+        SELECT jobs.next_attempt_at AS "nextAttemptAt"
+        FROM notification_writeback_jobs jobs
+        WHERE jobs.status = 'pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM notification_writeback_jobs earlier
+            WHERE earlier.notification_id = jobs.notification_id
+              AND (earlier.created_at, earlier.id) < (jobs.created_at, jobs.id)
+              AND earlier.status IN ('pending', 'sending')
+          )
+        ORDER BY jobs.next_attempt_at LIMIT 1
+      `);
+      const nextLease = await pool.query(`
+        SELECT lease_expires_at AS "nextAttemptAt"
+        FROM notification_writeback_jobs
+        WHERE status = 'sending' AND lease_expires_at IS NOT NULL
+        ORDER BY lease_expires_at LIMIT 1
+      `);
+      const candidates = [nextPending.rows[0], nextLease.rows[0]]
+        .filter((v): v is { nextAttemptAt: string } => !!v)
+        .sort((a, b) => Date.parse(a.nextAttemptAt) - Date.parse(b.nextAttemptAt));
+      return candidates[0] ?? null;
     },
 
-    refreshNotificationSyncState: refreshSyncState as unknown as (notificationId: string) => void,
+    refreshNotificationSyncState: refreshSyncState,
 
     wakeWritebackDispatcher() {
-      import('@/lib/notifications/notification-writeback').then(
-        m => m.wakeNotificationWritebackDispatcher(),
-      ).catch(() => { /* noop */ });
+      wakeNotificationWritebackDispatcher();
     },
   };
 }

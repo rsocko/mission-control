@@ -26,6 +26,12 @@ const singleJobConnectorIds = new Set<string>();
 
 let _web: NotificationWebPersistence | null = null;
 
+export function primeNotificationWebPersistenceForSynchronousCompatibility(
+  web: NotificationWebPersistence,
+): void {
+  _web = web;
+}
+
 async function resolveWeb(): Promise<NotificationWebPersistence> {
   if (_web) return _web;
   const repositories = await getWorkerPersistenceRepositories();
@@ -42,23 +48,31 @@ export async function enqueueNotificationDismissalWritebacks(
   notificationIds: string[],
 ): Promise<number> {
   const web = await resolveWeb();
-  const result = web.dismissNotificationsAndEnqueueWritebacks(notificationIds, new Date().toISOString());
+  const result = await web.dismissNotificationsAndEnqueueWritebacks(notificationIds, new Date().toISOString());
   return result.queuedCount;
 }
 
-export function mutateNotificationsAndEnqueueWritebacks(
+export async function mutateNotificationsAndEnqueueWritebacks(
   notificationIds: string[],
   action: NotificationMutationAction,
   changedAt: string,
-): NotificationMutationResult {
-  return requireWeb().mutateNotificationsAndEnqueueWritebacks(notificationIds, action, changedAt);
+): Promise<NotificationMutationResult> {
+  const web = await resolveWeb();
+  return web.mutateNotificationsAndEnqueueWritebacks(notificationIds, action, changedAt);
 }
 
 export function dismissNotificationsAndEnqueueWritebacks(
   notificationIds: string[],
   dismissedAt: string,
 ): { updatedCount: number; queuedCount: number } {
-  return requireWeb().dismissNotificationsAndEnqueueWritebacks(notificationIds, dismissedAt);
+  if (notificationIds.length === 0) return { updatedCount: 0, queuedCount: 0 };
+  const web = requireWeb();
+  if (!web.dismissNotificationsAndEnqueueWritebacksSync) {
+    throw new Error(
+      'Synchronous notification dismissal writeback is only supported by the SQLite persistence backend',
+    );
+  }
+  return web.dismissNotificationsAndEnqueueWritebacksSync(notificationIds, dismissedAt);
 }
 
 export function wakeNotificationWritebackDispatcher(): void {
@@ -70,14 +84,16 @@ export function wakeNotificationWritebackDispatcher(): void {
     })
     .finally(() => {
       dispatcherPromise = null;
-      scheduleNextWriteback();
+      void scheduleNextWriteback().catch((error) => {
+        logger.error({ err: error }, 'Notification writeback scheduling failed');
+      });
     });
 }
 
 export async function dispatchNotificationWritebacks(): Promise<void> {
   const web = await resolveWeb();
   while (true) {
-    const jobs = web.claimNextConnectorBatch({
+    const jobs = await web.claimNextConnectorBatch({
       batchSize: WRITEBACK_BATCH_SIZE,
       leaseMs: WRITEBACK_LEASE_MS,
       singleJobConnectorIds,
@@ -102,17 +118,17 @@ async function processWritebackBatch(jobs: WritebackRow[]): Promise<void> {
       'Connector initialization',
     );
   } catch (error) {
-    failJobs(jobs, error);
+    await failJobs(jobs, error);
     return;
   }
-  jobs = web.renewWritebackLeases(jobs, WRITEBACK_LEASE_MS);
+  jobs = await web.renewWritebackLeases(jobs, WRITEBACK_LEASE_MS);
   if (jobs.length === 0) return;
   if (
     !connector?.writeNotificationAction
     && !connector?.dismissAlert
     && !connector?.dismissAlerts
   ) {
-    failJobs(jobs, new ConnectorWritebackError(
+    await failJobs(jobs, new ConnectorWritebackError(
       connector
         ? 'Connector does not support notification writeback'
         : 'Connector is unavailable or has been removed',
@@ -130,15 +146,15 @@ async function processWritebackBatch(jobs: WritebackRow[]): Promise<void> {
         connector.dismissAlerts(jobs.map((job) => job.sourceId)),
         'Notification dismissal batch',
       );
-      web.completeWritebackJobs(jobs);
+      await web.completeWritebackJobs(jobs);
     } catch (error) {
-      failJobs(jobs, error);
+      await failJobs(jobs, error);
     }
     return;
   }
 
   rememberSingleJobConnector(jobs[0]!.connectorInstanceId);
-  web.releaseUnattemptedWritebackJobs(jobs.slice(1));
+  await web.releaseUnattemptedWritebackJobs(jobs.slice(1));
   const job = jobs[0]!;
   try {
     if (connector.writeNotificationAction) {
@@ -152,9 +168,9 @@ async function processWritebackBatch(jobs: WritebackRow[]): Promise<void> {
         `Notification ${job.actionType}`,
       );
     }
-    web.completeWritebackJobs([job]);
+    await web.completeWritebackJobs([job]);
   } catch (error) {
-    failJobs([job], error);
+    await failJobs([job], error);
   }
   await new Promise((resolve) => setTimeout(resolve, WRITEBACK_MIN_REQUEST_INTERVAL_MS));
 }
@@ -188,13 +204,13 @@ async function loadConnector(instanceId: string) {
   });
 }
 
-function failJobs(jobs: WritebackRow[], error: unknown): void {
+async function failJobs(jobs: WritebackRow[], error: unknown): Promise<void> {
   const message = error instanceof Error ? error.message : String(error);
   const retryable = !(error instanceof ConnectorWritebackError) || error.retryable;
   const providerRetryAt = error instanceof ConnectorWritebackError
     ? error.retryAt
     : undefined;
-  requireWeb().failWritebackJobs(
+  await requireWeb().failWritebackJobs(
     jobs,
     { message, retryable, retryAt: providerRetryAt },
     WRITEBACK_MAX_RETRY_MS,
@@ -206,23 +222,20 @@ function failJobs(jobs: WritebackRow[], error: unknown): void {
   );
 }
 
-function scheduleNextWriteback(): void {
+async function scheduleNextWriteback(): Promise<void> {
   if (retryTimer) clearTimeout(retryTimer);
-  try {
-    const next = requireWeb().getNextScheduledWriteback();
-    if (!next) return;
-    const delay = Math.max(0, Math.min(
-      WRITEBACK_MAX_RETRY_MS,
-      Date.parse(next.nextAttemptAt) - Date.now(),
-    ));
-    retryTimer = setTimeout(() => {
-      retryTimer = null;
-      wakeNotificationWritebackDispatcher();
-    }, delay);
-    retryTimer.unref?.();
-  } catch {
-    // Web persistence not yet initialized; skip scheduling
-  }
+  if (!_web) return;
+  const next = await _web.getNextScheduledWriteback();
+  if (!next) return;
+  const delay = Math.max(0, Math.min(
+    WRITEBACK_MAX_RETRY_MS,
+    Date.parse(next.nextAttemptAt) - Date.now(),
+  ));
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    wakeNotificationWritebackDispatcher();
+  }, delay);
+  retryTimer.unref?.();
 }
 
 function parseRecord(value: unknown): Record<string, unknown> {

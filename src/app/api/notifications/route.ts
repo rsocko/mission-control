@@ -21,14 +21,14 @@ export async function GET(request: Request) {
   try {
     const web = await getNotificationWebPersistence();
 
-    const recoveryCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-    web.recoverStaleActions(recoveryCutoff);
-
-    const result = await web.queryNotifications({ query, limit, cursor });
-
-    if (query.merchant && result.items.length === 0 && result.matchingCount === 0) {
+    if (query.merchant && !(await web.validateMerchantExists(query.merchant))) {
       return ApiErrors.badRequest(UNKNOWN_NOTIFICATION_MERCHANT_QUERY_ERROR);
     }
+
+    const recoveryCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    await web.recoverStaleActions(recoveryCutoff);
+
+    const result = await web.queryNotifications({ query, limit, cursor });
 
     const actionsByNotification = new Map<string, typeof result.actions>();
     for (const action of result.actions) {

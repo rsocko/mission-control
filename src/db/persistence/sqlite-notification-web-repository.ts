@@ -29,8 +29,106 @@ import {
   NOTIFICATION_IS_INBOX_SQL,
   NOTIFICATION_COUNTS_TOWARD_ATTENTION_SQL,
 } from '@/lib/notifications/lifecycle-sql';
+import {
+  primeNotificationWebPersistenceForSynchronousCompatibility,
+  wakeNotificationWritebackDispatcher,
+} from '@/lib/notifications/notification-writeback';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+
+const NOTIFICATION_SELECT_COLUMNS = `
+  id,
+  source_id AS "sourceId",
+  connector_type AS "connectorType",
+  connector_instance_id AS "connectorInstanceId",
+  title,
+  body,
+  level,
+  level_rank AS "levelRank",
+  category,
+  template_key AS "templateKey",
+  state,
+  read_state AS "readState",
+  disposition,
+  source_state AS "sourceState",
+  sync_state AS "syncState",
+  read_at AS "readAt",
+  handled_at AS "handledAt",
+  dismissed_at AS "dismissedAt",
+  resolved_at AS "resolvedAt",
+  archived_at AS "archivedAt",
+  muted_at AS "mutedAt",
+  snoozed_until AS "snoozedUntil",
+  source_resolved_at AS "sourceResolvedAt",
+  last_source_activity_at AS "lastSourceActivityAt",
+  last_source_activity_key AS "lastSourceActivityKey",
+  handled_source_activity_at AS "handledSourceActivityAt",
+  handled_source_activity_key AS "handledSourceActivityKey",
+  last_source_synced_at AS "lastSourceSyncedAt",
+  is_actionable AS "isActionable",
+  primary_action_id AS "primaryActionId",
+  ai_suggested_action_id AS "aiSuggestedActionId",
+  received_at AS "receivedAt",
+  sort_at AS "sortAt",
+  expires_at AS "expiresAt",
+  group_key AS "groupKey",
+  dedupe_key AS "dedupeKey",
+  related_task_id AS "relatedTaskId",
+  related_project_id AS "relatedProjectId",
+  related_entity_type AS "relatedEntityType",
+  related_entity_id AS "relatedEntityId",
+  navigation_target AS "navigationTarget",
+  reconcile_attempts AS "reconcileAttempts",
+  last_reconciled_at AS "lastReconciledAt",
+  stale_since AS "staleSince",
+  auto_resolve_reason AS "autoResolveReason",
+  metadata,
+  presentation,
+  enrichment_revision AS "enrichmentRevision",
+  enrichment_generation AS "enrichmentGeneration"
+`;
+
+const NOTIFICATION_ACTION_SELECT_COLUMNS = `
+  id,
+  notification_id AS "notificationId",
+  action_type AS "actionType",
+  label,
+  icon,
+  variant,
+  is_primary AS "isPrimary",
+  sort_order AS "sortOrder",
+  payload,
+  opens_external AS "opensExternal",
+  requires_confirmation AS "requiresConfirmation",
+  created_by AS "createdBy",
+  execution_state AS "executionState",
+  claimed_at AS "claimedAt",
+  completed_at AS "completedAt",
+  last_error AS "lastError"
+`;
+
+function parseJson(value: unknown): unknown {
+  return typeof value === 'string' ? JSON.parse(value) as unknown : value;
+}
+
+function normalizeNotificationRow(row: NotificationRow): NotificationRow {
+  return {
+    ...row,
+    metadata: parseJson(row.metadata),
+    presentation: parseJson(row.presentation),
+    isActionable: Boolean(row.isActionable),
+  };
+}
+
+function normalizeNotificationActionRow(row: NotificationActionRow): NotificationActionRow {
+  return {
+    ...row,
+    isPrimary: Boolean(row.isPrimary),
+    payload: parseJson(row.payload),
+    opensExternal: Boolean(row.opensExternal),
+    requiresConfirmation: Boolean(row.requiresConfirmation),
+  };
+}
 
 // ─── Query building (raw SQL) ───────────────────────────────────────────────
 
@@ -174,7 +272,7 @@ function mutationUpdateSql(
 ): { sql: string; parameters: (changedAt: string) => string[] } {
   switch (action) {
     case 'mark_read':
-      return {
+      const repository: NotificationWebPersistence = {
         sql: `UPDATE notifications
           SET read_state = 'read',
               read_at = COALESCE(read_at, ?),
@@ -367,6 +465,42 @@ export function createSqliteNotificationWebRepository(
     return { queued, pending: queued === 1 };
   }
 
+  function dismissAndEnqueueSync(
+    notificationIds: string[],
+    dismissedAt: string,
+  ): { updatedCount: number; queuedCount: number } {
+    if (notificationIds.length === 0) return { updatedCount: 0, queuedCount: 0 };
+    const ph = notificationIds.map(() => '?').join(',');
+    const transaction = sqlite.transaction(() => {
+      const rows = sqlite.prepare(`
+        SELECT id, source_id AS sourceId, connector_type AS connectorType,
+               connector_instance_id AS connectorInstanceId
+        FROM notifications WHERE id IN (${ph})
+      `).all(...notificationIds) as WritebackSourceRow[];
+      const queuedCount = insertDismissalWritebackRows(rows, dismissedAt);
+      const updateResult = sqlite.prepare(`
+        UPDATE notifications
+        SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
+            sync_state = CASE
+              WHEN EXISTS (
+                SELECT 1 FROM notification_writeback_jobs jobs
+                WHERE jobs.notification_id = notifications.id AND jobs.status = 'failed'
+              ) THEN 'failed'
+              WHEN EXISTS (
+                SELECT 1 FROM notification_writeback_jobs jobs
+                WHERE jobs.notification_id = notifications.id AND jobs.status IN ('pending', 'sending')
+              ) THEN 'pending'
+              ELSE 'synced'
+            END,
+            read_at = COALESCE(read_at, ?),
+            dismissed_at = ?
+        WHERE id IN (${ph})
+      `).run(dismissedAt, dismissedAt, ...notificationIds);
+      return { updatedCount: updateResult.changes, queuedCount };
+    });
+    return transaction.immediate();
+  }
+
   return {
     async queryNotifications(input) {
       const { query, limit, cursor } = input;
@@ -398,11 +532,12 @@ export function createSqliteNotificationWebRepository(
       const paginatedConditions = buildWhereClauses(query, cursor, paginatedParams);
       const orderDir = query.sort === 'oldest' ? 'ASC' : 'DESC';
       const paginatedWhere = paginatedConditions.length ? `WHERE ${paginatedConditions.join(' AND ')}` : '';
-      const rows = sqlite.prepare(`
-        SELECT * FROM notifications ${paginatedWhere}
+      const rows = (sqlite.prepare(`
+        SELECT ${NOTIFICATION_SELECT_COLUMNS} FROM notifications ${paginatedWhere}
         ORDER BY sort_at ${orderDir}, id ${orderDir}
         LIMIT ?
-      `).all(...paginatedParams, limit + 1) as NotificationRow[];
+      `).all(...paginatedParams, limit + 1) as NotificationRow[])
+        .map(normalizeNotificationRow);
 
       const hasMore = rows.length > limit;
       const items = hasMore ? rows.slice(0, limit) : rows;
@@ -412,12 +547,13 @@ export function createSqliteNotificationWebRepository(
       let actions: NotificationActionRow[] = [];
       if (notificationIds.length > 0) {
         const ph = notificationIds.map(() => '?').join(',');
-        actions = sqlite.prepare(`
-          SELECT * FROM notification_actions
+        actions = (sqlite.prepare(`
+          SELECT ${NOTIFICATION_ACTION_SELECT_COLUMNS} FROM notification_actions
           WHERE notification_id IN (${ph})
             AND execution_state = 'pending'
           ORDER BY sort_order ASC
-        `).all(...notificationIds) as NotificationActionRow[];
+        `).all(...notificationIds) as NotificationActionRow[])
+          .map(normalizeNotificationActionRow);
       }
 
       // Stats (always unfiltered)
@@ -519,7 +655,7 @@ export function createSqliteNotificationWebRepository(
       };
     },
 
-    recoverStaleActions(recoveryCutoff) {
+    async recoverStaleActions(recoveryCutoff) {
       sqlite.transaction((tx) => {
         const staleActions = tx.prepare(`
           SELECT id, notification_id AS notificationId, is_primary AS isPrimary
@@ -725,7 +861,7 @@ export function createSqliteNotificationWebRepository(
       `).run(now, ...ids).changes;
     },
 
-    mutateNotificationsAndEnqueueWritebacks(notificationIds, action, changedAt) {
+    async mutateNotificationsAndEnqueueWritebacks(notificationIds, action, changedAt) {
       if (notificationIds.length === 0) return { updatedCount: 0, queuedCount: 0, results: [] };
       const ph = notificationIds.map(() => '?').join(',');
       const transaction = sqlite.transaction(() => {
@@ -766,37 +902,12 @@ export function createSqliteNotificationWebRepository(
       return transaction.immediate();
     },
 
-    dismissNotificationsAndEnqueueWritebacks(notificationIds, dismissedAt) {
-      if (notificationIds.length === 0) return { updatedCount: 0, queuedCount: 0 };
-      const ph = notificationIds.map(() => '?').join(',');
-      const transaction = sqlite.transaction(() => {
-        const rows = sqlite.prepare(`
-          SELECT id, source_id AS sourceId, connector_type AS connectorType,
-                 connector_instance_id AS connectorInstanceId
-          FROM notifications WHERE id IN (${ph})
-        `).all(...notificationIds) as WritebackSourceRow[];
-        const queuedCount = insertDismissalWritebackRows(rows, dismissedAt);
-        const updateResult = sqlite.prepare(`
-          UPDATE notifications
-          SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
-              sync_state = CASE
-                WHEN EXISTS (
-                  SELECT 1 FROM notification_writeback_jobs jobs
-                  WHERE jobs.notification_id = notifications.id AND jobs.status = 'failed'
-                ) THEN 'failed'
-                WHEN EXISTS (
-                  SELECT 1 FROM notification_writeback_jobs jobs
-                  WHERE jobs.notification_id = notifications.id AND jobs.status IN ('pending', 'sending')
-                ) THEN 'pending'
-                ELSE 'synced'
-              END,
-              read_at = COALESCE(read_at, ?),
-              dismissed_at = ?
-          WHERE id IN (${ph})
-        `).run(dismissedAt, dismissedAt, ...notificationIds);
-        return { updatedCount: updateResult.changes, queuedCount };
-      });
-      return transaction.immediate();
+    dismissNotificationsAndEnqueueWritebacksSync(notificationIds, dismissedAt) {
+      return dismissAndEnqueueSync(notificationIds, dismissedAt);
+    },
+
+    async dismissNotificationsAndEnqueueWritebacks(notificationIds, dismissedAt) {
+      return dismissAndEnqueueSync(notificationIds, dismissedAt);
     },
 
     async listSavedViews() {
@@ -853,7 +964,7 @@ export function createSqliteNotificationWebRepository(
       };
     },
 
-    retryWritebacks(selector, ids, now) {
+    async retryWritebacks(selector, ids, now) {
       const ph = ids.map(() => '?').join(',');
       const transaction = sqlite.transaction(() => {
         const retryable = sqlite.prepare(`
@@ -907,7 +1018,7 @@ export function createSqliteNotificationWebRepository(
       sqlite.prepare(`DELETE FROM push_subscriptions WHERE endpoint = ?`).run(endpoint);
     },
 
-    claimNextConnectorBatch(input) {
+    async claimNextConnectorBatch(input) {
       const { batchSize, leaseMs, singleJobConnectorIds } = input;
       const now = new Date();
       const nowIso = now.toISOString();
@@ -977,7 +1088,7 @@ export function createSqliteNotificationWebRepository(
       return transaction.immediate();
     },
 
-    completeWritebackJobs(jobs) {
+    async completeWritebackJobs(jobs) {
       const now = new Date().toISOString();
       const transaction = sqlite.transaction(() => {
         for (const job of jobs) {
@@ -992,7 +1103,7 @@ export function createSqliteNotificationWebRepository(
       transaction.immediate();
     },
 
-    failWritebackJobs(jobs, error, maxRetryMs, retryBaseMs) {
+    async failWritebackJobs(jobs, error, maxRetryMs, retryBaseMs) {
       const now = new Date();
       const transaction = sqlite.transaction(() => {
         for (const job of jobs) {
@@ -1041,7 +1152,7 @@ export function createSqliteNotificationWebRepository(
       transaction.immediate();
     },
 
-    renewWritebackLeases(jobs, leaseMs) {
+    async renewWritebackLeases(jobs, leaseMs) {
       const now = new Date();
       const nowIso = now.toISOString();
       const leaseExpiresAt = new Date(now.getTime() + leaseMs).toISOString();
@@ -1062,7 +1173,7 @@ export function createSqliteNotificationWebRepository(
       return renewed;
     },
 
-    releaseUnattemptedWritebackJobs(jobs) {
+    async releaseUnattemptedWritebackJobs(jobs) {
       if (jobs.length === 0) return;
       const now = new Date().toISOString();
       const transaction = sqlite.transaction(() => {
@@ -1078,7 +1189,7 @@ export function createSqliteNotificationWebRepository(
       transaction.immediate();
     },
 
-    getNextScheduledWriteback() {
+    async getNextScheduledWriteback() {
       const nextPending = sqlite.prepare(`
         SELECT jobs.next_attempt_at AS nextAttemptAt
         FROM notification_writeback_jobs jobs
@@ -1103,12 +1214,14 @@ export function createSqliteNotificationWebRepository(
       return candidates[0] ?? null;
     },
 
-    refreshNotificationSyncState: refreshSyncState,
+    async refreshNotificationSyncState(notificationId) {
+      refreshSyncState(notificationId);
+    },
 
     wakeWritebackDispatcher() {
-      import('@/lib/notifications/notification-writeback').then(
-        m => m.wakeNotificationWritebackDispatcher(),
-      ).catch(() => { /* noop if module unavailable */ });
+      wakeNotificationWritebackDispatcher();
     },
   };
+  primeNotificationWebPersistenceForSynchronousCompatibility(repository);
+  return repository;
 }

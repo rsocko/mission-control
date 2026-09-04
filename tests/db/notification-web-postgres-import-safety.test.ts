@@ -67,4 +67,22 @@ describe('notification web PostgreSQL import safety', () => {
       .filter(spec => DB_HANDLE_SPECIFIER.test(spec) || SQLITE_DRIVER.test(spec));
     expect(forbidden).toEqual([]);
   });
+
+  it('PostgreSQL notification web repository has no SQLite coupling in its execution path', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/db/postgres/repositories/notification-web-repository.ts'),
+      'utf8',
+    );
+    const SQLITE_PERSISTENCE = /notification-web-repository|persistence\/sqlite/;
+    const forbidden = valueImportSpecifiers(source)
+      .filter(spec =>
+        DB_HANDLE_SPECIFIER.test(spec)
+        || SQLITE_DRIVER.test(spec)
+        || /better-sqlite3/.test(spec)
+        || (/sqlite/i.test(spec) && SQLITE_PERSISTENCE.test(spec)));
+    expect(forbidden).toEqual([]);
+    // The redesigned adapter must not leave deferred/SQLite-only throw stubs.
+    expect(source).not.toMatch(/uses the SQLite runtime composition/);
+    expect(source).not.toMatch(/implementation deferred to runtime composition/);
+  });
 });

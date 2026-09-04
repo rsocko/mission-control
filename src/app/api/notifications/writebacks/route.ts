@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
 
   const web = await getNotificationWebPersistence();
-  const { retried } = web.retryWritebacks(selector, uniqueIds, now);
+  const { retried } = await web.retryWritebacks(selector, uniqueIds, now);
 
   if (retried.length > 0) web.wakeWritebackDispatcher();
   return Response.json({

@@ -292,24 +292,24 @@ describe('notification writeback outbox', () => {
       },
     ]);
 
-    expect(mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
-    expect(mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 0,
     });
-    expect(mutateAndEnqueue(['github-handle'], 'mark_done', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-handle'], 'mark_done', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
-    expect(mutateAndEnqueue(['github-mute'], 'mute', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-mute'], 'mute', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
     const unmutedAt = now;
-    expect(mutateAndEnqueue(['github-mute'], 'unmute', unmutedAt)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-mute'], 'unmute', unmutedAt)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
@@ -382,13 +382,13 @@ describe('notification writeback outbox', () => {
       },
     ]);
 
-    mutateAndEnqueue(['github-independent'], 'mark_read', now);
-    mutateAndEnqueue(
+    await mutateAndEnqueue(['github-independent'], 'mark_read', now);
+    await mutateAndEnqueue(
       ['github-independent'],
       'mark_done',
       new Date(Date.parse(now) + 1).toISOString(),
     );
-    const localResult = mutateAndEnqueue(['local-handle'], 'mark_done', now);
+    const localResult = await mutateAndEnqueue(['local-handle'], 'mark_done', now);
 
     expect(sqlite.prepare(`
       SELECT action_type AS action, status
@@ -462,7 +462,7 @@ describe('notification writeback outbox', () => {
       receivedAt: now,
       sortAt: now,
     });
-    mutateAndEnqueue(['github-auth-failure'], 'mark_done', now);
+    await mutateAndEnqueue(['github-auth-failure'], 'mark_done', now);
     const { ConnectorWritebackError } = await import('@/lib/connectors');
     const connector: import('@/lib/connectors').IConnector = {
       id: 'github-failure',
@@ -510,7 +510,7 @@ describe('notification writeback outbox', () => {
       receivedAt: now,
       sortAt: now,
     });
-    mutateAndEnqueue(['github-isolated'], 'mark_read', now);
+    await mutateAndEnqueue(['github-isolated'], 'mark_read', now);
     sqlite.prepare(`
       UPDATE notification_writeback_jobs
       SET connector_instance_id = 'github-b'

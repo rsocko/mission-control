@@ -133,7 +133,7 @@ export async function POST(request: Request) {
           const changes = await web.bulkMarkReadDemo(ids, now);
           return response(changes);
         }
-        return writebackResponse(response, web.mutateNotificationsAndEnqueueWritebacks(
+        return writebackResponse(response, await web.mutateNotificationsAndEnqueueWritebacks(
           ids,
           'mark_read',
           now,
@@ -148,7 +148,7 @@ export async function POST(request: Request) {
       case 'dismiss': {
         const result = isDemoMode()
           ? { updatedCount: await web.bulkDismissDemo(ids, now), queuedCount: 0 }
-          : web.dismissNotificationsAndEnqueueWritebacks(ids, now);
+          : await web.dismissNotificationsAndEnqueueWritebacks(ids, now);
         if (result.queuedCount > 0) web.wakeWritebackDispatcher();
         return response(result.updatedCount, result.queuedCount);
       }
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
           const changes = await web.bulkHandleDemo(ids, now);
           return response(changes);
         }
-        return writebackResponse(response, web.mutateNotificationsAndEnqueueWritebacks(
+        return writebackResponse(response, await web.mutateNotificationsAndEnqueueWritebacks(
           ids,
           'mark_done',
           now,
@@ -168,7 +168,7 @@ export async function POST(request: Request) {
 
       case 'mute':
       case 'unmute':
-        return writebackResponse(response, web.mutateNotificationsAndEnqueueWritebacks(
+        return writebackResponse(response, await web.mutateNotificationsAndEnqueueWritebacks(
           ids,
           action,
           now,

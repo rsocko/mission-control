@@ -10,11 +10,13 @@
  * Each metric is self-contained with a slug, computation function,
  * and typed result. Callers request the slugs they need and receive
  * a typed map of results — only requested metrics are computed.
+ *
+ * Every read is delegated to the composed `analytics.kpis` repository; this
+ * module owns no driver, SQL, transaction, or backend selection.
  */
 
-import db from '@/db';
-import { tasks, notifications, myDayItems, focusItems, routines, routineCompletions, triageItems } from '@/db/schema';
-import { and, eq, gte, lt, lte, sql, notInArray, inArray, isNotNull } from 'drizzle-orm';
+import type { KpiAnalyticsRepository } from '@/db/persistence/analytics';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   formatDateInLocalTimezone,
   getLocalDateBoundsISO,
@@ -23,14 +25,12 @@ import {
   getLocalDayBoundsISO,
   parseStoredTimestamp,
 } from '@/lib/utils/date';
+import type { CadenceConfig } from '@/lib/routines/streaks';
 import {
   NEXT_7_DAYS,
   NEXT_7_DAYS_DESCRIPTION,
   NEXT_7_DAYS_LABEL,
 } from '@/lib/tasks/due-window';
-import type { CadenceConfig } from '@/lib/routines/streaks';
-import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
-import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -106,102 +106,96 @@ function getTodayBounds() {
   return getLocalDayBoundsISO();
 }
 
-// ─── Open-task base condition ───────────────────────────────────────────────
+// ─── Persistence ────────────────────────────────────────────────────────────
 
-const openCondition = notInArray(tasks.status, ['done', 'cancelled']);
-
-async function countOpen(extra?: ReturnType<typeof eq>): Promise<number> {
-  const where = extra ? and(openCondition, extra) : openCondition;
-  const [row] = await db.select({ count: sql<number>`count(*)` }).from(tasks).where(where);
-  return Number(row?.count ?? 0);
+async function kpiRepository(): Promise<KpiAnalyticsRepository> {
+  return (await getWorkerPersistenceRepositories()).analytics.kpis;
 }
 
 // ─── Individual KPI Computations ────────────────────────────────────────────
 
-async function computeTotalOpen(): Promise<KpiResult> {
-  const value = await countOpen();
+async function computeTotalOpen(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasks();
   return { slug: 'total-open', label: 'Total Open', value, type: 'counter', accent: 'blue' };
 }
 
-async function computeOverdue(today: string): Promise<KpiResult> {
-  const value = await countOpen(lt(tasks.dueDate, today));
+async function computeOverdue(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
+  const value = await repository.countOpenTasksDueBefore(today);
   return {
     slug: 'overdue', label: 'Overdue', value, type: 'counter',
     accent: value > 0 ? 'red' : 'green',
   };
 }
 
-async function computeDueThisWeek(today: string, weekFromNow: string): Promise<KpiResult> {
-  const value = await countOpen(and(gte(tasks.dueDate, today), lte(tasks.dueDate, weekFromNow)));
+async function computeDueThisWeek(
+  repository: KpiAnalyticsRepository,
+  today: string,
+  weekFromNow: string,
+): Promise<KpiResult> {
+  const value = await repository.countOpenTasksDueBetween({ from: today, to: weekFromNow });
   return { slug: 'due-this-week', label: NEXT_7_DAYS_LABEL, value, type: 'counter', accent: 'amber' };
 }
 
-async function computeUnreadAlerts(): Promise<KpiResult> {
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(notifications)
-    .where(notificationNeedsAttention());
-  return { slug: 'unread-notifications', label: 'Unread Notifications', value: Number(row?.count ?? 0), type: 'counter', accent: 'orange' };
+async function computeUnreadAlerts(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countNotificationsNeedingAttention();
+  return { slug: 'unread-notifications', label: 'Unread Notifications', value, type: 'counter', accent: 'orange' };
 }
 
-async function computeMyDay(today: string): Promise<KpiResult> {
-  const rows = await db.select({ taskId: myDayItems.taskId })
-    .from(myDayItems)
-    .where(eq(myDayItems.date, today));
-  const myDayTaskIds = rows.map(r => r.taskId);
+async function computeMyDay(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
+  const myDayTaskIds = await repository.listMyDayTaskIds(today);
   if (myDayTaskIds.length === 0) {
     return { slug: 'my-day', label: 'My Day', value: 0, type: 'counter', accent: 'cyan' };
   }
-  const value = await countOpen(inArray(tasks.id, myDayTaskIds));
+  const value = await repository.countOpenTasksInIds(myDayTaskIds);
   return { slug: 'my-day', label: 'My Day', value, type: 'counter', accent: 'cyan' };
 }
 
-async function computeHighPriority(): Promise<KpiResult> {
-  const value = await countOpen(inArray(tasks.priority, ['high', 'critical']));
+async function computeHighPriority(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasksWithPriorities(['high', 'critical']);
   return {
     slug: 'high-priority', label: 'High Priority', value, type: 'counter',
     accent: value > 0 ? 'orange' : 'green',
   };
 }
 
-async function computeAssignedToMe(): Promise<KpiResult> {
-  const value = await countOpen(isNotNull(tasks.assignee));
+async function computeAssignedToMe(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasksWithAssignee();
   return { slug: 'assigned-to-me', label: 'Assigned to Me', value, type: 'counter', accent: 'indigo' };
 }
 
-async function computeCompletedToday(): Promise<KpiResult> {
+async function computeCompletedToday(repository: KpiAnalyticsRepository): Promise<KpiResult> {
   const { todayStart, tomorrowStart } = getTodayBounds();
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(tasks)
-    .where(and(eq(tasks.status, 'done'), timestampGte(tasks.completedAt, todayStart), timestampLt(tasks.completedAt, tomorrowStart)));
-  return { slug: 'completed-today', label: 'Done Today', value: Number(row?.count ?? 0), type: 'counter', accent: 'emerald' };
+  const value = await repository.countTasksCompletedIn({
+    startInclusive: todayStart,
+    endExclusive: tomorrowStart,
+  });
+  return { slug: 'completed-today', label: 'Done Today', value, type: 'counter', accent: 'emerald' };
 }
 
-async function computeThisWeekProgress(today: string): Promise<KpiResult> {
+async function computeThisWeekProgress(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
   const monday = getWeekMonday(today);
   const sunday = getWeekSunday(monday);
   const { dayStart: mondayISO } = getLocalDateBoundsISO(monday);
   const { nextDayStart: weekEndExclusiveISO } = getLocalDateBoundsISO(sunday);
 
   // Tasks due this week (open or completed)
-  const [totalRow] = await db.select({ count: sql<number>`count(*)` })
-    .from(tasks)
-    .where(and(
-      sql`${tasks.status} != 'cancelled'`,
-      gte(tasks.dueDate, monday),
-      lte(tasks.dueDate, sunday),
-    ));
+  const total = await repository.countNonCancelledTasksDueBetween({ from: monday, to: sunday });
 
   // Completed this week
-  const [doneRow] = await db.select({ count: sql<number>`count(*)` })
-    .from(tasks)
-    .where(and(
-      eq(tasks.status, 'done'),
-      timestampGte(tasks.completedAt, mondayISO),
-      timestampLt(tasks.completedAt, weekEndExclusiveISO),
-    ));
+  const done = await repository.countTasksCompletedIn({
+    startInclusive: mondayISO,
+    endExclusive: weekEndExclusiveISO,
+  });
 
-  const total = Number(totalRow?.count ?? 0);
-  const done = Number(doneRow?.count ?? 0);
   const safeTotal = Math.max(total, done);
 
   return {
@@ -210,21 +204,23 @@ async function computeThisWeekProgress(today: string): Promise<KpiResult> {
   };
 }
 
-async function computeRoutinesKept(today: string): Promise<KpiResult> {
+async function computeRoutinesKept(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
   const monday = getWeekMonday(today);
   const sunday = getWeekSunday(monday);
 
-  const activeRoutines = await db.select()
-    .from(routines)
-    .where(and(eq(routines.isActive, true), eq(routines.isArchived, false)));
+  const activeRoutines = await repository.listActiveRoutines();
 
   if (activeRoutines.length === 0) {
     return { slug: 'routines-kept', label: 'Routines', value: 0, max: 0, type: 'percentage', accent: 'green' };
   }
 
-  const weekCompletions = await db.select()
-    .from(routineCompletions)
-    .where(and(gte(routineCompletions.date, monday), lte(routineCompletions.date, sunday)));
+  const weekCompletions = await repository.listRoutineCompletionsBetween({
+    from: monday,
+    to: sunday,
+  });
 
   let totalExpected = 0;
   let totalCompleted = 0;
@@ -265,23 +261,19 @@ async function computeRoutinesKept(today: string): Promise<KpiResult> {
   };
 }
 
-async function computeStreak(today: string): Promise<KpiResult> {
+async function computeStreak(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
   const daysToCheck = 90;
   const startDate = getDaysAgo(today, daysToCheck);
   const { dayStart: startDateISO } = getLocalDateBoundsISO(startDate);
 
-  const completions = await db.select({
-    completedAt: tasks.completedAt,
-  })
-    .from(tasks)
-    .where(and(
-      eq(tasks.status, 'done'),
-      timestampGte(tasks.completedAt, startDateISO),
-    ));
+  const completions = await repository.listCompletedTimestampsSince(startDateISO);
 
-  const completedDates = new Set(completions.flatMap((completion) => (
-    completion.completedAt
-      ? [formatDateInLocalTimezone(new Date(parseStoredTimestamp(completion.completedAt)))]
+  const completedDates = new Set(completions.flatMap((completedAt) => (
+    completedAt
+      ? [formatDateInLocalTimezone(new Date(parseStoredTimestamp(completedAt)))]
       : []
   )));
 
@@ -318,14 +310,11 @@ async function computeStreak(today: string): Promise<KpiResult> {
   };
 }
 
-async function computeFocus3(today: string): Promise<KpiResult> {
-  const items = await db.select({
-    id: focusItems.id,
-    status: tasks.status,
-  })
-    .from(focusItems)
-    .innerJoin(tasks, eq(focusItems.taskId, tasks.id))
-    .where(and(eq(focusItems.scope, 'today'), eq(focusItems.date, today)));
+async function computeFocus3(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
+  const items = await repository.listFocusItemStatuses('today', today);
 
   const total = items.length;
   const done = items.filter(i => i.status === 'done').length;
@@ -341,7 +330,10 @@ async function computeFocus3(today: string): Promise<KpiResult> {
   };
 }
 
-async function computeDailyAvg(today: string): Promise<KpiResult> {
+async function computeDailyAvg(
+  repository: KpiAnalyticsRepository,
+  today: string,
+): Promise<KpiResult> {
   const days = 7;
   const sparkline: number[] = [];
 
@@ -349,14 +341,10 @@ async function computeDailyAvg(today: string): Promise<KpiResult> {
     const date = getDaysAgo(today, i);
     const { dayStart, nextDayStart } = getLocalDateBoundsISO(date);
 
-    const [row] = await db.select({ count: sql<number>`count(*)` })
-      .from(tasks)
-      .where(and(
-        eq(tasks.status, 'done'),
-        timestampGte(tasks.completedAt, dayStart),
-        timestampLt(tasks.completedAt, nextDayStart),
-      ));
-    sparkline.push(Number(row?.count ?? 0));
+    sparkline.push(await repository.countTasksCompletedIn({
+      startInclusive: dayStart,
+      endExclusive: nextDayStart,
+    }));
   }
 
   const avg = sparkline.length > 0 ? sparkline.reduce((a, b) => a + b, 0) / sparkline.length : 0;
@@ -368,67 +356,47 @@ async function computeDailyAvg(today: string): Promise<KpiResult> {
   };
 }
 
-async function computeTriagePending(): Promise<KpiResult> {
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(triageItems)
-    .where(eq(triageItems.status, 'pending'));
-  const value = Number(row?.count ?? 0);
+async function computeTriagePending(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countTriageItemsWithStatus('pending');
   return {
     slug: 'triage-pending', label: 'Triage Pending', value, type: 'counter',
     accent: value > 5 ? 'amber' : 'slate',
   };
 }
 
-async function computeTriageStale(): Promise<KpiResult> {
+async function computeTriageStale(repository: KpiAnalyticsRepository): Promise<KpiResult> {
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(triageItems)
-    .where(and(eq(triageItems.status, 'pending'), lt(triageItems.capturedAt, sevenDaysAgo)));
-  const value = Number(row?.count ?? 0);
+  const value = await repository.countTriageItemsWithStatusCapturedBefore('pending', sevenDaysAgo);
   return {
     slug: 'triage-stale', label: 'Triage Stale', value, type: 'counter',
     accent: value > 0 ? 'red' : 'slate',
   };
 }
 
-async function computeDocActionsPending(): Promise<KpiResult> {
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(tasks)
-    .where(and(
-      eq(tasks.connectorType, 'document-intelligence'),
-      notInArray(tasks.status, ['done', 'cancelled']),
-    ));
-  const value = Number(row?.count ?? 0);
+async function computeDocActionsPending(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasksByConnectorType('document-intelligence');
   return {
     slug: 'doc-actions-pending', label: 'Doc Actions', value, type: 'counter',
     accent: value > 3 ? 'indigo' : 'slate',
   };
 }
 
-async function computeDocStatementsMissing(): Promise<KpiResult> {
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(notifications)
-    .where(and(
-      eq(notifications.connectorType, 'document-intelligence'),
-      notificationNeedsAttention(),
-      eq(notifications.category, 'document'),
-    ));
-  const value = Number(row?.count ?? 0);
+async function computeDocStatementsMissing(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countNotificationsNeedingAttentionInCategory(
+    'document-intelligence',
+    'document',
+  );
   return {
     slug: 'doc-statements-missing', label: 'Missing Stmts', value, type: 'counter',
     accent: value > 0 ? 'purple' : 'slate',
   };
 }
 
-async function computeDocEobUnmatched(): Promise<KpiResult> {
-  const [row] = await db.select({ count: sql<number>`count(*)` })
-    .from(notifications)
-    .where(and(
-      eq(notifications.connectorType, 'document-intelligence'),
-      notificationNeedsAttention(),
-      eq(notifications.category, 'medical'),
-    ));
-  const value = Number(row?.count ?? 0);
+async function computeDocEobUnmatched(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countNotificationsNeedingAttentionInCategory(
+    'document-intelligence',
+    'medical',
+  );
   return {
     slug: 'doc-eob-unmatched', label: 'Unmatched EOBs', value, type: 'counter',
     accent: value > 0 ? 'pink' : 'slate',
@@ -437,27 +405,31 @@ async function computeDocEobUnmatched(): Promise<KpiResult> {
 
 // ─── KPI Registry ───────────────────────────────────────────────────────────
 
-type KpiComputer = (today: string, weekFromNow: string) => Promise<KpiResult>;
+type KpiComputer = (
+  repository: KpiAnalyticsRepository,
+  today: string,
+  weekFromNow: string,
+) => Promise<KpiResult>;
 
 const KPI_REGISTRY: Record<KpiSlug, KpiComputer> = {
-  'total-open': () => computeTotalOpen(),
-  'overdue': (today) => computeOverdue(today),
-  'due-this-week': (today, weekFromNow) => computeDueThisWeek(today, weekFromNow),
-  'unread-notifications': () => computeUnreadAlerts(),
-  'my-day': (today) => computeMyDay(today),
-  'high-priority': () => computeHighPriority(),
-  'assigned-to-me': () => computeAssignedToMe(),
-  'completed-today': () => computeCompletedToday(),
-  'this-week-progress': (today) => computeThisWeekProgress(today),
-  'routines-kept': (today) => computeRoutinesKept(today),
-  'streak': (today) => computeStreak(today),
-  'focus-3': (today) => computeFocus3(today),
-  'daily-avg': (today) => computeDailyAvg(today),
-  'triage-pending': () => computeTriagePending(),
-  'triage-stale': () => computeTriageStale(),
-  'doc-actions-pending': () => computeDocActionsPending(),
-  'doc-statements-missing': () => computeDocStatementsMissing(),
-  'doc-eob-unmatched': () => computeDocEobUnmatched(),
+  'total-open': (repository) => computeTotalOpen(repository),
+  'overdue': (repository, today) => computeOverdue(repository, today),
+  'due-this-week': (repository, today, weekFromNow) => computeDueThisWeek(repository, today, weekFromNow),
+  'unread-notifications': (repository) => computeUnreadAlerts(repository),
+  'my-day': (repository, today) => computeMyDay(repository, today),
+  'high-priority': (repository) => computeHighPriority(repository),
+  'assigned-to-me': (repository) => computeAssignedToMe(repository),
+  'completed-today': (repository) => computeCompletedToday(repository),
+  'this-week-progress': (repository, today) => computeThisWeekProgress(repository, today),
+  'routines-kept': (repository, today) => computeRoutinesKept(repository, today),
+  'streak': (repository, today) => computeStreak(repository, today),
+  'focus-3': (repository, today) => computeFocus3(repository, today),
+  'daily-avg': (repository, today) => computeDailyAvg(repository, today),
+  'triage-pending': (repository) => computeTriagePending(repository),
+  'triage-stale': (repository) => computeTriageStale(repository),
+  'doc-actions-pending': (repository) => computeDocActionsPending(repository),
+  'doc-statements-missing': (repository) => computeDocStatementsMissing(repository),
+  'doc-eob-unmatched': (repository) => computeDocEobUnmatched(repository),
 };
 
 // ─── Public API ─────────────────────────────────────────────────────────────
@@ -476,8 +448,9 @@ export async function computeKpis(
     ? slugs.filter((s): s is KpiSlug => s in KPI_REGISTRY)
     : (Object.keys(KPI_REGISTRY) as KpiSlug[]);
 
+  const repository = await kpiRepository();
   const results = await Promise.all(
-    requested.map(slug => KPI_REGISTRY[slug](today, weekFromNow)),
+    requested.map(slug => KPI_REGISTRY[slug](repository, today, weekFromNow)),
   );
 
   const kpis = Object.fromEntries(results.map(r => [r.slug, r])) as Record<string, KpiResult>;

@@ -497,6 +497,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  analytics: new Proxy({} as WorkerPersistenceRepositories['analytics'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().analytics[
+        property as keyof WorkerPersistenceRepositories['analytics']
+      ]
+    ),
+  }),
 };
 const semanticPublicationRuntimeService: SemanticPublicationService = {
   upsert: async (entityType, entityId) => {

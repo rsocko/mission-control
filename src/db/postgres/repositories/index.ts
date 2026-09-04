@@ -40,6 +40,7 @@ import {
   createPostgresNotificationEntityLinkingRepository,
 } from './notification-entity-linking-repository';
 import { createPostgresExternalAgentControlRepository } from './external-agent-control-repository';
+import { createPostgresAnalyticsPersistence } from './analytics-repositories';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -83,6 +84,7 @@ export {
   createPostgresNotificationEntityLinkingRepository,
 } from './notification-entity-linking-repository';
 export { createPostgresExternalAgentControlRepository } from './external-agent-control-repository';
+export { createPostgresAnalyticsPersistence } from './analytics-repositories';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -178,5 +180,6 @@ export function createPostgresWorkerPersistenceRepositories(
       recovery: createPostgresFinanceConnectionRecoveryPersistence(pool),
     },
     ideationWorkspaces: createPostgresIdeationWorkspaceRepository(pool),
+    analytics: createPostgresAnalyticsPersistence(pool),
   };
 }

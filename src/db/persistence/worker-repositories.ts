@@ -14,6 +14,7 @@ import type {
   NotificationEntityLinkingRepository,
 } from './notification-entity-linking';
 import type { ExternalAgentControlPersistence } from './external-agent-control';
+import type { AnalyticsPersistence } from './analytics';
 import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
 
 export interface SyncRunSummary {
@@ -81,4 +82,13 @@ export interface WorkerPersistenceRepositories {
    * with any other worker surface.
    */
   ideationWorkspaces: IdeationWorkspaceRepository;
+  /**
+   * Layer 17: the read-only derived-analytics surfaces (dashboard/reset KPIs,
+   * the `/insights` query layer, cumulative flow, and the tag/word insight
+   * services). Published as its own top-level slot because these read models
+   * share no rows and no serialization namespace with any other worker
+   * surface, and grouped into one slot because they are registered atomically:
+   * a backend supports every analytics surface or none.
+   */
+  analytics: AnalyticsPersistence;
 }

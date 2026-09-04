@@ -116,6 +116,7 @@ const mocks = vi.hoisted(() => {
         externalAgentControl: {} as WorkerPersistenceRepositories['externalAgentControl'],
         finance: {} as WorkerPersistenceRepositories['finance'],
         ideationWorkspaces: {} as WorkerPersistenceRepositories['ideationWorkspaces'],
+        analytics: {} as WorkerPersistenceRepositories['analytics'],
       };
       workerRepositories.push(repository);
       return repository;

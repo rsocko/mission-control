@@ -63,6 +63,7 @@ import {
 import { loadFinanceInsightProjectionFacts } from './sqlite-finance-insight-projection-facts';
 import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-query';
 import { createSqliteExternalAgentControlRepository } from './sqlite-external-agent-control-repository';
+import { createSqliteAnalyticsPersistence } from './sqlite-analytics-repositories';
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
@@ -183,6 +184,7 @@ export function createSqliteWorkerPersistenceRepositories(
     externalAgentControl: createSqliteExternalAgentControlRepository(sqlite),
     finance,
     ideationWorkspaces: new SqliteIdeationWorkspaceRepository(sqlite),
+    analytics: createSqliteAnalyticsPersistence(db),
   };
   return repositories;
 }

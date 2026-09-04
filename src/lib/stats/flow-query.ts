@@ -1,7 +1,5 @@
-import db from '@/db';
-import { getTaskTransitionsInRange } from '@/db/task-history';
-import { hubProjects, taskProjects, tasks } from '@/db/schema';
-import { asc, eq } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { FlowAnalyticsRepository } from '@/db/persistence/analytics';
 import {
   computeFlowReport,
   type FlowFilters,
@@ -34,33 +32,29 @@ export interface FlowInsightsQuery {
   filters?: FlowFilters;
 }
 
+const FLOW_EVENT_TYPES = [
+  'baseline',
+  'status_changed',
+  'reopened',
+  'project_added',
+  'project_removed',
+] as const;
+
+async function flowRepository(): Promise<FlowAnalyticsRepository> {
+  return (await getWorkerPersistenceRepositories()).analytics.flow;
+}
+
 export async function computeFlowInsights(query: FlowInsightsQuery): Promise<FlowInsightsResult> {
   const now = query.now ?? new Date().toISOString();
+  const repository = await flowRepository();
   const [taskRows, membershipRows, projectRows, events] = await Promise.all([
-    db.select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      source: tasks.connectorType,
-    }).from(tasks).where(eq(tasks.isChecklistItem, false)),
-    db.select().from(taskProjects),
-    db.select({
-      id: hubProjects.id,
-      name: hubProjects.name,
-      color: hubProjects.color,
-    }).from(hubProjects).where(eq(hubProjects.hidden, false)).orderBy(asc(hubProjects.name)),
-    getTaskTransitionsInRange({
-      start: '0001-01-01T00:00:00.000Z',
-      end: now,
-      eventTypes: [
-        'baseline',
-        'status_changed',
-        'reopened',
-        'project_added',
-        'project_removed',
-      ],
-    }),
+    repository.listFlowTasks(),
+    repository.listTaskProjectMemberships(),
+    repository.listVisibleProjects(),
+    repository.listTaskTransitions(
+      { startInclusive: '0001-01-01T00:00:00.000Z', endExclusive: now },
+      FLOW_EVENT_TYPES,
+    ),
   ]);
 
   const projectIdsByTask = new Map<string, string[]>();

@@ -1587,6 +1587,108 @@ and is the first ratchet field in the programme to be fully retired.
 remain Tier A: they are tainted through `src/lib/ai/ideation-expand.ts` and
 `src/lib/ai/config-resolver.ts`, which belong to the AI provider layer.
 
+## Web/API PostgreSQL parity: Layer L17 (derived analytics: stats and insights)
+
+The read-only derived-analytics surfaces — dashboard and reset KPIs, the
+`/insights` query layer, cumulative flow, and the tag and word insight services
+— now select their backend through the composed worker persistence facade. See
+[analytics-persistence.md](./analytics-persistence.md) for the full contract,
+method inventory, and translation rules.
+
+`WorkerPersistenceRepositories` gains a top-level `analytics` slot holding five
+sub-repositories (`kpis`, `insights`, `flow`, `tagInsights`, `wordInsights`).
+The slot is top-level because these read models share no rows and no
+serialization namespace with any other worker surface; the five members live
+under one slot rather than as five top-level slots because they are registered
+atomically, so a backend supports every analytics surface or none.
+
+`src/lib/stats/index.ts`, `src/lib/stats/insights.ts`,
+`src/lib/stats/flow-query.ts`, `src/lib/tag-insights/service.ts`, and
+`src/lib/word-insights/service.ts` each hold an async repository resolver
+instead of a database handle, so none evaluates a driver at import time. Every
+exported signature, JavaScript reducer, date and timezone computation, clamp,
+and error string is unchanged. All six owned route handlers are unchanged:
+none of them ever imported the `@/db` namespace, so the whole decrement is
+transitive and `directTaintSourceRoutes` and `directDbNamespaceRoutes` are
+unchanged at 124 and 125.
+
+No DDL changed in L17, and none could: the layer is entirely read-only. No
+column, table, constraint, default, or index was added, and every table it
+reads — `tasks`, `task_projects`, `task_tags`, `tags`, `hub_projects`,
+`project_phases`, `project_phase_items`, `task_history_events`, `routines`,
+`routine_completions`, `notifications`, `triage_items`, `my_day_items`,
+`focus_items`, `connector_configs` — already ships in `drizzle/postgres`.
+
+Concurrency and ordering parity:
+
+- Neither backend opens a transaction, takes a row lock, or raises the
+  isolation level. The multi-query composites (`computeKpis` and the eleven-way
+  insights summary fan-out) were non-atomic under SQLite and stay non-atomic
+  under PostgreSQL. Wrapping them in a snapshot would hand callers a
+  consistency guarantee they do not have today and would pin a pooled
+  connection across a wide fan-out.
+- The per-project and per-day query loops in `getProjectActivity` and
+  `computeDailyAvg` are preserved deliberately. Collapsing them would be an
+  optimization, not backend parity.
+- SQLite validates each date and time field against a fixed range and then
+  computes a Julian day arithmetically. That yields three behaviours a cast
+  cannot reproduce: out-of-domain text becomes `NULL` (excluding the row rather
+  than raising); in-range fields past the end of their month or day are
+  *normalized* rather than rejected, so `2026-02-31` is `2026-03-03` and `24:30`
+  is the next day at `00:30`; and offsetless text is read as UTC. SQLite also
+  requires the colon inside a numeric zone offset, which PostgreSQL does not,
+  and caps that offset at 14 hours. PostgreSQL therefore *constructs* the
+  instant from regex-validated fields with `make_date` plus `make_interval`
+  rather than casting the text; `col::timestamptz` and `pg_input_is_valid` both
+  reject the overflow values SQLite accepts, and the latter additionally accepts
+  the colon-less offsets SQLite refuses. See
+  [analytics-persistence.md](./analytics-persistence.md) for the exact accepted
+  domain and the four behaviours deliberately left outside it.
+- SQLite's default `BINARY` collation orders text by bytes, so every text
+  `ORDER BY`, window `ORDER BY`, and `row_number()` partition order in the
+  PostgreSQL adapter is pinned with `COLLATE "C"`. The database's locale-aware
+  default collation would silently reorder hyphenated IDs and punctuated names.
+- SQLite's `lower()` folds ASCII only, so the synthetic-tag prefix scan uses
+  `translate(btrim(name), 'A-Z', 'a-z')` rather than a locale-aware `lower()`,
+  the same technique L16 used for `COLLATE NOCASE`.
+- Both adapters add explicit tiebreakers for the source breakdown
+  (`count DESC, connector_type`), active and visible projects (`name, id`),
+  delivery filter options (`name, id`), delivery records (`completed_at, id`),
+  active routines (`id`), and the unbounded routine-completion reads
+  (`routine_id, date`). These define an order SQLite previously left
+  unspecified; every already-explicit order is reproduced unchanged.
+- The PostgreSQL adapter reproduces the Drizzle `notificationNeedsAttention()`
+  predicate, **not** the sibling `NOTIFICATION_NEEDS_ATTENTION_SQL` text
+  constant. The two differ on a `NULL` `level`: the constant's
+  digest exclusion drops such rows, the function keeps them.
+  `notifications.level` is `NOT NULL DEFAULT 'fyi'` in both schemas so no live
+  row diverges, but the shared contract pins the distinction so a later
+  refactor cannot silently swap them.
+- `routines.cadence_config` is JSON text in SQLite and `jsonb` in PostgreSQL.
+  `jsonb` normalises key order, but every consumer reads only `days` and
+  `target`, so parsed cadence configs compare equal structurally.
+- `count(*)` returns `bigint` over `pg`; every count method casts to `int` in
+  SQL and coerces at the boundary, so callers always receive a `number`.
+
+`src/db/task-history.ts` is unchanged and keeps both of its consumers. The
+SQLite adapter calls `getTaskTransitionsInRange` directly — an adapter is
+allowed to be Tier A — so the `task_history_events` read model is not split
+across two owners and a later burn-report layer inherits it as is.
+
+The graph ratchet is exactly `266/175/27/64/124/51/125/78/0/253`: six routes and
+five libraries left Tier A, five routes became clean, and exactly one route
+reclassified to Tier B. `taintedApiHelpers` stays at its retired target of 0.
+
+`/api/insights/observations` is that reclassification. Its only residual reach
+is a deferred `import()` of `@/lib/ai/config-resolver` inside
+`src/lib/stats/observations.ts`, which belongs to the AI provider layer and was
+deliberately not touched. `/api/resets/stats`, `/api/mobile-dashboard`, and
+`/api/tasks/quick-sort-stats` share the analytics vocabulary but remain Tier A:
+they hold inline Drizzle queries in the route file itself and belong to the
+route-extraction work, not to this layer. `/api/projects/[id]/reports/burn`
+likewise remains Tier A; it is a history-replay report rather than a derived
+read model.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

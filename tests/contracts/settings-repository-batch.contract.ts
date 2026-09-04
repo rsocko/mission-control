@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { PersistenceJson } from '@/db/persistence/contracts';
 import type {
   ActiveEmbeddingIdentity,
   AtomicSettingsRepository,
@@ -38,10 +39,10 @@ export function describeSettingsRepositoryBatchContract(
         [second]: null,
       });
 
-      const entries = [
+      const entries: ReadonlyArray<readonly [string, PersistenceJson]> = [
         [first, { provider: 'ollama', enabled: true }],
         [second, { allowedRoutes: ['ollama'], version: 2 }],
-      ] as const;
+      ];
       await harness.repository.setMany(entries);
       await harness.repository.setMany(entries);
 

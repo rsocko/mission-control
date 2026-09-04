@@ -146,6 +146,13 @@ describe('SQLite runtime composition', () => {
     const firstDatabase = await import('@/db');
     const firstRuntime = await import('@/db/runtime');
     await firstRuntime.initializeRuntimeDatabase();
+    const firstDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
+    const firstDurableRepository = await firstDurableRuntime.getDurableAiRunRepository();
+    const firstDurableRegistration =
+      firstDurableRuntime.getRegisteredSqliteDurableAiRunRepository();
+    if (!firstDurableRegistration) {
+      throw new Error('SQLite durable AI run repository was not registered');
+    }
     const closeFirst = firstDatabase.sqlite.close.bind(firstDatabase.sqlite);
 
     resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
@@ -156,7 +163,15 @@ describe('SQLite runtime composition', () => {
     await secondRuntime.initializeRuntimeDatabase();
     const secondDatabase = await import('@/db');
     const syncJobs = await import('@/lib/sync/job-runtime');
+    const secondDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
     await expect(syncJobs.getSyncJobRepository()).resolves.toBeDefined();
+    await expect(secondDurableRuntime.getDurableAiRunRepository())
+      .resolves.not.toBe(firstDurableRepository);
+    const secondDurableRegistration =
+      secondDurableRuntime.getRegisteredSqliteDurableAiRunRepository();
+    firstDurableRuntime.clearSqliteDurableAiRunRepository(firstDurableRegistration);
+    expect(secondDurableRuntime.getRegisteredSqliteDurableAiRunRepository())
+      .toBe(secondDurableRegistration);
     const closeSecond = secondDatabase.sqlite.close.bind(secondDatabase.sqlite);
     await secondRuntime.shutdownRuntimeDatabase();
     closeSecond();

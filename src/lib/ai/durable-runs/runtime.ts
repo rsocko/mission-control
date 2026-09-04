@@ -40,6 +40,20 @@ export function clearPostgresDurableAiRunRepository(
   runtime.postgresRepository = null;
 }
 
+export function getRegisteredSqliteDurableAiRunRepository():
+  | Promise<DurableAiRunRepository>
+  | null {
+  return registry().sqliteRepositoryPromise;
+}
+
+export function clearSqliteDurableAiRunRepository(
+  expectedRepository: Promise<DurableAiRunRepository>,
+): void {
+  const runtime = registry();
+  if (runtime.sqliteRepositoryPromise !== expectedRepository) return;
+  runtime.sqliteRepositoryPromise = null;
+}
+
 export async function getDurableAiRunRepository(): Promise<DurableAiRunRepository> {
   assertPersistenceCompositionAccessAllowed();
   const runtime = registry();

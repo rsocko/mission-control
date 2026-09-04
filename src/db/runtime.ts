@@ -49,6 +49,8 @@ import {
 } from '@/lib/connectors/registry-runtime';
 import {
   clearPostgresDurableAiRunRepository,
+  clearSqliteDurableAiRunRepository,
+  getRegisteredSqliteDurableAiRunRepository,
   registerPostgresDurableAiRunRepository,
 } from '@/lib/ai/durable-runs/runtime';
 import { PostgresDurableAiRunRepository } from '@/lib/ai/durable-runs/postgres-adapter';
@@ -744,6 +746,7 @@ export function shutdownRuntimeDatabase(): Promise<void> {
   runtime.lifecycleGeneration += 1;
   blockPersistenceComposition();
   if (runtime.shutdownPromise) return runtime.shutdownPromise;
+  const sqliteDurableAiRunRepository = getRegisteredSqliteDurableAiRunRepository();
 
   runtime.shutdownPromise = (async () => {
     if (runtime.initializationPromise) {
@@ -794,6 +797,9 @@ export function shutdownRuntimeDatabase(): Promise<void> {
       throw error;
     } finally {
       clearModeRouteServiceDelegates();
+      if (sqliteDurableAiRunRepository) {
+        clearSqliteDurableAiRunRepository(sqliteDurableAiRunRepository);
+      }
       if (!runtime.cleanupRequired) {
         runtime.shutdownSqliteComposition = null;
         runtime.clearSqliteSyncInfrastructure = null;

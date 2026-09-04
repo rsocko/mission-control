@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 217,
+    "tierARoutes": 215,
     "tierBRoutes": 26,
-    "cleanRoutes": 23,
-    "directTaintSourceRoutes": 142,
-    "transitiveOnlyTaintSourceRoutes": 75,
-    "directDbNamespaceRoutes": 143,
+    "cleanRoutes": 25,
+    "directTaintSourceRoutes": 141,
+    "transitiveOnlyTaintSourceRoutes": 74,
+    "directDbNamespaceRoutes": 142,
     "taintedLibA": 92,
     "taintedApiHelpers": 1,
-    "totalMigrationUnits": 310
+    "totalMigrationUnits": 308
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -340,9 +340,7 @@
     "src/app/api/ai/daily-digest/route.ts",
     "src/app/api/ai/dispatch/route.ts",
     "src/app/api/ai/infer-tags/route.ts",
-    "src/app/api/ai/models/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/provider/route.ts",
     "src/app/api/ai/route.ts",
     "src/app/api/ai/search/route.ts",
     "src/app/api/ai/smart-priority/route.ts",
@@ -581,6 +579,8 @@
     "src/app/api/triage/sync-status/route.ts"
   ],
   "cleanRoutes": [
+    "src/app/api/ai/models/route.ts",
+    "src/app/api/ai/provider/route.ts",
     "src/app/api/assets/thumbnails/[filename]/route.ts",
     "src/app/api/auth/microsoft/callback/route.ts",
     "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
@@ -609,7 +609,6 @@
     "src/app/api/ai/context-tasks/route.ts",
     "src/app/api/ai/context-triage/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/provider/route.ts",
     "src/app/api/ai/search/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
@@ -754,7 +753,6 @@
     "src/app/api/ai/daily-digest/route.ts",
     "src/app/api/ai/dispatch/route.ts",
     "src/app/api/ai/infer-tags/route.ts",
-    "src/app/api/ai/models/route.ts",
     "src/app/api/ai/route.ts",
     "src/app/api/ai/smart-priority/route.ts",
     "src/app/api/ai/suggest-micro-status/route.ts",
@@ -830,7 +828,6 @@
     "src/app/api/ai/context-tasks/route.ts",
     "src/app/api/ai/context-triage/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/provider/route.ts",
     "src/app/api/ai/search/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
@@ -1112,6 +1109,28 @@
         }
       ],
       "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against the post-L06b worktree; entry-set diff shows zero additions to any taint set and zero Tier A -> Tier B reclassifications attributable to L04. L06b resolved the one recorded foreign-layer blocker without changing L04's owned migration accounting."
+    },
+    {
+      "layer": "L10",
+      "title": "AI provider configuration PostgreSQL web/API parity",
+      "totalMigrationUnits": {
+        "from": 310,
+        "to": 308,
+        "delta": -2
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [],
+      "removedTierARoutes": [
+        "src/app/api/ai/models/route.ts",
+        "src/app/api/ai/provider/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/ai/models/route.ts",
+        "src/app/api/ai/provider/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation removes only the AI model-discovery and provider-configuration routes from Tier A, adds both to cleanRoutes, leaves Tier B and tainted libraries unchanged, and reduces total migration units from 310 to 308."
     },
     {
       "layer": "L06b",

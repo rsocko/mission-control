@@ -13,7 +13,7 @@ import type {
   CorePersistenceRepositories,
   NotificationRepository,
   ProjectRepository,
-  SettingsRepository,
+  AtomicSettingsRepository,
   TaskRepository,
 } from './core-repositories';
 import type {
@@ -1123,7 +1123,7 @@ export class SqliteNotificationRepository implements NotificationRepository {
   }
 }
 
-export class SqliteSettingsRepository implements SettingsRepository {
+export class SqliteSettingsRepository implements AtomicSettingsRepository {
   constructor(private readonly database: SqliteDatabase) {}
 
   async get(key: string): Promise<PersistenceJson | null> {
@@ -1131,6 +1131,21 @@ export class SqliteSettingsRepository implements SettingsRepository {
       'SELECT value FROM app_settings WHERE key = ?',
     ).get(key) as { value: unknown } | undefined;
     return row ? parseJson(row.value) as PersistenceJson : null;
+  }
+
+  async getMany(keys: readonly string[]): Promise<Record<string, PersistenceJson | null>> {
+    const values = Object.fromEntries(keys.map((key) => [key, null])) as Record<
+      string,
+      PersistenceJson | null
+    >;
+    if (keys.length === 0) return values;
+    const rows = this.database.prepare(`
+      SELECT key, value
+      FROM app_settings
+      WHERE key IN (${keys.map(() => '?').join(', ')})
+    `).all(...keys) as Array<{ key: string; value: unknown }>;
+    for (const row of rows) values[row.key] = parseJson(row.value) as PersistenceJson;
+    return values;
   }
 
   async set(key: string, value: PersistenceJson): Promise<void> {
@@ -1143,9 +1158,45 @@ export class SqliteSettingsRepository implements SettingsRepository {
     `).run(key, stringifyJson(value), new Date().toISOString());
   }
 
+  async setMany(entries: ReadonlyArray<readonly [string, PersistenceJson]>): Promise<void> {
+    if (entries.length === 0) return;
+    if (new Set(entries.map(([key]) => key)).size !== entries.length) {
+      throw new Error('Settings batch keys must be unique');
+    }
+    const upsert = this.database.prepare(`
+      INSERT INTO app_settings (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `);
+    const write = this.database.transaction(() => {
+      const now = new Date().toISOString();
+      for (const [key, value] of entries) {
+        upsert.run(key, stringifyJson(value), now);
+      }
+    });
+    write.immediate();
+  }
+
   async delete(key: string): Promise<boolean> {
     return this.database.prepare('DELETE FROM app_settings WHERE key = ?').run(key)
       .changes === 1;
+  }
+
+  async getActiveEmbeddingIdentity() {
+    const row = this.database.prepare(`
+      SELECT provider, model, dimensions, vector_count AS vectorCount
+      FROM semantic_index_identities
+      WHERE status = 'active'
+      LIMIT 1
+    `).get() as {
+      provider: string;
+      model: string;
+      dimensions: number;
+      vectorCount: number;
+    } | undefined;
+    return row ?? null;
   }
 }
 

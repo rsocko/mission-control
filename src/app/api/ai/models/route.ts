@@ -2,7 +2,10 @@ import {
   AIProviderEndpointValidationError,
   validateProviderEndpoint,
 } from '@/lib/ai/sensitivity-policy';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import {
+  loadAIProviderConfiguration,
+} from '@/lib/ai/provider-configuration-service';
+import type { ResolvedAIConfig } from '@/lib/ai/types';
 
 const OPENAI_MODELS = [
   'gpt-4o',
@@ -31,8 +34,10 @@ function getBifrostModelsUrl(baseUrl: string) {
   return `${baseUrl.replace(/\/$/, '')}/models`;
 }
 
-function getBifrostAuthorization(baseUrl: string): Record<string, string> {
-  const resolved = getResolvedAIConfig();
+function getBifrostAuthorization(
+  baseUrl: string,
+  resolved: ResolvedAIConfig,
+): Record<string, string> {
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, '');
   const resolvedCredential = resolved.provider === 'bifrost'
     && resolved.baseUrl?.replace(/\/+$/, '') === normalizedBaseUrl
@@ -85,21 +90,25 @@ export async function GET(request: Request) {
   }
 
   if (provider === 'bifrost') {
-    const resolved = getResolvedAIConfig();
-    const bifrostBaseUrl = searchParams.get('baseUrl')
-      || (resolved.provider === 'bifrost' ? resolved.baseUrl : undefined)
-      || process.env.BIFROST_BASE_URL;
-    if (!bifrostBaseUrl) {
-      return Response.json({
-        models: BIFROST_MODELS.map((name) => ({ name })),
-      });
-    }
-
     try {
-      validateProviderEndpoint(provider, bifrostBaseUrl, Boolean(getBifrostAuthorization(bifrostBaseUrl).Authorization));
+      const { resolved } = await loadAIProviderConfiguration();
+      const bifrostBaseUrl = searchParams.get('baseUrl')
+        || (resolved.provider === 'bifrost' ? resolved.baseUrl : undefined)
+        || process.env.BIFROST_BASE_URL;
+      if (!bifrostBaseUrl) {
+        return Response.json({
+          models: BIFROST_MODELS.map((name) => ({ name })),
+        });
+      }
+
+      validateProviderEndpoint(
+        provider,
+        bifrostBaseUrl,
+        Boolean(getBifrostAuthorization(bifrostBaseUrl, resolved).Authorization),
+      );
       const response = await fetch(getBifrostModelsUrl(bifrostBaseUrl), {
         cache: 'no-store',
-        headers: getBifrostAuthorization(bifrostBaseUrl),
+        headers: getBifrostAuthorization(bifrostBaseUrl, resolved),
         signal: AbortSignal.timeout(20000),
       });
       if (!response.ok) {

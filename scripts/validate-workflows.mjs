@@ -190,13 +190,14 @@ for (const file of workflowFiles) {
     const workerRuntimeResult = workflow.jobs?.['worker-runtime'];
     const shards = workflow.jobs?.['unit-test-shards'];
     const unitTestsResult = workflow.jobs?.['unit-tests'];
-    const postgresIntegration = workflow.jobs?.['postgres-integration'];
+    const postgresIntegrationShards = workflow.jobs?.['postgres-integration-shards'];
+    const postgresIntegrationResult = workflow.jobs?.['postgres-integration'];
     const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
     assert.ok(
       changes && impeccableWorker && impeccableResult && lintWorker &&
         productionBuildWorker && lintResult && productionBuildResult &&
         workflowPolicyResult && workerRuntimeResult && shards && unitTestsResult &&
-        postgresIntegration,
+        postgresIntegrationShards && postgresIntegrationResult,
       'ci.yml must classify changes, isolate expensive workers, and expose every required check',
     );
     assert.equal(changes.name, 'Classify changes', 'change classification must retain its stable name');
@@ -298,17 +299,52 @@ for (const file of workflowFiles) {
       'ci.yml must run four unit-test shards',
     );
     assert.equal(shards.strategy?.['fail-fast'], false, 'unit-test shards must all report their result');
+    assert.deepEqual(
+      postgresIntegrationShards.needs,
+      ['changes'],
+      'PostgreSQL integration shards must depend on change classification',
+    );
     assert.equal(
-      postgresIntegration.services?.postgres?.image,
+      postgresIntegrationShards.name,
+      'PostgreSQL integration worker (${{ matrix.shard }}/4)',
+      'PostgreSQL integration shards must not claim the required check name',
+    );
+    for (const invariant of [
+      'always()',
+      "needs.changes.result != 'success'",
+      expensiveStepCondition,
+    ]) {
+      assert.ok(
+        postgresIntegrationShards.if.includes(invariant),
+        `PostgreSQL integration shards must enforce ${invariant}`,
+      );
+    }
+    assert.deepEqual(
+      postgresIntegrationShards.strategy?.matrix?.shard,
+      [1, 2, 3, 4],
+      'ci.yml must run four PostgreSQL integration shards',
+    );
+    assert.equal(
+      postgresIntegrationShards.strategy?.['fail-fast'],
+      false,
+      'PostgreSQL integration shards must all report their result',
+    );
+    assert.equal(
+      postgresIntegrationShards.steps?.some((step) => step.name?.startsWith('Skip ')),
+      false,
+      'PostgreSQL integration shards must skip documentation-only work before allocating a runner',
+    );
+    assert.equal(
+      postgresIntegrationShards.services?.postgres?.image,
       'pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f',
       'PostgreSQL integration must use the approved pgvector image digest',
     );
     assert.equal(
-      postgresIntegration['timeout-minutes'],
+      postgresIntegrationShards['timeout-minutes'],
       120,
       'PostgreSQL integration must budget for the required 1536-dimension 100k gate',
     );
-    const pgvectorBootstrap = postgresIntegration.steps?.find(
+    const pgvectorBootstrap = postgresIntegrationShards.steps?.find(
       (step) => step.name === 'Bootstrap and verify pgvector',
     );
     assert.ok(
@@ -327,10 +363,18 @@ for (const file of workflowFiles) {
         `PostgreSQL extension bootstrap must provide ${name}`,
       );
     }
-    const pgvectorBenchmark = postgresIntegration.steps?.find(
+    const postgresIntegrationTests = postgresIntegrationShards.steps?.find(
+      (step) => step.name === 'Run PostgreSQL integration tests',
+    );
+    assert.equal(
+      postgresIntegrationTests?.run,
+      'npm test -- --run --no-file-parallelism --shard=${{ matrix.shard }}/4 tests/db/postgres-*.integration.test.ts',
+      'PostgreSQL integration shards must partition the live database suite',
+    );
+    const pgvectorBenchmark = postgresIntegrationShards.steps?.find(
       (step) => step.name === 'Run pgvector 100k benchmark gate',
     );
-    const pgvectorContainer = postgresIntegration.steps?.find(
+    const pgvectorContainer = postgresIntegrationShards.steps?.find(
       (step) => step.name === 'Locate pgvector service container',
     );
     assert.ok(
@@ -344,8 +388,8 @@ for (const file of workflowFiles) {
     );
     assert.equal(
       pgvectorBenchmark?.if,
-      "github.event_name == 'workflow_dispatch'",
-      'The pgvector benchmark must run only when CI is manually dispatched',
+      "github.event_name == 'workflow_dispatch' && matrix.shard == 1",
+      'The pgvector benchmark must run only on the first shard of manually dispatched CI',
     );
     assert.equal(
       pgvectorBenchmark?.env?.MC_BENCHMARK_DIMENSIONS,
@@ -438,12 +482,21 @@ for (const file of workflowFiles) {
         decisionEnv: 'DOCS_ONLY',
         decisionValue: '${{ needs.changes.outputs.docs_only }}',
       },
+      'postgres-integration': {
+        job: postgresIntegrationResult,
+        name: 'PostgreSQL integration',
+        needs: ['changes', 'postgres-integration-shards'],
+        workerResult: '${{ needs.postgres-integration-shards.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
     };
     assert.deepEqual(
       Object.values(requiredGates).map(({ name }) => name).sort(),
       [
         'Impeccable integration',
         'Lint',
+        'PostgreSQL integration',
         'Production build',
         'Unit tests',
         'Worker runtime',
@@ -489,7 +542,8 @@ for (const file of workflowFiles) {
         jobName === 'production-build' ||
         jobName === 'workflow-policy' ||
         jobName === 'worker-runtime' ||
-        jobName === 'unit-tests'
+        jobName === 'unit-tests' ||
+        jobName === 'postgres-integration'
       ) continue;
       const cacheRestores =
         job.steps?.filter((step) => step.uses?.startsWith('actions/cache/restore@')) ?? [];
@@ -521,6 +575,13 @@ for (const file of workflowFiles) {
       ),
       false,
       'unit-test shards must not race to save the npm cache',
+    );
+    assert.equal(
+      workflow.jobs?.['postgres-integration-shards']?.steps?.some((step) =>
+        step.uses?.startsWith('actions/cache/save@')
+      ),
+      false,
+      'PostgreSQL integration shards must not race to save the npm cache',
     );
   }
 

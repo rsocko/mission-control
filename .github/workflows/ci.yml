@@ -452,8 +452,8 @@ jobs:
       - name: Test persisted-state compatibility
         run: npm run test:persisted-state
 
-  postgres-integration:
-    name: PostgreSQL integration
+  postgres-integration-shards:
+    name: PostgreSQL integration worker (${{ matrix.shard }}/4)
     if: >-
       always() &&
       (needs.changes.result != 'success' ||
@@ -464,6 +464,10 @@ jobs:
     timeout-minutes: 120
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     services:
       postgres:
         image: pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
@@ -529,12 +533,40 @@ jobs:
       - name: Run PostgreSQL integration tests
         env:
           MC_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
-        run: npm test -- --run --no-file-parallelism tests/db/postgres-*.integration.test.ts
+        run: npm test -- --run --no-file-parallelism --shard=${{ matrix.shard }}/4 tests/db/postgres-*.integration.test.ts
 
       - name: Run pgvector 100k benchmark gate
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' && matrix.shard == 1
         env:
           MC_BENCHMARK_DIMENSIONS: 1536
           MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
           MC_BENCHMARK_QUERY_RUNS: 20
         run: npm run --silent benchmark:postgres-vector
+
+  postgres-integration:
+    name: PostgreSQL integration
+    if: always()
+    needs:
+      - changes
+      - postgres-integration-shards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm all PostgreSQL integration shards passed
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.postgres-integration-shards.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac

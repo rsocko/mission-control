@@ -272,7 +272,7 @@ function mutationUpdateSql(
 ): { sql: string; parameters: (changedAt: string) => string[] } {
   switch (action) {
     case 'mark_read':
-      const repository: NotificationWebPersistence = {
+      return {
         sql: `UPDATE notifications
           SET read_state = 'read',
               read_at = COALESCE(read_at, ?),
@@ -501,7 +501,7 @@ export function createSqliteNotificationWebRepository(
     return transaction.immediate();
   }
 
-  return {
+  const repository: NotificationWebPersistence = {
     async queryNotifications(input) {
       const { query, limit, cursor } = input;
       const now = new Date().toISOString();
@@ -571,7 +571,7 @@ export function createSqliteNotificationWebRepository(
         FROM notifications
         WHERE ${inboxConditionSql()}
           AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
-      `).get(now) as NotificationStats;
+      `).get(now, now) as NotificationStats;
 
       // Facets
       const levelFacets = sqlite.prepare(`

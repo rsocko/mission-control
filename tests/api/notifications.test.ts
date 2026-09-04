@@ -271,6 +271,7 @@ describe('POST /api/notifications/bulk', () => {
       sourceState: 'active',
       mutedAt: null,
     }]);
+    mockWebPersistence.bulkMarkReadDemo.mockResolvedValueOnce(1);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const req = new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -329,6 +330,7 @@ describe('POST /api/notifications/bulk', () => {
       sourceState: 'active',
       mutedAt: null,
     }]);
+    mockWebPersistence.bulkHandleDemo.mockResolvedValueOnce(1);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',

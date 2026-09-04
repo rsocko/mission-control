@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { listGroups, sourceLists } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 export async function PATCH(
   request: Request,
@@ -11,19 +9,16 @@ export async function PATCH(
   const { id } = await params;
 
   try {
+    const persistence = await getConnectorManagementPersistence();
     const body = await request.json();
 
-    const [sourceList] = await db
-      .select({ id: sourceLists.id })
-      .from(sourceLists)
-      .where(eq(sourceLists.id, id))
-      .limit(1);
+    const sourceList = await persistence.getSourceList(id);
 
     if (!sourceList) {
       return NextResponse.json({ error: 'Source list not found' }, { status: 404 });
     }
 
-    const updates: Record<string, unknown> = {};
+    const updates: { groupId?: string | null; hidden?: boolean } = {};
 
     if ('groupId' in body) {
       const nextGroupId = body.groupId === null
@@ -33,13 +28,7 @@ export async function PATCH(
           : null;
 
       if (nextGroupId) {
-        const [group] = await db
-          .select({ id: listGroups.id })
-          .from(listGroups)
-          .where(eq(listGroups.id, nextGroupId))
-          .limit(1);
-
-        if (!group) {
+        if (!(await persistence.listGroupExists(nextGroupId))) {
           return NextResponse.json({ error: 'List group not found' }, { status: 404 });
         }
       }
@@ -55,7 +44,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    await db.update(sourceLists).set(updates).where(eq(sourceLists.id, id));
+    await persistence.patchSourceList({
+      sourceListId: id,
+      groupId: updates.groupId,
+      hidden: updates.hidden,
+    });
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to update source list', error);

@@ -51,6 +51,15 @@ const mockDb = {
 
 vi.mock('@/db', () => ({ default: mockDb }));
 
+const listSourceRankings = vi.fn(async () => []);
+const putSourceRankings = vi.fn(async (rankings: unknown[]) => rankings);
+vi.mock('@/lib/connectors/management-service', () => ({
+  getConnectorManagementPersistence: vi.fn(async () => ({
+    listSourceRankings,
+    putSourceRankings,
+  })),
+}));
+
 // ─── Portable task-core fake ────────────────────────────────────────────────
 
 const NOW = '2026-08-05T12:00:00.000Z';
@@ -388,7 +397,10 @@ describe('DELETE /api/priority-entities', () => {
 // ─── /api/source-rankings ───────────────────────────────────────────────────
 
 describe('GET /api/source-rankings', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    listSourceRankings.mockResolvedValue([]);
+  });
 
   it('returns rankings array', async () => {
     const { GET } = await import('@/app/api/source-rankings/route');
@@ -396,11 +408,15 @@ describe('GET /api/source-rankings', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data).toHaveProperty('rankings');
+    expect(listSourceRankings).toHaveBeenCalledOnce();
   });
 });
 
 describe('PUT /api/source-rankings', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    putSourceRankings.mockImplementation(async (rankings: unknown[]) => rankings);
+  });
 
   it('upserts rankings and returns updated list', async () => {
     mockDb.select.mockImplementation(() => chainable(undefined));
@@ -416,6 +432,9 @@ describe('PUT /api/source-rankings', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data).toHaveProperty('rankings');
+    expect(putSourceRankings).toHaveBeenCalledWith([
+      { id: 'github', connectorType: 'github-issues', name: 'GitHub', rank: 1 },
+    ], expect.stringMatching(/^20/));
   });
 
   it('returns 400 when rankings is not an array', async () => {

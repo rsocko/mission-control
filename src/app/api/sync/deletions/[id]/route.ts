@@ -1,17 +1,18 @@
 import { NextResponse } from 'next/server';
-import { eq } from 'drizzle-orm';
-import db from '@/db';
-import { syncDeletionSnapshots, tasks } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
-import { restoreDeletionSnapshot, type RestoreMode } from '@/lib/sync/deletion-recovery';
+import type { RestoreMode } from '@/lib/sync/deletion-recovery';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import type { GitHubRecoveryPreflight } from '@/lib/sync/deletion-recovery';
-
-type DeletionSnapshot = typeof syncDeletionSnapshots.$inferSelect;
+import type {
+  DeletionPersistence,
+  DeletionSnapshotRecord,
+} from '@/db/persistence/connector-execution';
+import { getConnectorDeletionPersistence } from '@/lib/connectors/management-service';
 
 async function getSourceRestoreBlockReason(
-  snapshot: Pick<DeletionSnapshot, 'connectorId' | 'taskData'>,
+  persistence: DeletionPersistence,
+  snapshot: Pick<DeletionSnapshotRecord, 'connectorId' | 'taskData'>,
 ): Promise<string | null> {
   if (snapshot.connectorId === 'local' || !(await isConnectorEnabled(snapshot.connectorId))) {
     return 'The original connector is unavailable';
@@ -27,13 +28,7 @@ async function getSourceRestoreBlockReason(
     if (capabilities.subtasks !== true || !task.parentId) {
       return 'The original connector cannot recreate this subtask';
     }
-    const [parent] = await db.select({
-      connectorInstanceId: tasks.connectorInstanceId,
-      sourceId: tasks.sourceId,
-    })
-      .from(tasks)
-      .where(eq(tasks.id, task.parentId))
-      .limit(1);
+    const parent = await persistence.getRestoreParent(task.parentId);
     if (
       !parent
       || parent.connectorInstanceId !== snapshot.connectorId
@@ -52,14 +47,12 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const [snapshot] = await db.select()
-    .from(syncDeletionSnapshots)
-    .where(eq(syncDeletionSnapshots.id, id))
-    .limit(1);
+  const persistence = await getConnectorDeletionPersistence();
+  const snapshot = await persistence.getSnapshot(id);
   if (!snapshot) return ApiErrors.notFound('Removed task snapshot');
 
   const task = snapshot.taskData;
-  const sourceRestoreBlockReason = await getSourceRestoreBlockReason(snapshot);
+  const sourceRestoreBlockReason = await getSourceRestoreBlockReason(persistence, snapshot);
 
   return NextResponse.json({
     snapshot: {
@@ -96,17 +89,12 @@ export async function POST(
   }
 
   try {
+    const persistence = await getConnectorDeletionPersistence();
     let githubPreflight: GitHubRecoveryPreflight | undefined;
     if (mode === 'source') {
-      const [snapshot] = await db.select({
-        connectorId: syncDeletionSnapshots.connectorId,
-        taskData: syncDeletionSnapshots.taskData,
-      })
-        .from(syncDeletionSnapshots)
-        .where(eq(syncDeletionSnapshots.id, id))
-        .limit(1);
+      const snapshot = await persistence.getSnapshot(id);
       if (!snapshot) return ApiErrors.notFound('Removed task snapshot');
-      const blockReason = await getSourceRestoreBlockReason(snapshot);
+      const blockReason = await getSourceRestoreBlockReason(persistence, snapshot);
       if (blockReason) return ApiErrors.forbidden(blockReason);
       if (snapshot.taskData.connectorType === 'github-issues') {
         const connector = await getOrInitializeConnector(snapshot.connectorId) as {
@@ -119,7 +107,7 @@ export async function POST(
       }
     }
 
-    const result = await restoreDeletionSnapshot(id, mode, githubPreflight);
+    const result = await persistence.restoreDeletionSnapshot(id, mode, githubPreflight);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof Error && error.message === 'Removed task snapshot not found') {

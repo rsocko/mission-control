@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { notifications } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 
 /**
  * POST /api/notifications/:id/snooze
@@ -42,39 +40,13 @@ export async function POST(
       }
     }
 
-    // Validate notification exists
-    const [notification] = await db.select({ id: notifications.id })
-      .from(notifications)
-      .where(eq(notifications.id, id))
-      .limit(1);
+    const web = await getNotificationWebPersistence();
+    const snoozeAt = snoozeUntil.toISOString();
+    const found = await web.snoozeNotification(id, snoozeAt);
 
-    if (!notification) {
+    if (!found) {
       return ApiErrors.notFound('Notification');
     }
-
-    const snoozeAt = snoozeUntil.toISOString();
-
-    // Read current metadata
-    const [current] = await db.select({ metadata: notifications.metadata })
-      .from(notifications)
-      .where(eq(notifications.id, id));
-    let existingMeta: Record<string, unknown> = {};
-    if (typeof current?.metadata === 'string') {
-      try { existingMeta = JSON.parse(current.metadata); } catch { /* ignore malformed legacy metadata */ }
-    } else if (current?.metadata && typeof current.metadata === 'object') {
-      existingMeta = current.metadata as Record<string, unknown>;
-    }
-
-    await db.update(notifications)
-      .set({
-        snoozedUntil: snoozeAt,
-        metadata: {
-          ...existingMeta,
-          snoozedUntil: snoozeAt,
-          snoozedAt: new Date().toISOString(),
-        },
-      })
-      .where(eq(notifications.id, id));
 
     return NextResponse.json({
       success: true,

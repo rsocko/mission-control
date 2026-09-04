@@ -182,19 +182,27 @@ describe('L04 task-core taint decrement', () => {
 
   it('holds the exact recomputed counts this layer committed', () => {
     expect({
+      apiRoutes: current.apiRoutes.length,
       taintedLibA: current.taintedLibA.length,
       taintedApiHelpers: current.taintedApiHelpers.length,
       tierARoutes: current.tierARoutes.length,
       tierBRoutes: current.tierBRoutes.length,
       cleanRoutes: current.cleanRoutes.length,
+      directTaintSourceRoutes: current.directTaintSourceRoutes.length,
+      transitiveOnlyTaintSourceRoutes: current.transitiveOnlyTaintSourceRoutes.length,
+      directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
-      taintedLibA: 92,
+      apiRoutes: 266,
+      taintedLibA: 91,
       taintedApiHelpers: 1,
-      tierARoutes: 208,
+      tierARoutes: 198,
       tierBRoutes: 26,
-      cleanRoutes: 32,
-      totalMigrationUnits: 301,
+      cleanRoutes: 42,
+      directTaintSourceRoutes: 125,
+      transitiveOnlyTaintSourceRoutes: 73,
+      directDbNamespaceRoutes: 126,
+      totalMigrationUnits: 290,
     });
   });
 });

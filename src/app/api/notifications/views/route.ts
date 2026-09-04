@@ -1,11 +1,10 @@
-import db from '@/db';
-import { notificationSavedViews } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
 import { parseNotificationQuery } from '@/lib/notifications/query';
 import { BUILT_IN_NOTIFICATION_VIEWS, type NotificationView } from '@/lib/notifications/views';
-import { asc } from 'drizzle-orm';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
+import type { SavedViewRow } from '@/db/persistence/notification-web';
 
-function customView(row: typeof notificationSavedViews.$inferSelect): NotificationView {
+function customView(row: SavedViewRow): NotificationView {
   const stored = typeof row.query === 'string' ? JSON.parse(row.query) : row.query;
   return {
     id: row.id,
@@ -19,9 +18,8 @@ function customView(row: typeof notificationSavedViews.$inferSelect): Notificati
 
 export async function GET() {
   try {
-    const rows = await db.select()
-      .from(notificationSavedViews)
-      .orderBy(asc(notificationSavedViews.name));
+    const web = await getNotificationWebPersistence();
+    const rows = await web.listSavedViews();
     return Response.json({
       views: [...BUILT_IN_NOTIFICATION_VIEWS, ...rows.map(customView)],
     });
@@ -42,14 +40,13 @@ export async function POST(request: Request) {
     }
 
     const now = new Date().toISOString();
-    const row = {
+    const web = await getNotificationWebPersistence();
+    const row = await web.createSavedView({
       id: crypto.randomUUID(),
       name,
       query: parseNotificationQuery(body.query as Record<string, unknown>),
-      createdAt: now,
-      updatedAt: now,
-    };
-    await db.insert(notificationSavedViews).values(row);
+      now,
+    });
     return Response.json({ view: customView(row) }, { status: 201 });
   } catch (error) {
     if (

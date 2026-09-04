@@ -1,197 +1,240 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ConnectorCapabilities } from '@/types';
+import type { TaskCoreTaskRow, TaskMutationRequest } from '@/lib/tasks/core/contracts';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
-const {
-  currentTask,
-  connectorCapabilities,
-  suppressAutoCompletionAfterReopen,
-  supersedePendingReconciliationSuggestions,
-  wasTaskAutoCompletedByReconciliation,
-} = vi.hoisted(() => ({
-  currentTask: {
-    id: 'task-1',
-    title: 'Scout task',
-    status: 'done',
-    completedAt: '2026-08-05T12:00:00.000Z',
-    statusReason: null,
-    priority: 'medium',
-    sourceId: 'scout:planner:task-1',
-    connectorType: 'scout',
-    connectorInstanceId: 'scout-default',
-  },
-  connectorCapabilities: {
+const connectorState = vi.hoisted(() => ({
+  capabilities: {
+    read: true,
     write: false,
+    delete: false,
+    sync: true,
     taskSourceModel: 'ingested',
     statusWriteBack: 'pull',
-    supportedTaskStatuses: undefined as import('@/types').TaskStatus[] | undefined,
-  },
-  suppressAutoCompletionAfterReopen: vi.fn(),
-  supersedePendingReconciliationSuggestions: vi.fn(),
-  wasTaskAutoCompletedByReconciliation: vi.fn(),
-}));
-
-const transaction = {
-  update: vi.fn(() => ({
-    set: vi.fn(() => ({
-      where: vi.fn(() => ({ run: vi.fn(() => ({ changes: 1 })) })),
-    })),
-  })),
-  delete: vi.fn(() => ({
-    where: vi.fn(() => ({ run: vi.fn() })),
-  })),
-  insert: vi.fn(() => ({
-    values: vi.fn(() => ({ run: vi.fn() })),
-  })),
-};
-
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(async () => [currentTask]),
-      })),
-    })),
-  },
-  runTransaction: vi.fn((callback: (tx: typeof transaction) => void) => callback(transaction)),
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: { id: 'id' },
-  taskTags: { taskId: 'taskId' },
-  taskProjects: {},
-  taskDependencies: {},
-  taskSchedules: {},
-  taskFieldStates: { taskId: 'taskId', fieldName: 'fieldName' },
-  myDayItems: {},
-  prioritySyncLog: {},
-}));
-
-vi.mock('@/lib/connectors/scout/reconciliation-service', () => ({
-  suppressAutoCompletionAfterReopen,
-  supersedePendingReconciliationSuggestions,
-  wasTaskAutoCompletedByReconciliation,
+  } as ConnectorCapabilities,
 }));
 
 vi.mock('@/lib/connectors/capabilities', () => ({
-  getConnectorCapabilities: vi.fn(async () => connectorCapabilities),
+  getConnectorCapabilities: vi.fn(async () => connectorState.capabilities),
   isConnectorEnabled: vi.fn(async () => true),
 }));
-
-vi.mock('@/lib/connectors', () => ({
-  connectorRegistry: { getConnector: vi.fn() },
+vi.mock('@/lib/connectors/runtime', () => ({ getOrInitializeConnector: vi.fn() }));
+vi.mock('@/lib/search/fts', () => ({
+  indexTask: vi.fn(async () => undefined),
+  removeTaskFromIndex: vi.fn(async () => undefined),
 }));
-
-vi.mock('@/lib/sync', () => ({
-  syncScheduler: {},
-  logWriteThrough: vi.fn(),
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  publishSemanticEntityDelete: vi.fn(async () => undefined),
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
 }));
-
-vi.mock('@/lib/events', () => ({ emitEvent: vi.fn(async () => undefined) }));
+vi.mock('@/lib/rules', () => ({ evaluateRulesForTasks: vi.fn(async () => undefined) }));
+vi.mock('@/lib/sync/write-through-log', () => ({ logWriteThrough: vi.fn() }));
 vi.mock('@/lib/priority', () => ({ resolveOutboundPriority: vi.fn() }));
 vi.mock('@/lib/utils/date', () => ({ getLocalToday: vi.fn(() => '2026-08-05') }));
-vi.mock('@/lib/utils/deep-links', () => ({ buildDeepLinkUrl: vi.fn() }));
-vi.mock('@/lib/mode', () => ({ isDemoMode: vi.fn(() => false) }));
+vi.mock('@/lib/mode', () => ({
+  isDemoMode: vi.fn(() => false),
+  getTimezone: vi.fn(() => 'UTC'),
+}));
 vi.mock('@/lib/logger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));
 
-import { PATCH } from '@/app/api/tasks/[id]/route';
+const task = {
+  id: 'task-1',
+  title: 'Scout task',
+  status: 'done',
+  completedAt: '2026-08-05T12:00:00.000Z',
+  statusReason: null,
+  priority: 'medium',
+  sourceId: 'scout:planner:task-1',
+  connectorType: 'scout',
+  connectorInstanceId: 'scout-default',
+  updatedAt: '2026-08-05T12:00:00.000Z',
+  metadata: {},
+  localDisposition: 'active',
+  isChecklistItem: false,
+  planningHorizon: null,
+  dueDate: null,
+  reminderAt: null,
+  reminderRelative: null,
+  reminderDueTime: null,
+  lastSyncedAt: '2026-08-05T12:00:00.000Z',
+} as unknown as TaskCoreTaskRow;
 
-describe('task reopen reconciliation suppression', () => {
+function request(body: Record<string, unknown>) {
+  return new Request('https://mc.example/api/tasks/task-1', {
+    method: 'PATCH',
+    body: JSON.stringify(body),
+  });
+}
+
+describe('task reopen reconciliation persistence', () => {
+  let currentTask: TaskCoreTaskRow;
+  let mutation: TaskMutationRequest | undefined;
+
   beforeEach(() => {
-    suppressAutoCompletionAfterReopen.mockReset();
-    supersedePendingReconciliationSuggestions.mockReset();
-    wasTaskAutoCompletedByReconciliation.mockReset();
-    wasTaskAutoCompletedByReconciliation.mockResolvedValue(true);
-    currentTask.status = 'done';
-    connectorCapabilities.write = false;
-    connectorCapabilities.taskSourceModel = 'ingested';
-    connectorCapabilities.statusWriteBack = 'pull';
-    connectorCapabilities.supportedTaskStatuses = undefined;
-    transaction.update.mockClear();
+    currentTask = { ...task };
+    mutation = undefined;
+    connectorState.capabilities = {
+      read: true,
+      write: false,
+      delete: false,
+      sync: true,
+      taskSourceModel: 'ingested',
+      statusWriteBack: 'pull',
+    };
+    registerFakeTaskCorePersistence({
+      mutations: {
+        getTaskWriteContext: async () => ({
+          task: currentTask,
+          schedule: null,
+          tagIds: [],
+          tagNamesById: {},
+          fieldStates: [],
+          wasAutoCompletedByReconciliation: true,
+        }),
+        mutateTask: async (request) => {
+          mutation = request;
+          currentTask = { ...currentTask, ...request.patch, updatedAt: request.now };
+          return { kind: 'committed', task: currentTask, recurrenceNextTaskId: null };
+        },
+      },
+    });
   });
 
-  it('durably suppresses future auto-completion when an auto-completed task is reopened', async () => {
-    const response = await PATCH(new Request('https://mc.example/api/tasks/task-1', {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'todo' }),
-    }), { params: Promise.resolve({ id: 'task-1' }) });
-
+  it('moves reopen suppression into the atomic mutation', async () => {
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const response = await PATCH(request({ status: 'todo' }), {
+      params: Promise.resolve({ id: currentTask.id }),
+    });
     expect(response.status).toBe(200);
-    expect(wasTaskAutoCompletedByReconciliation).toHaveBeenCalledWith('task-1');
-    expect(suppressAutoCompletionAfterReopen).toHaveBeenCalledWith(
-      transaction,
-      'task-1',
-      expect.any(String),
-    );
+    expect(mutation).toMatchObject({
+      suppressAutoCompletionAfterReopen: true,
+      supersedePendingReconciliation: false,
+    });
   });
 
   it('does not suppress a task that remains terminal', async () => {
-    const response = await PATCH(new Request('https://mc.example/api/tasks/task-1', {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'cancelled' }),
-    }), { params: Promise.resolve({ id: 'task-1' }) });
-
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const response = await PATCH(request({ status: 'cancelled' }), {
+      params: Promise.resolve({ id: currentTask.id }),
+    });
     expect(response.status).toBe(200);
-    expect(wasTaskAutoCompletedByReconciliation).not.toHaveBeenCalled();
-    expect(suppressAutoCompletionAfterReopen).not.toHaveBeenCalled();
+    expect(mutation?.suppressAutoCompletionAfterReopen).toBe(false);
   });
 
-  it('supersedes pending reconciliation suggestions when a task becomes terminal', async () => {
-    currentTask.status = 'todo';
-
-    const response = await PATCH(new Request('https://mc.example/api/tasks/task-1', {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'done' }),
-    }), { params: Promise.resolve({ id: 'task-1' }) });
-
+  it('atomically supersedes pending suggestions on a terminal transition', async () => {
+    currentTask = { ...currentTask, status: 'todo', completedAt: null };
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const response = await PATCH(request({ status: 'done' }), {
+      params: Promise.resolve({ id: currentTask.id }),
+    });
     expect(response.status).toBe(200);
-    expect(supersedePendingReconciliationSuggestions).toHaveBeenCalledWith(
-      transaction,
-      'task-1',
-      expect.any(String),
-    );
+    expect(mutation).toMatchObject({
+      expectedStatusForTerminalTransition: 'todo',
+      supersedePendingReconciliation: true,
+    });
+    expect(mutation?.events).toEqual([
+      expect.objectContaining({ type: 'task.completed' }),
+    ]);
   });
 
-  it('rejects a mixed request before updating when any field is blocked', async () => {
-    connectorCapabilities.taskSourceModel = 'remote-mirror';
-    connectorCapabilities.statusWriteBack = 'none';
+  it('rejects unsupported source statuses before mutation', async () => {
+    connectorState.capabilities = {
+      ...connectorState.capabilities,
+      write: true,
+      taskSourceModel: 'remote-managed',
+      statusWriteBack: 'direct',
+      supportedTaskStatuses: ['todo', 'done', 'cancelled'],
+    };
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const response = await PATCH(request({ status: 'in_progress' }), {
+      params: Promise.resolve({ id: currentTask.id }),
+    });
+    expect(response.status).toBe(422);
+    expect(mutation).toBeUndefined();
+  });
 
-    const response = await PATCH(new Request('https://mc.example/api/tasks/task-1', {
-      method: 'PATCH',
-      body: JSON.stringify({
-        effort: 3,
-        title: 'Blocked source title',
-      }),
-    }), { params: Promise.resolve({ id: 'task-1' }) });
-
+  it('rejects a mixed request before mutating when any field is blocked', async () => {
+    connectorState.capabilities = {
+      ...connectorState.capabilities,
+      taskSourceModel: 'remote-mirror',
+      statusWriteBack: 'none',
+    };
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const response = await PATCH(request({
+      effort: 3,
+      title: 'Blocked source title',
+    }), { params: Promise.resolve({ id: currentTask.id }) });
     expect(response.status).toBe(403);
     await expect(response.json()).resolves.toMatchObject({
-      error: 'Some fields cannot be changed for this task source',
       blockedFields: {
         title: expect.stringContaining('upstream task source'),
       },
     });
-    expect(transaction.update).not.toHaveBeenCalled();
+    expect(mutation).toBeUndefined();
   });
 
-  it('rejects lifecycle values the source cannot represent before updating locally', async () => {
-    currentTask.connectorType = 'document-intelligence';
-    currentTask.connectorInstanceId = 'owl-1';
-    currentTask.sourceId = 'owl-action-1';
-    connectorCapabilities.write = true;
-    connectorCapabilities.taskSourceModel = 'remote-managed';
-    connectorCapabilities.statusWriteBack = 'direct';
-    connectorCapabilities.supportedTaskStatuses = ['todo', 'done', 'cancelled'];
-
-    const response = await PATCH(new Request('https://mc.example/api/tasks/task-1', {
-      method: 'PATCH',
-      body: JSON.stringify({ status: 'in_progress' }),
-    }), { params: Promise.resolve({ id: 'task-1' }) });
-
-    expect(response.status).toBe(422);
-    await expect(response.json()).resolves.toMatchObject({
-      error: 'This task source does not support status "in_progress"',
+  it('returns the stable recurrence successor id on repeated completion', async () => {
+    currentTask = {
+      ...currentTask,
+      sourceId: 'local:task-1',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      status: 'todo',
+      completedAt: null,
+      dueDate: '2026-08-05',
+    };
+    const requests: TaskMutationRequest[] = [];
+    registerFakeTaskCorePersistence({
+      mutations: {
+        getTaskWriteContext: async () => ({
+          task: currentTask,
+          schedule: {
+            taskId: currentTask.id,
+            scheduledDate: '2026-08-05',
+            scheduledTime: null,
+            estimatedDuration: null,
+            isTimeBlocked: false,
+            recurrence: 'FREQ=DAILY',
+            recurrenceMode: 'completion',
+          },
+          tagIds: [],
+          tagNamesById: {},
+          fieldStates: [],
+          wasAutoCompletedByReconciliation: false,
+        }),
+        mutateTask: async (mutationRequest) => {
+          requests.push(mutationRequest);
+          currentTask = {
+            ...currentTask,
+            ...mutationRequest.patch,
+            updatedAt: mutationRequest.now,
+          };
+          return {
+            kind: 'committed',
+            task: currentTask,
+            recurrenceNextTaskId: 'next-occurrence',
+          };
+        },
+      },
     });
-    expect(transaction.update).not.toHaveBeenCalled();
+    const { PATCH } = await import('@/app/api/tasks/[id]/route');
+    const first = await PATCH(request({ status: 'done' }), {
+      params: Promise.resolve({ id: currentTask.id }),
+    });
+    const repeated = await PATCH(request({ status: 'done' }), {
+      params: Promise.resolve({ id: currentTask.id }),
+    });
+    expect(first.status).toBe(200);
+    expect(repeated.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      recurrenceNextTaskId: 'next-occurrence',
+    });
+    await expect(repeated.json()).resolves.toMatchObject({
+      recurrenceNextTaskId: 'next-occurrence',
+    });
+    expect(requests[0].recurrenceSuccessor).toBeDefined();
+    expect(requests[1].recurrenceSuccessor).toBeDefined();
   });
 });

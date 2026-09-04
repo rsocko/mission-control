@@ -6,8 +6,8 @@
  * both the SQLite and PostgreSQL adapters can interpret with their own
  * dialect. No Drizzle predicate (`SQL`), table object, or transaction handle
  * may cross this boundary — that is the whole point of the layer. The
- * legacy SQLite route surface keeps building Drizzle predicates, but it does
- * so on its *own* side of this contract, never through it.
+ * SQLite and PostgreSQL adapters compile the same domain specifications on
+ * their own side of this contract.
  *
  * This module is type-only plus a couple of pure constants, so importing it
  * never evaluates a database driver.
@@ -84,6 +84,19 @@ export interface TaskFilterSpec {
   readonly weekFromNow: string;
   /** `today - 7d`, used by the `recentlyCreated`/`recentlyClosed` filters. */
   readonly recentCutoff: string;
+  /** Literal collection-search term (not filter-query syntax). */
+  readonly search?: string | null;
+  /** Exact effort filter used by the collection endpoint. */
+  readonly effort?: number | null;
+  /** Match any of these tag ids. */
+  readonly tagIds?: readonly string[];
+  /** Match tasks with no project membership. */
+  readonly noProject?: boolean;
+  /** Optional drill-down into one visible collection group. */
+  readonly group?: {
+    readonly mode: TaskGroupMode;
+    readonly value: string;
+  } | null;
 }
 
 /** Which half of the canonical filter a query should apply. */
@@ -99,12 +112,16 @@ export interface TaskQueryScope {
 export type TaskListSortField =
   | 'dueDate'
   | 'priority'
+  | 'planningHorizon'
   | 'title'
   | 'createdAt'
+  | 'completedAt'
   | 'updatedAt'
+  | 'updated'
   | 'status'
   | 'sourceList'
-  | 'effort';
+  | 'effort'
+  | 'smartScore';
 
 export interface TaskListOrder {
   readonly field: TaskListSortField;
@@ -344,6 +361,356 @@ export interface TaskQuickSortSuggestionInputs {
     readonly taskId: string;
     readonly tagId: string;
   }>;
+}
+
+/* ------------------------------------------------------------------ *
+ * Task collection/detail and route write operations (L07)
+ * ------------------------------------------------------------------ */
+
+/** Portable representation of every durable task column used by the two routes. */
+export interface TaskCoreTaskRow {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly status: string;
+  readonly localDisposition: LocalDisposition;
+  readonly priority: string;
+  readonly planningHorizon: 'next' | 'soon' | 'later' | 'someday' | null;
+  readonly dueDate: string | null;
+  readonly pushCount: number;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly completedAt: string | null;
+  readonly recurrenceGeneratedFromTaskId: string | null;
+  readonly parentId: string | null;
+  readonly depth: number;
+  readonly isChecklistItem: boolean;
+  readonly sourceListId: string | null;
+  readonly sourceListName: string | null;
+  readonly assignee: string | null;
+  readonly microStatus: string | null;
+  readonly statusReason: string | null;
+  readonly metadata: Record<string, unknown>;
+  readonly syncStatus: string;
+  readonly lastSyncedAt: string;
+  readonly pushRetryCount: number;
+  readonly kanbanColumn: string | null;
+  readonly kanbanOrder: number | null;
+  readonly snoozedUntil: string | null;
+  readonly reminderAt: string | null;
+  readonly reminderRelative: string | null;
+  readonly reminderDueTime: string | null;
+  readonly effort: number | null;
+  readonly isBulkImport: boolean;
+}
+
+export interface TaskCollectionTag {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly type: string;
+  readonly source: string | null;
+  readonly color: string | null;
+  readonly confirmed: boolean;
+  readonly unifiedInto: string | null;
+}
+
+export interface TaskCollectionProjectPhaseMembership {
+  readonly projectId: string;
+  readonly projectName: string;
+  readonly phaseId: string | null;
+  readonly phaseName: string | null;
+}
+
+export interface TaskCollectionRow extends TaskCoreTaskRow {
+  readonly parentTitle: string | null;
+  readonly authoritativeSourceListName: string | null;
+  readonly estimatedDuration: number | null;
+  readonly subtaskTotal: number;
+  readonly subtaskDone: number;
+  readonly projectIds: string[];
+  readonly projectPhaseMemberships: TaskCollectionProjectPhaseMembership[];
+  readonly linkedSourceCount: number;
+  readonly tags: TaskCollectionTag[];
+}
+
+export interface TaskCollectionConnectorContext {
+  readonly id: string;
+  readonly type: string;
+  readonly enabled: boolean;
+  readonly deletedAt: string | null;
+  readonly capabilities: Record<string, unknown>;
+  readonly settings: Record<string, unknown>;
+}
+
+export interface TaskSmartScoreInputs {
+  readonly rows: TaskCollectionRow[];
+  readonly sourceRankings: Array<{
+    readonly id: string;
+    readonly connectorType: string;
+    readonly name: string;
+    readonly rank: number;
+    readonly updatedAt: string;
+  }>;
+}
+
+export interface TaskCollectionResult {
+  readonly rows: TaskCollectionRow[];
+  readonly total: number;
+  readonly stats: TaskStatsResult;
+  readonly sourceCounts: TaskSourceCounts;
+  readonly availableTags: AvailableTaskTag[];
+  readonly connectorContexts: TaskCollectionConnectorContext[];
+  /**
+   * Present for `smartScore`: rows are the deterministic candidate set rather
+   * than a page, and callers apply domain scoring before slicing.
+   */
+  readonly smartScore: TaskSmartScoreInputs | null;
+}
+
+export interface TaskCollectionReadRepository {
+  readTaskCollection(input: {
+    readonly spec: TaskFilterSpec;
+    readonly page: TaskListPage;
+    readonly includeTags: boolean;
+    readonly includeScoreInputs: boolean;
+    readonly countsOnly: boolean;
+    readonly smartScoreCandidateLimit: number;
+  }): Promise<TaskCollectionResult>;
+}
+
+export interface TaskDetailSubtask {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly effort: number | null;
+}
+
+export interface TaskDetailResult {
+  readonly task: TaskCoreTaskRow;
+  readonly tagIds: string[];
+  readonly projectIds: string[];
+  readonly subtasks: TaskDetailSubtask[];
+  readonly schedule: Pick<
+    TaskScheduleRow,
+    'estimatedDuration' | 'recurrence' | 'recurrenceMode'
+  > | null;
+  readonly isInMyDay: boolean;
+}
+
+export interface TaskDetailReadRepository {
+  getTaskDetail(taskId: string, myDayDate: string): Promise<TaskDetailResult | null>;
+}
+
+export interface TaskCoreEvent {
+  readonly stableKey: string;
+  readonly type: 'task.created' | 'task.updated' | 'task.completed';
+  readonly timestamp: string;
+  readonly payload: Record<string, unknown>;
+}
+
+export interface TaskCreateInput {
+  readonly task: TaskCoreTaskRow;
+  readonly tagIds: readonly string[];
+  readonly tagSlugs: readonly string[];
+  readonly tagCreationMode: 'freeform' | 'predefined';
+  readonly projectIds: readonly string[];
+  readonly schedule: TaskScheduleRow | null;
+  readonly triageItemId: string | null;
+  readonly triageClaimId: string | null;
+  readonly requireConnectorEnabled: boolean;
+  readonly requireSelectedSourceList: boolean;
+  readonly event: TaskCoreEvent;
+}
+
+export type TaskCreateTargetOutcome =
+  | {
+      readonly kind: 'resolved';
+      readonly connectorInstanceId: string;
+      readonly capabilities: Record<string, unknown>;
+      readonly settings: Record<string, unknown>;
+    }
+  | { readonly kind: 'connector-not-found' }
+  | { readonly kind: 'connector-disabled' }
+  | { readonly kind: 'connector-mismatch' }
+  | { readonly kind: 'connector-ambiguous' }
+  | { readonly kind: 'source-list-not-found' }
+  | { readonly kind: 'source-list-ambiguous' }
+  | { readonly kind: 'source-list-not-selected' };
+
+export type TaskCreateOutcome =
+  | {
+      readonly kind: 'committed';
+      readonly task: TaskCoreTaskRow;
+      readonly sourceTagNames: string[];
+    }
+  | { readonly kind: 'triage-not-found' }
+  | { readonly kind: 'triage-pending' }
+  | { readonly kind: 'triage-replay'; readonly taskId: string | null }
+  | { readonly kind: 'connector-not-found' }
+  | { readonly kind: 'connector-disabled' }
+  | { readonly kind: 'connector-mismatch' }
+  | { readonly kind: 'source-list-not-found' }
+  | { readonly kind: 'source-list-ambiguous' }
+  | { readonly kind: 'source-list-not-selected' }
+  | { readonly kind: 'project-not-found'; readonly projectId: string }
+  | { readonly kind: 'tag-not-found'; readonly tagId: string };
+
+export interface TaskCreateRepository {
+  resolveTaskCreateTarget(input: {
+    readonly connectorType: string;
+    readonly requestedConnectorInstanceId: string | null;
+    readonly sourceListId: string | null;
+  }): Promise<TaskCreateTargetOutcome>;
+  createTask(input: TaskCreateInput): Promise<TaskCreateOutcome>;
+}
+
+export interface TaskFieldStateMutation {
+  readonly fieldName: string;
+  readonly sourceValue: string;
+  readonly locallyOverridden: boolean;
+  readonly sourceObservedAt: string | null;
+  readonly localEditedAt: string | null;
+  readonly updatedAt: string;
+}
+
+export interface TaskPriorityLogMutation {
+  readonly id: string;
+  readonly previousPriority: string;
+  readonly newPriority: string;
+  readonly writeBackTriggered: boolean;
+  readonly note: string | null;
+}
+
+export interface TaskPlanningHistoryMutation {
+  readonly previousValue: string | null;
+  readonly newValue: string | null;
+}
+
+export interface TaskSchedulePatch {
+  readonly scheduledDate: string;
+  readonly estimatedDuration?: number | null;
+  readonly recurrence?: string | null;
+  readonly recurrenceMode?: 'schedule' | 'completion';
+}
+
+export interface TaskCoreTaskPatch {
+  readonly title?: string;
+  readonly description?: string | null;
+  readonly status?: string;
+  readonly localDisposition?: LocalDisposition;
+  readonly priority?: string;
+  readonly planningHorizon?: 'next' | 'soon' | 'later' | 'someday' | null;
+  readonly dueDate?: string | null;
+  readonly completedAt?: string | null;
+  readonly kanbanColumn?: string | null;
+  readonly kanbanOrder?: number | null;
+  readonly microStatus?: string | null;
+  readonly statusReason?: string | null;
+  readonly snoozedUntil?: string | null;
+  readonly reminderAt?: string | null;
+  readonly reminderRelative?: string | null;
+  readonly reminderDueTime?: string | null;
+  readonly effort?: number | null;
+  readonly metadata?: Record<string, unknown>;
+  readonly syncStatus?: string;
+  readonly pushRetryCount?: number;
+}
+
+export interface TaskRecurrenceSuccessorMutation {
+  readonly id: string;
+  readonly dueDate: string;
+  readonly scheduledDate: string;
+  readonly scheduledTime: string | null;
+  readonly reminderAt: string | null;
+  readonly metadata: Record<string, unknown>;
+}
+
+export interface TaskWriteContext {
+  readonly task: TaskCoreTaskRow;
+  readonly schedule: TaskScheduleRow | null;
+  readonly tagIds: string[];
+  readonly tagNamesById: Record<string, string>;
+  readonly fieldStates: TaskFieldStateMutation[];
+  readonly wasAutoCompletedByReconciliation: boolean;
+}
+
+export interface TaskMutationRequest {
+  readonly taskId: string;
+  readonly expectedUpdatedAt: string;
+  readonly expectedStatusForTerminalTransition: string | null;
+  readonly now: string;
+  readonly patch: TaskCoreTaskPatch;
+  readonly schedulePatch?: TaskSchedulePatch;
+  readonly replaceTagIds?: readonly string[];
+  readonly fieldStates?: readonly TaskFieldStateMutation[];
+  readonly priorityLog?: TaskPriorityLogMutation;
+  readonly planningHistory?: TaskPlanningHistoryMutation;
+  readonly suppressAutoCompletionAfterReopen?: boolean;
+  readonly supersedePendingReconciliation?: boolean;
+  readonly recurrenceSuccessor?: TaskRecurrenceSuccessorMutation;
+  readonly events?: readonly TaskCoreEvent[];
+}
+
+export type TaskMutationOutcome =
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'revision-conflict'; readonly currentUpdatedAt: string }
+  | {
+      readonly kind: 'committed';
+      readonly task: TaskCoreTaskRow;
+      readonly recurrenceNextTaskId: string | null;
+    };
+
+export interface TaskMutationRepository {
+  getTaskWriteContext(
+    taskId: string,
+    requestedTagIds?: readonly string[],
+  ): Promise<TaskWriteContext | null>;
+  mutateTask(request: TaskMutationRequest): Promise<TaskMutationOutcome>;
+}
+
+export type TaskRemovalMode =
+  | 'mirror-dismiss'
+  | 'ingested-cancel'
+  | 'local-delete'
+  | 'remote-cancel-intent';
+
+export interface TaskRemovalContext {
+  readonly task: TaskCoreTaskRow;
+}
+
+export type TaskRemovalOutcome =
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'revision-conflict'; readonly currentUpdatedAt: string }
+  | {
+      readonly kind: 'committed';
+      readonly action: 'dismissed' | 'cancelled' | 'deleted' | 'pending-remote';
+      readonly taskVersion: string | null;
+    };
+
+export interface TaskRemovalRepository {
+  getTaskRemovalContext(taskId: string): Promise<TaskRemovalContext | null>;
+  applyTaskRemoval(input: {
+    readonly taskId: string;
+    readonly expectedUpdatedAt: string;
+    readonly mode: TaskRemovalMode;
+    readonly now: string;
+    readonly events?: readonly TaskCoreEvent[];
+  }): Promise<TaskRemovalOutcome>;
+  /**
+   * Called only after external I/O has completed. Both the push lease and the
+   * optimistic task version must still match before the local graph is removed.
+   */
+  finalizeRemoteTaskRemoval(input: {
+    readonly taskId: string;
+    readonly leaseToken: string;
+    readonly expectedUpdatedAt: string;
+  }): Promise<TaskRemovalOutcome>;
 }
 
 /**
@@ -606,44 +973,7 @@ export interface TaskMoveRepository {
  * copies a source task onto its successor field by field, so every column it
  * carries has to be nameable on both backends.
  */
-export interface TaskMoveTaskRow {
-  readonly id: string;
-  readonly sourceId: string;
-  readonly connectorType: string;
-  readonly connectorInstanceId: string;
-  readonly title: string;
-  readonly description: string | null;
-  readonly status: string;
-  readonly localDisposition: LocalDisposition;
-  readonly priority: string;
-  readonly planningHorizon: 'next' | 'soon' | 'later' | 'someday' | null;
-  readonly dueDate: string | null;
-  readonly pushCount: number;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly completedAt: string | null;
-  readonly recurrenceGeneratedFromTaskId: string | null;
-  readonly parentId: string | null;
-  readonly depth: number;
-  readonly isChecklistItem: boolean;
-  readonly sourceListId: string | null;
-  readonly sourceListName: string | null;
-  readonly assignee: string | null;
-  readonly microStatus: string | null;
-  readonly statusReason: string | null;
-  readonly metadata: Record<string, unknown>;
-  readonly syncStatus: string;
-  readonly lastSyncedAt: string;
-  readonly pushRetryCount: number;
-  readonly kanbanColumn: string | null;
-  readonly kanbanOrder: number | null;
-  readonly snoozedUntil: string | null;
-  readonly reminderAt: string | null;
-  readonly reminderRelative: string | null;
-  readonly reminderDueTime: string | null;
-  readonly effort: number | null;
-  readonly isBulkImport: boolean;
-}
+export type TaskMoveTaskRow = TaskCoreTaskRow;
 
 /** A task row about to be written, i.e. every column the move must supply. */
 export type TaskMoveTaskInsert = TaskMoveTaskRow;
@@ -999,6 +1329,11 @@ export interface TaskTransferIdentityRepository {
  * nothing, so there is never a half-migrated task-core surface.
  */
 export interface TaskCorePersistence {
+  readonly collections: TaskCollectionReadRepository;
+  readonly details: TaskDetailReadRepository;
+  readonly creates: TaskCreateRepository;
+  readonly mutations: TaskMutationRepository;
+  readonly removals: TaskRemovalRepository;
   readonly taskReads: TaskReadRepository;
   readonly filterInputs: TaskFilterInputRepository;
   readonly queries: TaskQueryRepository;

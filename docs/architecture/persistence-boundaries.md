@@ -52,7 +52,7 @@ growing without an explicit exception.
 | Health and telemetry | `PRAGMA page_count`, page size, WAL checkpoints and SQLite observation | `src/lib/telemetry/**`, readiness route | High. Runtime health consumes a database-health probe result. |
 | Graph workspace | raw row mapping, JSON text, compare-and-swap writes and checkpoints | `src/lib/graph-workspace/sqlite-repository.ts` | Medium. An existing repository seam is the representative portable workflow. |
 | Tasks and projects | Drizzle queries plus shared `runTransaction` | task APIs and project services | Medium. Migrate by canonical workflow, not table-by-table. |
-| Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. |
+| Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. L13 migrated seven notification web routes and the writeback dispatcher behind `NotificationWebPersistence` (attached as `notificationDelivery.web`). |
 | Finance, external identity, AI runs and agents | concentrated raw SQL and synchronous transactions | corresponding `src/lib` domains | High, but outside the representative migration. Preserve as documented legacy exceptions until each workflow moves. |
 
 ## Portable contract rules
@@ -664,16 +664,19 @@ display names.
 
 ### The contract
 
-`src/lib/tasks/core/contracts.ts` defines `TaskCorePersistence`, a composition
-of ten narrowly-named repositories (`filterInputs`, `queries`,
-`policyIdentities`, `lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`,
-`priorityEntities`, `sourceListNames`, `transferIdentity`). It is deliberately **not** a generic
+`src/lib/tasks/core/contracts.ts` defines `TaskCorePersistence`, now a composition
+of fifteen narrowly-named repositories (`collections`, `details`, `creates`,
+`mutations`, `removals`, `filterInputs`, `queries`, `policyIdentities`,
+`lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`, `priorityEntities`,
+`sourceListNames`, `transferIdentity`). It is deliberately **not** a generic
 table/dialect query API, and it has no "run this callback in a transaction"
 escape hatch: the inputs are domain values (`TaskFilterSpec`, `TaskListPage`,
 `PendingSyncTaskMoveRequest`, `TaskMoveDestinationMaterialization`,
-`TaskMoveFinalizationRequest`) and the results are domain DTOs
-(`TaskStatsResult`, `AvailableTaskTag`, `ScoutHardDeleteOutcome`,
-`TaskMoveFinalizationOutcome`). No Drizzle `SQL` predicate, table object, or
+`TaskMoveFinalizationRequest`, `TaskMutationRequest`) and the results are domain
+DTOs (`TaskCollectionResult`, `TaskDetailResult`, `TaskMutationOutcome`,
+`TaskRemovalOutcome`, `TaskStatsResult`, `AvailableTaskTag`,
+`ScoutHardDeleteOutcome`, `TaskMoveFinalizationOutcome`). No Drizzle `SQL`
+predicate, table object, or
 transaction handle crosses this boundary in either direction.
 
 `src/lib/tasks/core/filter-spec.ts` is the single pure parser from
@@ -814,32 +817,21 @@ matching, SQLite's `IS <value>` null-safe comparison is
 `ON CONFLICT DO NOTHING`, and only SQLite has the `task_history_events`
 append-only DELETE trigger that the hard delete must drop and recreate.
 
-### Legacy route compatibility
+### Route compatibility
 
-The task read/write route handlers (layers L05/L07) still compose their own
-Drizzle predicates. `src/app/api/tasks/{canonical-filter,filter-factory,
-filter-query,query-builder}.ts` therefore still *return* SQLite Drizzle
-predicates, but they no longer *open* a database: the predicate constructors moved
-to the handle-free SQLite dialect compiler
-(`src/db/persistence/sqlite-task-filter.ts`, which imports only `@/db/schema` and
-`drizzle-orm`), and the stored inputs come from `TaskFilterInputRepository`. That
-is a compatibility seam on the route side of the boundary, not a contract leak.
-`tests/architecture/task-core-taint-decrement.test.ts` pins that exact four-file
-list, so no other owned file can quietly acquire a Drizzle surface.
+L07 removes the last route-local predicates from the collection/detail roots.
+The pure parser in `filter-spec.ts` represents literal search, effort, tags,
+projects/no-project, grouping, and list scope as domain values. The backend
+adapters compile those values to SQLite `LIKE` or PostgreSQL `ILIKE`, with
+escaping and ordering kept private to each adapter. The legacy predicate helpers
+remain available to specialized routes that have not migrated; neither migrated
+root imports or evaluates them.
 
-`src/app/api/tasks/stats-computer.ts` is now fully portable: every entry point
-takes a `TaskFilterSpec` and runs through `TaskQueryRepository`. Its former
-clause-shaped counters (`countTasks`, `getStats`, `getSourceCounts`,
-`getAvailableTags`, which take a *composed* `WHERE` clause because the route
-appends route-local predicates for effort, free-text search, tag ids,
-no-project and group scoping) now live inside
-`src/app/api/tasks/route.ts` — the single Tier A route that still needs them.
-That is deliberately a relocation, not a port: modelling those route-local
-predicates as `TaskFilterSpec` fields is the L05 read-route migration, and
-passing Drizzle predicates across a task-core contract behind an opaque port
-would have been worse than leaving them where they are used. The route's only
-other change is importing the identity-aware quick-filter builders it now calls
-directly; its data access is otherwise untouched.
+Collection totals, stats, source counts, available tags, pagination, and row
+enrichment now come from `collections.readTaskCollection`. Smart-score
+calculation remains route-owned domain behavior: persistence returns only the
+bounded deterministic candidate rows and ranking inputs, and the route scores
+and slices them before serializing the existing response.
 
 ### Residual taint owned by another layer
 
@@ -1011,6 +1003,108 @@ internal import resolves to a real module and every named binding it imports is
 actually exported, and the ratchet decrement above was recomputed and matched
 against the committed baseline. CI is expected to run the full suite with a
 working install.
+
+## Web/API PostgreSQL parity: Layer L07 (task collection/detail writes)
+
+L07 migrates only the mixed collection/detail task routes:
+`src/app/api/tasks/route.ts` (`GET`, `POST`) and
+`src/app/api/tasks/[id]/route.ts` (`GET`, `PATCH`, `DELETE`). The unchanged
+`src/app/api/mcp/tasks/[id]/route.ts` also becomes clean because its
+authenticated forwarding import now reaches a clean detail route. Specialized
+task routes remain outside this layer.
+
+The routes obtain backend-neutral task route persistence through the task-core
+runtime. Contracts are domain-shaped: collection queries and enrichment,
+detail/write contexts, atomic create and patch commands, removal decisions, and
+lease-fenced remote-delete finalization. They do not expose a database handle,
+transaction callback, SQL expression, generic query builder, or dialect. The
+SQLite adapter keeps better-sqlite3 callbacks synchronous; the PostgreSQL
+adapter owns async transactions, deterministic locking, guarded `updated_at`
+CAS, JSONB/text normalization, escaped literal search, null ordering, and
+stable id tie-breakers.
+
+### Atomic boundaries
+
+- Creation commits the task, tags, projects, schedule, triage claim/item
+  transition, and durable event intent as one local transaction.
+- Patch commits the guarded task update, schedule, tags, field state, priority
+  audit, planning history, Scout reopen suppression/suggestion supersession,
+  completion-anchored successor and copied graph, and durable event intent as
+  one local transaction. The recurrence source uniqueness key makes concurrent
+  completion return one successor.
+- Removal commits mirror dismissal, ingested cancellation, local graph
+  deletion, or optimistic remote cancellation/pending intent atomically.
+  Confirmed remote deletion removes the graph only when both the push lease and
+  expected task version still match.
+
+Those are existing task-route invariants, not ownership transfers for triage,
+Scout, events, connectors, search, or notifications. Connector/network I/O,
+identity writes, audit logging, keyword indexing, semantic publication, and
+rule evaluation never run inside a task transaction.
+
+### External effects and recovery
+
+Connector effects preserve this order:
+
+1. validate policy and read backend-neutral context;
+2. commit authoritative local state plus durable pending intent;
+3. claim the existing task push lease and capture the expected task version;
+4. perform connector I/O outside the transaction, heartbeating slow creation;
+5. finalize through the lease token and expected-version fence;
+6. persist creation identity only after successful push finalization;
+7. publish non-authoritative audit/search/rule effects in their existing
+   response-relative order.
+
+Unavailable/deferred connectors release the task as `pending_push`. Ordinary
+write failures remain retryable; GitHub unknown outcomes remain
+`push_failed` with retry count `5`. A stale lease cannot mark newer state
+synced or delete it, and a crash after local commit leaves durable work for the
+existing push worker. There is no fallback, dual-write, or second queue.
+
+The routes import connector initialization, write-through audit, keyword
+search, and semantic publication through their clean leaf modules. They do not
+import the mixed connector, sync, or search barrels, the triage action service,
+or the Scout reconciliation service.
+
+### Ratchet decrement
+
+The exact L07 graph is:
+
+| metric | L05 | L07 |
+| --- | ---: | ---: |
+| API routes | 266 | 266 |
+| Tier A routes | 208 | 205 |
+| Tier B routes | 26 | 26 |
+| clean routes | 32 | 35 |
+| direct taint-source routes | 134 | 132 |
+| transitive-only taint-source routes | 74 | 73 |
+| direct `@/db` namespace routes | 135 | 133 |
+| tainted `src/lib` | 95 | 95 |
+| tainted API helpers | 1 | 1 |
+| **total migration units** | **304** | **301** |
+
+The two task roots leave the direct sets; the MCP forwarding route leaves the
+transitive-only set. All three enter `cleanRoutes`. Tier B, tainted libraries,
+tainted API helpers, and the static/dynamic taint-source sets are unchanged.
+`tests/architecture/task-write-taint-decrement.test.ts` pins the exact paths and
+counts.
+
+### Proof and exclusions
+
+The shared task-core suite runs identical collection/detail/mutation,
+CAS/concurrency, recurrence-idempotency, rollback, and stale-finalization
+assertions against real SQLite and guarded live PostgreSQL. A PostgreSQL route
+integration test poisons `@/db` before importing and executing both route
+modules, proving that PostgreSQL execution does not evaluate SQLite. Focused
+route tests preserve HTTP status/body/header, policy, event, and asynchronous
+write-through behavior.
+
+L07 does not migrate connector management (L12), notifications (L13), triage or
+native routes, Scout ingestion/reconciliation ownership, AI or semantic
+retrieval, runtime/global-slot selection, schema/migrations/deployment, or any
+specialized task route. It adds no taint exception and does not move static
+taint into Tier B.
+
 ## Web/API PostgreSQL parity: Layer L02 (seed/demo fail-closed, entity-link parity, settings/mode route)
 
 Layer L02 owns exactly four application files (`src/app/api/settings/mode/

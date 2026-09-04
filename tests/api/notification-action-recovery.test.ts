@@ -13,14 +13,23 @@ describe('notification workflow action recovery', () => {
     vi.doUnmock('crypto');
     vi.resetModules();
 
-    const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
-      import('@/db/schema'),
-      import('@/app/api/notifications/route'),
-    ]);
+    const dbModule = await import('@/db');
     db = dbModule.default;
     sqlite = dbModule.sqlite;
+    const schemaModule = await import('@/db/schema');
     schema = schemaModule;
+
+    // Create a real web persistence from the SQLite DB and inject it
+    const { createSqliteNotificationWebRepository } = await import(
+      '@/db/persistence/sqlite-notification-web-repository'
+    );
+    const webRepo = createSqliteNotificationWebRepository(sqlite);
+    vi.doMock('@/lib/notifications/notification-web-service', () => ({
+      getNotificationWebPersistence: () => Promise.resolve(webRepo),
+    }));
+    vi.resetModules();
+
+    const routeModule = await import('@/app/api/notifications/route');
     getNotifications = routeModule.GET;
   });
 

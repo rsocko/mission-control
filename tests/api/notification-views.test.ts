@@ -34,17 +34,32 @@ vi.mock('@/lib/api-error', () => ({
   },
 }));
 
+const mockWebPersistence = {
+  listSavedViews: vi.fn().mockResolvedValue([]),
+  createSavedView: vi.fn().mockImplementation((input: Record<string, unknown>) => Promise.resolve({
+    id: input.id,
+    name: input.name,
+    query: JSON.stringify(input.query),
+    createdAt: input.now,
+    updatedAt: input.now,
+  })),
+  deleteSavedView: vi.fn().mockResolvedValue(true),
+};
+vi.mock('@/lib/notifications/notification-web-service', () => ({
+  getNotificationWebPersistence: vi.fn(() => Promise.resolve(mockWebPersistence)),
+}));
+
 describe('notification saved views API', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('returns built-in GitHub and Homelab defaults before custom views', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([{
+    mockWebPersistence.listSavedViews.mockResolvedValueOnce([{
       id: 'custom-1',
       name: 'My queue',
-      query: { state: 'unread' },
+      query: JSON.stringify({ state: 'unread' }),
       createdAt: '2026-08-10T00:00:00.000Z',
       updatedAt: '2026-08-10T00:00:00.000Z',
-    }]));
+    }]);
     const { GET } = await import('@/app/api/notifications/views/route');
     const response = await GET();
     const data = await response.json();
@@ -76,13 +91,13 @@ describe('notification saved views API', () => {
       reason: 'review_requested',
       sort: 'newest',
     });
-    expect(mockDb.insert).toHaveBeenCalledOnce();
+    expect(mockWebPersistence.createSavedView).toHaveBeenCalledOnce();
   });
 
   it('reports duplicate view names as a client error', async () => {
-    mockDb.insert.mockImplementationOnce(() => {
-      throw new Error('UNIQUE constraint failed: notification_saved_views.name');
-    });
+    mockWebPersistence.createSavedView.mockRejectedValueOnce(
+      new Error('UNIQUE constraint failed: notification_saved_views.name'),
+    );
     const { POST } = await import('@/app/api/notifications/views/route');
     const response = await POST(new Request('http://localhost/api/notifications/views', {
       method: 'POST',
@@ -103,7 +118,7 @@ describe('notification saved views API', () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mockDb.delete).not.toHaveBeenCalled();
+    expect(mockWebPersistence.deleteSavedView).not.toHaveBeenCalled();
   });
 
   it('protects the built-in Homelab view from deletion', async () => {
@@ -114,6 +129,6 @@ describe('notification saved views API', () => {
     );
 
     expect(response.status).toBe(400);
-    expect(mockDb.delete).not.toHaveBeenCalled();
+    expect(mockWebPersistence.deleteSavedView).not.toHaveBeenCalled();
   });
 });

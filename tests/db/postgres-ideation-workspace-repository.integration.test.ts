@@ -168,6 +168,9 @@ describe.skipIf(!connectionString)('PostgreSQL ideation workspace adapter', () =
   });
 
   it('round trips a jsonb document whose keys and numbers are normalized', async () => {
+    // Keys are declared out of alphabetical order and mix a list, an integer,
+    // and a unicode string, so `jsonb` key reordering and numeric
+    // normalization are both exercised on the way back out.
     const rich = createIdeationWorkspaceDocument([{
       id: 'root',
       label: 'Ünïcode … "quoted" \\ backslash',
@@ -175,8 +178,9 @@ describe.skipIf(!connectionString)('PostgreSQL ideation workspace adapter', () =
       parentId: null,
       sortOrder: 0,
       properties: {
-        zeta: { key: 'zeta', rawValue: '1', value: ['1'] },
-        alpha: { key: 'alpha', rawValue: 'a, b', value: ['a', 'b'] },
+        notes: { key: 'notes', rawValue: 'Ünïcode … "quoted"', value: 'Ünïcode … "quoted"' },
+        effort: { key: 'effort', rawValue: '3', value: 3 },
+        tags: { key: 'tags', rawValue: 'zeta, alpha', value: ['zeta', 'alpha'] },
       },
     }]);
 

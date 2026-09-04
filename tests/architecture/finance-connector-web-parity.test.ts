@@ -223,8 +223,8 @@ describe('L12b finance connector/operator web parity', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 130,
-      tierBRoutes: 19,
-      cleanRoutes: 117,
+      tierBRoutes: 13,
+      cleanRoutes: 123,
       directTaintSourceRoutes: 97,
       transitiveOnlyTaintSourceRoutes: 33,
       directDbNamespaceRoutes: 98,
@@ -235,8 +235,8 @@ describe('L12b finance connector/operator web parity', () => {
     expect(baseline.counts).toEqual({
       apiRoutes: 266,
       tierARoutes: 130,
-      tierBRoutes: 19,
-      cleanRoutes: 117,
+      tierBRoutes: 13,
+      cleanRoutes: 123,
       directTaintSourceRoutes: 97,
       transitiveOnlyTaintSourceRoutes: 33,
       directDbNamespaceRoutes: 98,

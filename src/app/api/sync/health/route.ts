@@ -1,10 +1,15 @@
 import { NextResponse } from 'next/server';
 import type { IConnector } from '@/lib/connectors';
-import type { ConnectorConfig } from '@/types';
+import type {
+  ConnectorCapabilities,
+  ConnectorConfig,
+  SyncMode,
+} from '@/types';
 import { ApiErrors } from '@/lib/api-error';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import type { ManagedConnectorRecord } from '@/db/persistence/connector-management';
 
 /**
  * Checks the sync health of Microsoft To Do lists.
@@ -84,6 +89,56 @@ async function fetchTaskCount(connector: IConnector, listSourceId: string): Prom
   }
 }
 
+function isSyncMode(value: string): value is SyncMode {
+  return value === 'webhook' || value === 'poll' || value === 'manual';
+}
+
+function isConnectorCapabilities(
+  value: unknown,
+): value is ConnectorCapabilities {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  return [
+    'read',
+    'write',
+    'delete',
+    'sync',
+    'subtasks',
+    'lists',
+    'tags',
+    'tagWriteBack',
+  ].every((key) => typeof Reflect.get(value, key) === 'boolean');
+}
+
+function isStringRecord(
+  value: Record<string, unknown>,
+): value is Record<string, string> {
+  return Object.values(value).every((entry) => typeof entry === 'string');
+}
+
+function asConnectorConfig(connector: ManagedConnectorRecord): ConnectorConfig | null {
+  if (
+    !isSyncMode(connector.syncMode)
+    || !isConnectorCapabilities(connector.capabilities)
+    || !isStringRecord(connector.credentials)
+  ) {
+    return null;
+  }
+  return {
+    id: connector.id,
+    type: connector.type,
+    name: connector.name,
+    enabled: connector.enabled,
+    syncMode: connector.syncMode,
+    ...(connector.pollIntervalMinutes === null
+      ? {}
+      : { pollIntervalMinutes: connector.pollIntervalMinutes }),
+    capabilities: connector.capabilities,
+    credentials: connector.credentials,
+    settings: connector.settings,
+    syncedLists: connector.syncedLists,
+  };
+}
+
 export async function GET() {
   try {
     const {
@@ -110,7 +165,10 @@ export async function GET() {
       connector = null;
     } else if (!connector && connectorConfig) {
       try {
-        connector = await connectorRegistry.createConnector(connectorConfig as ConnectorConfig);
+        const normalizedConfig = asConnectorConfig(connectorConfig);
+        if (normalizedConfig) {
+          connector = await connectorRegistry.createConnector(normalizedConfig);
+        }
       } catch {
         // Can't initialize connector — will show counts from local DB
       }

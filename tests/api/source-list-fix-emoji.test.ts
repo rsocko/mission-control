@@ -158,7 +158,6 @@ describe('source-list emoji repair route', () => {
   });
 
   it('replays a completed migration with the original SSE response contract', async () => {
-    mocks.getSourceList.mockResolvedValueOnce(null);
     mocks.getSourceListRepair.mockResolvedValueOnce(repair({
       strategy: 'migrate',
       status: 'completed',
@@ -178,6 +177,7 @@ describe('source-list emoji repair route', () => {
 
     expect(response.headers.get('content-type')).toBe('text/event-stream');
     expect(await response.text()).toContain('event: complete');
+    expect(mocks.getSourceList).not.toHaveBeenCalled();
     expect(mocks.runWithConnectorOperationLease).not.toHaveBeenCalled();
   });
 

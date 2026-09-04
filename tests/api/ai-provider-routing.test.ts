@@ -119,6 +119,8 @@ describe('AI provider routing settings', () => {
       embeddingModel: 'azure/text-embedding-3-small',
       embeddingBaseUrl: 'https://bifrost.test/v1',
       semanticSearchEnabled: false,
+      houstonMemoryEnabled: false,
+      houstonMemoryRetentionDays: 90,
       hasApiKey: true,
       embeddingHasApiKey: true,
     });
@@ -134,6 +136,7 @@ describe('AI provider routing settings', () => {
   });
 
   it('reports an unconfigured embedding route without failing the settings response', async () => {
+    vi.stubEnv('BIFROST_BASE_URL', '');
     state.saved = {
       provider: 'openai',
       model: 'gpt-4.1',

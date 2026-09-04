@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe } from 'vitest';
+import { afterAll, beforeAll, describe, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresSettingsRepository } from '@/db/postgres/repositories/settings-repository';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
@@ -8,6 +8,8 @@ import {
   describeSettingsRepositoryBatchContract,
   type SettingsRepositoryBatchHarness,
 } from '../contracts/settings-repository-batch.contract';
+
+vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 const describePostgres = describe.skipIf(!connectionString);

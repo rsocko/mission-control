@@ -87,7 +87,7 @@ export function getEmbeddingConfigForResolvedAI(
     headers: {
       'Content-Type': 'application/json',
       ...routingHeaders,
-      ...(apiKey ? { Authorization: `****** } : {}),
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     },
     context,
   };

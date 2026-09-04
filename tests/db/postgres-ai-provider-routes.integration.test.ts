@@ -46,6 +46,7 @@ describePostgres('PostgreSQL AI provider routes', () => {
     vi.stubEnv('MC_DATABASE_BACKEND', 'postgres');
     vi.stubEnv('MC_POSTGRES_URL', connectionString!);
     vi.stubEnv('MC_POSTGRES_APPLICATION_NAME', 'mission-control-ai-provider-route-test');
+    vi.stubEnv('BIFROST_BASE_URL', 'https://bifrost.test/v1');
     runtime = await import('@/db/runtime');
     await runtime.initializeRuntimeDatabase();
     const settings = requireAtomicSettings((await import('@/lib/persistence/runtime'))
@@ -147,7 +148,7 @@ describePostgres('PostgreSQL AI provider routes', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       'https://bifrost.test/v1/models',
       expect.objectContaining({
-        headers: { Authorization: '******' },
+        headers: { Authorization: 'Bearer integration-secret' },
       }),
     );
     expect(sqliteCompatibilityAccess).not.toHaveBeenCalled();

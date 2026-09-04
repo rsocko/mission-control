@@ -114,15 +114,15 @@ describe('L13 notification-web taint decrement', () => {
       directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
-      taintedLibA: 85,
-      taintedApiHelpers: 1,
-      tierARoutes: 186,
+      taintedLibA: 83,
+      taintedApiHelpers: 0,
+      tierARoutes: 181,
       tierBRoutes: 26,
-      cleanRoutes: 54,
+      cleanRoutes: 59,
       directTaintSourceRoutes: 124,
-      transitiveOnlyTaintSourceRoutes: 62,
+      transitiveOnlyTaintSourceRoutes: 57,
       directDbNamespaceRoutes: 125,
-      totalMigrationUnits: 272,
+      totalMigrationUnits: 264,
     });
   });
 });

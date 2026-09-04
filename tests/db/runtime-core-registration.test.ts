@@ -115,6 +115,7 @@ const mocks = vi.hoisted(() => {
         notificationEnrichment: {} as WorkerPersistenceRepositories['notificationEnrichment'],
         externalAgentControl: {} as WorkerPersistenceRepositories['externalAgentControl'],
         finance: {} as WorkerPersistenceRepositories['finance'],
+        ideationWorkspaces: {} as WorkerPersistenceRepositories['ideationWorkspaces'],
       };
       workerRepositories.push(repository);
       return repository;

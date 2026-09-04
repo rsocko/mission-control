@@ -30,6 +30,7 @@ import {
   registerKeywordSearchRepository,
 } from '@/lib/search/keyword-runtime';
 import { sqliteKeywordSearchRepository } from '@/lib/search/sqlite-fts-repository';
+import { SqliteIdeationWorkspaceRepository } from '@/lib/graph-workspace/sqlite-repository';
 import type { WorkerPersistenceRepositories } from './worker-repositories';
 import type { CorePersistenceRepositories } from './core-repositories';
 import { SqliteSyncRunRepository } from './sqlite-sync-run-repository';
@@ -181,6 +182,7 @@ export function createSqliteWorkerPersistenceRepositories(
     notificationEnrichment: createSqliteNotificationEnrichmentRepository(sqlite),
     externalAgentControl: createSqliteExternalAgentControlRepository(sqlite),
     finance,
+    ideationWorkspaces: new SqliteIdeationWorkspaceRepository(sqlite),
   };
   return repositories;
 }

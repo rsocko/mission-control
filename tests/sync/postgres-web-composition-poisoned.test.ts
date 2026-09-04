@@ -35,6 +35,7 @@ const mocks = vi.hoisted(() => {
     notificationEnrichment: {},
     externalAgentControl: {},
     finance: {},
+    ideationWorkspaces: {},
   };
   const queue = {
     countQueued: vi.fn(async () => 0),

@@ -44,15 +44,23 @@ Versioned Ideation document contract
       v
 IdeationWorkspaceRepository
       |
-      v
-SQLite workspace + checkpoint tables
+      +--> SQLite workspace + checkpoint tables
+      |
+      +--> PostgreSQL workspace + checkpoint tables
 ```
 
+Both backends are composed behind the `ideationWorkspaces` slot of
+`WorkerPersistenceRepositories`, and the service resolves the selected one
+lazily (Layer L16 of the web/API PostgreSQL parity migration). See
+[Persistence boundaries](./persistence-boundaries.md) for the transaction,
+ordering, and `jsonb` parity decisions.
+
 The Promise-based repository interface follows the shared portable persistence
-rules. SQLite owns row mapping, JSON serialization, compare-and-swap SQL, and
-atomic checkpoint writes; the application service and routes depend only on the
-repository port. This keeps SQLite replaceable without introducing a generic
-graph platform before a second authored consumer proves that broader contract.
+rules. Each backend adapter owns row mapping, JSON serialization,
+compare-and-swap SQL, and atomic checkpoint writes; the application service and
+routes depend only on the repository port. SQLite is now genuinely replaceable
+rather than merely seam-wrapped, and no generic graph platform was introduced
+before a second authored consumer proves that broader contract.
 
 ## Canonical document
 
@@ -96,7 +104,14 @@ round-trip through the existing outline syntax.
 importing, migrating, and restoring always writes a checkpoint. Autosave writes
 the current document on every successful save but materializes at most one
 routine checkpoint per five-minute interval. This separates concurrency
-correctness from history volume.
+correctness from history volume. The interval policy is a single shared
+function (`shouldCheckpointIdeationRevision`) so it cannot drift between
+backends.
+
+The library listing orders active workspaces before archived ones, then by most
+recent update, then by name using ASCII-only case folding, then by ID. The ID
+tiebreaker makes the order total, so both backends return an identical sequence
+for rows that would otherwise be indistinguishable.
 
 Deleting is a deliberate destructive operation:
 
@@ -116,6 +131,12 @@ PATCH(baseRevision, document)
 
 Metadata changes do not increment the content revision, so a rename or archive
 does not create a false content conflict.
+
+Both backends enforce the compare-and-swap identically. SQLite runs it inside a
+`BEGIN IMMEDIATE` transaction; PostgreSQL takes a `SELECT ... FOR UPDATE` row
+lock inside one `READ COMMITTED` transaction. Under either backend, exactly one
+of two concurrent saves at the same `baseRevision` wins and the loser sees the
+409 with the current server document.
 
 The client:
 

@@ -4,6 +4,7 @@ import { SqliteTransactionRunner } from '@/db/persistence/sqlite-transaction-run
 import { ideationWorkspaceDocumentSchema } from './ideation-contract';
 import {
   IdeationWorkspaceConflictError,
+  shouldCheckpointIdeationRevision,
   type CreateIdeationWorkspaceInput,
   type IdeationWorkspaceRepository,
 } from './repository';
@@ -13,8 +14,6 @@ import type {
   IdeationWorkspaceVersion,
   IdeationWorkspaceVersionReason,
 } from './types';
-
-const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 interface WorkspaceRow {
   id: string;
@@ -83,10 +82,13 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
 
   async list(includeArchived: boolean): Promise<IdeationWorkspaceSummary[]> {
     const where = includeArchived ? '' : 'WHERE archived_at IS NULL';
+    // The trailing `id` makes the order total (L16): without it, rows sharing
+    // an archived flag, `updated_at`, and folded name came back in an
+    // unspecified order that the PostgreSQL adapter could not reproduce.
     const rows = this.database.prepare(`
       SELECT * FROM graph_workspaces
       ${where}
-      ORDER BY archived_at IS NOT NULL, updated_at DESC, name COLLATE NOCASE
+      ORDER BY archived_at IS NOT NULL, updated_at DESC, name COLLATE NOCASE, id
     `).all() as WorkspaceRow[];
     return rows.map(toSummary);
   }
@@ -167,10 +169,7 @@ export class SqliteIdeationWorkspaceRepository implements IdeationWorkspaceRepos
         WHERE workspace_id = ?
         ORDER BY revision DESC LIMIT 1
       `).get(id) as { created_at: string } | undefined;
-      if (
-        !latestVersion
-        || Date.parse(now) - Date.parse(latestVersion.created_at) >= CHECKPOINT_INTERVAL_MS
-      ) {
+      if (shouldCheckpointIdeationRevision(now, latestVersion?.created_at ?? null)) {
         this.insertVersion(id, revision, current.name, serialized, 'checkpoint', now);
       }
       return this.getWorkspace(id)!;

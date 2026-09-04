@@ -14,6 +14,7 @@ import type {
   NotificationEntityLinkingRepository,
 } from './notification-entity-linking';
 import type { ExternalAgentControlPersistence } from './external-agent-control';
+import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -72,4 +73,12 @@ export interface WorkerPersistenceRepositories {
    * snapshots, reference datasets, and automated attribution).
    */
   finance: FinanceWorkerPersistence;
+  /**
+   * Layer 16: user-authored Ideation workspace documents and their bounded
+   * revision history. Published as its own top-level slot (rather than nested,
+   * as L15 nested `projectAutomation.hierarchy`) because `graph_workspaces` and
+   * `graph_workspace_versions` share no rows and no serialization namespace
+   * with any other worker surface.
+   */
+  ideationWorkspaces: IdeationWorkspaceRepository;
 }

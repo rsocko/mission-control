@@ -335,6 +335,9 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
       requirePostgresRepositories().connectors.updateCredentials(id, credentials, settings)
     ),
     delete: (id) => requirePostgresRepositories().connectors.delete(id),
+    recordTestResult: (command) => (
+      requirePostgresRepositories().connectors.recordTestResult(command)
+    ),
     mergeSettings: (id, currentSettings, patch) => (
       requirePostgresRepositories().connectors.mergeSettings(id, currentSettings, patch)
     ),

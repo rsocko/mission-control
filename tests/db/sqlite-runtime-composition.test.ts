@@ -1,9 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 describe('SQLite runtime composition', () => {
   beforeEach(() => {
+    resetProcessRuntimeRegistries();
     process.env.MC_DATABASE_BACKEND = 'sqlite';
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('drizzle-orm');

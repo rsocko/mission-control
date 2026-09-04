@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WorkerPersistenceRepositories } from '@/db/persistence/worker-repositories';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 function createWorkerRepositories(): WorkerPersistenceRepositories {
   return {
@@ -65,6 +66,7 @@ function createWorkerRepositories(): WorkerPersistenceRepositories {
 }
 
 afterEach(() => {
+  resetProcessRuntimeRegistries();
   vi.resetModules();
 });
 
@@ -100,6 +102,18 @@ describe('worker persistence runtime', () => {
     expect(() => runtime.registerWorkerPersistenceRepositories(selected)).not.toThrow();
     expect(() => runtime.registerWorkerPersistenceRepositories(createWorkerRepositories()))
       .toThrow('Worker persistence repositories are already selected');
+  });
+
+  it('shares the selected composition across isolated module evaluations', async () => {
+    const firstRuntime = await import('@/lib/persistence/worker-runtime');
+    const selected = createWorkerRepositories();
+    firstRuntime.registerWorkerPersistenceRepositories(selected);
+
+    vi.resetModules();
+    const secondRuntime = await import('@/lib/persistence/worker-runtime');
+
+    await expect(secondRuntime.getWorkerPersistenceRepositories()).resolves.toBe(selected);
+    secondRuntime.clearWorkerPersistenceRepositories(selected);
   });
 
   it('borrows an accessed triage identity without taking cleanup ownership', async () => {

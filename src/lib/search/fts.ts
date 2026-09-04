@@ -5,8 +5,7 @@ import { resolveDatabaseBackend } from '@/db/runtime-backend';
  * Resolves the keyword-search adapter for the currently selected database
  * backend. SQLite keeps using its long-standing FTS5-backed singleton
  * unchanged; PostgreSQL resolves to the adapter registered by
- * `initializeRuntimeDatabase` (see `@/db/runtime`) once the backend has
- * finished initializing.
+ * `initializeRuntimeDatabase` once the backend has finished initializing.
  *
  * The PostgreSQL side is imported dynamically (only once actually needed)
  * so that merely importing this module — as most of the existing SQLite
@@ -14,8 +13,10 @@ import { resolveDatabaseBackend } from '@/db/runtime-backend';
  */
 async function getKeywordSearchRepository(): Promise<KeywordSearchRepository> {
   if (resolveDatabaseBackend() === 'postgres') {
-    const { getPostgresKeywordSearchRepository } = await import('@/db/runtime');
-    return getPostgresKeywordSearchRepository();
+    const { getKeywordSearchRepository: getRegisteredKeywordSearchRepository } = await import(
+      './keyword-runtime'
+    );
+    return getRegisteredKeywordSearchRepository();
   }
   const { sqliteKeywordSearchRepository } = await import('./sqlite-fts-repository');
   return sqliteKeywordSearchRepository;

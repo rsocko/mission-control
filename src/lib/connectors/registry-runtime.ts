@@ -6,6 +6,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 export interface ConnectorRuntimeRegistry {
   createConnector(config: ConnectorConfig): Promise<IConnector>;
@@ -79,8 +80,22 @@ export class ConnectorRegistry implements ConnectorRuntimeRegistry {
   }
 }
 
-export const connectorRegistry = new ConnectorRegistry();
-let selectedConnectorRegistry: ConnectorRuntimeRegistry | null = null;
+interface ConnectorRegistrySelection {
+  runtime: ConnectorRegistry;
+  selected: ConnectorRuntimeRegistry | null;
+}
+
+const REGISTRY_KEY = 'mission-control.connector-runtime-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registrySelection(): ConnectorRegistrySelection {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    runtime: new ConnectorRegistry(),
+    selected: null,
+  }));
+}
+
+export const connectorRegistry = registrySelection().runtime;
 
 export function registerConnectorRuntimeRegistry(): void {
   registerConnectorRegistry(connectorRegistry);
@@ -92,22 +107,24 @@ export function assertCanRegisterConnectorRuntimeRegistry(): void {
 
 export function registerConnectorRegistry(registry: ConnectorRuntimeRegistry): void {
   assertCanRegisterConnectorRegistry(registry);
-  selectedConnectorRegistry = registry;
+  registrySelection().selected = registry;
 }
 
 export function assertCanRegisterConnectorRegistry(
   registry: ConnectorRuntimeRegistry,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (selectedConnectorRegistry && selectedConnectorRegistry !== registry) {
+  const selected = registrySelection().selected;
+  if (selected && selected !== registry) {
     throw new Error('Connector registry is already selected');
   }
 }
 
 export function getConnectorRegistry(): ConnectorRuntimeRegistry {
   assertPersistenceCompositionAccessAllowed();
-  if (!selectedConnectorRegistry) {
+  const selected = registrySelection().selected;
+  if (!selected) {
     throw new Error('Connector registry must be registered before connectors are accessed');
   }
-  return selectedConnectorRegistry;
+  return selected;
 }

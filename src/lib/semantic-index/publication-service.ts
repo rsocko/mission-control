@@ -4,6 +4,7 @@ import {
   assertPersistenceCompositionAccessAllowed,
   assertPersistenceCompositionPublicationAllowed,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
 export interface SemanticPublicationService {
   upsert(
@@ -16,30 +17,43 @@ export interface SemanticPublicationService {
   ): Promise<SemanticPublishResult | void>;
 }
 
-let selectedService: SemanticPublicationService | null = null;
+interface SemanticPublicationRegistry {
+  selected: SemanticPublicationService | null;
+}
+
+const REGISTRY_KEY = 'mission-control.semantic-publication-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): SemanticPublicationRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    selected: null,
+  }));
+}
 
 export function registerSemanticPublicationService(
   service: SemanticPublicationService,
 ): void {
   assertCanRegisterSemanticPublicationService(service);
-  selectedService = service;
+  registry().selected = service;
 }
 
 export function assertCanRegisterSemanticPublicationService(
   service: SemanticPublicationService,
 ): void {
   assertPersistenceCompositionPublicationAllowed();
-  if (selectedService && selectedService !== service) {
+  const selected = registry().selected;
+  if (selected && selected !== service) {
     throw new Error('Semantic publication service is already selected');
   }
 }
 
 function getService(): SemanticPublicationService {
   assertPersistenceCompositionAccessAllowed();
-  if (!selectedService) {
+  const selected = registry().selected;
+  if (!selected) {
     throw new Error('Semantic publication service must be registered before publication');
   }
-  return selectedService;
+  return selected;
 }
 
 export function publishSemanticEntityUpsert(

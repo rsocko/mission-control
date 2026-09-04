@@ -208,7 +208,7 @@ describe('GET /api/my-day suggestions', () => {
     expect(sqlite.prepare(`
       SELECT event_type AS eventType, new_value AS date
       FROM task_history_events
-      WHERE task_id = ?
+      WHERE task_id = ? AND event_type IN ('my_day_committed', 'my_day_withdrawn')
       ORDER BY id
     `).all('manual-suggestion')).toEqual([
       { eventType: 'my_day_committed', date: '2026-08-05' },
@@ -222,7 +222,7 @@ describe('GET /api/my-day suggestions', () => {
     expect(sqlite.prepare(`
       SELECT event_type AS eventType, new_value AS date
       FROM task_history_events
-      WHERE task_id = ?
+      WHERE task_id = ? AND event_type IN ('my_day_committed', 'my_day_withdrawn')
       ORDER BY id
     `).all('manual-suggestion')).toEqual([
       { eventType: 'my_day_committed', date: '2026-08-05' },

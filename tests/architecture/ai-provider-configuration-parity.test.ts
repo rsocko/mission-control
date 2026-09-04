@@ -21,7 +21,13 @@ const OWNED_TEST_PATHS = [
   'tests/api/ai-models-route.test.ts',
   'tests/api/ai-provider-routing.test.ts',
   'tests/architecture/ai-provider-configuration-parity.test.ts',
+  'tests/architecture/external-agent-taint-decrement.test.ts',
+  'tests/architecture/ideation-workspace-taint-decrement.test.ts',
+  'tests/architecture/notification-web-taint-decrement.test.ts',
+  'tests/architecture/project-hierarchy-taint-decrement.test.ts',
   'tests/architecture/task-core-taint-decrement.test.ts',
+  'tests/architecture/task-read-taint-decrement.test.ts',
+  'tests/architecture/task-write-taint-decrement.test.ts',
   'tests/architecture/transfer-identity-taint-decrement.test.ts',
   'tests/architecture/web-persistence-baseline.json',
   'tests/contracts/finance-assistant-persistence.contract.ts',
@@ -52,9 +58,9 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L10 AI provider configuration parity', () => {
-  it('pins the exact approved 22-path ownership boundary', () => {
+  it('pins the exact approved 28-path ownership boundary', () => {
     expect(OWNED_PRODUCTION_PATHS).toHaveLength(11);
-    expect(OWNED_TEST_PATHS).toHaveLength(11);
+    expect(OWNED_TEST_PATHS).toHaveLength(17);
     for (const path of [...OWNED_PRODUCTION_PATHS, ...OWNED_TEST_PATHS]) {
       expect(existsSync(join(process.cwd(), path)), `${path} must exist`).toBe(true);
     }
@@ -63,7 +69,7 @@ describe('L10 AI provider configuration parity', () => {
   it('records exactly the two-route decrement with no Tier B reclassification', () => {
     const entry = baseline.decrementHistory?.find((record) => record.layer === 'L10');
     expect(entry).toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 272, to: 270, delta: -2 });
+    expect(entry?.totalMigrationUnits).toEqual({ from: 264, to: 262, delta: -2 });
     expect(entry?.removedTierARoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.newlyCleanRoutes).toEqual([...OWNED_ROUTES]);
     expect(entry?.removedTaintedLibA).toEqual([]);
@@ -108,15 +114,15 @@ describe('L10 AI provider configuration parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 184,
+      tierARoutes: 179,
       tierBRoutes: 26,
-      cleanRoutes: 56,
+      cleanRoutes: 61,
       directTaintSourceRoutes: 123,
-      transitiveOnlyTaintSourceRoutes: 61,
+      transitiveOnlyTaintSourceRoutes: 56,
       directDbNamespaceRoutes: 124,
-      taintedLibA: 85,
-      taintedApiHelpers: 1,
-      totalMigrationUnits: 270,
+      taintedLibA: 83,
+      taintedApiHelpers: 0,
+      totalMigrationUnits: 262,
     });
   });
 });

@@ -83,6 +83,7 @@ vi.mock('@/lib/runtime/lifecycle', () => ({
 
 vi.mock('@/lib/logger', () => ({
   aiLogger: { info: () => undefined, warn: () => undefined, error: () => undefined },
+  dbLogger: { info: () => undefined, warn: () => undefined, error: () => undefined },
 }));
 
 vi.mock('@/lib/ai/tools', async () => {

@@ -3,10 +3,13 @@ import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
 import { createNewGitHubConnectorIdentityState } from '@/lib/external-identities/service';
 import type {
+  BeginSourceListRepair,
   ConnectorManagementPersistence,
+  FinalizeSourceListRepair,
   ManagedConnectorRecord,
   ManagedConnectorUpdate,
   SourceRankingRecord,
+  SourceListRepairRecord,
   SyncHistoryRecord,
 } from './connector-management';
 import type { SourceListRecord } from './connector-execution';
@@ -37,6 +40,15 @@ interface SqliteSyncHistoryRow extends Omit<
   success: number;
   errors: unknown;
   details: unknown;
+}
+
+interface SqliteSourceListRepairRow extends Omit<
+  SourceListRepairRecord,
+  'taskSnapshot' | 'moveResults' | 'oldListDeleted'
+> {
+  taskSnapshot: unknown;
+  moveResults: unknown;
+  oldListDeleted: number;
 }
 
 const CONNECTOR_COLUMNS = `
@@ -123,6 +135,53 @@ function mapSyncHistory(row: SqliteSyncHistoryRow): SyncHistoryRecord {
     errors: decodeLenientJsonArray(row.errors),
     details: decodeLenientJsonArray(row.details),
   };
+}
+
+function mapSourceListRepair(row: SqliteSourceListRepairRow): SourceListRepairRecord {
+  return {
+    ...row,
+    taskSnapshot: decodeLenientJsonArray(row.taskSnapshot)
+      .filter((entry): entry is SourceListRepairRecord['taskSnapshot'][number] => (
+        typeof entry === 'object' && entry !== null
+      )),
+    moveResults: decodeLenientJsonArray(row.moveResults)
+      .filter((entry): entry is SourceListRepairRecord['moveResults'][number] => (
+        typeof entry === 'object' && entry !== null
+      )),
+    oldListDeleted: row.oldListDeleted !== 0,
+  };
+}
+
+const SOURCE_LIST_REPAIR_COLUMNS = `
+  id,
+  created_at AS createdAt,
+  strategy,
+  status,
+  original_list_id AS originalListId,
+  original_source_id AS originalSourceId,
+  original_name AS originalName,
+  original_group_id AS originalGroupId,
+  connector_instance_id AS connectorInstanceId,
+  new_list_id AS newListId,
+  new_name AS newName,
+  task_snapshot AS taskSnapshot,
+  move_results AS moveResults,
+  tasks_total AS tasksTotal,
+  tasks_moved AS tasksMoved,
+  tasks_failed AS tasksFailed,
+  old_list_deleted AS oldListDeleted
+`;
+
+function sourceListRepairMatches(
+  repair: SourceListRepairRecord,
+  input: BeginSourceListRepair,
+): boolean {
+  return repair.strategy === input.strategy
+    && repair.originalListId === input.sourceList.id
+    && repair.originalSourceId === input.sourceList.sourceId
+    && repair.originalName === input.sourceList.name
+    && repair.connectorInstanceId === input.sourceList.connectorInstanceId
+    && repair.newName === input.newName;
 }
 
 function connectorUpdateParts(
@@ -213,6 +272,131 @@ export function createSqliteConnectorManagementRepository(
           };
         }),
       };
+    },
+
+    async getConnectorListSnapshot(connectorId) {
+      return database.transaction(() => {
+        const connectorRow = database.prepare(`
+          SELECT ${CONNECTOR_COLUMNS}
+          FROM connector_configs
+          WHERE id = ? AND deleted_at IS NULL
+          LIMIT 1
+        `).get(connectorId) as SqliteConnectorRow | undefined;
+        const sourceLists = (database.prepare(`
+          SELECT ${SOURCE_LIST_COLUMNS}
+          FROM source_lists
+          WHERE connector_instance_id = ?
+          ORDER BY sort_order ASC, name ASC, id ASC
+        `).all(connectorId) as SqliteSourceListRow[]).map(mapSourceList);
+        const openTaskCounts = database.prepare(`
+          SELECT source_list_id AS sourceListId, count(*) AS count
+          FROM tasks
+          WHERE connector_instance_id = ?
+            AND status NOT IN ('done', 'cancelled')
+            AND parent_id IS NULL
+            AND is_checklist_item = 0
+          GROUP BY source_list_id
+          ORDER BY source_list_id ASC
+        `).all(connectorId) as Array<{ sourceListId: string | null; count: number }>;
+        const groups = database.prepare(`
+          SELECT id, name, sort_order AS sortOrder
+          FROM list_groups
+          WHERE id IN (
+            SELECT group_id
+            FROM source_lists
+            WHERE connector_instance_id = ? AND group_id IS NOT NULL
+          )
+          ORDER BY sort_order ASC, id ASC
+        `).all(connectorId) as Array<{ id: string; name: string; sortOrder: number }>;
+        return {
+          connector: connectorRow
+            ? (({ id, type, settings, syncedLists }) => ({ id, type, settings, syncedLists }))(
+                mapConnector(connectorRow),
+              )
+            : null,
+          sourceLists,
+          openTaskCounts,
+          groups,
+        };
+      }).deferred();
+    },
+
+    async getGitHubRepositorySnapshot() {
+      return database.transaction(() => {
+        const connectors = (database.prepare(`
+          SELECT ${CONNECTOR_COLUMNS}
+          FROM connector_configs
+          WHERE type = 'github-issues' AND enabled = 1 AND deleted_at IS NULL
+          ORDER BY created_at ASC, id ASC
+        `).all() as SqliteConnectorRow[]).map(mapConnector).map(
+          ({ id, name, settings }) => ({ id, name, settings }),
+        );
+        const sourceLists = database.prepare(`
+          SELECT
+            sl.connector_instance_id AS connectorInstanceId,
+            sl.source_id AS sourceId,
+            sl.name
+          FROM source_lists sl
+          INNER JOIN connector_configs cc ON cc.id = sl.connector_instance_id
+          WHERE sl.type = 'repo'
+            AND cc.type = 'github-issues'
+            AND cc.enabled = 1
+            AND cc.deleted_at IS NULL
+          ORDER BY sl.sort_order ASC, sl.name ASC, sl.id ASC
+        `).all() as Array<{
+          connectorInstanceId: string;
+          sourceId: string;
+          name: string;
+        }>;
+        return { connectors, sourceLists };
+      }).deferred();
+    },
+
+    async listActiveConnectorsByType(type) {
+      return (database.prepare(`
+        SELECT ${CONNECTOR_COLUMNS}
+        FROM connector_configs
+        WHERE type = ? AND enabled = 1 AND deleted_at IS NULL
+        ORDER BY created_at ASC, id ASC
+      `).all(type) as SqliteConnectorRow[]).map(mapConnector);
+    },
+
+    async getMicrosoftTodoHealthSnapshot() {
+      return database.transaction(() => {
+        const connectors = (database.prepare(`
+          SELECT ${CONNECTOR_COLUMNS}
+          FROM connector_configs
+          WHERE type = 'microsoft-todo' AND deleted_at IS NULL
+          ORDER BY created_at ASC, id ASC
+        `).all() as SqliteConnectorRow[]).map(mapConnector);
+        const sourceLists = (database.prepare(`
+          SELECT ${SOURCE_LIST_COLUMNS}
+          FROM source_lists
+          WHERE connector_instance_id IN (
+            SELECT id FROM connector_configs
+            WHERE type = 'microsoft-todo' AND deleted_at IS NULL
+          )
+          ORDER BY sort_order ASC, id ASC
+        `).all() as SqliteSourceListRow[]).map(mapSourceList);
+        const taskCounts = database.prepare(`
+          SELECT
+            connector_instance_id AS connectorInstanceId,
+            source_list_id AS sourceListId,
+            count(*) AS count
+          FROM tasks
+          WHERE connector_instance_id IN (
+            SELECT id FROM connector_configs
+            WHERE type = 'microsoft-todo' AND deleted_at IS NULL
+          )
+          GROUP BY connector_instance_id, source_list_id
+          ORDER BY connector_instance_id ASC, source_list_id ASC
+        `).all() as Array<{
+          connectorInstanceId: string;
+          sourceListId: string | null;
+          count: number;
+        }>;
+        return { connectors, sourceLists, taskCounts };
+      }).deferred();
     },
 
     async projectExists(projectId) {
@@ -484,6 +668,177 @@ export function createSqliteConnectorManagementRepository(
       database.prepare(`
         UPDATE source_lists SET name = ?, last_known_remote_name = ? WHERE id = ?
       `).run(name, name, sourceListId);
+    },
+
+    async beginSourceListRepair(input) {
+      return database.transaction(() => {
+        const existingRow = database.prepare(`
+          SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+          FROM list_fix_audit_log
+          WHERE id = ?
+          LIMIT 1
+        `).get(input.id) as SqliteSourceListRepairRow | undefined;
+        if (existingRow) {
+          const repair = mapSourceListRepair(existingRow);
+          if (!sourceListRepairMatches(repair, input)) {
+            throw new Error('Source list repair idempotency key collision');
+          }
+          return { repair, replayed: true };
+        }
+        database.prepare(`
+          INSERT INTO list_fix_audit_log (
+            id, created_at, strategy, status, original_list_id, original_source_id,
+            original_name, original_group_id, connector_instance_id, new_list_id,
+            new_name, task_snapshot, move_results, tasks_total, tasks_moved,
+            tasks_failed, old_list_deleted
+          ) VALUES (?, ?, ?, 'pending', ?, ?, ?, ?, ?, NULL, ?, '[]', '[]', 0, 0, 0, 0)
+        `).run(
+          input.id,
+          input.createdAt,
+          input.strategy,
+          input.sourceList.id,
+          input.sourceList.sourceId,
+          input.sourceList.name,
+          input.sourceList.groupId,
+          input.sourceList.connectorInstanceId,
+          input.newName,
+        );
+        const repairRow = database.prepare(`
+          SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+          FROM list_fix_audit_log
+          WHERE id = ?
+          LIMIT 1
+        `).get(input.id) as SqliteSourceListRepairRow;
+        return { repair: mapSourceListRepair(repairRow), replayed: false };
+      }).immediate();
+    },
+
+    async getSourceListRepair(id) {
+      const row = database.prepare(`
+        SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+        FROM list_fix_audit_log
+        WHERE id = ?
+        LIMIT 1
+      `).get(id) as SqliteSourceListRepairRow | undefined;
+      return row ? mapSourceListRepair(row) : null;
+    },
+
+    async checkpointSourceListRepair(input) {
+      const assignments = ['status = ?'];
+      const values: unknown[] = [input.status];
+      if (input.newListId !== undefined) {
+        assignments.push('new_list_id = ?');
+        values.push(input.newListId);
+      }
+      if (input.taskSnapshot !== undefined) {
+        assignments.push('task_snapshot = ?', 'tasks_total = ?');
+        values.push(JSON.stringify(input.taskSnapshot), input.taskSnapshot.length);
+      }
+      if (input.moveResults !== undefined) {
+        const moved = input.moveResults.filter((result) => result.success).length;
+        assignments.push('move_results = ?', 'tasks_moved = ?', 'tasks_failed = ?');
+        values.push(
+          JSON.stringify(input.moveResults),
+          moved,
+          input.moveResults.length - moved,
+        );
+      }
+      if (input.oldListDeleted !== undefined) {
+        assignments.push('old_list_deleted = ?');
+        values.push(input.oldListDeleted ? 1 : 0);
+      }
+      values.push(input.id);
+      return database.prepare(`
+        UPDATE list_fix_audit_log
+        SET ${assignments.join(', ')}
+        WHERE id = ? AND status <> 'completed'
+      `).run(...values).changes === 1;
+    },
+
+    async finalizeSourceListRepair(input: FinalizeSourceListRepair) {
+      return database.transaction(() => {
+        const repairRow = database.prepare(`
+          SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+          FROM list_fix_audit_log
+          WHERE id = ?
+          LIMIT 1
+        `).get(input.id) as SqliteSourceListRepairRow | undefined;
+        if (!repairRow) return 'conflict' as const;
+        const repair = mapSourceListRepair(repairRow);
+        if (repair.status === 'completed') return 'replayed' as const;
+        if (
+          repair.strategy !== input.strategy
+          || repair.originalListId !== input.sourceListId
+          || repair.originalName !== input.expectedOriginalName
+        ) return 'conflict' as const;
+        const sourceList = database.prepare(`
+          SELECT
+            name,
+            source_id AS sourceId,
+            connector_instance_id AS connectorInstanceId
+          FROM source_lists
+          WHERE id = ?
+          LIMIT 1
+        `).get(input.sourceListId) as {
+          name: string;
+          sourceId: string;
+          connectorInstanceId: string;
+        } | undefined;
+        if (
+          !sourceList
+          || sourceList.name !== input.expectedOriginalName
+          || sourceList.sourceId !== repair.originalSourceId
+          || sourceList.connectorInstanceId !== repair.connectorInstanceId
+        ) {
+          return 'conflict' as const;
+        }
+        if (input.strategy === 'strip-emoji') {
+          const assignments = ['name = ?', 'last_known_remote_name = ?'];
+          const values: unknown[] = [input.newName, input.newName];
+          if (input.userDisplayName !== undefined) {
+            assignments.push('user_display_name = ?');
+            values.push(input.userDisplayName);
+          }
+          values.push(input.sourceListId);
+          database.prepare(`
+            UPDATE source_lists SET ${assignments.join(', ')} WHERE id = ?
+          `).run(...values);
+          database.prepare(`
+            UPDATE list_fix_audit_log
+            SET status = 'completed'
+            WHERE id = ?
+          `).run(input.id);
+          return 'completed' as const;
+        }
+        const moved = input.moveResults.filter((result) => result.success).length;
+        if (input.status === 'completed') {
+          database.prepare('DELETE FROM source_lists WHERE id = ?')
+            .run(input.sourceListId);
+        }
+        database.prepare(`
+          UPDATE list_fix_audit_log
+          SET status = ?,
+              new_list_id = ?,
+              task_snapshot = ?,
+              move_results = ?,
+              tasks_total = ?,
+              tasks_moved = ?,
+              tasks_failed = ?,
+              old_list_deleted = ?
+          WHERE id = ?
+        `).run(
+          input.status,
+          input.newListId,
+          JSON.stringify(input.taskSnapshot),
+          JSON.stringify(input.moveResults),
+          input.taskSnapshot.length,
+          moved,
+          input.taskSnapshot.length - moved,
+          input.oldListDeleted ? 1 : 0,
+          input.id,
+        );
+        return 'completed' as const;
+      }).immediate();
     },
 
     async reorderSourceLists(orderedIds) {

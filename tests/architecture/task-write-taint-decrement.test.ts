@@ -87,15 +87,15 @@ describe('L07 task-write taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 167,
+      tierARoutes: 157,
       tierBRoutes: 27,
-      cleanRoutes: 72,
-      directTaintSourceRoutes: 116,
+      cleanRoutes: 82,
+      directTaintSourceRoutes: 106,
       transitiveOnlyTaintSourceRoutes: 51,
-      directDbNamespaceRoutes: 117,
+      directDbNamespaceRoutes: 107,
       taintedLibA: 78,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 245,
+      totalMigrationUnits: 235,
     });
   });
 });

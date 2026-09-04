@@ -35,6 +35,8 @@ async function reset(): Promise<void> {
       WHERE connector_instance_id LIKE 'l11-management%';
     DELETE FROM work_todo_bridge_state
       WHERE connector_id LIKE 'l11-management%';
+    DELETE FROM list_fix_audit_log
+      WHERE id LIKE 'l11-management%';
     DELETE FROM source_lists
       WHERE connector_instance_id LIKE 'l11-management%';
     DELETE FROM tasks

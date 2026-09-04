@@ -35,6 +35,127 @@ export interface ConnectorOverview {
   }>;
 }
 
+export interface ConnectorListSnapshot {
+  connector: Pick<ManagedConnectorRecord, 'id' | 'type' | 'settings' | 'syncedLists'> | null;
+  sourceLists: SourceListRecord[];
+  openTaskCounts: Array<{
+    sourceListId: string | null;
+    count: number;
+  }>;
+  groups: Array<{
+    id: string;
+    name: string;
+    sortOrder: number;
+  }>;
+}
+
+export interface GitHubRepositorySnapshot {
+  connectors: Array<Pick<ManagedConnectorRecord, 'id' | 'name' | 'settings'>>;
+  sourceLists: Array<Pick<
+    SourceListRecord,
+    'connectorInstanceId' | 'sourceId' | 'name'
+  >>;
+}
+
+export interface MicrosoftTodoHealthSnapshot {
+  connectors: ManagedConnectorRecord[];
+  sourceLists: SourceListRecord[];
+  taskCounts: Array<{
+    connectorInstanceId: string;
+    sourceListId: string | null;
+    count: number;
+  }>;
+}
+
+export type SourceListRepairStrategy = 'strip-emoji' | 'migrate';
+export type SourceListRepairStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'partial'
+  | 'failed';
+
+export interface SourceListRepairTask {
+  id: string;
+  title: string;
+  status: string;
+}
+
+export interface SourceListRepairMoveResult {
+  taskId: string;
+  title: string;
+  status: string;
+  newTaskId?: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface SourceListRepairRecord {
+  id: string;
+  createdAt: string;
+  strategy: SourceListRepairStrategy;
+  status: SourceListRepairStatus;
+  originalListId: string;
+  originalSourceId: string;
+  originalName: string;
+  originalGroupId: string | null;
+  connectorInstanceId: string;
+  newListId: string | null;
+  newName: string;
+  taskSnapshot: SourceListRepairTask[];
+  moveResults: SourceListRepairMoveResult[];
+  tasksTotal: number;
+  tasksMoved: number;
+  tasksFailed: number;
+  oldListDeleted: boolean;
+}
+
+export interface BeginSourceListRepair {
+  id: string;
+  createdAt: string;
+  strategy: SourceListRepairStrategy;
+  sourceList: Pick<
+    SourceListRecord,
+    'id' | 'sourceId' | 'name' | 'groupId' | 'connectorInstanceId'
+  >;
+  newName: string;
+}
+
+export interface SourceListRepairCheckpoint {
+  id: string;
+  status: Exclude<SourceListRepairStatus, 'completed'>;
+  newListId?: string | null;
+  taskSnapshot?: readonly SourceListRepairTask[];
+  moveResults?: readonly SourceListRepairMoveResult[];
+  oldListDeleted?: boolean;
+}
+
+export type SourceListRepairFinalizationOutcome =
+  | 'completed'
+  | 'replayed'
+  | 'conflict';
+
+export type FinalizeSourceListRepair =
+  | {
+    strategy: 'strip-emoji';
+    id: string;
+    sourceListId: string;
+    expectedOriginalName: string;
+    newName: string;
+    userDisplayName?: string;
+  }
+  | {
+    strategy: 'migrate';
+    id: string;
+    sourceListId: string;
+    expectedOriginalName: string;
+    status: 'completed' | 'partial' | 'failed';
+    newListId: string;
+    taskSnapshot: readonly SourceListRepairTask[];
+    moveResults: readonly SourceListRepairMoveResult[];
+    oldListDeleted: boolean;
+  };
+
 export interface CreateManagedConnector {
   id: string;
   type: string;
@@ -123,6 +244,10 @@ export interface SyncHistoryRecord {
 
 export interface ConnectorManagementPersistence {
   getOverview(includeDeleted: boolean): Promise<ConnectorOverview>;
+  getConnectorListSnapshot(connectorId: string): Promise<ConnectorListSnapshot>;
+  getGitHubRepositorySnapshot(): Promise<GitHubRepositorySnapshot>;
+  listActiveConnectorsByType(type: string): Promise<ManagedConnectorRecord[]>;
+  getMicrosoftTodoHealthSnapshot(): Promise<MicrosoftTodoHealthSnapshot>;
   projectExists(projectId: string): Promise<boolean>;
   createConnector(input: CreateManagedConnector): Promise<boolean>;
   ensureSourceLists(lists: readonly ManagedSourceListInsert[]): Promise<void>;
@@ -160,6 +285,15 @@ export interface ConnectorManagementPersistence {
     iconColor?: string | null;
   }): Promise<void>;
   confirmRemoteSourceListRename(sourceListId: string, name: string): Promise<void>;
+  beginSourceListRepair(input: BeginSourceListRepair): Promise<{
+    repair: SourceListRepairRecord;
+    replayed: boolean;
+  }>;
+  getSourceListRepair(id: string): Promise<SourceListRepairRecord | null>;
+  checkpointSourceListRepair(input: SourceListRepairCheckpoint): Promise<boolean>;
+  finalizeSourceListRepair(
+    input: FinalizeSourceListRepair,
+  ): Promise<SourceListRepairFinalizationOutcome>;
   reorderSourceLists(orderedIds: readonly string[]): Promise<void>;
   listSourceRankings(): Promise<SourceRankingRecord[]>;
   putSourceRankings(rankings: readonly SourceRankingWrite[], now: string): Promise<SourceRankingRecord[]>;

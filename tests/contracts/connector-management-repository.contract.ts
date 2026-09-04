@@ -285,6 +285,185 @@ export function runConnectorManagementRepositoryContract(
       ]);
     });
 
+    it('returns normalized connector-domain snapshots with stable ordering', async () => {
+      const repository = harness.repository();
+      const todoId = `${PREFIX}-domain-todo`;
+      const githubId = `${PREFIX}-domain-github`;
+      await repository.createConnector(connector(todoId, {
+        type: 'microsoft-todo',
+        settings: { accountType: 'work' },
+      }));
+      await repository.createConnector(connector(githubId, {
+        type: 'github-issues',
+        settings: { repos: ['octo/fallback'] },
+      }));
+      await repository.ensureSourceLists([
+        {
+          id: `${PREFIX}-domain-list-b`,
+          connectorInstanceId: todoId,
+          sourceId: 'todo-b',
+          name: 'Todo B',
+          type: 'list',
+          taskCount: 0,
+          lastSyncedAt: null,
+          sortOrder: 1,
+          hidden: false,
+          icon: null,
+          iconColor: null,
+        },
+        {
+          id: `${PREFIX}-domain-list-a`,
+          connectorInstanceId: todoId,
+          sourceId: 'todo-a',
+          name: 'Todo A',
+          type: 'list',
+          taskCount: 0,
+          lastSyncedAt: null,
+          sortOrder: 0,
+          hidden: false,
+          icon: null,
+          iconColor: null,
+        },
+        {
+          id: `${PREFIX}-domain-repo`,
+          connectorInstanceId: githubId,
+          sourceId: 'octo/repo',
+          name: 'Repo',
+          type: 'repo',
+          taskCount: 0,
+          lastSyncedAt: null,
+          sortOrder: 0,
+          hidden: false,
+          icon: null,
+          iconColor: null,
+        },
+      ]);
+      await harness.seedTask(todoId, 'todo-a');
+
+      await expect(repository.getConnectorListSnapshot(todoId)).resolves.toMatchObject({
+        connector: {
+          id: todoId,
+          type: 'microsoft-todo',
+          settings: { accountType: 'work' },
+          syncedLists: ['primary'],
+        },
+        sourceLists: [
+          { id: `${PREFIX}-domain-list-a`, hidden: false },
+          { id: `${PREFIX}-domain-list-b`, hidden: false },
+        ],
+        openTaskCounts: [{ sourceListId: 'todo-a', count: 1 }],
+        groups: [],
+      });
+      await expect(repository.getGitHubRepositorySnapshot()).resolves.toMatchObject({
+        connectors: [{
+          id: githubId,
+          settings: { repos: ['octo/fallback'] },
+        }],
+        sourceLists: [{
+          connectorInstanceId: githubId,
+          sourceId: 'octo/repo',
+          name: 'Repo',
+        }],
+      });
+      await expect(repository.listActiveConnectorsByType('microsoft-todo'))
+        .resolves.toMatchObject([{ id: todoId, enabled: true }]);
+      await expect(repository.getMicrosoftTodoHealthSnapshot()).resolves.toMatchObject({
+        connectors: [{ id: todoId, enabled: true }],
+        sourceLists: [
+          { id: `${PREFIX}-domain-list-a` },
+          { id: `${PREFIX}-domain-list-b` },
+        ],
+        taskCounts: [{
+          connectorInstanceId: todoId,
+          sourceListId: 'todo-a',
+          count: 1,
+        }],
+      });
+    });
+
+    it('checkpoints and CAS-finalizes source-list repairs idempotently', async () => {
+      const repository = harness.repository();
+      const connectorId = `${PREFIX}-repair-connector`;
+      const sourceListId = `${PREFIX}-repair-list`;
+      const repairId = `${PREFIX}-repair`;
+      await repository.createConnector(connector(connectorId, {
+        type: 'microsoft-todo',
+      }));
+      await repository.ensureSourceLists([{
+        id: sourceListId,
+        connectorInstanceId: connectorId,
+        sourceId: 'remote-repair-list',
+        name: '😀 Repair me',
+        type: 'list',
+        taskCount: 0,
+        lastSyncedAt: null,
+        sortOrder: 0,
+        hidden: false,
+        icon: null,
+        iconColor: null,
+      }]);
+      const input = {
+        id: repairId,
+        createdAt: NOW,
+        strategy: 'strip-emoji' as const,
+        sourceList: (await repository.getSourceList(sourceListId))!,
+        newName: 'Repair me',
+      };
+
+      await expect(repository.beginSourceListRepair(input)).resolves.toMatchObject({
+        replayed: false,
+        repair: {
+          id: repairId,
+          status: 'pending',
+          taskSnapshot: [],
+          moveResults: [],
+          oldListDeleted: false,
+        },
+      });
+      await expect(repository.beginSourceListRepair(input)).resolves.toMatchObject({
+        replayed: true,
+        repair: { id: repairId },
+      });
+      await expect(repository.checkpointSourceListRepair({
+        id: repairId,
+        status: 'running',
+        taskSnapshot: [{ id: 'task-1', title: 'Task', status: 'notStarted' }],
+        moveResults: [{
+          taskId: 'task-1',
+          title: 'Task',
+          status: 'notStarted',
+          newTaskId: 'new-task-1',
+          success: true,
+        }],
+      })).resolves.toBe(true);
+      await expect(repository.finalizeSourceListRepair({
+        strategy: 'strip-emoji',
+        id: repairId,
+        sourceListId,
+        expectedOriginalName: '😀 Repair me',
+        newName: 'Repair me',
+      })).resolves.toBe('completed');
+      await expect(repository.finalizeSourceListRepair({
+        strategy: 'strip-emoji',
+        id: repairId,
+        sourceListId,
+        expectedOriginalName: '😀 Repair me',
+        newName: 'Repair me',
+      })).resolves.toBe('replayed');
+      await expect(repository.getSourceListRepair(repairId)).resolves.toMatchObject({
+        status: 'completed',
+        taskSnapshot: [{ id: 'task-1', title: 'Task', status: 'notStarted' }],
+        moveResults: [{ taskId: 'task-1', success: true }],
+        tasksTotal: 1,
+        tasksMoved: 1,
+        tasksFailed: 0,
+      });
+      await expect(repository.getSourceList(sourceListId)).resolves.toMatchObject({
+        name: 'Repair me',
+        lastKnownRemoteName: 'Repair me',
+      });
+    });
+
     it('upserts rankings and returns stable rank/id ordering', async () => {
       const repository = harness.repository();
       const written = await repository.putSourceRankings([

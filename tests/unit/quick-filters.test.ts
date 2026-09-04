@@ -22,6 +22,13 @@ const stats: TaskListStatsDto = {
 };
 
 describe('quick filter visibility', () => {
+  it('describes the week filter as a rolling seven-day window', () => {
+    expect(getQuickFilterDefinition('week')).toMatchObject({
+      label: 'Next 7 Days',
+      description: 'Due today through seven days from now',
+    });
+  });
+
   it('uses catalog defaults and preserves legacy hidden preferences', () => {
     const inbox = getQuickFilterDefinition('inbox')!;
 

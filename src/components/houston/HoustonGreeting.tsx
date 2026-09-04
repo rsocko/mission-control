@@ -80,7 +80,7 @@ export function HoustonGreeting() {
         if (tasksRes.status === 'fulfilled' && tasksRes.value.ok) {
           const data = await tasksRes.value.json();
           overdue = data?.stats?.overdue ?? 0;
-          dueToday = data?.stats?.dueThisWeek ?? 0;
+          dueToday = data?.stats?.dueToday ?? 0;
           inProgress = data?.stats?.totalOpen ?? 0;
           completedToday = data?.stats?.recentlyCreated ?? 0;
         }

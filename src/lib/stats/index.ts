@@ -23,6 +23,11 @@ import {
   getLocalDayBoundsISO,
   parseStoredTimestamp,
 } from '@/lib/utils/date';
+import {
+  NEXT_7_DAYS,
+  NEXT_7_DAYS_DESCRIPTION,
+  NEXT_7_DAYS_LABEL,
+} from '@/lib/tasks/due-window';
 import type { CadenceConfig } from '@/lib/routines/streaks';
 import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
 import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
@@ -128,7 +133,7 @@ async function computeOverdue(today: string): Promise<KpiResult> {
 
 async function computeDueThisWeek(today: string, weekFromNow: string): Promise<KpiResult> {
   const value = await countOpen(and(gte(tasks.dueDate, today), lte(tasks.dueDate, weekFromNow)));
-  return { slug: 'due-this-week', label: 'Due This Week', value, type: 'counter', accent: 'amber' };
+  return { slug: 'due-this-week', label: NEXT_7_DAYS_LABEL, value, type: 'counter', accent: 'amber' };
 }
 
 async function computeUnreadAlerts(): Promise<KpiResult> {
@@ -465,7 +470,7 @@ export async function computeKpis(
   options?: { today?: string },
 ): Promise<StatsSnapshot> {
   const today = options?.today ?? getLocalToday();
-  const weekFromNow = getLocalDaysFromNow(7);
+  const weekFromNow = getLocalDaysFromNow(NEXT_7_DAYS);
 
   const requested = slugs && slugs.length > 0
     ? slugs.filter((s): s is KpiSlug => s in KPI_REGISTRY)
@@ -501,7 +506,7 @@ export const KPI_CATALOG: Array<{
 }> = [
   { slug: 'total-open', label: 'Total Open', category: 'counts', type: 'counter', description: 'All open tasks across sources' },
   { slug: 'overdue', label: 'Overdue', category: 'counts', type: 'counter', description: 'Tasks past their due date' },
-  { slug: 'due-this-week', label: 'Due This Week', category: 'counts', type: 'counter', description: 'Tasks due within 7 days' },
+  { slug: 'due-this-week', label: NEXT_7_DAYS_LABEL, category: 'counts', type: 'counter', description: NEXT_7_DAYS_DESCRIPTION },
   { slug: 'unread-notifications', label: 'Unread Notifications', category: 'counts', type: 'counter', description: 'Unread notifications' },
   { slug: 'my-day', label: 'My Day', category: 'counts', type: 'counter', description: 'Tasks in your My Day list' },
   { slug: 'high-priority', label: 'High Priority', category: 'counts', type: 'counter', description: 'High or critical priority tasks' },

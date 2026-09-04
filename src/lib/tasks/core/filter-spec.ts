@@ -2,6 +2,7 @@ import { getLocalDaysFromNow, getLocalToday } from '@/lib/utils/date';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 import type { LocalDisposition } from '@/types';
 import {
   isTaskQuickFilter,
@@ -53,7 +54,7 @@ export interface TaskFilterSpecClock {
 export function getTaskFilterClock(): TaskFilterSpecClock {
   return {
     today: getLocalToday(),
-    weekFromNow: getLocalDaysFromNow(7),
+    weekFromNow: getLocalDaysFromNow(NEXT_7_DAYS),
     recentCutoff: getLocalDaysFromNow(-7),
   };
 }

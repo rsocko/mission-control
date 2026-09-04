@@ -25,6 +25,7 @@ import { ApiErrors } from '@/lib/api-error';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { getTaskSourceVisibilityConditions } from '@/app/api/tasks/canonical-filter';
 import { requireTaskEditPolicy, resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 import {
   finalizePlanningSignalsIfDue,
   planningFrictionEventTypes,
@@ -305,7 +306,7 @@ export async function GET(request: Request) {
     }
 
     const yesterday = getYesterday(date);
-    const weekEnd = addDays(date, 7);
+    const weekEnd = addDays(date, NEXT_7_DAYS);
     const isTopLevelTask = and(eq(tasks.depth, 0), isNull(tasks.parentId));
 
     // Batch-load hub project memberships for My Day tasks
@@ -463,7 +464,7 @@ export async function GET(request: Request) {
           )
         )
         .limit(SUGGESTION_LIMIT),
-      // 4. Due This Week
+      // 4. Due after today through the next seven days
       db.select()
         .from(tasks)
         .where(

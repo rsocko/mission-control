@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 import {
   Select,
   SelectContent,
@@ -280,7 +281,7 @@ export function UniverseFilterPanel({
             options={[
               { value: 'myDay', label: 'My Day' },
               { value: 'overdue', label: 'Overdue' },
-              { value: 'week', label: 'Due this week' },
+              { value: 'week', label: NEXT_7_DAYS_LABEL },
               { value: 'recentlyCreated', label: 'Recently created' },
               { value: 'recentlyClosed', label: 'Recently closed' },
             ]}

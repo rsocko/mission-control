@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('FTS authoritative filters', () => {
   let searchFTS: typeof import('@/lib/search/fts').searchFTS;
@@ -9,7 +10,7 @@ describe('FTS authoritative filters', () => {
     vi.resetModules();
 
     const [database, schema, fts] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/search/fts'),
     ]);

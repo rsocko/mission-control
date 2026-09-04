@@ -132,9 +132,9 @@ export interface SyncJobRepository {
     leaseMs?: number,
     excludedConnectorIds?: ReadonlySet<string>,
   ): Promise<SyncJob | null>;
-  renewLease(jobId: string, owner: string, leaseMs?: number): Promise<boolean>;
-  isCancellationRequested(jobId: string, owner: string): Promise<boolean>;
-  complete(jobId: string, owner: string, result: SyncResult): Promise<void>;
+  renewLease(jobId: string, owner: string, attempt: number, leaseMs?: number): Promise<boolean>;
+  isCancellationRequested(jobId: string, owner: string, attempt: number): Promise<boolean>;
+  complete(jobId: string, owner: string, attempt: number, result: SyncResult): Promise<void>;
   finalizeSuccess(
     job: SyncJob,
     owner: string,
@@ -148,7 +148,7 @@ export interface SyncJobRepository {
     error: string,
     options?: SyncJobFailureOptions,
   ): Promise<SyncJobStatus>;
-  release(jobId: string, owner: string, reason: string): Promise<boolean>;
+  release(jobId: string, owner: string, attempt: number, reason: string): Promise<boolean>;
   requestCancellation(params: {
     jobId?: string;
     connectorId?: string;

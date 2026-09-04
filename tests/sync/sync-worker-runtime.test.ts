@@ -195,6 +195,7 @@ describe('sync worker runtime', () => {
     await waitFor(() => expect(queueMocks.releaseSyncJob).toHaveBeenCalledWith(
       'job-1',
       'worker-a',
+      1,
       'worker_deactivated',
     ));
     await worker.stop();

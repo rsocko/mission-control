@@ -272,7 +272,7 @@ describe('durable sync job queue', () => {
     const queued = queue.enqueueSyncJob('github-1');
     const claimed = queue.claimNextSyncJob('worker-a');
     expect(claimed?.id).toBe(queued.id);
-    queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
+    queue.completeSyncJob(claimed!.id, 'worker-a', claimed!.attempt, success('github-1'));
     queue.enqueueSyncJob('github-2');
 
     expect(queue.countQueuedSyncJobs()).toBe(1);
@@ -450,7 +450,8 @@ describe('durable sync job queue', () => {
 
   it('queues one bounded follow-up behind a running connector job', () => {
     const running = queue.enqueueSyncJob('github-follow-up');
-    expect(queue.claimNextSyncJob('worker-a')?.id).toBe(running.id);
+    const claimed = queue.claimNextSyncJob('worker-a')!;
+    expect(claimed.id).toBe(running.id);
 
     const followUp = queue.enqueueSyncJob('github-follow-up', { full: true });
     const duplicate = queue.enqueueSyncJob('github-follow-up', { full: true });
@@ -460,16 +461,17 @@ describe('durable sync job queue', () => {
     expect(followUp).toMatchObject({ status: 'queued', full: true, attempt: 0 });
     expect(queue.getSyncQueueMetrics()).toMatchObject({ queued: 1, running: 1 });
 
-    queue.completeSyncJob(running.id, 'worker-a', success('github-follow-up'));
+    queue.completeSyncJob(claimed.id, 'worker-a', claimed.attempt, success('github-follow-up'));
     expect(queue.claimNextSyncJob('worker-b')?.id).toBe(followUp.id);
   });
 
   it('runs a queued follow-up instead of re-queuing a failed active job', () => {
     const running = queue.enqueueSyncJob('github-failed-follow-up');
-    expect(queue.claimNextSyncJob('worker-a')?.id).toBe(running.id);
+    const claimed = queue.claimNextSyncJob('worker-a')!;
+    expect(claimed.id).toBe(running.id);
     const followUp = queue.enqueueSyncJob('github-failed-follow-up', { full: true });
 
-    expect(queue.failSyncJob(running, 'worker-a', 'temporary failure')).toBe('failed');
+    expect(queue.failSyncJob(claimed, 'worker-a', 'temporary failure')).toBe('failed');
     expect(queue.getSyncJob(running.id)?.status).toBe('failed');
     expect(queue.claimNextSyncJob('worker-b')?.id).toBe(followUp.id);
   });
@@ -480,15 +482,46 @@ describe('durable sync job queue', () => {
 
     expect(claimed?.id).toBe(queued.id);
     expect(queue.claimNextSyncJob('worker-b')).toBeNull();
-    expect(queue.renewSyncJobLease(queued.id, 'worker-b')).toBe(false);
-    expect(() => queue.completeSyncJob(queued.id, 'worker-b', success('github-1')))
+    expect(queue.renewSyncJobLease(queued.id, 'worker-b', claimed!.attempt)).toBe(false);
+    expect(() => queue.completeSyncJob(
+      queued.id,
+      'worker-b',
+      claimed!.attempt,
+      success('github-1'),
+    ))
       .toThrow(/ownership was lost/);
 
-    queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
+    queue.completeSyncJob(queued.id, 'worker-a', claimed!.attempt, success('github-1'));
     expect(queue.getSyncJob(queued.id)).toMatchObject({
       status: 'succeeded',
       result: { success: true },
     });
+  });
+
+  it('fences stale attempts even when a retry uses the same owner', () => {
+    const queued = queue.enqueueSyncJob('github-1', { maxAttempts: 2 });
+    const first = queue.claimNextSyncJob('worker-a')!;
+    expect(queue.failSyncJob(first, 'worker-a', 'retry')).toBe('queued');
+    database.sqlite.prepare(`
+      UPDATE sync_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE id = ?
+    `).run(queued.id);
+    const second = queue.claimNextSyncJob('worker-a')!;
+    expect(second.attempt).toBe(first.attempt + 1);
+
+    expect(queue.renewSyncJobLease(first.id, 'worker-a', first.attempt)).toBe(false);
+    expect(() => queue.completeSyncJob(
+      first.id,
+      'worker-a',
+      first.attempt,
+      success('github-1'),
+    )).toThrow(/ownership was lost/);
+    expect(() => queue.failSyncJob(first, 'worker-a', 'stale failure'))
+      .toThrow(/ownership was lost/);
+    expect(queue.releaseSyncJob(first.id, 'worker-a', first.attempt, 'stale release'))
+      .toBe(false);
+
+    queue.completeSyncJob(second.id, 'worker-a', second.attempt, success('github-1'));
+    expect(queue.getSyncJob(second.id)?.status).toBe('succeeded');
   });
 
   it('atomically finalizes only the exact owned success log and releases its lease', async () => {
@@ -635,7 +668,7 @@ describe('durable sync job queue', () => {
     expect(running?.id).toBe(queued.id);
     expect(await probeRetentionProcess(retentionProbe)).toBe(false);
 
-    queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
+    queue.completeSyncJob(running!.id, 'worker-a', running!.attempt, success('github-1'));
     expect(await probeRetentionProcess(retentionProbe)).toBe(true);
     await stopRetentionProbeProcess(retentionProbe);
   });
@@ -700,14 +733,14 @@ describe('durable sync job queue', () => {
 
   it('exposes cooperative cancellation for the current lease owner', () => {
     const queued = queue.enqueueSyncJob('github-1');
-    queue.claimNextSyncJob('worker-a');
+    const claimed = queue.claimNextSyncJob('worker-a')!;
 
     expect(queue.requestSyncJobCancellation({ jobId: queued.id })).toEqual({
       cancelled: 0,
       cancellationRequested: 1,
     });
-    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-a')).toBe(true);
-    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-b')).toBe(false);
+    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-a', claimed.attempt)).toBe(true);
+    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-b', claimed.attempt)).toBe(false);
   });
 
   it('retries failures and records terminal failure without a success result', () => {
@@ -931,7 +964,7 @@ describe('durable sync job queue', () => {
       UPDATE sync_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE id = ?
     `).run(queued.id);
     const second = queue.claimNextSyncJob('worker-b')!;
-    queue.completeSyncJob(second.id, 'worker-b', success('github-1'));
+    queue.completeSyncJob(second.id, 'worker-b', second.attempt, success('github-1'));
 
     await expect(waiting).resolves.toMatchObject({ success: true, tasksAdded: 1 });
   });

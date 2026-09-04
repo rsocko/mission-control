@@ -1,6 +1,9 @@
 import { hostname } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
 import type {
   ConnectorOperationLeaseRepository,
   ConnectorOperationType,
@@ -27,15 +30,32 @@ export {
   getConnectorOperationLeaseMs,
 } from './connector-lock-values';
 
-export async function getConnectorOperationLeaseRepository(): Promise<ConnectorOperationLeaseRepository> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const { getPostgresConnectorOperationLeaseRepository } = await import('@/db/runtime');
-    return getPostgresConnectorOperationLeaseRepository();
+let repository: ConnectorOperationLeaseRepository | null = null;
+
+export function registerConnectorOperationLeaseRepository(
+  next: ConnectorOperationLeaseRepository,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  if (repository && repository !== next) {
+    throw new Error('Connector operation lease repository is already selected');
   }
-  const { sqliteConnectorOperationLeaseRepository } = await import(
-    './sqlite-connector-operation-lease-repository'
-  );
-  return sqliteConnectorOperationLeaseRepository;
+  repository = next;
+}
+
+export function clearConnectorOperationLeaseRepository(
+  expectedRepository?: ConnectorOperationLeaseRepository,
+): void {
+  if (expectedRepository && repository !== expectedRepository) return;
+  repository = null;
+}
+
+export async function getConnectorOperationLeaseRepository():
+Promise<ConnectorOperationLeaseRepository> {
+  assertPersistenceCompositionAccessAllowed();
+  if (!repository) {
+    throw new Error('Connector operation lease repository has not been registered');
+  }
+  return repository;
 }
 
 async function runWithConnectorOperationLeaseViaRepository<T>(
@@ -103,16 +123,10 @@ export async function runWithConnectorOperationLease<T>(
   operationType: ConnectorOperationType,
   operation: () => Promise<T>,
 ): Promise<T> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    return runWithConnectorOperationLeaseViaRepository(
-      await getConnectorOperationLeaseRepository(),
-      connectorId,
-      operationType,
-      operation,
-    );
-  }
-  const { runWithConnectorOperationLease: runWithSQLiteConnectorOperationLease } = await import(
-    './sqlite-connector-operation-lease-repository'
+  return runWithConnectorOperationLeaseViaRepository(
+    await getConnectorOperationLeaseRepository(),
+    connectorId,
+    operationType,
+    operation,
   );
-  return runWithSQLiteConnectorOperationLease(connectorId, operationType, operation);
 }

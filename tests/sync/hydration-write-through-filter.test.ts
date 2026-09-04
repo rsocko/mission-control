@@ -91,6 +91,10 @@ vi.mock('@/lib/sync/events', () => ({
   syncEventBus: { emitSyncEvent: vi.fn() },
 }));
 
+vi.mock('@/lib/sync/control-state', () => ({
+  assertConnectorSyncEnqueueAllowedAsync: vi.fn(() => Promise.resolve()),
+}));
+
 vi.mock('@/lib/sync/push-manager', () => ({
   pushPendingChanges: vi.fn(() => Promise.resolve({ pushed: 0, errors: [] })),
 }));

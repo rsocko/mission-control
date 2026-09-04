@@ -851,7 +851,12 @@ describePostgres('PostgreSQL finance worker queue-execution smoke', () => {
         const result = await pipeline.runSyncLocally(id, options);
         const job = await repository.get(options.jobId!);
         if (!job) throw new Error('Synthetic finance attempt disappeared before release');
-        if (!await repository.release(job.id, firstOwner, 'synthetic worker restart')) {
+        if (!await repository.release(
+          job.id,
+          firstOwner,
+          job.attempt,
+          'synthetic worker restart',
+        )) {
           throw new Error('Synthetic finance attempt could not be released');
         }
         await pool.query(

@@ -98,6 +98,10 @@ vi.mock('@/lib/sync/task-dependency-manager', () => ({
 vi.mock('@/lib/sync/maintenance-lock', () => ({
   assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
+vi.mock('@/lib/sync/control-state', () => ({
+  assertConnectorSyncEnqueueAllowedAsync: vi.fn(() => Promise.resolve()),
+  isConnectorSyncQuarantinedAsync: vi.fn(() => Promise.resolve(false)),
+}));
 vi.mock('@/lib/sync/list-manager', () => ({
   upsertSourceLists: vi.fn(),
   autoAssignFolderGroups: vi.fn(),

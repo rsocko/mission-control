@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (plan.md at session-state 430296c8-f794-4625-b32f-abb04894e6d4). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration (L03b plan.md at session-state 534e75a2-3d4e-4f6b-9bb2-70120e6bbec2). Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-03",
-  "generatedFromCommit": "eeeeca38d152c4347751c529a8b32f622b56c18f+L06b",
+  "generatedFromCommit": "49e9a24de91bd9ca73e74ba65452d8a4562605cd+L03b",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 219,
+    "tierARoutes": 217,
     "tierBRoutes": 26,
-    "cleanRoutes": 21,
+    "cleanRoutes": 23,
     "directTaintSourceRoutes": 142,
-    "transitiveOnlyTaintSourceRoutes": 77,
+    "transitiveOnlyTaintSourceRoutes": 75,
     "directDbNamespaceRoutes": 143,
-    "taintedLibA": 103,
+    "taintedLibA": 95,
     "taintedApiHelpers": 1,
-    "totalMigrationUnits": 323
+    "totalMigrationUnits": 313
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -389,7 +389,6 @@
     "src/app/api/finance/notifications/route.ts",
     "src/app/api/finance/overview/route.ts",
     "src/app/api/finance/summary/route.ts",
-    "src/app/api/finance/sync/route.ts",
     "src/app/api/finance/transactions/[id]/category/route.ts",
     "src/app/api/finance/transactions/[id]/kid/route.ts",
     "src/app/api/finance/transactions/route.ts",
@@ -501,7 +500,6 @@
     "src/app/api/sync/deletions/[id]/route.ts",
     "src/app/api/sync/health/route.ts",
     "src/app/api/sync/route.ts",
-    "src/app/api/sync/stream/route.ts",
     "src/app/api/sync/tasks/resolve/route.ts",
     "src/app/api/tag-insights/route.ts",
     "src/app/api/tags/merge/route.ts",
@@ -591,12 +589,14 @@
     "src/app/api/finance/insights/[occurrenceId]/route.ts",
     "src/app/api/finance/insights/presentation/route.ts",
     "src/app/api/finance/insights/route.ts",
+    "src/app/api/finance/sync/route.ts",
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/push/vapid-key/route.ts",
     "src/app/api/settings/mode/route.ts",
     "src/app/api/settings/shortcuts/route.ts",
     "src/app/api/shortcut/version/route.ts",
+    "src/app/api/sync/stream/route.ts",
     "src/app/api/tasks/[id]/hard-delete/route.ts",
     "src/app/api/triage/rules/route.ts",
     "src/app/api/triage/sources/route.ts",
@@ -775,7 +775,6 @@
     "src/app/api/finance/alerts/[id]/dismiss/route.ts",
     "src/app/api/finance/alerts/route.ts",
     "src/app/api/finance/overview/route.ts",
-    "src/app/api/finance/sync/route.ts",
     "src/app/api/finance/transactions/[id]/kid/route.ts",
     "src/app/api/graph/nodes/[nodeId]/neighbors/route.ts",
     "src/app/api/graph/universe/route.ts",
@@ -808,7 +807,6 @@
     "src/app/api/scout/reconciliation/suggestions/[id]/route.ts",
     "src/app/api/scout/reconciliation/suggestions/route.ts",
     "src/app/api/stats/route.ts",
-    "src/app/api/sync/stream/route.ts",
     "src/app/api/tag-insights/route.ts",
     "src/app/api/tasks/[id]/owl/route.ts",
     "src/app/api/tasks/[id]/relationship-candidates/route.ts",
@@ -1049,7 +1047,6 @@
     "src/lib/search/embedding-request.ts",
     "src/lib/search/index.ts",
     "src/lib/search/semantic.ts",
-    "src/lib/search/sqlite-fts-repository.ts",
     "src/lib/semantic-index/config.ts",
     "src/lib/semantic-index/index.ts",
     "src/lib/semantic-index/runtime.ts",
@@ -1057,13 +1054,6 @@
     "src/lib/stats/flow-query.ts",
     "src/lib/stats/index.ts",
     "src/lib/stats/insights.ts",
-    "src/lib/sync/connector-lock.ts",
-    "src/lib/sync/job-queue.ts",
-    "src/lib/sync/operator-control.ts",
-    "src/lib/sync/sqlite-connector-operation-lease-repository.ts",
-    "src/lib/sync/sqlite-control-state.ts",
-    "src/lib/sync/sqlite-job-repository.ts",
-    "src/lib/sync/sqlite-maintenance-lock.ts",
     "src/lib/tag-insights/service.ts",
     "src/lib/triage/actions.ts",
     "src/lib/triage/actions/ms-todo.ts",
@@ -1144,6 +1134,37 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation removes only transfer-identity.ts and its transitive task-move-write-through.ts caller from taintedLibA (105 to 103), leaves routes at A219/B26/clean21, and reduces total migration units from 325 to 323."
+    },
+    {
+      "layer": "L03b",
+      "title": "canonical sync infrastructure PostgreSQL web/API parity",
+      "totalMigrationUnits": {
+        "from": 323,
+        "to": 313,
+        "delta": -10
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/search/sqlite-fts-repository.ts",
+        "src/lib/sync/connector-lock.ts",
+        "src/lib/sync/job-queue.ts",
+        "src/lib/sync/operator-control.ts",
+        "src/lib/sync/sqlite-connector-operation-lease-repository.ts",
+        "src/lib/sync/sqlite-control-state.ts",
+        "src/lib/sync/sqlite-job-repository.ts",
+        "src/lib/sync/sqlite-maintenance-lock.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/finance/sync/route.ts",
+        "src/app/api/sync/stream/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/finance/sync/route.ts",
+        "src/app/api/sync/stream/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Recomputed with computeWebPersistenceGraph (node --experimental-strip-types) against base 49e9a24de91bd9ca73e74ba65452d8a4562605cd plus L03b. The graph is exactly 266 routes, 217 Tier A, 26 Tier B, 23 clean, 142 direct, 75 transitive-only, 143 direct @/db, 95 tainted libraries, 1 tainted API helper, and 313 total migration units. L03b removes only its two routes and eight libraries while retaining L06b's transfer-identity and transitive task-move removals, with no additions to any taint set and no Tier A to Tier B reclassification."
     }
   ],
   "layerUpdates": [

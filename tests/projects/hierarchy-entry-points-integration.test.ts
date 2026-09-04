@@ -132,7 +132,7 @@ async function seedEntryPointProject(suffix: string) {
 
 async function loadSnapshot(projectId: string) {
   const { getProjectHierarchySnapshot } = await import('@/lib/projects/hierarchy-service');
-  return getProjectHierarchySnapshot(projectId)!;
+  return (await getProjectHierarchySnapshot(projectId))!;
 }
 
 describe('project hierarchy mutation entry points', () => {

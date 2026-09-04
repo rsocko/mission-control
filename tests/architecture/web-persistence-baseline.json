@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 190,
+    "tierARoutes": 186,
     "tierBRoutes": 26,
-    "cleanRoutes": 50,
-    "directTaintSourceRoutes": 125,
-    "transitiveOnlyTaintSourceRoutes": 65,
-    "directDbNamespaceRoutes": 126,
-    "taintedLibA": 86,
+    "cleanRoutes": 54,
+    "directTaintSourceRoutes": 124,
+    "transitiveOnlyTaintSourceRoutes": 62,
+    "directDbNamespaceRoutes": 125,
+    "taintedLibA": 85,
     "taintedApiHelpers": 1,
-    "totalMigrationUnits": 277
+    "totalMigrationUnits": 272
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -393,7 +393,6 @@
     "src/app/api/graph/universe/route.ts",
     "src/app/api/hub-projects/[id]/route.ts",
     "src/app/api/hub-projects/[id]/rule-matches/route.ts",
-    "src/app/api/hub-projects/[id]/tasks/route.ts",
     "src/app/api/hub-projects/route.ts",
     "src/app/api/ideation/convert/route.ts",
     "src/app/api/ideation/expand/route.ts",
@@ -435,15 +434,12 @@
     "src/app/api/priority-entities/options/route.ts",
     "src/app/api/priority-entities/route.ts",
     "src/app/api/priority-log/route.ts",
-    "src/app/api/project-phases/[id]/items/reorder/route.ts",
-    "src/app/api/project-phases/[id]/items/route.ts",
     "src/app/api/project-phases/[id]/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
     "src/app/api/project-phases/route.ts",
     "src/app/api/projects-overview/route.ts",
     "src/app/api/projects/[id]/graph/route.ts",
-    "src/app/api/projects/[id]/hierarchy/route.ts",
     "src/app/api/projects/[id]/reports/burn/route.ts",
     "src/app/api/projects/[id]/task-dependencies/[dependencyId]/route.ts",
     "src/app/api/projects/[id]/task-dependencies/route.ts",
@@ -571,6 +567,7 @@
     "src/app/api/finance/insights/presentation/route.ts",
     "src/app/api/finance/insights/route.ts",
     "src/app/api/finance/sync/route.ts",
+    "src/app/api/hub-projects/[id]/tasks/route.ts",
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/mcp/tasks/[id]/route.ts",
@@ -580,6 +577,9 @@
     "src/app/api/notifications/views/[id]/route.ts",
     "src/app/api/notifications/views/route.ts",
     "src/app/api/notifications/writebacks/route.ts",
+    "src/app/api/project-phases/[id]/items/reorder/route.ts",
+    "src/app/api/project-phases/[id]/items/route.ts",
+    "src/app/api/projects/[id]/hierarchy/route.ts",
     "src/app/api/push/subscribe/route.ts",
     "src/app/api/push/vapid-key/route.ts",
     "src/app/api/settings/mode/route.ts",
@@ -671,7 +671,6 @@
     "src/app/api/priority-entities/options/route.ts",
     "src/app/api/priority-entities/route.ts",
     "src/app/api/priority-log/route.ts",
-    "src/app/api/project-phases/[id]/items/route.ts",
     "src/app/api/project-phases/[id]/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
@@ -753,7 +752,6 @@
     "src/app/api/finance/transactions/[id]/kid/route.ts",
     "src/app/api/graph/nodes/[nodeId]/neighbors/route.ts",
     "src/app/api/graph/universe/route.ts",
-    "src/app/api/hub-projects/[id]/tasks/route.ts",
     "src/app/api/ideation/expand/route.ts",
     "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
     "src/app/api/ideation/workspaces/[id]/route.ts",
@@ -769,10 +767,8 @@
     "src/app/api/native/push/registrations/[registrationId]/route.ts",
     "src/app/api/native/push/registrations/route.ts",
     "src/app/api/notifications/triage/route.ts",
-    "src/app/api/project-phases/[id]/items/reorder/route.ts",
     "src/app/api/projects-overview/route.ts",
     "src/app/api/projects/[id]/graph/route.ts",
-    "src/app/api/projects/[id]/hierarchy/route.ts",
     "src/app/api/projects/[id]/reports/burn/route.ts",
     "src/app/api/projects/[id]/task-dependencies/[dependencyId]/route.ts",
     "src/app/api/projects/[id]/task-dependencies/route.ts",
@@ -866,7 +862,6 @@
     "src/app/api/priority-entities/options/route.ts",
     "src/app/api/priority-entities/route.ts",
     "src/app/api/priority-log/route.ts",
-    "src/app/api/project-phases/[id]/items/route.ts",
     "src/app/api/project-phases/[id]/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
@@ -985,7 +980,6 @@
     "src/lib/notifications/workflow-executor.ts",
     "src/lib/persistence/sqlite-runtime.ts",
     "src/lib/projects-overview/index.ts",
-    "src/lib/projects/hierarchy-service.ts",
     "src/lib/public-demo-runtime.ts",
     "src/lib/push/scheduler.ts",
     "src/lib/push/triggers.ts",
@@ -1244,6 +1238,34 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Recomputed with computeWebPersistenceGraph at L14: 266 routes, 202 Tier A, 26 Tier B, 38 clean, 135 direct, 67 transitive-only, 136 direct @/db, 89 tainted libraries, 1 tainted API helper, and 292 total migration units."
+    },
+    {
+      "layer": "L15",
+      "title": "project-hierarchy web/API PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 277,
+        "to": 272,
+        "delta": -5
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/projects/hierarchy-service.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/hub-projects/[id]/tasks/route.ts",
+        "src/app/api/project-phases/[id]/items/reorder/route.ts",
+        "src/app/api/project-phases/[id]/items/route.ts",
+        "src/app/api/projects/[id]/hierarchy/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/hub-projects/[id]/tasks/route.ts",
+        "src/app/api/project-phases/[id]/items/reorder/route.ts",
+        "src/app/api/project-phases/[id]/items/route.ts",
+        "src/app/api/projects/[id]/hierarchy/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Recomputed with computeWebPersistenceGraph after landing L15 on main: 266 routes, 186 Tier A, 26 Tier B, 54 clean, 124 direct, 62 transitive-only, 125 direct @/db, 85 tainted libraries, 1 tainted API helper, and 272 total migration units."
     }
   ],
   "layerUpdates": [

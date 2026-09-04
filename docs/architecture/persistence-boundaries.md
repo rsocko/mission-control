@@ -1725,6 +1725,47 @@ they hold inline Drizzle queries in the route file itself and belong to the
 route-extraction work, not to this layer. `/api/projects/[id]/reports/burn`
 likewise remains Tier A; it is a history-replay report rather than a derived
 read model.
+## Web/API PostgreSQL parity: Layer L08b (triage native persistence)
+
+Layer L08b extends the same atomic `TriagePersistenceRepositories` value with
+a focused `native` sub-contract. It owns bounded installation and Share Sheet
+credential reads, fenced Share Sheet request claims, APNs registration request
+replay and lifecycle mutations, and logout revocation. SQLite uses immediate
+transactions; PostgreSQL uses transactional advisory locks for the two
+contention domains. Neither adapter exposes a driver, transaction handle,
+fallback, dual write, or generic query facade.
+
+Share Sheet claims prune requests older than 24 hours before enforcing an exact
+30-per-credential rolling-minute limit. Request identity is bound to the
+canonical payload hash. Completion requires the original reservation and
+payload, release deletes only an owned pending reservation, and concurrent
+claims resolve to one owner plus pending/replay/duplicate outcomes.
+
+APNs request records store domain response payloads rather than HTTP envelopes.
+Exact retries replay the stored status and payload; request-ID reuse with a
+different operation or payload returns a conflict. Registration atomically
+retires a device token reassigned to another installation, retires an
+installation's prior active target, rotates changed tokens in place, and keeps
+encrypted token material only. Unregister requires installation ownership and
+is idempotent. Logout atomically revokes active installation and Share Sheet
+credentials and retires active registrations, returning exact changed-row
+counts.
+
+Token parsing and hashing, constant-time comparison, scope/expiry/installation
+binding, APNs token encryption, canonical request hashing, schema validation,
+APNs configuration, HTTP envelopes, and triage item creation remain
+service-owned and outside repository transactions. Contract tests run against
+SQLite and live PostgreSQL; live-PostgreSQL route tests poison `@/db` while
+exercising Share Sheet capture, APNs register/replay/unregister, and logout.
+
+Composed on current main, the committed L08b graph is exactly 266 API routes,
+139 Tier A, 19 Tier B, 108 clean, 101 direct taint-source routes,
+38 transitive-only Tier A routes, 102 direct `@/db` namespace routes,
+67 tainted libraries, zero tainted API helpers, and 206 total migration units.
+No route moved into Tier B. The exact
+newly clean routes are `/api/triage/capture`, native logout, native APNs
+registration, and native APNs unregistration; the exact newly portable
+libraries are the four native service/authentication modules.
 
 ## Backend-specific exceptions
 

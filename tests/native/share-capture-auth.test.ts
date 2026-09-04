@@ -4,24 +4,14 @@ const credentialId = '83c45840-a47f-4269-aae9-5a3f4fbd220b';
 const token = `mc_share_v1.${credentialId}.${'a'.repeat(43)}`;
 const rows: Record<string, unknown>[] = [];
 
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => rows),
-        })),
-      })),
-    })),
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  nativeShareCredentials: { id: 'id' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(() => 'eq'),
+vi.mock('@/lib/triage/persistence', () => ({
+  getTriagePersistenceRepositories: vi.fn(() => ({
+    native: {
+      credentials: {
+        findShareCredential: vi.fn(async () => rows[0] ?? null),
+      },
+    },
+  })),
 }));
 
 import {

@@ -1,10 +1,8 @@
 import 'server-only';
 
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import db from '@/db';
-import { nativeInstallationCredentials } from '@/db/schema';
 import { safeEqual } from '@/lib/api/trusted-request';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 const installationTokenPattern =
   /^mc_install_v1\.([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43,128})$/i;
@@ -53,9 +51,10 @@ export async function authenticateNativeInstallationCredential(
   if (!match) return { status: 'unauthorized' };
 
   const credentialId = match[1].toLowerCase();
-  const credential = db.select().from(nativeInstallationCredentials).where(
-    eq(nativeInstallationCredentials.id, credentialId),
-  ).get();
+  const credential = await getTriagePersistenceRepositories()
+    .native
+    .credentials
+    .findInstallationCredential(credentialId);
   if (!credential || credential.revokedAt) return { status: 'unauthorized' };
   if (Date.parse(credential.expiresAt) <= now.getTime()) return { status: 'expired' };
   if (!safeEqual(hashNativeInstallationCredential(token), credential.tokenHash)) {

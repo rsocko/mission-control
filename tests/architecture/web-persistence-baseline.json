@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, and L08a triage web persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "96741e20236a3095b3ec15f4b34339faf831ad67+L08a",
+  "generatedFromCommit": "d4188708bb6b5b0d520684aaf5b162acec88ec28+L08b",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 143,
+    "tierARoutes": 139,
     "tierBRoutes": 19,
-    "cleanRoutes": 104,
+    "cleanRoutes": 108,
     "directTaintSourceRoutes": 101,
-    "transitiveOnlyTaintSourceRoutes": 42,
+    "transitiveOnlyTaintSourceRoutes": 38,
     "directDbNamespaceRoutes": 102,
-    "taintedLibA": 71,
+    "taintedLibA": 67,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 214
+    "totalMigrationUnits": 206
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -406,9 +406,6 @@
     "src/app/api/mobile-dashboard/route.ts",
     "src/app/api/my-day/route.ts",
     "src/app/api/my-day/sync/route.ts",
-    "src/app/api/native/logout/route.ts",
-    "src/app/api/native/push/registrations/[registrationId]/route.ts",
-    "src/app/api/native/push/registrations/route.ts",
     "src/app/api/navigation/counts/route.ts",
     "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
     "src/app/api/notifications/re-enrich/route.ts",
@@ -475,7 +472,6 @@
     "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/triage/[id]/extract-actions/route.ts",
     "src/app/api/triage/[id]/route.ts",
-    "src/app/api/triage/capture/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "tierBRoutes": [
@@ -537,6 +533,9 @@
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/mcp/tasks/[id]/route.ts",
+    "src/app/api/native/logout/route.ts",
+    "src/app/api/native/push/registrations/[registrationId]/route.ts",
+    "src/app/api/native/push/registrations/route.ts",
     "src/app/api/notifications/[id]/snooze/route.ts",
     "src/app/api/notifications/bulk/route.ts",
     "src/app/api/notifications/route.ts",
@@ -580,6 +579,7 @@
     "src/app/api/triage/backfill-thumbnails/route.ts",
     "src/app/api/triage/capture/image/[id]/route.ts",
     "src/app/api/triage/capture/image/route.ts",
+    "src/app/api/triage/capture/route.ts",
     "src/app/api/triage/content-types/route.ts",
     "src/app/api/triage/cron/route.ts",
     "src/app/api/triage/digest/route.ts",
@@ -732,9 +732,6 @@
     "src/app/api/integrations/alertmanager/route.ts",
     "src/app/api/integrations/alertmanager/test/route.ts",
     "src/app/api/integrations/alertmanager/webhook/route.ts",
-    "src/app/api/native/logout/route.ts",
-    "src/app/api/native/push/registrations/[registrationId]/route.ts",
-    "src/app/api/native/push/registrations/route.ts",
     "src/app/api/notifications/triage/route.ts",
     "src/app/api/projects-overview/route.ts",
     "src/app/api/projects/[id]/graph/route.ts",
@@ -749,8 +746,7 @@
     "src/app/api/tasks/[id]/relationships/[relationshipId]/route.ts",
     "src/app/api/tasks/[id]/relationships/route.ts",
     "src/app/api/triage/[id]/extract-actions/route.ts",
-    "src/app/api/triage/[id]/route.ts",
-    "src/app/api/triage/capture/route.ts"
+    "src/app/api/triage/[id]/route.ts"
   ],
   "directDbNamespaceRoutes": [
     "src/app/api/ai/context-tasks/route.ts",
@@ -901,10 +897,6 @@
     "src/lib/intake/ai-parser.ts",
     "src/lib/intake/index.ts",
     "src/lib/integrations/n8n.ts",
-    "src/lib/native/apns-registration-service.ts",
-    "src/lib/native/installation-auth.ts",
-    "src/lib/native/share-capture-auth.ts",
-    "src/lib/native/share-capture-service.ts",
     "src/lib/notifications/index.ts",
     "src/lib/notifications/push-policy/resolver.ts",
     "src/lib/notifications/push-policy/rules.ts",
@@ -1410,6 +1402,44 @@
         "src/app/api/triage/capture/route.ts"
       ],
       "verification": "computeWebPersistenceGraph reports exactly 266 routes, A143/B19/clean104, direct101/transitive42/directDB102, 71 tainted libraries, zero helpers, and 214 total migration units after composing with merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, and L12a connector-domain parity. L08a adds no Tier B route."
+    },
+    {
+      "layer": "L08b",
+      "title": "triage native PostgreSQL persistence parity",
+      "totalMigrationUnits": {
+        "from": 214,
+        "to": 206,
+        "delta": -8
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/native/apns-registration-service.ts",
+        "src/lib/native/installation-auth.ts",
+        "src/lib/native/share-capture-auth.ts",
+        "src/lib/native/share-capture-service.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/native/logout/route.ts",
+        "src/app/api/native/push/registrations/[registrationId]/route.ts",
+        "src/app/api/native/push/registrations/route.ts",
+        "src/app/api/triage/capture/route.ts"
+      ],
+      "removedTierBRoutes": [],
+      "removedDirectDbNamespaceRoutes": [],
+      "newlyCleanRoutes": [
+        "src/app/api/native/logout/route.ts",
+        "src/app/api/native/push/registrations/[registrationId]/route.ts",
+        "src/app/api/native/push/registrations/route.ts",
+        "src/app/api/triage/capture/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "explicitExclusions": [
+        "src/app/api/notifications/triage/route.ts",
+        "src/app/api/triage/[id]/extract-actions/route.ts",
+        "src/app/api/triage/[id]/route.ts"
+      ],
+      "verification": "computeWebPersistenceGraph reports exactly 266 routes, A139/B19/clean108, direct101/transitive38/directDB102, 67 tainted libraries, zero helpers, and 206 total migration units. No route moved from Tier A to Tier B."
     }
   ],
   "layerUpdates": [
@@ -1461,6 +1491,16 @@
         "Fourteen triage routes leave Tier A, eight triage routes leave Tier B, seven triage libraries leave taintedLibA, and five direct @/db route imports are removed without adding deferred taint.",
         "Shared SQLite and live-PostgreSQL contracts cover filters, facets, ordering/nulls, pagination, enrichment, content types, lifecycle maintenance, idempotency, and concurrent metadata merging; representative PostgreSQL route tests poison SQLite.",
         "The AI-linked /api/triage/[id] and /extract-actions routes, /api/notifications/triage, and native /api/triage/capture remain out of scope and retain their existing tier classification."
+      ]
+    },
+    {
+      "layer": "L08b",
+      "summary": "Web/API PostgreSQL parity: native Share Sheet authentication and claims, APNs registration lifecycle, and native logout use the atomic triage persistence composition.",
+      "changes": [
+        "TriagePersistenceRepositories gains a focused native sub-contract with bounded credential reads, fenced Share Sheet claims, APNs request replay and registration lifecycle operations, and atomic logout.",
+        "SQLite and PostgreSQL adapters preserve exact replay, rate-window, retention, reservation ownership, token reassignment, target rotation, unregister ownership, and exact-count logout semantics without fallback, dual writes, or raw handles.",
+        "Token parsing and hashing, constant-time comparison, scope/expiry/binding checks, encryption, canonical request hashing, schema validation, APNs configuration, HTTP envelopes, and triage item creation remain service-owned and outside repository transactions.",
+        "Four native routes leave Tier A, four native libraries leave taintedLibA, and no route is added to Tier B."
       ]
     }
   ]

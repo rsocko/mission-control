@@ -4,14 +4,11 @@ import {
   createHash,
   randomUUID,
 } from 'node:crypto';
-import { and, eq, isNull, ne } from 'drizzle-orm';
-import db, { runTransaction } from '@/db';
-import {
-  apnsRegistrations,
-  nativeInstallationCredentials,
-  nativePushRequests,
-  nativeShareCredentials,
-} from '@/db/schema';
+import type {
+  NativeApnsRegistrationStoredResponse,
+  NativeApnsUnregistrationStoredResponse,
+  NativeStoredRequest,
+} from '@/db/persistence/triage-repositories';
 import {
   apnsRegistrationRequestSchema,
   apnsUnregistrationRequestSchema,
@@ -25,6 +22,7 @@ import {
   type InstallationCredentialScope,
 } from './installation-auth';
 import { getApnsConfiguration } from '@/lib/push/apns-config';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 import {
   encryptApnsDeviceToken,
   hashApnsDeviceToken,
@@ -83,7 +81,24 @@ function failure(
   };
 }
 
+function canonicalJSON(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJSON).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map(
+      key => `${JSON.stringify(key)}:${canonicalJSON(record[key])}`,
+    ).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
 function canonicalHash(operation: string, payload: object): string {
+  return createHash('sha256')
+    .update(`${operation}\n${canonicalJSON(payload)}`, 'utf8')
+    .digest('hex');
+}
+
+function legacyHash(operation: string, payload: object): string {
   return createHash('sha256')
     .update(`${operation}\n${JSON.stringify(payload)}`, 'utf8')
     .digest('hex');
@@ -94,6 +109,7 @@ async function authenticate(
   requestId: string,
   requiredScope: InstallationCredentialScope,
   installationId: string,
+  now: Date,
 ): Promise<
   | { credentialId: string; installationId: string }
   | NativeApiResult
@@ -101,6 +117,7 @@ async function authenticate(
   const authentication = await authenticateNativeInstallationCredential(
     request.headers.get('authorization'),
     requiredScope,
+    now,
   );
   if (authentication.status === 'expired') {
     return failure(requestId, 401, 'TOKEN_EXPIRED', 'The installation credential has expired');
@@ -132,48 +149,113 @@ function validateIdempotencyKey(request: Request, requestId: string): NativeApiR
   return null;
 }
 
-function replayResult(
-  credentialId: string,
+function isRegistrationResponse(
+  value: unknown,
+): value is NativeApnsRegistrationStoredResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.kind === 'registration'
+    && typeof record.registrationId === 'string'
+    && (record.state === 'registered' || record.state === 'rotated')
+    && typeof record.updatedAt === 'string';
+}
+
+function isUnregistrationResponse(
+  value: unknown,
+): value is NativeApnsUnregistrationStoredResponse {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return record.kind === 'unregistration'
+    && typeof record.registrationId === 'string'
+    && record.state === 'unregistered'
+    && typeof record.updatedAt === 'string';
+}
+
+function registrationResult(
   requestId: string,
-  operation: string,
-  payloadHash: string,
-): NativeApiResult | null {
-  const prior = db.select().from(nativePushRequests).where(and(
-    eq(nativePushRequests.credentialId, credentialId),
-    eq(nativePushRequests.requestId, requestId),
-  )).get();
-  if (!prior) return null;
-  if (prior.operation !== operation || prior.payloadHash !== payloadHash) {
-    return failure(
-      requestId,
-      409,
-      'REPLAY_DETECTED',
-      'The request ID was already used for different content',
-    );
+  response: NativeStoredRequest,
+): NativeApiResult {
+  if (
+    (response.responseStatus === 200 || response.responseStatus === 201)
+    && response.responseBody
+    && typeof response.responseBody === 'object'
+    && !Array.isArray(response.responseBody)
+  ) {
+    const envelope = response.responseBody as Record<string, unknown>;
+    if (
+      envelope.version === 1
+      && envelope.requestId === requestId
+      && envelope.ok === true
+      && envelope.data
+      && isRegistrationResponse({
+        kind: 'registration',
+        ...(envelope.data as Record<string, unknown>),
+      })
+    ) {
+      return { status: response.responseStatus, body: envelope };
+    }
+  }
+  if (
+    (response.responseStatus !== 200 && response.responseStatus !== 201)
+    || !isRegistrationResponse(response.responseBody)
+  ) {
+    throw new Error('Stored APNs registration response is invalid');
   }
   return {
-    status: prior.responseStatus,
-    body: prior.responseBody as Record<string, unknown>,
+    status: response.responseStatus,
+    body: {
+      version: 1,
+      requestId,
+      ok: true,
+      data: {
+        registrationId: response.responseBody.registrationId,
+        state: response.responseBody.state,
+        updatedAt: response.responseBody.updatedAt,
+      },
+    },
   };
 }
 
-function storeResult(
-  credentialId: string,
+function unregistrationResult(
   requestId: string,
-  operation: string,
-  payloadHash: string,
-  result: NativeApiResult,
-  nowIso: string,
-): void {
-  db.insert(nativePushRequests).values({
-    credentialId,
-    requestId,
-    operation,
-    payloadHash,
-    responseStatus: result.status,
-    responseBody: result.body,
-    createdAt: nowIso,
-  }).run();
+  response: NativeStoredRequest,
+): NativeApiResult {
+  if (
+    response.responseStatus === 200
+    && response.responseBody
+    && typeof response.responseBody === 'object'
+    && !Array.isArray(response.responseBody)
+  ) {
+    const envelope = response.responseBody as Record<string, unknown>;
+    if (
+      envelope.version === 1
+      && envelope.requestId === requestId
+      && envelope.ok === true
+      && envelope.data
+      && isUnregistrationResponse({
+        kind: 'unregistration',
+        ...(envelope.data as Record<string, unknown>),
+      })
+    ) {
+      return { status: 200, body: envelope };
+    }
+  }
+  if (response.responseStatus !== 200 || !isUnregistrationResponse(response.responseBody)) {
+    throw new Error('Stored APNs unregistration response is invalid');
+  }
+  return {
+    status: 200,
+    body: {
+      version: 1,
+      requestId,
+      ok: true,
+      data: {
+        registrationId: response.responseBody.registrationId,
+        state: response.responseBody.state,
+        updatedAt: response.responseBody.updatedAt,
+      },
+    },
+  };
 }
 
 export async function processApnsRegistration(
@@ -194,6 +276,7 @@ export async function processApnsRegistration(
     body.requestId,
     'push:register',
     body.installationId,
+    now,
   );
   if ('body' in authentication) return authentication;
 
@@ -218,120 +301,42 @@ export async function processApnsRegistration(
     );
   }
 
-  const operation = 'register';
-  const payloadHash = canonicalHash(operation, body);
-  const prior = replayResult(
-    authentication.credentialId,
-    body.requestId,
-    operation,
-    payloadHash,
-  );
-  if (prior) return prior;
-
   try {
-    return runTransaction(() => {
-      const repeated = replayResult(
-        authentication.credentialId,
-        body.requestId,
-        operation,
-        payloadHash,
-      );
-      if (repeated) return repeated;
-      const nowIso = now.toISOString();
-      const tokenHash = hashApnsDeviceToken(body.deviceToken);
-      const existing = db.select().from(apnsRegistrations).where(and(
-        eq(apnsRegistrations.installationId, body.installationId),
-        eq(apnsRegistrations.environment, body.environment),
-        eq(apnsRegistrations.topic, body.topic),
-      )).get();
-
-      db.update(apnsRegistrations).set({
-        invalidatedAt: nowIso,
-        invalidationReason: 'token_reassigned',
-        updatedAt: nowIso,
-      }).where(and(
-        eq(apnsRegistrations.tokenHash, tokenHash),
-        eq(apnsRegistrations.environment, body.environment),
-        eq(apnsRegistrations.topic, body.topic),
-        isNull(apnsRegistrations.invalidatedAt),
-        ne(apnsRegistrations.id, existing?.id ?? ''),
-      )).run();
-      db.update(apnsRegistrations).set({
-        invalidatedAt: nowIso,
-        invalidationReason: 'target_changed',
-        updatedAt: nowIso,
-      }).where(and(
-        eq(apnsRegistrations.installationId, body.installationId),
-        isNull(apnsRegistrations.invalidatedAt),
-        ne(apnsRegistrations.id, existing?.id ?? ''),
-      )).run();
-
-      const state = existing && !existing.invalidatedAt && existing.tokenHash !== tokenHash
-        ? 'rotated'
-        : 'registered';
-      const registrationId = existing?.id ?? randomUUID();
-      if (existing) {
-        db.update(apnsRegistrations).set({
-          tokenCiphertext: existing.tokenHash === tokenHash
-            ? existing.tokenCiphertext
-            : encryptApnsDeviceToken(body.deviceToken),
-          tokenHash,
-          appVersion: body.appVersion,
-          buildNumber: body.buildNumber,
-          locale: body.locale,
-          timeZone: body.timeZone,
-          updatedAt: nowIso,
-          lastSeenAt: nowIso,
-          invalidatedAt: null,
-          invalidationReason: null,
-        }).where(eq(apnsRegistrations.id, registrationId)).run();
-      } else {
-        db.insert(apnsRegistrations).values({
-          id: registrationId,
-          installationId: body.installationId,
-          tokenCiphertext: encryptApnsDeviceToken(body.deviceToken),
-          tokenHash,
-          environment: body.environment,
-          topic: body.topic,
-          appVersion: body.appVersion,
-          buildNumber: body.buildNumber,
-          locale: body.locale,
-          timeZone: body.timeZone,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-          lastSeenAt: nowIso,
-          invalidatedAt: null,
-          invalidationReason: null,
-        }).run();
-      }
-
-      const result: NativeApiResult = {
-        status: existing ? 200 : 201,
-        body: {
-          version: 1,
-          requestId: body.requestId,
-          ok: true,
-          data: { registrationId, state, updatedAt: nowIso },
-        },
-      };
-      storeResult(
-        authentication.credentialId,
-        body.requestId,
-        operation,
-        payloadHash,
-        result,
-        nowIso,
-      );
-      return result;
+    const outcome = await getTriagePersistenceRepositories().native.apns.register({
+      credentialId: authentication.credentialId,
+      requestId: body.requestId,
+      payloadHash: canonicalHash('register', body),
+      legacyPayloadHash: legacyHash('register', body),
+      registrationId: randomUUID(),
+      installationId: body.installationId,
+      tokenCiphertext: encryptApnsDeviceToken(body.deviceToken),
+      tokenHash: hashApnsDeviceToken(body.deviceToken),
+      environment: body.environment,
+      topic: body.topic,
+      appVersion: body.appVersion,
+      buildNumber: body.buildNumber,
+      locale: body.locale,
+      timeZone: body.timeZone,
+      now: now.toISOString(),
     });
+    if (outcome.status === 'mismatch') {
+      return failure(
+        body.requestId,
+        409,
+        'REPLAY_DETECTED',
+        'The request ID was already used for different content',
+      );
+    }
+    if (outcome.status === 'credentialRevoked') {
+      return failure(
+        body.requestId,
+        401,
+        'UNAUTHORIZED',
+        'Authentication is required',
+      );
+    }
+    return registrationResult(body.requestId, outcome.response);
   } catch {
-    const concurrent = replayResult(
-      authentication.credentialId,
-      body.requestId,
-      operation,
-      payloadHash,
-    );
-    if (concurrent) return concurrent;
     return failure(
       body.requestId,
       500,
@@ -361,56 +366,47 @@ export async function processApnsUnregistration(
     body.requestId,
     'push:unregister',
     body.installationId,
+    now,
   );
   if ('body' in authentication) return authentication;
   return retireRegistration(authentication.credentialId, body, now);
 }
 
-function retireRegistration(
+async function retireRegistration(
   credentialId: string,
   body: ApnsUnregistrationRequest,
   now: Date,
-): NativeApiResult {
+): Promise<NativeApiResult> {
   const operation = `unregister:${body.registrationId}`;
   const payloadHash = canonicalHash(operation, body);
-  const prior = replayResult(credentialId, body.requestId, operation, payloadHash);
-  if (prior) return prior;
   try {
-    return runTransaction(() => {
-      const repeated = replayResult(credentialId, body.requestId, operation, payloadHash);
-      if (repeated) return repeated;
-      const registration = db.select().from(apnsRegistrations).where(and(
-        eq(apnsRegistrations.id, body.registrationId),
-        eq(apnsRegistrations.installationId, body.installationId),
-      )).get();
-      if (!registration) {
-        return failure(body.requestId, 403, 'FORBIDDEN', 'The registration is not owned by this installation');
-      }
-      const nowIso = now.toISOString();
-      db.update(apnsRegistrations).set({
-        invalidatedAt: registration.invalidatedAt ?? nowIso,
-        invalidationReason: registration.invalidationReason ?? 'user_unregistered',
-        updatedAt: nowIso,
-      }).where(eq(apnsRegistrations.id, registration.id)).run();
-      const result: NativeApiResult = {
-        status: 200,
-        body: {
-          version: 1,
-          requestId: body.requestId,
-          ok: true,
-          data: {
-            registrationId: body.registrationId,
-            state: 'unregistered',
-            updatedAt: nowIso,
-          },
-        },
-      };
-      storeResult(credentialId, body.requestId, operation, payloadHash, result, nowIso);
-      return result;
+    const outcome = await getTriagePersistenceRepositories().native.apns.unregister({
+      credentialId,
+      requestId: body.requestId,
+      payloadHash,
+      legacyPayloadHash: legacyHash(operation, body),
+      registrationId: body.registrationId,
+      installationId: body.installationId,
+      now: now.toISOString(),
     });
+    if (outcome.status === 'mismatch') {
+      return failure(
+        body.requestId,
+        409,
+        'REPLAY_DETECTED',
+        'The request ID was already used for different content',
+      );
+    }
+    if (outcome.status === 'notOwned') {
+      return failure(
+        body.requestId,
+        403,
+        'FORBIDDEN',
+        'The registration is not owned by this installation',
+      );
+    }
+    return unregistrationResult(body.requestId, outcome.response);
   } catch {
-    const concurrent = replayResult(credentialId, body.requestId, operation, payloadHash);
-    if (concurrent) return concurrent;
     return failure(
       body.requestId,
       500,
@@ -439,32 +435,15 @@ export async function processNativeLogout(
     body.requestId,
     'credentials:revoke',
     body.installationId,
+    now,
   );
   if ('body' in authentication) return authentication;
 
   try {
     const nowIso = now.toISOString();
-    const result = runTransaction(() => {
-      const credentialsRevoked = db.update(nativeInstallationCredentials).set({
-        revokedAt: nowIso,
-      }).where(and(
-        eq(nativeInstallationCredentials.installationId, body.installationId),
-        isNull(nativeInstallationCredentials.revokedAt),
-      )).run().changes + db.update(nativeShareCredentials).set({
-        revokedAt: nowIso,
-      }).where(and(
-        eq(nativeShareCredentials.installationId, body.installationId),
-        isNull(nativeShareCredentials.revokedAt),
-      )).run().changes;
-      const registrationsRetired = db.update(apnsRegistrations).set({
-        invalidatedAt: nowIso,
-        invalidationReason: 'logout',
-        updatedAt: nowIso,
-      }).where(and(
-        eq(apnsRegistrations.installationId, body.installationId),
-        isNull(apnsRegistrations.invalidatedAt),
-      )).run().changes;
-      return { credentialsRevoked, registrationsRetired };
+    const result = await getTriagePersistenceRepositories().native.apns.logout({
+      installationId: body.installationId,
+      now: nowIso,
     });
     return {
       status: 200,

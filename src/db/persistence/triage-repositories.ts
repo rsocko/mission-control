@@ -347,6 +347,135 @@ export interface TriageMaintenanceRepository {
   deleteByIds(ids: readonly string[]): Promise<TriageStorageRefRow[]>;
 }
 
+export interface NativeInstallationCredentialRecord {
+  readonly id: string;
+  readonly installationId: string;
+  readonly tokenHash: string;
+  readonly scopes: unknown;
+  readonly expiresAt: string;
+  readonly revokedAt: string | null;
+}
+
+export interface NativeShareCredentialRecord {
+  readonly id: string;
+  readonly tokenHash: string;
+  readonly scope: string;
+  readonly expiresAt: string;
+  readonly revokedAt: string | null;
+}
+
+export interface NativeCredentialRepository {
+  findInstallationCredential(id: string): Promise<NativeInstallationCredentialRecord | null>;
+  findShareCredential(id: string): Promise<NativeShareCredentialRecord | null>;
+}
+
+export type NativeShareCaptureClaim =
+  | { readonly status: 'acquired'; readonly reservationId: string }
+  | { readonly status: 'duplicate'; readonly itemId: string }
+  | { readonly status: 'pending' | 'rateLimited' | 'replay' };
+
+export interface NativeShareCaptureClaimInput {
+  readonly credentialId: string;
+  readonly requestId: string;
+  readonly payloadHash: string;
+  readonly reservationId: string;
+  readonly now: string;
+  readonly retentionCutoff: string;
+  readonly rateWindowStart: string;
+  readonly maximumCaptures: number;
+}
+
+export interface NativeShareCaptureRepository {
+  claim(input: NativeShareCaptureClaimInput): Promise<NativeShareCaptureClaim>;
+  complete(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly reservationId: string;
+    readonly payloadHash: string;
+    readonly itemId: string;
+    readonly completedAt: string;
+  }): Promise<boolean>;
+  release(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly reservationId: string;
+  }): Promise<boolean>;
+}
+
+export interface NativeStoredRequest {
+  readonly responseStatus: number;
+  readonly responseBody: unknown;
+}
+
+export type NativeRequestOutcome<T> =
+  | { readonly status: 'applied'; readonly response: NativeStoredRequest & { responseBody: T } }
+  | { readonly status: 'replay'; readonly response: NativeStoredRequest }
+  | { readonly status: 'mismatch' };
+
+export type NativeApnsRegistrationOutcome =
+  | NativeRequestOutcome<NativeApnsRegistrationStoredResponse>
+  | { readonly status: 'credentialRevoked' };
+
+export interface NativeApnsRegistrationStoredResponse {
+  readonly kind: 'registration';
+  readonly registrationId: string;
+  readonly state: 'registered' | 'rotated';
+  readonly updatedAt: string;
+}
+
+export interface NativeApnsUnregistrationStoredResponse {
+  readonly kind: 'unregistration';
+  readonly registrationId: string;
+  readonly state: 'unregistered';
+  readonly updatedAt: string;
+}
+
+export type NativeApnsUnregistrationOutcome =
+  | NativeRequestOutcome<NativeApnsUnregistrationStoredResponse>
+  | { readonly status: 'notOwned' };
+
+export interface NativeApnsRepository {
+  register(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly payloadHash: string;
+    readonly legacyPayloadHash: string;
+    readonly registrationId: string;
+    readonly installationId: string;
+    readonly tokenCiphertext: string;
+    readonly tokenHash: string;
+    readonly environment: string;
+    readonly topic: string;
+    readonly appVersion: string;
+    readonly buildNumber: number;
+    readonly locale: string;
+    readonly timeZone: string;
+    readonly now: string;
+  }): Promise<NativeApnsRegistrationOutcome>;
+  unregister(input: {
+    readonly credentialId: string;
+    readonly requestId: string;
+    readonly payloadHash: string;
+    readonly legacyPayloadHash: string;
+    readonly registrationId: string;
+    readonly installationId: string;
+    readonly now: string;
+  }): Promise<NativeApnsUnregistrationOutcome>;
+  logout(input: {
+    readonly installationId: string;
+    readonly now: string;
+  }): Promise<{
+    readonly credentialsRevoked: number;
+    readonly registrationsRetired: number;
+  }>;
+}
+
+export interface TriageNativePersistenceRepositories {
+  readonly credentials: NativeCredentialRepository;
+  readonly shareCapture: NativeShareCaptureRepository;
+  readonly apns: NativeApnsRepository;
+}
+
 export interface TriagePersistenceRepositories {
   readonly capture: TriageCaptureRepository;
   readonly syncState: TriageSyncStateRepository;
@@ -355,6 +484,7 @@ export interface TriagePersistenceRepositories {
   readonly contentTypes: TriageContentTypeRepository;
   readonly health: TriageQueueHealthRepository;
   readonly maintenance: TriageMaintenanceRepository;
+  readonly native: TriageNativePersistenceRepositories;
 }
 
 export function assertValidTriageCaptureBatch(items: readonly TriageItem[]): void {

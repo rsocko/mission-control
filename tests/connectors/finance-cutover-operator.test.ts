@@ -84,7 +84,9 @@ function seedCompletedPublication(sourceGeneration = generation, sourceSequence 
 }
 
 beforeAll(async () => {
-  ({ sqlite } = await import('@/db'));
+  const database = await import('@/db');
+  sqlite = database.sqlite;
+  await database.initializeSqlitePersistenceComposition();
   cutover = await import('@/lib/finance-insights/cutover-operator');
 });
 

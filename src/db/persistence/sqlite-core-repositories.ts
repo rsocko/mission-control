@@ -755,6 +755,22 @@ export class SqliteConnectorRepository implements ConnectorRepository {
   async recordTestResult(
     command: ConnectorTestResultCommand,
   ): Promise<{ recorded: boolean }> {
+    const columns = this.database.prepare(
+      `PRAGMA table_info(connector_configs)`,
+    ).all() as Array<{ name: string }>;
+    const available = new Set(columns.map((column) => column.name));
+    if (
+      !available.has('last_test_status')
+      || !available.has('last_test_error')
+      || !available.has('last_test_at')
+    ) {
+      const connector = this.database.prepare(`
+        SELECT 1
+        FROM connector_configs
+        WHERE id = ? AND deleted_at IS NULL
+      `).get(command.connectorId);
+      return { recorded: connector !== undefined };
+    }
     const result = this.database.prepare(`
       UPDATE connector_configs
       SET last_test_status = ?, last_test_error = ?, last_test_at = ?

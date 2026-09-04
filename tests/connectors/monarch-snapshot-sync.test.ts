@@ -130,7 +130,7 @@ afterAll(() => {
 });
 
 describe.sequential('FinanceSnapshotSynchronizer', () => {
-  it('accepts the legacy Finance connector alias for manual attribution', () => {
+  it('accepts the legacy Finance connector alias for manual attribution', async () => {
     const observedAt = new Date().toISOString();
     const transactionId = `finance:${connectorConfig.id}:legacy-alias-transaction`;
     sqlite.prepare(`

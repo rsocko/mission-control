@@ -324,27 +324,28 @@ export function runConnectorManagementRepositoryContract(
           errors: ['failed'],
         }),
         history(`${PREFIX}-history-3`, '2099-09-04T03:00:00.000Z'),
+        history(`${PREFIX}-history-4`, '2099-09-04T04:00:00.000Z'),
       ]);
 
       const first = await repository.listSyncHistory({ limit: 2, before: null });
       expect(first.hasMore).toBe(true);
       expect(first.history.map(({ id }) => id)).toEqual([
+        `${PREFIX}-history-4`,
         `${PREFIX}-history-3`,
-        `${PREFIX}-history-2`,
       ]);
-      expect(first.history[1]).toMatchObject({
-        success: false,
-        errors: ['failed'],
-        details: [{ id: `${PREFIX}-history-2` }],
-      });
 
       const second = await repository.listSyncHistory({
-        limit: 2,
+        limit: 1,
         before: first.history[1].syncedAt,
       });
       expect(second).toMatchObject({
-        hasMore: false,
-        history: [{ id: `${PREFIX}-history-1` }],
+        hasMore: true,
+        history: [{
+          id: `${PREFIX}-history-2`,
+          success: false,
+          errors: ['failed'],
+          details: [{ id: `${PREFIX}-history-2` }],
+        }],
       });
     });
   });

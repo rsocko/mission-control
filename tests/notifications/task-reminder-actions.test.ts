@@ -3,6 +3,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  publishSemanticEntityDelete: vi.fn(async () => undefined),
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
+}));
 
 let db: typeof import('@/db').default;
 let schema: typeof import('@/db/schema');

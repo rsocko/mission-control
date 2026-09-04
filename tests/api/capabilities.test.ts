@@ -31,10 +31,14 @@ const searchMocks = vi.hoisted(() => ({
   semanticDelete: vi.fn(async () => undefined),
 }));
 
-vi.mock('@/lib/connectors/capabilities', () => ({
-  getConnectorCapabilities: vi.fn(async () => connectorMocks.capabilities),
-  isConnectorEnabled: vi.fn(async () => connectorMocks.enabled),
-}));
+vi.mock('@/lib/connectors/capabilities', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/connectors/capabilities')>();
+  return {
+    ...actual,
+    getConnectorCapabilities: vi.fn(async () => connectorMocks.capabilities),
+    isConnectorEnabled: vi.fn(async () => connectorMocks.enabled),
+  };
+});
 vi.mock('@/lib/connectors/runtime', () => ({
   getOrInitializeConnector: connectorMocks.getConnector,
 }));

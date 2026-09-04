@@ -1,5 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  publishSemanticEntityDelete: vi.fn(async () => undefined),
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
+}));
+
 describe('completion-anchored task recurrence', () => {
   let db: typeof import('@/db').default;
   let sqlite: typeof import('@/db').sqlite;

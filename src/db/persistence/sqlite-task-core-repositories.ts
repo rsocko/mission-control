@@ -97,6 +97,7 @@ import {
   type TaskAttachmentInsert,
   type TaskAttachmentMetadataRow,
   type TaskAttachmentRow,
+  type TaskCollectionProjectPhaseMembership,
   type TaskCollectionReadRepository,
   type TaskCollectionResult,
   type TaskCollectionRow,
@@ -1909,7 +1910,9 @@ class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository
     return {
       rows: ordered.map((raw) => {
         const task = toMoveTaskRow(raw);
-        const memberships = (projectsByTask.get(task.id) ?? []).flatMap((project) => {
+        const memberships: TaskCollectionProjectPhaseMembership[] = (
+          projectsByTask.get(task.id) ?? []
+        ).flatMap((project) => {
           const phases = phasesByTaskProject.get(`${task.id}:${project.projectId}`) ?? [];
           return phases.length
             ? phases.map((phase) => ({

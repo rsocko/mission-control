@@ -21,21 +21,40 @@ describe('notification writeback outbox', () => {
     vi.doUnmock('@/db');
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
-    const [database, schemaModule, writeback, connectors] = await Promise.all([
-      import('@/db'),
-      import('@/db/schema'),
+
+    const database = await import('@/db');
+    db = database.default;
+    sqlite = database.sqlite;
+    const schemaModule = await import('@/db/schema');
+    schema = schemaModule;
+
+    // Create a real web repository and mock the worker persistence
+    const { createSqliteNotificationWebRepository } = await import(
+      '@/db/persistence/sqlite-notification-web-repository'
+    );
+    const webRepo = createSqliteNotificationWebRepository(sqlite);
+    vi.doMock('@/lib/persistence/worker-runtime', () => ({
+      getWorkerPersistenceRepositories: () => Promise.resolve({
+        notificationDelivery: { web: webRepo },
+        connectors: { get: () => Promise.resolve(null) },
+      }),
+      assertPersistenceCompositionAccessAllowed: () => {},
+    }));
+    vi.resetModules();
+
+    const [writeback, connectors] = await Promise.all([
       import('@/lib/notifications/notification-writeback'),
       import('@/lib/connectors'),
     ]);
-    db = database.default;
-    sqlite = database.sqlite;
-    schema = schemaModule;
     enqueue = writeback.enqueueNotificationDismissalWritebacks;
     dismissAndEnqueue = writeback.dismissNotificationsAndEnqueueWritebacks;
     mutateAndEnqueue = writeback.mutateNotificationsAndEnqueueWritebacks;
     wakeDispatcher = writeback.wakeNotificationWritebackDispatcher;
     dispatch = writeback.dispatchNotificationWritebacks;
     connectorRegistry = connectors.connectorRegistry;
+
+    // Initialize the cached web persistence by calling resolveWeb
+    await enqueue([]);
 
     const now = new Date().toISOString();
     await db.insert(schema.notifications).values({

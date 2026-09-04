@@ -1,8 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { pushSubscriptions } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { randomUUID } from 'crypto';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 
 /** Known legitimate push service domain patterns */
 const ALLOWED_PUSH_DOMAINS = [
@@ -53,25 +50,18 @@ export async function POST(request: Request) {
       );
     }
 
-    // Check if this endpoint is already registered
-    const existing = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(eq(pushSubscriptions.endpoint, endpoint))
-      .limit(1);
+    const web = await getNotificationWebPersistence();
 
-    if (existing.length > 0) {
-      return NextResponse.json({ id: existing[0].id, status: 'already_registered' });
+    // Check if this endpoint is already registered
+    const existing = await web.findSubscriptionByEndpoint(endpoint);
+    if (existing) {
+      return NextResponse.json({ id: existing.id, status: 'already_registered' });
     }
 
-    const id = randomUUID();
-    await db.insert(pushSubscriptions).values({
-      id,
-      platform: 'web',
+    const id = await web.registerSubscription({
       endpoint,
       keys: { p256dh: keys.p256dh, auth: keys.auth },
-      userAgent: request.headers.get('user-agent') || undefined,
-      createdAt: new Date().toISOString(),
+      userAgent: request.headers.get('user-agent') || null,
     });
 
     return NextResponse.json({ id, status: 'subscribed' }, { status: 201 });
@@ -88,7 +78,8 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'endpoint is required' }, { status: 400 });
     }
 
-    await db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, endpoint));
+    const web = await getNotificationWebPersistence();
+    await web.removeSubscription(endpoint);
     return NextResponse.json({ status: 'unsubscribed' });
   } catch (error) {
     return NextResponse.json({ error: 'Failed to unsubscribe' }, { status: 500 });

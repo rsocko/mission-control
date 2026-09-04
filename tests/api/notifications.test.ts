@@ -114,6 +114,36 @@ vi.mock('@/lib/notifications/notification-writeback', () => ({
   wakeNotificationWritebackDispatcher: vi.fn(),
 }));
 
+const mockWebPersistence = {
+  queryNotifications: vi.fn().mockResolvedValue({
+    items: [], actions: [], hasMore: false, cursor: null,
+    stats: { total: 0, unread: 0, attention: 0, urgent: 0, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
+    facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+    matchingCount: 0,
+  }),
+  recoverStaleActions: vi.fn(),
+  restoreSnapshots: vi.fn().mockResolvedValue({ updatedCount: 1 }),
+  mutateStates: vi.fn().mockResolvedValue({ updatedCount: 1 }),
+  snoozeNotification: vi.fn().mockResolvedValue(true),
+  selectForBulkByIds: vi.fn().mockResolvedValue([]),
+  selectForBulkByQuery: vi.fn().mockResolvedValue([]),
+  validateMerchantExists: vi.fn().mockResolvedValue(true),
+  bulkMarkUnread: vi.fn().mockResolvedValue(0),
+  bulkDismissDemo: vi.fn().mockResolvedValue(0),
+  bulkHandleDemo: vi.fn().mockResolvedValue(0),
+  bulkMarkReadDemo: vi.fn().mockResolvedValue(0),
+  mutateNotificationsAndEnqueueWritebacks: vi.fn((ids: string[]) => ({
+    updatedCount: ids.length, queuedCount: ids.length,
+    results: ids.map((id: string) => ({ id, localStatus: 'updated', writebackStatus: 'pending' })),
+  })),
+  dismissNotificationsAndEnqueueWritebacks: vi.fn(() => ({ updatedCount: 1, queuedCount: 0 })),
+  wakeWritebackDispatcher: vi.fn(),
+};
+
+vi.mock('@/lib/notifications/notification-web-service', () => ({
+  getNotificationWebPersistence: vi.fn(() => Promise.resolve(mockWebPersistence)),
+}));
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('GET /api/notifications', () => {

@@ -1,15 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { notifications } from '@/db/schema';
-import { and, inArray, sql } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { isDemoMode } from '@/lib/mode';
-import {
-  dismissNotificationsAndEnqueueWritebacks,
-  mutateNotificationsAndEnqueueWritebacks,
-  wakeNotificationWritebackDispatcher,
-  type NotificationMutationResult,
-} from '@/lib/notifications/notification-writeback';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
+import type { NotificationMutationResult } from '@/db/persistence/notification-web';
 import {
   createNotificationBulkOutcome,
   MAX_NOTIFICATION_BULK_IDS,
@@ -20,10 +13,6 @@ import {
   parseNotificationQuery,
   UNKNOWN_NOTIFICATION_MERCHANT_QUERY_ERROR,
 } from '@/lib/notifications/query';
-import {
-  notificationMerchantMetadataCondition,
-  notificationWhere,
-} from '@/lib/notifications/query-server';
 
 type BulkAction =
   | 'mark_read'
@@ -55,17 +44,12 @@ export async function POST(request: Request) {
     const parsedQuery = body.all === true
       ? parseNotificationQuery({ state: 'unread' })
       : parseNotificationQuery(submittedQuery);
+
+    const web = await getNotificationWebPersistence();
+
     if (allMatching && parsedQuery.merchant) {
-      const knownMerchant = await db.select({ id: notifications.id })
-        .from(notifications)
-        .where(and(
-          sql`${notifications.connectorInstanceId} NOT IN (
-            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
-          )`,
-          notificationMerchantMetadataCondition(parsedQuery.merchant),
-        ))
-        .limit(1);
-      if (knownMerchant.length === 0) {
+      const exists = await web.validateMerchantExists(parsedQuery.merchant);
+      if (!exists) {
         return ApiErrors.badRequest(UNKNOWN_NOTIFICATION_MERCHANT_QUERY_ERROR);
       }
     }
@@ -85,27 +69,9 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest(`Unknown action: ${action}`);
     }
 
-    const selection = {
-      id: notifications.id,
-      readState: notifications.readState,
-      disposition: notifications.disposition,
-      sourceState: notifications.sourceState,
-      mutedAt: notifications.mutedAt,
-    };
     const selectedRows = allMatching
-      ? await db.select(selection)
-          .from(notifications)
-          .where(notificationWhere(parsedQuery))
-          .limit(MAX_NOTIFICATION_BULK_IDS + 1)
-      : await db.select(selection)
-          .from(notifications)
-          .where(and(
-            inArray(notifications.id, requestedIds),
-            sql`${notifications.connectorInstanceId} NOT IN (
-              SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
-            )`,
-          ))
-          .limit(MAX_NOTIFICATION_BULK_IDS);
+      ? await web.selectForBulkByQuery(parsedQuery, MAX_NOTIFICATION_BULK_IDS + 1)
+      : await web.selectForBulkByIds(requestedIds, MAX_NOTIFICATION_BULK_IDS);
 
     if (selectedRows.length > MAX_NOTIFICATION_BULK_IDS) {
       return ApiErrors.badRequest(
@@ -164,94 +130,49 @@ export async function POST(request: Request) {
     switch (action) {
       case 'mark_read': {
         if (isDemoMode()) {
-          const result = await db.update(notifications)
-            .set({
-              readState: 'read',
-              readAt: now,
-              state: sql`CASE
-                WHEN ${notifications.disposition} = 'dismissed' THEN 'dismissed'
-                WHEN ${notifications.sourceState} IN ('resolved', 'deleted') THEN 'resolved'
-                WHEN ${notifications.disposition} = 'handled' THEN 'archived'
-                ELSE 'read'
-              END`,
-            })
-            .where(inArray(notifications.id, ids));
-          return response(result.changes);
+          const changes = await web.bulkMarkReadDemo(ids, now);
+          return response(changes);
         }
-        return writebackResponse(response, mutateNotificationsAndEnqueueWritebacks(
+        return writebackResponse(response, web.mutateNotificationsAndEnqueueWritebacks(
           ids,
           'mark_read',
           now,
-        ));
+        ), web);
       }
 
       case 'mark_unread': {
-        const result = await db.update(notifications)
-          .set({
-            readState: 'unread',
-            readAt: null,
-            state: sql`CASE
-              WHEN ${notifications.disposition} = 'dismissed' THEN 'dismissed'
-              WHEN ${notifications.sourceState} IN ('resolved', 'deleted') THEN 'resolved'
-              WHEN ${notifications.disposition} = 'handled' THEN 'archived'
-              ELSE 'unread'
-            END`,
-          })
-          .where(inArray(notifications.id, ids));
-        return response(result.changes);
+        const changes = await web.bulkMarkUnread(ids, now);
+        return response(changes);
       }
 
       case 'dismiss': {
         const result = isDemoMode()
-          ? {
-              updatedCount: (await db.update(notifications)
-                .set({
-                  state: 'dismissed',
-                  readState: 'read',
-                  disposition: 'dismissed',
-                  readAt: now,
-                  dismissedAt: now,
-                })
-                .where(inArray(notifications.id, ids))).changes,
-              queuedCount: 0,
-            }
-          : dismissNotificationsAndEnqueueWritebacks(ids, now);
-        if (result.queuedCount > 0) wakeNotificationWritebackDispatcher();
+          ? { updatedCount: await web.bulkDismissDemo(ids, now), queuedCount: 0 }
+          : web.dismissNotificationsAndEnqueueWritebacks(ids, now);
+        if (result.queuedCount > 0) web.wakeWritebackDispatcher();
         return response(result.updatedCount, result.queuedCount);
       }
 
       case 'handle':
       case 'archive': {
         if (isDemoMode()) {
-          const result = await db.update(notifications)
-            .set({
-              state: sql`CASE
-                WHEN ${notifications.sourceState} IN ('resolved', 'deleted') THEN 'resolved'
-                ELSE 'archived'
-              END`,
-              disposition: 'handled',
-              handledAt: now,
-              archivedAt: now,
-              handledSourceActivityAt: notifications.lastSourceActivityAt,
-              handledSourceActivityKey: notifications.lastSourceActivityKey,
-            })
-            .where(inArray(notifications.id, ids));
-          return response(result.changes);
+          const changes = await web.bulkHandleDemo(ids, now);
+          return response(changes);
         }
-        return writebackResponse(response, mutateNotificationsAndEnqueueWritebacks(
+        return writebackResponse(response, web.mutateNotificationsAndEnqueueWritebacks(
           ids,
           'mark_done',
           now,
-        ));
+        ), web);
       }
 
       case 'mute':
       case 'unmute':
-        return writebackResponse(response, mutateNotificationsAndEnqueueWritebacks(
+        return writebackResponse(response, web.mutateNotificationsAndEnqueueWritebacks(
           ids,
           action,
           now,
-        ));
+        ), web);
     }
   } catch (error) {
     return ApiErrors.internal('Failed to execute bulk action', error);
@@ -265,7 +186,8 @@ function writebackResponse(
     results?: NotificationMutationResult['results'],
   ) => NextResponse,
   result: NotificationMutationResult,
+  web: Awaited<ReturnType<typeof getNotificationWebPersistence>>,
 ) {
-  if (result.queuedCount > 0) wakeNotificationWritebackDispatcher();
+  if (result.queuedCount > 0) web.wakeWritebackDispatcher();
   return response(result.updatedCount, result.queuedCount, result.results);
 }

@@ -293,12 +293,13 @@ describe('task transfer identity persistence', () => {
     expect(await db.select().from(schema.externalEntityBindings)).toHaveLength(bindingCountBefore);
   });
 
-  it('returns a promise and the tasks route awaits the new identity write', async () => {
+  it('persists create identity before local task materialization and returns a promise', async () => {
     const [{ default: db }, schema, { persistCreatedTaskIdentity }] = await Promise.all([
       importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/transfer-identity'),
     ]);
+    const { eq } = await import('drizzle-orm');
     const now = '2026-08-13T20:00:00.000Z';
     await insertConnector(db, schema, 'github-create-async', now);
     await db.insert(schema.sourceLists).values({
@@ -307,16 +308,6 @@ describe('task transfer identity persistence', () => {
       sourceId: 'acme/async',
       name: 'acme/async',
       type: 'repo',
-    });
-    await db.insert(schema.tasks).values({
-      id: 'create-async-task',
-      sourceId: 'acme/async:5',
-      connectorType: 'github-issues',
-      connectorInstanceId: 'github-create-async',
-      title: 'Created async',
-      createdAt: now,
-      updatedAt: now,
-      lastSyncedAt: now,
     });
     const repository = repositoryEvidence('R_create_async', 'acme', 'async', now);
 
@@ -329,12 +320,76 @@ describe('task transfer identity persistence', () => {
     });
     expect(pending).toBeInstanceOf(Promise);
     await pending;
+    expect(await db.select().from(schema.tasks)
+      .where(eq(schema.tasks.id, 'create-async-task'))).toEqual([]);
+    expect(await db.select().from(schema.externalEntityBindings)
+      .where(eq(schema.externalEntityBindings.localId, 'create-async-task')))
+      .toEqual([expect.objectContaining({
+        connectorInstanceId: 'github-create-async',
+        bindingType: 'task',
+        state: 'active',
+      })]);
 
     const routeSource = readFileSync(
       resolve(process.cwd(), 'src/app/api/tasks/route.ts'),
       'utf8',
     );
     expect(routeSource).toMatch(/await persistCreatedTaskIdentity\(\{/);
+  });
+
+  it('rejects foreign-owned create targets and absent reconciliation targets', async () => {
+    const [
+      { default: db },
+      schema,
+      { persistCreatedTaskIdentity, reconcileTransferIdentity },
+    ] = await Promise.all([
+      importInitializedSqliteDatabase(),
+      import('@/db/schema'),
+      import('@/lib/connectors/transfer-identity'),
+    ]);
+    const { inArray } = await import('drizzle-orm');
+    const now = '2026-08-14T20:00:00.000Z';
+    await insertConnector(db, schema, 'github-create-owner', now);
+    await insertConnector(db, schema, 'github-create-requester', now);
+    await db.insert(schema.tasks).values({
+      id: 'foreign-create-task',
+      sourceId: 'acme/foreign:6',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-create-owner',
+      title: 'Foreign task',
+      createdAt: now,
+      updatedAt: now,
+      lastSyncedAt: now,
+    });
+
+    await expect(persistCreatedTaskIdentity({
+      taskId: 'foreign-create-task',
+      connectorInstanceId: 'github-create-requester',
+      sourceId: 'acme/foreign:6',
+      sourceListId: null,
+      evidence: issueEvidence('I_foreign_create', 'acme', 'foreign', 6, now),
+    })).rejects.toThrow('Task transfer identity target is owned by another connector');
+
+    await expect(reconcileTransferIdentity(
+      'absent-reconcile-task',
+      'github-create-requester',
+      {
+        task: transferTask({
+          connectorInstanceId: 'github-create-requester',
+          sourceId: 'acme/absent:7',
+          title: 'Absent task',
+          externalIdentity: issueEvidence('I_absent_reconcile', 'acme', 'absent', 7, now),
+          now,
+        }),
+        sourceLists: [],
+      },
+    )).rejects.toThrow('Task transfer identity refresh target was not found');
+
+    expect(await db.select().from(schema.externalEntities)
+      .where(inArray(
+        schema.externalEntities.stableId,
+        ['I_foreign_create', 'I_absent_reconcile'],
+      ))).toEqual([]);
   });
 });
 

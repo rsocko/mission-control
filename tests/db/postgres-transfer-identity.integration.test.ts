@@ -13,6 +13,9 @@ const describePostgres = describe.skipIf(!connectionString);
 const connectorA = `transfer-a-${randomUUID()}`;
 const connectorB = `transfer-b-${randomUUID()}`;
 const taskId = `transfer-task-${randomUUID()}`;
+const pendingTaskId = `transfer-pending-${randomUUID()}`;
+const foreignTaskId = `transfer-foreign-${randomUUID()}`;
+const absentTaskId = `transfer-absent-${randomUUID()}`;
 const conflictTaskId = `transfer-conflict-${randomUUID()}`;
 const sourceListId = `transfer-list-${randomUUID()}`;
 const rollbackSourceListId = `transfer-list-${randomUUID()}`;
@@ -61,7 +64,7 @@ async function cleanup(): Promise<void> {
   );
   await pool.query(
     `DELETE FROM tasks WHERE id = ANY($1::text[])`,
-    [[taskId, conflictTaskId]],
+    [[taskId, pendingTaskId, foreignTaskId, absentTaskId, conflictTaskId]],
   );
   await pool.query(
     `DELETE FROM source_lists WHERE id = ANY($1::text[])`,
@@ -247,6 +250,21 @@ function bridgeInput(connectorInstanceId = connectorA) {
   } as const;
 }
 
+function createIdentityInput(
+  targetTaskId: string,
+  connectorInstanceId = connectorA,
+) {
+  return {
+    taskId: targetTaskId,
+    connectorInstanceId,
+    sourceId: 'space/new-home:41',
+    sourceListId: null,
+    taskEvidence: issueEvidence(),
+    sourceLists: [],
+    observedAt: now,
+  } as const;
+}
+
 function transferRefresh(connectorInstanceId = connectorA) {
   return {
     task: {
@@ -367,6 +385,73 @@ describePostgres('transfer identity bridge (PostgreSQL)', () => {
       statement.toLowerCase().includes('from "source_lists"')
       && statement.toLowerCase().includes('for share')
     ))).toBe(true);
+  });
+
+  it('persists create identity before local task materialization', async () => {
+    const repository = createPostgresGitHubIdentityRepositories(
+      backend.context.pool,
+    ).transferIdentity;
+
+    await repository.persist(createIdentityInput(pendingTaskId));
+
+    const task = await backend.context.pool.query(
+      'SELECT id FROM tasks WHERE id = $1',
+      [pendingTaskId],
+    );
+    expect(task.rows).toEqual([]);
+    const binding = await backend.context.pool.query<{
+      connector_instance_id: string;
+      binding_type: string;
+      state: string;
+    }>(
+      `SELECT connector_instance_id, binding_type, state
+       FROM external_entity_bindings
+       WHERE local_id = $1`,
+      [pendingTaskId],
+    );
+    expect(binding.rows).toEqual([{
+      connector_instance_id: connectorA,
+      binding_type: 'task',
+      state: 'active',
+    }]);
+  });
+
+  it('rejects foreign-owned create targets and absent reconciliation targets', async () => {
+    const repository = createPostgresGitHubIdentityRepositories(
+      backend.context.pool,
+    ).transferIdentity;
+    await backend.context.pool.query(
+      `INSERT INTO tasks (
+         id, source_id, connector_type, connector_instance_id, title, status,
+         local_disposition, priority, created_at, updated_at, metadata, sync_status,
+         last_synced_at
+       ) VALUES (
+         $1, 'space/new-home:41', 'github', $2, 'Foreign task', 'todo',
+         'active', 'medium', $3, $3, '{}'::jsonb, 'synced', $3
+       )`,
+      [foreignTaskId, connectorB, now],
+    );
+
+    await expect(repository.persist(
+      createIdentityInput(foreignTaskId),
+    )).rejects.toThrow('Task transfer identity target is owned by another connector');
+    await expect(repository.persist({
+      ...bridgeInput(),
+      taskId: absentTaskId,
+    })).rejects.toThrow('Task transfer identity refresh target was not found');
+
+    const identities = await backend.context.pool.query(
+      `SELECT id FROM external_entities
+       WHERE stable_id = ANY($1::text[])`,
+      [[issueStableId, repositoryStableId]],
+    );
+    expect(identities.rows).toEqual([]);
+    const bindings = await backend.context.pool.query(
+      `SELECT id FROM external_entity_bindings
+       WHERE local_id = ANY($1::text[])`,
+      [[foreignTaskId, absentTaskId]],
+    );
+    expect(bindings.rows).toEqual([]);
   });
 
   it('rolls back task, source-list binding, and entity rows on a late task failure', async () => {

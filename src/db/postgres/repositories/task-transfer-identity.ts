@@ -10,6 +10,9 @@ type ResolveInput = Parameters<TaskTransferIdentityRepository['resolveIdentityTa
 type ResolveResult = Awaited<
   ReturnType<TaskTransferIdentityRepository['resolveIdentityTargets']>
 >;
+interface TransactionResolveResult extends ResolveResult {
+  taskOwnership: 'owned' | 'absent' | 'foreign';
+}
 type ReconcileInput = Parameters<TaskTransferIdentityRepository['reconcileTaskRefresh']>[0];
 type TransactionDatabase = PostgresDatabase | PostgresTransaction;
 const transactionScope = Symbol('PostgresTaskTransferIdentityTransaction');
@@ -52,7 +55,7 @@ async function resolvePostgresTaskTransferIdentityTargetsInternal(
   database: TransactionDatabase,
   input: ResolveInput,
   lockRows: boolean,
-): Promise<ResolveResult> {
+): Promise<TransactionResolveResult> {
   const orderedUniqueSourceIds = [...new Set(input.sourceListIds.filter(Boolean))];
   const localIdBySourceId = new Map<string, string>();
   if (orderedUniqueSourceIds.length > 0) {
@@ -70,17 +73,27 @@ async function resolvePostgresTaskTransferIdentityTargetsInternal(
     .filter((sourceId) => localIdBySourceId.has(sourceId))
     .map((sourceId) => ({ sourceId, localId: localIdBySourceId.get(sourceId)! }));
 
-  const taskQuery = database.select({ metadata: tasks.metadata })
+  const taskQuery = database.select({
+    connectorInstanceId: tasks.connectorInstanceId,
+    metadata: tasks.metadata,
+  })
     .from(tasks)
-    .where(and(
-      eq(tasks.id, input.taskId),
-      eq(tasks.connectorInstanceId, input.connectorInstanceId),
-    ))
+    .where(eq(tasks.id, input.taskId))
     .limit(1);
   const [taskRow] = lockRows ? await taskQuery.for('update') : await taskQuery;
+  let taskOwnership: TransactionResolveResult['taskOwnership'];
+  if (!taskRow) {
+    taskOwnership = 'absent';
+  } else if (taskRow.connectorInstanceId === input.connectorInstanceId) {
+    taskOwnership = 'owned';
+  } else {
+    taskOwnership = 'foreign';
+  }
+  const taskExists = taskOwnership === 'owned';
   return {
-    taskExists: Boolean(taskRow),
-    taskMetadata: taskRow ? asRecord(taskRow.metadata) : {},
+    taskExists,
+    taskOwnership,
+    taskMetadata: taskRow && taskExists ? asRecord(taskRow.metadata) : {},
     sourceLists: resolvedSourceLists,
   };
 }
@@ -99,7 +112,7 @@ export function resolvePostgresTaskTransferIdentityTargets(
 export function resolvePostgresTaskTransferIdentityTargetsInTransaction(
   transaction: PostgresTaskTransferIdentityTransaction,
   input: ResolveInput,
-): Promise<ResolveResult> {
+): Promise<TransactionResolveResult> {
   return resolvePostgresTaskTransferIdentityTargetsInternal(
     transaction.database,
     input,

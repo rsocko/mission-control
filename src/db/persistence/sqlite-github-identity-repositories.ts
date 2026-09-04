@@ -1655,10 +1655,13 @@ export function createSqliteGitHubIdentityRepositories(
           connectorInstanceId: input.connectorInstanceId,
           sourceListIds: sourceListIdsForGitHubTransferIdentity(input),
         });
-        const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
-        if (writes.length > 0 && !targets.taskExists) {
-          throw new Error('Task transfer identity target was not found');
+        if (targets.taskOwnership === 'foreign') {
+          throw new Error('Task transfer identity target is owned by another connector');
         }
+        if (input.reconcileTask && targets.taskOwnership === 'absent') {
+          throw new Error('Task transfer identity refresh target was not found');
+        }
+        const writes = buildGitHubTransferIdentityWrites(input, targets.sourceLists);
         assertExternalIdentityBatchWithinLimit(writes);
         if (writes.length > 0) {
           const modeSnapshot = getGitHubIdentityModeSnapshotInTransaction(

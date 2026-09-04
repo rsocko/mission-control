@@ -24,7 +24,9 @@ export interface GitHubTransferIdentityInput {
 export interface GitHubTransferIdentityPersistence {
   /**
    * Persists task/source-list identity state and an optional task refresh in
-   * one adapter-owned transaction. Callers must complete remote I/O first.
+   * one adapter-owned transaction. A create-only write may bind identity before
+   * the local task is materialized; reconciliation requires an existing task
+   * owned by the connector. Callers must complete remote I/O first.
    */
   persist(input: GitHubTransferIdentityInput): Promise<void>;
 }

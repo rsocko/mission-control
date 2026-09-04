@@ -1,6 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
-import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
+import {
+  GITHUB_IDENTITY_MODE,
+  type GitHubIdentityModeSnapshot,
+} from '@/lib/external-identities/stable-identity-types';
 import {
   buildGitHubTransferIdentityWrites,
   sourceListIdsForGitHubTransferIdentity,

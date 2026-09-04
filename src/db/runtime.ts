@@ -126,6 +126,7 @@ interface DatabaseRuntimeRegistry {
   modeRouteDemoSeedCommandService: DemoSeedCommandService | null;
   modeRouteTimezoneRepository: RelativeReminderTimezoneRepository | null;
   shutdownSqliteComposition: (() => Promise<void>) | null;
+  clearSqliteSyncInfrastructure: (() => void) | null;
   stopPostgresSemanticWorker: (() => Promise<void>) | null;
 }
 
@@ -165,6 +166,7 @@ function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
       modeRouteDemoSeedCommandService: null,
       modeRouteTimezoneRepository: null,
       shutdownSqliteComposition: null,
+      clearSqliteSyncInfrastructure: null,
       stopPostgresSemanticWorker: null,
     }),
   );
@@ -218,6 +220,26 @@ function clearModeRouteServiceDelegates(): void {
   const runtime = databaseRuntimeRegistry();
   runtime.modeRouteDemoSeedCommandDelegate = null;
   runtime.modeRouteTimezoneDelegate = null;
+}
+
+async function shutdownSqliteRuntimeDelegates(
+  runtime: DatabaseRuntimeRegistry,
+): Promise<void> {
+  const errors: unknown[] = [];
+  try {
+    await runtime.shutdownSqliteComposition?.();
+  } catch (error) {
+    errors.push(error);
+  }
+  try {
+    runtime.clearSqliteSyncInfrastructure?.();
+  } catch (error) {
+    errors.push(error);
+  }
+  if (errors.length === 1) throw errors[0];
+  if (errors.length > 1) {
+    throw new AggregateError(errors, 'SQLite runtime shutdown failed');
+  }
 }
 
 function clearPostgresRuntimeComposition(): void {
@@ -532,11 +554,13 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
       sqliteRuntime.shutdownSqlitePersistenceComposition;
     await sqliteRuntime.initializeSqlitePersistenceComposition();
     if (!isCurrentGeneration()) return;
-    const { registerSqliteSyncInfrastructure } = await import(
+    const sqliteSyncRuntime = await import(
       './persistence/sqlite-sync-runtime'
     );
+    databaseRuntimeRegistry().clearSqliteSyncInfrastructure =
+      sqliteSyncRuntime.clearSqliteSyncInfrastructure;
     if (!isCurrentGeneration()) return;
-    registerSqliteSyncInfrastructure();
+    sqliteSyncRuntime.registerSqliteSyncInfrastructure();
     await registerStableRuntimeServices();
     const [
       { createSqliteDemoSeedCommandService },
@@ -664,9 +688,10 @@ export function initializeRuntimeDatabase(): Promise<void> {
             if (!runtime.shutdownSqliteComposition) {
               throw new Error('SQLite runtime shutdown delegate has not been registered');
             }
-            await runtime.shutdownSqliteComposition();
+            await shutdownSqliteRuntimeDelegates(runtime);
             runtime.cleanupRequired = false;
             runtime.shutdownSqliteComposition = null;
+            runtime.clearSqliteSyncInfrastructure = null;
           } catch (cleanupError) {
             runtime.cleanupRequired = true;
             throw new AggregateError(
@@ -756,24 +781,23 @@ export function shutdownRuntimeDatabase(): Promise<void> {
     }
     try {
       if (
-        !runtime.shutdownSqliteComposition
+        (!runtime.shutdownSqliteComposition || !runtime.clearSqliteSyncInfrastructure)
         && (runtime.initialized || runtime.cleanupRequired)
       ) {
-        throw new Error('SQLite runtime shutdown delegate has not been registered');
+        throw new Error('SQLite runtime shutdown delegates have not been registered');
       }
-      await runtime.shutdownSqliteComposition?.();
+      await shutdownSqliteRuntimeDelegates(runtime);
       runtime.cleanupRequired = false;
       runtime.initialized = false;
     } catch (error) {
       runtime.cleanupRequired = true;
       throw error;
     } finally {
-      const { clearSqliteSyncInfrastructure } = await import(
-        './persistence/sqlite-sync-runtime'
-      );
-      clearSqliteSyncInfrastructure();
       clearModeRouteServiceDelegates();
-      if (!runtime.cleanupRequired) runtime.shutdownSqliteComposition = null;
+      if (!runtime.cleanupRequired) {
+        runtime.shutdownSqliteComposition = null;
+        runtime.clearSqliteSyncInfrastructure = null;
+      }
     }
   })().finally(() => {
     runtime.shutdownPromise = null;

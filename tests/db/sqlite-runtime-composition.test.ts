@@ -139,6 +139,26 @@ describe('SQLite runtime composition', () => {
     close();
   });
 
+  it('uses initializer-owned teardown delegates after isolated module evaluation', async () => {
+    const firstDatabase = await import('@/db');
+    const firstRuntime = await import('@/db/runtime');
+    await firstRuntime.initializeRuntimeDatabase();
+    const closeFirst = firstDatabase.sqlite.close.bind(firstDatabase.sqlite);
+
+    vi.resetModules();
+    const secondRuntime = await import('@/db/runtime');
+    await secondRuntime.shutdownRuntimeDatabase();
+    closeFirst();
+
+    await secondRuntime.initializeRuntimeDatabase();
+    const secondDatabase = await import('@/db');
+    const syncJobs = await import('@/lib/sync/job-runtime');
+    await expect(syncJobs.getSyncJobRepository()).resolves.toBeDefined();
+    const closeSecond = secondDatabase.sqlite.close.bind(secondDatabase.sqlite);
+    await secondRuntime.shutdownRuntimeDatabase();
+    closeSecond();
+  });
+
   it('fences shutdown before a cold SQLite module can open a connection', async () => {
     const openDatabaseConnection = vi.fn();
     vi.doMock('@/db/bootstrap/connection', () => ({

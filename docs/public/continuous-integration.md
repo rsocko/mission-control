@@ -6,6 +6,10 @@ policy, lint, run unit tests, smoke-test the worker runtime, and build the
 production application. Fork pull requests use a read-only `GITHUB_TOKEN`,
 receive no protected secrets, and cannot publish a container.
 
+The live PostgreSQL integration suite runs across four isolated database shards
+and reports through a stable aggregate status check. Test files remain serial
+within each shard to prevent destructive setup and cleanup from racing.
+
 Changes limited to `docs/**` or the standard root documentation files
 (`README.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `DESIGN.md`,
 `PRODUCT.md`, `SECURITY.md`, and `SUPPORT.md`) still report every required

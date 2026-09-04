@@ -87,15 +87,15 @@ describe('L12a connector-domain PostgreSQL parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 199,
-      tierBRoutes: 26,
-      cleanRoutes: 41,
-      directTaintSourceRoutes: 124,
-      transitiveOnlyTaintSourceRoutes: 75,
-      directDbNamespaceRoutes: 125,
-      taintedLibA: 95,
-      taintedApiHelpers: 1,
-      totalMigrationUnits: 295,
+      tierARoutes: 157,
+      tierBRoutes: 27,
+      cleanRoutes: 82,
+      directTaintSourceRoutes: 106,
+      transitiveOnlyTaintSourceRoutes: 51,
+      directDbNamespaceRoutes: 107,
+      taintedLibA: 78,
+      taintedApiHelpers: 0,
+      totalMigrationUnits: 235,
     });
   });
 

@@ -1,4 +1,5 @@
 import { parseFilterQuery } from './parseFilterQuery';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 
 interface KeywordFilterTask {
   title: string;
@@ -182,7 +183,7 @@ function matchesDueDate(dueDate: string | null, value: string): boolean {
   if (value === 'today') return dueDate === todayString;
   if (value === 'week') {
     const weekEnd = new Date(today);
-    weekEnd.setDate(weekEnd.getDate() + 7);
+    weekEnd.setDate(weekEnd.getDate() + NEXT_7_DAYS);
     return dueDate >= todayString && dueDate <= toLocalDateString(weekEnd);
   }
   if (value.startsWith('<')) return dueDate < value.slice(1);

@@ -1,4 +1,5 @@
 import type { TaskListStatsDto } from '@/types/api';
+import { NEXT_7_DAYS_DESCRIPTION, NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 export type QuickFilterVisibility = 'always' | 'when-not-empty' | 'hidden';
 
@@ -73,8 +74,8 @@ export const QUICK_FILTERS: readonly QuickFilterDefinition[] = [
   },
   {
     id: 'week',
-    label: 'Next 7 Days',
-    description: 'Due within the next seven days',
+    label: NEXT_7_DAYS_LABEL,
+    description: NEXT_7_DAYS_DESCRIPTION,
     statKey: 'dueThisWeek',
     icon: 'clock',
     iconClassName: 'text-blue-400',

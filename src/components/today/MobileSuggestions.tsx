@@ -13,6 +13,7 @@ import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { REPLANNING_SUGGESTION, type SuggestionGroups, type SuggestionTask } from './types';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 interface MobileSuggestionsProps {
   suggestions: SuggestionGroups;
@@ -44,7 +45,7 @@ const GROUPS: GroupConfig[] = [
   { key: 'yesterday', title: "Yesterday's Incomplete", icon: <History size={16} />, color: 'amber' },
   { key: 'overdue', title: 'Overdue', icon: <AlertCircle size={16} />, color: 'red', sortable: true },
   { key: 'dueToday', title: 'Due Today', icon: <CalendarClock size={16} />, color: 'blue' },
-  { key: 'dueThisWeek', title: 'Due This Week', icon: <Calendar size={16} />, color: 'cyan', sortable: true },
+  { key: 'dueThisWeek', title: NEXT_7_DAYS_LABEL, icon: <Calendar size={16} />, color: 'cyan', sortable: true },
   { key: 'highPriority', title: 'High Priority', icon: <Flame size={16} />, color: 'orange' },
   { key: 'aiRecommended', title: 'AI Recommended', icon: <Brain size={16} />, color: 'purple' },
   { key: 'recentlyAdded', title: 'Recently Added', icon: <Plus size={16} />, color: 'emerald' },

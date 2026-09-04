@@ -5,6 +5,7 @@ import { eq, and, ne } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
 import { getEnergyTagsForTasks } from '@/lib/ai/features/energy-tag-queries';
 import { ApiErrors } from '@/lib/api-error';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 
 /**
  * Get the Monday of the week for a given YYYY-MM-DD date.
@@ -120,8 +121,8 @@ export async function POST(request: Request) {
             score += 70; // Due today
           } else if (daysUntilDue <= 2) {
             score += 50; // Due very soon
-          } else if (daysUntilDue <= 7) {
-            score += 25; // Due this week
+          } else if (daysUntilDue <= NEXT_7_DAYS) {
+            score += 25; // Due in the next seven days
           }
         }
 

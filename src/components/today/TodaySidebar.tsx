@@ -5,6 +5,7 @@ import { SuggestionGroup } from './SuggestionGroup';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 interface TodaySidebarProps {
   suggestions: SuggestionGroups;
@@ -71,7 +72,7 @@ export function TodaySidebar({
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
           <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />
-          <SuggestionGroup title="Due This Week" icon={<Calendar size={12} />} tasks={suggestions.dueThisWeek} color="cyan" sortable {...interactionProps} />
+          <SuggestionGroup title={NEXT_7_DAYS_LABEL} icon={<Calendar size={12} />} tasks={suggestions.dueThisWeek} color="cyan" sortable {...interactionProps} />
           <SuggestionGroup title="High Priority" icon={<Flame size={12} />} tasks={suggestions.highPriority} color="orange" {...interactionProps} />
           <SuggestionGroup title="AI Recommended" icon={<Brain size={12} />} tasks={suggestions.aiRecommended} color="purple" {...interactionProps} />
           <SuggestionGroup title="Recently Added" icon={<Plus size={12} />} tasks={suggestions.recentlyAdded} color="emerald" {...interactionProps} />

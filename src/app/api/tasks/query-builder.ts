@@ -6,6 +6,7 @@ import {
   withCondition as composeCondition,
 } from '@/db/persistence/sqlite-task-filter';
 import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 import { getLocalDaysFromNow, getLocalToday } from '@/lib/utils/date';
 
 /**
@@ -19,7 +20,7 @@ import { getLocalDaysFromNow, getLocalToday } from '@/lib/utils/date';
 
 export function getDateBounds() {
   const today = getLocalToday();
-  const weekFromNow = getLocalDaysFromNow(7);
+  const weekFromNow = getLocalDaysFromNow(NEXT_7_DAYS);
   return { today, weekFromNow };
 }
 

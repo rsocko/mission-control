@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle, Clock, Layers, TrendingUp, X, ArrowRight } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 interface Suggestion {
   id: string;
@@ -57,10 +58,10 @@ function buildSuggestions(data: SuggestionData): Suggestion[] {
       id: 'deadlines',
       type: 'deadline',
       title: `${data.upcomingDeadlines} upcoming ${data.upcomingDeadlines === 1 ? 'deadline' : 'deadlines'}`,
-      description: 'Tasks due this week that may need your attention.',
+      description: `Tasks due in the ${NEXT_7_DAYS_LABEL.toLowerCase()} that may need your attention.`,
       icon: <Clock size={16} className="text-blue-400" />,
       action: 'Plan ahead',
-      actionPrompt: 'What tasks do I have due this week? Help me create a plan to get them done on time.',
+      actionPrompt: `What tasks do I have due in the ${NEXT_7_DAYS_LABEL.toLowerCase()}? Help me create a plan to get them done on time.`,
       urgency: 'medium',
     });
   }

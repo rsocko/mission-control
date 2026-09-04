@@ -656,8 +656,8 @@ export function createSqliteNotificationWebRepository(
     },
 
     async recoverStaleActions(recoveryCutoff) {
-      sqlite.transaction((tx) => {
-        const staleActions = tx.prepare(`
+      sqlite.transaction(() => {
+        const staleActions = sqlite.prepare(`
           SELECT id, notification_id AS notificationId, is_primary AS isPrimary
           FROM notification_actions
           WHERE action_type = 'run_workflow'
@@ -666,14 +666,14 @@ export function createSqliteNotificationWebRepository(
         `).all(recoveryCutoff) as Array<{ id: string; notificationId: string; isPrimary: number }>;
         if (staleActions.length === 0) return;
         const ph = staleActions.map(() => '?').join(',');
-        tx.prepare(`
+        sqlite.prepare(`
           UPDATE notification_actions
           SET execution_state = 'pending', claimed_at = NULL
           WHERE id IN (${ph})
         `).run(...staleActions.map(a => a.id));
         for (const action of staleActions) {
           if (!action.isPrimary) continue;
-          tx.prepare(`
+          sqlite.prepare(`
             UPDATE notifications SET is_actionable = 1, primary_action_id = ?
             WHERE id = ?
           `).run(action.id, action.notificationId);

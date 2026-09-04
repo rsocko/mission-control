@@ -75,19 +75,20 @@ export function dismissNotificationsAndEnqueueWritebacks(
   return web.dismissNotificationsAndEnqueueWritebacksSync(notificationIds, dismissedAt);
 }
 
-export function wakeNotificationWritebackDispatcher(): void {
-  if (dispatcherPromise) return;
+export function wakeNotificationWritebackDispatcher(): Promise<void> {
+  if (dispatcherPromise) return dispatcherPromise;
   dispatcherPromise = Promise.resolve()
     .then(dispatchNotificationWritebacks)
     .catch((error) => {
       logger.error({ err: error }, 'Notification writeback dispatcher failed');
     })
-    .finally(() => {
+    .finally(async () => {
       dispatcherPromise = null;
-      void scheduleNextWriteback().catch((error) => {
+      await scheduleNextWriteback().catch((error) => {
         logger.error({ err: error }, 'Notification writeback scheduling failed');
       });
     });
+  return dispatcherPromise;
 }
 
 export async function dispatchNotificationWritebacks(): Promise<void> {

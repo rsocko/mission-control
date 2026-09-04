@@ -124,10 +124,8 @@ describe('notification writeback outbox', () => {
         WHERE notification_id = ?
       `).run(leaseExpiresAt, 'notification-1');
 
-      wakeDispatcher();
-      await vi.advanceTimersByTimeAsync(1_001);
-      await Promise.resolve();
-      await Promise.resolve();
+      await wakeDispatcher();
+      await vi.advanceTimersByTimeAsync(1_101);
 
       const job = sqlite.prepare(`
         SELECT status, lease_expires_at AS leaseExpiresAt

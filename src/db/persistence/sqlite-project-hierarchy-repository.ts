@@ -433,39 +433,35 @@ export function createSqliteProjectHierarchyRepository(
   sqlite: Database.Database,
 ): ProjectHierarchyPersistence {
   return {
-    getSnapshot(projectId) {
-      return Promise.resolve(
-        sqlite.transaction(() => loadSnapshot(sqlite, projectId)).deferred(),
-      );
+    async getSnapshot(projectId) {
+      return sqlite.transaction(() => loadSnapshot(sqlite, projectId)).deferred();
     },
-    findCommittedCommand(commandId) {
-      return Promise.resolve(findCommand(sqlite, commandId));
+    async findCommittedCommand(commandId) {
+      return findCommand(sqlite, commandId);
     },
-    applyAuthorizedCommand(input) {
-      return Promise.resolve(
-        sqlite.transaction(() => applyCommandInTransaction(sqlite, input)).immediate(),
-      );
+    async applyAuthorizedCommand(input) {
+      return sqlite.transaction(() => applyCommandInTransaction(sqlite, input)).immediate();
     },
-    findPhaseProjectId(phaseId) {
+    async findPhaseProjectId(phaseId) {
       const row = sqlite.prepare(`
         SELECT project_id AS projectId FROM project_phases WHERE id = ?
       `).get(phaseId) as { projectId: string | null } | undefined;
-      return Promise.resolve(row?.projectId ?? null);
+      return row?.projectId ?? null;
     },
-    listPhaseItems(phaseId) {
-      return Promise.resolve((sqlite.prepare(`
+    async listPhaseItems(phaseId) {
+      return (sqlite.prepare(`
         SELECT ${PHASE_ITEM_COLUMNS}
         FROM project_phase_items
         WHERE phase_id = ?
         ORDER BY sort_order ASC, created_at ASC, id ASC
-      `).all(phaseId) as PhaseItemRow[]).map(phaseItemFromRow));
+      `).all(phaseId) as PhaseItemRow[]).map(phaseItemFromRow);
     },
-    findPhaseItemTask(phaseId, itemId) {
+    async findPhaseItemTask(phaseId, itemId) {
       const row = sqlite.prepare(`
         SELECT task_id AS taskId FROM project_phase_items
         WHERE id = ? AND phase_id = ?
       `).get(itemId, phaseId) as { taskId: string } | undefined;
-      return Promise.resolve(row?.taskId ?? null);
+      return row?.taskId ?? null;
     },
   };
 }

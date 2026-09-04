@@ -1288,6 +1288,12 @@ export class PostgresSyncJobRepository implements SyncJobRepository {
     const jobs: SyncJob[] = [];
     for (const schedule of due) {
       const job = await withTransaction(this.pool, async (client) => {
+        // Operator control takes this lock before mutating sync_schedules.
+        // Match that order so a due-schedule claim cannot deadlock quarantine.
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          [schedule.connectorId],
+        );
         // Lock this schedule row (skipping it if another worker already
         // holds it) so claiming the due schedule, enqueueing its job, and
         // advancing next_due_at happen as a single atomic unit — otherwise

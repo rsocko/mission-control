@@ -58,6 +58,25 @@ describePostgres('PostgreSQL sync job repository integration', () => {
     return id;
   }
 
+  async function waitForAdvisoryLockWaiter(): Promise<void> {
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const result = await backend.context.pool.query<{ waiting: boolean }>(
+        `SELECT EXISTS (
+           SELECT 1
+           FROM pg_locks AS locks
+           JOIN pg_stat_activity AS activity ON activity.pid = locks.pid
+           WHERE locks.locktype = 'advisory'
+             AND locks.granted = false
+             AND activity.application_name = 'mission-control-sync-job-repository-test'
+         ) AS waiting`,
+      );
+      if (result.rows[0]?.waiting) return;
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    throw new Error('Timed out waiting for the scheduler advisory lock');
+  }
+
   it('enqueues a job and claims it exactly once under concurrent claim attempts', async () => {
     const connectorId = await createConnector();
     const job = await repository.enqueue(connectorId);
@@ -333,5 +352,52 @@ describePostgres('PostgreSQL sync job repository integration', () => {
       claimed!.attempt,
       'test cleanup',
     );
+  });
+
+  it('takes the connector advisory lock before the due schedule row lock', async () => {
+    const connectorId = await createConnector();
+    await repository.registerSchedule(connectorId, 5);
+    await backend.context.pool.query(
+      `UPDATE sync_schedules
+       SET next_due_at = now() - interval '1 minute'
+       WHERE connector_id = $1`,
+      [connectorId],
+    );
+    const advisoryBlocker = await backend.context.pool.connect();
+    const rowProbe = await backend.context.pool.connect();
+    let enqueuePromise: Promise<unknown> | undefined;
+    let blockerOpen = false;
+    let probeOpen = false;
+
+    try {
+      await advisoryBlocker.query('BEGIN');
+      blockerOpen = true;
+      await advisoryBlocker.query(
+        'SELECT pg_advisory_xact_lock(hashtext($1))',
+        [connectorId],
+      );
+
+      enqueuePromise = repository.enqueueDueSchedules(new Date());
+      await waitForAdvisoryLockWaiter();
+
+      await rowProbe.query('BEGIN');
+      probeOpen = true;
+      await rowProbe.query(
+        'SELECT 1 FROM sync_schedules WHERE connector_id = $1 FOR UPDATE NOWAIT',
+        [connectorId],
+      );
+      await rowProbe.query('ROLLBACK');
+      probeOpen = false;
+
+      await advisoryBlocker.query('COMMIT');
+      blockerOpen = false;
+      await expect(enqueuePromise).resolves.toHaveLength(1);
+    } finally {
+      if (probeOpen) await rowProbe.query('ROLLBACK');
+      if (blockerOpen) await advisoryBlocker.query('ROLLBACK');
+      advisoryBlocker.release();
+      rowProbe.release();
+      await enqueuePromise;
+    }
   });
 });

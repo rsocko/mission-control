@@ -52,7 +52,7 @@ growing without an explicit exception.
 | Health and telemetry | `PRAGMA page_count`, page size, WAL checkpoints and SQLite observation | `src/lib/telemetry/**`, readiness route | High. Runtime health consumes a database-health probe result. |
 | Graph workspace | raw row mapping, JSON text, compare-and-swap writes and checkpoints | `src/lib/graph-workspace/sqlite-repository.ts` | Migrated (L16). Both backends implement `IdeationWorkspaceRepository`; the SQLite adapter is one of two composed behind the `ideationWorkspaces` worker slot. |
 | Tasks and projects | Drizzle queries plus shared `runTransaction` | task APIs and project services | Medium. Migrate by canonical workflow, not table-by-table. |
-| Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. L13 migrated seven notification web routes and the writeback dispatcher behind `NotificationWebPersistence` (attached as `notificationDelivery.web`). |
+| Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. L13 migrated seven notification web routes and the writeback dispatcher behind `NotificationWebPersistence` (attached as `notificationDelivery.web`). Push preferences, scheduler state, quiet-hours preferences, and active calendar-token projection are attached additively as `notificationDelivery.push`. |
 | Finance, external identity, AI runs and agents | concentrated raw SQL and synchronous transactions | corresponding `src/lib` domains | High, but outside the representative migration. Preserve as documented legacy exceptions until each workflow moves. |
 
 ## Portable contract rules
@@ -1932,6 +1932,33 @@ landed task quick-sort and L18 decrements, the graph moves from
 `266/110/5/151/80/30/81/57/0/167`. The CI-exposed exact-current ratchet
 expansion adds 19 test-only paths to the approved 28-path maximum, for a
 47-path maximum and 46 actual changed paths.
+
+## Web/API PostgreSQL parity: notification push preferences and scheduler
+
+The additive `notificationDelivery.push` port owns push preferences, the
+notification-delivery master switch, scheduler enablement, quiet-hours
+preference reads, and the existing active calendar access-token projection.
+SQLite and PostgreSQL adapters preserve defaults, timezone and quiet-hours
+values, stable token ordering, and omission semantics. Preference and master
+switch updates commit atomically. PostgreSQL serializes legacy-client omission
+updates with an advisory transaction lock; SQLite uses one local transaction.
+PostgreSQL selection never imports, initializes, or falls back to SQLite.
+
+Scheduler trigger handlers are registered once in a process-wide, cycle-safe
+runtime slot after database initialization. Registration is idempotent,
+resettable in tests, and access fails closed until handlers are present.
+Lifecycle serialization composes each start, stop, or restart with its durable
+state update, preserving concurrent master-switch and omitted-field behavior.
+Calendar API calls and all other network I/O remain outside repository
+transactions. Repositories expose only active access-token strings and neither
+log nor return refresh tokens, encrypted credentials, or backend error details.
+
+The bounded layer owns only `/api/push/preferences` and
+`/api/push/scheduler`, plus their minimal notification/push dependency chain.
+Notification actions, re-enrichment, trigger delivery, recent wins, task and
+project organization, finance, webhook integrations, and the AI control plane
+remain excluded. The exact composed graph is
+`266/108/5/153/78/30/79/55/0/163`, and the approved hard cap is 40 paths.
 
 ## Backend-specific exceptions
 

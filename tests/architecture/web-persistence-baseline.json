@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through notification push preferences and scheduler parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-05",
-  "generatedFromCommit": "5943866d197a3bec417a67e19152b5ea9229e597+L19",
+  "generatedFromCommit": "5943866d197a3bec417a67e19152b5ea9229e597+L19+notification-push",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 110,
+    "tierARoutes": 108,
     "tierBRoutes": 5,
-    "cleanRoutes": 151,
-    "directTaintSourceRoutes": 80,
+    "cleanRoutes": 153,
+    "directTaintSourceRoutes": 78,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 81,
-    "taintedLibA": 57,
+    "directDbNamespaceRoutes": 79,
+    "taintedLibA": 55,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 167
+    "totalMigrationUnits": 163
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -219,8 +219,6 @@
     "src/app/api/projects/[id]/reports/burn/route.ts",
     "src/app/api/projects/[id]/task-dependencies/[dependencyId]/route.ts",
     "src/app/api/projects/[id]/task-dependencies/route.ts",
-    "src/app/api/push/preferences/route.ts",
-    "src/app/api/push/scheduler/route.ts",
     "src/app/api/push/subscribe/route.ts",
     "src/app/api/push/trigger/route.ts",
     "src/app/api/push/vapid-key/route.ts",
@@ -541,6 +539,8 @@
     "src/app/api/project-phases/[id]/route.ts",
     "src/app/api/project-phases/route.ts",
     "src/app/api/projects/[id]/hierarchy/route.ts",
+    "src/app/api/push/preferences/route.ts",
+    "src/app/api/push/scheduler/route.ts",
     "src/app/api/push/subscribe/route.ts",
     "src/app/api/push/vapid-key/route.ts",
     "src/app/api/settings/mode/route.ts",
@@ -648,8 +648,6 @@
     "src/app/api/priority-log/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
-    "src/app/api/push/preferences/route.ts",
-    "src/app/api/push/scheduler/route.ts",
     "src/app/api/recent-wins/dismiss/route.ts",
     "src/app/api/recent-wins/route.ts",
     "src/app/api/recent-wins/settings/route.ts",
@@ -763,8 +761,6 @@
     "src/app/api/priority-log/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
-    "src/app/api/push/preferences/route.ts",
-    "src/app/api/push/scheduler/route.ts",
     "src/app/api/recent-wins/dismiss/route.ts",
     "src/app/api/recent-wins/route.ts",
     "src/app/api/recent-wins/settings/route.ts",
@@ -841,12 +837,10 @@
     "src/lib/notifications/index.ts",
     "src/lib/notifications/push-policy/resolver.ts",
     "src/lib/notifications/push-policy/rules.ts",
-    "src/lib/notifications/quiet-hours.ts",
     "src/lib/notifications/service.ts",
     "src/lib/notifications/workflow-executor.ts",
     "src/lib/projects-overview/index.ts",
     "src/lib/public-demo-runtime.ts",
-    "src/lib/push/scheduler.ts",
     "src/lib/push/triggers.ts",
     "src/lib/reports/burn.ts",
     "src/lib/search/embedding-request.ts",
@@ -1703,6 +1697,40 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation after the landed task quick-sort and L18 decrements moves all eight owned project, phase, rule-match, and list-group administration routes from Tier A to clean through two capabilities atomically nested under projectAutomation. The graph is exactly 266 routes, A110/B5/clean151, direct80/transitive30/directDB81, 57 tainted libraries, zero helpers, and 167 total migration units. No route is reclassified into Tier B and no taint-side set grows."
+    },
+    {
+      "layer": "notification-push",
+      "title": "notification push preferences and scheduler PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 167,
+        "to": 163,
+        "delta": -4
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/notifications/quiet-hours.ts",
+        "src/lib/push/scheduler.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation moves the two push preference/scheduler routes from direct Tier A to clean and removes quiet-hours.ts plus scheduler.ts from taintedLibA. The graph is exactly 266 routes, A108/B5/clean153, direct78/transitive30/directDB79, 55 tainted libraries, zero helpers, and 163 total migration units."
     }
   ],
   "layerUpdates": [

@@ -9,6 +9,7 @@ import {
 import { needsAttention } from '@/lib/notifications/lifecycle';
 import { isQuietHour } from '@/lib/notifications/quiet-hours-window';
 import { createPostgresNotificationWebRepository } from './notification-web-repository';
+import { createPostgresNotificationPushRepository } from './notification-push-repository';
 
 interface RawClaim {
   id: string;
@@ -376,6 +377,7 @@ export function createPostgresNotificationDeliveryRepository(
       return result.rowCount === 1;
     },
 
+    push: createPostgresNotificationPushRepository(pool),
     web: createPostgresNotificationWebRepository(pool),
   };
 }

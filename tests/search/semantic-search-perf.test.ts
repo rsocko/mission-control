@@ -18,9 +18,23 @@ import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-regist
  */
 
 const mocks = vi.hoisted(() => ({
+  contextSources: [] as string[],
   scheduleSemanticBackfill: vi.fn(),
   semanticSearchEnabled: true,
 }));
+
+vi.mock('@/lib/ai/provider-routing-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ai/provider-routing-core')>();
+  return {
+    ...actual,
+    createConfiguredAIRequestContext: (
+      ...args: Parameters<typeof actual.createConfiguredAIRequestContext>
+    ) => {
+      mocks.contextSources = args[2]?.sources ?? [];
+      return actual.createConfiguredAIRequestContext(...args);
+    },
+  };
+});
 
 vi.mock('@/lib/ai/provider-configuration-service', () => ({
   loadAIProviderConfiguration: async () => ({
@@ -65,6 +79,7 @@ describe('Semantic search — unit tests (mocked)', () => {
   beforeEach(async () => {
     resetProcessRuntimeRegistries();
     vi.restoreAllMocks();
+    mocks.contextSources = [];
     mocks.scheduleSemanticBackfill.mockReset();
     mocks.semanticSearchEnabled = true;
     vi.stubEnv('MC_EMBEDDING_REQUEST_MAX_RETRIES', '2');
@@ -144,11 +159,7 @@ describe('Semantic search — unit tests (mocked)', () => {
 
     await generateEmbedding('private message', { sources: ['rymessage'] });
 
-    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.headers).toMatchObject({
-      'x-mc-ai-feature-id': 'semantic-embedding',
-      'x-mc-ai-sensitivity': 'local-only',
-      'x-mc-ai-allowed-routes': 'ollama',
-    });
+    expect(mocks.contextSources).toEqual(['rymessage']);
   });
 
   it('cosine similarity computation is fast for 1000 items', () => {

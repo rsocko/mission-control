@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   allowedRoutes: ['bifrost-copilot', 'azure-private'],
@@ -40,10 +40,15 @@ describe('embedding provider requests', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.allowedRoutes = ['bifrost-copilot', 'azure-private'];
+    vi.stubEnv('AI_APPROVED_BIFROST_HOSTS', 'bifrost.example.test');
     vi.stubEnv('MC_DB_PATH', ':memory:');
     vi.stubEnv('MC_EMBEDDING_REQUEST_MAX_RETRIES', '2');
     vi.stubEnv('MC_EMBEDDING_REQUEST_RETRY_BASE_MS', '1');
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('sends credentials and complete policy metadata and records Bifrost fallback identity', async () => {

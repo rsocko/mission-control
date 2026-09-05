@@ -1844,7 +1844,47 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
-## Web/API PostgreSQL parity: Layer L18 (project organization)
+## Web/API PostgreSQL parity: Layer L18 (AI execution and memory control plane)
+
+Layer L18 removes the deferred SQLite reach from document intake, retained
+Houston memory, and durable AI run control without changing any of their eight
+route files. Durable runs and semantic source reads now resolve process-wide,
+backend-neutral contracts populated only by `initializeRuntimeDatabase()`.
+SQLite constructs its adapters inside the SQLite startup branch; PostgreSQL
+constructs its existing durable-run and semantic-source adapters from the live
+pool. Access before composition is registered fails closed, and shutdown clears
+only the exact registered generation.
+
+Provider construction is split into a pure `provider-client` capability that
+accepts already-resolved configuration and an asynchronous `provider-runtime`
+that reads configuration through the composed settings repository. The legacy
+synchronous provider facade delegates to the same client, preserving route
+selection, sensitivity policy, admission control, telemetry, error propagation,
+and request ordering. Document intake and Houston summary generation use the
+asynchronous facade, so PostgreSQL never evaluates `config-resolver.ts` or
+`@/db`.
+
+Houston memory continues to persist through `CorePersistenceRepositories`.
+After an authoritative write commits, semantic publication uses the registered
+publication service; entity-link validation uses the registered semantic source
+port. The ordering remains inspect, provider call, memory write, then semantic
+publication. Exclusion remains sticky across recapture, deleted memory stays
+redacted, and expired-memory deletion remains bounded.
+
+The exact graph transition is 266 routes, A121/B13/clean132 to
+A121/B5/clean140. The eight owned routes leave Tier B, while
+`ai-parser.ts`, `intake/index.ts`, and `ai/tools/intake-tools.ts` leave
+`taintedLibA`; total migration units decrease from 182 to 179. Direct-taint,
+transitive-only Tier A, direct-`@/db`, and helper counts are unchanged. No
+suggestion, search, planning, task-ancillary, schema, migration, dependency,
+Next.js, or build path is part of this layer.
+
+The CI-proven cap is 43 paths: 9 production, 32 tests/helpers, and 2
+architecture/documentation paths. The expansion from the original 24-path
+inventory is limited to the 17 established graph readers and two SQLite
+durable-run suites that now register their selected repository explicitly.
+
+## Web/API PostgreSQL parity: Layer L19 (project organization)
 
 Project administration, phase lifecycle, rule-match previews, and list-group
 organization now resolve two backend-neutral capabilities atomically nested
@@ -1861,11 +1901,11 @@ dedicated list-organization lock, and the existing per-project advisory
 namespace for project and phase mutations. Phase administration therefore
 continues to participate in L15 revision triggers and optimistic CAS fencing.
 
-All eight owned routes move directly from Tier A to clean. The exact composed
-graph is 266 API routes, 113 Tier A, 13 Tier B, 140 clean, 83 direct
-taint-source routes, 30 transitive-only Tier A routes, 84 direct `@/db`
-namespace routes, 61 tainted libraries, zero tainted API helpers, and 174 total
-migration units.
+All eight owned routes move directly from Tier A to clean. Composed after L18,
+the graph moves from `266/121/5/140/91/30/92/58/0/179` to
+`266/113/5/148/83/30/84/58/0/171`. The CI-exposed exact-current ratchet
+expansion adds 18 test-only paths to the approved 28-path maximum, for a
+46-path maximum and 45 actual changed paths.
 
 ## Backend-specific exceptions
 

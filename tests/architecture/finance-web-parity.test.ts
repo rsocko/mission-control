@@ -161,26 +161,26 @@ describe('L12c finance end-user web/API PostgreSQL parity', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 113,
-      tierBRoutes: 13,
-      cleanRoutes: 140,
+      tierBRoutes: 5,
+      cleanRoutes: 148,
       directTaintSourceRoutes: 83,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 84,
-      taintedLibA: 61,
+      taintedLibA: 58,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 174,
+      totalMigrationUnits: 171,
     });
     expect(baseline.counts).toEqual({
       apiRoutes: 266,
       tierARoutes: 113,
-      tierBRoutes: 13,
-      cleanRoutes: 140,
+      tierBRoutes: 5,
+      cleanRoutes: 148,
       directTaintSourceRoutes: 83,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 84,
-      taintedLibA: 61,
+      taintedLibA: 58,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 174,
+      totalMigrationUnits: 171,
     });
   });
 });

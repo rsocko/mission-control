@@ -119,14 +119,14 @@ describe('L10 AI provider configuration parity', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 113,
-      tierBRoutes: 13,
-      cleanRoutes: 140,
+      tierBRoutes: 5,
+      cleanRoutes: 148,
       directTaintSourceRoutes: 83,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 84,
-      taintedLibA: 61,
+      taintedLibA: 58,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 174,
+      totalMigrationUnits: 171,
     });
   });
 });

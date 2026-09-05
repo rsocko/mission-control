@@ -12,12 +12,10 @@ const POSTGRES_EXCLUDED_ENTRY_IMPORTS = new Set([
 const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   COMPOSITION_ROOT,
   'src/db/runtime.ts',
-  'src/lib/ai/durable-runs/runtime.ts',
   'src/lib/semantic-index/embedding-provider.ts',
   'src/lib/connectors/github-issues/backup-verifier.ts',
   'src/lib/connectors/monarch-money/index.ts',
   'src/lib/connectors/rymessage/rymessage-client.ts',
-  'src/lib/houston-memory/service.ts',
   'src/lib/search/fts.ts',
   'src/lib/semantic-index/publication.ts',
   'src/lib/semantic-index/repository-facade.ts',
@@ -204,7 +202,7 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
 
     expect(unexpectedImporters).toEqual([]);
     expect(guardedEdges).toContain('src/db/runtime.ts -> ./index');
-    expect(guardedEdges).toContain(
+    expect(guardedEdges).not.toContain(
       'src/lib/ai/durable-runs/runtime.ts -> ./sqlite-adapter',
     );
     expect(guardedEdges).toContain(

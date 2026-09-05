@@ -5,6 +5,7 @@ const processRegistryKeys = [
   'mission-control.triage-persistence-registry',
   'mission-control.connector-runtime-registry',
   'mission-control.semantic-publication-registry',
+  'mission-control.semantic-source-port-registry',
   'mission-control.keyword-search-registry',
   'mission-control.ai-enrichment-registry',
   'mission-control.mode-route-service-registry',

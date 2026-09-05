@@ -385,7 +385,7 @@ describe('PostgreSQL runtime core repository registration', () => {
       recompute: () => ({ success: false }),
     })).toThrow('Persistence composition is unavailable until initializeRuntimeDatabase() completes');
     expect(() => (
-      durableRuntime.registerPostgresDurableAiRunRepository(replacementDurableRepository)
+      durableRuntime.registerDurableAiRunRepository(replacementDurableRepository)
     )).toThrow(
       'Persistence composition publication is blocked until initializeRuntimeDatabase()',
     );
@@ -407,7 +407,7 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.registerWorker).toHaveBeenCalledTimes(3);
     expect(mocks.resumeSemantic).toHaveBeenCalledTimes(3);
     const selectedDurableRepository = await durableRuntime.getDurableAiRunRepository();
-    durableRuntime.clearPostgresDurableAiRunRepository(replacementDurableRepository);
+    durableRuntime.clearDurableAiRunRepository(replacementDurableRepository);
     expect(await durableRuntime.getDurableAiRunRepository()).toBe(selectedDurableRepository);
   });
 

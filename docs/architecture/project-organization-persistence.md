@@ -103,15 +103,15 @@ remains authoritative.
 
 ## Graph decrement and proof
 
-The exact graph moved from
-`266/121/13/132/91/30/92/61/0/182` to
-`266/113/13/140/83/30/84/61/0/174` for API routes, Tier A, Tier B, clean,
+The exact graph, composed after the landed L18 AI execution layer, moved from
+`266/121/5/140/91/30/92/58/0/179` to
+`266/113/5/148/83/30/84/58/0/171` for API routes, Tier A, Tier B, clean,
 direct taint, transitive-only taint, direct `@/db`, tainted libraries, tainted
 API helpers, and migration units respectively. All eight owned routes moved
 from Tier A to clean; no route moved to Tier B.
 
 Proof is split across one shared repository contract, SQLite and live
 PostgreSQL runners, PostgreSQL concurrency/CAS checks, a poisoned-SQLite import
-and route execution proof, route compatibility tests, and the L18 architecture
+and route execution proof, route compatibility tests, and the L19 architecture
 ratchet. `tests/architecture/web-persistence-baseline.json` records the exact
 decrement.

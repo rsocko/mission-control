@@ -85,11 +85,11 @@ describe('L05 task-read taint decrement', () => {
     // asserted by `analytics-taint-decrement.test.ts`. L08a then removed its
     // eight owned Tier B triage routes, and runtime observability parity
     // removed six more. The non-route digests reflect the composed L16, L17,
-    // and L08a removals; taintedApiHelpers remains empty.
+    // L08a, and L18 removals; taintedApiHelpers remains empty.
     expect(digest(current.tierBRoutes))
-      .toBe('1b40233b2898ab0993be3818f0e14101924c117728cf430e8fb3982c14c31622');
+      .toBe('2c839bdae24fab27c245d516a003c03e2952ee107ed6ba0c47ba41ffda86ff40');
     expect(digest(current.taintedLibA))
-      .toBe('69b17cfe5ae56abda59e494e4cb7290047f515824a241f555d4020cbbc805925');
+      .toBe('60fd13dc48ee641028587e1bddf3eb8ef57cfb000445996039ab99288629d1d6');
     expect(digest(current.taintedApiHelpers))
       .toBe('4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945');
     expect(current.taintedApiHelpers).toEqual([]);
@@ -121,14 +121,14 @@ describe('L05 task-read taint decrement', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 113,
-      tierBRoutes: 13,
-      cleanRoutes: 140,
+      tierBRoutes: 5,
+      cleanRoutes: 148,
       directTaintSourceRoutes: 83,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 84,
-      taintedLibA: 61,
+      taintedLibA: 58,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 174,
+      totalMigrationUnits: 171,
     });
   });
 });

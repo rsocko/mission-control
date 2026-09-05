@@ -15,18 +15,6 @@ vi.mock('@/lib/search/fts', () => ({
   warmUpFTS: vi.fn(),
 }));
 
-vi.mock('@/lib/search/semantic', () => ({
-  semanticSearch: mocks.semanticSearch,
-  getSemanticSearchMetrics: vi.fn(),
-  getSemanticSearchStatus: vi.fn(),
-  rebuildEmbeddingIndex: vi.fn(),
-}));
-
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  publishSemanticUpsert: vi.fn(async () => ({ status: 'published' })),
-  publishSemanticDelete: vi.fn(async () => ({ status: 'published' })),
-}));
-
 describe('staged search execution', () => {
   beforeEach(() => {
     mocks.searchFTS.mockReset();
@@ -47,8 +35,12 @@ describe('staged search execution', () => {
     mocks.searchFTS.mockResolvedValue([keywordResult]);
     mocks.semanticSearch.mockImplementation(() => new Promise(() => undefined));
 
-    const { searchWithBranches } = await import('@/lib/search');
-    await expect(searchWithBranches('urgent bug', { mode: 'keyword' })).resolves.toMatchObject({
+    const { executeSearchWithBranches } = await import('@/lib/search/semantic');
+    await expect(executeSearchWithBranches(
+      'urgent bug',
+      { mode: 'keyword' },
+      mocks.semanticSearch,
+    )).resolves.toMatchObject({
       results: [keywordResult],
       branches: {
         keyword: { status: 'completed', resultCount: 1 },
@@ -66,14 +58,14 @@ describe('staged search execution', () => {
       metadata: {},
     }]);
 
-    const { searchWithBranches } = await import('@/lib/search');
-    const execution = await searchWithBranches('project', {
+    const { executeSearchWithBranches } = await import('@/lib/search/semantic');
+    const execution = await executeSearchWithBranches('project', {
       mode: 'keyword',
       source: 'Project Alpha',
       status: 'in_progress',
       excludeDone: true,
       limit: 20,
-    });
+    }, mocks.semanticSearch);
 
     expect(execution.results.map((result) => result.id)).toEqual(['keep']);
     expect(mocks.searchFTS).toHaveBeenCalledWith(
@@ -91,14 +83,14 @@ describe('staged search execution', () => {
   it('passes the same filters into semantic retrieval', async () => {
     mocks.semanticSearch.mockResolvedValue([]);
 
-    const { searchWithBranches } = await import('@/lib/search');
-    await searchWithBranches('project', {
+    const { executeSearchWithBranches } = await import('@/lib/search/semantic');
+    await executeSearchWithBranches('project', {
       mode: 'semantic',
       source: 'Project Alpha',
       status: 'in_progress',
       excludeDone: true,
       limit: 20,
-    });
+    }, mocks.semanticSearch);
 
     expect(mocks.semanticSearch).toHaveBeenCalledWith(
       'project',
@@ -125,8 +117,12 @@ describe('staged search execution', () => {
     }]);
     mocks.semanticSearch.mockResolvedValue([]);
 
-    const { searchWithBranches } = await import('@/lib/search');
-    const execution = await searchWithBranches('urgent', { mode: 'hybrid' });
+    const { executeSearchWithBranches } = await import('@/lib/search/semantic');
+    const execution = await executeSearchWithBranches(
+      'urgent',
+      { mode: 'hybrid' },
+      mocks.semanticSearch,
+    );
 
     expect(execution.results.map((result) => result.id)).toEqual(['keyword-only']);
     expect(execution.branches.semantic).toMatchObject({ resultCount: 0 });
@@ -136,13 +132,13 @@ describe('staged search execution', () => {
     mocks.searchFTS.mockResolvedValue([]);
     mocks.semanticSearch.mockResolvedValue([]);
 
-    const { searchWithBranches } = await import('@/lib/search');
-    await searchWithBranches('deploy', {
+    const { executeSearchWithBranches } = await import('@/lib/search/semantic');
+    await executeSearchWithBranches('deploy', {
       mode: 'hybrid',
       source: 'Project Alpha',
       status: 'todo',
       excludeDone: true,
-    });
+    }, mocks.semanticSearch);
 
     const expectedFilters = {
       source: 'Project Alpha',

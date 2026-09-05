@@ -2,7 +2,7 @@
 title: "Portable Persistence Boundaries"
 status: active
 created: 2026-08-25
-last_reviewed: 2026-08-30
+last_reviewed: 2026-09-05
 category: architecture
 related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
@@ -492,6 +492,20 @@ Generic PostgreSQL runs use the backend-selected keyword search repository
 after commit. Semantic enrichment, project-rule/planning post-processing,
 outbound-event publication, and durable AI use their backend-selected
 repositories and never fall back to SQLite.
+
+The `/api/ai/search` visibility preflight also uses the selected core
+`ConnectorRepository`. Both adapters return soft-deleted connector IDs in
+deterministic binary order before the route starts its concurrent keyword/
+semantic search and status branches. PostgreSQL search therefore cannot
+evaluate the SQLite compatibility database while preserving the same
+Universe privacy exclusion set.
+
+Search query/status orchestration resolves semantic-index storage and
+embedding capabilities through a process-wide runtime selected by database
+startup. SQLite registers its existing semantic runtime; PostgreSQL registers
+its native repository and async provider configuration path. Missing
+composition fails closed, and neither the route nor its search runtime can
+load or fall back to SQLite in PostgreSQL mode.
 
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health

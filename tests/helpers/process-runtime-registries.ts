@@ -7,6 +7,7 @@ const processRegistryKeys = [
   'mission-control.semantic-publication-registry',
   'mission-control.semantic-source-port-registry',
   'mission-control.keyword-search-registry',
+  'mission-control.semantic-search-runtime',
   'mission-control.ai-enrichment-registry',
   'mission-control.mode-route-service-registry',
   'mission-control.database-runtime-registry',

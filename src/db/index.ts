@@ -18,9 +18,15 @@ import {
   assertPersistenceCompositionPublicationAllowed,
   isPersistenceCompositionAccessBlocked,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
+import type { SemanticSearchRuntime } from '@/lib/search/semantic';
+import {
+  getSemanticIndexRuntime,
+  scheduleSemanticBackfill,
+} from '@/lib/semantic-index/runtime';
 
 // Keep connection creation lazy so Next.js build workers do not race to open
 // the database during static analysis.
@@ -50,6 +56,47 @@ let sqliteCompositionPromise: Promise<void> | null = null;
 let sqliteCompositionShutdownPromise: Promise<void> | null = null;
 let sqliteCompositionState: 'cold' | 'initializing' | 'active' | 'stopping' | 'stopped' = 'cold';
 const databaseTelemetry = new DatabaseTelemetryCollector();
+const sqliteSemanticSearchRuntime: SemanticSearchRuntime = {
+  async resolve() {
+    const { repository, embeddings } = await getSemanticIndexRuntime();
+    return { repository, embeddings };
+  },
+  async scheduleBackfill() {
+    return scheduleSemanticBackfill();
+  },
+};
+interface SemanticSearchRuntimeRegistry {
+  selected: SemanticSearchRuntime | null;
+}
+const SEMANTIC_SEARCH_RUNTIME_KEY = 'mission-control.semantic-search-runtime';
+const SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION = 1;
+
+function semanticSearchRuntimeRegistry(): SemanticSearchRuntimeRegistry {
+  return getProcessRuntimeSlot(
+    SEMANTIC_SEARCH_RUNTIME_KEY,
+    SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION,
+    () => ({ selected: null }),
+  );
+}
+
+function assertCanSelectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = semanticSearchRuntimeRegistry().selected;
+  if (selected && selected !== runtime) {
+    throw new Error('Semantic search runtime is already selected');
+  }
+}
+
+function selectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertCanSelectSemanticSearchRuntime(runtime);
+  const registry = semanticSearchRuntimeRegistry();
+  registry.selected = runtime;
+}
+
+function clearSelectedSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  const registry = semanticSearchRuntimeRegistry();
+  if (registry.selected === runtime) registry.selected = null;
+}
 
 function resetPartialDatabaseInitialization(): void {
   try {
@@ -166,6 +213,7 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     );
   }
   modules.workerRuntime.assertCanRegisterSqliteWorkerRuntimeServices();
+  assertCanSelectSemanticSearchRuntime(sqliteSemanticSearchRuntime);
 
   try {
     modules.coreRuntime.registerCorePersistenceRepositories(composition.coreRepositories);
@@ -180,8 +228,10 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     }
     modules.workerRuntime.registerSqliteWorkerRuntimeServices();
     modules.taskCoreRuntime.registerTaskCorePersistence(composition.taskCorePersistence);
+    selectSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     sqliteCompositionState = 'active';
   } catch (error) {
+    clearSelectedSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     modules.taskCoreRuntime.clearSelectedTaskCorePersistence(
       composition.taskCorePersistence,
     );
@@ -294,6 +344,7 @@ export function shutdownSqlitePersistenceComposition(): Promise<void> {
       sqliteCompositionModules.taskCoreRuntime.clearSelectedTaskCorePersistence(
         sqliteComposition.taskCorePersistence,
       );
+      clearSelectedSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     }
     sqliteCompositionState = 'stopped';
   })();

@@ -2,17 +2,50 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
-import { createPostgresCoreRepositories } from '@/db/postgres/repositories';
+import {
+  createPostgresCoreRepositories,
+  PostgresConnectorRepository,
+} from '@/db/postgres/repositories';
 import type { CorePersistenceRepositories } from '@/db/persistence/core-repositories';
-import { notificationActions } from '@/db/postgres/schema';
+import { connectorConfigs, notificationActions } from '@/db/postgres/schema';
 import type { ConnectorConfig, HubProject, NotificationItem, TaskItem } from '@/types';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
-import { eq } from 'drizzle-orm';
+import { describeConnectorDeletedIdsContract } from '../contracts/connector-deleted-ids.contract';
+import { eq, inArray } from 'drizzle-orm';
 
 vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 const describePostgres = describe.skipIf(!connectionString);
+
+describePostgres('PostgreSQL ConnectorRepository deleted-ID contract', () => {
+  describeConnectorDeletedIdsContract('PostgreSQL', async () => {
+    if (!connectionString) throw new Error('MC_TEST_POSTGRES_URL is required');
+    assertSafeIntegrationTestTarget(connectionString);
+    const contractBackend = new PostgresPersistenceBackend({
+      config: resolvePostgresConfig({
+        MC_POSTGRES_URL: connectionString,
+        MC_POSTGRES_APPLICATION_NAME: 'mission-control-connector-deleted-ids-contract',
+      }),
+    });
+    await contractBackend.initialize();
+    const repository = new PostgresConnectorRepository(contractBackend.context.db);
+    return {
+      repository,
+      close: async (ids: readonly string[]) => {
+        try {
+          if (ids.length > 0) {
+            await contractBackend.context.db
+              .delete(connectorConfigs)
+              .where(inArray(connectorConfigs.id, [...ids]));
+          }
+        } finally {
+          await contractBackend.shutdown();
+        }
+      },
+    };
+  });
+});
 
 describePostgres('PostgreSQL core repositories integration', () => {
   const backend = new PostgresPersistenceBackend({

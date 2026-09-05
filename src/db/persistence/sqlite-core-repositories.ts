@@ -9,7 +9,7 @@ import type {
 } from '@/types';
 import { RepositoryError, type PersistenceJson } from './contracts';
 import type {
-  ConnectorRepository,
+  ConnectorDeletedIdsRepository,
   ConnectorTestResultCommand,
   CorePersistenceRepositories,
   NotificationRepository,
@@ -594,7 +594,7 @@ interface ConnectorRow {
   syncedLists: unknown;
 }
 
-export class SqliteConnectorRepository implements ConnectorRepository {
+export class SqliteConnectorRepository implements ConnectorDeletedIdsRepository {
   constructor(private readonly database: SqliteDatabase) {}
 
   private getSync(id: string): ConnectorConfig | null {
@@ -664,6 +664,16 @@ export class SqliteConnectorRepository implements ConnectorRepository {
         'connector_configs.synced_lists',
       ).map(String),
     }));
+  }
+
+  async listDeletedIds(): Promise<string[]> {
+    const rows = this.database.prepare(`
+      SELECT id
+      FROM connector_configs
+      WHERE deleted_at IS NOT NULL
+      ORDER BY id COLLATE BINARY
+    `).all() as Array<{ id: string }>;
+    return rows.map(({ id }) => id);
   }
 
   async upsert(connector: ConnectorConfig): Promise<ConnectorConfig> {

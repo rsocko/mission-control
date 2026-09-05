@@ -1953,8 +1953,8 @@ contract also pins deterministic destination-list selection: prefer
 both routes have poisoned-SQLite proofs; there is no SQLite load, fallback,
 dual write, or backend probe in either request path.
 
-The cap is 42 changed paths: 9 production paths, 11 direct
-contract/route/runtime tests, 19 inherited exact-current graph expectation
+The cap is 43 changed paths: 9 production paths, 11 direct
+contract/route/runtime tests, 20 inherited exact-current graph expectation
 updates, 2 graph artifacts, and this architecture document. Retained-list
 purge, GitHub bulk transfer, sync cleanup, retained-resolution claims,
 Scout/triage, and webhook integration are explicitly excluded. Bulk transfer

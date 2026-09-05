@@ -1,7 +1,5 @@
-import db from '@/db';
-import { inboundWebhookLog } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /**
  * GET /api/inbound-webhooks/[id]/log
@@ -21,12 +19,11 @@ export async function GET(
   );
 
   try {
-    const entries = await db
-      .select()
-      .from(inboundWebhookLog)
-      .where(eq(inboundWebhookLog.webhookId, id))
-      .orderBy(desc(inboundWebhookLog.receivedAt))
-      .limit(limit);
+    const repositories = await getWorkerPersistenceRepositories();
+    const entries = await repositories.webhookIntegrations.inbound.listLog({
+      webhookId: id,
+      limit,
+    });
 
     return Response.json({ entries });
   } catch (error) {

@@ -1,7 +1,6 @@
-import db from '@/db';
-import { outboundWebhooks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { OutboundWebhookPatch } from '@/db/persistence/webhook-integrations';
 
 function normalizeEventTypes(value: unknown) {
   return Array.isArray(value)
@@ -17,9 +16,9 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const updates: Record<string, unknown> = {};
+    const patch: OutboundWebhookPatch = {};
 
-    if (typeof body.name === 'string') updates.name = body.name.trim();
+    if (typeof body.name === 'string') patch.name = body.name.trim();
     if (typeof body.url === 'string') {
       const url = body.url.trim();
       try {
@@ -27,19 +26,20 @@ export async function PATCH(
       } catch {
         return Response.json({ error: 'Webhook URL must be valid' }, { status: 400 });
       }
-      updates.url = url;
+      patch.url = url;
     }
-    if (typeof body.secret === 'string') updates.secret = body.secret.trim() || null;
-    if (typeof body.enabled === 'boolean') updates.enabled = body.enabled;
+    if (typeof body.secret === 'string') patch.secret = body.secret.trim() || null;
+    if (typeof body.enabled === 'boolean') patch.enabled = body.enabled;
 
     const eventTypes = normalizeEventTypes(body.eventTypes);
-    if (eventTypes) updates.eventTypes = eventTypes;
+    if (eventTypes) patch.eventTypes = eventTypes;
 
-    if (!Object.keys(updates).length) {
+    if (!Object.keys(patch).length) {
       return Response.json({ error: 'No updates provided' }, { status: 400 });
     }
 
-    await db.update(outboundWebhooks).set(updates).where(eq(outboundWebhooks.id, id));
+    const repositories = await getWorkerPersistenceRepositories();
+    await repositories.webhookIntegrations.outbound.update(id, patch);
     return Response.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to update webhook', error);
@@ -53,7 +53,8 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    await db.delete(outboundWebhooks).where(eq(outboundWebhooks.id, id));
+    const repositories = await getWorkerPersistenceRepositories();
+    await repositories.webhookIntegrations.outbound.delete(id);
     return Response.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete webhook', error);

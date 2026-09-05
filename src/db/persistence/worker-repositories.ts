@@ -15,6 +15,7 @@ import type {
 } from './notification-entity-linking';
 import type { ExternalAgentControlPersistence } from './external-agent-control';
 import type { AnalyticsPersistence } from './analytics';
+import type { WebhookIntegrationsPersistence } from './webhook-integrations';
 import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
 
 export interface SyncRunSummary {
@@ -91,4 +92,14 @@ export interface WorkerPersistenceRepositories {
    * a backend supports every analytics surface or none.
    */
   analytics: AnalyticsPersistence;
+  /**
+   * Layer 20: the webhook configuration/delivery/log surface — inbound webhook
+   * CRUD plus their replay/log tables, outbound webhook subscriptions, the n8n
+   * integration configuration, and the task/notification ingestion the n8n,
+   * RyMessage, and per-connector webhook receivers share. Published as its own
+   * top-level slot because those tables share no rows and no serialization
+   * namespace with any other worker surface, and grouped into one slot because
+   * a backend either supports the whole webhook contract or none of it.
+   */
+  webhookIntegrations: WebhookIntegrationsPersistence;
 }

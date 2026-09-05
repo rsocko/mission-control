@@ -1,10 +1,9 @@
-import db from '@/db';
-import { integrationConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import type { IntegrationConfigRecord } from '@/db/persistence/webhook-integrations';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 export const N8N_CONFIG_ID = 'n8n';
 
-export interface N8NSettings {
+export interface N8NSettings extends Record<string, unknown> {
   workflowCount?: number;
   connected?: boolean;
   webhookSecret?: string;
@@ -12,14 +11,11 @@ export interface N8NSettings {
   lastError?: string | null;
 }
 
-export async function getN8nConfig() {
-  const [config] = await db
-    .select()
-    .from(integrationConfigs)
-    .where(eq(integrationConfigs.id, N8N_CONFIG_ID))
-    .limit(1);
-
-  return config ?? null;
+export async function getN8nConfig(): Promise<IntegrationConfigRecord | null> {
+  return (await getWorkerPersistenceRepositories())
+    .webhookIntegrations
+    .integrations
+    .find(N8N_CONFIG_ID);
 }
 
 export function parseN8NSettings(value: unknown): N8NSettings {

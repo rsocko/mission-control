@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through connector transfer/sync control-plane parity, personal-planning routines parity, settings preference parity, AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through daily-completions read-model parity, connector transfer/sync control-plane parity, personal-planning routines parity, settings preference parity, AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-05",
-  "generatedFromCommit": "e500c02459870755a5aa91a92843f479f6d63bea+connector-transfer-sync-control-plane",
+  "generatedFromCommit": "100e5e64729ff2913c88e2fbda7f2155b0b86a13+daily-planning-read-model",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 83,
+    "tierARoutes": 82,
     "tierBRoutes": 5,
-    "cleanRoutes": 178,
-    "directTaintSourceRoutes": 53,
+    "cleanRoutes": 179,
+    "directTaintSourceRoutes": 52,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 54,
+    "directDbNamespaceRoutes": 53,
     "taintedLibA": 51,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 134
+    "totalMigrationUnits": 133
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -350,7 +350,6 @@
     "src/app/api/ai/whats-next/route.ts",
     "src/app/api/bug-report/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
-    "src/app/api/daily-completions/route.ts",
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
@@ -458,6 +457,7 @@
     "src/app/api/connectors/github-repos/route.ts",
     "src/app/api/connectors/route.ts",
     "src/app/api/connectors/test-pre-save/route.ts",
+    "src/app/api/daily-completions/route.ts",
     "src/app/api/dashboard/kpis/route.ts",
     "src/app/api/external-agents/[id]/route.ts",
     "src/app/api/external-agents/dispatch/route.ts",
@@ -613,7 +613,6 @@
     "src/app/api/ai/suggest-focus/route.ts",
     "src/app/api/bug-report/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
-    "src/app/api/daily-completions/route.ts",
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
@@ -701,7 +700,6 @@
     "src/app/api/bug-report/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
-    "src/app/api/daily-completions/route.ts",
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
@@ -803,6 +801,26 @@
   ],
   "taintedApiHelpers": [],
   "decrementHistory": [
+    {
+      "layer": "daily-planning-read-model",
+      "title": "daily completions PostgreSQL read-model parity",
+      "totalMigrationUnits": {
+        "from": 134,
+        "to": 133,
+        "delta": -1
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [],
+      "removedTierARoutes": [
+        "src/app/api/daily-completions/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/daily-completions/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on main 100e5e64729ff2913c88e2fbda7f2155b0b86a13 moves only GET /api/daily-completions from direct Tier A taint to clean by delegating to the landed AnalyticsPersistence.kpis contract. Tier B, transitive-only routes, tainted libraries, and tainted API helpers are unchanged; the composed graph is 266 routes, 82 Tier A, 5 Tier B, 179 clean, 52 direct, 30 transitive-only, 53 direct @/db, 51 tainted libraries, 0 tainted API helpers, and 133 total migration units."
+    },
     {
       "layer": "L07",
       "title": "task collection/detail writes PostgreSQL web parity",

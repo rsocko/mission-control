@@ -316,6 +316,14 @@ PostgreSQL generated search-vector columns are classified as derived state and
 not copied. `task_search_documents` and `notification_search_documents` are
 rebuilt from authoritative `tasks` and `notifications` rows after import.
 
+The command is deliberately single-run against a non-empty target. A second run
+without `--reset-disposable-rehearsal-target` fails before copying and leaves the
+first result intact. Synthetic rehearsals may opt into the guarded reset flag to
+prove a deterministic rerun. If copying fails after a guarded reset, the importer
+rolls back the copy transaction, drops the disposable rehearsal schema, verifies
+that no public tables remain, and retains the SQLite source for diagnosis. Never
+use the reset flag as a retry mechanism against a target that is not disposable.
+
 Before opening a PostgreSQL pool, the importer derives every `jsonb` mapping from
 the source and target schemas and streams all mapped SQLite values through
 syntax, storage-type, Unicode, and deterministic nesting checks. Diagnostics
@@ -352,8 +360,9 @@ import tooling tracked by
 deployment work, and the explicit #1155 maintenance-window gate all complete.
 
 The #1681 import rehearsal must leave a durable, redacted evidence package before
-operators plan cutover. The exact command names and output paths are intentionally
-left to #1681, but the package must cover:
+operators plan cutover. Capture the final machine-readable `summary` line from
+`npm run db:import:postgres` through the operator's approved artifact mechanism
+alongside the application revision and attestations below:
 
 | Evidence area | Required signal |
 | --- | --- |
@@ -432,3 +441,12 @@ MC_TEST_POSTGRES_IMPORT_URL=******localhost/mission_control_import_test?sslmode=
 Never point `MC_TEST_POSTGRES_URL` or `MC_TEST_POSTGRES_IMPORT_URL` at
 production. The test harness creates and removes isolated schemas and may apply
 destructive migrations within them.
+
+`tests/db/postgres-sqlite-to-postgres-import.integration.test.ts` enriches a
+committed synthetic persisted-state fixture with representative task hierarchy
+and dependencies, connector settings, finance, triage, workflow-template,
+routine, queue, boolean, JSON, null/default, timezone-offset, unique-index, and
+explicit-sequence cases. It also proves non-empty rerun rejection, guarded reset
+determinism, and verified cleanup after malformed synthetic input. This remains
+rehearsal evidence only: it does not exercise real data, deployment credentials,
+Homelab infrastructure, application activation, or reverse migration.

@@ -24,7 +24,7 @@ const TEST_PATHS = [
 
 const ARCHITECTURE_PATHS = [
   'docs/architecture/persistence-boundaries.md',
-  'tests/architecture/web-persistence-baseline.json',
+  join('tests', 'architecture', 'web-persistence-baseline.json'),
 ] as const;
 
 const graph = computeWebPersistenceGraph(process.cwd());

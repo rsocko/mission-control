@@ -227,6 +227,7 @@ reclassified from Tier A to Tier B.
   regression for the service and the mutation entry points.
 - `tests/db/postgres-schema.test.ts` — migration `0004` inventory, trigger-name
   parity with the SQLite migration, and additive-only assertions.
-- `tests/architecture/project-hierarchy-taint-decrement.test.ts` — the exact
-  owned sets, adapter/driver confinement, shared-planner use, and the exact
-  composed graph.
+- `tests/architecture/project-hierarchy-taint-decrement.test.ts` — owned
+  route/library cleanliness, adapter/driver confinement, shared-planner use,
+  and the monotonic L15 migration-unit ceiling. The PostgreSQL route sentinel
+  owns the exact current graph.

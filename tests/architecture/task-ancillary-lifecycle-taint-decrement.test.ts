@@ -4,22 +4,24 @@ import { describe, expect, it } from 'vitest';
 import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 const OWNED_ROUTES = [
-  'src/app/api/tasks/quick-sort-stats/route.ts',
-  'src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts',
-  'src/app/api/tasks/quick-sort/operations/route.ts',
+  'src/app/api/tasks/[id]/attachments/route.ts',
+  'src/app/api/tasks/[id]/copy/route.ts',
+  'src/app/api/tasks/[id]/promote/route.ts',
+  'src/app/api/tasks/[id]/subtasks/route.ts',
+  'src/app/api/tasks/[id]/tags/route.ts',
 ] as const;
 
-const OWNED_LIBRARY = 'src/lib/quick-sort/operations.ts';
-const FORBIDDEN_PERSISTENCE = /from\s+['"]@\/db(?:\/|['"])|import\(\s*['"]@\/db|better-sqlite3|drizzle-orm/;
+const FORBIDDEN_PERSISTENCE =
+  /from\s+['"]@\/db(?:\/|['"])|import\(\s*['"]@\/db|better-sqlite3|drizzle-orm/;
 
 const graph = computeWebPersistenceGraph(process.cwd());
 
-describe('task quick-sort persistence decrement', () => {
-  it('stays at or below the task quick-sort migration-unit ceiling', () => {
-    expect(graph.totalMigrationUnits).toBeLessThanOrEqual(178);
+describe('task ancillary lifecycle persistence decrement', () => {
+  it('stays at or below the task ancillary lifecycle migration-unit ceiling', () => {
+    expect(graph.totalMigrationUnits).toBeLessThanOrEqual(150);
   });
 
-  it.each([...OWNED_ROUTES, OWNED_LIBRARY])('%s evaluates no persistence driver surface', (file) => {
+  it.each(OWNED_ROUTES)('%s evaluates no persistence driver surface', (file) => {
     const source = readFileSync(join(process.cwd(), file), 'utf8');
     expect(source).not.toMatch(FORBIDDEN_PERSISTENCE);
   });
@@ -29,4 +31,5 @@ describe('task quick-sort persistence decrement', () => {
     expect(graph.tierARoutes).not.toContain(route);
     expect(graph.tierBRoutes).not.toContain(route);
   });
+
 });

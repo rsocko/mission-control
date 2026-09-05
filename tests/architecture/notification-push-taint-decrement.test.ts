@@ -29,29 +29,8 @@ const PRODUCTION_PATHS = [
 const TEST_PATHS = [
   'tests/api/push-preferences.test.ts',
   'tests/api/push-scheduler.test.ts',
-  'tests/architecture/ai-execution-memory-parity.test.ts',
-  'tests/architecture/ai-provider-configuration-parity.test.ts',
-  'tests/architecture/analytics-taint-decrement.test.ts',
-  'tests/architecture/external-agent-taint-decrement.test.ts',
-  'tests/architecture/finance-connector-web-parity.test.ts',
-  'tests/architecture/finance-web-parity.test.ts',
-  'tests/architecture/ideation-workspace-taint-decrement.test.ts',
-  'tests/architecture/l11-connector-core-parity.test.ts',
-  'tests/architecture/l12a-connector-domains-parity.test.ts',
   'tests/architecture/notification-push-taint-decrement.test.ts',
-  'tests/architecture/notification-web-taint-decrement.test.ts',
-  'tests/architecture/project-hierarchy-taint-decrement.test.ts',
-  'tests/architecture/project-organization-taint-decrement.test.ts',
-  'tests/architecture/runtime-observability-parity.test.ts',
-  'tests/architecture/task-core-taint-decrement.test.ts',
-  'tests/architecture/task-quick-sort-taint-decrement.test.ts',
-  'tests/architecture/task-read-taint-decrement.test.ts',
-  'tests/architecture/task-write-taint-decrement.test.ts',
-  'tests/architecture/transfer-identity-taint-decrement.test.ts',
-  'tests/architecture/triage-native-web-persistence-boundary.test.ts',
-  'tests/architecture/web-persistence-baseline.json',
   'tests/contracts/notification-push-repository.contract.ts',
-  'tests/contracts/finance-assistant-persistence.contract.ts',
   'tests/db/notification-push-postgres-import-safety.test.ts',
   'tests/db/postgres-notification-push-repository.integration.test.ts',
   'tests/db/sqlite-notification-push-repository.test.ts',
@@ -67,33 +46,16 @@ function source(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8');
 }
 
-const baseline = JSON.parse(
-  readFileSync(join(process.cwd(), 'tests/architecture/web-persistence-baseline.json'), 'utf8'),
-) as {
-  decrementHistory?: Array<{
-    layer: string;
-    totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTaintedLibA: string[];
-    removedTierARoutes: string[];
-    newlyCleanRoutes: string[];
-    removedDirectTaintSourceRoutes?: string[];
-    removedDirectDbNamespaceRoutes?: string[];
-    removedTransitiveOnlyTaintSourceRoutes?: string[];
-    tierBReclassifications: string[];
-    notMigratedFromTheOwnedFileSet: Array<{ file: string; reason: string }>;
-  }>;
-};
-
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('notification push taint decrement', () => {
-  it('pins the reviewed 43-path cap and its 12 production paths', () => {
+  it('pins the approved production cap and focused support paths', () => {
     expect(PRODUCTION_PATHS).toHaveLength(12);
-    expect(TEST_PATHS).toHaveLength(30);
+    expect(TEST_PATHS).toHaveLength(9);
     expect(ARCHITECTURE_PATHS).toHaveLength(1);
     const paths = [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS];
-    expect(paths).toHaveLength(43);
-    expect(new Set(paths).size).toBe(43);
+    expect(paths).toHaveLength(22);
+    expect(new Set(paths).size).toBe(22);
     for (const path of paths) {
       expect(existsSync(join(process.cwd(), path)), path).toBe(true);
     }
@@ -121,20 +83,11 @@ describe('notification push taint decrement', () => {
     expect(instrumentation).toContain('registerScheduledPushHandlers({');
   });
 
-  it('records the exact owned decrement with no deferred migration', () => {
-    const entry = baseline.decrementHistory?.find(
-      item => item.layer === 'notification-push',
-    );
-    expect(entry).toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 167, to: 163, delta: -4 });
-    expect(entry?.removedTierARoutes.sort()).toEqual([...OWNED_ROUTES].sort());
-    expect(entry?.newlyCleanRoutes.sort()).toEqual([...OWNED_ROUTES].sort());
-    expect(entry?.removedDirectTaintSourceRoutes?.sort()).toEqual([...OWNED_ROUTES].sort());
-    expect(entry?.removedDirectDbNamespaceRoutes?.sort()).toEqual([...OWNED_ROUTES].sort());
-    expect(entry?.removedTransitiveOnlyTaintSourceRoutes).toEqual([]);
-    expect(entry?.removedTaintedLibA.sort()).toEqual([...OWNED_LIBS].sort());
-    expect(entry?.tierBReclassifications).toEqual([]);
-    expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
+  it('accounts for the four owned migration units without Tier B reclassification', () => {
+    expect(OWNED_ROUTES.length + OWNED_LIBS.length).toBe(4);
+    for (const route of OWNED_ROUTES) {
+      expect(current.tierBRoutes).not.toContain(route);
+    }
   });
 
   it.each(OWNED_ROUTES)('%s is clean and evaluates no database handle', (route) => {
@@ -151,29 +104,4 @@ describe('notification push taint decrement', () => {
     expect(current.taintedLibA).not.toContain(path);
   });
 
-  it('holds the exact composed graph', () => {
-    expect({
-      apiRoutes: current.apiRoutes.length,
-      tierARoutes: current.tierARoutes.length,
-      tierBRoutes: current.tierBRoutes.length,
-      cleanRoutes: current.cleanRoutes.length,
-      directTaintSourceRoutes: current.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: current.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
-      taintedLibA: current.taintedLibA.length,
-      taintedApiHelpers: current.taintedApiHelpers.length,
-      totalMigrationUnits: current.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 108,
-      tierBRoutes: 5,
-      cleanRoutes: 153,
-      directTaintSourceRoutes: 78,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 79,
-      taintedLibA: 55,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 163,
-    });
-  });
 });

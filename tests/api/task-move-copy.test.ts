@@ -96,6 +96,7 @@ const mockExecutePendingSyncMove = vi.fn(async () => {
   });
   return { kind: 'moved' as const };
 });
+const mockCopyTask = vi.fn();
 
 vi.mock('@/db', () => ({
   default: mockDb,
@@ -154,6 +155,7 @@ beforeEach(() => {
   txOps.length = 0;
   vi.clearAllMocks();
   mockDb.select.mockImplementation(() => chainable([]));
+  mockCopyTask.mockResolvedValue({ kind: 'task-not-found' });
   registerTaskCorePersistence({
     moves: {
       getMoveSource: async () => {
@@ -175,6 +177,9 @@ beforeEach(() => {
       findTargetList: async () => null,
       executePendingSyncMove: mockExecutePendingSyncMove,
       taskExists: async () => false,
+    },
+    ancillary: {
+      copyTask: mockCopyTask,
     },
   } as unknown as TaskCorePersistence);
 });
@@ -329,7 +334,7 @@ describe('POST /api/tasks/[id]/copy — uses targetConnectorInstanceId (PR #302)
   });
 
   it('should return 404 when target connector instance does not exist', async () => {
-    mockDb.select.mockImplementation(() => chainable([]));
+    mockCopyTask.mockResolvedValue({ kind: 'connector-not-found' });
 
     const { POST } = await import('@/app/api/tasks/[id]/copy/route');
     const request = new Request(`${BASE}/api/tasks/task-1/copy`, {
@@ -342,12 +347,7 @@ describe('POST /api/tasks/[id]/copy — uses targetConnectorInstanceId (PR #302)
   });
 
   it('should return 404 when source task does not exist', async () => {
-    let callCount = 0;
-    mockDb.select.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) return chainable([{ id: 'inst-2', type: 'github-issues' }]);
-      return chainable([]);
-    });
+    mockCopyTask.mockResolvedValue({ kind: 'task-not-found' });
 
     const { POST } = await import('@/app/api/tasks/[id]/copy/route');
     const request = new Request(`${BASE}/api/tasks/task-999/copy`, {
@@ -360,15 +360,9 @@ describe('POST /api/tasks/[id]/copy — uses targetConnectorInstanceId (PR #302)
   });
 
   it('should return 201 on successful copy', async () => {
-    let callCount = 0;
-    mockDb.select.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) return chainable([{ id: 'inst-2', type: 'microsoft-todo' }]);
-      return chainable([{
-        id: 'task-1', connectorInstanceId: 'inst-1', connectorType: 'local',
-        title: 'Copy Me', description: 'a task', status: 'todo', priority: 'low',
-        dueDate: null, createdAt: '2026-07-01',
-      }]);
+    mockCopyTask.mockResolvedValue({
+      kind: 'committed',
+      connectorType: 'microsoft-todo',
     });
 
     const { POST } = await import('@/app/api/tasks/[id]/copy/route');

@@ -96,8 +96,13 @@ import {
   type SourceListNameRepository,
   type TaskAttachmentContentRow,
   type TaskAttachmentInsert,
+  type TaskAttachmentInsertOutcome,
+  type TaskAttachmentListContext,
+  type TaskAttachmentDeleteContext,
   type TaskAttachmentMetadataRow,
   type TaskAttachmentRow,
+  type TaskAncillaryRepository,
+  type TaskAncillarySubtask,
   type TaskCollectionProjectPhaseMembership,
   type TaskCollectionReadRepository,
   type TaskCollectionResult,
@@ -108,6 +113,7 @@ import {
   type TaskCreateOutcome,
   type TaskCreateRepository,
   type TaskCreateTargetOutcome,
+  type TaskCopyOutcome,
   type TaskCorePersistence,
   type TaskDetailReadRepository,
   type TaskDetailResult,
@@ -151,11 +157,17 @@ import {
   type TaskQuickSortSuggestionInputs,
   type TaskReadRepository,
   type TaskRelationshipCandidateRow,
+  type TaskPromoteOutcome,
   type TaskScheduleRow,
   type TaskSourceCounts,
   type TaskSourceIdentityRow,
   type TaskStatsResult,
   type TaskTransferIdentityRepository,
+  type TaskSubtaskCreateOutcome,
+  type TaskSubtaskProposalOutcome,
+  type TaskSubtaskProposalSnapshot,
+  type TaskTagMutationContext,
+  type TaskTagMutationResult,
   type WriteThroughTaskMoveRepository,
 } from '@/lib/tasks/core/contracts';
 
@@ -1823,12 +1835,469 @@ function toMoveTaskRow(row: Record<string, unknown>): TaskMoveTaskRow {
   };
 }
 
+function normalizedSnapshot(snapshot: TaskSubtaskProposalSnapshot): TaskSubtaskProposalSnapshot {
+  return {
+    parentUpdatedAt: snapshot.parentUpdatedAt,
+    tagNames: [...snapshot.tagNames].sort(),
+    projectNames: [...snapshot.projectNames].sort(),
+    subtaskTitles: [...snapshot.subtaskTitles].sort(),
+  };
+}
+
+function sameSnapshot(
+  left: TaskSubtaskProposalSnapshot,
+  right: TaskSubtaskProposalSnapshot,
+): boolean {
+  return JSON.stringify(normalizedSnapshot(left)) === JSON.stringify(normalizedSnapshot(right));
+}
+
 /**
  * `metadata` is a real `jsonb` column here, so the object is written as-is
  * rather than serialized the way the SQLite text column requires.
  */
 function moveTaskInsertValues(task: TaskMoveTaskInsert) {
   return { ...task, metadata: task.metadata };
+}
+
+class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async getTask(taskId: string): Promise<TaskCoreTaskRow | null> {
+    const [row] = await this.db.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ? toMoveTaskRow(row) : null;
+  }
+
+  async getAttachmentListContext(taskId: string): Promise<TaskAttachmentListContext> {
+    const [task] = await this.db.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return { task: null, attachments: [] };
+    const attachments = await this.db.select({
+      id: taskAttachments.id,
+      taskId: taskAttachments.taskId,
+      name: taskAttachments.name,
+      contentType: taskAttachments.contentType,
+      size: taskAttachments.size,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      createdAt: taskAttachments.createdAt,
+      hasLocalContent: sql<boolean>`CASE WHEN ${taskAttachments.contentBase64} IS NULL THEN FALSE ELSE TRUE END`,
+    }).from(taskAttachments)
+      .where(eq(taskAttachments.taskId, taskId))
+      .orderBy(asc(taskAttachments.createdAt), asc(taskAttachments.id));
+    return { task, attachments };
+  }
+
+  async getAttachmentDeleteContext(
+    taskId: string,
+    attachmentId: string,
+  ): Promise<TaskAttachmentDeleteContext> {
+    const [[task], [attachment]] = await Promise.all([
+      this.db.select({
+        id: tasks.id,
+        sourceId: tasks.sourceId,
+        connectorType: tasks.connectorType,
+        connectorInstanceId: tasks.connectorInstanceId,
+        updatedAt: tasks.updatedAt,
+      }).from(tasks).where(eq(tasks.id, taskId)).limit(1),
+      this.db.select({
+        id: taskAttachments.id,
+        taskId: taskAttachments.taskId,
+        name: taskAttachments.name,
+        contentType: taskAttachments.contentType,
+        size: taskAttachments.size,
+        sourceAttachmentId: taskAttachments.sourceAttachmentId,
+        createdAt: taskAttachments.createdAt,
+      }).from(taskAttachments).where(and(
+        eq(taskAttachments.id, attachmentId),
+        eq(taskAttachments.taskId, taskId),
+      )).limit(1),
+    ]);
+    return { task: task ?? null, attachment: attachment ?? null };
+  }
+
+  async insertAttachment(
+    attachment: TaskAttachmentInsert,
+  ): Promise<TaskAttachmentInsertOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [task] = await tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.id, attachment.taskId)).limit(1);
+      if (!task) return { kind: 'task-not-found' } as const;
+      const [inserted] = await tx.insert(taskAttachments).values({ ...attachment })
+        .onConflictDoNothing({ target: taskAttachments.id })
+        .returning({ id: taskAttachments.id });
+      return inserted
+        ? { kind: 'inserted' } as const
+        : { kind: 'already-exists' } as const;
+    });
+  }
+
+  async deleteAttachment(input: {
+    readonly taskId: string;
+    readonly attachmentId: string;
+    readonly expectedSourceAttachmentId: string | null;
+  }): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx.select({
+        sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      }).from(taskAttachments).where(and(
+        eq(taskAttachments.id, input.attachmentId),
+        eq(taskAttachments.taskId, input.taskId),
+      )).limit(1);
+      if (!current || current.sourceAttachmentId !== input.expectedSourceAttachmentId) {
+        return false;
+      }
+      const removed = await tx.delete(taskAttachments).where(and(
+        eq(taskAttachments.id, input.attachmentId),
+        eq(taskAttachments.taskId, input.taskId),
+      )).returning({ id: taskAttachments.id });
+      return removed.length === 1;
+    });
+  }
+
+  async copyTask(input: {
+    readonly sourceTaskId: string;
+    readonly newTaskId: string;
+    readonly targetConnectorInstanceId: string;
+    readonly targetListId: string | null;
+    readonly keepTags: boolean;
+    readonly now: string;
+  }): Promise<TaskCopyOutcome> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`task-copy:${input.newTaskId}`}))`);
+      const [replay] = await tx.select({
+        connectorType: tasks.connectorType,
+        sourceId: tasks.sourceId,
+      }).from(tasks).where(eq(tasks.id, input.newTaskId)).limit(1);
+      if (replay) {
+        return replay.sourceId === `local:${input.newTaskId}`
+          ? { kind: 'already-committed', connectorType: replay.connectorType } as const
+          : { kind: 'task-not-found' } as const;
+      }
+      const [connector] = await tx.select().from(connectorConfigs)
+        .where(eq(connectorConfigs.id, input.targetConnectorInstanceId)).limit(1);
+      if (!connector) return { kind: 'connector-not-found' } as const;
+
+      let targetSourceListId: string | null = null;
+      if (input.targetListId) {
+        const [targetList] = await tx.select().from(sourceLists).where(and(
+          eq(sourceLists.connectorInstanceId, input.targetConnectorInstanceId),
+          or(eq(sourceLists.id, input.targetListId), eq(sourceLists.sourceId, input.targetListId)),
+        )).limit(1);
+        if (!targetList) return { kind: 'source-list-not-found' } as const;
+        if (!isSourceListSelected(connector, targetList)) {
+          return { kind: 'source-list-not-selected' } as const;
+        }
+        targetSourceListId = targetList.sourceId;
+      }
+
+      const [source] = await tx.select({
+        title: tasks.title,
+        description: tasks.description,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+      }).from(tasks).where(eq(tasks.id, input.sourceTaskId)).limit(1);
+      if (!source) return { kind: 'task-not-found' } as const;
+
+      await tx.insert(tasks).values({
+        id: input.newTaskId,
+        sourceId: `local:${input.newTaskId}`,
+        connectorType: connector.type,
+        connectorInstanceId: input.targetConnectorInstanceId,
+        title: source.title,
+        description: source.description,
+        status: 'todo',
+        priority: source.priority,
+        dueDate: source.dueDate,
+        createdAt: input.now,
+        updatedAt: input.now,
+        depth: 0,
+        isChecklistItem: false,
+        sourceListId: targetSourceListId,
+        metadata: {},
+        syncStatus: 'pending_push',
+        lastSyncedAt: input.now,
+      });
+      if (input.keepTags) {
+        const tagRows = await tx.select({ tagId: taskTags.tagId }).from(taskTags)
+          .where(eq(taskTags.taskId, input.sourceTaskId));
+        if (tagRows.length) {
+          await tx.insert(taskTags).values(tagRows.map(({ tagId }) => ({
+            taskId: input.newTaskId,
+            tagId,
+          })));
+        }
+      }
+      const projectRows = await tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, input.sourceTaskId));
+      if (projectRows.length) {
+        await tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+          taskId: input.newTaskId,
+          projectId,
+        })));
+      }
+      return { kind: 'committed', connectorType: connector.type } as const;
+    });
+  }
+
+  async promoteSubtask(input: {
+    readonly taskId: string;
+    readonly expectedUpdatedAt: string;
+    readonly now: string;
+  }): Promise<TaskPromoteOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx.select({
+        parentId: tasks.parentId,
+        isChecklistItem: tasks.isChecklistItem,
+        updatedAt: tasks.updatedAt,
+      }).from(tasks).where(eq(tasks.id, input.taskId)).limit(1);
+      if (!current) return { kind: 'not-found' } as const;
+      if (current.updatedAt !== input.expectedUpdatedAt) {
+        return { kind: 'revision-conflict', currentUpdatedAt: current.updatedAt } as const;
+      }
+      if (!current.isChecklistItem || !current.parentId) {
+        return { kind: 'not-subtask' } as const;
+      }
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${current.parentId}`}))`,
+      );
+      const updated = await tx.update(tasks).set({
+        parentId: null,
+        depth: 0,
+        isChecklistItem: false,
+        updatedAt: input.now,
+      }).where(and(
+        eq(tasks.id, input.taskId),
+        eq(tasks.updatedAt, input.expectedUpdatedAt),
+        eq(tasks.parentId, current.parentId),
+        eq(tasks.isChecklistItem, true),
+      )).returning({ id: tasks.id });
+      return updated.length === 1
+        ? { kind: 'promoted', previousParentId: current.parentId } as const
+        : { kind: 'revision-conflict', currentUpdatedAt: current.updatedAt } as const;
+    });
+  }
+
+  async listSubtasks(parentTaskId: string): Promise<TaskAncillarySubtask[]> {
+    return this.db.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      priority: tasks.priority,
+      effort: tasks.effort,
+      parentId: tasks.parentId,
+    }).from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+  }
+
+  private async readProposalSnapshot(
+    database: PostgresTransaction,
+    parentTaskId: string,
+  ): Promise<TaskSubtaskProposalSnapshot | null> {
+    const [parent] = await database.select({ updatedAt: tasks.updatedAt }).from(tasks)
+      .where(eq(tasks.id, parentTaskId)).limit(1);
+    if (!parent) return null;
+    const [tagRows, projectRows, subtaskRows] = await Promise.all([
+      database.select({ name: tags.name }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(eq(taskTags.taskId, parentTaskId))
+        .limit(20),
+      database.select({ name: hubProjects.name }).from(taskProjects)
+        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+        .where(eq(taskProjects.taskId, parentTaskId))
+        .limit(10),
+      database.select({ title: tasks.title }).from(tasks)
+        .where(eq(tasks.parentId, parentTaskId))
+        .limit(30),
+    ]);
+    return normalizedSnapshot({
+      parentUpdatedAt: parent.updatedAt,
+      tagNames: tagRows.map((row) => row.name),
+      projectNames: projectRows.map((row) => row.name),
+      subtaskTitles: subtaskRows.map((row) => row.title),
+    });
+  }
+
+  async getSubtaskProposalSnapshot(
+    parentTaskId: string,
+  ): Promise<TaskSubtaskProposalSnapshot | null> {
+    return this.db.transaction((tx) => this.readProposalSnapshot(tx, parentTaskId));
+  }
+
+  async createSubtask(input: {
+    readonly task: TaskMoveTaskInsert;
+  }): Promise<TaskSubtaskCreateOutcome> {
+    return this.db.transaction(async (tx) => {
+      if (!input.task.parentId) return { kind: 'parent-not-found' } as const;
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.task.parentId}`}))`,
+      );
+      const [existing] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.task.id)).limit(1);
+      if (existing) {
+        return existing.parentId === input.task.parentId
+          ? { kind: 'already-created', subtask: toMoveTaskRow(existing) } as const
+          : { kind: 'id-conflict' } as const;
+      }
+      const [parent] = await tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.id, input.task.parentId)).limit(1);
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      await tx.insert(tasks).values(moveTaskInsertValues(input.task));
+      return { kind: 'created' } as const;
+    });
+  }
+
+  async acceptSubtaskProposal(input: {
+    readonly task: TaskMoveTaskInsert;
+    readonly expected: TaskSubtaskProposalSnapshot;
+  }): Promise<TaskSubtaskProposalOutcome> {
+    return this.db.transaction(async (tx) => {
+      if (!input.task.parentId) return { kind: 'stale' } as const;
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.task.parentId}`}))`,
+      );
+      const [existing] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.task.id)).limit(1);
+      const current = await this.readProposalSnapshot(tx, input.task.parentId);
+      if (!current) return { kind: 'stale' } as const;
+      if (existing) {
+        return existing.parentId === input.task.parentId
+          ? { kind: 'duplicate', subtask: toMoveTaskRow(existing), snapshot: current } as const
+          : { kind: 'id-conflict' } as const;
+      }
+      if (!sameSnapshot(current, input.expected)) return { kind: 'stale' } as const;
+      await tx.insert(tasks).values(moveTaskInsertValues(input.task));
+      const snapshot = await this.readProposalSnapshot(tx, input.task.parentId);
+      if (!snapshot) throw new Error('Subtask parent disappeared during proposal acceptance');
+      return { kind: 'created', snapshot } as const;
+    });
+  }
+
+  async completeSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+    readonly sourceId: string;
+    readonly metadata: Record<string, unknown>;
+    readonly now: string;
+  }): Promise<boolean> {
+    const updated = await this.db.update(tasks).set({
+      sourceId: input.sourceId,
+      syncStatus: 'synced',
+      lastSyncedAt: input.now,
+      metadata: input.metadata,
+    }).where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.syncStatus, input.expectedSyncStatus),
+    )).returning({ id: tasks.id });
+    return updated.length === 1;
+  }
+
+  async failSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+  }): Promise<boolean> {
+    const updated = await this.db.update(tasks).set({
+      syncStatus: 'push_failed',
+      pushRetryCount: 5,
+    }).where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.syncStatus, input.expectedSyncStatus),
+    )).returning({ id: tasks.id });
+    return updated.length === 1;
+  }
+
+  async getTagMutationContext(taskId: string): Promise<TaskTagMutationContext> {
+    const [task] = await this.db.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return { task: null, storedCapabilities: {} };
+    const [connector] = await this.db.select({
+      capabilities: connectorConfigs.capabilities,
+    }).from(connectorConfigs)
+      .where(eq(connectorConfigs.id, task.connectorInstanceId)).limit(1);
+    return {
+      task,
+      storedCapabilities: asRecord(connector?.capabilities),
+    };
+  }
+
+  async addTaskTags(input: {
+    readonly taskId: string;
+    readonly candidates: readonly { id: string; name: string; slug: string }[];
+    readonly tagCreationMode: 'freeform' | 'predefined';
+    readonly now: string;
+  }): Promise<TaskTagMutationResult> {
+    return this.db.transaction(async (tx) => {
+      const ordered = [...input.candidates].sort((a, b) => a.slug.localeCompare(b.slug));
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.taskId}`}))`);
+      for (const candidate of ordered) {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`tag-slug:${candidate.slug}`}))`);
+      }
+      const existing = ordered.length
+        ? await tx.select().from(tags).where(inArray(tags.slug, ordered.map((tag) => tag.slug)))
+          .orderBy(asc(tags.slug), asc(tags.createdAt), asc(tags.id))
+        : [];
+      const bySlug = new Map(existing.map((tag) => [tag.slug, tag]));
+      const rejectedTags: string[] = [];
+      const resolved: Array<{ id: string; name: string }> = [];
+      for (const candidate of ordered) {
+        const match = bySlug.get(candidate.slug);
+        if (match) {
+          resolved.push({ id: match.id, name: match.name });
+        } else if (input.tagCreationMode === 'predefined') {
+          rejectedTags.push(candidate.name);
+        } else {
+          await tx.insert(tags).values({
+            id: candidate.id,
+            name: candidate.name,
+            slug: candidate.slug,
+            type: 'ai-inferred',
+            source: 'ai',
+            color: '#64748b',
+            confirmed: false,
+            createdAt: input.now,
+          });
+          resolved.push({ id: candidate.id, name: candidate.name });
+        }
+      }
+      const existingLinks = new Set((await tx.select({ tagId: taskTags.tagId }).from(taskTags)
+        .where(eq(taskTags.taskId, input.taskId))).map((row) => row.tagId));
+      const addedTags = resolved.filter((tag) => !existingLinks.has(tag.id));
+      if (addedTags.length) {
+        await tx.insert(taskTags).values(addedTags.map((tag) => ({
+          taskId: input.taskId,
+          tagId: tag.id,
+        })));
+      }
+      return { addedTags, rejectedTags };
+    });
+  }
+
+  async removeTaskTag(input: {
+    readonly taskId: string;
+    readonly tagId: string;
+  }): Promise<{ readonly removed: boolean; readonly tagName: string | null }> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.taskId}`}))`);
+      const [tag] = await tx.select({ name: tags.name }).from(tags)
+        .where(eq(tags.id, input.tagId)).limit(1);
+      const removed = await tx.delete(taskTags).where(and(
+        eq(taskTags.taskId, input.taskId),
+        eq(taskTags.tagId, input.tagId),
+      )).returning({ tagId: taskTags.tagId });
+      return { removed: removed.length > 0, tagName: tag?.name ?? null };
+    });
+  }
 }
 
 async function enqueueTaskCoreEvent(
@@ -3454,5 +3923,6 @@ export function createPostgresTaskCorePersistence(
     sourceListNames: new PostgresSourceListNameRepository(db),
     transferIdentity: new PostgresTaskTransferIdentityRepository(db),
     quickSort: new PostgresTaskQuickSortRepository(db),
+    ancillary: new PostgresTaskAncillaryRepository(db),
   };
 }

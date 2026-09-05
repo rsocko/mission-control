@@ -117,8 +117,8 @@ const GROUP_UPDATE_COLUMNS: Record<keyof ListOrganizationGroupUpdate, string> = 
   sortOrder: 'sort_order',
 };
 
-function parseJson<T>(value: string | T): T {
-  return typeof value === 'string' ? JSON.parse(value) as T : value;
+function parseJson<T>(value: string): T {
+  return JSON.parse(value) as T;
 }
 
 function projectFromRow(row: ProjectRow): ProjectOrganizationProject {
@@ -128,8 +128,10 @@ function projectFromRow(row: ProjectRow): ProjectOrganizationProject {
     sourceBindings: decodeLenientJsonArray(row.sourceBindings),
     autoIncludeRules: decodeLenientJsonArray(row.autoIncludeRules),
     kanbanColumns: decodeLenientJsonArray(row.kanbanColumns),
-    defaultFilters: row.defaultFilters === null ? null : parseJson(row.defaultFilters),
-    metadata: parseJson(row.metadata),
+    defaultFilters: row.defaultFilters === null
+      ? null
+      : parseJson<Record<string, unknown>>(row.defaultFilters),
+    metadata: parseJson<Record<string, unknown>>(row.metadata),
   };
 }
 

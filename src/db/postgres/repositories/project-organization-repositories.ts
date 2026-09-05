@@ -16,12 +16,12 @@ const MAX_TRANSACTION_ATTEMPTS = 3;
 const LIST_ORGANIZATION_LOCK = 'list-organization';
 const CROSS_PROJECT_PHASE_LOCK = 'project-phase:cross-project';
 
-interface ProjectRow extends ProjectOrganizationProject {}
+type ProjectRow = ProjectOrganizationProject;
 interface PhaseRow extends Omit<ProjectPhase, 'status'> {
   status: string;
 }
-interface PhaseItemRow extends ProjectPhaseItem {}
-interface SourceListRow extends ListOrganizationSourceList {}
+type PhaseItemRow = ProjectPhaseItem;
+type SourceListRow = ListOrganizationSourceList;
 
 const PROJECT_COLUMNS = `
   id, name, description, color, icon, icon_color AS "iconColor",

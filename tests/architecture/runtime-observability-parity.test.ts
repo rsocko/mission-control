@@ -34,15 +34,15 @@ describe('runtime observability PostgreSQL parity', () => {
       totalMigrationUnits: graph.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 110,
+      tierARoutes: 109,
       tierBRoutes: 5,
-      cleanRoutes: 151,
-      directTaintSourceRoutes: 80,
+      cleanRoutes: 152,
+      directTaintSourceRoutes: 79,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 81,
+      directDbNamespaceRoutes: 80,
       taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 167,
+      totalMigrationUnits: 166,
     });
   });
 

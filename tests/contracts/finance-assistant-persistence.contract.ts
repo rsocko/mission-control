@@ -604,15 +604,15 @@ export function describeFinanceAssistantPersistenceContract(
           };
           expect(baseline.counts).toEqual({
             apiRoutes: 266,
-            tierARoutes: 110,
+            tierARoutes: 109,
             tierBRoutes: 5,
-            cleanRoutes: 151,
-            directTaintSourceRoutes: 80,
+            cleanRoutes: 152,
+            directTaintSourceRoutes: 79,
             transitiveOnlyTaintSourceRoutes: 30,
-            directDbNamespaceRoutes: 81,
+            directDbNamespaceRoutes: 80,
             taintedLibA: 57,
             taintedApiHelpers: 0,
-            totalMigrationUnits: 167,
+            totalMigrationUnits: 166,
           });
           const l09 = baseline.decrementHistory.find((record) => record.layer === 'L09');
           expect(l09?.totalMigrationUnits).toEqual({ from: 313, to: 310, delta: -3 });

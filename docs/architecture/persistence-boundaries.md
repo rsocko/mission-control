@@ -2,7 +2,7 @@
 title: "Portable Persistence Boundaries"
 status: active
 created: 2026-08-25
-last_reviewed: 2026-08-30
+last_reviewed: 2026-09-05
 category: architecture
 related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
@@ -54,6 +54,7 @@ growing without an explicit exception.
 | Tasks and projects | Drizzle queries plus shared `runTransaction` | task APIs and project services | Medium. Migrate by canonical workflow, not table-by-table. |
 | Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. L13 migrated seven notification web routes and the writeback dispatcher behind `NotificationWebPersistence` (attached as `notificationDelivery.web`). |
 | Finance, external identity, AI runs and agents | concentrated raw SQL and synchronous transactions | corresponding `src/lib` domains | High, but outside the representative migration. Preserve as documented legacy exceptions until each workflow moves. |
+| Daily planning read models | task completion aggregate with SQLite timestamp predicates | `src/app/api/daily-completions/route.ts` | Migrated. The route resolves configured local-day bounds before calling `AnalyticsPersistence.kpis.countTasksCompletedIn`; the half-open instant range is shared by SQLite and PostgreSQL without loading SQLite helpers in the PostgreSQL web graph. |
 
 ## Portable contract rules
 

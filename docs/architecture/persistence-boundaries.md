@@ -1844,9 +1844,9 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
-## Web/API PostgreSQL parity: Layer L18 (webhook configuration, delivery, and log)
+## Web/API PostgreSQL parity: Layer L19 (webhook configuration, delivery, and log)
 
-Layer L18 publishes one atomic `webhookIntegrations` slot on
+Layer L19 publishes one atomic `webhookIntegrations` slot on
 `WorkerPersistenceRepositories`. It is a top-level slot rather than a nested
 one because `inbound_webhooks`, `inbound_webhook_log`,
 `inbound_webhook_replays`, `outbound_webhooks`, and `integration_configs` share
@@ -1903,12 +1903,12 @@ embeds one in an error.
 - HMAC signature verification, the production unsigned-webhook rejection, rate
   limiting, bounded body reads, and payload redaction all remain in the route,
   before and outside any repository call.
-- The replay claim is a single atomic operation: optional expired-claim sweep,
-  removal of the specific expired claim, then a conflict-tolerant insert whose
-  row count decides the outcome. SQLite runs it in one immediate transaction;
-  PostgreSQL adds a delivery-scoped advisory transaction lock so the
-  expire-then-insert pair cannot interleave. The five-minute window and the
-  route's sampled sweep cadence are unchanged.
+- The replay claim is a single atomic expire-then-insert operation whose row
+  count decides the outcome. SQLite performs its sampled expired-claim sweep
+  and claim in one immediate transaction. PostgreSQL runs the idempotent sweep
+  before the claim transaction, then uses a delivery-scoped advisory lock so
+  concurrent claims cannot interleave without introducing a sweep/claim lock
+  cycle. The five-minute window and sampled sweep cadence are unchanged.
 - A claim is released only on pre-side-effect failures; once a task, alert, or
   agent result has committed, the claim is kept.
 - Delivery-log reads and compaction are deterministic: `received_at DESC, id
@@ -1932,10 +1932,10 @@ embeds one in an error.
 - Connector lookup, the enabled/secret gates, and the sync-log append on
   `/api/webhooks/[connectorId]` are unchanged, including the generic handler's
   notification-only source-profile check and template-key extraction.
-- RyMessage stays idempotent: create and update both resolve the notification by
-  `(connector_type, source_id)` under a row lock and either update or insert;
-  terminal events delete the notification with its actions and report the
-  deleted id.
+- RyMessage stays idempotent: create and update serialize
+  `(connector_type, source_id)` before resolving and either updating or
+  inserting the notification; terminal events delete the notification with its
+  actions and report the deleted id.
 - Keyword indexing stays inline and immediate and the semantic side is only
   published, exactly as `indexNotificationSearch`/`removeNotificationSearch` do.
   The two receivers reach those through the backend-neutral
@@ -1944,20 +1944,20 @@ embeds one in an error.
 
 ### Ratchet decrement
 
-Recomputed exactly from `tests/architecture/web-persistence-graph.ts` on
-baseline `6205bb0ece832ed0225b8ee31e1cbf6996308d93`:
+Recomputed exactly from `tests/architecture/web-persistence-graph.ts` after
+reconciling current main `5943866d197a3bec417a67e19152b5ea9229e597`:
 
 | Metric | Before | After |
 | --- | --- | --- |
-| `tierARoutes` | 121 | 110 |
-| `tierBRoutes` | 13 | 13 |
-| `cleanRoutes` | 132 | 143 |
-| `directTaintSourceRoutes` | 91 | 80 |
+| `tierARoutes` | 118 | 107 |
+| `tierBRoutes` | 5 | 5 |
+| `cleanRoutes` | 143 | 154 |
+| `directTaintSourceRoutes` | 88 | 77 |
 | `transitiveOnlyTaintSourceRoutes` | 30 | 30 |
-| `directDbNamespaceRoutes` | 92 | 81 |
-| `taintedLibA` | 61 | 60 |
+| `directDbNamespaceRoutes` | 89 | 78 |
+| `taintedLibA` | 57 | 56 |
 | `taintedApiHelpers` | 0 | 0 |
-| `totalMigrationUnits` | 182 | 170 |
+| `totalMigrationUnits` | 175 | 163 |
 
 All eleven owned routes leave Tier A, `directTaintSourceRoutes`, and
 `directDbNamespaceRoutes` together, `src/lib/integrations/n8n.ts` leaves
@@ -1985,7 +1985,70 @@ raw SQLite handle at all.
   eleven routes — including the unauthenticated-mutation rejections, the
   signature failures, the duplicate-delivery short circuit, and the
   connector-status gates.
+## Web/API PostgreSQL parity: task quick-sort workflow persistence
 
+The quick-sort activity, operation-apply, and operation-undo routes now use a
+bounded `TaskCorePersistence.quickSort` port. The existing task-core composition
+remains the sole owner: startup constructs the SQLite or PostgreSQL adapter
+atomically, and route or helper evaluation cannot import, initialize, or fall
+back to SQLite in PostgreSQL mode.
+
+The port owns task snapshot reads, conflict-safe operation reservation,
+operation/log finalization, undo claim/release/finalization, and activity
+statistics. Applying and undoing task fields still delegate to the existing task
+`PATCH` handler with `x-expected-task-updated-at`; this preserves the landed task
+revision CAS, field policy, and external write ordering rather than duplicating
+that behavior in the quick-sort adapter. Operation finalization and log creation
+share one transaction, as do undo state and log reversal. Concurrent reservation
+returns the existing operation, concurrent undo has one claimant, and completed
+undo remains replay-safe.
+
+The exact graph transition from base
+`6205bb0ece832ed0225b8ee31e1cbf6996308d93` is
+`266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182`
+to
+`266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178`.
+All three owned routes become clean, `src/lib/quick-sort/operations.ts` leaves
+the tainted-library set, and no route moves to Tier B.
+## Web/API PostgreSQL parity: Layer L18 (AI execution and memory control plane)
+
+Layer L18 removes the deferred SQLite reach from document intake, retained
+Houston memory, and durable AI run control without changing any of their eight
+route files. Durable runs and semantic source reads now resolve process-wide,
+backend-neutral contracts populated only by `initializeRuntimeDatabase()`.
+SQLite constructs its adapters inside the SQLite startup branch; PostgreSQL
+constructs its existing durable-run and semantic-source adapters from the live
+pool. Access before composition is registered fails closed, and shutdown clears
+only the exact registered generation.
+
+Provider construction is split into a pure `provider-client` capability that
+accepts already-resolved configuration and an asynchronous `provider-runtime`
+that reads configuration through the composed settings repository. The legacy
+synchronous provider facade delegates to the same client, preserving route
+selection, sensitivity policy, admission control, telemetry, error propagation,
+and request ordering. Document intake and Houston summary generation use the
+asynchronous facade, so PostgreSQL never evaluates `config-resolver.ts` or
+`@/db`.
+
+Houston memory continues to persist through `CorePersistenceRepositories`.
+After an authoritative write commits, semantic publication uses the registered
+publication service; entity-link validation uses the registered semantic source
+port. The ordering remains inspect, provider call, memory write, then semantic
+publication. Exclusion remains sticky across recapture, deleted memory stays
+redacted, and expired-memory deletion remains bounded.
+
+The exact graph transition is 266 routes, A121/B13/clean132 to
+A121/B5/clean140. The eight owned routes leave Tier B, while
+`ai-parser.ts`, `intake/index.ts`, and `ai/tools/intake-tools.ts` leave
+`taintedLibA`; total migration units decrease from 182 to 179. Direct-taint,
+transitive-only Tier A, direct-`@/db`, and helper counts are unchanged. No
+suggestion, search, planning, task-ancillary, schema, migration, dependency,
+Next.js, or build path is part of this layer.
+
+The CI-proven cap is 43 paths: 9 production, 32 tests/helpers, and 2
+architecture/documentation paths. The expansion from the original 24-path
+inventory is limited to the 17 established graph readers and two SQLite
+durable-run suites that now register their selected repository explicitly.
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

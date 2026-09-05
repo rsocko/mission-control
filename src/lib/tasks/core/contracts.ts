@@ -14,6 +14,10 @@
  */
 
 import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
+import type {
+  QuickSortBeforeSnapshot,
+  QuickSortTaskSnapshot,
+} from '@/types/quick-sort';
 
 /* ------------------------------------------------------------------ *
  * Filter / query specification
@@ -249,12 +253,28 @@ export type TaskGroupMode =
   | 'tag'
   | 'project';
 
-export type TaskQuickSortQueueMode =
-  | 'no_priority'
-  | 'quadrant'
-  | 'no_effort'
-  | 'no_tags'
-  | 'no_planning_horizon';
+export const TASK_QUICK_SORT_QUEUE_MODES = [
+  'no_priority',
+  'quadrant',
+  'no_effort',
+  'no_tags',
+  'no_planning_horizon',
+] as const;
+
+export type TaskQuickSortQueueMode = typeof TASK_QUICK_SORT_QUEUE_MODES[number];
+
+export function parseTaskQuickSortQueueMode(value: string): TaskQuickSortQueueMode {
+  switch (value) {
+    case 'no_priority':
+    case 'quadrant':
+    case 'no_effort':
+    case 'no_tags':
+    case 'no_planning_horizon':
+      return value;
+    default:
+      throw new Error(`Invalid persisted Quick Sort mode: ${value}`);
+  }
+}
 
 export type TaskQuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
 
@@ -361,6 +381,88 @@ export interface TaskQuickSortSuggestionInputs {
     readonly taskId: string;
     readonly tagId: string;
   }>;
+}
+
+export type TaskQuickSortAction = 'applied' | 'suggestion_accepted' | 'skipped';
+export type TaskQuickSortOperationState = 'applying' | 'applied' | 'undoing' | 'undone';
+
+export function parseTaskQuickSortAction(value: string): TaskQuickSortAction {
+  if (value === 'applied' || value === 'suggestion_accepted' || value === 'skipped') {
+    return value;
+  }
+  throw new Error(`Invalid persisted Quick Sort action: ${value}`);
+}
+
+export function parseTaskQuickSortOperationState(value: string): TaskQuickSortOperationState {
+  if (value === 'applying' || value === 'applied' || value === 'undoing' || value === 'undone') {
+    return value;
+  }
+  throw new Error(`Invalid persisted Quick Sort operation state: ${value}`);
+}
+
+export interface TaskQuickSortOperation {
+  readonly id: string;
+  readonly taskId: string;
+  readonly mode: TaskQuickSortQueueMode;
+  readonly action: TaskQuickSortAction;
+  readonly label: string;
+  readonly contextKey: string;
+  readonly queueIndex: number;
+  readonly beforeSnapshot: QuickSortBeforeSnapshot;
+  readonly afterSnapshot: QuickSortTaskSnapshot;
+  readonly state: TaskQuickSortOperationState;
+  readonly aiAccepted: boolean;
+  readonly createdAt: string;
+  readonly undoneAt: string | null;
+}
+
+export interface TaskQuickSortOperationReservation {
+  readonly id: string;
+  readonly taskId: string;
+  readonly mode: TaskQuickSortQueueMode;
+  readonly action: TaskQuickSortAction;
+  readonly label: string;
+  readonly contextKey: string;
+  readonly queueIndex: number;
+  readonly beforeSnapshot: QuickSortBeforeSnapshot;
+  readonly afterSnapshot: QuickSortTaskSnapshot;
+  readonly aiAccepted: boolean;
+  readonly createdAt: string;
+}
+
+export type TaskQuickSortReservationOutcome =
+  | { readonly kind: 'reserved'; readonly operation: TaskQuickSortOperation }
+  | { readonly kind: 'existing'; readonly operation: TaskQuickSortOperation };
+
+export interface TaskQuickSortLogEntry {
+  readonly id: string;
+  readonly taskId: string;
+  readonly operationId: string | null;
+  readonly mode: TaskQuickSortQueueMode;
+  readonly action: TaskQuickSortAction;
+  readonly triagedAt: string;
+}
+
+export interface TaskQuickSortPersistenceRepository {
+  captureTask(taskId: string): Promise<QuickSortTaskSnapshot | null>;
+  getOperation(id: string): Promise<TaskQuickSortOperation | null>;
+  reserveOperation(
+    input: TaskQuickSortOperationReservation,
+  ): Promise<TaskQuickSortReservationOutcome>;
+  discardApplyingOperation(id: string): Promise<boolean>;
+  finalizeOperation(
+    id: string,
+    afterSnapshot: QuickSortTaskSnapshot,
+    logs: readonly TaskQuickSortLogEntry[],
+  ): Promise<TaskQuickSortOperation | null>;
+  claimUndo(id: string): Promise<boolean>;
+  releaseUndo(id: string): Promise<boolean>;
+  finalizeUndo(id: string, undoneAt: string): Promise<boolean>;
+  countActivityByModeSince(
+    since: string,
+  ): Promise<Array<{ readonly mode: TaskQuickSortQueueMode; readonly count: number }>>;
+  listActivityTimestampsSince(since: string): Promise<string[]>;
+  recordActivity(entry: TaskQuickSortLogEntry): Promise<void>;
 }
 
 /* ------------------------------------------------------------------ *
@@ -1345,6 +1447,7 @@ export interface TaskCorePersistence {
   readonly priorityEntities: PriorityEntityRepository;
   readonly sourceListNames: SourceListNameRepository;
   readonly transferIdentity: TaskTransferIdentityRepository;
+  readonly quickSort: TaskQuickSortPersistenceRepository;
 }
 
 /* ------------------------------------------------------------------ *

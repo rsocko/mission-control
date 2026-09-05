@@ -166,10 +166,19 @@ export interface TaskCoreContractHarness {
   insertQuickSortLogs(rows: Array<{
     id: string;
     taskId: string;
+    operationId?: string | null;
+    mode?: string;
     action: string;
     triagedAt: string;
     reversedAt?: string | null;
   }>): Promise<void>;
+  listQuickSortLogs(operationId: string): Promise<Array<{
+    id: string;
+    operationId: string | null;
+    mode: string;
+    action: string;
+    reversedAt: string | null;
+  }>>;
   listTaskIds(): Promise<string[]>;
   listTaskTagIds(taskId: string): Promise<string[]>;
   listTaskProjectIds(taskId: string): Promise<string[]>;
@@ -333,6 +342,187 @@ export function describeTaskCoreContract(
     beforeEach(async () => {
       harness = await createHarness();
       await harness.reset();
+    });
+
+    describe('quick sort workflow persistence', () => {
+      it('captures task revisions and normalized tag order', async () => {
+        await harness.insertTasks([{
+          id: 'quick-task',
+          status: 'todo',
+          localDisposition: 'active',
+          priority: 'none',
+          planningHorizon: null,
+          dueDate: '2026-08-20',
+          updatedAt: '2026-08-10T12:00:00.000Z',
+          effort: 2,
+        }]);
+        await harness.insertTags([
+          { id: 'tag-z', name: 'Zed', slug: 'zed' },
+          { id: 'tag-a', name: 'Alpha', slug: 'alpha' },
+        ]);
+        await harness.insertTaskTags([
+          { taskId: 'quick-task', tagId: 'tag-z' },
+          { taskId: 'quick-task', tagId: 'tag-a' },
+        ]);
+
+        await expect(harness.persistence.quickSort.captureTask('quick-task')).resolves.toMatchObject({
+          updatedAt: '2026-08-10T12:00:00.000Z',
+          status: 'todo',
+          localDisposition: 'active',
+          priority: 'none',
+          dueDate: '2026-08-20',
+          effort: 2,
+          tagIds: ['tag-a', 'tag-z'],
+        });
+      });
+
+      it('reserves an operation exactly once and atomically finalizes ordered log inputs', async () => {
+        await harness.insertTasks([{
+          id: 'quick-task',
+          updatedAt: '2026-08-10T12:00:00.000Z',
+        }]);
+        const snapshot = await harness.persistence.quickSort.captureTask('quick-task');
+        expect(snapshot).not.toBeNull();
+        if (!snapshot) return;
+        const reservation = {
+          id: 'operation-1',
+          taskId: 'quick-task',
+          mode: 'no_priority' as const,
+          action: 'applied' as const,
+          label: 'Set priority',
+          contextKey: 'queue:no-priority',
+          queueIndex: 0,
+          beforeSnapshot: { ...snapshot, originalPatch: { priority: 'high' } },
+          afterSnapshot: snapshot,
+          aiAccepted: false,
+          createdAt: '2026-08-10T12:01:00.000Z',
+        };
+
+        const outcomes = await Promise.all([
+          harness.persistence.quickSort.reserveOperation(reservation),
+          harness.persistence.quickSort.reserveOperation(reservation),
+        ]);
+        expect(outcomes.map((outcome) => outcome.kind).sort()).toEqual(['existing', 'reserved']);
+
+        const applied = await harness.persistence.quickSort.finalizeOperation(
+          reservation.id,
+          snapshot,
+          [
+            {
+              id: 'log-1',
+              taskId: 'quick-task',
+              operationId: reservation.id,
+              mode: 'no_priority',
+              action: 'applied',
+              triagedAt: '2026-08-10T12:01:00.000Z',
+            },
+            {
+              id: 'log-2',
+              taskId: 'quick-task',
+              operationId: reservation.id,
+              mode: 'no_effort',
+              action: 'applied',
+              triagedAt: '2026-08-10T12:01:00.000Z',
+            },
+          ],
+        );
+        expect(applied?.state).toBe('applied');
+        expect(await harness.listQuickSortLogs(reservation.id)).toEqual([
+          expect.objectContaining({ id: 'log-1', mode: 'no_priority' }),
+          expect.objectContaining({ id: 'log-2', mode: 'no_effort' }),
+        ]);
+
+        const replay = await harness.persistence.quickSort.reserveOperation(reservation);
+        expect(replay).toMatchObject({ kind: 'existing', operation: { state: 'applied' } });
+      });
+
+      it('allows only one concurrent undo claim and reverses logs idempotently', async () => {
+        await harness.insertTasks([{
+          id: 'quick-task',
+          updatedAt: '2026-08-10T12:00:00.000Z',
+        }]);
+        const snapshot = await harness.persistence.quickSort.captureTask('quick-task');
+        expect(snapshot).not.toBeNull();
+        if (!snapshot) return;
+        await harness.persistence.quickSort.reserveOperation({
+          id: 'operation-undo',
+          taskId: 'quick-task',
+          mode: 'no_priority',
+          action: 'applied',
+          label: 'Set priority',
+          contextKey: 'queue:no-priority',
+          queueIndex: 0,
+          beforeSnapshot: { ...snapshot, originalPatch: {} },
+          afterSnapshot: snapshot,
+          aiAccepted: false,
+          createdAt: '2026-08-10T12:01:00.000Z',
+        });
+        await harness.persistence.quickSort.finalizeOperation(
+          'operation-undo',
+          snapshot,
+          [{
+            id: 'log-undo',
+            taskId: 'quick-task',
+            operationId: 'operation-undo',
+            mode: 'no_priority',
+            action: 'applied',
+            triagedAt: '2026-08-10T12:01:00.000Z',
+          }],
+        );
+
+        const claims = await Promise.all([
+          harness.persistence.quickSort.claimUndo('operation-undo'),
+          harness.persistence.quickSort.claimUndo('operation-undo'),
+        ]);
+        expect(claims.filter(Boolean)).toHaveLength(1);
+        await expect(harness.persistence.quickSort.finalizeUndo(
+          'operation-undo',
+          '2026-08-10T12:02:00.000Z',
+        )).resolves.toBe(true);
+        await expect(harness.persistence.quickSort.finalizeUndo(
+          'operation-undo',
+          '2026-08-10T12:03:00.000Z',
+        )).resolves.toBe(false);
+        await expect(harness.persistence.quickSort.claimUndo('operation-undo')).resolves.toBe(false);
+        expect(await harness.listQuickSortLogs('operation-undo')).toEqual([
+          expect.objectContaining({ id: 'log-undo', reversedAt: '2026-08-10T12:02:00.000Z' }),
+        ]);
+      });
+
+      it('excludes skipped and reversed activity from stats reads', async () => {
+        await harness.insertTasks([{ id: 'quick-task' }]);
+        await harness.insertQuickSortLogs([
+          {
+            id: 'active',
+            taskId: 'quick-task',
+            mode: 'quadrant',
+            action: 'applied',
+            triagedAt: '2026-08-10T12:00:00.000Z',
+          },
+          {
+            id: 'skipped',
+            taskId: 'quick-task',
+            mode: 'quadrant',
+            action: 'skipped',
+            triagedAt: '2026-08-10T12:01:00.000Z',
+          },
+          {
+            id: 'reversed',
+            taskId: 'quick-task',
+            mode: 'no_effort',
+            action: 'applied',
+            triagedAt: '2026-08-10T12:02:00.000Z',
+            reversedAt: '2026-08-10T12:03:00.000Z',
+          },
+        ]);
+
+        await expect(harness.persistence.quickSort.countActivityByModeSince(
+          '2026-08-10T00:00:00.000Z',
+        )).resolves.toEqual([{ mode: 'quadrant', count: 1 }]);
+        await expect(harness.persistence.quickSort.listActivityTimestampsSince(
+          '2026-08-10T00:00:00.000Z',
+        )).resolves.toEqual(['2026-08-10T12:00:00.000Z']);
+      });
     });
 
     describe('collection, detail, and write transactions', () => {

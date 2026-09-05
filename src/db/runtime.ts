@@ -48,10 +48,8 @@ import {
   registerConnectorRuntimeRegistry,
 } from '@/lib/connectors/registry-runtime';
 import {
-  clearPostgresDurableAiRunRepository,
-  clearSqliteDurableAiRunRepository,
-  getRegisteredSqliteDurableAiRunRepository,
-  registerPostgresDurableAiRunRepository,
+  clearDurableAiRunRepository,
+  registerDurableAiRunRepository,
 } from '@/lib/ai/durable-runs/runtime';
 import { PostgresDurableAiRunRepository } from '@/lib/ai/durable-runs/postgres-adapter';
 import {
@@ -111,6 +109,10 @@ import {
   registerRuntimeTelemetryPersistence,
   type RuntimeTelemetryPersistence,
 } from '@/lib/telemetry/runtime-persistence';
+import {
+  clearSemanticSourcePort,
+  registerSemanticSourcePort,
+} from '@/lib/semantic-index/source/facade';
 
 interface DatabaseRuntimeRegistry {
   backend: PostgresPersistenceBackend;
@@ -298,9 +300,7 @@ function clearPostgresRuntimeComposition(): void {
   if (runtime.aiEnrichmentService) {
     clearAIEnrichmentService(runtime.aiEnrichmentService);
   }
-  if (runtime.durableAiRunRepository) {
-    clearPostgresDurableAiRunRepository(runtime.durableAiRunRepository);
-  }
+  clearAiControlPlaneComposition(runtime);
   runtime.repositories = null;
   runtime.workerRepositories = null;
   runtime.syncJobRepository = null;
@@ -311,9 +311,19 @@ function clearPostgresRuntimeComposition(): void {
   runtime.keywordSearchRepository = null;
   runtime.semanticIndexRepository = null;
   runtime.semanticSourcePort = null;
-  runtime.durableAiRunRepository = null;
   runtime.aiEnrichmentService = null;
   runtime.taskCorePersistence = null;
+}
+
+function clearAiControlPlaneComposition(runtime: DatabaseRuntimeRegistry): void {
+  if (runtime.semanticSourcePort) {
+    clearSemanticSourcePort(runtime.semanticSourcePort);
+    runtime.semanticSourcePort = null;
+  }
+  if (runtime.durableAiRunRepository) {
+    clearDurableAiRunRepository(runtime.durableAiRunRepository);
+    runtime.durableAiRunRepository = null;
+  }
 }
 
 function clearRuntimeObservabilityComposition(runtime: DatabaseRuntimeRegistry): void {
@@ -631,10 +641,14 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
       { SqliteDatabaseHealthProbe },
       { SqliteHealthSnapshotStore },
       { SqliteRuntimeTelemetryPersistence },
+      { SqliteDurableAiRunRepository },
+      { SqliteSemanticSourcePort },
     ] = await Promise.all([
       import('@/lib/telemetry/sqlite-database-health-probe'),
       import('@/lib/telemetry/sqlite-health-snapshot-store'),
       import('@/lib/telemetry/sqlite-runtime-telemetry'),
+      import('@/lib/ai/durable-runs/sqlite-adapter'),
+      import('@/lib/semantic-index/source/sqlite-source-port'),
     ]);
     if (!isCurrentGeneration()) return;
     const runtime = databaseRuntimeRegistry();
@@ -657,6 +671,10 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
     );
     registerRuntimeHealthPersistence(runtime.runtimeHealthPersistence);
     registerRuntimeTelemetryPersistence(runtime.runtimeTelemetryPersistence);
+    runtime.durableAiRunRepository = new SqliteDurableAiRunRepository();
+    runtime.semanticSourcePort = new SqliteSemanticSourcePort(sqliteRuntime.sqlite);
+    registerDurableAiRunRepository(runtime.durableAiRunRepository);
+    registerSemanticSourcePort(runtime.semanticSourcePort);
     const sqliteSyncRuntime = await import(
       './persistence/sqlite-sync-runtime'
     );
@@ -725,7 +743,8 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   runtime.semanticIndexRepository = createPostgresSemanticIndexRepository(pool, vector);
   runtime.semanticSourcePort = createPostgresSemanticSourcePort(pool);
   runtime.durableAiRunRepository = new PostgresDurableAiRunRepository(pool);
-  registerPostgresDurableAiRunRepository(runtime.durableAiRunRepository);
+  registerSemanticSourcePort(runtime.semanticSourcePort);
+  registerDurableAiRunRepository(runtime.durableAiRunRepository);
   await registerStableRuntimeServices();
   if (!isCurrentGeneration()) return;
   const packagedSemanticRuntime = await import(
@@ -813,6 +832,7 @@ export function initializeRuntimeDatabase(): Promise<void> {
             );
           } finally {
             clearRuntimeObservabilityComposition(runtime);
+            clearAiControlPlaneComposition(runtime);
             const { clearSqliteSyncInfrastructure } = await import(
               './persistence/sqlite-sync-runtime'
             );
@@ -857,7 +877,6 @@ export function shutdownRuntimeDatabase(): Promise<void> {
   runtime.lifecycleGeneration += 1;
   blockPersistenceComposition();
   if (runtime.shutdownPromise) return runtime.shutdownPromise;
-  const sqliteDurableAiRunRepository = getRegisteredSqliteDurableAiRunRepository();
 
   runtime.shutdownPromise = (async () => {
     if (runtime.initializationPromise) {
@@ -909,9 +928,7 @@ export function shutdownRuntimeDatabase(): Promise<void> {
     } finally {
       clearModeRouteServiceDelegates();
       clearRuntimeObservabilityComposition(runtime);
-      if (sqliteDurableAiRunRepository) {
-        clearSqliteDurableAiRunRepository(sqliteDurableAiRunRepository);
-      }
+      clearAiControlPlaneComposition(runtime);
       if (!runtime.cleanupRequired) {
         runtime.shutdownSqliteComposition = null;
         runtime.clearSqliteSyncInfrastructure = null;
@@ -1090,7 +1107,17 @@ export function getPostgresSemanticIndexRepository(): SemanticIndexRepository {
 /** Explicit override hook (primarily for tests). */
 export function registerPostgresSemanticSourcePort(port: SemanticSourcePort): void {
   assertPersistenceCompositionPublicationAllowed();
-  databaseRuntimeRegistry().semanticSourcePort = port;
+  const runtime = databaseRuntimeRegistry();
+  const previous = runtime.semanticSourcePort;
+  if (previous === port) return;
+  if (previous) clearSemanticSourcePort(previous);
+  try {
+    registerSemanticSourcePort(port);
+    runtime.semanticSourcePort = port;
+  } catch (error) {
+    if (previous) registerSemanticSourcePort(previous);
+    throw error;
+  }
 }
 
 export function getPostgresSemanticSourcePort(): SemanticSourcePort {

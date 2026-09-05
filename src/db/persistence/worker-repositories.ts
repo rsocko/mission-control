@@ -93,7 +93,7 @@ export interface WorkerPersistenceRepositories {
    */
   analytics: AnalyticsPersistence;
   /**
-   * Layer 18: the webhook configuration/delivery/log surface — inbound webhook
+   * Layer 19: the webhook configuration/delivery/log surface — inbound webhook
    * CRUD plus their replay/log tables, outbound webhook subscriptions, the n8n
    * integration configuration, and the task/notification ingestion the n8n,
    * RyMessage, and per-connector webhook receivers share. Published as its own

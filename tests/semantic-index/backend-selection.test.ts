@@ -66,6 +66,22 @@ describe('semantic index backend selection', () => {
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 
+  it('requires the semantic source port to be selected by startup composition', async () => {
+    process.env.MC_DATABASE_BACKEND = 'postgres';
+    const {
+      getSemanticSourcePort,
+      registerSemanticSourcePort,
+    } = await import('@/lib/semantic-index/source/facade');
+
+    await expect(getSemanticSourcePort()).rejects.toThrow(
+      'Semantic source port has not been registered',
+    );
+    const sourcePort = { get: vi.fn(async () => null) };
+    registerSemanticSourcePort(sourcePort as never);
+    await expect(getSemanticSourcePort()).resolves.toBe(sourcePort);
+    expect(sqliteTouch).not.toHaveBeenCalled();
+  });
+
   it('only reaches for the SQLite handle on the SQLite path', async () => {
     process.env.MC_DATABASE_BACKEND = 'sqlite';
     const { getSemanticIndexRepository } = await import('@/lib/semantic-index/repository-facade');

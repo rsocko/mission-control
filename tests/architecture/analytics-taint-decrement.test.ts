@@ -210,15 +210,15 @@ describe('L17 derived-analytics taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 121,
-      tierBRoutes: 13,
-      cleanRoutes: 132,
-      directTaintSourceRoutes: 91,
+      tierARoutes: 107,
+      tierBRoutes: 5,
+      cleanRoutes: 154,
+      directTaintSourceRoutes: 77,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 92,
-      taintedLibA: 61,
+      directDbNamespaceRoutes: 78,
+      taintedLibA: 56,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 182,
+      totalMigrationUnits: 163,
     });
   });
 });

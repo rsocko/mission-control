@@ -21,19 +21,27 @@ let durable: typeof import('@/lib/ai/durable-runs') & {
 };
 let sqliteDurable: typeof import('@/lib/ai/durable-runs/sqlite-adapter');
 let copilotPersistence: typeof import('@/lib/ai/durable-runs/copilot-adapter');
+let durableRuntime: typeof import('@/lib/ai/durable-runs/runtime');
+let selectedRepository: InstanceType<
+  typeof import('@/lib/ai/durable-runs/sqlite-adapter').SqliteDurableAiRunRepository
+>;
 
 beforeAll(async () => {
   database = await import('@/db');
-  const [durableModule, sqliteDurableModule] = await Promise.all([
+  const [durableModule, sqliteDurableModule, runtime] = await Promise.all([
     import('@/lib/ai/durable-runs'),
     import('@/lib/ai/durable-runs/sqlite-adapter'),
+    import('@/lib/ai/durable-runs/runtime'),
   ]);
   sqliteDurable = sqliteDurableModule;
+  durableRuntime = runtime;
   durable = {
     ...durableModule,
     DurableAiRunStore: sqliteDurableModule.SqliteDurableAiRunStore,
   };
   copilotPersistence = await import('@/lib/ai/durable-runs/copilot-adapter');
+  selectedRepository = new sqliteDurableModule.SqliteDurableAiRunRepository();
+  durableRuntime.registerDurableAiRunRepository(selectedRepository);
   database.sqlite.prepare('SELECT 1').get();
 });
 
@@ -48,6 +56,7 @@ afterEach(() => {
 });
 
 afterAll(() => {
+  durableRuntime.clearDurableAiRunRepository(selectedRepository);
   database.sqlite.close();
   rmSync(testDirectory, { recursive: true, force: true });
 });

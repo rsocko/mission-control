@@ -149,7 +149,7 @@ describe('SQLite runtime composition', () => {
     const firstDurableRuntime = await import('@/lib/ai/durable-runs/runtime');
     const firstDurableRepository = await firstDurableRuntime.getDurableAiRunRepository();
     const firstDurableRegistration =
-      firstDurableRuntime.getRegisteredSqliteDurableAiRunRepository();
+      firstDurableRuntime.getRegisteredDurableAiRunRepository();
     if (!firstDurableRegistration) {
       throw new Error('SQLite durable AI run repository was not registered');
     }
@@ -168,9 +168,9 @@ describe('SQLite runtime composition', () => {
     await expect(secondDurableRuntime.getDurableAiRunRepository())
       .resolves.not.toBe(firstDurableRepository);
     const secondDurableRegistration =
-      secondDurableRuntime.getRegisteredSqliteDurableAiRunRepository();
-    firstDurableRuntime.clearSqliteDurableAiRunRepository(firstDurableRegistration);
-    expect(secondDurableRuntime.getRegisteredSqliteDurableAiRunRepository())
+      secondDurableRuntime.getRegisteredDurableAiRunRepository();
+    firstDurableRuntime.clearDurableAiRunRepository(firstDurableRegistration);
+    expect(secondDurableRuntime.getRegisteredDurableAiRunRepository())
       .toBe(secondDurableRegistration);
     const closeSecond = secondDatabase.sqlite.close.bind(secondDatabase.sqlite);
     await secondRuntime.shutdownRuntimeDatabase();

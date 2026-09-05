@@ -250,7 +250,7 @@ async function findNotificationIdBySource(
 }
 
 /**
- * PostgreSQL adapter for the Layer L18 webhook configuration/delivery/log
+ * PostgreSQL adapter for the Layer L19 webhook configuration/delivery/log
  * port. Nothing here imports `@/db`, a SQLite driver, or a SQLite schema, so
  * selecting PostgreSQL never loads or falls back to SQLite persistence.
  */

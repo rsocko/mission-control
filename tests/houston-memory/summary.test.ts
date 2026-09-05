@@ -4,8 +4,8 @@ const generateObject = vi.fn();
 const get = vi.fn();
 
 vi.mock('ai', () => ({ generateObject }));
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getAIModel: () => ({ model: {}, context: {} }),
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIModel: async () => ({ model: {}, context: {} }),
 }));
 vi.mock('@/lib/semantic-index/source/facade', () => ({
   getSemanticSourcePort: async () => ({ get }),

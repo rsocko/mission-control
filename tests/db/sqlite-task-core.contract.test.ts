@@ -66,6 +66,7 @@ beforeAll(async () => {
         schema.myDayItems,
         schema.priorityEntities,
         schema.sourceRankings,
+        schema.quickSortOperations,
         schema.quickSortLog,
         schema.sourceLists,
         schema.connectorConfigs,
@@ -154,11 +155,24 @@ beforeAll(async () => {
       await db.insert(schema.quickSortLog).values(rows.map((row) => ({
         id: row.id,
         taskId: row.taskId,
-        mode: 'no_priority',
+        operationId: row.operationId ?? null,
+        mode: row.mode ?? 'no_priority',
         action: row.action,
         triagedAt: row.triagedAt,
         reversedAt: row.reversedAt ?? null,
       })));
+    },
+    async listQuickSortLogs(operationId) {
+      return db.select({
+        id: schema.quickSortLog.id,
+        operationId: schema.quickSortLog.operationId,
+        mode: schema.quickSortLog.mode,
+        action: schema.quickSortLog.action,
+        reversedAt: schema.quickSortLog.reversedAt,
+      }).from(schema.quickSortLog)
+        .orderBy(schema.quickSortLog.id)
+        .all()
+        .filter((row) => row.operationId === operationId);
     },
     async insertTags(rows: SeedTag[]) {
       if (rows.length === 0) return;

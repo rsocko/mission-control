@@ -47,6 +47,30 @@ describe('process-wide runtime registries', () => {
     secondRuntime.clearTriagePersistenceRepositories(selected);
   });
 
+  it('shares AI control-plane registrations across isolated module evaluations', async () => {
+    const firstDurable = await import('@/lib/ai/durable-runs/runtime');
+    const firstSource = await import('@/lib/semantic-index/source/facade');
+    const durableRepository = { marker: 'durable' };
+    const sourcePort = { marker: 'source' };
+    firstDurable.registerDurableAiRunRepository(durableRepository as never);
+    firstSource.registerSemanticSourcePort(sourcePort as never);
+
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
+    const secondDurable = await import('@/lib/ai/durable-runs/runtime');
+    const secondSource = await import('@/lib/semantic-index/source/facade');
+
+    expect(() => secondDurable.registerDurableAiRunRepository(
+      durableRepository as never,
+    )).not.toThrow();
+    expect(() => secondSource.registerSemanticSourcePort(sourcePort as never))
+      .not.toThrow();
+    await expect(secondDurable.getDurableAiRunRepository())
+      .resolves.toBe(durableRepository);
+    await expect(secondSource.getSemanticSourcePort()).resolves.toBe(sourcePort);
+    firstDurable.clearDurableAiRunRepository(durableRepository as never);
+    firstSource.clearSemanticSourcePort(sourcePort as never);
+  });
+
   it('shares connector registration across isolated module evaluations', async () => {
     const firstRuntime = await import('@/lib/connectors/registry-runtime');
     const selected: ConnectorRuntimeRegistry = {

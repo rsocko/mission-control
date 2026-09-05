@@ -194,15 +194,15 @@ describe('L18 AI execution and memory control-plane parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 110,
+      tierARoutes: 107,
       tierBRoutes: 5,
-      cleanRoutes: 151,
-      directTaintSourceRoutes: 80,
+      cleanRoutes: 154,
+      directTaintSourceRoutes: 77,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 81,
+      directDbNamespaceRoutes: 78,
       taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 167,
+      totalMigrationUnits: 164,
     });
   });
 });

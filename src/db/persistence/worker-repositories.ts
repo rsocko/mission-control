@@ -15,6 +15,7 @@ import type {
 } from './notification-entity-linking';
 import type { ExternalAgentControlPersistence } from './external-agent-control';
 import type { AnalyticsPersistence } from './analytics';
+import type { RoutinesRepository } from './routines';
 import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
 
 export interface SyncRunSummary {
@@ -91,4 +92,6 @@ export interface WorkerPersistenceRepositories {
    * a backend supports every analytics surface or none.
    */
   analytics: AnalyticsPersistence;
+  /** Personal routine definitions and cadence-sensitive completion lifecycle. */
+  routines: RoutinesRepository;
 }

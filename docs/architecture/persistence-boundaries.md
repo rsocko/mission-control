@@ -2,7 +2,7 @@
 title: "Portable Persistence Boundaries"
 status: active
 created: 2026-08-25
-last_reviewed: 2026-08-30
+last_reviewed: 2026-09-05
 category: architecture
 related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
@@ -1932,6 +1932,29 @@ landed task quick-sort and L18 decrements, the graph moves from
 `266/110/5/151/80/30/81/57/0/167`. The CI-exposed exact-current ratchet
 expansion adds 19 test-only paths to the approved 28-path maximum, for a
 47-path maximum and 46 actual changed paths.
+
+## Web/API PostgreSQL parity: personal-planning routines
+
+Routine collection, item lifecycle, and completions now resolve one
+backend-neutral `WorkerPersistenceRepositories.routines` capability. The scope
+is exactly three routes and the existing `routines` / `routine_completions`
+table pair; all broader daily-planning, My Day, mobile, navigation, reset, AI,
+task, notification, webhook, and project surfaces remain separate.
+
+SQLite uses immediate transactions for sort allocation and cadence-sensitive
+completion creation. PostgreSQL uses bounded SERIALIZABLE transactions with
+transaction-scoped advisory locks for the sort namespace and each
+`(routineId, date)` completion namespace. Daily and specific-day duplicate
+creation therefore remains a 409 conflict under concurrency, while
+over-completion cadences continue to allow multiple same-day records. Local
+calendar dates, streak input ordering, soft archive, and both completion delete
+forms are unchanged. See
+[routines-persistence.md](./routines-persistence.md) for the complete contract.
+
+All three owned routes move directly from Tier A to clean. The exact graph moves
+from `266/110/5/151/80/30/81/57/0/167` to
+`266/107/5/154/77/30/78/57/0/164`, with no Tier B reclassification and no new
+taint.
 
 ## Backend-specific exceptions
 

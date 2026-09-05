@@ -1,16 +1,31 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, taskAttachments } from '@/db/schema';
-import { eq, and, sql } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { connectorRegistry } from '@/lib/connectors';
-import { syncScheduler } from '@/lib/sync';
+import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
 import { ApiErrors } from '@/lib/api-error';
 import logger from '@/lib/logger';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type { ConnectorConfig } from '@/types';
 
 /** Max upload size: 25MB (matches MS Todo upload session limit) */
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
+async function getOrRefreshAttachmentConnector(connectorInstanceId: string) {
+  const registry = getConnectorRegistry();
+  const existing = registry.getConnector(connectorInstanceId);
+  if (existing) return existing;
+  const repositories = await getWorkerPersistenceRepositories();
+  const config = await repositories.connectors.get(connectorInstanceId);
+  if (!config) return null;
+  repositories.execution.support.assertConfigSupported(config);
+  const resolvedConfig: ConnectorConfig = {
+    ...config,
+    syncMode: config.syncMode || 'poll',
+    pollIntervalMinutes: config.pollIntervalMinutes ?? 5,
+  };
+  return registry.replaceConnector(resolvedConfig);
+}
 
 /**
  * GET /api/tasks/[id]/attachments — List attachments for a task.
@@ -24,24 +39,14 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [task] = await db.select({
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-    }).from(tasks).where(eq(tasks.id, id));
+    const { ancillary } = await getTaskCorePersistence();
+    const { task, attachments: localAttachments } =
+      await ancillary.getAttachmentListContext(id);
 
     if (!task) return ApiErrors.notFound('Task');
 
     const isLocal = task.sourceId.startsWith('local:') || task.connectorType === 'local';
 
-    const localAttachments = await db.select({
-      id: taskAttachments.id,
-      name: taskAttachments.name,
-      contentType: taskAttachments.contentType,
-      size: taskAttachments.size,
-      createdAt: taskAttachments.createdAt,
-      hasLocalContent: sql<number>`CASE WHEN ${taskAttachments.contentBase64} IS NOT NULL THEN 1 ELSE 0 END`,
-    }).from(taskAttachments).where(eq(taskAttachments.taskId, id));
     const toAttachmentMetadata = (attachment: typeof localAttachments[number]) => ({
       id: attachment.id,
       name: attachment.name,
@@ -66,10 +71,7 @@ export async function GET(
       });
     }
 
-    let connector = connectorRegistry.getConnector(task.connectorInstanceId) ?? null;
-    if (!connector) {
-      connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
-    }
+    const connector = await getOrRefreshAttachmentConnector(task.connectorInstanceId);
     if (!connector?.listAttachments) {
       return NextResponse.json({ attachments: [], supported: false });
     }
@@ -118,11 +120,8 @@ export async function POST(
       );
     }
 
-    const [task] = await db.select({
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-    }).from(tasks).where(eq(tasks.id, id));
+    const { ancillary } = await getTaskCorePersistence();
+    const task = await ancillary.getTask(id);
 
     if (!task) return ApiErrors.notFound('Task');
 
@@ -131,7 +130,7 @@ export async function POST(
     if (isLocal) {
       // Store locally
       const attachmentId = randomUUID();
-      await db.insert(taskAttachments).values({
+      const outcome = await ancillary.insertAttachment({
         id: attachmentId,
         taskId: id,
         name,
@@ -140,6 +139,7 @@ export async function POST(
         contentBase64,
         createdAt: new Date().toISOString(),
       });
+      if (outcome.kind === 'task-not-found') return ApiErrors.notFound('Task');
 
       return NextResponse.json({
         attachment: { id: attachmentId, name, contentType, size: sizeBytes },
@@ -155,10 +155,7 @@ export async function POST(
       );
     }
 
-    let connector = connectorRegistry.getConnector(task.connectorInstanceId) ?? null;
-    if (!connector) {
-      connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
-    }
+    const connector = await getOrRefreshAttachmentConnector(task.connectorInstanceId);
     if (!connector?.uploadAttachment) {
       return NextResponse.json(
         { error: 'Connector does not support uploading attachments' },
@@ -170,7 +167,7 @@ export async function POST(
 
     // Also store a reference locally (without content to save space)
     const localId = randomUUID();
-    await db.insert(taskAttachments).values({
+    const outcome = await ancillary.insertAttachment({
       id: localId,
       taskId: id,
       name: result.name,
@@ -179,6 +176,7 @@ export async function POST(
       sourceAttachmentId: result.id,
       createdAt: new Date().toISOString(),
     });
+    if (outcome.kind === 'task-not-found') return ApiErrors.notFound('Task');
 
     return NextResponse.json({
       attachment: { id: localId, sourceAttachmentId: result.id, name: result.name, contentType, size: result.size },
@@ -206,18 +204,11 @@ export async function DELETE(
   }
 
   try {
-    const [task] = await db.select({
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-    }).from(tasks).where(eq(tasks.id, id));
+    const { ancillary } = await getTaskCorePersistence();
+    const { task, attachment: localAttachment } =
+      await ancillary.getAttachmentDeleteContext(id, attachmentId);
 
     if (!task) return ApiErrors.notFound('Task');
-
-    // Look up local attachment record
-    const [localAttachment] = await db.select().from(taskAttachments).where(
-      and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, id))
-    );
 
     if (!localAttachment) {
       return ApiErrors.notFound('Attachment');
@@ -229,10 +220,7 @@ export async function DELETE(
       // Delete from remote too
       const caps = await getConnectorCapabilities(task.connectorInstanceId);
       if (caps?.attachments) {
-        let connector = connectorRegistry.getConnector(task.connectorInstanceId) ?? null;
-        if (!connector) {
-          connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
-        }
+        const connector = await getOrRefreshAttachmentConnector(task.connectorInstanceId);
         if (connector?.deleteAttachment) {
           await connector.deleteAttachment(task.sourceId, localAttachment.sourceAttachmentId);
         }
@@ -240,7 +228,17 @@ export async function DELETE(
     }
 
     // Delete local record
-    await db.delete(taskAttachments).where(eq(taskAttachments.id, attachmentId));
+    const removed = await ancillary.deleteAttachment({
+      taskId: id,
+      attachmentId,
+      expectedSourceAttachmentId: localAttachment.sourceAttachmentId,
+    });
+    if (!removed) {
+      return NextResponse.json(
+        { error: 'Attachment changed while it was being deleted' },
+        { status: 409 },
+      );
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

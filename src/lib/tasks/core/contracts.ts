@@ -1305,6 +1305,170 @@ export interface WriteThroughTaskMoveRepository {
   ): Promise<void>;
 }
 
+/* ------------------------------------------------------------------ *
+ * Ancillary task lifecycle
+ * ------------------------------------------------------------------ */
+
+export interface TaskAncillaryIdentity {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly updatedAt: string;
+}
+
+export interface TaskAncillaryAttachment extends TaskAttachmentMetadataRow {
+  readonly hasLocalContent: boolean;
+}
+
+export interface TaskAttachmentListContext {
+  readonly task: TaskAncillaryIdentity | null;
+  readonly attachments: TaskAncillaryAttachment[];
+}
+
+export interface TaskAttachmentDeleteContext {
+  readonly task: TaskAncillaryIdentity | null;
+  readonly attachment: TaskAttachmentMetadataRow | null;
+}
+
+export type TaskAttachmentInsertOutcome =
+  | { readonly kind: 'inserted' }
+  | { readonly kind: 'already-exists' }
+  | { readonly kind: 'task-not-found' };
+
+export type TaskCopyOutcome =
+  | { readonly kind: 'committed'; readonly connectorType: string }
+  | { readonly kind: 'already-committed'; readonly connectorType: string }
+  | { readonly kind: 'connector-not-found' }
+  | { readonly kind: 'source-list-not-found' }
+  | { readonly kind: 'source-list-not-selected' }
+  | { readonly kind: 'task-not-found' };
+
+export type TaskPromoteOutcome =
+  | { readonly kind: 'promoted'; readonly previousParentId: string }
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'not-subtask' }
+  | { readonly kind: 'revision-conflict'; readonly currentUpdatedAt: string };
+
+export interface TaskAncillarySubtask {
+  readonly id: string;
+  readonly title: string;
+  readonly status: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly priority: string;
+  readonly effort: number | null;
+  readonly parentId: string | null;
+}
+
+export interface TaskSubtaskProposalSnapshot {
+  readonly parentUpdatedAt: string;
+  readonly tagNames: readonly string[];
+  readonly projectNames: readonly string[];
+  readonly subtaskTitles: readonly string[];
+}
+
+export type TaskSubtaskCreateOutcome =
+  | { readonly kind: 'created' }
+  | { readonly kind: 'already-created'; readonly subtask: TaskAncillarySubtask }
+  | { readonly kind: 'id-conflict' }
+  | { readonly kind: 'parent-not-found' };
+
+export type TaskSubtaskProposalOutcome =
+  | {
+      readonly kind: 'created';
+      readonly snapshot: TaskSubtaskProposalSnapshot;
+    }
+  | {
+      readonly kind: 'duplicate';
+      readonly subtask: TaskAncillarySubtask;
+      readonly snapshot: TaskSubtaskProposalSnapshot;
+    }
+  | { readonly kind: 'id-conflict' }
+  | { readonly kind: 'stale' };
+
+export interface TaskTagMutationContext {
+  readonly task: TaskAncillaryIdentity | null;
+  readonly storedCapabilities: Record<string, unknown>;
+}
+
+export interface TaskTagCandidate {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+}
+
+export interface TaskTagMutationResult {
+  readonly addedTags: Array<{ readonly id: string; readonly name: string }>;
+  readonly rejectedTags: string[];
+}
+
+/**
+ * Persistence used by the five non-AI ancillary task routes. Connector/network
+ * calls remain route-owned; this repository owns only deterministic reads and
+ * atomic local graph mutations.
+ */
+export interface TaskAncillaryRepository {
+  getTask(taskId: string): Promise<TaskCoreTaskRow | null>;
+  getAttachmentListContext(taskId: string): Promise<TaskAttachmentListContext>;
+  getAttachmentDeleteContext(
+    taskId: string,
+    attachmentId: string,
+  ): Promise<TaskAttachmentDeleteContext>;
+  insertAttachment(attachment: TaskAttachmentInsert): Promise<TaskAttachmentInsertOutcome>;
+  deleteAttachment(input: {
+    readonly taskId: string;
+    readonly attachmentId: string;
+    readonly expectedSourceAttachmentId: string | null;
+  }): Promise<boolean>;
+  copyTask(input: {
+    readonly sourceTaskId: string;
+    readonly newTaskId: string;
+    readonly targetConnectorInstanceId: string;
+    readonly targetListId: string | null;
+    readonly keepTags: boolean;
+    readonly now: string;
+  }): Promise<TaskCopyOutcome>;
+  promoteSubtask(input: {
+    readonly taskId: string;
+    readonly expectedUpdatedAt: string;
+    readonly now: string;
+  }): Promise<TaskPromoteOutcome>;
+  listSubtasks(parentTaskId: string): Promise<TaskAncillarySubtask[]>;
+  getSubtaskProposalSnapshot(
+    parentTaskId: string,
+  ): Promise<TaskSubtaskProposalSnapshot | null>;
+  createSubtask(input: {
+    readonly task: TaskMoveTaskInsert;
+  }): Promise<TaskSubtaskCreateOutcome>;
+  acceptSubtaskProposal(input: {
+    readonly task: TaskMoveTaskInsert;
+    readonly expected: TaskSubtaskProposalSnapshot;
+  }): Promise<TaskSubtaskProposalOutcome>;
+  completeSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+    readonly sourceId: string;
+    readonly metadata: Record<string, unknown>;
+    readonly now: string;
+  }): Promise<boolean>;
+  failSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+  }): Promise<boolean>;
+  getTagMutationContext(taskId: string): Promise<TaskTagMutationContext>;
+  addTaskTags(input: {
+    readonly taskId: string;
+    readonly candidates: readonly TaskTagCandidate[];
+    readonly tagCreationMode: 'freeform' | 'predefined';
+    readonly now: string;
+  }): Promise<TaskTagMutationResult>;
+  removeTaskTag(input: {
+    readonly taskId: string;
+    readonly tagId: string;
+  }): Promise<{ readonly removed: boolean; readonly tagName: string | null }>;
+}
+
 export interface PriorityEntityRow {
   readonly id: string;
   readonly name: string;
@@ -1448,6 +1612,7 @@ export interface TaskCorePersistence {
   readonly sourceListNames: SourceListNameRepository;
   readonly transferIdentity: TaskTransferIdentityRepository;
   readonly quickSort: TaskQuickSortPersistenceRepository;
+  readonly ancillary: TaskAncillaryRepository;
 }
 
 /* ------------------------------------------------------------------ *

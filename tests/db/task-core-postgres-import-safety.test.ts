@@ -187,6 +187,33 @@ function fakePersistence(): TaskCorePersistence {
         { kind: 'not-found' as const },
       ),
     },
+    ancillary: {
+      getTask: () => record('ancillaryGetTask', null),
+      getAttachmentListContext: () => record(
+        'getAttachmentListContext',
+        { task: null, attachments: [] },
+      ),
+      getAttachmentDeleteContext: () => record(
+        'getAttachmentDeleteContext',
+        { task: null, attachment: null },
+      ),
+      insertAttachment: () => record('insertAttachment', { kind: 'task-not-found' as const }),
+      deleteAttachment: () => record('deleteAttachment', false),
+      copyTask: () => record('copyTask', { kind: 'task-not-found' as const }),
+      promoteSubtask: () => record('promoteSubtask', { kind: 'not-found' as const }),
+      listSubtasks: () => record('listSubtasks', []),
+      getSubtaskProposalSnapshot: () => record('getSubtaskProposalSnapshot', null),
+      createSubtask: () => record('createSubtask', { kind: 'parent-not-found' as const }),
+      acceptSubtaskProposal: () => record('acceptSubtaskProposal', { kind: 'stale' as const }),
+      completeSubtaskWriteThrough: () => record('completeSubtaskWriteThrough', false),
+      failSubtaskWriteThrough: () => record('failSubtaskWriteThrough', false),
+      getTagMutationContext: () => record(
+        'getTagMutationContext',
+        { task: null, storedCapabilities: {} },
+      ),
+      addTaskTags: () => record('addTaskTags', { addedTags: [], rejectedTags: [] }),
+      removeTaskTag: () => record('removeTaskTag', { removed: false, tagName: null }),
+    },
     taskReads: {
       getAttachmentReadContext: () => record('getAttachmentReadContext', {
         task: {

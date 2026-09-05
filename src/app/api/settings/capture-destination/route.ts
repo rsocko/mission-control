@@ -1,31 +1,15 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { appSettings } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-
-export interface CaptureDestinationSetting {
-  connectorType: string;
-  connectorInstanceId?: string;
-  sourceListId?: string;
-  sourceListName?: string;
-}
-
-const SETTING_KEY = 'capture.defaultDestination';
+import {
+  getPreferenceSettingsRepositoryForBackend,
+  type CaptureDestinationSetting,
+} from '@/lib/settings/preference-settings';
 
 /**
  * GET /api/settings/capture-destination — Get user's default capture destination
  */
 export async function GET() {
-  const rows = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, SETTING_KEY))
-    .limit(1);
-
-  const destination: CaptureDestinationSetting = rows.length > 0
-    ? rows[0].value as CaptureDestinationSetting
-    : { connectorType: 'local' };
-
+  const repository = await getPreferenceSettingsRepositoryForBackend();
+  const destination = await repository.getCaptureDestination();
   return NextResponse.json({ destination });
 }
 
@@ -49,15 +33,8 @@ export async function PUT(request: Request) {
     ...(sourceListName && { sourceListName }),
   };
 
-  const now = new Date().toISOString();
-
-  await db
-    .insert(appSettings)
-    .values({ key: SETTING_KEY, value: destination as unknown as Record<string, unknown>, updatedAt: now })
-    .onConflictDoUpdate({
-      target: appSettings.key,
-      set: { value: destination as unknown as Record<string, unknown>, updatedAt: now },
-    });
+  const repository = await getPreferenceSettingsRepositoryForBackend();
+  await repository.setCaptureDestination(destination);
 
   return NextResponse.json({ destination });
 }

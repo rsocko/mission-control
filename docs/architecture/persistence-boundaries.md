@@ -2223,6 +2223,31 @@ to
 `266/A92/B5/clean169/direct62/transitive30/directDB63/lib54/helpers0/units146`.
 The reconciled diff contains exactly 23 paths: the approved 12 production paths,
 10 focused test/baseline paths, and this architecture document.
+## Web/API PostgreSQL parity: settings preferences
+
+The capture destination, dopamine menu, and inbox-list routes now use the
+typed `PreferenceSettingsRepository` adapter over the startup-selected core
+settings repository. The adapter preserves the established keys, defaults,
+partial dopamine merge behavior, inbox-list ordering and duplicates, and
+single-key upsert semantics. No route probes the backend, imports a database
+schema, falls back to SQLite, or changes its existing validation and error
+responses.
+
+The bounded slice excludes kanban settings, tags, priority entities and logs,
+smart score, and subtask templates. Those surfaces retain task lifecycle,
+source write-through, or separate scoring concerns and remain independently
+reviewable migration units.
+
+Shared SQLite/PostgreSQL contract coverage, live PostgreSQL route coverage,
+and an always-on SQLite-poison test protect the selected behavior. The
+11-path cap is 4 production paths, 5 test paths, and 2 architecture paths.
+The canonical baseline plus fail-closed sentinel are the sole authoritative
+exact-current graph gate. On base
+`0bdf59f493ba7e5d90f601915c3c4511a32ddee2`, the graph moves from
+`266/A91/B5/clean170/direct61/transitive30/directDB62/lib51/helpers0/units142`
+to
+`266/A88/B5/clean173/direct58/transitive30/directDB59/lib51/helpers0/units139`,
+with no Tier A-to-B reclassification.
 
 ## Backend-specific exceptions
 

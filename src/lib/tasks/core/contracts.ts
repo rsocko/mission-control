@@ -1140,6 +1140,7 @@ export interface TaskMoveListRow {
 export interface TaskMoveClaimRequest {
   readonly taskId: string;
   readonly expectedSourceId: string;
+  readonly expectedSourceConnectorInstanceId: string;
   readonly expectedSyncStatus: string;
   readonly claimSyncStatus: string;
   readonly claimToken: string;
@@ -1284,6 +1285,13 @@ export interface WriteThroughTaskMoveRepository {
   findTargetListBySourceId(
     connectorInstanceId: string,
     sourceListId: string,
+  ): Promise<TaskMoveListRow | null>;
+  /**
+   * Resolves the connector's default destination, falling back to its first
+   * deterministically ordered source list for legacy callers that omit a list.
+   */
+  findDefaultTargetList(
+    connectorInstanceId: string,
   ): Promise<TaskMoveListRow | null>;
 
   /* atomic operations */

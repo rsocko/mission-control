@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through personal-planning routines parity, settings preference parity, AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through connector transfer/sync control-plane parity, personal-planning routines parity, settings preference parity, AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-05",
-  "generatedFromCommit": "2cab3de02ccf797dd7ddbd17db1fbb5b8d991cbd+personal-planning-routines",
+  "generatedFromCommit": "e500c02459870755a5aa91a92843f479f6d63bea+connector-transfer-sync-control-plane",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 85,
+    "tierARoutes": 83,
     "tierBRoutes": 5,
-    "cleanRoutes": 176,
-    "directTaintSourceRoutes": 55,
+    "cleanRoutes": 178,
+    "directTaintSourceRoutes": 53,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 56,
+    "directDbNamespaceRoutes": 54,
     "taintedLibA": 51,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 136
+    "totalMigrationUnits": 134
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -349,7 +349,6 @@
     "src/app/api/ai/triage-alerts/route.ts",
     "src/app/api/ai/whats-next/route.ts",
     "src/app/api/bug-report/route.ts",
-    "src/app/api/connectors/[id]/cross-account/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
     "src/app/api/daily-completions/route.ts",
     "src/app/api/energy/route.ts",
@@ -405,7 +404,6 @@
     "src/app/api/smart-score/settings/route.ts",
     "src/app/api/subtask-templates/route.ts",
     "src/app/api/sync/cleanup/route.ts",
-    "src/app/api/sync/tasks/resolve/route.ts",
     "src/app/api/tags/merge/route.ts",
     "src/app/api/tags/push/route.ts",
     "src/app/api/tags/remove-from-source/route.ts",
@@ -443,6 +441,7 @@
     "src/app/api/auth/microsoft/callback/route.ts",
     "src/app/api/auth/microsoft/connect/route.ts",
     "src/app/api/calendar-events/route.ts",
+    "src/app/api/connectors/[id]/cross-account/route.ts",
     "src/app/api/connectors/[id]/finance-operations/route.ts",
     "src/app/api/connectors/[id]/finance/attention-repair/route.ts",
     "src/app/api/connectors/[id]/finance/attribution-exceptions/[exceptionId]/route.ts",
@@ -551,6 +550,7 @@
     "src/app/api/sync/health/route.ts",
     "src/app/api/sync/route.ts",
     "src/app/api/sync/stream/route.ts",
+    "src/app/api/sync/tasks/resolve/route.ts",
     "src/app/api/tag-insights/route.ts",
     "src/app/api/tasks/[id]/attachments/[attachmentId]/route.ts",
     "src/app/api/tasks/[id]/attachments/route.ts",
@@ -612,7 +612,6 @@
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
     "src/app/api/bug-report/route.ts",
-    "src/app/api/connectors/[id]/cross-account/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
     "src/app/api/daily-completions/route.ts",
     "src/app/api/energy/route.ts",
@@ -652,7 +651,6 @@
     "src/app/api/smart-score/settings/route.ts",
     "src/app/api/subtask-templates/route.ts",
     "src/app/api/sync/cleanup/route.ts",
-    "src/app/api/sync/tasks/resolve/route.ts",
     "src/app/api/tags/merge/route.ts",
     "src/app/api/tags/push/route.ts",
     "src/app/api/tags/remove-from-source/route.ts",
@@ -701,7 +699,6 @@
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
     "src/app/api/bug-report/route.ts",
-    "src/app/api/connectors/[id]/cross-account/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
     "src/app/api/daily-completions/route.ts",
@@ -742,7 +739,6 @@
     "src/app/api/smart-score/settings/route.ts",
     "src/app/api/subtask-templates/route.ts",
     "src/app/api/sync/cleanup/route.ts",
-    "src/app/api/sync/tasks/resolve/route.ts",
     "src/app/api/tags/merge/route.ts",
     "src/app/api/tags/push/route.ts",
     "src/app/api/tags/remove-from-source/route.ts",
@@ -1894,9 +1890,55 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "The fail-closed PostgreSQL route sentinel on exact base 2cab3de02ccf797dd7ddbd17db1fbb5b8d991cbd moves the three bounded routines routes from direct Tier A to clean through one atomically selected worker persistence capability. Exact graph: 266 routes, A85/B5/clean176, direct55/transitive30/directDB56, 51 tainted libraries, zero helpers, and 136 total migration units."
+    },
+    {
+      "layer": "connector-transfer-sync-control-plane",
+      "title": "connector transfer and sync identity PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 136,
+        "to": 134,
+        "delta": -2
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [],
+      "removedTierARoutes": [
+        "src/app/api/connectors/[id]/cross-account/route.ts",
+        "src/app/api/sync/tasks/resolve/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/connectors/[id]/cross-account/route.ts",
+        "src/app/api/sync/tasks/resolve/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/connectors/[id]/cross-account/route.ts",
+        "src/app/api/sync/tasks/resolve/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/connectors/[id]/cross-account/route.ts",
+        "src/app/api/sync/tasks/resolve/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [
+        "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
+        "src/app/api/connectors/github-bulk-transfer/route.ts",
+        "src/app/api/sync/cleanup/route.ts",
+        "src/app/api/sync/retained/resolve/route.ts"
+      ],
+      "verification": "The fail-closed PostgreSQL route sentinel on exact base e500c02459870755a5aa91a92843f479f6d63bea moves the two bounded connector transfer and sync identity routes from direct Tier A to clean through the canonical task-core move and identity repositories. Exact graph: 266 routes, A83/B5/clean178, direct53/transitive30/directDB54, 51 tainted libraries, zero helpers, and 134 total migration units."
     }
   ],
   "layerUpdates": [
+    {
+      "layer": "connector-transfer-sync-control-plane",
+      "summary": "Web/API PostgreSQL parity: cross-account task transfer and sync task-identity resolution use the canonical task-core move and identity repositories.",
+      "changes": [
+        "The two-route ownership cap is connectors/[id]/cross-account and sync/tasks/resolve. Retained-list purge, GitHub bulk transfer, sync cleanup, retained resolution, Scout/triage, and webhook integration remain excluded.",
+        "Cross-account transfer resolves a deterministic destination list and delegates to the canonical write-through task move, preserving source-connector ownership fencing, transfer identity, compensation, cleanup intent, replay behavior, redacted upstream failures, and external I/O outside persistence transactions.",
+        "Sync task resolution uses the canonical connector/source identity lookup. SQLite and PostgreSQL implement the same typed task-core contract, and PostgreSQL startup and both routes have poisoned-SQLite proofs with no fallback or dual write.",
+        "The canonical baseline plus fail-closed PostgreSQL route sentinel remain the sole exact-current graph owners; the layer test retains only bounded monotonic ownership and exclusion assertions."
+      ]
+    },
     {
       "layer": "L02",
       "summary": "Web/API PostgreSQL parity: seed/demo fail-closed audit fix, entity-link cross-backend parity, and a fully clean settings/mode route migration.",

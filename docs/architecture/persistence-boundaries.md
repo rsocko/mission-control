@@ -2175,6 +2175,41 @@ concurrent proposal/tag mutation, copy idempotency, attachment
 binary/text/empty/null behavior, and deterministic ordering. Live-PostgreSQL
 route coverage poisons SQLite loading for all five routes.
 
+## Web/API PostgreSQL parity: notification push preferences and scheduler
+
+The additive `notificationDelivery.push` port owns push preferences, the
+notification-delivery master switch, scheduler enablement, quiet-hours
+preference reads, and the existing active calendar access-token projection.
+SQLite and PostgreSQL adapters preserve defaults, timezone and quiet-hours
+values, stable token ordering, and omission semantics. Preference and master
+switch updates commit atomically. PostgreSQL serializes legacy-client omission
+updates with an advisory transaction lock; SQLite uses one immediate
+transaction. PostgreSQL selection never imports, initializes, or falls back to
+SQLite.
+
+Scheduler trigger handlers are registered once in a process-wide, cycle-safe
+runtime slot after database initialization. Registration is idempotent,
+resettable in tests, and access fails closed until handlers are present.
+SQLite startup registers the existing trigger-delivery implementation;
+PostgreSQL startup does not import that excluded SQLite-backed module. Lifecycle
+serialization composes each start, stop, or restart with its durable state
+update, preserving concurrent master-switch and omitted-field behavior.
+Calendar API calls and all other network I/O remain outside repository
+transactions. Repositories expose only active access-token strings and neither
+log nor return refresh tokens, encrypted credentials, or backend error details.
+
+The bounded layer owns only `/api/push/preferences` and
+`/api/push/scheduler`, plus their minimal notification/push dependency chain.
+Notification actions, re-enrichment, trigger delivery, recent wins, task and
+project organization, finance, webhook integrations, and the AI control plane
+remain excluded. Reconciled after task ancillary lifecycle parity, the
+authoritative sentinel transition is
+`266/A94/B5/clean167/direct64/transitive30/directDB65/lib56/helpers0/units150`
+to
+`266/A92/B5/clean169/direct62/transitive30/directDB63/lib54/helpers0/units146`.
+The reconciled diff contains exactly 23 paths: the approved 12 production paths,
+10 focused test/baseline paths, and this architecture document.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

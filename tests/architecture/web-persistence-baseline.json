@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-05",
-  "generatedFromCommit": "bb2dad0653f634da49f17a7e6ded728a5348efce+task-ancillary-lifecycle",
+  "generatedFromCommit": "4906f4718f2f3c0da54c22b3f051468ffd37d52b+notification-push",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 94,
+    "tierARoutes": 92,
     "tierBRoutes": 5,
-    "cleanRoutes": 167,
-    "directTaintSourceRoutes": 64,
+    "cleanRoutes": 169,
+    "directTaintSourceRoutes": 62,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 65,
-    "taintedLibA": 56,
+    "directDbNamespaceRoutes": 63,
+    "taintedLibA": 54,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 150
+    "totalMigrationUnits": 146
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -387,8 +387,6 @@
     "src/app/api/projects/[id]/reports/burn/route.ts",
     "src/app/api/projects/[id]/task-dependencies/[dependencyId]/route.ts",
     "src/app/api/projects/[id]/task-dependencies/route.ts",
-    "src/app/api/push/preferences/route.ts",
-    "src/app/api/push/scheduler/route.ts",
     "src/app/api/push/trigger/route.ts",
     "src/app/api/recent-wins/dismiss/route.ts",
     "src/app/api/recent-wins/route.ts",
@@ -535,6 +533,8 @@
     "src/app/api/project-phases/[id]/route.ts",
     "src/app/api/project-phases/route.ts",
     "src/app/api/projects/[id]/hierarchy/route.ts",
+    "src/app/api/push/preferences/route.ts",
+    "src/app/api/push/scheduler/route.ts",
     "src/app/api/push/subscribe/route.ts",
     "src/app/api/push/vapid-key/route.ts",
     "src/app/api/settings/mode/route.ts",
@@ -638,8 +638,6 @@
     "src/app/api/priority-log/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
-    "src/app/api/push/preferences/route.ts",
-    "src/app/api/push/scheduler/route.ts",
     "src/app/api/recent-wins/dismiss/route.ts",
     "src/app/api/recent-wins/route.ts",
     "src/app/api/recent-wins/settings/route.ts",
@@ -737,8 +735,6 @@
     "src/app/api/priority-log/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
-    "src/app/api/push/preferences/route.ts",
-    "src/app/api/push/scheduler/route.ts",
     "src/app/api/recent-wins/dismiss/route.ts",
     "src/app/api/recent-wins/route.ts",
     "src/app/api/recent-wins/settings/route.ts",
@@ -808,12 +804,10 @@
     "src/lib/notifications/index.ts",
     "src/lib/notifications/push-policy/resolver.ts",
     "src/lib/notifications/push-policy/rules.ts",
-    "src/lib/notifications/quiet-hours.ts",
     "src/lib/notifications/service.ts",
     "src/lib/notifications/workflow-executor.ts",
     "src/lib/projects-overview/index.ts",
     "src/lib/public-demo-runtime.ts",
-    "src/lib/push/scheduler.ts",
     "src/lib/push/triggers.ts",
     "src/lib/reports/burn.ts",
     "src/lib/search/embedding-request.ts",
@@ -1782,6 +1776,40 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation on current main bb2dad0653f634da49f17a7e6ded728a5348efce moves the five owned task ancillary lifecycle routes from Tier A to clean, removes five direct-taint and direct @/db route imports, adds no Tier B route or tainted library/helper, and changes the graph from 266/A99/B5/clean162/direct69/transitive30/directDB70/lib56/helpers0/units155 to 266/A94/B5/clean167/direct64/transitive30/directDB65/lib56/helpers0/units150."
+    },
+    {
+      "layer": "notification-push",
+      "title": "notification push preferences and scheduler PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 150,
+        "to": 146,
+        "delta": -4
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/notifications/quiet-hours.ts",
+        "src/lib/push/scheduler.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/push/preferences/route.ts",
+        "src/app/api/push/scheduler/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "The fail-closed PostgreSQL route sentinel moves the two push preference/scheduler routes from direct Tier A to clean and removes quiet-hours.ts plus scheduler.ts from taintedLibA. The exact graph is 266 routes, A92/B5/clean169, direct62/transitive30/directDB63, 54 tainted libraries, zero helpers, and 146 total migration units."
     }
   ],
   "layerUpdates": [
@@ -1893,6 +1921,16 @@
         "Copy and tag mutations are transactional and idempotent, promotion and attachment deletion use compare-and-swap guards, and PostgreSQL serializes proposal/tag concurrency with a shared advisory lock namespace.",
         "Connector I/O, GitHub write fencing, write-through logging, rule evaluation, and AI context hashing remain caller-owned and outside persistence transactions.",
         "All five owned routes leave Tier A and become clean, removing five direct SQLite-taint and direct @/db imports without adding Tier B reach or tainted libraries."
+      ]
+    },
+    {
+      "layer": "notification-push",
+      "summary": "Web/API PostgreSQL parity: push preferences, scheduler state, quiet-hours reads, and active calendar-token projection now use the additive notificationDelivery.push persistence contract.",
+      "changes": [
+        "The two owned routes and two owned libraries leave direct SQLite taint without adding Tier B reach; the authoritative sentinel records a four-unit decrement from 150 to 146.",
+        "SQLite and PostgreSQL adapters preserve atomic preference/master-switch updates, omission concurrency, scheduler settings, quiet-hours/timezones, and stable active-token ordering without exposing refresh tokens or encrypted credentials.",
+        "Scheduler handler registration is process-wide, idempotent, cycle-safe, resettable in tests, and fail-closed; PostgreSQL startup does not import the excluded SQLite-backed trigger-delivery module.",
+        "The reconciled change retains exactly 12 production paths and uses the canonical baseline plus fail-closed route sentinel as the sole exact-current graph gate."
       ]
     }
   ]

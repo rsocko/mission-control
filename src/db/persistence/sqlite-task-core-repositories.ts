@@ -3215,13 +3215,13 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
         ...input,
         state: 'applying',
         undoneAt: null,
-      }).onConflictDoNothing().returning({ id: quickSortOperations.id }).get();
+      }).onConflictDoNothing().run();
       const operation: TaskQuickSortOperation = {
         ...input,
         state: 'applying',
         undoneAt: null,
       };
-      if (inserted) return { kind: 'reserved', operation };
+      if (inserted.changes === 1) return { kind: 'reserved', operation };
 
       const existing = tx.select().from(quickSortOperations)
         .where(eq(quickSortOperations.id, input.id))
@@ -3237,8 +3237,8 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
     const deleted = this.database.delete(quickSortOperations).where(and(
       eq(quickSortOperations.id, id),
       eq(quickSortOperations.state, 'applying'),
-    )).returning({ id: quickSortOperations.id }).get();
-    return deleted !== undefined;
+    )).run();
+    return deleted.changes === 1;
   }
 
   async finalizeOperation(
@@ -3253,8 +3253,8 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
       }).where(and(
         eq(quickSortOperations.id, id),
         eq(quickSortOperations.state, 'applying'),
-      )).returning({ id: quickSortOperations.id }).get();
-      if (!changed) return null;
+      )).run();
+      if (changed.changes !== 1) return null;
       if (logs.length > 0) {
         tx.insert(quickSortLog).values(logs.map((entry) => ({ ...entry }))).run();
       }
@@ -3274,9 +3274,8 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
         eq(quickSortOperations.state, 'applied'),
         isNull(quickSortOperations.undoneAt),
       ))
-      .returning({ id: quickSortOperations.id })
-      .get();
-    return changed !== undefined;
+      .run();
+    return changed.changes === 1;
   }
 
   async releaseUndo(id: string): Promise<boolean> {
@@ -3287,9 +3286,8 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
         eq(quickSortOperations.state, 'undoing'),
         isNull(quickSortOperations.undoneAt),
       ))
-      .returning({ id: quickSortOperations.id })
-      .get();
-    return changed !== undefined;
+      .run();
+    return changed.changes === 1;
   }
 
   async finalizeUndo(id: string, undoneAt: string): Promise<boolean> {
@@ -3301,8 +3299,8 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
         eq(quickSortOperations.id, id),
         eq(quickSortOperations.state, 'undoing'),
         isNull(quickSortOperations.undoneAt),
-      )).returning({ id: quickSortOperations.id }).get();
-      if (!changed) return false;
+      )).run();
+      if (changed.changes !== 1) return false;
       tx.update(quickSortLog).set({ reversedAt: undoneAt })
         .where(eq(quickSortLog.operationId, id))
         .run();

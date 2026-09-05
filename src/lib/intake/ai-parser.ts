@@ -8,7 +8,7 @@
 
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import { getAIModel } from '@/lib/ai/provider-factory';
+import { getAsyncAIModel } from '@/lib/ai/provider-runtime';
 import type { ParsedDocument, Finding, PhaseDefinition, PriorityGroup } from './document-intake';
 import logger from '@/lib/logger';
 
@@ -77,7 +77,7 @@ export async function parseDocumentWithAI(
     // Guard against excessively large documents that would blow token limits
     const truncated = content.length > 30000 ? content.slice(0, 30000) : content;
 
-    const route = getAIModel('document-intake', {
+    const route = await getAsyncAIModel('document-intake', {
       sources: ['document-intelligence'],
     });
 

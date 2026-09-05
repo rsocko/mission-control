@@ -605,14 +605,14 @@ export function describeFinanceAssistantPersistenceContract(
           expect(baseline.counts).toEqual({
             apiRoutes: 266,
             tierARoutes: 121,
-            tierBRoutes: 13,
-            cleanRoutes: 132,
+            tierBRoutes: 5,
+            cleanRoutes: 140,
             directTaintSourceRoutes: 91,
             transitiveOnlyTaintSourceRoutes: 30,
             directDbNamespaceRoutes: 92,
-            taintedLibA: 61,
+            taintedLibA: 58,
             taintedApiHelpers: 0,
-            totalMigrationUnits: 182,
+            totalMigrationUnits: 179,
           });
           const l09 = baseline.decrementHistory.find((record) => record.layer === 'L09');
           expect(l09?.totalMigrationUnits).toEqual({ from: 313, to: 310, delta: -3 });

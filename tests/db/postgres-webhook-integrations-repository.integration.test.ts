@@ -9,7 +9,7 @@ import type { WebhookIntegrationsPersistence } from '@/db/persistence/webhook-in
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 
 /**
- * Live-PostgreSQL behavior coverage for the Layer L19 webhook port. It runs the
+ * Live-PostgreSQL behavior coverage for the Layer L20 webhook port. It runs the
  * same scenarios as tests/db/sqlite-webhook-integrations-repository.test.ts —
  * deterministic ordering, atomic replay claiming under concurrency, transaction
  * rollback, failure persistence, CRUD, connector lookup/status, and outbound

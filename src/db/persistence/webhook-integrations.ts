@@ -1,5 +1,5 @@
 /**
- * Layer L19: the webhook configuration / delivery / log persistence contract.
+ * Layer L20: the webhook configuration / delivery / log persistence contract.
  *
  * One cohesive port for every webhook surface the web tier owns: inbound
  * webhook configuration and their delivery/replay/log tables, outbound webhook
@@ -475,7 +475,7 @@ export interface WebhookIngestRepository {
 }
 
 /**
- * The whole Layer L19 surface, registered atomically: a backend either
+ * The whole Layer L20 surface, registered atomically: a backend either
  * supports every webhook configuration/delivery/log surface or none of them.
  */
 export interface WebhookIntegrationsPersistence {

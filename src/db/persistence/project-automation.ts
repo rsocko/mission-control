@@ -1,5 +1,9 @@
 import type { SourceBinding } from '@/types';
 import type { ProjectHierarchyPersistence } from './project-hierarchy';
+import type {
+  ListOrganizationPersistence,
+  ProjectAdministrationPersistence,
+} from './project-organization';
 
 export interface AutoIncludeRule {
   type: 'tag' | 'title_contains' | 'source_list' | 'connector';
@@ -35,6 +39,16 @@ export interface ProjectAutomationRepository {
    * backend selection and one per-project serialization namespace.
    */
   hierarchy: ProjectHierarchyPersistence;
+  /**
+   * Project CRUD and phase administration share hierarchy-owned rows and the
+   * same per-project serialization namespace as rule evaluation and L15.
+   */
+  projectAdministration: ProjectAdministrationPersistence;
+  /**
+   * List-group administration is published atomically with project
+   * administration so PostgreSQL can never fall back to the SQLite graph.
+   */
+  listOrganization: ListOrganizationPersistence;
 }
 
 export interface ProjectAutomationProject {

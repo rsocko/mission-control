@@ -127,7 +127,7 @@ function taskInsertValues(input: WebhookTaskInsert) {
 }
 
 /**
- * SQLite adapter for the Layer L19 webhook configuration/delivery/log port.
+ * SQLite adapter for the Layer L20 webhook configuration/delivery/log port.
  *
  * It receives the native handle and the drizzle handle from the SQLite
  * composition only. Multi-row work (secret/agent reference checks, webhook

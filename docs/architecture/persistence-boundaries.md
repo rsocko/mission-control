@@ -1844,9 +1844,98 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
-## Web/API PostgreSQL parity: Layer L19 (webhook configuration, delivery, and log)
+## Web/API PostgreSQL parity: task quick-sort workflow persistence
 
-Layer L19 publishes one atomic `webhookIntegrations` slot on
+The quick-sort activity, operation-apply, and operation-undo routes now use a
+bounded `TaskCorePersistence.quickSort` port. The existing task-core composition
+remains the sole owner: startup constructs the SQLite or PostgreSQL adapter
+atomically, and route or helper evaluation cannot import, initialize, or fall
+back to SQLite in PostgreSQL mode.
+
+The port owns task snapshot reads, conflict-safe operation reservation,
+operation/log finalization, undo claim/release/finalization, and activity
+statistics. Applying and undoing task fields still delegate to the existing task
+`PATCH` handler with `x-expected-task-updated-at`; this preserves the landed task
+revision CAS, field policy, and external write ordering rather than duplicating
+that behavior in the quick-sort adapter. Operation finalization and log creation
+share one transaction, as do undo state and log reversal. Concurrent reservation
+returns the existing operation, concurrent undo has one claimant, and completed
+undo remains replay-safe.
+
+The exact graph transition from base
+`6205bb0ece832ed0225b8ee31e1cbf6996308d93` is
+`266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182`
+to
+`266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178`.
+All three owned routes become clean, `src/lib/quick-sort/operations.ts` leaves
+the tainted-library set, and no route moves to Tier B.
+## Web/API PostgreSQL parity: Layer L18 (AI execution and memory control plane)
+
+Layer L18 removes the deferred SQLite reach from document intake, retained
+Houston memory, and durable AI run control without changing any of their eight
+route files. Durable runs and semantic source reads now resolve process-wide,
+backend-neutral contracts populated only by `initializeRuntimeDatabase()`.
+SQLite constructs its adapters inside the SQLite startup branch; PostgreSQL
+constructs its existing durable-run and semantic-source adapters from the live
+pool. Access before composition is registered fails closed, and shutdown clears
+only the exact registered generation.
+
+Provider construction is split into a pure `provider-client` capability that
+accepts already-resolved configuration and an asynchronous `provider-runtime`
+that reads configuration through the composed settings repository. The legacy
+synchronous provider facade delegates to the same client, preserving route
+selection, sensitivity policy, admission control, telemetry, error propagation,
+and request ordering. Document intake and Houston summary generation use the
+asynchronous facade, so PostgreSQL never evaluates `config-resolver.ts` or
+`@/db`.
+
+Houston memory continues to persist through `CorePersistenceRepositories`.
+After an authoritative write commits, semantic publication uses the registered
+publication service; entity-link validation uses the registered semantic source
+port. The ordering remains inspect, provider call, memory write, then semantic
+publication. Exclusion remains sticky across recapture, deleted memory stays
+redacted, and expired-memory deletion remains bounded.
+
+The exact graph transition is 266 routes, A121/B13/clean132 to
+A121/B5/clean140. The eight owned routes leave Tier B, while
+`ai-parser.ts`, `intake/index.ts`, and `ai/tools/intake-tools.ts` leave
+`taintedLibA`; total migration units decrease from 182 to 179. Direct-taint,
+transitive-only Tier A, direct-`@/db`, and helper counts are unchanged. No
+suggestion, search, planning, task-ancillary, schema, migration, dependency,
+Next.js, or build path is part of this layer.
+
+The CI-proven cap is 43 paths: 9 production, 32 tests/helpers, and 2
+architecture/documentation paths. The expansion from the original 24-path
+inventory is limited to the 17 established graph readers and two SQLite
+durable-run suites that now register their selected repository explicitly.
+
+## Web/API PostgreSQL parity: Layer L19 (project organization)
+
+Project administration, phase lifecycle, rule-match previews, and list-group
+organization now resolve two backend-neutral capabilities atomically nested
+under the existing `projectAutomation` worker slot. They sit beside, rather
+than replace, L15 `projectAutomation.hierarchy`; no parallel runtime registry,
+backend probe, fallback, or dual write was introduced. See
+[project-organization-persistence.md](./project-organization-persistence.md)
+for the complete route inventory and behavioral contract.
+
+SQLite owns its driver and uses immediate mutations plus deferred composite
+reads. PostgreSQL uses SERIALIZABLE mutations, REPEATABLE READ snapshots,
+bounded serialization/deadlock retry, byte-stable `COLLATE "C"` ordering, a
+dedicated list-organization lock, and the existing per-project advisory
+namespace for project and phase mutations. Phase administration therefore
+continues to participate in L15 revision triggers and optimistic CAS fencing.
+
+All eight owned routes move directly from Tier A to clean. Composed after the
+landed task quick-sort and L18 decrements, the graph moves from
+`266/118/5/143/88/30/89/57/0/175` to
+`266/110/5/151/80/30/81/57/0/167`. The CI-exposed exact-current ratchet
+expansion adds 19 test-only paths to the approved 28-path maximum, for a
+47-path maximum and 46 actual changed paths.
+
+## Web/API PostgreSQL parity: Layer L20 (webhook configuration, delivery, and log)
+
+Layer L20 publishes one atomic `webhookIntegrations` slot on
 `WorkerPersistenceRepositories`. It is a top-level slot rather than a nested
 one because `inbound_webhooks`, `inbound_webhook_log`,
 `inbound_webhook_replays`, `outbound_webhooks`, and `integration_configs` share
@@ -1985,70 +2074,7 @@ raw SQLite handle at all.
   eleven routes — including the unauthenticated-mutation rejections, the
   signature failures, the duplicate-delivery short circuit, and the
   connector-status gates.
-## Web/API PostgreSQL parity: task quick-sort workflow persistence
 
-The quick-sort activity, operation-apply, and operation-undo routes now use a
-bounded `TaskCorePersistence.quickSort` port. The existing task-core composition
-remains the sole owner: startup constructs the SQLite or PostgreSQL adapter
-atomically, and route or helper evaluation cannot import, initialize, or fall
-back to SQLite in PostgreSQL mode.
-
-The port owns task snapshot reads, conflict-safe operation reservation,
-operation/log finalization, undo claim/release/finalization, and activity
-statistics. Applying and undoing task fields still delegate to the existing task
-`PATCH` handler with `x-expected-task-updated-at`; this preserves the landed task
-revision CAS, field policy, and external write ordering rather than duplicating
-that behavior in the quick-sort adapter. Operation finalization and log creation
-share one transaction, as do undo state and log reversal. Concurrent reservation
-returns the existing operation, concurrent undo has one claimant, and completed
-undo remains replay-safe.
-
-The exact graph transition from base
-`6205bb0ece832ed0225b8ee31e1cbf6996308d93` is
-`266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182`
-to
-`266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178`.
-All three owned routes become clean, `src/lib/quick-sort/operations.ts` leaves
-the tainted-library set, and no route moves to Tier B.
-## Web/API PostgreSQL parity: Layer L18 (AI execution and memory control plane)
-
-Layer L18 removes the deferred SQLite reach from document intake, retained
-Houston memory, and durable AI run control without changing any of their eight
-route files. Durable runs and semantic source reads now resolve process-wide,
-backend-neutral contracts populated only by `initializeRuntimeDatabase()`.
-SQLite constructs its adapters inside the SQLite startup branch; PostgreSQL
-constructs its existing durable-run and semantic-source adapters from the live
-pool. Access before composition is registered fails closed, and shutdown clears
-only the exact registered generation.
-
-Provider construction is split into a pure `provider-client` capability that
-accepts already-resolved configuration and an asynchronous `provider-runtime`
-that reads configuration through the composed settings repository. The legacy
-synchronous provider facade delegates to the same client, preserving route
-selection, sensitivity policy, admission control, telemetry, error propagation,
-and request ordering. Document intake and Houston summary generation use the
-asynchronous facade, so PostgreSQL never evaluates `config-resolver.ts` or
-`@/db`.
-
-Houston memory continues to persist through `CorePersistenceRepositories`.
-After an authoritative write commits, semantic publication uses the registered
-publication service; entity-link validation uses the registered semantic source
-port. The ordering remains inspect, provider call, memory write, then semantic
-publication. Exclusion remains sticky across recapture, deleted memory stays
-redacted, and expired-memory deletion remains bounded.
-
-The exact graph transition is 266 routes, A121/B13/clean132 to
-A121/B5/clean140. The eight owned routes leave Tier B, while
-`ai-parser.ts`, `intake/index.ts`, and `ai/tools/intake-tools.ts` leave
-`taintedLibA`; total migration units decrease from 182 to 179. Direct-taint,
-transitive-only Tier A, direct-`@/db`, and helper counts are unchanged. No
-suggestion, search, planning, task-ancillary, schema, migration, dependency,
-Next.js, or build path is part of this layer.
-
-The CI-proven cap is 43 paths: 9 production, 32 tests/helpers, and 2
-architecture/documentation paths. The expansion from the original 24-path
-inventory is limited to the 17 established graph readers and two SQLite
-durable-run suites that now register their selected repository explicitly.
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

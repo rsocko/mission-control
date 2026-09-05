@@ -98,7 +98,7 @@ const MIGRATED_CONNECTOR_STATE_MODULES = [
 ] as const;
 
 /**
- * Layer 19: the webhook configuration/delivery/log surface. Every inbound and
+ * Layer 20: the webhook configuration/delivery/log surface. Every inbound and
  * outbound webhook route, both n8n routes, the RyMessage receiver, and the
  * per-connector receiver must reach the database only through the
  * `webhookIntegrations` worker persistence slot, so PostgreSQL selection never

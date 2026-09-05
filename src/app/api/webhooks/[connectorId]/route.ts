@@ -149,11 +149,24 @@ async function handleGitHubWebhook(
 ): Promise<{ tasksAdded: number; tasksUpdated: number }> {
   const action = payload.action as string;
   const issue = payload.issue as Record<string, unknown> | undefined;
+  const repository = payload.repository as Record<string, unknown> | undefined;
+  const issueNumber = issue?.number;
+  const repositoryName = repository?.full_name;
 
-  if (!issue) return { tasksAdded: 0, tasksUpdated: 0 };
+  if (
+    !issue
+    || typeof issueNumber !== 'number'
+    || typeof repositoryName !== 'string'
+    || repositoryName.length === 0
+  ) {
+    return { tasksAdded: 0, tasksUpdated: 0 };
+  }
 
-  const sourceId = `github:${issue.number}`;
-  const currentTask = await ingest.findTaskBySourceId(sourceId);
+  const sourceId = `${repositoryName}:${issueNumber}`;
+  const currentTask = await ingest.findTaskBySource({
+    connectorInstanceId: connectorId,
+    sourceId,
+  });
 
   // Map GitHub state_reason to internal statusReason
   const ghStateReason = issue.state_reason as string | null | undefined;
@@ -239,7 +252,10 @@ async function handleMicrosoftWebhook(
       });
       added++;
     } else if (changeType === 'updated') {
-      const existing = await ingest.findTaskBySourceId(sourceId);
+      const existing = await ingest.findTaskBySource({
+        connectorInstanceId: connectorId,
+        sourceId,
+      });
       if (existing) {
         await ingest.updateTask(existing.id, {
           updatedAt: now,

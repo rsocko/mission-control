@@ -692,11 +692,37 @@ describePostgres('postgres webhook integrations repository', () => {
       lastSyncedAt: BASE_TIME,
     });
 
-    await expect(repository.ingest.findTaskBySourceId('github:pg-42')).resolves.toEqual({
+    await repository.ingest.createTask({
+      id: 'pg-ingest-task-other-connector',
+      sourceId: 'github:pg-42',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'pg-webhook-github-other',
+      title: 'Other connector',
+      priority: 'none',
+      status: 'in_progress',
+      completedAt: null,
+      statusReason: null,
+      createdAt: BASE_TIME,
+      updatedAt: BASE_TIME,
+      syncStatus: 'synced',
+      lastSyncedAt: BASE_TIME,
+    });
+
+    await expect(repository.ingest.findTaskBySource({
+      connectorInstanceId: 'pg-webhook-github',
+      sourceId: 'github:pg-42',
+    })).resolves.toEqual({
       id: 'pg-ingest-task',
       status: 'todo',
       completedAt: null,
       statusReason: null,
+    });
+    await expect(repository.ingest.findTaskBySource({
+      connectorInstanceId: 'pg-webhook-github-other',
+      sourceId: 'github:pg-42',
+    })).resolves.toMatchObject({
+      id: 'pg-ingest-task-other-connector',
+      status: 'in_progress',
     });
 
     await repository.ingest.updateTask('pg-ingest-task', {
@@ -719,7 +745,10 @@ describePostgres('postgres webhook integrations repository', () => {
       statusReason: 'completed',
       description: 'Body',
     }]);
-    await expect(repository.ingest.findTaskBySourceId('github:pg-missing')).resolves.toBeNull();
+    await expect(repository.ingest.findTaskBySource({
+      connectorInstanceId: 'pg-webhook-github',
+      sourceId: 'github:pg-missing',
+    })).resolves.toBeNull();
   });
 
   it('creates a notification with extra actions and returns its search projection', async () => {

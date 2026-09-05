@@ -54,6 +54,7 @@ import type {
   WebhookSyncLogEntry,
   WebhookTaskIdentity,
   WebhookTaskInsert,
+  WebhookTaskSourceIdentity,
   WebhookTaskUpdate,
 } from './webhook-integrations';
 
@@ -566,7 +567,9 @@ export function createSqliteWebhookIntegrationsRepository(
           : null;
       },
 
-      async findTaskBySourceId(sourceId: string): Promise<WebhookTaskIdentity | null> {
+      async findTaskBySource(
+        input: WebhookTaskSourceIdentity,
+      ): Promise<WebhookTaskIdentity | null> {
         const [row] = await db
           .select({
             id: tasks.id,
@@ -575,7 +578,10 @@ export function createSqliteWebhookIntegrationsRepository(
             statusReason: tasks.statusReason,
           })
           .from(tasks)
-          .where(eq(tasks.sourceId, sourceId))
+          .where(and(
+            eq(tasks.connectorInstanceId, input.connectorInstanceId),
+            eq(tasks.sourceId, input.sourceId),
+          ))
           .limit(1);
         return row ?? null;
       },

@@ -409,6 +409,11 @@ export interface ConnectorWebhookConfig {
   settings: Record<string, unknown>;
 }
 
+export interface WebhookTaskSourceIdentity {
+  connectorInstanceId: string;
+  sourceId: string;
+}
+
 export interface WebhookSyncLogEntry {
   id: string;
   connectorId: string;
@@ -455,7 +460,7 @@ export interface IntegrationConfigRepository {
 
 export interface WebhookIngestRepository {
   findConnector(connectorId: string): Promise<ConnectorWebhookConfig | null>;
-  findTaskBySourceId(sourceId: string): Promise<WebhookTaskIdentity | null>;
+  findTaskBySource(input: WebhookTaskSourceIdentity): Promise<WebhookTaskIdentity | null>;
   createTask(input: WebhookTaskInsert): Promise<void>;
   updateTask(id: string, values: WebhookTaskUpdate): Promise<void>;
   createNotification(

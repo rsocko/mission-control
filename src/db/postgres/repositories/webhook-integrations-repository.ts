@@ -34,6 +34,7 @@ import type {
   WebhookSyncLogEntry,
   WebhookTaskIdentity,
   WebhookTaskInsert,
+  WebhookTaskSourceIdentity,
   WebhookTaskUpdate,
 } from '@/db/persistence/webhook-integrations';
 import { ingestPostgresConnectorNotificationInTransaction } from './connector-execution-repositories';
@@ -695,16 +696,19 @@ export function createPostgresWebhookIntegrationsRepository(
         return row ?? null;
       },
 
-      async findTaskBySourceId(sourceId: string): Promise<WebhookTaskIdentity | null> {
+      async findTaskBySource(
+        input: WebhookTaskSourceIdentity,
+      ): Promise<WebhookTaskIdentity | null> {
         const [row] = await query<WebhookTaskIdentity>(
           pool,
           `
             SELECT id, status, completed_at AS "completedAt", status_reason AS "statusReason"
             FROM tasks
-            WHERE source_id = $1
+            WHERE connector_instance_id = $1
+              AND source_id = $2
             LIMIT 1
           `,
-          [sourceId],
+          [input.connectorInstanceId, input.sourceId],
         );
         return row ?? null;
       },

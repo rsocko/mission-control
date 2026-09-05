@@ -129,7 +129,7 @@ const webhookIntegrations: WebhookIntegrationsPersistence = {
   },
   ingest: {
     findConnector: calls.ingestFindConnector,
-    findTaskBySourceId: calls.ingestFindTask,
+    findTaskBySource: calls.ingestFindTask,
     createTask: calls.ingestCreateTask,
     updateTask: calls.ingestUpdateTask,
     createNotification: calls.ingestCreateNotification,
@@ -743,12 +743,20 @@ describe('poisoned-SQLite webhook web surface', () => {
       mutate('/api/webhooks/github-work', 'POST', {
         action: 'opened',
         issue: { number: 7, title: 'Issue', state: 'open' },
+        repository: { full_name: 'octocat/hello-world' },
       }),
       { params: Promise.resolve({ connectorId: 'github-work' }) },
     );
     expect(opened.status).toBe(200);
     expect(await opened.json()).toMatchObject({ tasksAdded: 1, tasksUpdated: 0 });
-    expect(calls.ingestFindTask).toHaveBeenCalledWith('github:7');
+    expect(calls.ingestFindTask).toHaveBeenCalledWith({
+      connectorInstanceId: 'github-work',
+      sourceId: 'octocat/hello-world:7',
+    });
+    expect(calls.ingestCreateTask).toHaveBeenCalledWith(expect.objectContaining({
+      connectorInstanceId: 'github-work',
+      sourceId: 'octocat/hello-world:7',
+    }));
 
     calls.ingestFindTask.mockResolvedValue({
       id: 'task-1',
@@ -760,6 +768,7 @@ describe('poisoned-SQLite webhook web surface', () => {
       mutate('/api/webhooks/github-work', 'POST', {
         action: 'closed',
         issue: { number: 7, title: 'Issue', state: 'closed', state_reason: 'not_planned' },
+        repository: { full_name: 'octocat/hello-world' },
       }),
       { params: Promise.resolve({ connectorId: 'github-work' }) },
     );
@@ -768,5 +777,16 @@ describe('poisoned-SQLite webhook web surface', () => {
       status: 'done',
       statusReason: 'not_planned',
     }));
+
+    const malformed = await route.POST(
+      mutate('/api/webhooks/github-work', 'POST', {
+        action: 'opened',
+        issue: { number: 8, title: 'Missing repository', state: 'open' },
+      }),
+      { params: Promise.resolve({ connectorId: 'github-work' }) },
+    );
+    expect(await malformed.json()).toMatchObject({ tasksAdded: 0, tasksUpdated: 0 });
+    expect(calls.ingestFindTask).toHaveBeenCalledTimes(2);
+    expect(calls.ingestCreateTask).toHaveBeenCalledTimes(1);
   });
 });

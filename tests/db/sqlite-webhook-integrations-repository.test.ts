@@ -632,11 +632,37 @@ describe('sqlite webhook integrations repository', () => {
         lastSyncedAt: BASE_TIME,
       });
 
-      await expect(repository.ingest.findTaskBySourceId('github:42')).resolves.toEqual({
+      await repository.ingest.createTask({
+        id: 'task-other-connector',
+        sourceId: 'github:42',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'github-other',
+        title: 'Other connector',
+        priority: 'none',
+        status: 'in_progress',
+        completedAt: null,
+        statusReason: null,
+        createdAt: BASE_TIME,
+        updatedAt: BASE_TIME,
+        syncStatus: 'synced',
+        lastSyncedAt: BASE_TIME,
+      });
+
+      await expect(repository.ingest.findTaskBySource({
+        connectorInstanceId: 'github',
+        sourceId: 'github:42',
+      })).resolves.toEqual({
         id: 'task-1',
         status: 'todo',
         completedAt: null,
         statusReason: null,
+      });
+      await expect(repository.ingest.findTaskBySource({
+        connectorInstanceId: 'github-other',
+        sourceId: 'github:42',
+      })).resolves.toMatchObject({
+        id: 'task-other-connector',
+        status: 'in_progress',
       });
 
       await repository.ingest.updateTask('task-1', {
@@ -657,7 +683,10 @@ describe('sqlite webhook integrations repository', () => {
         statusReason: 'completed',
         description: 'Body',
       });
-      await expect(repository.ingest.findTaskBySourceId('missing')).resolves.toBeNull();
+      await expect(repository.ingest.findTaskBySource({
+        connectorInstanceId: 'github',
+        sourceId: 'missing',
+      })).resolves.toBeNull();
     });
 
     it('creates a notification with extra actions and a synced open_url action', async () => {

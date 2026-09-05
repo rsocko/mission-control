@@ -1945,6 +1945,20 @@ export function describeTaskCoreContract(
             sortOrder: 10,
           },
           {
+            id: 'sl-a',
+            connectorInstanceId: 'target-binary-order',
+            sourceId: 'lowercase-list',
+            name: 'Lowercase',
+            sortOrder: 10,
+          },
+          {
+            id: 'sl-A',
+            connectorInstanceId: 'target-binary-order',
+            sourceId: 'uppercase-list',
+            name: 'Uppercase',
+            sortOrder: 10,
+          },
+          {
             id: 'sl-default',
             connectorInstanceId: 'target-1',
             sourceId: 'default-list',
@@ -1963,6 +1977,11 @@ export function describeTaskCoreContract(
           id: 'sl-first',
           name: 'First',
           sourceId: 'first-list',
+        });
+        expect(await moves().findDefaultTargetList('target-binary-order')).toEqual({
+          id: 'sl-A',
+          name: 'Uppercase',
+          sourceId: 'uppercase-list',
         });
         expect(await moves().findDefaultTargetList('missing')).toBeNull();
       });

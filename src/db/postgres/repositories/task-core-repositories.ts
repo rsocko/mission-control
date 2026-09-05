@@ -3339,14 +3339,14 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
         eq(sourceLists.connectorInstanceId, connectorInstanceId),
         eq(sourceLists.wellKnownListName, 'defaultList'),
       ))
-      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.id))
+      .orderBy(asc(sourceLists.sortOrder), asc(sql`${sourceLists.id} COLLATE "C"`))
       .limit(1);
     if (defaultList) return defaultList;
 
     const [firstList] = await this.db.select(projection)
       .from(sourceLists)
       .where(eq(sourceLists.connectorInstanceId, connectorInstanceId))
-      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.id))
+      .orderBy(asc(sourceLists.sortOrder), asc(sql`${sourceLists.id} COLLATE "C"`))
       .limit(1);
     return firstList ?? null;
   }

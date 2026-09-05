@@ -419,6 +419,16 @@ function requirePostgresWorkerRepositories(): WorkerPersistenceRepositories {
   return repositories;
 }
 
+function requirePostgresDailyPlanningPersistence(): NonNullable<
+  WorkerPersistenceRepositories['dailyPlanning']
+> {
+  const persistence = requirePostgresWorkerRepositories().dailyPlanning;
+  if (!persistence) {
+    throw new Error('PostgreSQL daily planning persistence has not been registered');
+  }
+  return persistence;
+}
+
 const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
   tasks: {
     get: (id) => requirePostgresRepositories().tasks.get(id),
@@ -634,6 +644,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
     get: (_target, property) => (
       requirePostgresWorkerRepositories().routines[
         property as keyof WorkerPersistenceRepositories['routines']
+      ]
+    ),
+  }),
+  dailyPlanning: new Proxy({} as NonNullable<WorkerPersistenceRepositories['dailyPlanning']>, {
+    get: (_target, property) => (
+      requirePostgresDailyPlanningPersistence()[
+        property as keyof NonNullable<WorkerPersistenceRepositories['dailyPlanning']>
       ]
     ),
   }),

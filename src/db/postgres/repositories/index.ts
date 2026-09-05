@@ -45,6 +45,9 @@ import { createPostgresAnalyticsPersistence } from './analytics-repositories';
 import { createPostgresFinanceWebPersistence } from './finance-web-repository';
 import { createPostgresRoutinesRepository } from './routines-repository';
 import {
+  createPostgresDailyPlanningPersistence,
+} from './daily-planning-repository';
+import {
   createPostgresWebhookIntegrationsRepository,
 } from './webhook-integrations-repository';
 import type { Pool } from 'pg';
@@ -94,6 +97,9 @@ export { createPostgresExternalAgentControlRepository } from './external-agent-c
 export { createPostgresAnalyticsPersistence } from './analytics-repositories';
 export { createPostgresFinanceWebPersistence } from './finance-web-repository';
 export { createPostgresRoutinesRepository } from './routines-repository';
+export {
+  createPostgresDailyPlanningPersistence,
+} from './daily-planning-repository';
 export {
   createPostgresScoutStatusChangeRepository,
 } from './scout-status-change-repository';
@@ -199,6 +205,7 @@ export function createPostgresWorkerPersistenceRepositories(
     ideationWorkspaces: createPostgresIdeationWorkspaceRepository(pool),
     analytics: createPostgresAnalyticsPersistence(pool),
     routines: createPostgresRoutinesRepository(pool),
+    dailyPlanning: createPostgresDailyPlanningPersistence(pool),
     webhookIntegrations: createPostgresWebhookIntegrationsRepository(pool),
   };
 }

@@ -1,85 +1,75 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => {
-  const terminals: unknown[] = [];
-
-  function chainable(terminal: unknown) {
-    const chain = new Proxy<Record<PropertyKey, unknown>>({}, {
-      get(_, property) {
-        if (property === 'then') {
-          return (resolve: (value: unknown) => unknown) => resolve(terminal);
-        }
-        return vi.fn(() => chain);
-      },
-    });
-    return chain;
-  }
-
-  return {
-    terminals,
-    select: vi.fn(() => chainable(terminals.shift() ?? [])),
-    getServerToday: vi.fn(() => '2026-08-16'),
-  };
+vi.mock('@/db', () => {
+  throw new Error('SQLite database module must not be evaluated');
+});
+vi.mock('@/db/schema', () => {
+  throw new Error('SQLite schema module must not be evaluated');
 });
 
-vi.mock('@/db', () => ({
-  default: { select: mocks.select },
+const mocks = vi.hoisted(() => ({
+  counts: vi.fn(),
+  getServerToday: vi.fn(() => '2026-08-16'),
 }));
 
-vi.mock('@/db/schema', () => ({
-  myDayItems: { date: 'myDayDate', taskId: 'myDayTaskId' },
-  notifications: {
-    connectorInstanceId: 'notificationConnectorId',
-    readState: 'notificationReadState',
-    level: 'notificationLevel',
-  },
-  scoutReconciliationSuggestions: {
-    taskId: 'suggestionTaskId',
-    status: 'suggestionStatus',
-    expiresAt: 'suggestionExpiresAt',
-  },
-  tasks: {
-    id: 'taskId',
-    connectorInstanceId: 'taskConnectorId',
-    connectorType: 'taskConnectorType',
-    status: 'taskStatus',
-    snoozedUntil: 'taskSnoozedUntil',
-    parentId: 'taskParentId',
-    priority: 'taskPriority',
-    dueDate: 'taskDueDate',
-  },
-  triageItems: { status: 'triageStatus' },
-}));
-
-vi.mock('@/lib/connectors/task-source-profiles', () => ({
-  NOTIFICATION_ONLY_CONNECTOR_TYPES: ['outlook-email'],
-}));
-
-vi.mock('@/lib/notifications/lifecycle-sql', () => ({
-  notificationCountsTowardAttention: vi.fn(() => ({ type: 'attention' })),
-  notificationIsInInbox: vi.fn(() => ({ type: 'inbox' })),
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    dailyPlanning: { navigation: { counts: mocks.counts } },
+  }),
 }));
 
 vi.mock('@/lib/utils/date', () => ({
   getLocalToday: mocks.getServerToday,
 }));
 
+function projection(overrides: {
+  myDay?: number;
+  triage?: number;
+  quickSort?: number;
+  reconciliation?: number;
+  overdue?: number;
+  notifications?: Partial<{
+    attention: number;
+    unread: number;
+    urgent: number;
+    actionNeeded: number;
+    headsUp: number;
+    fyi: number;
+  }>;
+}) {
+  return {
+    myDay: overrides.myDay ?? 0,
+    triage: overrides.triage ?? 0,
+    quickSort: overrides.quickSort ?? 0,
+    reconciliation: overrides.reconciliation ?? 0,
+    overdue: overrides.overdue ?? 0,
+    notifications: {
+      attention: 0,
+      unread: 0,
+      urgent: 0,
+      actionNeeded: 0,
+      headsUp: 0,
+      fyi: 0,
+      ...overrides.notifications,
+    },
+  };
+}
+
 describe('GET /api/navigation/counts', () => {
   beforeEach(() => {
-    mocks.terminals.length = 0;
-    mocks.select.mockClear();
-    mocks.getServerToday.mockClear();
+    vi.clearAllMocks();
+    mocks.getServerToday.mockReturnValue('2026-08-16');
   });
 
   it('returns all actionable queue counts and notification severity', async () => {
-    mocks.terminals.push(
-      [{ count: 4 }],
-      [{ attention: 7, unread: 9, urgent: 0, actionNeeded: 2, headsUp: 3, fyi: 2 }],
-      [{ count: 11 }],
-      [{ count: 5 }],
-      [{ count: 3 }],
-      [{ count: 6 }],
-    );
+    mocks.counts.mockResolvedValue(projection({
+      myDay: 4,
+      triage: 11,
+      quickSort: 5,
+      reconciliation: 3,
+      overdue: 6,
+      notifications: { attention: 7, unread: 9, actionNeeded: 2, headsUp: 3, fyi: 2 },
+    }));
 
     const { GET } = await import('@/app/api/navigation/counts/route');
     const response = await GET(new Request(
@@ -88,6 +78,9 @@ describe('GET /api/navigation/counts', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.getServerToday).not.toHaveBeenCalled();
+    expect(mocks.counts).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-08-16' }),
+    );
     await expect(response.json()).resolves.toEqual({
       myDay: 4,
       notifications: 2,
@@ -101,19 +94,15 @@ describe('GET /api/navigation/counts', () => {
   });
 
   it('counts only urgent notifications when urgent is the highest severity', async () => {
-    mocks.terminals.push(
-      [{ count: 4 }],
-      [{ attention: 7, unread: 9, urgent: 2, actionNeeded: 3, headsUp: 1, fyi: 1 }],
-      [{ count: 11 }],
-      [{ count: 5 }],
-      [{ count: 3 }],
-      [{ count: 6 }],
-    );
+    mocks.counts.mockResolvedValue(projection({
+      notifications: { attention: 7, unread: 9, urgent: 2, actionNeeded: 3, headsUp: 1, fyi: 1 },
+    }));
 
     const { GET } = await import('@/app/api/navigation/counts/route');
     const response = await GET(new Request('http://localhost/api/navigation/counts'));
 
     expect(response.status).toBe(200);
+    expect(mocks.getServerToday).toHaveBeenCalled();
     await expect(response.json()).resolves.toMatchObject({
       notifications: 2,
       notificationTone: 'red',
@@ -121,14 +110,9 @@ describe('GET /api/navigation/counts', () => {
   });
 
   it('counts only heads-up notifications above lower blue severities', async () => {
-    mocks.terminals.push(
-      [{ count: 0 }],
-      [{ attention: 6, unread: 6, urgent: 0, actionNeeded: 0, headsUp: 2, fyi: 4 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-      [{ count: 0 }],
-    );
+    mocks.counts.mockResolvedValue(projection({
+      notifications: { attention: 6, unread: 6, headsUp: 2, fyi: 4 },
+    }));
 
     const { GET } = await import('@/app/api/navigation/counts/route');
     const response = await GET(new Request('http://localhost/api/navigation/counts'));
@@ -147,6 +131,15 @@ describe('GET /api/navigation/counts', () => {
     ));
 
     expect(response.status).toBe(400);
-    expect(mocks.select).not.toHaveBeenCalled();
+    expect(mocks.counts).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the selected persistence projection is unavailable', async () => {
+    mocks.counts.mockRejectedValue(new Error('PostgreSQL unavailable'));
+
+    const { GET } = await import('@/app/api/navigation/counts/route');
+    const response = await GET(new Request('http://localhost/api/navigation/counts'));
+
+    expect(response.status).toBe(500);
   });
 });

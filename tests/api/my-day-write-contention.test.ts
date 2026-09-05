@@ -38,8 +38,9 @@ describe('GET /api/my-day under writer-lock contention', () => {
     vi.doUnmock('crypto');
     vi.resetModules();
 
-    const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
+    const helper = await import('../helpers/initialized-sqlite-database');
+    const dbModule = await helper.importInitializedSqliteDatabase();
+    const [schemaModule, routeModule] = await Promise.all([
       import('@/db/schema'),
       import('@/app/api/my-day/route'),
     ]);
@@ -79,10 +80,10 @@ describe('GET /api/my-day under writer-lock contention', () => {
       order: 1,
       addedAt: timestamp,
     });
-  });
+  }, 30_000);
 
   afterAll(() => {
-    sqlite.close();
+    sqlite?.close();
     if (originalDatabasePath === undefined) delete process.env.MC_DB_PATH;
     else process.env.MC_DB_PATH = originalDatabasePath;
     if (originalBusyTimeout === undefined) delete process.env.MC_DB_BUSY_TIMEOUT_MS;

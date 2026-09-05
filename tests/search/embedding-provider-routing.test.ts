@@ -121,7 +121,7 @@ describe('embedding provider requests', () => {
   });
 
   it('stops before egress when sensitivity policy denies the embedding route', async () => {
-    mocks.allowedRoutes = ['azure-private'];
+    mocks.allowedRoutes = ['ollama'];
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const { testEmbeddingConnection } = await import('@/lib/search/semantic');
 
@@ -130,7 +130,7 @@ describe('embedding provider requests', () => {
   });
 
   it('reports a policy-denied embedding route without throwing from status', async () => {
-    mocks.allowedRoutes = ['azure-private'];
+    mocks.allowedRoutes = ['ollama'];
     const { getEmbeddingOperationalStatus } = await import('@/lib/search/semantic');
 
     await expect(getEmbeddingOperationalStatus()).resolves.toMatchObject({

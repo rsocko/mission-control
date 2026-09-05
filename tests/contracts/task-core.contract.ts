@@ -346,6 +346,302 @@ export function describeTaskCoreContract(
       await harness.reset();
     });
 
+    describe('ancillary task lifecycle persistence', () => {
+      it('orders attachment metadata and preserves binary, text, empty, and null content', async () => {
+        await harness.insertTasks([{ id: 'attachment-task' }]);
+        await harness.insertAttachments([
+          {
+            id: 'attachment-null',
+            taskId: 'attachment-task',
+            name: 'remote.bin',
+            contentType: 'application/octet-stream',
+            size: 8,
+            contentBase64: null,
+            sourceAttachmentId: 'remote-1',
+            createdAt: '2026-08-10T12:02:00.000Z',
+          },
+          {
+            id: 'attachment-binary',
+            taskId: 'attachment-task',
+            name: 'image.bin',
+            contentType: 'application/octet-stream',
+            size: 3,
+            contentBase64: 'AP+A',
+            createdAt: '2026-08-10T12:01:00.000Z',
+          },
+          {
+            id: 'attachment-empty',
+            taskId: 'attachment-task',
+            name: 'empty.txt',
+            contentType: 'text/plain',
+            size: 0,
+            contentBase64: '',
+            createdAt: '2026-08-10T12:01:00.000Z',
+          },
+        ]);
+
+        const context = await harness.persistence.ancillary
+          .getAttachmentListContext('attachment-task');
+        expect(context.attachments.map((attachment) => ({
+          id: attachment.id,
+          hasLocalContent: attachment.hasLocalContent,
+        }))).toEqual([
+          { id: 'attachment-binary', hasLocalContent: true },
+          { id: 'attachment-empty', hasLocalContent: true },
+          { id: 'attachment-null', hasLocalContent: false },
+        ]);
+        await expect(harness.persistence.taskReads.getAttachmentReadContext(
+          'attachment-task',
+          'attachment-binary',
+        )).resolves.toMatchObject({
+          attachment: { contentBase64: 'AP+A', contentType: 'application/octet-stream' },
+        });
+        await expect(harness.persistence.taskReads.getAttachmentReadContext(
+          'attachment-task',
+          'attachment-empty',
+        )).resolves.toMatchObject({
+          attachment: { contentBase64: '', contentType: 'text/plain' },
+        });
+        await expect(harness.persistence.taskReads.getAttachmentReadContext(
+          'attachment-task',
+          'attachment-null',
+        )).resolves.toMatchObject({
+          attachment: { contentBase64: null, sourceAttachmentId: 'remote-1' },
+        });
+      });
+
+      it('copies atomically, rolls back invalid targets, and replays the same copy idempotently', async () => {
+        await harness.insertTasks([{ id: 'copy-source', title: 'Copy source' }]);
+        await harness.insertConnectors([{
+          id: 'copy-target',
+          type: 'microsoft-todo',
+          syncedLists: [],
+        }]);
+        await harness.insertTags([{ id: 'copy-tag', name: 'Copy', slug: 'copy' }]);
+        await harness.insertTaskTags([{ taskId: 'copy-source', tagId: 'copy-tag' }]);
+        await harness.insertProjects([{ id: 'copy-project', name: 'Copy Project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'copy-source',
+          projectId: 'copy-project',
+        }]);
+
+        await expect(harness.persistence.ancillary.copyTask({
+          sourceTaskId: 'copy-source',
+          newTaskId: 'copy-invalid',
+          targetConnectorInstanceId: 'missing',
+          targetListId: null,
+          keepTags: true,
+          now: '2026-08-10T12:00:00.000Z',
+        })).resolves.toEqual({ kind: 'connector-not-found' });
+        await expect(harness.persistence.ancillary.getTask('copy-invalid')).resolves.toBeNull();
+
+        const request = {
+          sourceTaskId: 'copy-source',
+          newTaskId: 'copy-successor',
+          targetConnectorInstanceId: 'copy-target',
+          targetListId: null,
+          keepTags: true,
+          now: '2026-08-10T12:00:00.000Z',
+        } as const;
+        await expect(harness.persistence.ancillary.copyTask(request)).resolves.toEqual({
+          kind: 'committed',
+          connectorType: 'microsoft-todo',
+        });
+        await expect(harness.persistence.ancillary.copyTask(request)).resolves.toEqual({
+          kind: 'already-committed',
+          connectorType: 'microsoft-todo',
+        });
+        await expect(harness.persistence.details.getTaskDetail(
+          'copy-successor',
+          '2026-08-10',
+        )).resolves.toMatchObject({
+          task: {
+            title: 'Copy source',
+            connectorInstanceId: 'copy-target',
+            syncStatus: 'pending_push',
+          },
+          tagIds: ['copy-tag'],
+          projectIds: ['copy-project'],
+        });
+      });
+
+      it('rejects stale promotion revisions and promotes only once', async () => {
+        await harness.insertTasks([
+          { id: 'promote-parent' },
+          {
+            id: 'promote-child',
+            parentId: 'promote-parent',
+            depth: 1,
+            isChecklistItem: true,
+            updatedAt: '2026-08-10T12:00:00.000Z',
+          },
+        ]);
+        const repository = harness.persistence.ancillary;
+        await expect(repository.promoteSubtask({
+          taskId: 'promote-child',
+          expectedUpdatedAt: 'stale',
+          now: '2026-08-10T12:01:00.000Z',
+        })).resolves.toEqual({
+          kind: 'revision-conflict',
+          currentUpdatedAt: '2026-08-10T12:00:00.000Z',
+        });
+        const outcomes = await Promise.all([
+          repository.promoteSubtask({
+            taskId: 'promote-child',
+            expectedUpdatedAt: '2026-08-10T12:00:00.000Z',
+            now: '2026-08-10T12:01:00.000Z',
+          }),
+          repository.promoteSubtask({
+            taskId: 'promote-child',
+            expectedUpdatedAt: '2026-08-10T12:00:00.000Z',
+            now: '2026-08-10T12:02:00.000Z',
+          }),
+        ]);
+        expect(outcomes.filter((outcome) => outcome.kind === 'promoted')).toHaveLength(1);
+        expect(outcomes.filter((outcome) => outcome.kind !== 'promoted')).toHaveLength(1);
+      });
+
+      it('serializes concurrent proposal acceptance and returns deterministic child order', async () => {
+        await harness.insertTasks([{
+          id: 'proposal-parent',
+          updatedAt: '2026-08-10T12:00:00.000Z',
+        }]);
+        const expected = await harness.persistence.ancillary
+          .getSubtaskProposalSnapshot('proposal-parent');
+        expect(expected).not.toBeNull();
+        if (!expected) return;
+        const first = {
+          ...writableTask('proposal-a', 'First proposal'),
+          sourceId: 'proposal-a',
+          parentId: 'proposal-parent',
+          depth: 1,
+          isChecklistItem: true,
+          createdAt: '2026-08-10T12:02:00.000Z',
+          updatedAt: '2026-08-10T12:02:00.000Z',
+        };
+        const second = {
+          ...writableTask('proposal-b', 'Second proposal'),
+          sourceId: 'proposal-b',
+          parentId: 'proposal-parent',
+          depth: 1,
+          isChecklistItem: true,
+          createdAt: '2026-08-10T12:01:00.000Z',
+          updatedAt: '2026-08-10T12:01:00.000Z',
+        };
+        const outcomes = await Promise.all([
+          harness.persistence.ancillary.acceptSubtaskProposal({ task: first, expected }),
+          harness.persistence.ancillary.acceptSubtaskProposal({ task: second, expected }),
+        ]);
+        expect(outcomes.map((outcome) => outcome.kind).sort()).toEqual(['created', 'stale']);
+        expect((await harness.persistence.ancillary.listSubtasks('proposal-parent'))
+          .map((task) => task.id)).toHaveLength(1);
+      });
+
+      it('orders subtasks by creation time and stable id tie-breaker', async () => {
+        await harness.insertTasks([{ id: 'ordered-parent' }]);
+        const repository = harness.persistence.ancillary;
+        for (const task of [
+          {
+            ...writableTask('ordered-c', 'Third'),
+            parentId: 'ordered-parent',
+            depth: 1,
+            createdAt: '2026-08-10T12:02:00.000Z',
+          },
+          {
+            ...writableTask('ordered-b', 'Second'),
+            parentId: 'ordered-parent',
+            depth: 1,
+            createdAt: '2026-08-10T12:01:00.000Z',
+          },
+          {
+            ...writableTask('ordered-a', 'First'),
+            parentId: 'ordered-parent',
+            depth: 1,
+            createdAt: '2026-08-10T12:01:00.000Z',
+          },
+        ]) {
+          await expect(repository.createSubtask({ task })).resolves.toEqual({
+            kind: 'created',
+          });
+        }
+        await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
+          expect.objectContaining({ id: 'ordered-a' }),
+          expect.objectContaining({ id: 'ordered-b' }),
+          expect.objectContaining({ id: 'ordered-c' }),
+        ]);
+      });
+
+      it('normalizes concurrent tag mutations by slug and keeps links idempotent', async () => {
+        await harness.insertTasks([{ id: 'tag-task' }]);
+        const repository = harness.persistence.ancillary;
+        const outcomes = await Promise.all([
+          repository.addTaskTags({
+            taskId: 'tag-task',
+            candidates: [{ id: 'tag-first', name: 'Needs Review', slug: 'needs-review' }],
+            tagCreationMode: 'freeform',
+            now: '2026-08-10T12:00:00.000Z',
+          }),
+          repository.addTaskTags({
+            taskId: 'tag-task',
+            candidates: [{ id: 'tag-second', name: 'needs-review', slug: 'needs-review' }],
+            tagCreationMode: 'freeform',
+            now: '2026-08-10T12:00:01.000Z',
+          }),
+        ]);
+        expect(outcomes.flatMap((outcome) => outcome.addedTags)).toHaveLength(1);
+        const detail = await harness.persistence.details.getTaskDetail('tag-task', '2026-08-10');
+        expect(detail?.tagIds).toHaveLength(1);
+        await expect(repository.addTaskTags({
+          taskId: 'tag-task',
+          candidates: [{ id: 'tag-third', name: 'NEEDS REVIEW', slug: 'needs-review' }],
+          tagCreationMode: 'freeform',
+          now: '2026-08-10T12:00:02.000Z',
+        })).resolves.toEqual({ addedTags: [], rejectedTags: [] });
+      });
+
+      it('serializes proposal acceptance against concurrent tag mutation', async () => {
+        await harness.insertTasks([{
+          id: 'proposal-tag-parent',
+          updatedAt: '2026-08-10T12:00:00.000Z',
+        }]);
+        const repository = harness.persistence.ancillary;
+        const expected = await repository.getSubtaskProposalSnapshot('proposal-tag-parent');
+        expect(expected).not.toBeNull();
+        if (!expected) return;
+
+        const [proposalOutcome, tagOutcome] = await Promise.all([
+          repository.acceptSubtaskProposal({
+            expected,
+            task: {
+              ...writableTask('proposal-tag-child', 'Concurrent child'),
+              sourceId: 'proposal-tag-child',
+              parentId: 'proposal-tag-parent',
+              depth: 1,
+              isChecklistItem: true,
+            },
+          }),
+          repository.addTaskTags({
+            taskId: 'proposal-tag-parent',
+            candidates: [{
+              id: 'proposal-tag',
+              name: 'Concurrent Tag',
+              slug: 'concurrent-tag',
+            }],
+            tagCreationMode: 'freeform',
+            now: '2026-08-10T12:01:00.000Z',
+          }),
+        ]);
+
+        expect(['created', 'stale']).toContain(proposalOutcome.kind);
+        expect(tagOutcome.addedTags).toEqual([{
+          id: 'proposal-tag',
+          name: 'Concurrent Tag',
+        }]);
+        const subtasks = await repository.listSubtasks('proposal-tag-parent');
+        expect(subtasks).toHaveLength(proposalOutcome.kind === 'created' ? 1 : 0);
+      });
+    });
+
     describe('quick sort workflow persistence', () => {
       it('captures task revisions and normalized tag order', async () => {
         await harness.insertTasks([{

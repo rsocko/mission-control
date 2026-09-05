@@ -1,81 +1,108 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { DEFAULT_NOTIFICATION_PUSH_PREFERENCES } from '@/db/persistence/notification-push';
 
-const schedulerMocks = vi.hoisted(() => ({
-  isRunning: vi.fn(() => false),
+const mocks = vi.hoisted(() => ({
+  getPreferences: vi.fn(),
+  getPushDeliveryEnabled: vi.fn(),
+  savePreferences: vi.fn(),
   restart: vi.fn(),
 }));
 
-vi.mock('@/lib/push/scheduler', () => ({
-  pushNotificationScheduler: schedulerMocks,
+vi.mock('@/lib/push/notification-push-service', () => ({
+  getNotificationPushPersistence: async () => ({
+    getPreferences: mocks.getPreferences,
+    getPushDeliveryEnabled: mocks.getPushDeliveryEnabled,
+    savePreferences: mocks.savePreferences,
+  }),
 }));
-vi.unmock('drizzle-orm');
-process.env.MC_DB_PATH = ':memory:';
+vi.mock('@/lib/push/scheduler', () => ({
+  pushNotificationScheduler: {
+    restart: mocks.restart,
+  },
+}));
 
-let db: typeof import('@/db').default;
-let schema: typeof import('@/db/schema');
-let GET: typeof import('@/app/api/push/preferences/route').GET;
-let PUT: typeof import('@/app/api/push/preferences/route').PUT;
+import { GET, PUT } from '@/app/api/push/preferences/route';
 
-beforeAll(async () => {
-  db = (await import('@/db')).default;
-  schema = await import('@/db/schema');
-  ({ GET, PUT } = await import('@/app/api/push/preferences/route'));
-});
+function request(body: unknown): Request {
+  return new Request('http://localhost/api/push/preferences', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
 
 beforeEach(() => {
-  db.delete(schema.pushPreferences).run();
-  db.delete(schema.appSettings).run();
-  schedulerMocks.isRunning.mockReturnValue(false);
-  schedulerMocks.restart.mockReset();
+  vi.clearAllMocks();
+  mocks.getPreferences.mockResolvedValue({ ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES });
+  mocks.getPushDeliveryEnabled.mockResolvedValue(true);
+  mocks.savePreferences.mockResolvedValue(undefined);
+  mocks.restart.mockResolvedValue(undefined);
 });
 
-describe('push preferences', () => {
-  it('defaults push delivery to enabled', async () => {
+describe('push preferences route', () => {
+  it('returns preferences and the delivery master switch', async () => {
+    mocks.getPushDeliveryEnabled.mockResolvedValue(false);
     const response = await GET();
-
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ pushDeliveryEnabled: true });
-  });
-
-  it('persists the push delivery master switch independently of scheduler state', async () => {
-    const response = await PUT(new Request('http://localhost/api/push/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pushDeliveryEnabled: false }),
-    }));
-
-    expect(response.status).toBe(200);
-    expect(schedulerMocks.restart).not.toHaveBeenCalled();
-    expect(await (await GET()).json()).toMatchObject({ pushDeliveryEnabled: false });
-  });
-
-  it('rejects non-boolean push delivery values', async () => {
-    const response = await PUT(new Request('http://localhost/api/push/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pushDeliveryEnabled: 'false' }),
-    }));
-
-    expect(response.status).toBe(400);
-  });
-
-  it('does not re-enable push delivery when an older client omits the field', async () => {
-    await PUT(new Request('http://localhost/api/push/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pushDeliveryEnabled: false }),
-    }));
-
-    const response = await PUT(new Request('http://localhost/api/push/preferences', {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ morningHour: 9 }),
-    }));
-
-    expect(response.status).toBe(200);
-    expect(await (await GET()).json()).toMatchObject({
-      morningHour: 9,
+    await expect(response.json()).resolves.toEqual({
+      ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES,
       pushDeliveryEnabled: false,
     });
+  });
+
+  it('saves validated values atomically and preserves an omitted master switch', async () => {
+    const response = await PUT(request({
+      morningEnabled: false,
+      morningHour: 9,
+      quietStart: 22,
+      quietEnd: 7,
+    }));
+
+    expect(response.status).toBe(200);
+    expect(mocks.savePreferences).toHaveBeenCalledWith({
+      preferences: {
+        ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES,
+        morningEnabled: false,
+        morningHour: 9,
+        quietStart: 22,
+        quietEnd: 7,
+      },
+      pushDeliveryEnabled: undefined,
+      updatedAt: expect.any(String),
+    });
+    expect(mocks.restart).toHaveBeenCalledOnce();
+  });
+
+  it('refreshes scheduler state only after persistence succeeds', async () => {
+    const response = await PUT(request({ carryForwardHour: 20 }));
+    expect(response.status).toBe(200);
+    expect(mocks.savePreferences.mock.invocationCallOrder[0])
+      .toBeLessThan(mocks.restart.mock.invocationCallOrder[0]);
+  });
+
+  it.each([
+    [{ morningHour: 24 }, 'morningHour must be 0-23'],
+    [{ carryForwardHour: -1 }, 'carryForwardHour must be 0-23'],
+    [{ triageNudgeThreshold: 0 }, 'triageNudgeThreshold must be a positive integer'],
+    [{ quietStart: 24 }, 'quietStart must be 0-23'],
+    [{ quietEnd: 1.5 }, 'quietEnd must be 0-23'],
+    [{ pushDeliveryEnabled: 'false' }, 'pushDeliveryEnabled must be a boolean'],
+    [{ morningEnabled: 'false' }, 'morningEnabled must be a boolean'],
+    [{ triageNudgeEnabled: 1 }, 'triageNudgeEnabled must be a boolean'],
+    [{ carryForwardEnabled: null }, 'carryForwardEnabled must be a boolean'],
+    [{ doNotDisturb: 'true' }, 'doNotDisturb must be a boolean'],
+  ])('rejects invalid input %#', async (body, error) => {
+    const response = await PUT(request(body));
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ error });
+    expect(mocks.savePreferences).not.toHaveBeenCalled();
+  });
+
+  it('redacts persistence failures and does not restart', async () => {
+    mocks.savePreferences.mockRejectedValue(new Error('postgres://secret@example'));
+    const response = await PUT(request({ morningHour: 9 }));
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({ error: 'Failed to save preferences' });
+    expect(mocks.restart).not.toHaveBeenCalled();
   });
 });

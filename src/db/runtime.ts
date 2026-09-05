@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
@@ -13,6 +14,7 @@ import {
   clearKeywordSearchRepository,
   registerKeywordSearchRepository,
 } from '@/lib/search/keyword-runtime';
+import type { SemanticSearchRuntime } from '@/lib/search/semantic';
 import {
   clearSyncControlStateRepository,
   registerSyncControlStateRepository,
@@ -96,6 +98,14 @@ import { createPostgresAIEnrichmentService } from './postgres/sync/notification-
 import { createPostgresKeywordSearchRepository } from './postgres/search';
 import { createPostgresSemanticIndexRepository } from './postgres/semantic-index/repository';
 import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
+import { getSemanticEmbeddingProvider } from '@/lib/semantic-index/embedding-provider';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
+import { resolveSensitivity } from '@/lib/ai/sensitivity-policy';
+import { semanticIndexLogger } from '@/lib/logger';
+import { runIdempotencyKey } from '@/lib/semantic-index/runs';
+import { SemanticIndexService } from '@/lib/semantic-index/service';
+import { SEMANTIC_SOURCE_ENTITY_TYPES } from '@/lib/semantic-index/source/contracts';
+import { resolveSemanticWorkerConfig } from '@/lib/semantic-index/worker-config';
 import { createPostgresRelativeReminderTimezoneRepository } from './postgres/repositories/relative-reminder-timezone-repository';
 import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import { PostgresDatabaseHealthProbe } from './postgres/health';
@@ -127,6 +137,7 @@ interface DatabaseRuntimeRegistry {
   syncOperatorControlRepository: SyncOperatorControlRepository | null;
   keywordSearchRepository: KeywordSearchRepository | null;
   semanticIndexRepository: SemanticIndexRepository | null;
+  semanticSearchRuntime: SemanticSearchRuntime | null;
   semanticSourcePort: SemanticSourcePort | null;
   durableAiRunRepository: DurableAiRunRepository | null;
   aiEnrichmentService: AIEnrichmentService | null;
@@ -153,6 +164,38 @@ interface DatabaseRuntimeRegistry {
 
 const DATABASE_RUNTIME_REGISTRY_KEY = 'mission-control.database-runtime-registry';
 const DATABASE_RUNTIME_REGISTRY_SCHEMA_VERSION = 1;
+const SEMANTIC_SEARCH_RUNTIME_KEY = 'mission-control.semantic-search-runtime';
+const SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION = 1;
+
+interface SemanticSearchRuntimeRegistry {
+  selected: SemanticSearchRuntime | null;
+}
+
+function semanticSearchRuntimeRegistry(): SemanticSearchRuntimeRegistry {
+  return getProcessRuntimeSlot(
+    SEMANTIC_SEARCH_RUNTIME_KEY,
+    SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION,
+    () => ({ selected: null }),
+  );
+}
+
+function assertCanSelectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = semanticSearchRuntimeRegistry().selected;
+  if (selected && selected !== runtime) {
+    throw new Error('Semantic search runtime is already selected');
+  }
+}
+
+function selectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertCanSelectSemanticSearchRuntime(runtime);
+  semanticSearchRuntimeRegistry().selected = runtime;
+}
+
+function clearSelectedSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  const registry = semanticSearchRuntimeRegistry();
+  if (registry.selected === runtime) registry.selected = null;
+}
 
 function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
   return getProcessRuntimeSlot(
@@ -169,6 +212,7 @@ function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
       syncOperatorControlRepository: null,
       keywordSearchRepository: null,
       semanticIndexRepository: null,
+      semanticSearchRuntime: null,
       semanticSourcePort: null,
       durableAiRunRepository: null,
       aiEnrichmentService: null,
@@ -299,6 +343,9 @@ function clearPostgresRuntimeComposition(): void {
   if (runtime.keywordSearchRepository) {
     clearKeywordSearchRepository(runtime.keywordSearchRepository);
   }
+  if (runtime.semanticSearchRuntime) {
+    clearSelectedSemanticSearchRuntime(runtime.semanticSearchRuntime);
+  }
   if (runtime.aiEnrichmentService) {
     clearAIEnrichmentService(runtime.aiEnrichmentService);
   }
@@ -312,6 +359,7 @@ function clearPostgresRuntimeComposition(): void {
   runtime.syncOperatorControlRepository = null;
   runtime.keywordSearchRepository = null;
   runtime.semanticIndexRepository = null;
+  runtime.semanticSearchRuntime = null;
   runtime.semanticSourcePort = null;
   runtime.aiEnrichmentService = null;
   runtime.taskCorePersistence = null;
@@ -370,6 +418,15 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
   },
   connectors: {
     listEnabled: () => requirePostgresRepositories().connectors.listEnabled(),
+    listDeletedIds: () => {
+      const repository = requirePostgresRepositories().connectors;
+      if (typeof repository.listDeletedIds !== 'function') {
+        return Promise.reject(new Error(
+          'PostgreSQL connector deleted-ID repository has not been registered',
+        ));
+      }
+      return repository.listDeletedIds();
+    },
     get: (id) => requirePostgresRepositories().connectors.get(id),
     upsert: (connector) => requirePostgresRepositories().connectors.upsert(connector),
     updateCredentials: (id, credentials, settings) => (
@@ -553,6 +610,23 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  routines: new Proxy({} as WorkerPersistenceRepositories['routines'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().routines[
+        property as keyof WorkerPersistenceRepositories['routines']
+      ]
+    ),
+  }),
+  webhookIntegrations: new Proxy(
+    {} as WorkerPersistenceRepositories['webhookIntegrations'],
+    {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().webhookIntegrations[
+          property as keyof WorkerPersistenceRepositories['webhookIntegrations']
+        ]
+      ),
+    },
+  ),
 };
 const semanticPublicationRuntimeService: SemanticPublicationService = {
   upsert: async (entityType, entityId) => {
@@ -695,6 +769,87 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   const runtime = databaseRuntimeRegistry();
   await runtime.backend.initialize();
   if (!isCurrentGeneration()) return;
+  const packagedSemanticRuntime = await import(
+    '@/lib/semantic-index/packaged-worker-runtime'
+  );
+  const semanticSearchRuntime: SemanticSearchRuntime = {
+    async resolve() {
+      const repository = databaseRuntimeRegistry().semanticIndexRepository;
+      if (!repository) {
+        throw new Error('PostgreSQL semantic index repository has not been registered');
+      }
+      return {
+        repository,
+        embeddings: getSemanticEmbeddingProvider(),
+      };
+    },
+    async scheduleBackfill() {
+      if (/^(1|true|yes|on)$/i.test(
+        process.env.MC_SEMANTIC_INDEX_WORKER_DISABLED?.trim() ?? '',
+      )) {
+        return { status: 'skipped', reason: 'semantic-search-disabled' };
+      }
+      try {
+        const { resolved, routingPolicy } = await loadAIProviderConfiguration();
+        if (!resolved.semanticSearchEnabled && !resolved.houstonMemoryEnabled) {
+          return { status: 'skipped', reason: 'semantic-search-disabled' };
+        }
+        const entityTypes = SEMANTIC_SOURCE_ENTITY_TYPES.filter((entityType) =>
+          entityType === 'houston-summary'
+            ? resolved.houstonMemoryEnabled
+            : resolved.semanticSearchEnabled
+        );
+        const config = resolveSemanticWorkerConfig(entityTypes);
+        const repository = databaseRuntimeRegistry().semanticIndexRepository;
+        const source = databaseRuntimeRegistry().semanticSourcePort;
+        if (!repository || !source) {
+          throw new Error('PostgreSQL semantic persistence has not been registered');
+        }
+        const service = new SemanticIndexService({
+          repository,
+          source,
+          embeddings: getSemanticEmbeddingProvider(),
+          resolveSensitivity: ({ connectorType }) => resolveSensitivity(
+            'semantic-embedding',
+            routingPolicy,
+            { sources: connectorType ? [connectorType.trim().toLowerCase()] : [] },
+          ),
+          embeddingTimeoutMs: config.embeddingTimeoutMs,
+        });
+        const identity = await service.ensureIdentity();
+        if (identity.status !== 'ready') {
+          return { status: 'skipped', reason: identity.reason };
+        }
+        const window = `manual:${Math.floor(Date.now() / config.maintenanceIntervalMs)}`;
+        const created = await repository.createRun({
+          id: randomUUID(),
+          indexId: identity.identity.id,
+          kind: 'backfill',
+          idempotencyKey: runIdempotencyKey(identity.identity.id, 'backfill', window),
+          now: new Date().toISOString(),
+        });
+        semanticIndexLogger.info({
+          event: 'semantic_backfill_scheduled',
+          indexId: identity.identity.id,
+          runId: created.run.id,
+          status: created.status,
+        }, 'Semantic index backfill scheduled');
+        return {
+          status: created.status === 'created' ? 'scheduled' : 'existing',
+          indexId: identity.identity.id,
+          runId: created.run.id,
+          runStatus: created.run.status,
+        };
+      } catch (error) {
+        semanticIndexLogger.warn({
+          event: 'semantic_backfill_schedule_failed',
+          err: error,
+        }, 'Failed to schedule semantic index backfill');
+        return { status: 'skipped', reason: 'schedule-failed' };
+      }
+    },
+  };
+  assertCanSelectSemanticSearchRuntime(semanticSearchRuntime);
   const { db, pool, vector } = runtime.backend.context;
   runtime.runtimeHealthPersistence = {
     databaseHealthProbe: new PostgresDatabaseHealthProbe(pool),
@@ -736,15 +891,14 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   runtime.aiEnrichmentService = createPostgresAIEnrichmentService();
   registerAIEnrichmentService(runtime.aiEnrichmentService);
   runtime.semanticIndexRepository = createPostgresSemanticIndexRepository(pool, vector);
+  runtime.semanticSearchRuntime = semanticSearchRuntime;
   runtime.semanticSourcePort = createPostgresSemanticSourcePort(pool);
   runtime.durableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerSemanticSourcePort(runtime.semanticSourcePort);
+  selectSemanticSearchRuntime(runtime.semanticSearchRuntime);
   registerDurableAiRunRepository(runtime.durableAiRunRepository);
   await registerStableRuntimeServices();
   if (!isCurrentGeneration()) return;
-  const packagedSemanticRuntime = await import(
-    '@/lib/semantic-index/packaged-worker-runtime'
-  );
   runtime.stopPostgresSemanticWorker =
     packagedSemanticRuntime.stopPackagedPostgresSemanticWorker;
   if (!isCurrentGeneration()) return;

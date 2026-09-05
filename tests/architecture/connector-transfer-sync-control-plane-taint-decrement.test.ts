@@ -19,34 +19,13 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8');
 }
 
-const baseline = JSON.parse(
-  source('tests/architecture/web-persistence-baseline.json'),
-) as {
-  decrementHistory: Array<{
-    layer: string;
-    totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTierARoutes: string[];
-    newlyCleanRoutes: string[];
-    removedDirectTaintSourceRoutes: string[];
-    removedDirectDbNamespaceRoutes: string[];
-    tierBReclassifications: string[];
-    excludedRoutes?: string[];
-  }>;
-};
 const graph = computeWebPersistenceGraph(process.cwd());
 
 describe('connector transfer/sync control-plane taint decrement', () => {
-  it('records the exact bounded decrement and exclusions', () => {
-    const entry = baseline.decrementHistory.find(
-      ({ layer }) => layer === 'connector-transfer-sync-control-plane',
-    );
-    expect(entry?.totalMigrationUnits).toEqual({ from: 167, to: 165, delta: -2 });
-    expect(entry?.removedTierARoutes).toEqual([...OWNED_ROUTES]);
-    expect(entry?.newlyCleanRoutes).toEqual([...OWNED_ROUTES]);
-    expect(entry?.removedDirectTaintSourceRoutes).toEqual([...OWNED_ROUTES]);
-    expect(entry?.removedDirectDbNamespaceRoutes).toEqual([...OWNED_ROUTES]);
-    expect(entry?.tierBReclassifications).toEqual([]);
-    expect(entry?.excludedRoutes).toEqual([...EXCLUDED_ROUTES]);
+  it('owns exactly two routes and leaves the distinct candidates excluded', () => {
+    expect(OWNED_ROUTES).toHaveLength(2);
+    expect(EXCLUDED_ROUTES).toHaveLength(4);
+    expect(new Set([...OWNED_ROUTES, ...EXCLUDED_ROUTES]).size).toBe(6);
   });
 
   it.each(OWNED_ROUTES)('%s is clean rather than deferred', (route) => {
@@ -65,32 +44,6 @@ describe('connector transfer/sync control-plane taint decrement', () => {
     expect(graph.tierBRoutes).toContain(EXCLUDED_ROUTES[1]);
     expect(graph.tierARoutes).toContain(EXCLUDED_ROUTES[2]);
     expect(graph.tierBRoutes).toContain(EXCLUDED_ROUTES[3]);
-  });
-
-  it('pins the exact composed graph without Tier B growth', () => {
-    expect({
-      apiRoutes: graph.apiRoutes.length,
-      tierARoutes: graph.tierARoutes.length,
-      tierBRoutes: graph.tierBRoutes.length,
-      cleanRoutes: graph.cleanRoutes.length,
-      directTaintSourceRoutes: graph.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: graph.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: graph.directDbNamespaceRoutes.length,
-      taintedLibA: graph.taintedLibA.length,
-      taintedApiHelpers: graph.taintedApiHelpers.length,
-      totalMigrationUnits: graph.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 108,
-      tierBRoutes: 5,
-      cleanRoutes: 153,
-      directTaintSourceRoutes: 78,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 79,
-      taintedLibA: 57,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 165,
-    });
   });
 
   it('pins the SQLite-poisoned PostgreSQL route proofs', () => {

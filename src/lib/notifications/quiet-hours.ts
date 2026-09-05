@@ -8,12 +8,14 @@
  *
  * Refs: #1542
  */
-import db from '@/db';
-import { pushPreferences, connectorConfigs } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
 import { getTimezone, ianaToWindowsTimezone } from '@/lib/mode';
 import logger from '@/lib/logger';
+import { getNotificationPushPersistence } from '@/lib/push/notification-push-service';
 import { isQuietHour } from './quiet-hours-window';
+import {
+  DEFAULT_NOTIFICATION_PUSH_PREFERENCES,
+  type NotificationPushPreferences,
+} from '@/db/persistence/notification-push';
 
 export { isQuietHour } from './quiet-hours-window';
 
@@ -33,47 +35,15 @@ export interface NotificationGateResult {
   reason?: 'dnd' | 'quiet_hours' | 'calendar_busy';
 }
 
-export interface PushPrefs {
-  morningEnabled: boolean;
-  morningHour: number;
-  triageNudgeEnabled: boolean;
-  triageNudgeThreshold: number;
-  carryForwardEnabled: boolean;
-  carryForwardHour: number;
-  quietStart: number | null;
-  quietEnd: number | null;
-  doNotDisturb: boolean;
-}
+export type PushPrefs = NotificationPushPreferences;
 
-const DEFAULT_PREFS: PushPrefs = {
-  morningEnabled: true,
-  morningHour: 8,
-  triageNudgeEnabled: true,
-  triageNudgeThreshold: 5,
-  carryForwardEnabled: true,
-  carryForwardHour: 18,
-  quietStart: null,
-  quietEnd: null,
-  doNotDisturb: false,
+export const DEFAULT_PREFS: PushPrefs = {
+  ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES,
 };
 
 /** Load push notification preferences from DB, falling back to defaults. */
 export async function getPreferences(): Promise<PushPrefs> {
-  const rows = await db.select().from(pushPreferences).where(eq(pushPreferences.id, 'default')).limit(1);
-  if (rows.length === 0) return { ...DEFAULT_PREFS };
-
-  const r = rows[0];
-  return {
-    morningEnabled: r.morningEnabled,
-    morningHour: r.morningHour,
-    triageNudgeEnabled: r.triageNudgeEnabled,
-    triageNudgeThreshold: r.triageNudgeThreshold,
-    carryForwardEnabled: r.carryForwardEnabled,
-    carryForwardHour: r.carryForwardHour,
-    quietStart: r.quietStart,
-    quietEnd: r.quietEnd,
-    doNotDisturb: r.doNotDisturb,
-  };
+  return (await getNotificationPushPersistence()).getPreferences();
 }
 
 /**
@@ -86,22 +56,15 @@ export async function getPreferences(): Promise<PushPrefs> {
  */
 export async function isCalendarBusy(): Promise<boolean> {
   try {
-    const calConnectors = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.type, 'outlook-calendar'), isNull(connectorConfigs.deletedAt)));
-
-    const activeConnectors = calConnectors.filter(c => c.enabled);
-    if (activeConnectors.length === 0) return false;
+    const accessTokens = await (
+      await getNotificationPushPersistence()
+    ).listActiveCalendarAccessTokens();
+    if (accessTokens.length === 0) return false;
 
     const now = new Date();
     const windowsTz = ianaToWindowsTimezone(getTimezone());
 
-    for (const connector of activeConnectors) {
-      const creds = connector.credentials as Record<string, string> | null;
-      const token = creds?.accessToken || creds?.access_token;
-      if (!token) continue;
-
+    for (const token of accessTokens) {
       try {
         // Query a narrow 1-minute window around "now" to see if user is in a meeting
         const startISO = now.toISOString();

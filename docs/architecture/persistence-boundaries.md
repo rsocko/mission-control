@@ -2,7 +2,7 @@
 title: "Portable Persistence Boundaries"
 status: active
 created: 2026-08-25
-last_reviewed: 2026-08-30
+last_reviewed: 2026-09-05
 category: architecture
 related:
   - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
@@ -493,6 +493,20 @@ after commit. Semantic enrichment, project-rule/planning post-processing,
 outbound-event publication, and durable AI use their backend-selected
 repositories and never fall back to SQLite.
 
+The `/api/ai/search` visibility preflight also uses the selected core
+`ConnectorRepository`. Both adapters return soft-deleted connector IDs in
+deterministic binary order before the route starts its concurrent keyword/
+semantic search and status branches. PostgreSQL search therefore cannot
+evaluate the SQLite compatibility database while preserving the same
+Universe privacy exclusion set.
+
+Search query/status orchestration resolves semantic-index storage and
+embedding capabilities through a process-wide runtime selected by database
+startup. SQLite registers its existing semantic runtime; PostgreSQL registers
+its native repository and async provider configuration path. Missing
+composition fails closed, and neither the route nor its search runtime can
+load or fall back to SQLite in PostgreSQL mode.
+
 The PostgreSQL implementation also supplies backend-specific migrations, sync
 jobs and connector-operation leases, full-text search, database health
 snapshots, and runtime telemetry. This is application capability, not evidence
@@ -502,6 +516,40 @@ work is performed. See the
 [database scaling and migration strategy](../design/active/database-scaling-strategy.md).
 
 ## Domain migration sequence
+
+### Connector transfer and sync control plane
+
+This bounded layer owns only the legacy
+`connectors/[id]/cross-account` transfer endpoint and
+`sync/tasks/resolve` identity lookup. Cross-account execution is selected by a
+process-wide, backend-neutral route service registered from the database
+composition root for both SQLite and PostgreSQL. It verifies source-connector
+ownership, resolves an omitted destination through the task-core list
+repository, and delegates to the canonical write-through task move. The route
+therefore inherits optimistic claim fencing, transfer identity, compensation,
+durable cleanup intent, replay handling, redacted upstream failures, and remote
+I/O ordering instead of recreating those semantics.
+
+Task identity resolution uses the canonical connector/source identity lookup
+from task-core persistence. The shared SQLite and live-PostgreSQL contract pins
+deterministic destination-list selection: prefer `defaultList`, then lowest
+`sortOrder`, then stable `id`. PostgreSQL startup and both routes have
+poisoned-SQLite proofs; there is no SQLite load, fallback, dual write, or
+backend probe in either request path.
+
+The reconciled cap is 23 changed paths: 9 production paths, 12 test paths, and
+2 architecture/ratchet paths. Retained-list purge, GitHub bulk transfer, sync
+cleanup, retained-resolution claims, Scout/triage, and webhook integration are
+explicitly excluded. The canonical baseline and fail-closed PostgreSQL route
+sentinel are the sole exact-current graph owners.
+
+Against base `e500c02459870755a5aa91a92843f479f6d63bea`, the exact graph moves
+from `266/85/5/176/55/30/56/51/0/136` to
+`266/83/5/178/53/30/54/51/0/134`, ordered as API routes / Tier A / Tier B /
+clean / direct taint / transitive-only taint / direct `@/db` / tainted
+libraries / tainted helpers / total migration units. Both owned routes move
+from Tier A directly to clean; Tier B and every library/helper set remain
+unchanged.
 
 Migrate one correctness-sensitive workflow at a time:
 
@@ -604,24 +652,31 @@ every `src/app/api/**/route.ts(x)` file as Tier A (fails at PostgreSQL
 *import* time - a static edge reaches `@/db` or a SQLite driver package),
 Tier B (fails only at *call* time - the only path is a dynamic `import()`/
 `require()`), or clean. `tests/architecture/web-persistence-baseline.json`
-commits the exact current sets and counts (266 routes, Tier A 221, Tier B 39,
-clean 6, tainted `src/lib` 123, tainted shared API helpers 6, total migration
-units 350 = Tier A + tainted-lib + tainted-helpers), plus a `finalTarget` of
-zero for every count. `tests/architecture/web-persistence-baseline.test.ts`
-recomputes the census from current source on every run and fails on: any set
-gaining an entry absent from the baseline, any count exceeding its baseline
-ceiling (`cleanRoutes` uses the same check inverted, as a floor), or the
-partition/total invariants no longer holding. Set-based (not count-only)
-comparison is deliberate and is itself covered by synthetic meta-tests in the
-same file: a later layer cannot pass the ratchet by swapping one allowed
-tainted file for a different, unlisted one at an unchanged count, or by
-"fixing" a Tier A route merely by turning its static import into a dynamic
-one (which would shrink Tier A but must simultaneously add a new,
-baseline-absent entry to Tier B, failing that tier's own independent
-ceiling). `LEGACY_RAW_SQLITE_IMPORTS` and other legacy allowlist entries from
-the ratchet in "Current dependency inventory" above are not grandfathered
-here: if reachable from a route, they correctly still count as Tier A/B
-taint. This ratchet is deliberately a separate file from
+commits the exact current graph: every path array, every count, the partition
+invariants, and a `finalTarget` of zero for every taint count. The historical
+`decrementHistory` and `layerUpdates` entries in that file are archival
+provenance, not a second live assertion surface.
+
+**Ratchet ownership.** `scripts/postgres-route-sentinel.mjs` is the sole
+exact-current baseline reader and graph/path allowlist gate. Historical layer
+tests do not reread the JSON or copy the current global count tuple. They assert
+only monotonic behavior owned by that layer: migrated routes remain clean,
+removed libraries remain outside the taint graph, source-level adapter
+boundaries remain intact, and (where useful) the total migration units do not
+exceed that layer's post-migration ceiling. A later unrelated decrement can
+therefore update only the canonical baseline, while any regression in an older
+layer still fails its local invariant.
+
+Set-based (not count-only) comparison in the sentinel is deliberate and covered
+by dependency-free synthetic tests: a later layer cannot pass by swapping one
+allowed tainted route or library for an unlisted one at the same count, or by
+"fixing" a Tier A route merely by turning its static import into a dynamic one.
+The sentinel also compares every declared count to the recomputed graph, so
+baseline count drift fails even when all path arrays still match.
+`LEGACY_RAW_SQLITE_IMPORTS` and other legacy allowlist entries from the ratchet
+in "Current dependency inventory" above are not grandfathered here: if
+reachable from a route, they correctly still count as Tier A/B taint. This
+ratchet is deliberately separate from
 `persistence-boundaries.test.ts`'s narrower raw-handle/driver-import
 allowlist ratchet (a different, adapter-boundary-scoped check carried over
 from the worker layers); neither duplicates the other.
@@ -646,6 +701,34 @@ cause; only the corrected, self-consistent `directTaintSourceRoutes`/
 `transitiveOnlyTaintSourceRoutes` split (143/78, which sums exactly to 221 by
 construction) is used as a ratchet field.
 
+**Dedicated PostgreSQL route sentinel.** `scripts/postgres-route-sentinel.mjs`
+promotes the route census to a dependency-free CI gate run with
+`MC_DATABASE_BACKEND=postgres`. It does not execute route handlers or contact a
+database or external service. Instead, it recomputes the static and deferred
+import graph and treats the canonical baseline's nonzero `tierARoutes` and
+`tierBRoutes` arrays as explicit, exact-current allowlists while also pinning
+the source, route-inventory, clean-route, tainted-library, and shared-helper
+arrays. The check fails when a currently clean route gains any SQLite
+reachability, a new route is added without classification, any graph array
+changes without a deliberate baseline update, a path is not
+sorted/unique/POSIX-normalized, or declared counts and partitions drift. This
+preserves the honest current state rather than claiming parity is complete;
+later parity layers tighten the gate by updating the same canonical baseline as
+their taint sets shrink. `scripts/postgres-route-sentinel.test.mjs` runs without
+Vitest and proves that count drift, same-count route and library swaps, static
+and deferred SQLite reach, and non-canonical paths all fail. It also prevents
+historical tests and contracts from reclaiming baseline-reader or global-tuple
+ownership. The existing poisoned-SQLite composition tests remain the dynamic
+complement for migrated
+surfaces: `tests/sync/postgres-web-composition-poisoned.test.ts`, the AI and
+runtime-observability route suites under `tests/api/`, and the analytics,
+ideation, project-hierarchy, and project-organization suites under `tests/db/`.
+The webhook configuration/delivery/log layer adds
+`tests/api/postgres-webhook-integrations-poisoned.test.ts` as an all-route
+composition proof.
+The sentinel is deterministic architecture reachability protection, not a claim
+that static analysis proves every runtime branch.
+
 **Known limitation: no local validation was run for this layer.** The
 approved-registry npm restore failed on a `qs@6.16.0` 404 against
 `https://packagefeedproxy.microsoft.io/npm/`; per this repository's
@@ -669,10 +752,11 @@ display names.
 ### The contract
 
 `src/lib/tasks/core/contracts.ts` defines `TaskCorePersistence`, now a composition
-of fifteen narrowly-named repositories (`collections`, `details`, `creates`,
-`mutations`, `removals`, `filterInputs`, `queries`, `policyIdentities`,
-`lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`, `priorityEntities`,
-`sourceListNames`, `transferIdentity`). It is deliberately **not** a generic
+of eighteen narrowly-named repositories (`collections`, `details`, `creates`,
+`mutations`, `removals`, `taskReads`, `filterInputs`, `queries`,
+`policyIdentities`, `lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`,
+`priorityEntities`, `sourceListNames`, `transferIdentity`, `quickSort`,
+`ancillary`). It is deliberately **not** a generic
 table/dialect query API, and it has no "run this callback in a transaction"
 escape hatch: the inputs are domain values (`TaskFilterSpec`, `TaskListPage`,
 `PendingSyncTaskMoveRequest`, `TaskMoveDestinationMaterialization`,
@@ -1090,8 +1174,9 @@ The exact L07 graph is:
 The two task roots leave the direct sets; the MCP forwarding route leaves the
 transitive-only set. All three enter `cleanRoutes`. Tier B, tainted libraries,
 tainted API helpers, and the static/dynamic taint-source sets are unchanged.
-`tests/architecture/task-write-taint-decrement.test.ts` pins the exact paths and
-counts.
+`tests/architecture/task-write-taint-decrement.test.ts` keeps the three
+layer-owned routes clean and enforces the monotonic L07 migration-unit ceiling;
+the PostgreSQL route sentinel owns the exact current paths and counts.
 
 ### Proof and exclusions
 
@@ -1479,9 +1564,8 @@ committed baseline after both merge is `taintedLibA` 123 → 112 (nine L06a
 files plus the two L02 files), `directDbNamespaceRoutes` 144 → 143 (L02's
 contribution only, unrelated to L06a), and `totalMigrationUnits` 350 → 338.
 This combined figure — not either layer's own isolated delta above — is what
-`tests/architecture/web-persistence-baseline.json` and
-`tests/architecture/web-persistence-baseline.test.ts`'s exact-equality check
-enforce on `main` after both merges.
+`tests/architecture/web-persistence-baseline.json` and the dependency-free
+PostgreSQL route sentinel enforce on `main` after both merges.
 
 **Known limitation: no local validation was run for this layer**, for the
 same approved-registry `qs@6.16.0` restore failure documented under Layer
@@ -1933,40 +2017,296 @@ landed task quick-sort and L18 decrements, the graph moves from
 expansion adds 19 test-only paths to the approved 28-path maximum, for a
 47-path maximum and 46 actual changed paths.
 
-## Web/API PostgreSQL parity: connector transfer/sync control plane
+## Web/API PostgreSQL parity: Layer L20 (webhook configuration, delivery, and log)
 
-This bounded layer owns only the legacy
-`connectors/[id]/cross-account` transfer endpoint and
-`sync/tasks/resolve` identity lookup. Cross-account execution is selected by a
-process-wide, backend-neutral route service registered from the database
-composition root for both SQLite and PostgreSQL. The implementation verifies
-source-connector ownership, resolves an omitted destination through the
-task-core list repository, and delegates to the canonical write-through task
-move. It therefore inherits the existing optimistic claim fence, transfer
-identity, compensation, durable cleanup intent, replay handling, and remote-I/O
-ordering rather than recreating them in the route.
+Layer L20 publishes one atomic `webhookIntegrations` slot on
+`WorkerPersistenceRepositories`. It is a top-level slot rather than a nested
+one because `inbound_webhooks`, `inbound_webhook_log`,
+`inbound_webhook_replays`, `outbound_webhooks`, and `integration_configs` share
+no rows and no serialization namespace with any other worker surface, and it is
+a single slot because a backend either supports the whole webhook contract or
+none of it.
 
-Task identity resolution now uses the canonical connector/source identity
-lookup from task-core persistence. The shared SQLite and live-PostgreSQL
-contract also pins deterministic destination-list selection: prefer
-`defaultList`, then lowest `sortOrder`, then stable `id`. PostgreSQL startup and
-both routes have poisoned-SQLite proofs; there is no SQLite load, fallback,
-dual write, or backend probe in either request path.
+### The cap
 
-The cap is 43 changed paths: 9 production paths, 11 direct
-contract/route/runtime tests, 20 inherited exact-current graph expectation
-updates, 2 graph artifacts, and this architecture document. Retained-list
-purge, GitHub bulk transfer, sync cleanup, retained-resolution claims,
-Scout/triage, and webhook integration are explicitly excluded. Bulk transfer
-and retained resolution already use portable persistence and retain their
-existing Tier B classification.
+Eleven routes and one shared library move behind the port:
+`/api/inbound-webhooks` (GET/POST), `/api/inbound-webhooks/[id]`
+(PATCH/DELETE), `/api/inbound-webhooks/[id]/log` (GET),
+`/api/inbound-webhooks/[id]/receive` (POST), `/api/integrations/n8n`
+(GET/POST/PUT), `/api/integrations/n8n/webhook` (POST),
+`/api/integrations/rymessage` (GET/POST), `/api/integrations/webhooks`
+(GET/POST), `/api/integrations/webhooks/[id]` (PATCH/DELETE),
+`/api/integrations/webhooks/[id]/test` (POST), `/api/webhooks/[connectorId]`
+(GET/POST), plus `src/lib/integrations/n8n.ts`.
 
-The exact graph moves from `266/110/5/151/80/30/81/57/0/167` to
-`266/108/5/153/78/30/79/57/0/165`, ordered as API routes / Tier A / Tier B /
-clean / direct taint / transitive-only taint / direct `@/db` / tainted
-libraries / tainted helpers / total migration units. Both owned routes move
-from Tier A directly to clean; Tier B and every library/helper set remain
-unchanged.
+The final approved maximum is 48 paths: the 28-path implementation cap plus
+20 test-only exact-current ratchet readers discovered across both main
+reconciliations and CI. The production and route scope did not expand.
+
+The port lives in `src/db/persistence/webhook-integrations.ts`, with
+`src/db/persistence/sqlite-webhook-integrations-repository.ts` and
+`src/db/postgres/repositories/webhook-integrations-repository.ts` as the two
+adapters. The SQLite adapter receives the native handle plus the drizzle handle
+only from the SQLite composition; the PostgreSQL adapter receives a `pg` `Pool`
+and owns raw SQL, matching the surrounding adapters.
+
+### The contract
+
+Four sub-ports:
+
+- `inbound` — redacted listing (`hasSecret`, never the secret), create, patch,
+  delete, bounded log read and append, the delivery-config read, the replay
+  claim/release pair, delivery stats, and the task/alert writes the receiver
+  performs.
+- `outbound` — outbound webhook listing, lookup, create, patch, delete.
+- `integrations` — the n8n integration configuration read, upsert, and
+  settings-only update.
+- `ingest` — connector lookup, task lookup/insert/update, notification
+  create/upsert/delete/snooze, and the webhook sync-log append shared by the
+  n8n, RyMessage, and per-connector receivers.
+
+Secret handling is explicit rather than incidental. `InboundWebhookSummary`
+carries `hasSecret` and the PostgreSQL adapter never even selects the secret
+column for it; `InboundWebhookDeliveryConfig` returns the secret because HMAC
+verification is its only purpose; `OutboundWebhookRecord` returns the signing
+secret because the signed-delivery transport and the existing configuration UI
+both require it (unchanged from before this layer). No adapter logs a secret or
+embeds one in an error.
+
+### Invariants preserved
+
+- Trusted-mutation authentication on inbound webhook create, patch, and delete
+  is unchanged, and no route gains or loses an authentication requirement.
+- HMAC signature verification, the production unsigned-webhook rejection, rate
+  limiting, bounded body reads, and payload redaction all remain in the route,
+  before and outside any repository call.
+- The replay claim is a single atomic expire-then-insert operation whose row
+  count decides the outcome. SQLite performs its sampled expired-claim sweep
+  and claim in one immediate transaction. PostgreSQL runs the idempotent sweep
+  before the claim transaction, then uses a delivery-scoped advisory lock so
+  concurrent claims cannot interleave without introducing a sweep/claim lock
+  cycle. The five-minute window and sampled sweep cadence are unchanged.
+- A claim is released only on pre-side-effect failures; once a task, alert, or
+  agent result has committed, the claim is kept.
+- Delivery-log reads and compaction are deterministic: `received_at DESC, id
+  DESC` on both backends, for the bounded read, for the retained window, and for
+  the inbound and outbound configuration listings (`created_at DESC, id DESC`),
+  where ties were previously arbitrary.
+- Failure statistics and log entries are still written on the error path, with
+  the same envelopes, and a failing log append is still only warned about.
+- The inbound alert write remains one transaction covering the notification, its
+  primary action, and the durable push-delivery events; the dispatcher is woken
+  only when that transaction produced a pending delivery. SQLite reuses
+  `createNotificationsInTransaction`; PostgreSQL reuses the existing
+  `ingestPostgresConnectorNotificationInTransaction` helper, so durable push and
+  outbox semantics are shared rather than reimplemented.
+- External-agent dispatch lookup, authentication, and result submission keep
+  their existing control-plane behavior and ordering.
+- The outbound test send performs network I/O strictly after the lookup and
+  outside any database transaction; the n8n connectivity test performs its HTTP
+  call first and then persists the success or failure status, in the same order
+  as before.
+- Connector lookup, the enabled/secret gates, and the sync-log append on
+  `/api/webhooks/[connectorId]` are unchanged, including the generic handler's
+  notification-only source-profile check and template-key extraction.
+- RyMessage stays idempotent: create and update serialize
+  `(connector_type, source_id)` before resolving and either updating or
+  inserting the notification; terminal events delete the notification with its
+  actions and report the deleted id.
+- Keyword indexing stays inline and immediate and the semantic side is only
+  published, exactly as `indexNotificationSearch`/`removeNotificationSearch` do.
+  The two receivers reach those through the backend-neutral
+  `@/lib/search/fts` and `@/lib/semantic-index/publication-service` registries
+  instead of the SQLite-bound `@/lib/search` barrel.
+
+### Ratchet decrement
+
+Recomputed exactly from `tests/architecture/web-persistence-graph.ts` after
+reconciling current main `cd9c8279ed222add48817c3b6ced6dbb49baf916`:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| `tierARoutes` | 110 | 99 |
+| `tierBRoutes` | 5 | 5 |
+| `cleanRoutes` | 151 | 162 |
+| `directTaintSourceRoutes` | 80 | 69 |
+| `transitiveOnlyTaintSourceRoutes` | 30 | 30 |
+| `directDbNamespaceRoutes` | 81 | 70 |
+| `taintedLibA` | 57 | 56 |
+| `taintedApiHelpers` | 0 | 0 |
+| `totalMigrationUnits` | 167 | 155 |
+
+All eleven owned routes leave Tier A, `directTaintSourceRoutes`, and
+`directDbNamespaceRoutes` together, `src/lib/integrations/n8n.ts` leaves
+`taintedLibA`, and no route is reclassified into Tier B.
+`src/app/api/inbound-webhooks/[id]/receive/route.ts` is also removed from
+`LEGACY_RAW_SQLITE_IMPORTS` in
+`tests/architecture/persistence-boundaries.test.ts`: it no longer imports the
+raw SQLite handle at all.
+
+### Proof
+
+- `tests/db/sqlite-webhook-integrations-repository.test.ts` and
+  `tests/db/postgres-webhook-integrations-repository.integration.test.ts` run
+  the same scenarios on both backends: deterministic listing and log ordering,
+  compaction by retention cutoff and retained window, atomic replay claiming
+  including concurrent races, expiry-based re-claiming, release, the
+  cross-webhook sweep, failure-entry persistence, delivery statistics,
+  transaction rollback when a notification's action insert fails, inbound and
+  outbound CRUD with the secret-reference conflicts, connector
+  lookup/enablement/settings, integration-configuration upsert, and the shared
+  task/notification ingestion.
+- `tests/api/postgres-webhook-integrations-poisoned.test.ts` fails `@/db`,
+  `@/db/schema`, `better-sqlite3`, and `drizzle-orm/better-sqlite3` closed,
+  injects a PostgreSQL-shaped composition, and exercises every handler on all
+  eleven routes — including the unauthenticated-mutation rejections, the
+  signature failures, the duplicate-delivery short circuit, and the
+  connector-status gates.
+
+## Web/API PostgreSQL parity: task ancillary lifecycle persistence
+
+The bounded ancillary layer adds one `TaskCorePersistence.ancillary` repository
+to the existing atomic task-core composition. It owns persistence for exactly
+five routes:
+
+- `/api/tasks/[id]/attachments`;
+- `/api/tasks/[id]/copy`;
+- `/api/tasks/[id]/promote`;
+- `/api/tasks/[id]/subtasks`; and
+- `/api/tasks/[id]/tags`.
+
+Both task-core adapters construct the capability in the same composition step;
+there is no ancillary registry, per-route backend choice, SQLite fallback, or
+direct database import in any owned route. AI breakdown and move preview/execute
+remain excluded: breakdown has separate AI ownership, while move behavior
+continues to use the landed task-core move and transfer-identity contracts.
+
+The repository preserves the route contracts rather than absorbing caller
+policy. Authorization, connector construction, network calls, rule evaluation,
+field policy, and source write-back remain route-side. Adapter operations own
+only durable state:
+
+- attachment reads preserve stable created-at/id ordering and exact metadata;
+  stored binary, empty-text, and null content remain distinguishable;
+- attachment deletion performs the remote delete first, then a guarded local
+  delete against the observed source attachment identity;
+- copy snapshots and writes the task graph atomically, preserves deterministic
+  tag/project/subtask ordering, and makes replay of the caller-supplied copy ID
+  idempotent;
+- promotion compares the expected task revision, parent, and checklist state,
+  so stale or concurrent promotion cannot succeed twice;
+- accepted subtask proposals compare the complete ordered snapshot, while
+  direct write-through subtasks persist local intent before source creation and
+  settle that exact intent afterward;
+- tag mutation normalizes duplicate slugs, serializes with proposal acceptance,
+  and commits the local mutation before asynchronous source write-back.
+
+PostgreSQL uses transactions, row locks, and shared advisory-lock namespaces for
+copy replay and concurrent proposal/tag mutation. SQLite uses the existing
+task-core transaction runner. Failure rolls back the complete adapter operation
+on both backends; stale CAS outcomes and existing route errors are preserved
+instead of being inferred from backend messages.
+
+After the L20 webhook decrement landed on `main`, the authoritative sentinel
+transition for this layer is
+`266/A99/B5/clean162/direct69/transitive30/directDB70/lib56/helpers0/units155`
+to
+`266/A94/B5/clean167/direct64/transitive30/directDB65/lib56/helpers0/units150`.
+All five owned routes move directly from Tier A to clean, Tier B and library
+taint remain unchanged, and `web-persistence-baseline.json` plus the fail-closed
+PostgreSQL route sentinel are the sole exact-current graph gate.
+
+The reconciled change keeps exactly eight production paths: the existing
+task-core contract, two adapters/composition files, and five routes. Shared
+SQLite/live-PostgreSQL contracts cover rollback, stale revision rejection,
+concurrent proposal/tag mutation, copy idempotency, attachment
+binary/text/empty/null behavior, and deterministic ordering. Live-PostgreSQL
+route coverage poisons SQLite loading for all five routes.
+
+## Web/API PostgreSQL parity: notification push preferences and scheduler
+
+The additive `notificationDelivery.push` port owns push preferences, the
+notification-delivery master switch, scheduler enablement, quiet-hours
+preference reads, and the existing active calendar access-token projection.
+SQLite and PostgreSQL adapters preserve defaults, timezone and quiet-hours
+values, stable token ordering, and omission semantics. Preference and master
+switch updates commit atomically. PostgreSQL serializes legacy-client omission
+updates with an advisory transaction lock; SQLite uses one immediate
+transaction. PostgreSQL selection never imports, initializes, or falls back to
+SQLite.
+
+Scheduler trigger handlers are registered once in a process-wide, cycle-safe
+runtime slot after database initialization. Registration is idempotent,
+resettable in tests, and access fails closed until handlers are present.
+SQLite startup registers the existing trigger-delivery implementation;
+PostgreSQL startup does not import that excluded SQLite-backed module. Lifecycle
+serialization composes each start, stop, or restart with its durable state
+update, preserving concurrent master-switch and omitted-field behavior.
+Calendar API calls and all other network I/O remain outside repository
+transactions. Repositories expose only active access-token strings and neither
+log nor return refresh tokens, encrypted credentials, or backend error details.
+
+The bounded layer owns only `/api/push/preferences` and
+`/api/push/scheduler`, plus their minimal notification/push dependency chain.
+Notification actions, re-enrichment, trigger delivery, recent wins, task and
+project organization, finance, webhook integrations, and the AI control plane
+remain excluded. Reconciled after task ancillary lifecycle parity, the
+authoritative sentinel transition is
+`266/A94/B5/clean167/direct64/transitive30/directDB65/lib56/helpers0/units150`
+to
+`266/A92/B5/clean169/direct62/transitive30/directDB63/lib54/helpers0/units146`.
+The reconciled diff contains exactly 23 paths: the approved 12 production paths,
+10 focused test/baseline paths, and this architecture document.
+## Web/API PostgreSQL parity: settings preferences
+
+The capture destination, dopamine menu, and inbox-list routes now use the
+typed `PreferenceSettingsRepository` adapter over the startup-selected core
+settings repository. The adapter preserves the established keys, defaults,
+partial dopamine merge behavior, inbox-list ordering and duplicates, and
+single-key upsert semantics. No route probes the backend, imports a database
+schema, falls back to SQLite, or changes its existing validation and error
+responses.
+
+The bounded slice excludes kanban settings, tags, priority entities and logs,
+smart score, and subtask templates. Those surfaces retain task lifecycle,
+source write-through, or separate scoring concerns and remain independently
+reviewable migration units.
+
+Shared SQLite/PostgreSQL contract coverage, live PostgreSQL route coverage,
+and an always-on SQLite-poison test protect the selected behavior. The
+11-path cap is 4 production paths, 5 test paths, and 2 architecture paths.
+The canonical baseline plus fail-closed sentinel are the sole authoritative
+exact-current graph gate. On base
+`0bdf59f493ba7e5d90f601915c3c4511a32ddee2`, the graph moves from
+`266/A91/B5/clean170/direct61/transitive30/directDB62/lib51/helpers0/units142`
+to
+`266/A88/B5/clean173/direct58/transitive30/directDB59/lib51/helpers0/units139`,
+with no Tier A-to-B reclassification.
+
+## Web/API PostgreSQL parity: personal-planning routines
+
+Routine collection, item lifecycle, and completions resolve one backend-neutral
+`WorkerPersistenceRepositories.routines` capability. The scope is exactly three
+routes and the existing `routines` / `routine_completions` table pair; broader
+daily-planning, My Day, mobile, navigation, reset, AI, task, notification,
+webhook, and project surfaces remain separate.
+
+SQLite uses immediate transactions for sort allocation and cadence-sensitive
+completion creation. PostgreSQL uses explicit READ COMMITTED transactions with
+transaction-scoped advisory locks for the sort namespace and each
+`(routineId, date)` completion namespace. Each post-lock statement therefore
+sees the prior writer's commit. Daily and specific-day duplicate creation
+remains a 409 conflict under concurrency, while over-completion cadences
+continue to allow multiple same-day records. Local calendar dates, streak input
+ordering, soft archive, and both completion delete forms are unchanged. See
+[routines-persistence.md](./routines-persistence.md) for the complete contract.
+
+All three owned routes move directly from Tier A to clean. Composed after the
+settings-preference baseline, the exact graph moves from
+`266/A88/B5/clean173/direct58/transitive30/directDB59/lib51/helpers0/units139`
+to
+`266/A85/B5/clean176/direct55/transitive30/directDB56/lib51/helpers0/units136`,
+with no Tier B reclassification and no new taint.
 
 ## Backend-specific exceptions
 

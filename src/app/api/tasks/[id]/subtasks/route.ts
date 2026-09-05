@@ -1,10 +1,9 @@
-import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { hubProjects, tags, taskProjects, tasks, taskTags } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
-import { connectorRegistry } from '@/lib/connectors';
-import { syncScheduler, logWriteThrough } from '@/lib/sync';
+import { NextResponse } from 'next/server';
+import { z } from 'zod';
+import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { logWriteThrough } from '@/lib/sync/write-through-log';
 import logger from '@/lib/logger';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
@@ -13,11 +12,17 @@ import { isPublicDemoMode } from '@/lib/public-demo';
 import { isDemoMode } from '@/lib/mode';
 import { resolveTaskFieldPolicy } from '@/lib/tasks/field-policy';
 import { resolveTaskEditPolicy } from '@/lib/tasks/edit-policy';
-import { z } from 'zod';
 import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type {
+  TaskCoreTaskRow,
+  TaskMoveTaskInsert,
+  TaskSubtaskProposalSnapshot,
+} from '@/lib/tasks/core/contracts';
+import type { ConnectorConfig } from '@/types';
 
 const createSubtaskSchema = z.object({
   title: z.string().trim().min(1).max(200),
@@ -26,26 +31,110 @@ const createSubtaskSchema = z.object({
   proposalId: z.string().uuid().optional(),
 });
 
+async function getOrRefreshSubtaskConnector(connectorInstanceId: string) {
+  const registry = getConnectorRegistry();
+  const existing = registry.getConnector(connectorInstanceId);
+  if (existing) return existing;
+  const repositories = await getWorkerPersistenceRepositories();
+  const config = await repositories.connectors.get(connectorInstanceId);
+  if (!config) return null;
+  repositories.execution.support.assertConfigSupported(config);
+  const resolvedConfig: ConnectorConfig = {
+    ...config,
+    syncMode: config.syncMode || 'poll',
+    pollIntervalMinutes: config.pollIntervalMinutes ?? 5,
+  };
+  return registry.replaceConnector(resolvedConfig);
+}
+
+function contextVersion(snapshot: TaskSubtaskProposalSnapshot): string {
+  return createBreakdownContextVersion({
+    updatedAt: snapshot.parentUpdatedAt,
+    tags: snapshot.tagNames,
+    projects: snapshot.projectNames,
+    existingSubtasks: snapshot.subtaskTitles,
+  });
+}
+
+function proposalReplayResponse(
+  task: TaskCoreTaskRow,
+  currentContextVersion: string,
+) {
+  return NextResponse.json({
+    subtask: {
+      id: task.id,
+      title: task.title,
+      status: task.status,
+      effort: task.effort,
+      parentId: task.parentId,
+    },
+    contextVersion: currentContextVersion,
+    duplicate: true,
+  });
+}
+
+function buildSubtask(
+  parent: TaskCoreTaskRow,
+  input: {
+    id: string;
+    title: string;
+    effort: number | null;
+    now: string;
+    syncStatus: string;
+  },
+): TaskMoveTaskInsert {
+  return {
+    id: input.id,
+    sourceId: input.id,
+    connectorType: parent.connectorType,
+    connectorInstanceId: parent.connectorInstanceId,
+    title: input.title,
+    description: null,
+    status: 'todo',
+    localDisposition: 'active',
+    priority: 'none',
+    planningHorizon: null,
+    dueDate: null,
+    pushCount: 0,
+    createdAt: input.now,
+    updatedAt: input.now,
+    completedAt: null,
+    recurrenceGeneratedFromTaskId: null,
+    parentId: parent.id,
+    depth: parent.depth + 1,
+    isChecklistItem: true,
+    sourceListId: parent.sourceListId,
+    sourceListName: parent.sourceListName,
+    assignee: null,
+    microStatus: null,
+    statusReason: null,
+    metadata: {},
+    syncStatus: input.syncStatus,
+    lastSyncedAt: input.now,
+    pushRetryCount: 0,
+    kanbanColumn: null,
+    kanbanOrder: null,
+    snoozedUntil: null,
+    reminderAt: null,
+    reminderRelative: null,
+    reminderDueTime: null,
+    effort: input.effort,
+    isBulkImport: false,
+  };
+}
+
 /**
- * GET /api/tasks/[id]/subtasks — List subtasks/checklist items for a task
+ * GET /api/tasks/[id]/subtasks — List subtasks/checklist items for a task.
  */
 export async function GET(
   _request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
   try {
-    const subtaskRows = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      priority: tasks.priority,
-    }).from(tasks).where(eq(tasks.parentId, id));
-
-    return NextResponse.json({ subtasks: subtaskRows });
+    const { ancillary } = await getTaskCorePersistence();
+    return NextResponse.json({ subtasks: await ancillary.listSubtasks(id) });
   } catch (error) {
     logger.error({ err: error, taskId: id }, 'Failed to list subtasks');
     return NextResponse.json({ error: 'Failed to list subtasks' }, { status: 500 });
@@ -53,12 +142,12 @@ export async function GET(
 }
 
 /**
- * POST /api/tasks/[id]/subtasks — Add a subtask/step to a task
- * Immediate write-through: creates locally, then pushes checklist item to source.
+ * POST /api/tasks/[id]/subtasks — Add a subtask/step to a task.
+ * Immediate write-through creates the durable local intent before source I/O.
  */
 export async function POST(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
 
@@ -76,8 +165,8 @@ export async function POST(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    // Verify parent task exists
-    const [parent] = await db.select().from(tasks).where(eq(tasks.id, id));
+    const { ancillary } = await getTaskCorePersistence();
+    const parent = await ancillary.getTask(id);
     if (!parent) {
       return NextResponse.json({ error: 'Parent task not found' }, { status: 404 });
     }
@@ -115,8 +204,7 @@ export async function POST(
           { status: 403 },
         );
       }
-      const connector = connectorRegistry.getConnector(parent.connectorInstanceId)
-        ?? await syncScheduler.initializeConnectorFromDb(parent.connectorInstanceId);
+      const connector = await getOrRefreshSubtaskConnector(parent.connectorInstanceId);
       if (!connector?.createSubTask) {
         return NextResponse.json(
           { error: 'This connector does not support subtask creation' },
@@ -125,135 +213,91 @@ export async function POST(
       }
     }
 
-    const subtaskId = proposalId || randomUUID();
-    const now = new Date().toISOString();
-    const values = {
-      id: subtaskId,
-      title,
-      status: 'todo',
-      priority: 'none',
-      effort: effort ?? null,
-      connectorType: parent.connectorType,
-      connectorInstanceId: parent.connectorInstanceId,
-      sourceListId: parent.sourceListId,
-      sourceListName: parent.sourceListName,
-      parentId: id,
-      depth: (parent.depth || 0) + 1,
-      isChecklistItem: true,
-      sourceId: subtaskId,
-      syncStatus: shouldWriteThrough ? 'pending_push' : 'synced',
-      lastSyncedAt: now,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    let acceptedContextVersion: string | undefined;
+    let expectedSnapshot: TaskSubtaskProposalSnapshot | null = null;
     if (proposalId && expectedContextVersion) {
-      const result = runTransaction((tx) => {
-        const previouslyAccepted = tx.select({
-          id: tasks.id,
-          title: tasks.title,
-          status: tasks.status,
-          effort: tasks.effort,
-          parentId: tasks.parentId,
-        }).from(tasks).where(eq(tasks.id, proposalId)).get();
-        const freshParent = tx.select({ updatedAt: tasks.updatedAt })
-          .from(tasks)
-          .where(eq(tasks.id, id))
-          .get();
-        const currentTags = tx.select({ name: tags.name })
-          .from(taskTags)
-          .innerJoin(tags, eq(taskTags.tagId, tags.id))
-          .where(eq(taskTags.taskId, id))
-          .limit(20)
-          .all();
-        const currentProjects = tx.select({ name: hubProjects.name })
-          .from(taskProjects)
-          .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-          .where(eq(taskProjects.taskId, id))
-          .limit(10)
-          .all();
-        const currentSubtasks = tx.select({ title: tasks.title })
-          .from(tasks)
-          .where(eq(tasks.parentId, id))
-          .limit(30)
-          .all();
-        if (!freshParent) {
-          return { kind: 'stale' } as const;
+      const previouslyAccepted = await ancillary.getTask(proposalId);
+      if (previouslyAccepted) {
+        if (previouslyAccepted.parentId !== id) {
+          return NextResponse.json({ error: 'Proposal ID is already in use' }, { status: 409 });
         }
-        const currentContextVersion = createBreakdownContextVersion({
-          updatedAt: freshParent.updatedAt,
-          tags: currentTags.map((row) => row.name),
-          projects: currentProjects.map((row) => row.name),
-          existingSubtasks: currentSubtasks.map((row) => row.title),
-        });
-        if (previouslyAccepted) {
-          return previouslyAccepted.parentId === id
-            ? {
-                kind: 'duplicate',
-                subtask: previouslyAccepted,
-                contextVersion: currentContextVersion,
-              } as const
-            : { kind: 'conflict' } as const;
+        const currentSnapshot = await ancillary.getSubtaskProposalSnapshot(id);
+        return proposalReplayResponse(
+          previouslyAccepted,
+          currentSnapshot ? contextVersion(currentSnapshot) : expectedContextVersion,
+        );
+      }
+      expectedSnapshot = await ancillary.getSubtaskProposalSnapshot(id);
+      if (!expectedSnapshot || contextVersion(expectedSnapshot) !== expectedContextVersion) {
+        const concurrentlyAccepted = await ancillary.getTask(proposalId);
+        if (concurrentlyAccepted?.parentId === id) {
+          const currentSnapshot = await ancillary.getSubtaskProposalSnapshot(id);
+          return proposalReplayResponse(
+            concurrentlyAccepted,
+            currentSnapshot ? contextVersion(currentSnapshot) : expectedContextVersion,
+          );
         }
-        if (currentContextVersion !== expectedContextVersion) {
-          return { kind: 'stale' } as const;
+        if (concurrentlyAccepted) {
+          return NextResponse.json({ error: 'Proposal ID is already in use' }, { status: 409 });
         }
-
-        const existingChildren = tx.select({
-          id: tasks.id,
-          title: tasks.title,
-          status: tasks.status,
-          effort: tasks.effort,
-        }).from(tasks).where(eq(tasks.parentId, id)).all();
-        const duplicate = existingChildren.find((subtask) => titleKey(subtask.title) === titleKey(title));
-        if (duplicate) {
-          return {
-            kind: 'duplicate',
-            subtask: duplicate,
-            contextVersion: currentContextVersion,
-          } as const;
-        }
-
-        tx.insert(tasks).values(values).run();
-        const updatedSubtasks = tx.select({ title: tasks.title })
-          .from(tasks)
-          .where(eq(tasks.parentId, id))
-          .limit(30)
-          .all();
-        return {
-          kind: 'created',
-          contextVersion: createBreakdownContextVersion({
-            updatedAt: freshParent.updatedAt,
-            tags: currentTags.map((row) => row.name),
-            projects: currentProjects.map((row) => row.name),
-            existingSubtasks: updatedSubtasks.map((row) => row.title),
-          }),
-        } as const;
-      });
-
-      if (result.kind === 'stale') {
         return NextResponse.json(
           { error: 'This task changed after the breakdown was generated. Generate a fresh breakdown.' },
           { status: 409 },
         );
       }
-      if (result.kind === 'conflict') {
-        return NextResponse.json({ error: 'Proposal ID is already in use' }, { status: 409 });
-      }
-      if (result.kind === 'duplicate') {
+      const duplicate = (await ancillary.listSubtasks(id))
+        .find((subtask) => titleKey(subtask.title) === titleKey(title));
+      if (duplicate) {
         return NextResponse.json({
-          subtask: result.subtask,
-          contextVersion: result.contextVersion,
+          subtask: duplicate,
+          contextVersion: expectedContextVersion,
           duplicate: true,
         });
       }
-      acceptedContextVersion = result.contextVersion;
-    } else {
-      await db.insert(tasks).values(values);
     }
 
-    // Immediate write-through for remote tasks
+    const subtaskId = proposalId || randomUUID();
+    const now = new Date().toISOString();
+    const task = buildSubtask(parent, {
+      id: subtaskId,
+      title,
+      effort: effort ?? null,
+      now,
+      syncStatus: shouldWriteThrough ? 'pending_push' : 'synced',
+    });
+
+    let acceptedContextVersion: string | undefined;
+    if (expectedSnapshot) {
+      const outcome = await ancillary.acceptSubtaskProposal({ task, expected: expectedSnapshot });
+      if (outcome.kind === 'stale') {
+        return NextResponse.json(
+          { error: 'This task changed after the breakdown was generated. Generate a fresh breakdown.' },
+          { status: 409 },
+        );
+      }
+      if (outcome.kind === 'id-conflict') {
+        return NextResponse.json({ error: 'Proposal ID is already in use' }, { status: 409 });
+      }
+      if (outcome.kind === 'duplicate') {
+        return NextResponse.json({
+          subtask: outcome.subtask,
+          contextVersion: contextVersion(outcome.snapshot),
+          duplicate: true,
+        });
+      }
+      acceptedContextVersion = contextVersion(outcome.snapshot);
+    } else {
+      const outcome = await ancillary.createSubtask({ task });
+      if (outcome.kind === 'parent-not-found') {
+        return NextResponse.json({ error: 'Parent task not found' }, { status: 404 });
+      }
+      if (outcome.kind === 'id-conflict') {
+        return NextResponse.json({ error: 'Subtask ID is already in use' }, { status: 409 });
+      }
+      if (outcome.kind === 'already-created') {
+        return NextResponse.json({ subtask: outcome.subtask, duplicate: true });
+      }
+    }
+
     if (shouldWriteThrough) {
       writeThroughSubtask({
         subtaskId,
@@ -261,16 +305,16 @@ export async function POST(
         parentTaskId: parent.id,
         parentSourceId: parent.sourceId,
         connectorInstanceId: parent.connectorInstanceId,
-      }).catch((err) => {
-        logger.error({ err, subtaskId }, 'Write-through subtask request failed unexpectedly');
+      }).catch((error) => {
+        logger.error({ err: error, subtaskId }, 'Write-through subtask request failed unexpectedly');
       });
     }
 
     return NextResponse.json({
       subtask: { id: subtaskId, title, status: 'todo', effort: effort ?? null },
       editPolicy: resolveTaskEditPolicy({
-        sourceId: values.sourceId,
-        connectorType: values.connectorType,
+        sourceId: task.sourceId,
+        connectorType: task.connectorType,
         connectorEnabled,
         forceLocal,
       }, capabilities),
@@ -282,11 +326,6 @@ export async function POST(
   }
 }
 
-/**
- * Attempt immediate write-through for a newly created subtask/checklist item.
- * On success: updates local subtask with the real sourceId and marks synced.
- * On failure: subtask stays pending_push for retry on next sync cycle.
- */
 async function writeThroughSubtask(params: {
   subtaskId: string;
   title: string;
@@ -295,39 +334,34 @@ async function writeThroughSubtask(params: {
   connectorInstanceId: string;
 }) {
   try {
-    let connector = connectorRegistry.getConnector(params.connectorInstanceId) ?? null;
-    if (!connector) {
-      connector = await syncScheduler.initializeConnectorFromDb(params.connectorInstanceId);
-    }
-    if (!connector || !connector.createSubTask) {
-      // Connector doesn't support subtask creation — leave as pending_push
-      return;
-    }
+    const connector = await getOrRefreshSubtaskConnector(params.connectorInstanceId);
+    if (!connector?.createSubTask) return;
 
     const createRemote = () => connector.createSubTask!(params.parentSourceId, {
-        title: params.title,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        status: 'todo' as any,
-      });
+      title: params.title,
+      // Connector contracts still expose their own status union.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      status: 'todo' as any,
+    });
     const created = connector.type === 'github-issues'
       ? await executeFencedGitHubTaskMutation({
-        connectorInstanceId: params.connectorInstanceId,
-        taskId: params.subtaskId,
-        operation: 'sub_issue',
-        connector,
-        participantTaskIds: [{ role: 'parent_issue', taskId: params.parentTaskId }],
-        write: createRemote,
-      })
+          connectorInstanceId: params.connectorInstanceId,
+          taskId: params.subtaskId,
+          operation: 'sub_issue',
+          connector,
+          participantTaskIds: [{ role: 'parent_issue', taskId: params.parentTaskId }],
+          write: createRemote,
+        })
       : await createRemote();
 
-    // Update local subtask with the real source ID
-    await db.update(tasks).set({
+    const { ancillary } = await getTaskCorePersistence();
+    await ancillary.completeSubtaskWriteThrough({
+      taskId: params.subtaskId,
+      expectedSyncStatus: 'pending_push',
       sourceId: created.sourceId,
-      syncStatus: 'synced',
-      lastSyncedAt: new Date().toISOString(),
-      metadata: JSON.stringify(created.metadata || {}),
-    }).where(eq(tasks.id, params.subtaskId));
-
+      metadata: created.metadata || {},
+      now: new Date().toISOString(),
+    });
     await logWriteThrough({
       connectorId: params.connectorInstanceId,
       action: 'subtask_created',
@@ -335,13 +369,14 @@ async function writeThroughSubtask(params: {
       taskTitle: params.title,
       taskSourceId: created.sourceId,
     });
-  } catch (err) {
-    logger.error({ err, subtaskId: params.subtaskId }, 'Write-through subtask request failed');
-    if (err instanceof GitHubUnknownWriteOutcomeError) {
-      await db.update(tasks).set({
-        syncStatus: 'push_failed',
-        pushRetryCount: 5,
-      }).where(eq(tasks.id, params.subtaskId));
+  } catch (error) {
+    logger.error({ err: error, subtaskId: params.subtaskId }, 'Write-through subtask request failed');
+    if (error instanceof GitHubUnknownWriteOutcomeError) {
+      const { ancillary } = await getTaskCorePersistence();
+      await ancillary.failSubtaskWriteThrough({
+        taskId: params.subtaskId,
+        expectedSyncStatus: 'pending_push',
+      });
     }
   }
 }

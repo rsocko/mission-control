@@ -99,8 +99,13 @@ import {
   type SourceListNameRepository,
   type TaskAttachmentContentRow,
   type TaskAttachmentInsert,
+  type TaskAttachmentInsertOutcome,
+  type TaskAttachmentListContext,
+  type TaskAttachmentDeleteContext,
   type TaskAttachmentMetadataRow,
   type TaskAttachmentRow,
+  type TaskAncillaryRepository,
+  type TaskAncillarySubtask,
   type TaskCollectionProjectPhaseMembership,
   type TaskCollectionReadRepository,
   type TaskCollectionResult,
@@ -111,6 +116,7 @@ import {
   type TaskCreateOutcome,
   type TaskCreateRepository,
   type TaskCreateTargetOutcome,
+  type TaskCopyOutcome,
   type TaskCorePersistence,
   type TaskDetailReadRepository,
   type TaskDetailResult,
@@ -154,11 +160,17 @@ import {
   type TaskQuickSortSuggestionInputs,
   type TaskReadRepository,
   type TaskRelationshipCandidateRow,
+  type TaskPromoteOutcome,
   type TaskScheduleRow,
   type TaskSourceIdentityRow,
   type TaskSourceCounts,
   type TaskStatsResult,
   type TaskTransferIdentityRepository,
+  type TaskSubtaskCreateOutcome,
+  type TaskSubtaskProposalOutcome,
+  type TaskSubtaskProposalSnapshot,
+  type TaskTagMutationContext,
+  type TaskTagMutationResult,
   type WriteThroughTaskMoveRepository,
 } from '@/lib/tasks/core/contracts';
 
@@ -1698,6 +1710,22 @@ function toMoveTaskRow(row: RawMoveTaskRow): TaskMoveTaskRow {
   };
 }
 
+function normalizedSnapshot(snapshot: TaskSubtaskProposalSnapshot): TaskSubtaskProposalSnapshot {
+  return {
+    parentUpdatedAt: snapshot.parentUpdatedAt,
+    tagNames: [...snapshot.tagNames].sort(),
+    projectNames: [...snapshot.projectNames].sort(),
+    subtaskTitles: [...snapshot.subtaskTitles].sort(),
+  };
+}
+
+function sameSnapshot(
+  left: TaskSubtaskProposalSnapshot,
+  right: TaskSubtaskProposalSnapshot,
+): boolean {
+  return JSON.stringify(normalizedSnapshot(left)) === JSON.stringify(normalizedSnapshot(right));
+}
+
 /** The insert payload every task write in this repository shares. */
 function moveTaskInsertValues(task: TaskMoveTaskInsert) {
   return {
@@ -1706,6 +1734,434 @@ function moveTaskInsertValues(task: TaskMoveTaskInsert) {
     localDisposition: task.localDisposition,
     metadata: JSON.stringify(task.metadata),
   };
+}
+
+class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async getTask(taskId: string): Promise<TaskCoreTaskRow | null> {
+    const [row] = await this.database.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ? toMoveTaskRow(row) : null;
+  }
+
+  async getAttachmentListContext(taskId: string): Promise<TaskAttachmentListContext> {
+    const [task] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return { task: null, attachments: [] };
+    const attachments = await this.database.select({
+      id: taskAttachments.id,
+      taskId: taskAttachments.taskId,
+      name: taskAttachments.name,
+      contentType: taskAttachments.contentType,
+      size: taskAttachments.size,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      createdAt: taskAttachments.createdAt,
+      hasLocalContent: sql<number>`CASE WHEN ${taskAttachments.contentBase64} IS NULL THEN 0 ELSE 1 END`,
+    }).from(taskAttachments)
+      .where(eq(taskAttachments.taskId, taskId))
+      .orderBy(asc(taskAttachments.createdAt), asc(taskAttachments.id));
+    return {
+      task,
+      attachments: attachments.map((attachment) => ({
+        ...attachment,
+        hasLocalContent: Boolean(attachment.hasLocalContent),
+      })),
+    };
+  }
+
+  async getAttachmentDeleteContext(
+    taskId: string,
+    attachmentId: string,
+  ): Promise<TaskAttachmentDeleteContext> {
+    const [task] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    const [attachment] = await this.database.select({
+      id: taskAttachments.id,
+      taskId: taskAttachments.taskId,
+      name: taskAttachments.name,
+      contentType: taskAttachments.contentType,
+      size: taskAttachments.size,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      createdAt: taskAttachments.createdAt,
+    }).from(taskAttachments).where(and(
+      eq(taskAttachments.id, attachmentId),
+      eq(taskAttachments.taskId, taskId),
+    )).limit(1);
+    return { task: task ?? null, attachment: attachment ?? null };
+  }
+
+  async insertAttachment(
+    attachment: TaskAttachmentInsert,
+  ): Promise<TaskAttachmentInsertOutcome> {
+    return this.runTransaction((tx) => {
+      const task = tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.id, attachment.taskId)).get();
+      if (!task) return { kind: 'task-not-found' } as const;
+      const existing = tx.select({ id: taskAttachments.id }).from(taskAttachments)
+        .where(eq(taskAttachments.id, attachment.id)).get();
+      if (existing) return { kind: 'already-exists' } as const;
+      tx.insert(taskAttachments).values({ ...attachment }).run();
+      return { kind: 'inserted' } as const;
+    });
+  }
+
+  async deleteAttachment(input: {
+    readonly taskId: string;
+    readonly attachmentId: string;
+    readonly expectedSourceAttachmentId: string | null;
+  }): Promise<boolean> {
+    return this.runTransaction((tx) => {
+      const current = tx.select({
+        sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      }).from(taskAttachments).where(and(
+        eq(taskAttachments.id, input.attachmentId),
+        eq(taskAttachments.taskId, input.taskId),
+      )).get();
+      if (!current || current.sourceAttachmentId !== input.expectedSourceAttachmentId) {
+        return false;
+      }
+      return tx.delete(taskAttachments).where(and(
+        eq(taskAttachments.id, input.attachmentId),
+        eq(taskAttachments.taskId, input.taskId),
+      )).run().changes === 1;
+    });
+  }
+
+  async copyTask(input: {
+    readonly sourceTaskId: string;
+    readonly newTaskId: string;
+    readonly targetConnectorInstanceId: string;
+    readonly targetListId: string | null;
+    readonly keepTags: boolean;
+    readonly now: string;
+  }): Promise<TaskCopyOutcome> {
+    return this.runTransaction((tx) => {
+      const replay = tx.select({
+        connectorType: tasks.connectorType,
+        sourceId: tasks.sourceId,
+      }).from(tasks).where(eq(tasks.id, input.newTaskId)).get();
+      if (replay) {
+        return replay.sourceId === `local:${input.newTaskId}`
+          ? { kind: 'already-committed', connectorType: replay.connectorType } as const
+          : { kind: 'task-not-found' } as const;
+      }
+      const connector = tx.select().from(connectorConfigs)
+        .where(eq(connectorConfigs.id, input.targetConnectorInstanceId)).get();
+      if (!connector) return { kind: 'connector-not-found' } as const;
+
+      let targetSourceListId: string | null = null;
+      if (input.targetListId) {
+        const targetList = tx.select().from(sourceLists).where(and(
+          eq(sourceLists.connectorInstanceId, input.targetConnectorInstanceId),
+          or(eq(sourceLists.id, input.targetListId), eq(sourceLists.sourceId, input.targetListId)),
+        )).get();
+        if (!targetList) return { kind: 'source-list-not-found' } as const;
+        if (!isSourceListSelected(connector, targetList)) {
+          return { kind: 'source-list-not-selected' } as const;
+        }
+        targetSourceListId = targetList.sourceId;
+      }
+
+      const source = tx.select({
+        title: tasks.title,
+        description: tasks.description,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+      }).from(tasks).where(eq(tasks.id, input.sourceTaskId)).get();
+      if (!source) return { kind: 'task-not-found' } as const;
+
+      tx.insert(tasks).values({
+        id: input.newTaskId,
+        sourceId: `local:${input.newTaskId}`,
+        connectorType: connector.type,
+        connectorInstanceId: input.targetConnectorInstanceId,
+        title: source.title,
+        description: source.description,
+        status: 'todo',
+        priority: source.priority,
+        dueDate: source.dueDate,
+        createdAt: input.now,
+        updatedAt: input.now,
+        depth: 0,
+        isChecklistItem: false,
+        sourceListId: targetSourceListId,
+        metadata: {},
+        syncStatus: 'pending_push',
+        lastSyncedAt: input.now,
+      }).run();
+      if (input.keepTags) {
+        const tagRows = tx.select({ tagId: taskTags.tagId }).from(taskTags)
+          .where(eq(taskTags.taskId, input.sourceTaskId)).all();
+        if (tagRows.length) {
+          tx.insert(taskTags).values(tagRows.map(({ tagId }) => ({
+            taskId: input.newTaskId,
+            tagId,
+          }))).run();
+        }
+      }
+      const projectRows = tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, input.sourceTaskId)).all();
+      if (projectRows.length) {
+        tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+          taskId: input.newTaskId,
+          projectId,
+        }))).run();
+      }
+      return { kind: 'committed', connectorType: connector.type } as const;
+    });
+  }
+
+  async promoteSubtask(input: {
+    readonly taskId: string;
+    readonly expectedUpdatedAt: string;
+    readonly now: string;
+  }): Promise<TaskPromoteOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select({
+        parentId: tasks.parentId,
+        isChecklistItem: tasks.isChecklistItem,
+        updatedAt: tasks.updatedAt,
+      }).from(tasks).where(eq(tasks.id, input.taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      if (current.updatedAt !== input.expectedUpdatedAt) {
+        return { kind: 'revision-conflict', currentUpdatedAt: current.updatedAt } as const;
+      }
+      if (!current.isChecklistItem || !current.parentId) {
+        return { kind: 'not-subtask' } as const;
+      }
+      const updated = tx.update(tasks).set({
+        parentId: null,
+        depth: 0,
+        isChecklistItem: false,
+        updatedAt: input.now,
+      }).where(and(
+        eq(tasks.id, input.taskId),
+        eq(tasks.updatedAt, input.expectedUpdatedAt),
+        eq(tasks.parentId, current.parentId),
+        eq(tasks.isChecklistItem, true),
+      )).run();
+      return updated.changes === 1
+        ? { kind: 'promoted', previousParentId: current.parentId } as const
+        : { kind: 'revision-conflict', currentUpdatedAt: current.updatedAt } as const;
+    });
+  }
+
+  async listSubtasks(parentTaskId: string): Promise<TaskAncillarySubtask[]> {
+    return this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      priority: tasks.priority,
+      effort: tasks.effort,
+      parentId: tasks.parentId,
+    }).from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+  }
+
+  private readProposalSnapshot(
+    database: Drizzle | SqliteTransaction,
+    parentTaskId: string,
+  ): TaskSubtaskProposalSnapshot | null {
+    const parent = database.select({ updatedAt: tasks.updatedAt }).from(tasks)
+      .where(eq(tasks.id, parentTaskId)).get();
+    if (!parent) return null;
+    const tagRows = database.select({ name: tags.name }).from(taskTags)
+      .innerJoin(tags, eq(taskTags.tagId, tags.id))
+      .where(eq(taskTags.taskId, parentTaskId))
+      .limit(20).all();
+    const projectRows = database.select({ name: hubProjects.name }).from(taskProjects)
+      .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+      .where(eq(taskProjects.taskId, parentTaskId))
+      .limit(10).all();
+    const subtaskRows = database.select({ title: tasks.title }).from(tasks)
+      .where(eq(tasks.parentId, parentTaskId))
+      .limit(30).all();
+    return normalizedSnapshot({
+      parentUpdatedAt: parent.updatedAt,
+      tagNames: tagRows.map((row) => row.name),
+      projectNames: projectRows.map((row) => row.name),
+      subtaskTitles: subtaskRows.map((row) => row.title),
+    });
+  }
+
+  async getSubtaskProposalSnapshot(
+    parentTaskId: string,
+  ): Promise<TaskSubtaskProposalSnapshot | null> {
+    return this.readProposalSnapshot(this.database, parentTaskId);
+  }
+
+  async createSubtask(input: {
+    readonly task: TaskMoveTaskInsert;
+  }): Promise<TaskSubtaskCreateOutcome> {
+    return this.runTransaction((tx) => {
+      const existing = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.task.id)).get();
+      if (existing) {
+        return existing.parentId === input.task.parentId
+          ? { kind: 'already-created', subtask: toMoveTaskRow(existing) } as const
+          : { kind: 'id-conflict' } as const;
+      }
+      const parent = input.task.parentId
+        ? tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, input.task.parentId)).get()
+        : null;
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      tx.insert(tasks).values(moveTaskInsertValues(input.task)).run();
+      return { kind: 'created' } as const;
+    });
+  }
+
+  async acceptSubtaskProposal(input: {
+    readonly task: TaskMoveTaskInsert;
+    readonly expected: TaskSubtaskProposalSnapshot;
+  }): Promise<TaskSubtaskProposalOutcome> {
+    return this.runTransaction((tx) => {
+      const existing = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.task.id)).get();
+      const current = input.task.parentId
+        ? this.readProposalSnapshot(tx, input.task.parentId)
+        : null;
+      if (!current) return { kind: 'stale' } as const;
+      if (existing) {
+        return existing.parentId === input.task.parentId
+          ? { kind: 'duplicate', subtask: toMoveTaskRow(existing), snapshot: current } as const
+          : { kind: 'id-conflict' } as const;
+      }
+      if (!sameSnapshot(current, input.expected)) return { kind: 'stale' } as const;
+      tx.insert(tasks).values(moveTaskInsertValues(input.task)).run();
+      const snapshot = this.readProposalSnapshot(tx, input.task.parentId!);
+      if (!snapshot) throw new Error('Subtask parent disappeared during proposal acceptance');
+      return { kind: 'created', snapshot } as const;
+    });
+  }
+
+  async completeSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+    readonly sourceId: string;
+    readonly metadata: Record<string, unknown>;
+    readonly now: string;
+  }): Promise<boolean> {
+    return this.database.update(tasks).set({
+      sourceId: input.sourceId,
+      syncStatus: 'synced',
+      lastSyncedAt: input.now,
+      metadata: input.metadata,
+    }).where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.syncStatus, input.expectedSyncStatus),
+    )).run().changes === 1;
+  }
+
+  async failSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+  }): Promise<boolean> {
+    return this.database.update(tasks).set({
+      syncStatus: 'push_failed',
+      pushRetryCount: 5,
+    }).where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.syncStatus, input.expectedSyncStatus),
+    )).run().changes === 1;
+  }
+
+  async getTagMutationContext(taskId: string): Promise<TaskTagMutationContext> {
+    const [task] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return { task: null, storedCapabilities: {} };
+    const [connector] = await this.database.select({
+      capabilities: connectorConfigs.capabilities,
+    }).from(connectorConfigs)
+      .where(eq(connectorConfigs.id, task.connectorInstanceId)).limit(1);
+    return {
+      task,
+      storedCapabilities: parseMetadata(connector?.capabilities),
+    };
+  }
+
+  async addTaskTags(input: {
+    readonly taskId: string;
+    readonly candidates: readonly { id: string; name: string; slug: string }[];
+    readonly tagCreationMode: 'freeform' | 'predefined';
+    readonly now: string;
+  }): Promise<TaskTagMutationResult> {
+    return this.runTransaction((tx) => {
+      const ordered = [...input.candidates].sort((a, b) => a.slug.localeCompare(b.slug));
+      const existing = ordered.length
+        ? tx.select().from(tags).where(inArray(tags.slug, ordered.map((tag) => tag.slug)))
+          .orderBy(asc(tags.slug), asc(tags.createdAt), asc(tags.id)).all()
+        : [];
+      const bySlug = new Map(existing.map((tag) => [tag.slug, tag]));
+      const rejectedTags: string[] = [];
+      const resolved: Array<{ id: string; name: string }> = [];
+      for (const candidate of ordered) {
+        const match = bySlug.get(candidate.slug);
+        if (match) {
+          resolved.push({ id: match.id, name: match.name });
+        } else if (input.tagCreationMode === 'predefined') {
+          rejectedTags.push(candidate.name);
+        } else {
+          tx.insert(tags).values({
+            id: candidate.id,
+            name: candidate.name,
+            slug: candidate.slug,
+            type: 'ai-inferred',
+            source: 'ai',
+            color: '#64748b',
+            confirmed: false,
+            createdAt: input.now,
+          }).run();
+          resolved.push({ id: candidate.id, name: candidate.name });
+        }
+      }
+      const existingLinks = new Set(tx.select({ tagId: taskTags.tagId }).from(taskTags)
+        .where(eq(taskTags.taskId, input.taskId)).all().map((row) => row.tagId));
+      const addedTags = resolved.filter((tag) => !existingLinks.has(tag.id));
+      if (addedTags.length) {
+        tx.insert(taskTags).values(addedTags.map((tag) => ({
+          taskId: input.taskId,
+          tagId: tag.id,
+        }))).run();
+      }
+      return { addedTags, rejectedTags };
+    });
+  }
+
+  async removeTaskTag(input: {
+    readonly taskId: string;
+    readonly tagId: string;
+  }): Promise<{ readonly removed: boolean; readonly tagName: string | null }> {
+    return this.runTransaction((tx) => {
+      const tag = tx.select({ name: tags.name }).from(tags)
+        .where(eq(tags.id, input.tagId)).get();
+      const result = tx.delete(taskTags).where(and(
+        eq(taskTags.taskId, input.taskId),
+        eq(taskTags.tagId, input.tagId),
+      )).run();
+      return { removed: result.changes > 0, tagName: tag?.name ?? null };
+    });
+  }
 }
 
 function enqueueTaskCoreEvent(tx: SqliteTransaction, event: TaskCoreEvent): void {
@@ -3399,6 +3855,7 @@ export function createSqliteTaskCorePersistence(
     sourceListNames: new SqliteSourceListNameRepository(database),
     transferIdentity: new SqliteTaskTransferIdentityRepository(database, transactionRunner),
     quickSort: new SqliteTaskQuickSortRepository(database, transactionRunner),
+    ancillary: new SqliteTaskAncillaryRepository(database, transactionRunner),
   };
 }
 

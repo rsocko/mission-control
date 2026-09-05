@@ -75,10 +75,13 @@ export class PostgresSettingsRepository implements AtomicSettingsRepository {
   async listSmartScoreSettings(): Promise<Record<string, PersistenceJson>> {
     const rows = await this.db.select({
       key: smartScoreSettings.key,
-      value: smartScoreSettings.value,
+      value: sql<string>`${smartScoreSettings.value}::text`,
     }).from(smartScoreSettings)
       .orderBy(sql`${smartScoreSettings.key} COLLATE "C"`);
-    return Object.fromEntries(rows.map((row) => [row.key, row.value as PersistenceJson]));
+    return Object.fromEntries(rows.map((row) => [
+      row.key,
+      JSON.parse(row.value) as PersistenceJson,
+    ]));
   }
 
   async setSmartScoreSetting(key: string, value: string): Promise<void> {

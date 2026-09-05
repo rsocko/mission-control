@@ -7,12 +7,10 @@ import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 /**
  * Fixture-level unit tests for the `computeWebPersistenceGraph` parser
- * itself, independent of the real repository's current state - the real
- * repo's `web-persistence-baseline.test.ts` ratchet only proves the parser
- * agrees with the committed baseline for whatever patterns exist *today*; it
- * cannot demonstrate a parser bug whose triggering pattern doesn't currently
- * occur anywhere under `src/`. Both cases below were found by independent
- * review and are regression-locked here against synthetic fixtures.
+ * itself, independent of the real repository's current state. The PostgreSQL
+ * route sentinel proves the parser agrees with the committed baseline for
+ * patterns that exist today; these fixtures cover parser failures whose
+ * triggering syntax may not occur anywhere under `src/`.
  */
 
 const roots: string[] = [];
@@ -94,5 +92,32 @@ describe('computeWebPersistenceGraph parser', () => {
     // it is simply not mislabeled as an "API helper".
     expect(result.tierARoutes.concat(result.taintedLibA, result.taintedApiHelpers))
       .not.toContain('src/app/page.tsx');
+  });
+
+  it('recognizes comments before static and dynamic import specifiers', () => {
+    const root = createFixture({
+      'src/db/index.ts': 'export const db = 1;\n',
+      'src/lib/static-consumer.ts':
+        "export const value = 1; import /* bare comment */ '@/db';\n" +
+        "import { db /* ; from '@/safe' */ } from /* from comment */ '@/db';\n",
+      'src/lib/static-reexport.ts':
+        "export { db /* ; from '@/safe' */ } from /* export comment */ '@/db';\n",
+      'src/lib/dynamic-consumer.ts':
+        "export async function load() { return import /* call comment */ " +
+        "(/* spec comment */ '@/db', { with: { type: 'json' } }); }\n",
+      'src/lib/require-consumer.ts':
+        "export function load() { return require /* call comment */ (/* spec comment */ '@/db'); }\n",
+      'src/app/api/static/route.ts': "import '@/lib/static-consumer';\n",
+      'src/app/api/reexport/route.ts': "import '@/lib/static-reexport';\n",
+      'src/app/api/dynamic/route.ts': "import '@/lib/dynamic-consumer';\n",
+      'src/app/api/require/route.ts': "import '@/lib/require-consumer';\n",
+    });
+
+    const result = computeWebPersistenceGraph(root);
+
+    expect(result.tierARoutes).toContain('src/app/api/static/route.ts');
+    expect(result.tierARoutes).toContain('src/app/api/reexport/route.ts');
+    expect(result.tierBRoutes).toContain('src/app/api/dynamic/route.ts');
+    expect(result.tierBRoutes).toContain('src/app/api/require/route.ts');
   });
 });

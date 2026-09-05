@@ -1,48 +1,14 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { appSettings, pushPreferences } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { pushNotificationScheduler } from '@/lib/push/scheduler';
-import { PUSH_DELIVERY_SETTING_KEY } from '@/lib/notifications/service';
-
-function parsePushDeliveryEnabled(value: unknown): boolean {
-  if (typeof value === 'boolean') return value;
-  return value !== null
-    && typeof value === 'object'
-    && !Array.isArray(value)
-    && (value as Record<string, unknown>).enabled === true;
-}
+import { getNotificationPushPersistence } from '@/lib/push/notification-push-service';
 
 /** Get push notification preferences */
 export async function GET() {
-  const [rows, pushDeliveryRows] = await Promise.all([
-    db.select().from(pushPreferences).where(eq(pushPreferences.id, 'default')).limit(1),
-    db.select({ value: appSettings.value })
-      .from(appSettings)
-      .where(eq(appSettings.key, PUSH_DELIVERY_SETTING_KEY))
-      .limit(1),
+  const persistence = await getNotificationPushPersistence();
+  const [prefs, pushDeliveryEnabled] = await Promise.all([
+    persistence.getPreferences(),
+    persistence.getPushDeliveryEnabled(),
   ]);
-  const pushDeliveryEnabled = pushDeliveryRows.length === 0
-    ? true
-    : parsePushDeliveryEnabled(pushDeliveryRows[0].value);
-
-  if (rows.length === 0) {
-    // Return defaults
-    return NextResponse.json({
-      morningEnabled: true,
-      morningHour: 8,
-      triageNudgeEnabled: true,
-      triageNudgeThreshold: 5,
-      carryForwardEnabled: true,
-      carryForwardHour: 18,
-      quietStart: null,
-      quietEnd: null,
-      doNotDisturb: false,
-      pushDeliveryEnabled,
-    });
-  }
-
-  const prefs = rows[0];
   return NextResponse.json({
     morningEnabled: prefs.morningEnabled,
     morningHour: prefs.morningHour,
@@ -92,6 +58,16 @@ export async function PUT(request: Request) {
     ) {
       return NextResponse.json({ error: 'pushDeliveryEnabled must be a boolean' }, { status: 400 });
     }
+    for (const field of [
+      'morningEnabled',
+      'triageNudgeEnabled',
+      'carryForwardEnabled',
+      'doNotDisturb',
+    ] as const) {
+      if (body[field] !== undefined && typeof body[field] !== 'boolean') {
+        return NextResponse.json({ error: `${field} must be a boolean` }, { status: 400 });
+      }
+    }
 
     const values = {
       id: 'default' as const,
@@ -107,33 +83,26 @@ export async function PUT(request: Request) {
       updatedAt: now,
     };
 
-    runTransaction((tx) => {
-      const storedDeliverySetting = tx.select({ value: appSettings.value })
-        .from(appSettings)
-        .where(eq(appSettings.key, PUSH_DELIVERY_SETTING_KEY))
-        .get();
-      const pushDeliveryEnabled = pushDeliveryEnabledInput
-        ?? (storedDeliverySetting
-          ? parsePushDeliveryEnabled(storedDeliverySetting.value)
-          : true);
-      tx.insert(pushPreferences).values(values).onConflictDoUpdate({
-        target: pushPreferences.id,
-        set: values,
-      }).run();
-      tx.insert(appSettings).values({
-        key: PUSH_DELIVERY_SETTING_KEY,
-        value: pushDeliveryEnabled,
-        updatedAt: now,
-      }).onConflictDoUpdate({
-        target: appSettings.key,
-        set: { value: pushDeliveryEnabled, updatedAt: now },
-      }).run();
+    const persistence = await getNotificationPushPersistence();
+    await persistence.savePreferences({
+      preferences: {
+        morningEnabled: values.morningEnabled,
+        morningHour: values.morningHour,
+        triageNudgeEnabled: values.triageNudgeEnabled,
+        triageNudgeThreshold: values.triageNudgeThreshold,
+        carryForwardEnabled: values.carryForwardEnabled,
+        carryForwardHour: values.carryForwardHour,
+        quietStart: values.quietStart,
+        quietEnd: values.quietEnd,
+        doNotDisturb: values.doNotDisturb,
+      },
+      pushDeliveryEnabled: pushDeliveryEnabledInput,
+      updatedAt: now,
     });
 
-    // Restart scheduler so cron times reflect new morningHour/carryForwardHour
-    if (pushNotificationScheduler.isRunning()) {
-      await pushNotificationScheduler.restart();
-    }
+    // The scheduler checks its running state inside the lifecycle lock so a
+    // concurrent stop cannot be undone by this settings refresh.
+    await pushNotificationScheduler.restart();
 
     return NextResponse.json({ status: 'saved' });
   } catch (error) {

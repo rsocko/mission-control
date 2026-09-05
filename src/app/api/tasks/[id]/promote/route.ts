@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import logger from '@/lib/logger';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
 /**
  * POST /api/tasks/[id]/promote — Promote a subtask (checklist item) to a standalone task.
@@ -21,7 +19,8 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
+    const { ancillary } = await getTaskCorePersistence();
+    const task = await ancillary.getTask(id);
 
     if (!task) {
       return ApiErrors.notFound('Task');
@@ -34,17 +33,23 @@ export async function POST(
       );
     }
 
-    await db
-      .update(tasks)
-      .set({
-        parentId: null,
-        depth: 0,
-        isChecklistItem: false,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(tasks.id, id));
+    const outcome = await ancillary.promoteSubtask({
+      taskId: id,
+      expectedUpdatedAt: task.updatedAt,
+      now: new Date().toISOString(),
+    });
+    if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
+    if (outcome.kind === 'not-subtask') {
+      return NextResponse.json({ error: 'Task is not a subtask' }, { status: 400 });
+    }
+    if (outcome.kind === 'revision-conflict') {
+      return NextResponse.json(
+        { error: 'Task changed while it was being promoted' },
+        { status: 409 },
+      );
+    }
 
-    logger.info({ taskId: id, previousParentId: task.parentId }, 'Subtask promoted to task');
+    logger.info({ taskId: id, previousParentId: outcome.previousParentId }, 'Subtask promoted to task');
 
     return NextResponse.json({ success: true });
   } catch (error) {

@@ -65,8 +65,12 @@ a poisoned-SQLite suite imports and executes all three route modules through a
 PostgreSQL-shaped composition. The graph ratchet moves exactly those routes from
 Tier A to clean:
 
-`266/110/5/151/80/30/81/57/0/167` to
-`266/107/5/154/77/30/78/57/0/164`.
+`266/88/5/173/58/30/59/51/0/139` to
+`266/85/5/176/55/30/56/51/0/136`.
+
+The canonical baseline and fail-closed PostgreSQL route sentinel are the sole
+exact-current graph owners; the routines layer test keeps only bounded
+ownership and monotonic cleanliness assertions.
 
 No schema, migration, dependency, streak algorithm, or unrelated route changes
 belong to this layer.

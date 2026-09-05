@@ -9,6 +9,7 @@ import {
 import { needsAttention } from '@/lib/notifications/lifecycle';
 import { isQuietHour } from '@/lib/notifications/quiet-hours-window';
 import { createSqliteNotificationWebRepository } from './sqlite-notification-web-repository';
+import { createSqliteNotificationPushRepository } from './sqlite-notification-push-repository';
 
 interface RawClaim {
   id: string;
@@ -342,6 +343,7 @@ export function createSqliteNotificationDeliveryRepository(
       ).changes === 1;
     },
 
+    push: createSqliteNotificationPushRepository(sqlite),
     web: createSqliteNotificationWebRepository(sqlite),
   };
 }

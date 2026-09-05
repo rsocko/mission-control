@@ -25,17 +25,14 @@
  * only one request implementation.
  */
 
-import {
-  getAIRequestContext,
-  getAIRoutingHeaders,
-} from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
 import type { SensitivityClass } from '@/lib/ai/types';
 import {
   requestEmbeddingResult,
   type EmbeddingConfig,
   type EmbeddingRequestResult,
 } from './embedding-transport';
+import { getEmbeddingConfigForResolvedAI } from './embedding-config-core';
 export {
   DEFAULT_EMBEDDING_TIMEOUT_MS,
   getConfiguredEmbeddingRoute,
@@ -106,64 +103,8 @@ export async function getEmbeddingConfig(
   sources: string[] = [],
   options: { sensitivityOverride?: SensitivityClass } = {},
 ): Promise<EmbeddingConfig | null> {
-  const resolved = getResolvedAIConfig();
-  const provider = resolved.embeddingProvider ?? resolved.provider;
-  const model = resolved.embeddingModel;
-  const baseUrl = resolved.embeddingBaseUrl ?? resolved.baseUrl;
-  const apiKey = resolved.embeddingApiKey ?? resolved.apiKey;
-  if (!(resolved.embeddingConfigured ?? resolved.configured)) {
-    return null;
-  }
-
-  const context = getAIRequestContext(
-    'semantic-embedding',
-    options.sensitivityOverride
-      ? { sources, sensitivityOverride: options.sensitivityOverride }
-      : { sources },
-  );
-  const routingHeaders = getAIRoutingHeaders(
-    context,
-    provider,
-    baseUrl,
-    Boolean(apiKey),
-    model,
-  );
-
-  if (provider === 'azure') {
-    if (!baseUrl || !apiKey) {
-      return null;
-    }
-
-    return {
-      provider,
-      baseUrl,
-      apiKey,
-      model,
-      endpoint: getAzureEmbeddingEndpoint(baseUrl, model),
-      headers: {
-        'Content-Type': 'application/json',
-        'api-key': apiKey,
-        ...routingHeaders,
-      },
-      context,
-    };
-  }
-
-  return {
-    provider,
-    baseUrl,
-    apiKey,
-    model,
-    endpoint: baseUrl
-      ? `${baseUrl.replace(/\/$/, '')}/embeddings`
-      : 'https://api.openai.com/v1/embeddings',
-    headers: {
-      'Content-Type': 'application/json',
-      ...routingHeaders,
-      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    },
-    context,
-  };
+  const { resolved, routingPolicy } = await loadAIProviderConfiguration();
+  return getEmbeddingConfigForResolvedAI(resolved, routingPolicy, sources, options);
 }
 
 function sleep(ms: number): Promise<void> {

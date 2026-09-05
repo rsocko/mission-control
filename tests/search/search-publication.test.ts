@@ -20,13 +20,16 @@ vi.mock('@/lib/search/fts', () => ({
 }));
 
 vi.mock('@/lib/search/semantic', () => ({
+  search: vi.fn(async () => []),
+  searchWithBranches: vi.fn(async () => ({ results: [], branches: {} })),
+  getSearchStatus: vi.fn(async () => ({ available: true })),
   semanticSearch: vi.fn(async () => []),
   getSemanticSearchMetrics: vi.fn(() => ({})),
   getSemanticSearchStatus: vi.fn(async () => ({ available: true, state: 'ready', note: null })),
   rebuildEmbeddingIndex: vi.fn(async () => ({ status: 'scheduled' })),
 }));
 
-vi.mock('@/lib/semantic-index/publication', () => ({
+vi.mock('@/lib/semantic-index/publication-service', () => ({
   publishSemanticEntityUpsert: mocks.publishSemanticUpsert,
   publishSemanticEntityDelete: mocks.publishSemanticDelete,
 }));

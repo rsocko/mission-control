@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 /**
  * Backend-neutral static import-graph census over `src/**\/*.{ts,tsx}`,
@@ -83,6 +83,10 @@ export interface WebPersistenceGraphResult {
   totalMigrationUnits: number;
 }
 
+export function normalizeRepoPath(path: string): string {
+  return path.replaceAll('\\', '/');
+}
+
 function listTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -101,10 +105,77 @@ function listTypeScriptFiles(directory: string): string[] {
 // keyword (multi-line named-binding lists never do), so this bound cannot
 // clip a legitimate clause while it prevents the clause from ever
 // swallowing an intervening statement's terminator.
-const IMPORT_STATEMENT_RE = /(?:^|\n)[ \t]*(?:import|export)\b([^;]*?)from\s*['"]([^'"]+)['"]/g;
-const BARE_IMPORT_RE = /(?:^|\n)[ \t]*import\s*['"]([^'"]+)['"]/g;
-const DYNAMIC_IMPORT_RE = /import\(\s*['"]([^'"]+)['"]\s*\)/g;
-const REQUIRE_RE = /require\(\s*['"]([^'"]+)['"]\s*\)/g;
+const IMPORT_COMMENT_TRIVIA = String.raw`(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r?\n|$))*`;
+const IMPORT_STATEMENT_RE = new RegExp(
+  String.raw`(?:^|[;\n])[ \t]*(?:import|export)\b([^;]*?)from${IMPORT_COMMENT_TRIVIA}['"]([^'"]+)['"]`,
+  'g',
+);
+const BARE_IMPORT_RE = new RegExp(
+  String.raw`(?:^|[;\n])[ \t]*import${IMPORT_COMMENT_TRIVIA}['"]([^'"]+)['"]`,
+  'g',
+);
+const DYNAMIC_IMPORT_RE = new RegExp(
+  String.raw`import${IMPORT_COMMENT_TRIVIA}\(${IMPORT_COMMENT_TRIVIA}['"]([^'"]+)['"]`,
+  'g',
+);
+const REQUIRE_RE = new RegExp(
+  String.raw`require${IMPORT_COMMENT_TRIVIA}\(${IMPORT_COMMENT_TRIVIA}['"]([^'"]+)['"]`,
+  'g',
+);
+
+function maskComments(source: string): string {
+  const masked = [...source];
+  let quote: "'" | '"' | '`' | null = null;
+
+  for (let index = 0; index < masked.length; index += 1) {
+    const char = masked[index];
+    const next = masked[index + 1];
+
+    if (quote) {
+      if (char === '\\') {
+        index += 1;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"' || char === '`') {
+      quote = char;
+      continue;
+    }
+
+    if (char === '/' && next === '/') {
+      masked[index] = ' ';
+      masked[index + 1] = ' ';
+      index += 2;
+      while (index < masked.length && masked[index] !== '\n' && masked[index] !== '\r') {
+        masked[index] = ' ';
+        index += 1;
+      }
+      index -= 1;
+      continue;
+    }
+
+    if (char === '/' && next === '*') {
+      masked[index] = ' ';
+      masked[index + 1] = ' ';
+      index += 2;
+      while (index < masked.length) {
+        if (masked[index] === '*' && masked[index + 1] === '/') {
+          masked[index] = ' ';
+          masked[index + 1] = ' ';
+          index += 1;
+          break;
+        }
+        if (masked[index] !== '\n' && masked[index] !== '\r') masked[index] = ' ';
+        index += 1;
+      }
+    }
+  }
+
+  return masked.join('');
+}
 
 function clauseIsTypeOnly(clause: string): boolean {
   const trimmed = clause.trim();
@@ -130,7 +201,7 @@ const DB_NAMESPACE_SPECIFIER_RE = /^@\/db(\/|$)/;
  * so the result is byte-for-byte deterministic across platforms and runs.
  */
 export function computeWebPersistenceGraph(root: string): WebPersistenceGraphResult {
-  const toRepoRelative = (path: string): string => relative(root, path).split(sep).join('/');
+  const toRepoRelative = (path: string): string => normalizeRepoPath(relative(root, path));
   const files = listTypeScriptFiles(join(root, 'src')).map(toRepoRelative);
   const fileSet = new Set(files);
 
@@ -139,7 +210,7 @@ export function computeWebPersistenceGraph(root: string): WebPersistenceGraphRes
     if (spec.startsWith('@/')) {
       base = `src/${spec.slice(2)}`;
     } else if (spec.startsWith('.')) {
-      base = relative(root, resolve(dirname(join(root, fromFile)), spec)).split(sep).join('/');
+      base = normalizeRepoPath(relative(root, resolve(dirname(join(root, fromFile)), spec)));
     } else {
       return null;
     }
@@ -155,23 +226,24 @@ export function computeWebPersistenceGraph(root: string): WebPersistenceGraphRes
 
   for (const name of files) {
     const source = readFileSync(join(root, name), 'utf8');
+    const syntaxSource = maskComments(source);
     const out: ImportEdge[] = [];
     const extStatic = new Set<string>();
     const extDynamic = new Set<string>();
 
-    for (const match of source.matchAll(IMPORT_STATEMENT_RE)) {
+    for (const match of syntaxSource.matchAll(IMPORT_STATEMENT_RE)) {
       if (clauseIsTypeOnly(match[1])) continue;
       const target = resolveSpecifier(name, match[2]);
       if (target) out.push({ target, dynamic: false, spec: match[2] });
       else extStatic.add(match[2]);
     }
-    for (const match of source.matchAll(BARE_IMPORT_RE)) {
+    for (const match of syntaxSource.matchAll(BARE_IMPORT_RE)) {
       const target = resolveSpecifier(name, match[1]);
       if (target) out.push({ target, dynamic: false, spec: match[1] });
       else extStatic.add(match[1]);
     }
     for (const re of [DYNAMIC_IMPORT_RE, REQUIRE_RE]) {
-      for (const match of source.matchAll(re)) {
+      for (const match of syntaxSource.matchAll(re)) {
         const target = resolveSpecifier(name, match[1]);
         if (target) out.push({ target, dynamic: true, spec: match[1] });
         else extDynamic.add(match[1]);

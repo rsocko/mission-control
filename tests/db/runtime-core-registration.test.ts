@@ -145,6 +145,7 @@ const mocks = vi.hoisted(() => {
         ideationWorkspaces: {} as WorkerPersistenceRepositories['ideationWorkspaces'],
         analytics: {} as WorkerPersistenceRepositories['analytics'],
         routines: {} as WorkerPersistenceRepositories['routines'],
+        webhookIntegrations: {} as WorkerPersistenceRepositories['webhookIntegrations'],
       };
       workerRepositories.push(repository);
       return repository;

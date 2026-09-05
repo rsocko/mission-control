@@ -17,6 +17,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:postgres-route-sentinel": "node --experimental-strip-types scripts/postgres-route-sentinel.mjs && node --experimental-strip-types --test scripts/postgres-route-sentinel.test.mjs",
     "test:persisted-state": "vitest run --no-file-parallelism tests/db/persisted-state-compatibility.test.ts",
     "test:watch": "vitest",
     "test:worker-runtime": "npm run build:worker && npm run build:identity-operator && node scripts/smoke-sync-worker-runtime.mjs",

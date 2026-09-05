@@ -44,6 +44,9 @@ import { createPostgresExternalAgentControlRepository } from './external-agent-c
 import { createPostgresAnalyticsPersistence } from './analytics-repositories';
 import { createPostgresFinanceWebPersistence } from './finance-web-repository';
 import { createPostgresRoutinesRepository } from './routines-repository';
+import {
+  createPostgresWebhookIntegrationsRepository,
+} from './webhook-integrations-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -91,6 +94,9 @@ export { createPostgresExternalAgentControlRepository } from './external-agent-c
 export { createPostgresAnalyticsPersistence } from './analytics-repositories';
 export { createPostgresFinanceWebPersistence } from './finance-web-repository';
 export { createPostgresRoutinesRepository } from './routines-repository';
+export {
+  createPostgresWebhookIntegrationsRepository,
+} from './webhook-integrations-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -190,5 +196,6 @@ export function createPostgresWorkerPersistenceRepositories(
     ideationWorkspaces: createPostgresIdeationWorkspaceRepository(pool),
     analytics: createPostgresAnalyticsPersistence(pool),
     routines: createPostgresRoutinesRepository(pool),
+    webhookIntegrations: createPostgresWebhookIntegrationsRepository(pool),
   };
 }

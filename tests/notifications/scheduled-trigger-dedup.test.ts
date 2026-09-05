@@ -1,4 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import type { NotificationPushPersistence } from '@/db/persistence/notification-push';
+import { createSqliteNotificationPushRepository } from '@/db/persistence/sqlite-notification-push-repository';
 
 vi.unmock('drizzle-orm');
 process.env.MC_DB_PATH = ':memory:';
@@ -6,10 +8,17 @@ process.env.MC_DB_PATH = ':memory:';
 let db: typeof import('@/db').default;
 let schema: typeof import('@/db/schema');
 let triggerTriageNudge: typeof import('@/lib/push/triggers').triggerTriageNudge;
+let pushPersistence: NotificationPushPersistence;
+
+vi.mock('@/lib/push/notification-push-service', () => ({
+  getNotificationPushPersistence: async () => pushPersistence,
+}));
 
 beforeAll(async () => {
-  db = (await import('@/db')).default;
+  const database = await import('@/db');
+  db = database.default;
   schema = await import('@/db/schema');
+  pushPersistence = createSqliteNotificationPushRepository(database.sqlite);
   ({ triggerTriageNudge } = await import('@/lib/push/triggers'));
 });
 

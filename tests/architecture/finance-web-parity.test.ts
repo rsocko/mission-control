@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { computeWebPersistenceGraph } from './web-persistence-graph';
 
@@ -39,25 +39,6 @@ function source(path: string): string {
 }
 
 const current = computeWebPersistenceGraph(process.cwd());
-const baseline = JSON.parse(
-  readFileSync(join(process.cwd(), 'tests/architecture/web-persistence-baseline.json'), 'utf8'),
-) as {
-  counts: Record<string, number>;
-  tierBRoutes: string[];
-  taintedApiHelpers: string[];
-  decrementHistory: Array<{
-    layer: string;
-    totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTaintedLibA: string[];
-    removedTierARoutes: string[];
-    newlyCleanRoutes: string[];
-    removedDirectTaintSourceRoutes: string[];
-    removedDirectDbNamespaceRoutes: string[];
-    removedTransitiveOnlyTaintSourceRoutes: string[];
-    tierBReclassifications: string[];
-    notMigratedFromTheOwnedFileSet: string[];
-  }>;
-};
 
 describe('L12c finance end-user web/API PostgreSQL parity', () => {
   it('keeps the frozen route and supporting-library cap free of SQLite reach', () => {
@@ -109,34 +90,11 @@ describe('L12c finance end-user web/API PostgreSQL parity', () => {
     expect(failure).toBeGreaterThan(complete);
   });
 
-  it('records the exact graph decrement including two transitively cleaned alert routes', () => {
-    const entry = baseline.decrementHistory.find((record) => record.layer === 'L12c');
-    const allCleanRoutes = [...COLLATERALLY_CLEAN_ROUTES, ...OWNED_ROUTES].sort();
-    expect(entry, 'L12c must be recorded in web-persistence-baseline.json').toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 193, to: 182, delta: -11 });
-    expect(entry?.removedTierARoutes).toEqual(allCleanRoutes);
-    expect(entry?.newlyCleanRoutes).toEqual(allCleanRoutes);
-    expect(entry?.removedTaintedLibA).toEqual([...OWNED_LIBRARIES].sort());
-    expect(entry?.removedDirectTaintSourceRoutes).toEqual([
-      'src/app/api/finance/kids/route.ts',
-      'src/app/api/finance/notifications/[id]/dismiss/route.ts',
-      'src/app/api/finance/notifications/route.ts',
-      'src/app/api/finance/summary/route.ts',
-      'src/app/api/finance/transactions/[id]/category/route.ts',
-      'src/app/api/finance/transactions/route.ts',
-    ]);
-    expect(entry?.removedDirectDbNamespaceRoutes)
-      .toEqual(entry?.removedDirectTaintSourceRoutes);
-    expect(entry?.removedTransitiveOnlyTaintSourceRoutes).toEqual([
-      'src/app/api/finance/alerts/[id]/dismiss/route.ts',
-      'src/app/api/finance/alerts/route.ts',
-      'src/app/api/finance/overview/route.ts',
-    ]);
-    expect(entry?.tierBReclassifications).toEqual([]);
-    expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
+  it('stays at or below the L12c migration-unit ceiling', () => {
+    expect(current.totalMigrationUnits).toBeLessThanOrEqual(182);
   });
 
-  it('recomputes the exact after graph without adding Tier B or helper taint', () => {
+  it('keeps owned and collateral routes plus owned libraries free of graph taint', () => {
     for (const route of [...OWNED_ROUTES, ...COLLATERALLY_CLEAN_ROUTES]) {
       expect(current.cleanRoutes, route).toContain(route);
       expect(current.tierARoutes, route).not.toContain(route);
@@ -145,42 +103,5 @@ describe('L12c finance end-user web/API PostgreSQL parity', () => {
     for (const library of OWNED_LIBRARIES) {
       expect(current.taintedLibA, library).not.toContain(library);
     }
-    expect(current.tierBRoutes).toEqual(baseline.tierBRoutes);
-    expect(current.taintedApiHelpers).toEqual(baseline.taintedApiHelpers);
-    expect({
-      apiRoutes: current.apiRoutes.length,
-      tierARoutes: current.tierARoutes.length,
-      tierBRoutes: current.tierBRoutes.length,
-      cleanRoutes: current.cleanRoutes.length,
-      directTaintSourceRoutes: current.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: current.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
-      taintedLibA: current.taintedLibA.length,
-      taintedApiHelpers: current.taintedApiHelpers.length,
-      totalMigrationUnits: current.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 107,
-      tierBRoutes: 5,
-      cleanRoutes: 154,
-      directTaintSourceRoutes: 77,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 78,
-      taintedLibA: 57,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 164,
-    });
-    expect(baseline.counts).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 107,
-      tierBRoutes: 5,
-      cleanRoutes: 154,
-      directTaintSourceRoutes: 77,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 78,
-      taintedLibA: 57,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 164,
-    });
   });
 });

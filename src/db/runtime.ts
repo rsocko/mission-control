@@ -457,6 +457,12 @@ const postgresCorePersistenceRepositories: CorePersistenceRepositories = {
     getActiveEmbeddingIdentity: () => (
       requirePostgresRepositories().settings.getActiveEmbeddingIdentity!()
     ),
+    listSmartScoreSettings: () => (
+      requirePostgresRepositories().settings.listSmartScoreSettings!()
+    ),
+    setSmartScoreSetting: (key, value) => (
+      requirePostgresRepositories().settings.setSmartScoreSetting!(key, value)
+    ),
   },
   houstonMemories: {
     get: (id, authorizationScope) => (

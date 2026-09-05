@@ -1227,6 +1227,28 @@ export class SqliteSettingsRepository implements AtomicSettingsRepository {
       .changes === 1;
   }
 
+  async listSmartScoreSettings(): Promise<Record<string, PersistenceJson>> {
+    const rows = this.database.prepare(`
+      SELECT key, value
+      FROM smart_score_settings
+      ORDER BY key COLLATE BINARY
+    `).all() as Array<{ key: string; value: unknown }>;
+    return Object.fromEntries(rows.map((row) => [
+      row.key,
+      parseJson(row.value) as PersistenceJson,
+    ]));
+  }
+
+  async setSmartScoreSetting(key: string, value: string): Promise<void> {
+    this.database.prepare(`
+      INSERT INTO smart_score_settings (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET
+        value = excluded.value,
+        updated_at = excluded.updated_at
+    `).run(key, stringifyJson(value), new Date().toISOString());
+  }
+
   async getActiveEmbeddingIdentity() {
     const row = this.database.prepare(`
       SELECT provider, model, dimensions, vector_count AS vectorCount

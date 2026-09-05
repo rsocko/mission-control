@@ -104,5 +104,22 @@ export function describeSettingsRepositoryBatchContract(
       await expect(harness.freshRepository().getActiveEmbeddingIdentity())
         .resolves.toEqual(expected);
     });
+
+    it('round trips smart-score settings through their existing dedicated store', async () => {
+      const alpha = `${prefix}-smart-alpha`;
+      const zulu = `${prefix}-smart-zulu`;
+      await harness.repository.setSmartScoreSetting(zulu, 'false');
+      await harness.repository.setSmartScoreSetting(alpha, '42');
+      await harness.repository.setSmartScoreSetting(zulu, 'true');
+
+      const settings = await harness.freshRepository().listSmartScoreSettings();
+      expect(settings).toMatchObject({
+        [alpha]: '42',
+        [zulu]: 'true',
+      });
+      expect(Object.keys(settings).filter((key) => key.startsWith(`${prefix}-smart-`)))
+        .toEqual([alpha, zulu]);
+      await expect(harness.repository.get(alpha)).resolves.toBeNull();
+    });
   });
 }

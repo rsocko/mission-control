@@ -96,12 +96,31 @@ export interface SettingsRepository {
   getMany?(keys: readonly string[]): Promise<Record<string, PersistenceJson | null>>;
   setMany?(entries: ReadonlyArray<readonly [string, PersistenceJson]>): Promise<void>;
   getActiveEmbeddingIdentity?(): Promise<ActiveEmbeddingIdentity | null>;
+  listSmartScoreSettings?(): Promise<Record<string, PersistenceJson>>;
+  setSmartScoreSetting?(key: string, value: string): Promise<void>;
 }
 
-export interface AtomicSettingsRepository extends SettingsRepository {
+export interface SmartScoreSettingsRepository extends SettingsRepository {
+  listSmartScoreSettings(): Promise<Record<string, PersistenceJson>>;
+  setSmartScoreSetting(key: string, value: string): Promise<void>;
+}
+
+export interface AtomicSettingsRepository extends SmartScoreSettingsRepository {
   getMany(keys: readonly string[]): Promise<Record<string, PersistenceJson | null>>;
   setMany(entries: ReadonlyArray<readonly [string, PersistenceJson]>): Promise<void>;
   getActiveEmbeddingIdentity(): Promise<ActiveEmbeddingIdentity | null>;
+}
+
+export function requireSmartScoreSettingsRepository(
+  repository: SettingsRepository,
+): SmartScoreSettingsRepository {
+  if (
+    typeof repository.listSmartScoreSettings !== 'function'
+    || typeof repository.setSmartScoreSetting !== 'function'
+  ) {
+    throw new Error('Smart-score settings repository has not been registered');
+  }
+  return repository as SmartScoreSettingsRepository;
 }
 
 export interface ActiveEmbeddingIdentity {

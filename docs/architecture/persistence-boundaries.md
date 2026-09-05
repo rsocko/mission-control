@@ -2284,6 +2284,55 @@ to
 `266/A88/B5/clean173/direct58/transitive30/directDB59/lib51/helpers0/units139`,
 with no Tier A-to-B reclassification.
 
+## Web/API PostgreSQL parity: taxonomy and prioritization
+
+The bounded prioritization layer owns four routes:
+
+- `/api/priority-entities`;
+- `/api/priority-entities/options`;
+- `/api/priority-log`; and
+- `/api/smart-score/settings`.
+
+Priority entity reads, mutations, picker options, and synchronization logs use
+the existing task-core composition. SQLite performs append allocation, batch
+updates, and delete/rerank operations through its injected immediate
+transaction runner. PostgreSQL uses native transactions and a domain advisory
+lock where concurrent appends or reranks must serialize. Both adapters apply
+binary/C-locale tie-breakers to entity ranks, option names and identifiers, and
+same-timestamp log entries.
+
+Smart-score settings remain row-per-key in the existing
+`smart_score_settings` table and are exposed through the selected core settings
+repository; no duplicate settings store or new runtime registry is introduced.
+The PostgreSQL core facade forwards that capability to the live adapter and
+fails closed if an incomplete test composition is selected. Route validation,
+canonical project/tag/source reference resolution, response envelopes, and
+string normalization of setting values remain unchanged.
+
+The intentionally excluded surfaces are `/api/smart-score` scoring,
+kanban settings, tags collection/merge/push/remove/unify, subtask templates,
+preference settings, and task-tag assignment. Scout/triage state, connector
+transfer, routines, daily completions, and production cutover are also outside
+this layer.
+
+On base `8d690f82bc9fc8651a376fc99a2030e3e99f477a`, the authoritative
+sentinel moves from
+`266/A82/B5/clean179/direct52/transitive30/directDB53/lib51/helpers0/units133`
+to
+`266/A78/B5/clean183/direct48/transitive30/directDB50/lib51/helpers0/units129`.
+All four routes move directly from Tier A to clean, with no Tier B or library
+reclassification. The canonical baseline and fail-closed sentinel remain the
+only exact-current graph owners.
+
+The implementation changes 11 source paths: the four routes, task-core and
+core-settings contracts, four SQLite/PostgreSQL adapters, and the existing
+PostgreSQL core facade. Shared SQLite/live-PostgreSQL contracts cover append
+concurrency, batch rollback, stable reranking, option filtering/order, log
+filtering/order, and dedicated smart-score setting persistence. Route tests
+poison direct SQLite loading. Together with this document, the baseline, and
+focused harness/facade tests, the complete change remains below the approved
+42-path maximum.
+
 ## Web/API PostgreSQL parity: personal-planning routines
 
 Routine collection, item lifecycle, and completions resolve one backend-neutral

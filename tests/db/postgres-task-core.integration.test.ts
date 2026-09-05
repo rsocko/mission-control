@@ -7,6 +7,7 @@ import {
   type SeedConnector,
   type SeedLinkedSource,
   type SeedPriorityEntity,
+  type SeedPrioritySyncLog,
   type SeedProjectPhase,
   type SeedSourceList,
   type SeedSourceRanking,
@@ -87,6 +88,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           my_day_exclusions,
           my_day_items,
           priority_entities,
+          priority_sync_log,
           source_rankings,
           source_lists,
           connector_configs,
@@ -170,8 +172,18 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
     async insertProjects(rows) {
       for (const row of rows) {
         await client.query(
-          'INSERT INTO hub_projects (id, name, created_at, updated_at) VALUES ($1,$2,$3,$4)',
-          [row.id, row.name, DEFAULT_NOW, DEFAULT_NOW],
+          `INSERT INTO hub_projects (
+            id, name, description, color, hidden, created_at, updated_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [
+            row.id,
+            row.name,
+            row.description ?? null,
+            row.color ?? '#3b82f6',
+            row.hidden ?? false,
+            DEFAULT_NOW,
+            DEFAULT_NOW,
+          ],
         );
       }
     },
@@ -412,6 +424,54 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             DEFAULT_NOW,
           ],
         );
+      }
+    },
+    async insertPrioritySyncLogs(rows: SeedPrioritySyncLog[]) {
+      for (const row of rows) {
+        await client.query(
+          `INSERT INTO priority_sync_log (
+            id, task_id, connector_type, connector_instance_id, previous_priority,
+            new_priority, direction, write_back_triggered, note, timestamp
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [
+            row.id,
+            row.taskId,
+            row.connectorType ?? 'local',
+            row.connectorInstanceId ?? 'local',
+            row.previousPriority ?? 'none',
+            row.newPriority ?? 'medium',
+            row.direction ?? 'inbound',
+            row.writeBackTriggered ?? false,
+            row.note ?? null,
+            row.timestamp,
+          ],
+        );
+      }
+    },
+    async forcePriorityUpdateRollback(firstId, failureId) {
+      await client.query(`
+        CREATE FUNCTION priority_update_forced_failure() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.id = '${failureId.replaceAll("'", "''")}' THEN
+            RAISE EXCEPTION 'forced priority update failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+      `);
+      await client.query(`
+        CREATE TRIGGER priority_update_forced_failure
+        BEFORE UPDATE ON priority_entities
+        FOR EACH ROW EXECUTE FUNCTION priority_update_forced_failure()
+      `);
+      try {
+        await harness!.persistence.priorityEntities.updatePriorityEntities([
+          { id: firstId, name: 'Changed', updatedAt: DEFAULT_NOW },
+          { id: failureId, name: 'Changed', updatedAt: DEFAULT_NOW },
+        ]);
+      } finally {
+        await client.query('DROP TRIGGER priority_update_forced_failure ON priority_entities');
+        await client.query('DROP FUNCTION priority_update_forced_failure()');
       }
     },
     async listTaskIds() {

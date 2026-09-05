@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { eq } from 'drizzle-orm';
 import type * as SchemaModule from '@/db/schema';
 import {
   describeTaskCoreContract,
@@ -171,9 +170,9 @@ beforeAll(async () => {
         action: schema.quickSortLog.action,
         reversedAt: schema.quickSortLog.reversedAt,
       }).from(schema.quickSortLog)
-        .where(eq(schema.quickSortLog.operationId, operationId))
         .orderBy(schema.quickSortLog.id)
-        .all();
+        .all()
+        .filter((row) => row.operationId === operationId);
     },
     async insertTags(rows: SeedTag[]) {
       if (rows.length === 0) return;

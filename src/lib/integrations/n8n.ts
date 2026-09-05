@@ -3,7 +3,7 @@ import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runti
 
 export const N8N_CONFIG_ID = 'n8n';
 
-export interface N8NSettings {
+export interface N8NSettings extends Record<string, unknown> {
   workflowCount?: number;
   connected?: boolean;
   webhookSecret?: string;

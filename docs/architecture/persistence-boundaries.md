@@ -1955,6 +1955,10 @@ Eleven routes and one shared library move behind the port:
 `/api/integrations/webhooks/[id]/test` (POST), `/api/webhooks/[connectorId]`
 (GET/POST), plus `src/lib/integrations/n8n.ts`.
 
+The final approved maximum is 48 paths: the 28-path implementation cap plus
+20 test-only exact-current ratchet readers discovered across both main
+reconciliations and CI. The production and route scope did not expand.
+
 The port lives in `src/db/persistence/webhook-integrations.ts`, with
 `src/db/persistence/sqlite-webhook-integrations-repository.ts` and
 `src/db/postgres/repositories/webhook-integrations-repository.ts` as the two

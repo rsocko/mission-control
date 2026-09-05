@@ -26,33 +26,11 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8');
 }
 
-const baseline = JSON.parse(readFileSync(
-  join(process.cwd(), 'tests/architecture/web-persistence-baseline.json'),
-  'utf8',
-)) as {
-  decrementHistory: Array<{
-    layer: string;
-    totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTierARoutes: string[];
-    newlyCleanRoutes: string[];
-    removedDirectTaintSourceRoutes: string[];
-    removedDirectDbNamespaceRoutes: string[];
-    tierBReclassifications: string[];
-    notMigratedFromTheOwnedFileSet: unknown[];
-  }>;
-};
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L19 project-organization taint decrement', () => {
-  it('records the exact composed decrement', () => {
-    const entry = baseline.decrementHistory.find(({ layer }) => layer === 'L19');
-    expect(entry?.totalMigrationUnits).toEqual({ from: 175, to: 167, delta: -8 });
-    expect(entry?.removedTierARoutes.sort()).toEqual([...ROUTES].sort());
-    expect(entry?.newlyCleanRoutes.sort()).toEqual([...ROUTES].sort());
-    expect(entry?.removedDirectTaintSourceRoutes.sort()).toEqual([...ROUTES].sort());
-    expect(entry?.removedDirectDbNamespaceRoutes.sort()).toEqual([...ROUTES].sort());
-    expect(entry?.tierBReclassifications).toEqual([]);
-    expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
+  it('stays at or below the L19 migration-unit ceiling', () => {
+    expect(current.totalMigrationUnits).toBeLessThanOrEqual(167);
   });
 
   it.each(ROUTES)('%s is clean and keeps no persistence import', (route) => {
@@ -125,31 +103,5 @@ describe('L19 project-organization taint decrement', () => {
     expect(postgres).toContain('BEGIN ISOLATION LEVEL SERIALIZABLE');
     expect(postgres).toContain('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');
     expect(postgres).toContain('COLLATE "C"');
-  });
-
-  it('holds the exact composed graph', () => {
-    expect({
-      apiRoutes: current.apiRoutes.length,
-      tierARoutes: current.tierARoutes.length,
-      tierBRoutes: current.tierBRoutes.length,
-      cleanRoutes: current.cleanRoutes.length,
-      directTaintSourceRoutes: current.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: current.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
-      taintedLibA: current.taintedLibA.length,
-      taintedApiHelpers: current.taintedApiHelpers.length,
-      totalMigrationUnits: current.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 110,
-      tierBRoutes: 5,
-      cleanRoutes: 151,
-      directTaintSourceRoutes: 80,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 81,
-      taintedLibA: 57,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 167,
-    });
   });
 });

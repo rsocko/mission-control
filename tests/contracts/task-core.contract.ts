@@ -73,6 +73,14 @@ export interface SeedSourceList {
   sortOrder?: number;
 }
 
+export interface SeedProject {
+  id: string;
+  name: string;
+  description?: string | null;
+  color?: string;
+  hidden?: boolean;
+}
+
 export interface SeedConnector {
   id: string;
   type: string;
@@ -101,6 +109,19 @@ export interface SeedPriorityEntity {
   type: string;
   referenceId?: string | null;
   rank?: number;
+}
+
+export interface SeedPrioritySyncLog {
+  id: string;
+  taskId: string;
+  connectorType?: string;
+  connectorInstanceId?: string;
+  previousPriority?: string;
+  newPriority?: string;
+  direction?: string;
+  writeBackTriggered?: boolean;
+  note?: string | null;
+  timestamp: string;
 }
 
 export interface SeedSchedule {
@@ -147,7 +168,7 @@ export interface TaskCoreContractHarness {
   insertTasks(rows: SeedTask[]): Promise<void>;
   insertTags(rows: SeedTag[]): Promise<void>;
   insertTaskTags(rows: Array<{ taskId: string; tagId: string }>): Promise<void>;
-  insertProjects(rows: Array<{ id: string; name: string }>): Promise<void>;
+  insertProjects(rows: SeedProject[]): Promise<void>;
   insertTaskProjects(rows: Array<{ taskId: string; projectId: string }>): Promise<void>;
   insertTaskDependencies(rows: Array<{
     id: string;
@@ -160,6 +181,8 @@ export interface TaskCoreContractHarness {
   setAppSetting(key: string, value: unknown): Promise<void>;
   insertAttachments(rows: SeedAttachment[]): Promise<void>;
   insertPriorityEntities(rows: SeedPriorityEntity[]): Promise<void>;
+  insertPrioritySyncLogs(rows: SeedPrioritySyncLog[]): Promise<void>;
+  forcePriorityUpdateRollback(firstId: string, failureId: string): Promise<void>;
   insertMyDayExclusion(row: { id: string; taskId: string; date: string }): Promise<void>;
   insertTaskSchedules(rows: SeedSchedule[]): Promise<void>;
   insertLinkedSources(rows: SeedLinkedSource[]): Promise<void>;
@@ -2477,6 +2500,137 @@ export function describeTaskCoreContract(
         ]);
         expect(await harness.persistence.sourceListNames.listSourceListDisplayNames([]))
           .toEqual([]);
+      });
+
+      it('serializes concurrent appends into unique ranks', async () => {
+        const created = await Promise.all(Array.from({ length: 8 }, (_, index) =>
+          harness.persistence.priorityEntities.createPriorityEntity({
+            id: `concurrent-${index}`,
+            name: `Concurrent ${index}`,
+            type: 'person',
+            now: `2026-08-05T12:00:0${index}.000Z`,
+          })));
+
+        expect(new Set(created.map((entity) => entity.rank)).size).toBe(8);
+        expect((await harness.persistence.priorityEntities.listPriorityEntitiesByRank())
+          .map((entity) => entity.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+      });
+
+      it('rolls back a batch update when a later entity write fails', async () => {
+        await harness.insertPriorityEntities([
+          { id: 'priority-first', name: 'First', type: 'person', rank: 1 },
+          { id: 'priority-failure', name: 'Failure', type: 'person', rank: 2 },
+        ]);
+
+        await expect(harness.forcePriorityUpdateRollback(
+          'priority-first',
+          'priority-failure',
+        )).rejects.toThrow();
+
+        expect(await harness.persistence.priorityEntities.listPriorityEntitiesByRank())
+          .toMatchObject([
+            { id: 'priority-first', name: 'First' },
+            { id: 'priority-failure', name: 'Failure' },
+          ]);
+      });
+
+      it('deletes and reranks remaining entities in stable rank/id order', async () => {
+        await harness.insertPriorityEntities([
+          { id: 'priority-b', name: 'B', type: 'person', rank: 3 },
+          { id: 'priority-c', name: 'C', type: 'person', rank: 3 },
+          { id: 'priority-a', name: 'A', type: 'person', rank: 1 },
+        ]);
+
+        await harness.persistence.priorityEntities.deletePriorityEntityAndRerank(
+          'priority-a',
+          '2026-08-06T00:00:00.000Z',
+        );
+
+        expect(await harness.persistence.priorityEntities.listPriorityEntitiesByRank())
+          .toMatchObject([
+            { id: 'priority-b', rank: 1 },
+            { id: 'priority-c', rank: 2 },
+          ]);
+      });
+
+      it('filters and byte-orders priority entity picker options', async () => {
+        await harness.insertProjects([
+          { id: 'project-z', name: 'Zulu' },
+          { id: 'project-a', name: 'Alpha' },
+          { id: 'project-hidden', name: 'Hidden', hidden: true },
+        ]);
+        await harness.insertTags([
+          { id: 'tag-z', name: 'Zulu', slug: 'zulu' },
+          { id: 'tag-a', name: 'Alpha', slug: 'alpha' },
+          { id: 'tag-unconfirmed', name: 'Ignored', slug: 'ignored', confirmed: false },
+          { id: 'tag-unified', name: 'Unified', slug: 'unified', unifiedInto: 'tag-a' },
+        ]);
+        await harness.insertConnectors([
+          { id: 'connector-z', type: 'github', name: 'Zulu' },
+          { id: 'connector-a', type: 'todo', name: 'Alpha' },
+          { id: 'connector-disabled', type: 'todo', name: 'Disabled', enabled: false },
+          { id: 'connector-deleted', type: 'todo', name: 'Deleted', deletedAt: NOW },
+        ]);
+        await harness.insertSourceLists([
+          {
+            id: 'source-z',
+            connectorInstanceId: 'connector-z',
+            sourceId: 'z',
+            name: 'Zulu',
+          },
+          {
+            id: 'source-a',
+            connectorInstanceId: 'connector-a',
+            sourceId: 'a',
+            name: 'Alpha',
+            userDisplayName: 'Renamed',
+          },
+          {
+            id: 'source-hidden',
+            connectorInstanceId: 'connector-a',
+            sourceId: 'hidden',
+            name: 'Hidden',
+            hidden: true,
+          },
+          {
+            id: 'source-disabled',
+            connectorInstanceId: 'connector-disabled',
+            sourceId: 'disabled',
+            name: 'Disabled',
+          },
+          {
+            id: 'source-deleted',
+            connectorInstanceId: 'connector-deleted',
+            sourceId: 'deleted',
+            name: 'Deleted',
+          },
+        ]);
+
+        const options = await harness.persistence.priorityEntities.listPriorityEntityOptions();
+        expect(options.projects.map((row) => row.id)).toEqual(['project-a', 'project-z']);
+        expect(options.tags.map((row) => row.id)).toEqual(['tag-a', 'tag-z']);
+        expect(options.sources.map((row) => row.sourceId)).toEqual(['a', 'z']);
+        expect(options.sources[0]).toMatchObject({
+          connectorName: 'Alpha',
+          connectorType: 'todo',
+          userDisplayName: 'Renamed',
+        });
+      });
+
+      it('filters, limits, and deterministically orders priority sync logs', async () => {
+        await harness.insertPrioritySyncLogs([
+          { id: 'log-b', taskId: 'task-a', timestamp: '2026-08-06T00:00:00.000Z' },
+          { id: 'log-a', taskId: 'task-a', timestamp: '2026-08-06T00:00:00.000Z' },
+          { id: 'log-new', taskId: 'task-b', timestamp: '2026-08-07T00:00:00.000Z' },
+        ]);
+
+        expect((await harness.persistence.priorityEntities.listPrioritySyncLog({
+          limit: 2,
+        })).map((row) => row.id)).toEqual(['log-new', 'log-a']);
+        expect((await harness.persistence.priorityEntities.listPrioritySyncLog({
+          taskId: 'task-a',
+          limit: 10,
+        })).map((row) => row.id)).toEqual(['log-a', 'log-b']);
       });
     });
 

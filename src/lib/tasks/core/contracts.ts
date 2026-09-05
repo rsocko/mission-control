@@ -1492,6 +1492,30 @@ export interface PriorityEntityRow {
   readonly updatedAt: string;
 }
 
+export interface PriorityEntityCreate {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+  readonly referenceId?: string | null;
+  readonly description?: string | null;
+  readonly tier?: string;
+  readonly color?: string;
+  readonly rank?: number;
+  readonly now: string;
+}
+
+export interface PriorityEntityUpdate {
+  readonly id: string;
+  readonly name?: string;
+  readonly type?: string;
+  readonly referenceId?: string | null;
+  readonly description?: string | null;
+  readonly tier?: string;
+  readonly color?: string;
+  readonly rank?: number;
+  readonly updatedAt: string;
+}
+
 export interface PriorityProjectReference {
   readonly id: string;
   readonly name: string;
@@ -1514,8 +1538,40 @@ export interface PrioritySourceListReference {
   readonly color: string | null;
 }
 
+export interface PrioritySourceOption extends PrioritySourceListReference {
+  readonly connectorName: string;
+  readonly connectorType: string;
+}
+
+export interface PriorityEntityOptions {
+  readonly projects: PriorityProjectReference[];
+  readonly tags: PriorityTagReference[];
+  readonly sources: PrioritySourceOption[];
+}
+
+export interface PrioritySyncLogRow {
+  readonly id: string;
+  readonly taskId: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly previousPriority: string;
+  readonly newPriority: string;
+  readonly direction: string;
+  readonly writeBackTriggered: boolean;
+  readonly note: string | null;
+  readonly timestamp: string;
+}
+
 export interface PriorityEntityRepository {
   listPriorityEntitiesByRank(): Promise<PriorityEntityRow[]>;
+  createPriorityEntity(input: PriorityEntityCreate): Promise<PriorityEntityRow>;
+  updatePriorityEntities(inputs: readonly PriorityEntityUpdate[]): Promise<void>;
+  deletePriorityEntityAndRerank(id: string, updatedAt: string): Promise<void>;
+  listPriorityEntityOptions(): Promise<PriorityEntityOptions>;
+  listPrioritySyncLog(input: {
+    readonly taskId?: string;
+    readonly limit: number;
+  }): Promise<PrioritySyncLogRow[]>;
   getProjectReference(projectId: string): Promise<PriorityProjectReference | null>;
   getTagReference(tagId: string): Promise<PriorityTagReference | null>;
   getSourceListReference(

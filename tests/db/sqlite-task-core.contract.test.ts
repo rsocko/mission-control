@@ -8,6 +8,7 @@ import {
   type SeedConnector,
   type SeedLinkedSource,
   type SeedPriorityEntity,
+  type SeedPrioritySyncLog,
   type SeedProjectPhase,
   type SeedSourceList,
   type SeedSourceRanking,
@@ -65,6 +66,7 @@ beforeAll(async () => {
         schema.myDayExclusions,
         schema.myDayItems,
         schema.priorityEntities,
+        schema.prioritySyncLog,
         schema.sourceRankings,
         schema.quickSortOperations,
         schema.quickSortLog,
@@ -197,6 +199,9 @@ beforeAll(async () => {
       await db.insert(schema.hubProjects).values(rows.map((row) => ({
         id: row.id,
         name: row.name,
+        description: row.description ?? null,
+        color: row.color ?? '#3b82f6',
+        hidden: row.hidden ?? false,
         createdAt: DEFAULT_NOW,
         updatedAt: DEFAULT_NOW,
       })));
@@ -311,6 +316,39 @@ beforeAll(async () => {
         createdAt: DEFAULT_NOW,
         updatedAt: DEFAULT_NOW,
       })));
+    },
+    async insertPrioritySyncLogs(rows: SeedPrioritySyncLog[]) {
+      if (rows.length === 0) return;
+      await db.insert(schema.prioritySyncLog).values(rows.map((row) => ({
+        id: row.id,
+        taskId: row.taskId,
+        connectorType: row.connectorType ?? 'local',
+        connectorInstanceId: row.connectorInstanceId ?? 'local',
+        previousPriority: row.previousPriority ?? 'none',
+        newPriority: row.newPriority ?? 'medium',
+        direction: row.direction ?? 'inbound',
+        writeBackTriggered: row.writeBackTriggered ?? false,
+        note: row.note ?? null,
+        timestamp: row.timestamp,
+      })));
+    },
+    async forcePriorityUpdateRollback(firstId, failureId) {
+      sqlite.exec(`
+        CREATE TRIGGER priority_update_forced_failure
+        BEFORE UPDATE ON priority_entities
+        WHEN NEW.id = '${failureId.replaceAll("'", "''")}'
+        BEGIN
+          SELECT RAISE(ABORT, 'forced priority update failure');
+        END;
+      `);
+      try {
+        await harness.persistence.priorityEntities.updatePriorityEntities([
+          { id: firstId, name: 'Changed', updatedAt: DEFAULT_NOW },
+          { id: failureId, name: 'Changed', updatedAt: DEFAULT_NOW },
+        ]);
+      } finally {
+        sqlite.exec('DROP TRIGGER priority_update_forced_failure');
+      }
     },
     async listTaskIds() {
       const rows = await db.select({ id: schema.tasks.id }).from(schema.tasks);

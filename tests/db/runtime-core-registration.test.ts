@@ -103,6 +103,8 @@ const mocks = vi.hoisted(() => {
           get: vi.fn(async () => null),
           set: vi.fn(async () => undefined),
           delete: vi.fn(async () => false),
+          listSmartScoreSettings: vi.fn(async () => ({ enabled: 'true' })),
+          setSmartScoreSetting: vi.fn(async () => undefined),
         },
         houstonMemories: {} as CorePersistenceRepositories['houstonMemories'],
       };
@@ -287,6 +289,8 @@ describe('PostgreSQL runtime core repository registration', () => {
       error: null,
       testedAt: '2026-09-04T21:45:00.000Z',
     });
+    await registeredComposition.settings.listSmartScoreSettings!();
+    await registeredComposition.settings.setSmartScoreSetting!('enabled', 'false');
     await registeredWorkerComposition.syncRuns.listLatestSuccessfulPulls();
     await registeredWorkerComposition.notificationDelivery.getNextWakeAt();
     await registeredWorkerComposition.reminders.cancelInvalidated({
@@ -301,6 +305,9 @@ describe('PostgreSQL runtime core repository registration', () => {
       error: null,
       testedAt: '2026-09-04T21:45:00.000Z',
     });
+    expect(mocks.repositories[0].settings.listSmartScoreSettings).toHaveBeenCalledOnce();
+    expect(mocks.repositories[0].settings.setSmartScoreSetting)
+      .toHaveBeenCalledWith('enabled', 'false');
     expect(mocks.workerRepositories[0].syncRuns.listLatestSuccessfulPulls)
       .toHaveBeenCalledOnce();
     expect(mocks.workerRepositories[0].notificationDelivery.getNextWakeAt)

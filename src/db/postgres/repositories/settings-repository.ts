@@ -2,7 +2,7 @@ import { eq, inArray, sql } from 'drizzle-orm';
 import type { PersistenceJson } from '@/db/persistence/contracts';
 import type { AtomicSettingsRepository } from '@/db/persistence/core-repositories';
 import type { PostgresDatabase } from '../runtime';
-import { appSettings, semanticIndexIdentities } from '../schema';
+import { appSettings, semanticIndexIdentities, smartScoreSettings } from '../schema';
 
 /**
  * PostgreSQL-backed implementation of the portable `SettingsRepository`
@@ -70,6 +70,28 @@ export class PostgresSettingsRepository implements AtomicSettingsRepository {
       .where(eq(appSettings.key, key))
       .returning({ key: appSettings.key });
     return deleted.length > 0;
+  }
+
+  async listSmartScoreSettings(): Promise<Record<string, PersistenceJson>> {
+    const rows = await this.db.select({
+      key: smartScoreSettings.key,
+      value: sql<string>`${smartScoreSettings.value}::text`,
+    }).from(smartScoreSettings)
+      .orderBy(sql`${smartScoreSettings.key} COLLATE "C"`);
+    return Object.fromEntries(rows.map((row) => [
+      row.key,
+      JSON.parse(row.value) as PersistenceJson,
+    ]));
+  }
+
+  async setSmartScoreSetting(key: string, value: string): Promise<void> {
+    const updatedAt = new Date().toISOString();
+    await this.db.insert(smartScoreSettings)
+      .values({ key, value, updatedAt })
+      .onConflictDoUpdate({
+        target: smartScoreSettings.key,
+        set: { value, updatedAt },
+      });
   }
 
   async getActiveEmbeddingIdentity() {

@@ -37,6 +37,9 @@ describePostgres('PostgreSQL settings batch integration', () => {
     await backend.context.pool.query(
       `DELETE FROM app_settings WHERE key LIKE 'settings-batch-%'`,
     );
+    await backend.context.pool.query(
+      `DELETE FROM smart_score_settings WHERE key LIKE 'settings-batch-%'`,
+    );
     for (const key of ownedKeys) {
       await backend.context.pool.query('DELETE FROM app_settings WHERE key = $1', [key]);
     }

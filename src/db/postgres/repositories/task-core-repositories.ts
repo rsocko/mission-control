@@ -84,9 +84,13 @@ import {
   type PendingSyncTaskMoveOutcome,
   type PendingSyncTaskMoveRequest,
   type PriorityEntityRepository,
+  type PriorityEntityCreate,
+  type PriorityEntityOptions,
   type PriorityEntityRow,
+  type PriorityEntityUpdate,
   type PriorityProjectReference,
   type PrioritySourceListReference,
+  type PrioritySyncLogRow,
   type PriorityTagReference,
   type RetentionTaskIdentity,
   type RetentionTaskRow,
@@ -3574,6 +3578,132 @@ class PostgresPriorityEntityRepository implements PriorityEntityRepository {
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }));
+  }
+
+  async createPriorityEntity(input: PriorityEntityCreate): Promise<PriorityEntityRow> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('priority-entities-order'))`);
+      const [current] = await tx.select({ rank: priorityEntities.rank })
+        .from(priorityEntities)
+        .orderBy(desc(priorityEntities.rank))
+        .limit(1);
+      const [created] = await tx.insert(priorityEntities).values({
+        id: input.id,
+        name: input.name,
+        type: input.type,
+        referenceId: input.referenceId ?? null,
+        description: input.description ?? null,
+        tier: input.tier ?? 'standard',
+        color: input.color ?? '#64748b',
+        rank: input.rank ?? (current?.rank ?? 0) + 1,
+        createdAt: input.now,
+        updatedAt: input.now,
+      }).returning();
+      return created;
+    });
+  }
+
+  async updatePriorityEntities(inputs: readonly PriorityEntityUpdate[]): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('priority-entities-order'))`);
+      for (const input of inputs) {
+        const {
+          id,
+          updatedAt,
+          ...changes
+        } = input;
+        await tx.update(priorityEntities)
+          .set({ ...changes, updatedAt })
+          .where(eq(priorityEntities.id, id));
+      }
+    });
+  }
+
+  async deletePriorityEntityAndRerank(id: string, updatedAt: string): Promise<void> {
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('priority-entities-order'))`);
+      await tx.delete(priorityEntities).where(eq(priorityEntities.id, id));
+      const remaining = await tx.select({ id: priorityEntities.id })
+        .from(priorityEntities)
+        .orderBy(
+          asc(priorityEntities.rank),
+          asc(sql`${priorityEntities.id} COLLATE "C"`),
+        );
+      for (const [index, row] of remaining.entries()) {
+        await tx.update(priorityEntities)
+          .set({ rank: index + 1, updatedAt })
+          .where(eq(priorityEntities.id, row.id));
+      }
+    });
+  }
+
+  async listPriorityEntityOptions(): Promise<PriorityEntityOptions> {
+    const projects = await this.db.select({
+      id: hubProjects.id,
+      name: hubProjects.name,
+      description: hubProjects.description,
+      color: hubProjects.color,
+    }).from(hubProjects)
+      .where(eq(hubProjects.hidden, false))
+      .orderBy(
+        asc(sql`${hubProjects.name} COLLATE "C"`),
+        asc(sql`${hubProjects.id} COLLATE "C"`),
+      );
+    const tagRows = await this.db.select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      unifiedInto: tags.unifiedInto,
+    }).from(tags)
+      .where(and(eq(tags.confirmed, true), isNull(tags.unifiedInto)))
+      .orderBy(
+        asc(sql`${tags.name} COLLATE "C"`),
+        asc(sql`${tags.id} COLLATE "C"`),
+      );
+    const sources = await this.db.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      color: sourceLists.iconColor,
+      connectorName: connectorConfigs.name,
+      connectorType: connectorConfigs.type,
+    }).from(sourceLists)
+      .innerJoin(connectorConfigs, eq(sourceLists.connectorInstanceId, connectorConfigs.id))
+      .where(and(
+        eq(sourceLists.hidden, false),
+        eq(connectorConfigs.enabled, true),
+        isNull(connectorConfigs.deletedAt),
+      ))
+      .orderBy(
+        asc(sql`${connectorConfigs.name} COLLATE "C"`),
+        asc(sql`${sourceLists.name} COLLATE "C"`),
+        asc(sql`${sourceLists.connectorInstanceId} COLLATE "C"`),
+        asc(sql`${sourceLists.sourceId} COLLATE "C"`),
+      );
+    return {
+      projects: projects.map((row) => ({ ...row, description: row.description ?? null })),
+      tags: tagRows.map((row) => ({ ...row, color: row.color ?? null, unifiedInto: null })),
+      sources: sources.map((row) => ({
+        ...row,
+        userDisplayName: row.userDisplayName ?? null,
+        color: row.color ?? null,
+      })),
+    };
+  }
+
+  async listPrioritySyncLog(input: {
+    readonly taskId?: string;
+    readonly limit: number;
+  }): Promise<PrioritySyncLogRow[]> {
+    return this.db.select()
+      .from(prioritySyncLog)
+      .where(input.taskId ? eq(prioritySyncLog.taskId, input.taskId) : undefined)
+      .orderBy(
+        desc(prioritySyncLog.timestamp),
+        asc(sql`${prioritySyncLog.id} COLLATE "C"`),
+      )
+      .limit(input.limit);
   }
 
   async getProjectReference(projectId: string): Promise<PriorityProjectReference | null> {

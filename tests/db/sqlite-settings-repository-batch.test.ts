@@ -22,6 +22,11 @@ async function createHarness(): Promise<SettingsRepositoryBatchHarness> {
       status TEXT NOT NULL,
       vector_count INTEGER NOT NULL
     );
+    CREATE TABLE smart_score_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   const repository = new SqliteSettingsRepository(database);
   return {

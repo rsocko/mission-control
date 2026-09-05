@@ -11,13 +11,17 @@ const mocks = vi.hoisted(() => {
     startAndPersist: vi.fn(async () => { running = true; }),
     stopAndPersist: vi.fn(async () => { running = false; }),
     restartAndPersist: vi.fn(async () => { running = true; }),
+    getPreferences: vi.fn(),
     getScheduledSummariesEnabled: vi.fn(),
+    setScheduledSummariesEnabled: vi.fn(),
   };
 });
 
 vi.mock('@/lib/push/notification-push-service', () => ({
   getNotificationPushPersistence: async () => ({
+    getPreferences: mocks.getPreferences,
     getScheduledSummariesEnabled: mocks.getScheduledSummariesEnabled,
+    setScheduledSummariesEnabled: mocks.setScheduledSummariesEnabled,
   }),
 }));
 vi.mock('@/lib/push/scheduler', async (importOriginal) => {
@@ -48,7 +52,9 @@ function request(action: string): Request {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.reset();
+  mocks.getPreferences.mockResolvedValue({ ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES });
   mocks.getScheduledSummariesEnabled.mockResolvedValue(true);
+  mocks.setScheduledSummariesEnabled.mockResolvedValue(undefined);
 });
 
 describe('push scheduler route', () => {
@@ -107,16 +113,9 @@ describe('PushNotificationScheduler lifecycle', () => {
     vi.doMock('@/lib/logger', () => ({
       default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
     }));
-    const persistence = {
-      getPreferences: vi.fn(async () => ({ ...DEFAULT_NOTIFICATION_PUSH_PREFERENCES })),
-      getScheduledSummariesEnabled: vi.fn(async () => true),
-      setScheduledSummariesEnabled: vi.fn()
-        .mockRejectedValueOnce(new Error('temporary failure'))
-        .mockResolvedValue(undefined),
-    };
-    vi.doMock('@/lib/push/notification-push-service', () => ({
-      getNotificationPushPersistence: async () => persistence,
-    }));
+    mocks.setScheduledSummariesEnabled
+      .mockRejectedValueOnce(new Error('temporary failure'))
+      .mockResolvedValue(undefined);
     const schedulerModule = await import('@/lib/push/scheduler');
     await schedulerModule._resetPushNotificationSchedulerForTests();
     const scheduler = new schedulerModule.PushNotificationScheduler();
@@ -137,7 +136,7 @@ describe('PushNotificationScheduler lifecycle', () => {
     })).not.toThrow();
     await expect(scheduler.startAndPersist()).rejects.toThrow('temporary failure');
     expect(scheduler.isRunning()).toBe(false);
-    expect(persistence.setScheduledSummariesEnabled).toHaveBeenNthCalledWith(
+    expect(mocks.setScheduledSummariesEnabled).toHaveBeenNthCalledWith(
       2,
       false,
       expect.any(String),
@@ -159,7 +158,7 @@ describe('PushNotificationScheduler lifecycle', () => {
     const stalePreferencesRestart = scheduler.restart();
     await Promise.all([stop, stalePreferencesRestart]);
     expect(scheduler.isRunning()).toBe(false);
-    expect(persistence.setScheduledSummariesEnabled).toHaveBeenLastCalledWith(
+    expect(mocks.setScheduledSummariesEnabled).toHaveBeenLastCalledWith(
       false,
       expect.any(String),
     );

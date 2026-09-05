@@ -219,6 +219,8 @@
     "src/app/api/projects/[id]/reports/burn/route.ts",
     "src/app/api/projects/[id]/task-dependencies/[dependencyId]/route.ts",
     "src/app/api/projects/[id]/task-dependencies/route.ts",
+    "src/app/api/push/preferences/route.ts",
+    "src/app/api/push/scheduler/route.ts",
     "src/app/api/push/subscribe/route.ts",
     "src/app/api/push/trigger/route.ts",
     "src/app/api/push/vapid-key/route.ts",

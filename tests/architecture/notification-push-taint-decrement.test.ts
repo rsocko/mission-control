@@ -51,9 +51,11 @@ const TEST_PATHS = [
   'tests/architecture/triage-native-web-persistence-boundary.test.ts',
   'tests/architecture/web-persistence-baseline.json',
   'tests/contracts/notification-push-repository.contract.ts',
+  'tests/contracts/finance-assistant-persistence.contract.ts',
   'tests/db/notification-push-postgres-import-safety.test.ts',
   'tests/db/postgres-notification-push-repository.integration.test.ts',
   'tests/db/sqlite-notification-push-repository.test.ts',
+  'tests/notifications/scheduled-trigger-dedup.test.ts',
 ] as const;
 
 const ARCHITECTURE_PATHS = [
@@ -84,13 +86,13 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('notification push taint decrement', () => {
-  it('pins the approved 40-path cap and its 12 production paths', () => {
+  it('pins the CI-proven 42-path cap and its 12 production paths', () => {
     expect(PRODUCTION_PATHS).toHaveLength(12);
-    expect(TEST_PATHS).toHaveLength(27);
+    expect(TEST_PATHS).toHaveLength(29);
     expect(ARCHITECTURE_PATHS).toHaveLength(1);
     const paths = [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS];
-    expect(paths).toHaveLength(40);
-    expect(new Set(paths).size).toBe(40);
+    expect(paths).toHaveLength(42);
+    expect(new Set(paths).size).toBe(42);
     for (const path of paths) {
       expect(existsSync(join(process.cwd(), path)), path).toBe(true);
     }

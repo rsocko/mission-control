@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs, syncLog, tasks, notifications, notificationActions } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { getStatusLifecycleUpdates } from '@/lib/tasks/status-lifecycle';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
 import { extractNotificationTemplateKey } from '@/lib/notifications/push-policy/catalog';
 import { getConnectorSourceProfile } from '@/lib/connectors/task-source-profiles';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { WebhookIngestRepository } from '@/db/persistence/webhook-integrations';
 
 /**
  * POST /api/webhooks/[connectorId] — Receive webhook pushes from external services
@@ -31,21 +30,20 @@ export async function POST(
   const { connectorId } = await params;
 
   try {
-    // Validate connector exists
-    const connector = await db.select().from(connectorConfigs)
-      .where(eq(connectorConfigs.id, connectorId))
-      .limit(1);
+    const ingest = (await getWorkerPersistenceRepositories()).webhookIntegrations.ingest;
 
-    if (!connector.length) {
+    // Validate connector exists
+    const config = await ingest.findConnector(connectorId);
+
+    if (!config) {
       return NextResponse.json({ error: 'Unknown connector' }, { status: 404 });
     }
 
-    if (!connector[0].enabled) {
+    if (!config.enabled) {
       return NextResponse.json({ error: 'Connector disabled' }, { status: 403 });
     }
 
-    const config = connector[0];
-    const settings = config.settings as Record<string, unknown>;
+    const settings = config.settings;
 
     // Verify webhook secret if configured
     const webhookSecret = settings?.webhookSecret as string | undefined;
@@ -67,13 +65,13 @@ export async function POST(
     // Handle based on connector type
     switch (config.type) {
       case 'github-issues': {
-        const result = await handleGitHubWebhook(payload, config.id, now);
+        const result = await handleGitHubWebhook(ingest, payload, config.id, now);
         tasksAdded = result.tasksAdded;
         tasksUpdated = result.tasksUpdated;
         break;
       }
       case 'microsoft-todo': {
-        const result = await handleMicrosoftWebhook(payload, config.id, now);
+        const result = await handleMicrosoftWebhook(ingest, payload, config.id, now);
         tasksAdded = result.tasksAdded;
         tasksUpdated = result.tasksUpdated;
         break;
@@ -81,6 +79,7 @@ export async function POST(
       default: {
         // Generic handler: attempt to parse as task or notification
         const result = await handleGenericWebhook(
+          ingest,
           payload,
           config.id,
           config.type,
@@ -94,7 +93,7 @@ export async function POST(
     }
 
     // Log sync event
-    await db.insert(syncLog).values({
+    await ingest.appendSyncLog({
       id: crypto.randomUUID(),
       connectorId,
       success: true,
@@ -143,6 +142,7 @@ export async function GET(
 // ─── Handler: GitHub ─────────────────────────────────────────────────────────
 
 async function handleGitHubWebhook(
+  ingest: WebhookIngestRepository,
   payload: Record<string, unknown>,
   connectorId: string,
   now: string
@@ -153,9 +153,7 @@ async function handleGitHubWebhook(
   if (!issue) return { tasksAdded: 0, tasksUpdated: 0 };
 
   const sourceId = `github:${issue.number}`;
-  const existing = await db.select().from(tasks)
-    .where(eq(tasks.sourceId, sourceId))
-    .limit(1);
+  const currentTask = await ingest.findTaskBySourceId(sourceId);
 
   // Map GitHub state_reason to internal statusReason
   const ghStateReason = issue.state_reason as string | null | undefined;
@@ -166,39 +164,39 @@ async function handleGitHubWebhook(
 
   const mappedStatus = issue.state === 'closed' ? 'done' : 'todo';
   const closedAt = typeof issue.closed_at === 'string' ? issue.closed_at : now;
-  const currentTask = existing[0];
+  const lifecycle = getStatusLifecycleUpdates({
+    status: mappedStatus,
+    explicitReason: statusReason,
+    completedAt: closedAt,
+    currentStatus: currentTask?.status,
+    currentCompletedAt: currentTask?.completedAt,
+    currentStatusReason: currentTask?.statusReason,
+  });
   const taskData = {
     title: issue.title as string,
     description: issue.body as string | undefined,
     priority: 'none',
     updatedAt: now,
-    syncStatus: 'synced' as const,
+    syncStatus: 'synced',
     lastSyncedAt: now,
-    ...getStatusLifecycleUpdates({
-      status: mappedStatus,
-      explicitReason: statusReason,
-      completedAt: closedAt,
-      currentStatus: currentTask?.status,
-      currentCompletedAt: currentTask?.completedAt,
-      currentStatusReason: currentTask?.statusReason,
-    }),
+    status: lifecycle.status ?? undefined,
+    completedAt: lifecycle.completedAt,
+    statusReason: lifecycle.statusReason,
   };
 
-  if (existing.length) {
-    await db.update(tasks).set(taskData).where(eq(tasks.id, currentTask.id));
+  if (currentTask) {
+    await ingest.updateTask(currentTask.id, taskData);
     return { tasksAdded: 0, tasksUpdated: 1 };
   }
 
   if (action === 'opened' || action === 'reopened') {
-    await db.insert(tasks).values({
+    await ingest.createTask({
       id: crypto.randomUUID(),
       sourceId,
       connectorType: 'github-issues',
       connectorInstanceId: connectorId,
       ...taskData,
       createdAt: now,
-      depth: 0,
-      isChecklistItem: false,
     });
     return { tasksAdded: 1, tasksUpdated: 0 };
   }
@@ -209,6 +207,7 @@ async function handleGitHubWebhook(
 // ─── Handler: Microsoft Graph ────────────────────────────────────────────────
 
 async function handleMicrosoftWebhook(
+  ingest: WebhookIngestRepository,
   payload: Record<string, unknown>,
   connectorId: string,
   now: string
@@ -225,7 +224,7 @@ async function handleMicrosoftWebhook(
     const sourceId = `mstodo:${resourceData.id}`;
 
     if (changeType === 'created') {
-      await db.insert(tasks).values({
+      await ingest.createTask({
         id: crypto.randomUUID(),
         sourceId,
         connectorType: 'microsoft-todo',
@@ -235,22 +234,18 @@ async function handleMicrosoftWebhook(
         priority: 'none',
         createdAt: now,
         updatedAt: now,
-        depth: 0,
-        isChecklistItem: false,
         syncStatus: 'synced',
         lastSyncedAt: now,
       });
       added++;
     } else if (changeType === 'updated') {
-      const existing = await db.select().from(tasks)
-        .where(eq(tasks.sourceId, sourceId))
-        .limit(1);
-      if (existing.length) {
-        await db.update(tasks).set({
+      const existing = await ingest.findTaskBySourceId(sourceId);
+      if (existing) {
+        await ingest.updateTask(existing.id, {
           updatedAt: now,
           syncStatus: 'synced',
           lastSyncedAt: now,
-        }).where(eq(tasks.id, existing[0].id));
+        });
         updated++;
       }
     }
@@ -262,6 +257,7 @@ async function handleMicrosoftWebhook(
 // ─── Handler: Generic ────────────────────────────────────────────────────────
 
 async function handleGenericWebhook(
+  ingest: WebhookIngestRepository,
   payload: Record<string, unknown>,
   connectorId: string,
   connectorType: string,
@@ -275,7 +271,7 @@ async function handleGenericWebhook(
 
   // Try to interpret as a task
   if (acceptsTasks && (payload.title || payload.name)) {
-    await db.insert(tasks).values({
+    await ingest.createTask({
       id: crypto.randomUUID(),
       sourceId: `webhook:${payload.id || crypto.randomUUID()}`,
       connectorType,
@@ -286,8 +282,6 @@ async function handleGenericWebhook(
       priority: (payload.priority as string) || 'none',
       createdAt: now,
       updatedAt: now,
-      depth: 0,
-      isChecklistItem: false,
       syncStatus: 'synced',
       lastSyncedAt: now,
     });
@@ -304,40 +298,40 @@ async function handleGenericWebhook(
       settings.notificationTemplateKeyField,
     );
 
-    await db.insert(notifications).values({
-      id,
-      sourceId: `webhook:${payload.id || crypto.randomUUID()}`,
-      connectorType,
-      connectorInstanceId: connectorId,
-      title: (payload.title || payload.message || 'Webhook Notification') as string,
-      body: (payload.body || payload.description) as string | undefined,
-      level,
-      levelRank,
-      category: (payload.category || payload.type || 'webhook') as string,
-      templateKey,
-      state: 'unread',
-      isActionable: Boolean(actionUrl),
-      receivedAt: now,
-      sortAt: now,
-      expiresAt: null,
-      metadata: payload,
-      presentation: {},
+    await ingest.createNotification({
+      notification: {
+        id,
+        sourceId: `webhook:${payload.id || crypto.randomUUID()}`,
+        connectorType,
+        connectorInstanceId: connectorId,
+        title: (payload.title || payload.message || 'Webhook Notification') as string,
+        body: (payload.body || payload.description) as string | undefined,
+        level,
+        levelRank,
+        category: (payload.category || payload.type || 'webhook') as string,
+        templateKey,
+        state: 'unread',
+        isActionable: Boolean(actionUrl),
+        receivedAt: now,
+        sortAt: now,
+        expiresAt: null,
+        metadata: payload,
+        presentation: {},
+      },
+      actions: actionUrl
+        ? [{
+            id: crypto.randomUUID(),
+            actionType: 'open_url',
+            label: 'Open',
+            variant: 'primary',
+            isPrimary: true,
+            sortOrder: 0,
+            payload: { url: actionUrl },
+            opensExternal: true,
+            createdBy: 'connector',
+          }]
+        : [],
     });
-
-    if (actionUrl) {
-      await db.insert(notificationActions).values({
-        id: crypto.randomUUID(),
-        notificationId: id,
-        actionType: 'open_url',
-        label: 'Open',
-        variant: 'primary',
-        isPrimary: true,
-        sortOrder: 0,
-        payload: { url: actionUrl },
-        opensExternal: true,
-        createdBy: 'connector',
-      });
-    }
 
     notificationsAdded++;
   }

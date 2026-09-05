@@ -541,6 +541,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  webhookIntegrations: new Proxy(
+    {} as WorkerPersistenceRepositories['webhookIntegrations'],
+    {
+      get: (_target, property) => (
+        requirePostgresWorkerRepositories().webhookIntegrations[
+          property as keyof WorkerPersistenceRepositories['webhookIntegrations']
+        ]
+      ),
+    },
+  ),
 };
 const semanticPublicationRuntimeService: SemanticPublicationService = {
   upsert: async (entityType, entityId) => {

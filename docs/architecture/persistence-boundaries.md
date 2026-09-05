@@ -1844,6 +1844,148 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
+## Web/API PostgreSQL parity: Layer L18 (webhook configuration, delivery, and log)
+
+Layer L18 publishes one atomic `webhookIntegrations` slot on
+`WorkerPersistenceRepositories`. It is a top-level slot rather than a nested
+one because `inbound_webhooks`, `inbound_webhook_log`,
+`inbound_webhook_replays`, `outbound_webhooks`, and `integration_configs` share
+no rows and no serialization namespace with any other worker surface, and it is
+a single slot because a backend either supports the whole webhook contract or
+none of it.
+
+### The cap
+
+Eleven routes and one shared library move behind the port:
+`/api/inbound-webhooks` (GET/POST), `/api/inbound-webhooks/[id]`
+(PATCH/DELETE), `/api/inbound-webhooks/[id]/log` (GET),
+`/api/inbound-webhooks/[id]/receive` (POST), `/api/integrations/n8n`
+(GET/POST/PUT), `/api/integrations/n8n/webhook` (POST),
+`/api/integrations/rymessage` (GET/POST), `/api/integrations/webhooks`
+(GET/POST), `/api/integrations/webhooks/[id]` (PATCH/DELETE),
+`/api/integrations/webhooks/[id]/test` (POST), `/api/webhooks/[connectorId]`
+(GET/POST), plus `src/lib/integrations/n8n.ts`.
+
+The port lives in `src/db/persistence/webhook-integrations.ts`, with
+`src/db/persistence/sqlite-webhook-integrations-repository.ts` and
+`src/db/postgres/repositories/webhook-integrations-repository.ts` as the two
+adapters. The SQLite adapter receives the native handle plus the drizzle handle
+only from the SQLite composition; the PostgreSQL adapter receives a `pg` `Pool`
+and owns raw SQL, matching the surrounding adapters.
+
+### The contract
+
+Four sub-ports:
+
+- `inbound` — redacted listing (`hasSecret`, never the secret), create, patch,
+  delete, bounded log read and append, the delivery-config read, the replay
+  claim/release pair, delivery stats, and the task/alert writes the receiver
+  performs.
+- `outbound` — outbound webhook listing, lookup, create, patch, delete.
+- `integrations` — the n8n integration configuration read, upsert, and
+  settings-only update.
+- `ingest` — connector lookup, task lookup/insert/update, notification
+  create/upsert/delete/snooze, and the webhook sync-log append shared by the
+  n8n, RyMessage, and per-connector receivers.
+
+Secret handling is explicit rather than incidental. `InboundWebhookSummary`
+carries `hasSecret` and the PostgreSQL adapter never even selects the secret
+column for it; `InboundWebhookDeliveryConfig` returns the secret because HMAC
+verification is its only purpose; `OutboundWebhookRecord` returns the signing
+secret because the signed-delivery transport and the existing configuration UI
+both require it (unchanged from before this layer). No adapter logs a secret or
+embeds one in an error.
+
+### Invariants preserved
+
+- Trusted-mutation authentication on inbound webhook create, patch, and delete
+  is unchanged, and no route gains or loses an authentication requirement.
+- HMAC signature verification, the production unsigned-webhook rejection, rate
+  limiting, bounded body reads, and payload redaction all remain in the route,
+  before and outside any repository call.
+- The replay claim is a single atomic operation: optional expired-claim sweep,
+  removal of the specific expired claim, then a conflict-tolerant insert whose
+  row count decides the outcome. SQLite runs it in one immediate transaction;
+  PostgreSQL adds a delivery-scoped advisory transaction lock so the
+  expire-then-insert pair cannot interleave. The five-minute window and the
+  route's sampled sweep cadence are unchanged.
+- A claim is released only on pre-side-effect failures; once a task, alert, or
+  agent result has committed, the claim is kept.
+- Delivery-log reads and compaction are deterministic: `received_at DESC, id
+  DESC` on both backends, for the bounded read, for the retained window, and for
+  the inbound and outbound configuration listings (`created_at DESC, id DESC`),
+  where ties were previously arbitrary.
+- Failure statistics and log entries are still written on the error path, with
+  the same envelopes, and a failing log append is still only warned about.
+- The inbound alert write remains one transaction covering the notification, its
+  primary action, and the durable push-delivery events; the dispatcher is woken
+  only when that transaction produced a pending delivery. SQLite reuses
+  `createNotificationsInTransaction`; PostgreSQL reuses the existing
+  `ingestPostgresConnectorNotificationInTransaction` helper, so durable push and
+  outbox semantics are shared rather than reimplemented.
+- External-agent dispatch lookup, authentication, and result submission keep
+  their existing control-plane behavior and ordering.
+- The outbound test send performs network I/O strictly after the lookup and
+  outside any database transaction; the n8n connectivity test performs its HTTP
+  call first and then persists the success or failure status, in the same order
+  as before.
+- Connector lookup, the enabled/secret gates, and the sync-log append on
+  `/api/webhooks/[connectorId]` are unchanged, including the generic handler's
+  notification-only source-profile check and template-key extraction.
+- RyMessage stays idempotent: create and update both resolve the notification by
+  `(connector_type, source_id)` under a row lock and either update or insert;
+  terminal events delete the notification with its actions and report the
+  deleted id.
+- Keyword indexing stays inline and immediate and the semantic side is only
+  published, exactly as `indexNotificationSearch`/`removeNotificationSearch` do.
+  The two receivers reach those through the backend-neutral
+  `@/lib/search/fts` and `@/lib/semantic-index/publication-service` registries
+  instead of the SQLite-bound `@/lib/search` barrel.
+
+### Ratchet decrement
+
+Recomputed exactly from `tests/architecture/web-persistence-graph.ts` on
+baseline `6205bb0ece832ed0225b8ee31e1cbf6996308d93`:
+
+| Metric | Before | After |
+| --- | --- | --- |
+| `tierARoutes` | 121 | 110 |
+| `tierBRoutes` | 13 | 13 |
+| `cleanRoutes` | 132 | 143 |
+| `directTaintSourceRoutes` | 91 | 80 |
+| `transitiveOnlyTaintSourceRoutes` | 30 | 30 |
+| `directDbNamespaceRoutes` | 92 | 81 |
+| `taintedLibA` | 61 | 60 |
+| `taintedApiHelpers` | 0 | 0 |
+| `totalMigrationUnits` | 182 | 170 |
+
+All eleven owned routes leave Tier A, `directTaintSourceRoutes`, and
+`directDbNamespaceRoutes` together, `src/lib/integrations/n8n.ts` leaves
+`taintedLibA`, and no route is reclassified into Tier B.
+`src/app/api/inbound-webhooks/[id]/receive/route.ts` is also removed from
+`LEGACY_RAW_SQLITE_IMPORTS` in
+`tests/architecture/persistence-boundaries.test.ts`: it no longer imports the
+raw SQLite handle at all.
+
+### Proof
+
+- `tests/db/sqlite-webhook-integrations-repository.test.ts` and
+  `tests/db/postgres-webhook-integrations-repository.integration.test.ts` run
+  the same scenarios on both backends: deterministic listing and log ordering,
+  compaction by retention cutoff and retained window, atomic replay claiming
+  including concurrent races, expiry-based re-claiming, release, the
+  cross-webhook sweep, failure-entry persistence, delivery statistics,
+  transaction rollback when a notification's action insert fails, inbound and
+  outbound CRUD with the secret-reference conflicts, connector
+  lookup/enablement/settings, integration-configuration upsert, and the shared
+  task/notification ingestion.
+- `tests/api/postgres-webhook-integrations-poisoned.test.ts` fails `@/db`,
+  `@/db/schema`, `better-sqlite3`, and `drizzle-orm/better-sqlite3` closed,
+  injects a PostgreSQL-shaped composition, and exercises every handler on all
+  eleven routes — including the unauthenticated-mutation rejections, the
+  signature failures, the duplicate-delivery short circuit, and the
+  connector-status gates.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, L08b triage native persistence, and L18 webhook configuration/delivery/log parity. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "c354e567a84c744e19ba238a08616a8f082920f5+L12c",
+  "generatedFromCommit": "6205bb0ece832ed0225b8ee31e1cbf6996308d93+L18",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 121,
+    "tierARoutes": 110,
     "tierBRoutes": 13,
-    "cleanRoutes": 132,
-    "directTaintSourceRoutes": 91,
+    "cleanRoutes": 143,
+    "directTaintSourceRoutes": 80,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 92,
-    "taintedLibA": 61,
+    "directDbNamespaceRoutes": 81,
+    "taintedLibA": 60,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 182
+    "totalMigrationUnits": 170
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -368,19 +368,9 @@
     "src/app/api/hub-projects/route.ts",
     "src/app/api/ideation/convert/route.ts",
     "src/app/api/ideation/expand/route.ts",
-    "src/app/api/inbound-webhooks/[id]/log/route.ts",
-    "src/app/api/inbound-webhooks/[id]/receive/route.ts",
-    "src/app/api/inbound-webhooks/[id]/route.ts",
-    "src/app/api/inbound-webhooks/route.ts",
     "src/app/api/integrations/alertmanager/route.ts",
     "src/app/api/integrations/alertmanager/test/route.ts",
     "src/app/api/integrations/alertmanager/webhook/route.ts",
-    "src/app/api/integrations/n8n/route.ts",
-    "src/app/api/integrations/n8n/webhook/route.ts",
-    "src/app/api/integrations/rymessage/route.ts",
-    "src/app/api/integrations/webhooks/[id]/route.ts",
-    "src/app/api/integrations/webhooks/[id]/test/route.ts",
-    "src/app/api/integrations/webhooks/route.ts",
     "src/app/api/kanban-settings/route.ts",
     "src/app/api/list-groups/[id]/route.ts",
     "src/app/api/list-groups/reorder/route.ts",
@@ -453,8 +443,7 @@
     "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
     "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/triage/[id]/extract-actions/route.ts",
-    "src/app/api/triage/[id]/route.ts",
-    "src/app/api/webhooks/[connectorId]/route.ts"
+    "src/app/api/triage/[id]/route.ts"
   ],
   "tierBRoutes": [
     "src/app/api/ai/intake-document/route.ts",
@@ -527,7 +516,17 @@
     "src/app/api/ideation/workspaces/[id]/versions/[revision]/route.ts",
     "src/app/api/ideation/workspaces/[id]/versions/route.ts",
     "src/app/api/ideation/workspaces/route.ts",
+    "src/app/api/inbound-webhooks/[id]/log/route.ts",
+    "src/app/api/inbound-webhooks/[id]/receive/route.ts",
+    "src/app/api/inbound-webhooks/[id]/route.ts",
+    "src/app/api/inbound-webhooks/route.ts",
     "src/app/api/insights/route.ts",
+    "src/app/api/integrations/n8n/route.ts",
+    "src/app/api/integrations/n8n/webhook/route.ts",
+    "src/app/api/integrations/rymessage/route.ts",
+    "src/app/api/integrations/webhooks/[id]/route.ts",
+    "src/app/api/integrations/webhooks/[id]/test/route.ts",
+    "src/app/api/integrations/webhooks/route.ts",
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/mcp/tasks/[id]/route.ts",
@@ -599,6 +598,7 @@
     "src/app/api/triage/sources/route.ts",
     "src/app/api/triage/storage/route.ts",
     "src/app/api/triage/sync-status/route.ts",
+    "src/app/api/webhooks/[connectorId]/route.ts",
     "src/app/api/word-insights/route.ts",
     "src/app/api/work-todo/ack/route.ts",
     "src/app/api/work-todo/changes/route.ts",
@@ -628,16 +628,6 @@
     "src/app/api/hub-projects/[id]/rule-matches/route.ts",
     "src/app/api/hub-projects/route.ts",
     "src/app/api/ideation/convert/route.ts",
-    "src/app/api/inbound-webhooks/[id]/log/route.ts",
-    "src/app/api/inbound-webhooks/[id]/receive/route.ts",
-    "src/app/api/inbound-webhooks/[id]/route.ts",
-    "src/app/api/inbound-webhooks/route.ts",
-    "src/app/api/integrations/n8n/route.ts",
-    "src/app/api/integrations/n8n/webhook/route.ts",
-    "src/app/api/integrations/rymessage/route.ts",
-    "src/app/api/integrations/webhooks/[id]/route.ts",
-    "src/app/api/integrations/webhooks/[id]/test/route.ts",
-    "src/app/api/integrations/webhooks/route.ts",
     "src/app/api/kanban-settings/route.ts",
     "src/app/api/list-groups/[id]/route.ts",
     "src/app/api/list-groups/reorder/route.ts",
@@ -695,8 +685,7 @@
     "src/app/api/tasks/move/preview/route.ts",
     "src/app/api/tasks/quick-sort-stats/route.ts",
     "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
-    "src/app/api/tasks/quick-sort/operations/route.ts",
-    "src/app/api/webhooks/[connectorId]/route.ts"
+    "src/app/api/tasks/quick-sort/operations/route.ts"
   ],
   "transitiveOnlyTaintSourceRoutes": [
     "src/app/api/ai/assign-projects/route.ts",
@@ -754,16 +743,6 @@
     "src/app/api/hub-projects/[id]/rule-matches/route.ts",
     "src/app/api/hub-projects/route.ts",
     "src/app/api/ideation/convert/route.ts",
-    "src/app/api/inbound-webhooks/[id]/log/route.ts",
-    "src/app/api/inbound-webhooks/[id]/receive/route.ts",
-    "src/app/api/inbound-webhooks/[id]/route.ts",
-    "src/app/api/inbound-webhooks/route.ts",
-    "src/app/api/integrations/n8n/route.ts",
-    "src/app/api/integrations/n8n/webhook/route.ts",
-    "src/app/api/integrations/rymessage/route.ts",
-    "src/app/api/integrations/webhooks/[id]/route.ts",
-    "src/app/api/integrations/webhooks/[id]/test/route.ts",
-    "src/app/api/integrations/webhooks/route.ts",
     "src/app/api/kanban-settings/route.ts",
     "src/app/api/list-groups/[id]/route.ts",
     "src/app/api/list-groups/reorder/route.ts",
@@ -821,8 +800,7 @@
     "src/app/api/tasks/move/preview/route.ts",
     "src/app/api/tasks/quick-sort-stats/route.ts",
     "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
-    "src/app/api/tasks/quick-sort/operations/route.ts",
-    "src/app/api/webhooks/[connectorId]/route.ts"
+    "src/app/api/tasks/quick-sort/operations/route.ts"
   ],
   "taintedLibA": [
     "src/lib/ai/agents/index.ts",
@@ -862,7 +840,6 @@
     "src/lib/houston-memory/retrieval.ts",
     "src/lib/intake/ai-parser.ts",
     "src/lib/intake/index.ts",
-    "src/lib/integrations/n8n.ts",
     "src/lib/notifications/index.ts",
     "src/lib/notifications/push-policy/resolver.ts",
     "src/lib/notifications/push-policy/rules.ts",
@@ -1595,6 +1572,76 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation on current main c354e567a84c744e19ba238a08616a8f082920f5 moves the seven owned finance end-user routes from Tier A to clean, transitively cleans the two finance alert routes through the shared Monarch snapshot module, removes six direct-taint and direct @/db route imports, removes operations.ts and snapshot-sync.ts from taintedLibA, adds no Tier B route or tainted helper, and reduces total migration units from 193 to 182."
+    },
+    {
+      "layer": "L18",
+      "title": "webhook configuration/delivery/log PostgreSQL web/API parity",
+      "totalMigrationUnits": {
+        "from": 182,
+        "to": 170,
+        "delta": -12
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/integrations/n8n.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/inbound-webhooks/[id]/log/route.ts",
+        "src/app/api/inbound-webhooks/[id]/receive/route.ts",
+        "src/app/api/inbound-webhooks/[id]/route.ts",
+        "src/app/api/inbound-webhooks/route.ts",
+        "src/app/api/integrations/n8n/route.ts",
+        "src/app/api/integrations/n8n/webhook/route.ts",
+        "src/app/api/integrations/rymessage/route.ts",
+        "src/app/api/integrations/webhooks/[id]/route.ts",
+        "src/app/api/integrations/webhooks/[id]/test/route.ts",
+        "src/app/api/integrations/webhooks/route.ts",
+        "src/app/api/webhooks/[connectorId]/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/inbound-webhooks/[id]/log/route.ts",
+        "src/app/api/inbound-webhooks/[id]/receive/route.ts",
+        "src/app/api/inbound-webhooks/[id]/route.ts",
+        "src/app/api/inbound-webhooks/route.ts",
+        "src/app/api/integrations/n8n/route.ts",
+        "src/app/api/integrations/n8n/webhook/route.ts",
+        "src/app/api/integrations/rymessage/route.ts",
+        "src/app/api/integrations/webhooks/[id]/route.ts",
+        "src/app/api/integrations/webhooks/[id]/test/route.ts",
+        "src/app/api/integrations/webhooks/route.ts",
+        "src/app/api/webhooks/[connectorId]/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/inbound-webhooks/[id]/log/route.ts",
+        "src/app/api/inbound-webhooks/[id]/receive/route.ts",
+        "src/app/api/inbound-webhooks/[id]/route.ts",
+        "src/app/api/inbound-webhooks/route.ts",
+        "src/app/api/integrations/n8n/route.ts",
+        "src/app/api/integrations/n8n/webhook/route.ts",
+        "src/app/api/integrations/rymessage/route.ts",
+        "src/app/api/integrations/webhooks/[id]/route.ts",
+        "src/app/api/integrations/webhooks/[id]/test/route.ts",
+        "src/app/api/integrations/webhooks/route.ts",
+        "src/app/api/webhooks/[connectorId]/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/inbound-webhooks/[id]/log/route.ts",
+        "src/app/api/inbound-webhooks/[id]/receive/route.ts",
+        "src/app/api/inbound-webhooks/[id]/route.ts",
+        "src/app/api/inbound-webhooks/route.ts",
+        "src/app/api/integrations/n8n/route.ts",
+        "src/app/api/integrations/n8n/webhook/route.ts",
+        "src/app/api/integrations/rymessage/route.ts",
+        "src/app/api/integrations/webhooks/[id]/route.ts",
+        "src/app/api/integrations/webhooks/[id]/test/route.ts",
+        "src/app/api/integrations/webhooks/route.ts",
+        "src/app/api/webhooks/[connectorId]/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "removedTierBRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on baseline 6205bb0ece832ed0225b8ee31e1cbf6996308d93 moves all eleven owned webhook routes (inbound webhook CRUD/log/receive, the n8n config and webhook receivers, the RyMessage receiver, outbound webhook CRUD and test, and the per-connector receiver) from Tier A to clean, removes all eleven from both direct-taint and direct @/db namespace imports, removes src/lib/integrations/n8n.ts from taintedLibA, adds no Tier B route, tainted helper, raw-driver import, or database namespace import, and reduces total migration units from 182 to 170."
     }
   ],
   "layerUpdates": [
@@ -1666,6 +1713,16 @@
         "FinanceWorkerPersistence now composes a driver-neutral web port atomically. SQLite and PostgreSQL adapters preserve finance projections, ordering, summaries, scoped dismissal, and operations-overview calculations; PostgreSQL selection never imports or evaluates SQLite.",
         "Live category write-back claims and validates persistence before provider I/O, then conditionally finalizes or fails with a claim-token fence. PostgreSQL serializes connector claims with an advisory transaction lock and both adapters preserve idempotent replay, CAS conflicts, stale retry, and competing-mutation behavior.",
         "snapshot-sync.ts no longer owns an obsolete raw-SQLite page helper; active snapshot ingestion remains on the finance snapshot port delivered by earlier finance layers."
+      ]
+    },
+    {
+      "layer": "L18",
+      "summary": "Web/API PostgreSQL parity: the whole webhook configuration, delivery, and log contract (inbound webhooks, outbound webhook subscriptions, the n8n integration configuration, and shared webhook task/notification ingestion) resolves through one atomic WorkerPersistenceRepositories.webhookIntegrations slot.",
+      "changes": [
+        "A new driver-free WebhookIntegrationsPersistence port publishes inbound CRUD plus redacted listing, delivery-config reads that carry the verification secret only for HMAC checking, atomic replay claim/release, bounded log append with received_at DESC, id DESC compaction, outbound webhook CRUD and lookup, n8n integration configuration, and shared task/notification ingestion.",
+        "SQLite and PostgreSQL adapters own all SQL and every multi-row transaction: agent reference checks and webhook deletion, replay claiming, log append plus compaction, and notification+action ingestion each run in a single transaction, serialized by an immediate SQLite transaction and a PostgreSQL advisory transaction lock plus row locks.",
+        "Trusted mutation authentication, HMAC verification, production unsigned rejection, rate limiting, payload bounding, redaction, external-agent dispatch results, outbound and n8n network I/O ordering, and every error envelope stay service-owned and outside repository transactions.",
+        "src/lib/integrations/n8n.ts becomes persistence-neutral, all eleven webhook routes leave Tier A, direct-taint, and the @/db namespace, and no route is added to Tier B."
       ]
     }
   ]

@@ -1,8 +1,6 @@
-import db from '@/db';
-import { integrationConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { getN8nConfig, N8N_CONFIG_ID, parseN8NSettings } from '@/lib/integrations/n8n';
 import { ApiErrors } from '@/lib/api-error';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 async function fetchN8NWorkflows(baseUrl: string, apiKey: string) {
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/api/v1/workflows`, {
@@ -66,29 +64,18 @@ export async function POST(request: Request) {
       ? { ...existingSettings, webhookSecret }
       : existingSettings;
 
-    await db
-      .insert(integrationConfigs)
-      .values({
-        id: N8N_CONFIG_ID,
-        type: 'n8n',
-        name: 'n8n',
-        baseUrl,
-        apiKey,
-        enabled,
-        settings,
-        createdAt: existing?.createdAt || now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: integrationConfigs.id,
-        set: {
-          baseUrl,
-          apiKey,
-          enabled,
-          settings,
-          updatedAt: now,
-        },
-      });
+    const repositories = await getWorkerPersistenceRepositories();
+    await repositories.webhookIntegrations.integrations.save({
+      id: N8N_CONFIG_ID,
+      type: 'n8n',
+      name: 'n8n',
+      baseUrl,
+      apiKey,
+      enabled,
+      settings,
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    });
 
     return Response.json({
       success: true,
@@ -115,23 +102,22 @@ export async function PUT() {
 
   const now = new Date().toISOString();
   const settings = parseN8NSettings(config.settings);
+  const repositories = await getWorkerPersistenceRepositories();
 
   try {
     const workflowCount = await fetchN8NWorkflows(config.baseUrl, config.apiKey);
 
-    await db
-      .update(integrationConfigs)
-      .set({
-        settings: {
-          ...settings,
-          connected: true,
-          workflowCount,
-          lastCheckedAt: now,
-          lastError: null,
-        },
-        updatedAt: now,
-      })
-      .where(eq(integrationConfigs.id, N8N_CONFIG_ID));
+    await repositories.webhookIntegrations.integrations.updateSettings({
+      id: N8N_CONFIG_ID,
+      settings: {
+        ...settings,
+        connected: true,
+        workflowCount,
+        lastCheckedAt: now,
+        lastError: null,
+      },
+      updatedAt: now,
+    });
 
     return Response.json({
       success: true,
@@ -140,19 +126,17 @@ export async function PUT() {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
-    await db
-      .update(integrationConfigs)
-      .set({
-        settings: {
-          ...settings,
-          connected: false,
-          workflowCount: 0,
-          lastCheckedAt: now,
-          lastError: message,
-        },
-        updatedAt: now,
-      })
-      .where(eq(integrationConfigs.id, N8N_CONFIG_ID));
+    await repositories.webhookIntegrations.integrations.updateSettings({
+      id: N8N_CONFIG_ID,
+      settings: {
+        ...settings,
+        connected: false,
+        workflowCount: 0,
+        lastCheckedAt: now,
+        lastError: message,
+      },
+      updatedAt: now,
+    });
 
     return Response.json({
       success: false,

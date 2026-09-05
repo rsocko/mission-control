@@ -12,7 +12,6 @@ const LEGACY_DRIVER_IMPORTS = new Set([
 ]);
 
 const LEGACY_RAW_SQLITE_IMPORTS = new Set([
-  'src/app/api/inbound-webhooks/[id]/receive/route.ts',
   'src/app/api/notifications/writebacks/route.ts',
   'src/lib/ai/agents/maintenance.ts',
   'src/lib/ai/config-resolver.ts',
@@ -96,6 +95,29 @@ const MIGRATED_CONNECTOR_STATE_MODULES = [
   'src/lib/connectors/microsoft-todo/index.ts',
   'src/lib/connectors/rymessage/index.ts',
   'src/lib/connectors/document-intelligence/index.ts',
+] as const;
+
+/**
+ * Layer 18: the webhook configuration/delivery/log surface. Every inbound and
+ * outbound webhook route, both n8n routes, the RyMessage receiver, and the
+ * per-connector receiver must reach the database only through the
+ * `webhookIntegrations` worker persistence slot, so PostgreSQL selection never
+ * imports, evaluates, or falls back to SQLite. `src/lib/integrations/n8n.ts` is
+ * listed because it is the one shared library those routes still import.
+ */
+const MIGRATED_WEBHOOK_MODULES = [
+  'src/app/api/inbound-webhooks/route.ts',
+  'src/app/api/inbound-webhooks/[id]/route.ts',
+  'src/app/api/inbound-webhooks/[id]/log/route.ts',
+  'src/app/api/inbound-webhooks/[id]/receive/route.ts',
+  'src/app/api/integrations/n8n/route.ts',
+  'src/app/api/integrations/n8n/webhook/route.ts',
+  'src/app/api/integrations/rymessage/route.ts',
+  'src/app/api/integrations/webhooks/route.ts',
+  'src/app/api/integrations/webhooks/[id]/route.ts',
+  'src/app/api/integrations/webhooks/[id]/test/route.ts',
+  'src/app/api/webhooks/[connectorId]/route.ts',
+  'src/lib/integrations/n8n.ts',
 ] as const;
 
 function listTypeScriptFiles(directory: string): string[] {
@@ -329,6 +351,44 @@ describe('portable persistence dependency ratchet', () => {
     });
 
     expect(violations).toEqual([]);
+  });
+
+  it('keeps the migrated webhook routes behind the webhook persistence port', () => {
+    const violations = MIGRATED_WEBHOOK_MODULES.flatMap((path) => {
+      const source = readFileSync(join(process.cwd(), path), 'utf8');
+      const runtimeDatabaseImport = new RegExp(
+        String.raw`(?<!import type )(?:^|\n)import\s+(?!type\s)[^;]*?from\s+['"]@/db(?:['"]|/(?:index|schema)['"])`,
+      );
+      const dynamicDatabaseImport = /import\(\s*['"]@\/db(?:\/(?:index|schema))?['"]\s*\)/;
+      return runtimeDatabaseImport.test(source)
+        || dynamicDatabaseImport.test(source)
+        || /from\s+['"](?:better-sqlite3|pg|drizzle-orm[^'"]*)['"]/.test(source)
+        || importsRawSqliteHandle(source)
+        ? [path]
+        : [];
+    });
+
+    expect(violations).toEqual([]);
+  });
+
+  it('keeps the Layer 18 webhook port free of driver imports', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/db/persistence/webhook-integrations.ts'),
+      'utf8',
+    );
+    expect(source).not.toMatch(/from\s+['"](?:better-sqlite3|pg|drizzle-orm[^'"]*)['"]/);
+    expect(source).not.toMatch(/from\s+['"]@\/db(?:['"]|\/)/);
+    expect(importsRawSqliteHandle(source)).toBe(false);
+  });
+
+  it('keeps the PostgreSQL webhook adapter off every SQLite module', () => {
+    const source = readFileSync(
+      join(process.cwd(), 'src/db/postgres/repositories/webhook-integrations-repository.ts'),
+      'utf8',
+    );
+    expect(source).not.toMatch(/from\s+['"](?:better-sqlite3|drizzle-orm\/better-sqlite3)['"]/);
+    expect(source).not.toMatch(/from\s+['"]@\/db(?:['"]|\/(?:index|schema)['"])/);
+    expect(importsRawSqliteHandle(source)).toBe(false);
   });
 
   /**

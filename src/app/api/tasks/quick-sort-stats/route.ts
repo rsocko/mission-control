@@ -1,8 +1,10 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import db from '@/db';
-import { quickSortLog } from '@/db/schema';
-import { and, gte, isNull, ne, sql } from 'drizzle-orm';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import {
+  parseTaskQuickSortAction,
+  parseTaskQuickSortQueueMode,
+} from '@/lib/tasks/core/contracts';
 import {
   formatDateInLocalTimezone,
   getLocalDateBoundsISO,
@@ -32,20 +34,14 @@ export async function GET() {
   const today = getLocalToday();
   const weekStartDate = getWeekMonday(today);
   const { dayStart: weekStartIso } = getLocalDateBoundsISO(weekStartDate);
+  const ninetyDaysAgo = shiftDate(today, -90);
+  const { dayStart: ninetyDaysAgoIso } = getLocalDateBoundsISO(ninetyDaysAgo);
+  const quickSort = (await getTaskCorePersistence()).quickSort;
 
-  // Aggregate this-week counts by mode (exclude skipped)
-  const weekRows = await db
-    .select({
-      mode: quickSortLog.mode,
-      count: sql<number>`count(*)`.as('count'),
-    })
-    .from(quickSortLog)
-    .where(and(
-      gte(quickSortLog.triagedAt, weekStartIso),
-      isNull(quickSortLog.reversedAt),
-      ne(quickSortLog.action, 'skipped'),
-    ))
-    .groupBy(quickSortLog.mode);
+  const [weekRows, activityTimestamps] = await Promise.all([
+    quickSort.countActivityByModeSince(weekStartIso),
+    quickSort.listActivityTimestampsSince(ninetyDaysAgoIso),
+  ]);
 
   const byMode: Record<string, number> = {};
   let weekTotal = 0;
@@ -54,27 +50,12 @@ export async function GET() {
     weekTotal += row.count;
   }
 
-  // Streak: fetch recent timestamps, then bucket them in the configured timezone.
-  const ninetyDaysAgo = shiftDate(today, -90);
-  const { dayStart: ninetyDaysAgoIso } = getLocalDateBoundsISO(ninetyDaysAgo);
-
-  const dateRows = await db
-    .select({
-      triagedAt: quickSortLog.triagedAt,
-    })
-    .from(quickSortLog)
-    .where(and(
-      gte(quickSortLog.triagedAt, ninetyDaysAgoIso),
-      isNull(quickSortLog.reversedAt),
-      ne(quickSortLog.action, 'skipped'),
-    ));
-
   let streak = 0;
 
-  if (dateRows.length > 0) {
+  if (activityTimestamps.length > 0) {
     // Check consecutive days ending today (or yesterday if today has no actions)
-    const activeDays = new Set(dateRows.map((row) => (
-      formatDateInLocalTimezone(new Date(row.triagedAt))
+    const activeDays = new Set(activityTimestamps.map((triagedAt) => (
+      formatDateInLocalTimezone(new Date(triagedAt))
     )));
     const startDay = activeDays.has(today) ? today : shiftDate(today, -1);
 
@@ -132,12 +113,15 @@ export async function POST(request: Request) {
   if (!validModes.includes(mode) || !validActions.includes(action)) {
     return NextResponse.json({ error: 'Invalid mode or action' }, { status: 400 });
   }
+  const validatedMode = parseTaskQuickSortQueueMode(mode);
+  const validatedAction = parseTaskQuickSortAction(action);
 
-  await db.insert(quickSortLog).values({
+  await (await getTaskCorePersistence()).quickSort.recordActivity({
     id: randomUUID(),
     taskId,
-    mode,
-    action,
+    operationId: null,
+    mode: validatedMode,
+    action: validatedAction,
     triagedAt: new Date().toISOString(),
   });
 

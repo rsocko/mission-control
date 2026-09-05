@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through L18 AI execution and memory control-plane persistence, L19 project-organization parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-05",
-  "generatedFromCommit": "5238b5c2437eb524cf2bff8ba22582cb104ed091+L19",
+  "generatedFromCommit": "5943866d197a3bec417a67e19152b5ea9229e597+L19",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 113,
+    "tierARoutes": 110,
     "tierBRoutes": 5,
-    "cleanRoutes": 148,
-    "directTaintSourceRoutes": 83,
+    "cleanRoutes": 151,
+    "directTaintSourceRoutes": 80,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 84,
-    "taintedLibA": 58,
+    "directDbNamespaceRoutes": 81,
+    "taintedLibA": 57,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 171
+    "totalMigrationUnits": 167
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -441,9 +441,6 @@
     "src/app/api/tasks/[id]/subtasks/route.ts",
     "src/app/api/tasks/[id]/tags/route.ts",
     "src/app/api/tasks/move/preview/route.ts",
-    "src/app/api/tasks/quick-sort-stats/route.ts",
-    "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
-    "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/triage/[id]/extract-actions/route.ts",
     "src/app/api/triage/[id]/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
@@ -570,6 +567,9 @@
     "src/app/api/tasks/detect-duplicates/route.ts",
     "src/app/api/tasks/filter-options/route.ts",
     "src/app/api/tasks/group-counts/route.ts",
+    "src/app/api/tasks/quick-sort-stats/route.ts",
+    "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
+    "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/tasks/quick-sort/route.ts",
     "src/app/api/tasks/quick-sort/suggestions/route.ts",
     "src/app/api/tasks/route.ts",
@@ -685,9 +685,6 @@
     "src/app/api/tasks/[id]/subtasks/route.ts",
     "src/app/api/tasks/[id]/tags/route.ts",
     "src/app/api/tasks/move/preview/route.ts",
-    "src/app/api/tasks/quick-sort-stats/route.ts",
-    "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
-    "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "transitiveOnlyTaintSourceRoutes": [
@@ -803,9 +800,6 @@
     "src/app/api/tasks/[id]/subtasks/route.ts",
     "src/app/api/tasks/[id]/tags/route.ts",
     "src/app/api/tasks/move/preview/route.ts",
-    "src/app/api/tasks/quick-sort-stats/route.ts",
-    "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
-    "src/app/api/tasks/quick-sort/operations/route.ts",
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "taintedLibA": [
@@ -854,7 +848,6 @@
     "src/lib/public-demo-runtime.ts",
     "src/lib/push/scheduler.ts",
     "src/lib/push/triggers.ts",
-    "src/lib/quick-sort/operations.ts",
     "src/lib/reports/burn.ts",
     "src/lib/search/embedding-request.ts",
     "src/lib/search/index.ts",
@@ -1578,6 +1571,43 @@
       "verification": "Exact computeWebPersistenceGraph recomputation on current main c354e567a84c744e19ba238a08616a8f082920f5 moves the seven owned finance end-user routes from Tier A to clean, transitively cleans the two finance alert routes through the shared Monarch snapshot module, removes six direct-taint and direct @/db route imports, removes operations.ts and snapshot-sync.ts from taintedLibA, adds no Tier B route or tainted helper, and reduces total migration units from 193 to 182."
     },
     {
+      "layer": "task-quick-sort",
+      "title": "task quick-sort workflow PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 182,
+        "to": 178,
+        "delta": -4
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/quick-sort/operations.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/tasks/quick-sort-stats/route.ts",
+        "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
+        "src/app/api/tasks/quick-sort/operations/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/tasks/quick-sort-stats/route.ts",
+        "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
+        "src/app/api/tasks/quick-sort/operations/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/tasks/quick-sort-stats/route.ts",
+        "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
+        "src/app/api/tasks/quick-sort/operations/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/tasks/quick-sort-stats/route.ts",
+        "src/app/api/tasks/quick-sort/operations/[id]/undo/route.ts",
+        "src/app/api/tasks/quick-sort/operations/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on base 6205bb0ece832ed0225b8ee31e1cbf6996308d93 moves the three quick-sort workflow routes from Tier A to clean, removes src/lib/quick-sort/operations.ts from taintedLibA, adds no Tier B route or tainted helper, and changes the graph from 266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182 to 266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178."
+    },
+    {
       "layer": "L18",
       "title": "AI execution and memory control-plane PostgreSQL parity",
       "totalMigrationUnits": {
@@ -1623,8 +1653,8 @@
       "layer": "L19",
       "title": "project organization and administration PostgreSQL parity",
       "totalMigrationUnits": {
-        "from": 179,
-        "to": 171,
+        "from": 175,
+        "to": 167,
         "delta": -8
       },
       "removedTaintedApiHelpers": [],
@@ -1672,7 +1702,7 @@
       "removedTransitiveOnlyTaintSourceRoutes": [],
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
-      "verification": "Exact computeWebPersistenceGraph recomputation after landed L18 moves all eight owned project, phase, rule-match, and list-group administration routes from Tier A to clean through two capabilities atomically nested under projectAutomation. The graph is exactly 266 routes, A113/B5/clean148, direct83/transitive30/directDB84, 58 tainted libraries, zero helpers, and 171 total migration units. No route is reclassified into Tier B and no taint-side set grows."
+      "verification": "Exact computeWebPersistenceGraph recomputation after the landed task quick-sort and L18 decrements moves all eight owned project, phase, rule-match, and list-group administration routes from Tier A to clean through two capabilities atomically nested under projectAutomation. The graph is exactly 266 routes, A110/B5/clean151, direct80/transitive30/directDB81, 57 tainted libraries, zero helpers, and 167 total migration units. No route is reclassified into Tier B and no taint-side set grows."
     }
   ],
   "layerUpdates": [
@@ -1744,6 +1774,16 @@
         "FinanceWorkerPersistence now composes a driver-neutral web port atomically. SQLite and PostgreSQL adapters preserve finance projections, ordering, summaries, scoped dismissal, and operations-overview calculations; PostgreSQL selection never imports or evaluates SQLite.",
         "Live category write-back claims and validates persistence before provider I/O, then conditionally finalizes or fails with a claim-token fence. PostgreSQL serializes connector claims with an advisory transaction lock and both adapters preserve idempotent replay, CAS conflicts, stale retry, and competing-mutation behavior.",
         "snapshot-sync.ts no longer owns an obsolete raw-SQLite page helper; active snapshot ingestion remains on the finance snapshot port delivered by earlier finance layers."
+      ]
+    },
+    {
+      "layer": "task-quick-sort",
+      "summary": "Web/API PostgreSQL parity: quick-sort activity stats, operation apply, and operation undo now use the existing backend-selected task-core composition.",
+      "changes": [
+        "TaskCorePersistence gains one bounded quickSort port for task snapshots, operation reservation/finalization, undo claims, and activity logging/statistics; both SQLite and PostgreSQL adapters implement the same typed contract.",
+        "Operation application and undo continue to invoke the existing task PATCH handler with x-expected-task-updated-at, preserving task revision CAS and all existing write-through ordering instead of duplicating task mutation logic.",
+        "Operation reservation is now conflict-safe under concurrent retries, finalization writes operation state and ordered log inputs in one transaction, and undo claim/finalization remains fenced and idempotent.",
+        "The three owned routes and src/lib/quick-sort/operations.ts evaluate no SQLite handle or schema. PostgreSQL startup registers the complete task-core composition and cannot fall back to SQLite."
       ]
     },
     {

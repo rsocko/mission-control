@@ -1,9 +1,11 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import db, { runTransaction } from '@/db';
-import { quickSortLog, quickSortOperations } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { PATCH as patchTask } from '@/app/api/tasks/[id]/route';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type {
+  TaskQuickSortAction,
+  TaskQuickSortOperation,
+} from '@/lib/tasks/core/contracts';
 import {
   captureQuickSortTask,
   QUICK_SORT_MODES,
@@ -23,7 +25,7 @@ interface ApplyOperationBody {
   aiAccepted?: boolean;
 }
 
-function operationResponse(operation: typeof quickSortOperations.$inferSelect) {
+function operationResponse(operation: TaskQuickSortOperation) {
   return {
     operation: {
       id: operation.id,
@@ -44,8 +46,22 @@ function isQuickSortMode(value: string | undefined): value is QuickSortMode {
 
 function isQuickSortAction(
   value: string | undefined,
-): value is 'applied' | 'suggestion_accepted' | 'skipped' {
+): value is TaskQuickSortAction {
   return value === 'applied' || value === 'suggestion_accepted' || value === 'skipped';
+}
+
+function replayOperation(
+  operation: TaskQuickSortOperation,
+  taskId: string,
+  contextKey: string,
+) {
+  if (operation.taskId !== taskId || operation.contextKey !== contextKey) {
+    return NextResponse.json({ error: 'Operation ID is already in use' }, { status: 409 });
+  }
+  if (operation.state === 'applied' || operation.state === 'undone') {
+    return NextResponse.json(operationResponse(operation));
+  }
+  return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
 }
 
 export async function POST(request: Request) {
@@ -92,24 +108,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid Quick Sort operation' }, { status: 400 });
   }
 
-  const existing = await db.select()
-    .from(quickSortOperations)
-    .where(eq(quickSortOperations.id, operationId))
-    .get();
+  const quickSort = (await getTaskCorePersistence()).quickSort;
+  const existing = await quickSort.getOperation(operationId);
   if (existing) {
-    if (existing.taskId !== taskId || existing.contextKey !== contextKey) {
-      return NextResponse.json({ error: 'Operation ID is already in use' }, { status: 409 });
-    }
-    if (existing.state === 'applied' || existing.state === 'undone') {
-      return NextResponse.json(operationResponse(existing));
-    }
-    return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
+    return replayOperation(existing, taskId, contextKey);
   }
 
   const before = await captureQuickSortTask(taskId);
   if (!before) return NextResponse.json({ error: 'Task not found' }, { status: 404 });
   const now = new Date().toISOString();
-  await db.insert(quickSortOperations).values({
+  const reservation = await quickSort.reserveOperation({
     id: operationId,
     taskId,
     mode,
@@ -119,10 +127,12 @@ export async function POST(request: Request) {
     queueIndex,
     beforeSnapshot: { ...before, originalPatch: mutatesTask ? patch : {} },
     afterSnapshot: before,
-    state: 'applying',
     aiAccepted,
     createdAt: now,
   });
+  if (reservation.kind === 'existing') {
+    return replayOperation(reservation.operation, taskId, contextKey);
+  }
 
   let after = before;
   if (mutatesTask) {
@@ -138,7 +148,7 @@ export async function POST(request: Request) {
       { params: Promise.resolve({ id: taskId }) },
     );
     if (!patchResponse.ok) {
-      await db.delete(quickSortOperations).where(eq(quickSortOperations.id, operationId));
+      await quickSort.discardApplyingOperation(operationId);
       return new NextResponse(await patchResponse.text(), {
         status: patchResponse.status,
         headers: { 'Content-Type': patchResponse.headers.get('Content-Type') ?? 'application/json' },
@@ -147,7 +157,7 @@ export async function POST(request: Request) {
 
     const capturedAfter = await captureQuickSortTask(taskId);
     if (!capturedAfter) {
-      await db.delete(quickSortOperations).where(eq(quickSortOperations.id, operationId));
+      await quickSort.discardApplyingOperation(operationId);
       return NextResponse.json({ error: 'Task disappeared after update' }, { status: 409 });
     }
     after = capturedAfter;
@@ -156,24 +166,20 @@ export async function POST(request: Request) {
   const logModes = [...new Set(
     requestedLogModes.length > 0 ? requestedLogModes : [mode],
   )];
-  runTransaction((tx) => {
-    tx.update(quickSortOperations).set({
-      afterSnapshot: after,
-      state: 'applied',
-    }).where(eq(quickSortOperations.id, operationId)).run();
-    tx.insert(quickSortLog).values(logModes.map((logMode) => ({
+  const applied = await quickSort.finalizeOperation(
+    operationId,
+    after,
+    logModes.map((logMode) => ({
       id: randomUUID(),
       taskId,
       operationId,
       mode: logMode,
       action,
       triagedAt: now,
-    }))).run();
-  });
-
-  const applied = await db.select()
-    .from(quickSortOperations)
-    .where(eq(quickSortOperations.id, operationId))
-    .get();
-  return NextResponse.json(operationResponse(applied!));
+    })),
+  );
+  if (!applied) {
+    return NextResponse.json({ error: 'Operation is still being applied' }, { status: 409 });
+  }
+  return NextResponse.json(operationResponse(applied));
 }

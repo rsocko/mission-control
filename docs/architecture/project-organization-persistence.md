@@ -103,9 +103,9 @@ remains authoritative.
 
 ## Graph decrement and proof
 
-The exact graph, composed after the landed L18 AI execution layer, moved from
-`266/121/5/140/91/30/92/58/0/179` to
-`266/113/5/148/83/30/84/58/0/171` for API routes, Tier A, Tier B, clean,
+The exact graph, composed after the landed task quick-sort and L18 AI execution
+layers, moved from `266/118/5/143/88/30/89/57/0/175` to
+`266/110/5/151/80/30/81/57/0/167` for API routes, Tier A, Tier B, clean,
 direct taint, transitive-only taint, direct `@/db`, tainted libraries, tainted
 API helpers, and migration units respectively. All eight owned routes moved
 from Tier A to clean; no route moved to Tier B.

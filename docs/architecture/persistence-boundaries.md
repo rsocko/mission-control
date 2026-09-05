@@ -1844,6 +1844,31 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
+## Web/API PostgreSQL parity: task quick-sort workflow persistence
+
+The quick-sort activity, operation-apply, and operation-undo routes now use a
+bounded `TaskCorePersistence.quickSort` port. The existing task-core composition
+remains the sole owner: startup constructs the SQLite or PostgreSQL adapter
+atomically, and route or helper evaluation cannot import, initialize, or fall
+back to SQLite in PostgreSQL mode.
+
+The port owns task snapshot reads, conflict-safe operation reservation,
+operation/log finalization, undo claim/release/finalization, and activity
+statistics. Applying and undoing task fields still delegate to the existing task
+`PATCH` handler with `x-expected-task-updated-at`; this preserves the landed task
+revision CAS, field policy, and external write ordering rather than duplicating
+that behavior in the quick-sort adapter. Operation finalization and log creation
+share one transaction, as do undo state and log reversal. Concurrent reservation
+returns the existing operation, concurrent undo has one claimant, and completed
+undo remains replay-safe.
+
+The exact graph transition from base
+`6205bb0ece832ed0225b8ee31e1cbf6996308d93` is
+`266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182`
+to
+`266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178`.
+All three owned routes become clean, `src/lib/quick-sort/operations.ts` leaves
+the tainted-library set, and no route moves to Tier B.
 ## Web/API PostgreSQL parity: Layer L18 (AI execution and memory control plane)
 
 Layer L18 removes the deferred SQLite reach from document intake, retained
@@ -1901,11 +1926,12 @@ dedicated list-organization lock, and the existing per-project advisory
 namespace for project and phase mutations. Phase administration therefore
 continues to participate in L15 revision triggers and optimistic CAS fencing.
 
-All eight owned routes move directly from Tier A to clean. Composed after L18,
-the graph moves from `266/121/5/140/91/30/92/58/0/179` to
-`266/113/5/148/83/30/84/58/0/171`. The CI-exposed exact-current ratchet
-expansion adds 18 test-only paths to the approved 28-path maximum, for a
-46-path maximum and 45 actual changed paths.
+All eight owned routes move directly from Tier A to clean. Composed after the
+landed task quick-sort and L18 decrements, the graph moves from
+`266/118/5/143/88/30/89/57/0/175` to
+`266/110/5/151/80/30/81/57/0/167`. The CI-exposed exact-current ratchet
+expansion adds 19 test-only paths to the approved 28-path maximum, for a
+47-path maximum and 46 actual changed paths.
 
 ## Backend-specific exceptions
 

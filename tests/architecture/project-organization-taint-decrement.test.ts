@@ -44,9 +44,9 @@ const baseline = JSON.parse(readFileSync(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L19 project-organization taint decrement', () => {
-  it('records the exact historical decrement', () => {
+  it('records the exact composed decrement', () => {
     const entry = baseline.decrementHistory.find(({ layer }) => layer === 'L19');
-    expect(entry?.totalMigrationUnits).toEqual({ from: 179, to: 171, delta: -8 });
+    expect(entry?.totalMigrationUnits).toEqual({ from: 175, to: 167, delta: -8 });
     expect(entry?.removedTierARoutes.sort()).toEqual([...ROUTES].sort());
     expect(entry?.newlyCleanRoutes.sort()).toEqual([...ROUTES].sort());
     expect(entry?.removedDirectTaintSourceRoutes.sort()).toEqual([...ROUTES].sort());
@@ -141,15 +141,15 @@ describe('L19 project-organization taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 113,
+      tierARoutes: 110,
       tierBRoutes: 5,
-      cleanRoutes: 148,
-      directTaintSourceRoutes: 83,
+      cleanRoutes: 151,
+      directTaintSourceRoutes: 80,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 84,
-      taintedLibA: 58,
+      directDbNamespaceRoutes: 81,
+      taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 171,
+      totalMigrationUnits: 167,
     });
   });
 });

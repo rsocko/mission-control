@@ -11,7 +11,6 @@ const TEST_PATHS = [
 ] as const;
 const ARCHITECTURE_PATHS = [
   'docs/architecture/persistence-boundaries.md',
-  'tests/architecture/web-persistence-baseline.json',
 ] as const;
 
 function source(path: string) {
@@ -21,10 +20,10 @@ function source(path: string) {
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('daily planning read-model taint decrement', () => {
-  it('pins the five-path implementation and proof cap', () => {
+  it('pins the four owned implementation and proof paths', () => {
     expect(PRODUCTION_PATHS).toHaveLength(1);
     expect(TEST_PATHS).toHaveLength(2);
-    expect(ARCHITECTURE_PATHS).toHaveLength(2);
+    expect(ARCHITECTURE_PATHS).toHaveLength(1);
     for (const path of [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS]) {
       expect(existsSync(join(process.cwd(), path)), path).toBe(true);
     }

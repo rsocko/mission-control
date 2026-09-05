@@ -23,6 +23,7 @@ import type { CorePersistenceRepositories } from './persistence/core-repositorie
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
 import type { SemanticSearchRuntime } from '@/lib/search/semantic';
+import type { ScoutStatusChangeRepository } from '@/lib/connectors/scout/status-change-repository';
 import {
   getSemanticIndexRuntime,
   scheduleSemanticBackfill,
@@ -37,6 +38,7 @@ let sqliteComposition: {
   coreRepositories: CorePersistenceRepositories;
   workerRepositories: WorkerPersistenceRepositories;
   taskCorePersistence: TaskCorePersistence;
+  scoutStatusChangeRepository: ScoutStatusChangeRepository;
   borrowsTriage: boolean;
 } | null = null;
 type SqliteCompositionModules = {
@@ -49,6 +51,10 @@ type SqliteCompositionModules = {
   taskCoreRuntime: typeof import('@/lib/tasks/core/runtime');
   taskCorePersistence:
     typeof import('./persistence/sqlite-task-core-repositories').sqliteTaskCorePersistence;
+  scoutStatusChangeRuntime:
+    typeof import('@/lib/connectors/scout/status-change-runtime');
+  createScoutStatusChangeRepository:
+    typeof import('./persistence/sqlite-scout-status-change-repository').createSqliteScoutStatusChangeRepository;
 };
 let sqliteCompositionModules: SqliteCompositionModules | null = null;
 let sqliteCompositionModulesPromise: Promise<SqliteCompositionModules> | null = null;
@@ -136,6 +142,8 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     import('@/lib/triage/persistence'),
     import('@/lib/tasks/core/runtime'),
     import('./persistence/sqlite-task-core-repositories'),
+    import('@/lib/connectors/scout/status-change-runtime'),
+    import('./persistence/sqlite-scout-status-change-repository'),
   ]).then(([
     core,
     workerRuntime,
@@ -144,6 +152,8 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     triageRuntime,
     taskCoreRuntime,
     taskCorePersistence,
+    scoutStatusChangeRuntime,
+    scoutStatusChangeRepository,
   ]) => ({
     createCoreRepositories: core.createSqliteCorePersistenceRepositories,
     workerRuntime,
@@ -152,6 +162,9 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     triageRuntime,
     taskCoreRuntime,
     taskCorePersistence: taskCorePersistence.sqliteTaskCorePersistence,
+    scoutStatusChangeRuntime,
+    createScoutStatusChangeRepository:
+      scoutStatusChangeRepository.createSqliteScoutStatusChangeRepository,
   }));
   sqliteCompositionModulesPromise = pending;
   try {
@@ -190,6 +203,8 @@ function getOrCreateSqliteComposition(
         ? { ...workerRepositories, triage: borrowedTriage }
         : workerRepositories,
       taskCorePersistence: modules.taskCorePersistence,
+      scoutStatusChangeRepository:
+        modules.createScoutStatusChangeRepository(localSqlite),
       borrowsTriage: borrowedTriage !== null,
     };
   }
@@ -213,6 +228,9 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     );
   }
   modules.workerRuntime.assertCanRegisterSqliteWorkerRuntimeServices();
+  modules.scoutStatusChangeRuntime.assertCanRegisterScoutStatusChangeRepository(
+    composition.scoutStatusChangeRepository,
+  );
   assertCanSelectSemanticSearchRuntime(sqliteSemanticSearchRuntime);
 
   try {
@@ -228,9 +246,15 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     }
     modules.workerRuntime.registerSqliteWorkerRuntimeServices();
     modules.taskCoreRuntime.registerTaskCorePersistence(composition.taskCorePersistence);
+    modules.scoutStatusChangeRuntime.registerScoutStatusChangeRepository(
+      composition.scoutStatusChangeRepository,
+    );
     selectSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     sqliteCompositionState = 'active';
   } catch (error) {
+    modules.scoutStatusChangeRuntime.clearScoutStatusChangeRepository(
+      composition.scoutStatusChangeRepository,
+    );
     clearSelectedSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     modules.taskCoreRuntime.clearSelectedTaskCorePersistence(
       composition.taskCorePersistence,
@@ -343,6 +367,9 @@ export function shutdownSqlitePersistenceComposition(): Promise<void> {
       );
       sqliteCompositionModules.taskCoreRuntime.clearSelectedTaskCorePersistence(
         sqliteComposition.taskCorePersistence,
+      );
+      sqliteCompositionModules.scoutStatusChangeRuntime.clearScoutStatusChangeRepository(
+        sqliteComposition.scoutStatusChangeRepository,
       );
       clearSelectedSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     }

@@ -17,6 +17,28 @@ const mocks = vi.hoisted(() => {
   const registerConnectorRuntime = vi.fn();
   const registerDemoSeedCommandService = vi.fn();
   const registerRelativeReminderTimezoneRepository = vi.fn();
+  const createPostgresHealthProbe = vi.fn(() => ({
+    inspect: vi.fn(),
+    hasSeedMarker: vi.fn(),
+  }));
+  const createPostgresHealthSnapshotStore = vi.fn(() => ({
+    read: vi.fn(),
+    write: vi.fn(),
+  }));
+  const runtimeTelemetryPersistence = {
+    getDatabaseTelemetry: vi.fn(),
+    registerInstance: vi.fn(),
+    persist: vi.fn(),
+    recordStop: vi.fn(),
+    maintainHistory: vi.fn(),
+    getCurrent: vi.fn(),
+    getHistory: vi.fn(),
+    getAlertHistory: vi.fn(),
+    getInstances: vi.fn(),
+  };
+  const createPostgresRuntimeTelemetryPersistence = vi.fn(
+    () => runtimeTelemetryPersistence,
+  );
   const resumeSemantic = vi.fn();
   const stopSemantic = vi.fn(async () => undefined);
   const backend = {
@@ -41,6 +63,10 @@ const mocks = vi.hoisted(() => {
     registerConnectorRuntime,
     registerDemoSeedCommandService,
     registerRelativeReminderTimezoneRepository,
+    createPostgresHealthProbe,
+    createPostgresHealthSnapshotStore,
+    createPostgresRuntimeTelemetryPersistence,
+    runtimeTelemetryPersistence,
     registerCore,
     repositories,
     createCore: vi.fn(() => {
@@ -176,6 +202,24 @@ vi.mock('@/db/postgres/sync/connector-operation-lease-repository', () => ({
 vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: vi.fn(() => ({})),
 }));
+vi.mock('@/db/postgres/health', () => ({
+  PostgresDatabaseHealthProbe: class {
+    constructor(_pool: unknown) {
+      return mocks.createPostgresHealthProbe();
+    }
+  },
+}));
+vi.mock('@/lib/telemetry/postgres-health-snapshot-store', () => ({
+  PostgresHealthSnapshotStore: class {
+    constructor(_database: unknown) {
+      return mocks.createPostgresHealthSnapshotStore();
+    }
+  },
+}));
+vi.mock('@/db/postgres/telemetry-runtime', () => ({
+  createPostgresRuntimeTelemetryPersistence:
+    mocks.createPostgresRuntimeTelemetryPersistence,
+}));
 vi.mock('@/lib/semantic-index/packaged-worker-runtime', () => ({
   resumePackagedPostgresSemanticRuntime: mocks.resumeSemantic,
   stopPackagedPostgresSemanticWorker: mocks.stopSemantic,
@@ -265,6 +309,8 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.registerCore).toHaveBeenCalledTimes(1);
     expect(mocks.registerWorker).toHaveBeenCalledTimes(1);
     expect(mocks.registerConnectorRuntime).toHaveBeenCalledTimes(1);
+    expect(mocks.createPostgresHealthProbe).toHaveBeenCalledTimes(1);
+    expect(mocks.createPostgresRuntimeTelemetryPersistence).toHaveBeenCalledTimes(1);
     expect(mocks.resumeSemantic).toHaveBeenCalledTimes(1);
 
     await shutdownRuntimeDatabase();
@@ -277,6 +323,8 @@ describe('PostgreSQL runtime core repository registration', () => {
     expect(mocks.registerCore).toHaveBeenCalledTimes(2);
     expect(mocks.registerCore.mock.calls[1][0]).toBe(registeredComposition);
     expect(mocks.registerWorker.mock.calls[1][0]).toBe(registeredWorkerComposition);
+    expect(mocks.createPostgresHealthProbe).toHaveBeenCalledTimes(2);
+    expect(mocks.createPostgresRuntimeTelemetryPersistence).toHaveBeenCalledTimes(2);
     expect(mocks.resumeSemantic).toHaveBeenCalledTimes(2);
     await getPostgresCoreRepositories().tasks.get('task-1');
     await registeredComposition.connectors.recordTestResult({

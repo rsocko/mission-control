@@ -8,6 +8,9 @@ import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-ope
 import type { SyncControlStateRepository } from '@/lib/sync/control-state';
 import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
 import type { SyncOperatorControlRepository } from '@/lib/sync/operator-control';
+import type { RuntimeHealthPersistence } from '@/lib/telemetry/database-health-runtime';
+import type { RuntimeTelemetryPersistence } from '@/lib/telemetry/runtime-persistence';
+import type { StoredHealthSnapshot } from '@/lib/telemetry/health-snapshot-store';
 import {
   resetModulesPreservingProcessRuntimeRegistries,
   resetProcessRuntimeRegistries,
@@ -124,6 +127,77 @@ describe('process-wide runtime registries', () => {
 
     expect(secondRuntime.getDemoSeedCommandService()).toBe(demoService);
     expect(secondRuntime.getRelativeReminderTimezoneRepository()).toBe(timezoneRepository);
+  });
+
+  it('shares runtime observability compositions across isolated module evaluations', async () => {
+    const firstHealth = await import('@/lib/telemetry/database-health-runtime');
+    const firstTelemetry = await import('@/lib/telemetry/runtime-persistence');
+    const health: RuntimeHealthPersistence = {
+      databaseHealthProbe: {
+        inspect: vi.fn(async () => ({
+          connected: true,
+          severity: 'healthy',
+          message: 'Connected',
+          backend: { kind: 'test' },
+        })),
+        hasSeedMarker: vi.fn(async () => true),
+      },
+      createHealthSnapshotStore: <TSummary>() => ({
+        write: vi.fn(async () => undefined),
+        read: vi.fn(async (): Promise<StoredHealthSnapshot<TSummary> | null> => null),
+      }),
+    };
+    const telemetry: RuntimeTelemetryPersistence = {
+      getDatabaseTelemetry: () => undefined,
+      registerInstance: vi.fn(async () => undefined),
+      persist: vi.fn(async () => undefined),
+      recordStop: vi.fn(async () => undefined),
+      maintainHistory: vi.fn(async () => undefined),
+      getCurrent: vi.fn(async () => []),
+      getHistory: vi.fn(async () => []),
+      getAlertHistory: vi.fn(async () => []),
+      getInstances: vi.fn(async () => []),
+    };
+    firstHealth.registerRuntimeHealthPersistence(health);
+    firstTelemetry.registerRuntimeTelemetryPersistence(telemetry);
+
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
+    const secondHealth = await import('@/lib/telemetry/database-health-runtime');
+    const secondTelemetry = await import('@/lib/telemetry/runtime-persistence');
+
+    expect(secondHealth.getRuntimeHealthPersistence()).toBe(health);
+    expect(secondTelemetry.getRuntimeTelemetryPersistence()).toBe(telemetry);
+    secondHealth.clearRuntimeHealthPersistence(health);
+    secondTelemetry.clearRuntimeTelemetryPersistence(telemetry);
+  });
+
+  it('resolves health snapshot stores from the active composition on every call', async () => {
+    const healthRuntime = await import('@/lib/telemetry/database-health-runtime');
+    const firstRead = vi.fn(async () => null);
+    const secondRead = vi.fn(async () => null);
+    const createHealth = (read: typeof firstRead): RuntimeHealthPersistence => ({
+      databaseHealthProbe: {
+        inspect: vi.fn(),
+        hasSeedMarker: vi.fn(),
+      },
+      createHealthSnapshotStore: () => ({
+        write: vi.fn(async () => undefined),
+        read,
+      }),
+    });
+    const first = createHealth(firstRead);
+    const second = createHealth(secondRead);
+    const store = healthRuntime.createHealthSnapshotStore();
+
+    healthRuntime.registerRuntimeHealthPersistence(first);
+    await store.read();
+    healthRuntime.clearRuntimeHealthPersistence(first);
+    healthRuntime.registerRuntimeHealthPersistence(second);
+    await store.read();
+
+    expect(firstRead).toHaveBeenCalledOnce();
+    expect(secondRead).toHaveBeenCalledOnce();
+    healthRuntime.clearRuntimeHealthPersistence(second);
   });
 
   it('shares legacy search indexing across isolated module evaluations', async () => {

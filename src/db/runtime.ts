@@ -98,6 +98,19 @@ import { createPostgresSemanticIndexRepository } from './postgres/semantic-index
 import { createPostgresSemanticSourcePort } from './postgres/semantic-index/source-port';
 import { createPostgresRelativeReminderTimezoneRepository } from './postgres/repositories/relative-reminder-timezone-repository';
 import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
+import { PostgresDatabaseHealthProbe } from './postgres/health';
+import { createPostgresRuntimeTelemetryPersistence } from './postgres/telemetry-runtime';
+import { PostgresHealthSnapshotStore } from '@/lib/telemetry/postgres-health-snapshot-store';
+import {
+  clearRuntimeHealthPersistence,
+  registerRuntimeHealthPersistence,
+  type RuntimeHealthPersistence,
+} from '@/lib/telemetry/database-health-runtime';
+import {
+  clearRuntimeTelemetryPersistence,
+  registerRuntimeTelemetryPersistence,
+  type RuntimeTelemetryPersistence,
+} from '@/lib/telemetry/runtime-persistence';
 
 interface DatabaseRuntimeRegistry {
   backend: PostgresPersistenceBackend;
@@ -114,6 +127,8 @@ interface DatabaseRuntimeRegistry {
   durableAiRunRepository: DurableAiRunRepository | null;
   aiEnrichmentService: AIEnrichmentService | null;
   taskCorePersistence: TaskCorePersistence | null;
+  runtimeHealthPersistence: RuntimeHealthPersistence | null;
+  runtimeTelemetryPersistence: RuntimeTelemetryPersistence | null;
   initialized: boolean;
   initializationPromise: Promise<void> | null;
   shutdownPromise: Promise<void> | null;
@@ -154,6 +169,8 @@ function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
       durableAiRunRepository: null,
       aiEnrichmentService: null,
       taskCorePersistence: null,
+      runtimeHealthPersistence: null,
+      runtimeTelemetryPersistence: null,
       initialized: false,
       initializationPromise: null,
       shutdownPromise: null,
@@ -246,6 +263,7 @@ async function shutdownSqliteRuntimeDelegates(
 
 function clearPostgresRuntimeComposition(): void {
   const runtime = databaseRuntimeRegistry();
+  clearRuntimeObservabilityComposition(runtime);
   if (runtime.syncOperatorControlRepository) {
     clearSyncOperatorControlRepository(runtime.syncOperatorControlRepository);
   }
@@ -296,6 +314,17 @@ function clearPostgresRuntimeComposition(): void {
   runtime.durableAiRunRepository = null;
   runtime.aiEnrichmentService = null;
   runtime.taskCorePersistence = null;
+}
+
+function clearRuntimeObservabilityComposition(runtime: DatabaseRuntimeRegistry): void {
+  if (runtime.runtimeHealthPersistence) {
+    clearRuntimeHealthPersistence(runtime.runtimeHealthPersistence);
+    runtime.runtimeHealthPersistence = null;
+  }
+  if (runtime.runtimeTelemetryPersistence) {
+    clearRuntimeTelemetryPersistence(runtime.runtimeTelemetryPersistence);
+    runtime.runtimeTelemetryPersistence = null;
+  }
 }
 
 function requirePostgresRepositories(): CorePersistenceRepositories {
@@ -588,6 +617,36 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
       sqliteRuntime.shutdownSqlitePersistenceComposition;
     await sqliteRuntime.initializeSqlitePersistenceComposition();
     if (!isCurrentGeneration()) return;
+    const [
+      { SqliteDatabaseHealthProbe },
+      { SqliteHealthSnapshotStore },
+      { SqliteRuntimeTelemetryPersistence },
+    ] = await Promise.all([
+      import('@/lib/telemetry/sqlite-database-health-probe'),
+      import('@/lib/telemetry/sqlite-health-snapshot-store'),
+      import('@/lib/telemetry/sqlite-runtime-telemetry'),
+    ]);
+    if (!isCurrentGeneration()) return;
+    const runtime = databaseRuntimeRegistry();
+    runtime.runtimeHealthPersistence = {
+      databaseHealthProbe: new SqliteDatabaseHealthProbe(
+        sqliteRuntime.sqlite,
+        sqliteRuntime.withoutDatabaseObservation,
+      ),
+      createHealthSnapshotStore: <TSummary>() => (
+        new SqliteHealthSnapshotStore<TSummary>(
+          sqliteRuntime.sqlite,
+          sqliteRuntime.withoutDatabaseObservation,
+        )
+      ),
+    };
+    runtime.runtimeTelemetryPersistence = new SqliteRuntimeTelemetryPersistence(
+      sqliteRuntime.sqlite,
+      sqliteRuntime.withoutDatabaseObservation,
+      sqliteRuntime.getDatabaseTelemetry,
+    );
+    registerRuntimeHealthPersistence(runtime.runtimeHealthPersistence);
+    registerRuntimeTelemetryPersistence(runtime.runtimeTelemetryPersistence);
     const sqliteSyncRuntime = await import(
       './persistence/sqlite-sync-runtime'
     );
@@ -614,6 +673,15 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   await runtime.backend.initialize();
   if (!isCurrentGeneration()) return;
   const { db, pool, vector } = runtime.backend.context;
+  runtime.runtimeHealthPersistence = {
+    databaseHealthProbe: new PostgresDatabaseHealthProbe(pool),
+    createHealthSnapshotStore: <TSummary>() => (
+      new PostgresHealthSnapshotStore<TSummary>(db)
+    ),
+  };
+  runtime.runtimeTelemetryPersistence = createPostgresRuntimeTelemetryPersistence(pool);
+  registerRuntimeHealthPersistence(runtime.runtimeHealthPersistence);
+  registerRuntimeTelemetryPersistence(runtime.runtimeTelemetryPersistence);
   runtime.repositories = createPostgresCoreRepositories(db);
   registerCorePersistenceRepositories(stableCorePersistenceFacade());
   // The task-core composition is built atomically from the freshly
@@ -734,6 +802,7 @@ export function initializeRuntimeDatabase(): Promise<void> {
               { cause: error },
             );
           } finally {
+            clearRuntimeObservabilityComposition(runtime);
             const { clearSqliteSyncInfrastructure } = await import(
               './persistence/sqlite-sync-runtime'
             );
@@ -829,6 +898,7 @@ export function shutdownRuntimeDatabase(): Promise<void> {
       throw error;
     } finally {
       clearModeRouteServiceDelegates();
+      clearRuntimeObservabilityComposition(runtime);
       if (sqliteDurableAiRunRepository) {
         clearSqliteDurableAiRunRepository(sqliteDurableAiRunRepository);
       }

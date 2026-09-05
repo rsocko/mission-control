@@ -30,6 +30,19 @@ vi.mock('@/lib/public-demo-runtime', () => ({
 vi.mock('@/lib/telemetry/runtime', () => ({
   startRuntimeTelemetry: vi.fn(async () => undefined),
 }));
+vi.mock('@/lib/telemetry/sqlite-runtime-telemetry', () => ({
+  SqliteRuntimeTelemetryPersistence: class {
+    getDatabaseTelemetry = () => undefined;
+    registerInstance = vi.fn(async () => undefined);
+    persist = vi.fn(async () => undefined);
+    recordStop = vi.fn(async () => undefined);
+    maintainHistory = vi.fn(async () => undefined);
+    getCurrent = vi.fn(async () => []);
+    getHistory = vi.fn(async () => []);
+    getAlertHistory = vi.fn(async () => []);
+    getInstances = vi.fn(async () => []);
+  },
+}));
 
 describe('SQLite web sync service composition', () => {
   beforeAll(async () => {

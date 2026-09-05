@@ -1794,6 +1794,31 @@ state remains owned by the selected core backend. Composition is fail closed:
 PostgreSQL never falls back to SQLite, and no schema or deployment change is
 part of this layer.
 
+## Web/API PostgreSQL parity: runtime observability and health
+
+Runtime health snapshots, readiness probes, current telemetry, history,
+instance history, and telemetry maintenance now consume process-wide,
+startup-selected contracts. `initializeRuntimeDatabase()` publishes exactly one
+health and telemetry composition after its selected backend is initialized and
+clears both during failed startup or shutdown. Callers fail closed before
+publication or after fencing; they never select a driver or fall back to
+SQLite.
+
+The SQLite adapters retain the existing `PRAGMA page_count`, page-size,
+observation, JSON text, retention, and downsampling behavior. PostgreSQL uses
+`PostgresDatabaseHealthProbe`, `PostgresHealthSnapshotStore`, and the native
+`runtime_telemetry*` tables, including `pg_database_size(current_database())`
+and pool saturation metadata. SQLite-only PRAGMAs and `better-sqlite3` remain
+confined to explicitly named SQLite adapters.
+
+Five owned route files remain byte-for-byte unchanged. Only
+`src/app/api/health/route.ts` changes its import to the driver-neutral snapshot
+read seam so route evaluation no longer reaches worker snapshot generation.
+The exact graph transition is 266 routes, A130/B19/clean117 to
+A130/B13/clean123. All six owned health, metrics, and runtime telemetry routes
+move from Tier B to clean; every Tier A, direct-taint, direct-`@/db`,
+tainted-library, helper, and total-migration-unit count is unchanged.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

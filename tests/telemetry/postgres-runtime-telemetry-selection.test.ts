@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
  * Proves that runtime telemetry (`RuntimeTelemetryMonitor` persistence,
  * `startRuntimeTelemetry`/`stopRuntimeTelemetry`, and the
  * `getRuntimeTelemetry*` readers) actually switches to the PostgreSQL
- * adapter under `MC_DATABASE_BACKEND=postgres` — and never touches the
+ * startup-selected PostgreSQL adapter — and never touches the
  * SQLite compatibility layer while doing so. `@/db`'s `sqlite`/`db` exports
  * are mocked to throw on any access, so any code path that still reached
  * into SQLite would fail this test immediately instead of silently working
@@ -30,7 +30,6 @@ vi.mock('@/db', () => ({
 }));
 
 const postgresMocks = vi.hoisted(() => ({
-  pool: { query: vi.fn(async () => ({ rows: [], rowCount: 0 })) },
   registerPostgresRuntimeInstance: vi.fn(async () => undefined),
   persistPostgresRuntimeTelemetry: vi.fn(async () => undefined),
   recordPostgresRuntimeTelemetryStop: vi.fn(async () => undefined),
@@ -50,19 +49,21 @@ const postgresMocks = vi.hoisted(() => ({
   getPostgresRuntimeTelemetryInstances: vi.fn(async () => []),
 }));
 
-vi.mock('@/db/runtime', () => ({
-  getPostgresPersistenceBackend: () => ({ context: { pool: postgresMocks.pool } }),
-}));
-
-vi.mock('@/db/postgres/telemetry-runtime', () => ({
-  registerPostgresRuntimeInstance: postgresMocks.registerPostgresRuntimeInstance,
-  persistPostgresRuntimeTelemetry: postgresMocks.persistPostgresRuntimeTelemetry,
-  recordPostgresRuntimeTelemetryStop: postgresMocks.recordPostgresRuntimeTelemetryStop,
-  maintainPostgresRuntimeTelemetryHistory: postgresMocks.maintainPostgresRuntimeTelemetryHistory,
-  getPostgresRuntimeTelemetry: postgresMocks.getPostgresRuntimeTelemetry,
-  getPostgresRuntimeTelemetryHistory: postgresMocks.getPostgresRuntimeTelemetryHistory,
-  getPostgresRuntimeTelemetryAlertHistory: postgresMocks.getPostgresRuntimeTelemetryAlertHistory,
-  getPostgresRuntimeTelemetryInstances: postgresMocks.getPostgresRuntimeTelemetryInstances,
+vi.mock('@/lib/telemetry/runtime-persistence', () => ({
+  getRegisteredRuntimeTelemetryPersistence: () => ({
+    getDatabaseTelemetry: () => undefined,
+  }),
+  getRuntimeTelemetryPersistence: () => ({
+    getDatabaseTelemetry: () => undefined,
+    registerInstance: postgresMocks.registerPostgresRuntimeInstance,
+    persist: postgresMocks.persistPostgresRuntimeTelemetry,
+    recordStop: postgresMocks.recordPostgresRuntimeTelemetryStop,
+    maintainHistory: postgresMocks.maintainPostgresRuntimeTelemetryHistory,
+    getCurrent: postgresMocks.getPostgresRuntimeTelemetry,
+    getHistory: postgresMocks.getPostgresRuntimeTelemetryHistory,
+    getAlertHistory: postgresMocks.getPostgresRuntimeTelemetryAlertHistory,
+    getInstances: postgresMocks.getPostgresRuntimeTelemetryInstances,
+  }),
 }));
 
 const ORIGINAL_BACKEND = process.env.MC_DATABASE_BACKEND;
@@ -87,13 +88,11 @@ describe('PostgreSQL backend selection — runtime telemetry monitor lifecycle',
 
     expect(postgresMocks.registerPostgresRuntimeInstance).toHaveBeenCalledOnce();
     expect(postgresMocks.registerPostgresRuntimeInstance).toHaveBeenCalledWith(
-      postgresMocks.pool,
       expect.objectContaining({ instanceId: monitor.instanceId, role: 'worker' }),
     );
-    expect(postgresMocks.maintainPostgresRuntimeTelemetryHistory).toHaveBeenCalledWith(postgresMocks.pool);
+    expect(postgresMocks.maintainPostgresRuntimeTelemetryHistory).toHaveBeenCalledWith();
     expect(postgresMocks.persistPostgresRuntimeTelemetry).toHaveBeenCalledOnce();
     expect(postgresMocks.persistPostgresRuntimeTelemetry).toHaveBeenCalledWith(
-      postgresMocks.pool,
       expect.objectContaining({ instanceId: monitor.instanceId, role: 'worker' }),
     );
     expect(sqliteTouch).not.toHaveBeenCalled();
@@ -112,7 +111,6 @@ describe('PostgreSQL backend selection — runtime telemetry monitor lifecycle',
     expect(postgresMocks.persistPostgresRuntimeTelemetry).toHaveBeenCalledOnce();
     expect(postgresMocks.recordPostgresRuntimeTelemetryStop).toHaveBeenCalledOnce();
     expect(postgresMocks.recordPostgresRuntimeTelemetryStop).toHaveBeenCalledWith(
-      postgresMocks.pool,
       expect.objectContaining({ instanceId: monitor.instanceId, reason: 'SIGTERM' }),
     );
     expect(sqliteTouch).not.toHaveBeenCalled();
@@ -127,7 +125,6 @@ describe('PostgreSQL backend selection — runtime telemetry monitor lifecycle',
 
     await stopRuntimeTelemetry('test_shutdown');
     expect(postgresMocks.recordPostgresRuntimeTelemetryStop).toHaveBeenCalledWith(
-      postgresMocks.pool,
       expect.objectContaining({ instanceId: monitor.instanceId, reason: 'test_shutdown' }),
     );
     expect(sqliteTouch).not.toHaveBeenCalled();
@@ -176,7 +173,7 @@ describe('PostgreSQL backend selection — runtime telemetry readers', () => {
   it('getRuntimeTelemetry delegates to the PostgreSQL adapter', async () => {
     const { getRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
     const result = await getRuntimeTelemetry();
-    expect(postgresMocks.getPostgresRuntimeTelemetry).toHaveBeenCalledWith(postgresMocks.pool);
+    expect(postgresMocks.getPostgresRuntimeTelemetry).toHaveBeenCalledWith();
     expect(result).toHaveLength(1);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
@@ -185,8 +182,7 @@ describe('PostgreSQL backend selection — runtime telemetry readers', () => {
     const { getRuntimeTelemetryHistory } = await import('@/lib/telemetry/runtime');
     await getRuntimeTelemetryHistory(24, 'web');
     expect(postgresMocks.getPostgresRuntimeTelemetryHistory).toHaveBeenCalledWith(
-      postgresMocks.pool,
-      expect.objectContaining({ role: 'web', limit: 10_000 }),
+      expect.objectContaining({ role: 'web' }),
     );
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
@@ -195,7 +191,6 @@ describe('PostgreSQL backend selection — runtime telemetry readers', () => {
     const { getRuntimeTelemetryHistory } = await import('@/lib/telemetry/runtime');
     await getRuntimeTelemetryHistory({ role: 'worker', since: '2026-01-01T00:00:00.000Z', limit: 50 });
     expect(postgresMocks.getPostgresRuntimeTelemetryHistory).toHaveBeenCalledWith(
-      postgresMocks.pool,
       { role: 'worker', since: '2026-01-01T00:00:00.000Z', limit: 50 },
     );
     expect(sqliteTouch).not.toHaveBeenCalled();
@@ -204,14 +199,14 @@ describe('PostgreSQL backend selection — runtime telemetry readers', () => {
   it('getRuntimeTelemetryAlertHistory delegates to the PostgreSQL adapter', async () => {
     const { getRuntimeTelemetryAlertHistory } = await import('@/lib/telemetry/runtime');
     await getRuntimeTelemetryAlertHistory(2);
-    expect(postgresMocks.getPostgresRuntimeTelemetryAlertHistory).toHaveBeenCalledWith(postgresMocks.pool, 2);
+    expect(postgresMocks.getPostgresRuntimeTelemetryAlertHistory).toHaveBeenCalledWith(2);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 
   it('getRuntimeTelemetryInstances delegates to the PostgreSQL adapter', async () => {
     const { getRuntimeTelemetryInstances } = await import('@/lib/telemetry/runtime');
     await getRuntimeTelemetryInstances(48);
-    expect(postgresMocks.getPostgresRuntimeTelemetryInstances).toHaveBeenCalledWith(postgresMocks.pool, 48);
+    expect(postgresMocks.getPostgresRuntimeTelemetryInstances).toHaveBeenCalledWith(48);
     expect(sqliteTouch).not.toHaveBeenCalled();
   });
 });

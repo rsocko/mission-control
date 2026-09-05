@@ -10,9 +10,11 @@ import {
   persistPostgresRuntimeTelemetry,
   recordPostgresRuntimeTelemetryStop,
   registerPostgresRuntimeInstance,
+  createPostgresRuntimeTelemetryPersistence,
 } from '@/db/postgres/telemetry-runtime';
 import type { RuntimeMetrics } from '@/lib/telemetry/runtime';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+import { describeRuntimeTelemetryPersistenceContract } from '../contracts/runtime-telemetry-persistence.contract';
 
 vi.unmock('drizzle-orm');
 
@@ -219,5 +221,27 @@ describePostgres('PostgreSQL runtime telemetry adapter integration', () => {
     expect(rows).toHaveLength(1);
     expect(rows[0].resolutionSeconds).toBe(300);
     expect(rows[0].metrics.memory.intervalHighWater.externalBytes).toBe(900);
+  });
+
+  describeRuntimeTelemetryPersistenceContract('PostgreSQL', () => {
+    const instanceId = `postgres-contract-${randomUUID()}`;
+    return {
+      persistence: createPostgresRuntimeTelemetryPersistence(backend.context.pool),
+      instanceId,
+      close: async () => {
+        await backend.context.pool.query(
+          'DELETE FROM runtime_telemetry WHERE instance_id = $1',
+          [instanceId],
+        );
+        await backend.context.pool.query(
+          'DELETE FROM runtime_telemetry_samples WHERE instance_id = $1',
+          [instanceId],
+        );
+        await backend.context.pool.query(
+          'DELETE FROM runtime_telemetry_instances WHERE instance_id = $1',
+          [instanceId],
+        );
+      },
+    };
   });
 });

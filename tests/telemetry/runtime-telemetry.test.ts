@@ -5,15 +5,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RuntimeTelemetryPersistence } from '@/lib/telemetry/runtime-persistence';
 
-const run = vi.fn();
-const all = vi.fn(() => []);
-const prepare = vi.fn(() => ({ run, all }));
-vi.mock('@/db', () => ({
-  sqlite: {
-    prepare,
-  },
-  getDatabaseTelemetry: vi.fn(() => ({
+const persistence = vi.hoisted(() => ({
+  getDatabaseTelemetry: vi.fn<RuntimeTelemetryPersistence['getDatabaseTelemetry']>(() => ({
     sampledAt: '2026-08-03T00:00:10.000Z',
     windowStartedAt: '2026-08-03T00:00:00.000Z',
     sampleInterval: {
@@ -87,7 +82,24 @@ vi.mock('@/db', () => ({
     severity: 'healthy',
     reasons: [],
   })),
-  withoutDatabaseObservation: <T>(callback: () => T) => callback(),
+  registerInstance: vi.fn<RuntimeTelemetryPersistence['registerInstance']>(
+    async () => undefined,
+  ),
+  persist: vi.fn<RuntimeTelemetryPersistence['persist']>(async () => undefined),
+  recordStop: vi.fn<RuntimeTelemetryPersistence['recordStop']>(async () => undefined),
+  maintainHistory: vi.fn<RuntimeTelemetryPersistence['maintainHistory']>(
+    async () => undefined,
+  ),
+  getCurrent: vi.fn<RuntimeTelemetryPersistence['getCurrent']>(async () => []),
+  getHistory: vi.fn<RuntimeTelemetryPersistence['getHistory']>(async () => []),
+  getAlertHistory: vi.fn<RuntimeTelemetryPersistence['getAlertHistory']>(
+    async () => [],
+  ),
+  getInstances: vi.fn<RuntimeTelemetryPersistence['getInstances']>(async () => []),
+}));
+vi.mock('@/lib/telemetry/runtime-persistence', () => ({
+  getRegisteredRuntimeTelemetryPersistence: () => persistence,
+  getRuntimeTelemetryPersistence: () => persistence,
 }));
 vi.mock('@/lib/logger', () => ({
   default: {
@@ -203,10 +215,9 @@ describe('runtime telemetry', () => {
       synchronousDatabaseTimeMs: 12,
       operationCount: 2,
     });
-      expect(run).toHaveBeenCalledTimes(3);
-      expect(prepare.mock.calls.some(([sql]) =>
-        String(sql).includes('ON CONFLICT(instance_id, sampled_at, resolution_seconds)'),
-      )).toBe(true);
+      expect(persistence.persist).toHaveBeenCalledWith(
+        expect.objectContaining({ role }),
+      );
       await monitor.stop();
     },
   );
@@ -313,9 +324,7 @@ describe('runtime telemetry', () => {
   });
 
   it('keeps monitoring when telemetry persistence fails', async () => {
-    run.mockImplementationOnce(() => {
-      throw new Error('disk full');
-    });
+    persistence.persist.mockRejectedValueOnce(new Error('disk full'));
     const { default: logger } = await import('@/lib/logger');
     const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
     const monitor = new RuntimeTelemetryMonitor('worker');
@@ -329,20 +338,31 @@ describe('runtime telemetry', () => {
   });
 
   it('returns parsed historical samples in query order', async () => {
-    all.mockReturnValueOnce([{
+    persistence.getHistory.mockResolvedValueOnce([{
       id: 1,
       role: 'web',
       instanceId: 'web-1',
       pid: 123,
       sampledAt: '2026-08-03T00:00:10.000Z',
-      metrics: JSON.stringify({
+      resolutionSeconds: 10,
+      metrics: {
+        schemaVersion: 2,
+        role: 'web',
+        sampledAt: '2026-08-03T00:00:10.000Z',
         eventLoop: {},
         process: {},
         garbageCollection: {},
         requests: {},
         host: {},
-        container: { unavailable: ['memory.max: ENOENT'] },
-      }),
+        container: {
+          unavailable: [
+            'memory.max: ENOENT',
+            'restartCount: not recorded by this historical sample',
+          ],
+          restartCount: null,
+          restartCountSource: 'unavailable',
+        },
+      },
     }]);
     const { getRuntimeTelemetryHistory } = await import('@/lib/telemetry/runtime');
 
@@ -367,7 +387,11 @@ describe('runtime telemetry', () => {
         }),
       }),
     })]);
-    expect(all).toHaveBeenCalledWith('2026-08-03T00:00:00.000Z', 'web', 10);
+    expect(persistence.getHistory).toHaveBeenCalledWith({
+      role: 'web',
+      since: '2026-08-03T00:00:00.000Z',
+      limit: 10,
+    });
   });
 
   it('releases request concurrency on completion and disconnect', async () => {
@@ -482,10 +506,10 @@ describe('runtime telemetry', () => {
   });
 
   it('downsamples old raw samples, preserves peaks, and expires retained history', async () => {
-    const {
-      maintainRuntimeTelemetryHistory,
-      RuntimeTelemetryMonitor,
-    } = await import('@/lib/telemetry/runtime');
+    const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
+    const { SqliteRuntimeTelemetryPersistence } = await import(
+      '@/lib/telemetry/sqlite-runtime-telemetry'
+    );
     const database = new Database(':memory:');
     database.exec(`
       CREATE TABLE runtime_telemetry_samples (
@@ -527,7 +551,12 @@ describe('runtime telemetry', () => {
         ('expired', '2026-08-03T04:00:00.000Z')
     `).run();
 
-    maintainRuntimeTelemetryHistory(database, now);
+    const adapter = new SqliteRuntimeTelemetryPersistence(
+      database,
+      (callback) => callback(),
+      persistence.getDatabaseTelemetry,
+    );
+    await adapter.maintainHistory(now);
 
     const rows = database.prepare(`
       SELECT instance_id AS instanceId, resolution_seconds AS resolutionSeconds, metrics
@@ -546,13 +575,47 @@ describe('runtime telemetry', () => {
     database.close();
   });
 
+  it('keeps SQLite hours-based history unbounded', async () => {
+    const { SqliteRuntimeTelemetryPersistence } = await import(
+      '@/lib/telemetry/sqlite-runtime-telemetry'
+    );
+    const database = new Database(':memory:');
+    database.exec(`
+      CREATE TABLE runtime_telemetry_samples (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        instance_id TEXT NOT NULL,
+        role TEXT NOT NULL,
+        pid INTEGER NOT NULL,
+        sampled_at TEXT NOT NULL,
+        resolution_seconds INTEGER NOT NULL,
+        metrics TEXT NOT NULL
+      );
+    `);
+    const adapter = new SqliteRuntimeTelemetryPersistence(
+      database,
+      (callback) => callback(),
+      persistence.getDatabaseTelemetry,
+    );
+    const prepare = vi.spyOn(database, 'prepare');
+
+    await adapter.getHistory({
+      role: 'worker',
+      since: '2026-08-03T00:00:00.000Z',
+    });
+
+    expect(prepare.mock.calls[0][0]).not.toContain('LIMIT');
+    database.close();
+  });
+
   it('persists a terminal sample and restart reason on shutdown', async () => {
     const { RuntimeTelemetryMonitor } = await import('@/lib/telemetry/runtime');
     const monitor = new RuntimeTelemetryMonitor('worker');
     await monitor.start();
     await monitor.stop('SIGTERM');
 
-    expect(run.mock.calls.some((call) => call.includes('SIGTERM'))).toBe(true);
+    expect(persistence.recordStop).toHaveBeenCalledWith(
+      expect.objectContaining({ reason: 'SIGTERM' }),
+    );
   });
 
   it('registers and removes web shutdown telemetry handlers', async () => {

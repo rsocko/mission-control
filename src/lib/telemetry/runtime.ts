@@ -9,7 +9,6 @@ import {
   PerformanceObserver,
   type PerformanceEntry,
 } from 'node:perf_hooks';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
 import logger from '@/lib/logger';
 import {
   getRuntimeLifecycleSnapshot,
@@ -23,6 +22,10 @@ import {
   getRuntimeOperationSnapshot,
   type RuntimeOperationSnapshot,
 } from './operations';
+import {
+  getRegisteredRuntimeTelemetryPersistence,
+  getRuntimeTelemetryPersistence,
+} from './runtime-persistence';
 
 export type RuntimeRole = 'web' | 'worker';
 export type MemoryPressureLevel = 'healthy' | 'warning' | 'critical' | 'unavailable';
@@ -177,21 +180,6 @@ interface RuntimeGlobalState {
     SIGTERM?: () => void;
     SIGINT?: () => void;
   };
-}
-
-interface TelemetryDatabase {
-  prepare(sql: string): {
-    run(...parameters: unknown[]): unknown;
-    all(...parameters: unknown[]): unknown[];
-  };
-}
-
-type SQLiteRuntime = typeof import('@/db');
-let sqliteRuntime: SQLiteRuntime | null = null;
-
-async function loadSQLiteRuntime(): Promise<SQLiteRuntime> {
-  sqliteRuntime ??= await import('@/db');
-  return sqliteRuntime;
 }
 
 const GLOBAL_KEY = '__mc_runtime_telemetry__';
@@ -723,71 +711,6 @@ export function aggregateSamples(samples: RuntimeTelemetrySample[]): RuntimeMetr
   }), latest);
 }
 
-export function maintainRuntimeTelemetryHistory(
-  database: TelemetryDatabase,
-  now = new Date(),
-  options: {
-    retentionHours?: number;
-    rawHours?: number;
-    downsampleSeconds?: number;
-  } = {},
-): void {
-  const retentionHours = Math.max(72, options.retentionHours ?? 72);
-  const rawHours = Math.min(retentionHours, Math.max(1, options.rawHours ?? 6));
-  const downsampleSeconds = Math.max(60, options.downsampleSeconds ?? 300);
-  const retentionCutoff = new Date(now.getTime() - retentionHours * 60 * 60_000).toISOString();
-  const rawCutoff = new Date(now.getTime() - rawHours * 60 * 60_000).toISOString();
-  const rows = database.prepare(`
-    SELECT id, role, instance_id AS instanceId, pid, sampled_at AS sampledAt,
-      resolution_seconds AS resolutionSeconds, metrics
-    FROM runtime_telemetry_samples
-    WHERE sampled_at >= ? AND sampled_at < ? AND resolution_seconds < ?
-    ORDER BY instance_id, sampled_at
-  `).all(retentionCutoff, rawCutoff, downsampleSeconds) as Array<
-    Omit<RuntimeTelemetrySample, 'metrics'> & { metrics: string }
-  >;
-  const buckets = new Map<string, RuntimeTelemetrySample[]>();
-  for (const row of rows) {
-    const bucketTime = Math.floor(
-      new Date(row.sampledAt).getTime() / (downsampleSeconds * 1_000),
-    ) * downsampleSeconds * 1_000;
-    const key = `${row.instanceId}:${bucketTime}`;
-    const bucket = buckets.get(key) ?? [];
-    bucket.push({ ...row, metrics: deserializeRuntimeMetrics(row.metrics) });
-    buckets.set(key, bucket);
-  }
-
-  const insert = database.prepare(`
-    INSERT INTO runtime_telemetry_samples (
-      instance_id, role, pid, sampled_at, resolution_seconds, metrics
-    ) VALUES (?, ?, ?, ?, ?, ?)
-    ON CONFLICT(instance_id, sampled_at, resolution_seconds) DO UPDATE SET
-      metrics = excluded.metrics
-  `);
-  for (const samples of buckets.values()) {
-    const first = samples[0];
-    const bucketTime = Math.floor(
-      new Date(first.sampledAt).getTime() / (downsampleSeconds * 1_000),
-    ) * downsampleSeconds * 1_000;
-    insert.run(
-      first.instanceId,
-      first.role,
-      first.pid,
-      new Date(bucketTime).toISOString(),
-      downsampleSeconds,
-      JSON.stringify(aggregateSamples(samples)),
-    );
-  }
-  database.prepare(`
-    DELETE FROM runtime_telemetry_samples
-    WHERE sampled_at < ? OR (sampled_at < ? AND resolution_seconds < ?)
-  `).run(retentionCutoff, rawCutoff, downsampleSeconds);
-  database.prepare(`
-    DELETE FROM runtime_telemetry_instances
-    WHERE last_seen_at < ?
-  `).run(retentionCutoff);
-}
-
 export class RuntimeTelemetryMonitor {
   readonly role: RuntimeRole;
   readonly instanceId = randomUUID();
@@ -1004,9 +927,6 @@ export class RuntimeTelemetryMonitor {
    */
   sampleAndPersist(now?: number): Promise<RuntimeMetrics> {
     const pending = this.persistenceChain.then(async () => {
-      if (resolveDatabaseBackend() === 'sqlite') {
-        await loadSQLiteRuntime();
-      }
       const metrics = this.sample(now ?? performance.now());
       try {
         await this.persist(metrics);
@@ -1075,9 +995,7 @@ export class RuntimeTelemetryMonitor {
       active: this.activeRequests,
       peakActive: this.peakActiveRequests,
     };
-    const database = resolveDatabaseBackend() === 'sqlite' && sqliteRuntime
-      ? sqliteRuntime.getDatabaseTelemetry()
-      : undefined;
+    const database = getRegisteredRuntimeTelemetryPersistence()?.getDatabaseTelemetry();
     const eventLoopCorrelation = database
       ? {
           eventLoopP99Ms: p99Ms,
@@ -1253,178 +1171,49 @@ export class RuntimeTelemetryMonitor {
   }
 
   private async registerInstance(): Promise<void> {
-    if (resolveDatabaseBackend() === 'postgres') {
-      const [{ getPostgresPersistenceBackend }, { registerPostgresRuntimeInstance }] = await Promise.all([
-        import('@/db/runtime'),
-        import('@/db/postgres/telemetry-runtime'),
-      ]);
-      await registerPostgresRuntimeInstance(
-        getPostgresPersistenceBackend().context.pool,
-        {
-          instanceId: this.instanceId,
-          role: this.role,
-          pid: process.pid,
-          startedAt: this.startedAt,
-          restartCount: readCgroupMetrics().restartCount,
-          buildSha: runtimeRelease,
-          runtimeMode: runtimeMode(),
-          highWaterMetrics: this.instanceHighWater,
-          restartReason: process.env.MC_PREVIOUS_RESTART_REASON ?? 'instance_replaced',
-        },
-      );
-      return;
-    }
-    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-    withoutDatabaseObservation(() => {
-      const restartReason = process.env.MC_PREVIOUS_RESTART_REASON ?? 'instance_replaced';
-      sqlite.prepare(`
-        UPDATE runtime_telemetry_instances
-        SET stopped_at = ?, terminal_reason = COALESCE(terminal_reason, ?)
-        WHERE role = ? AND stopped_at IS NULL AND instance_id <> ?
-      `).run(this.startedAt, restartReason, this.role, this.instanceId);
-      sqlite.prepare(`
-        INSERT INTO runtime_telemetry_instances (
-          instance_id, role, pid, started_at, last_seen_at, stopped_at,
-          terminal_reason, restart_count, build_sha, runtime_mode, high_water_metrics
-        ) VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?)
-        ON CONFLICT(instance_id) DO NOTHING
-      `).run(
-        this.instanceId,
-        this.role,
-        process.pid,
-        this.startedAt,
-        this.startedAt,
-        readCgroupMetrics().restartCount,
-        runtimeRelease,
-        runtimeMode(),
-        JSON.stringify(this.instanceHighWater),
-      );
+    await getRuntimeTelemetryPersistence().registerInstance({
+      instanceId: this.instanceId,
+      role: this.role,
+      pid: process.pid,
+      startedAt: this.startedAt,
+      restartCount: readCgroupMetrics().restartCount,
+      buildSha: runtimeRelease,
+      runtimeMode: runtimeMode(),
+      highWaterMetrics: this.instanceHighWater,
+      restartReason: process.env.MC_PREVIOUS_RESTART_REASON ?? 'instance_replaced',
     });
   }
 
   private async maintainHistory(): Promise<void> {
-    if (resolveDatabaseBackend() === 'postgres') {
-      const [{ getPostgresPersistenceBackend }, { maintainPostgresRuntimeTelemetryHistory }] = await Promise.all([
-        import('@/db/runtime'),
-        import('@/db/postgres/telemetry-runtime'),
-      ]);
-      await maintainPostgresRuntimeTelemetryHistory(
-        getPostgresPersistenceBackend().context.pool,
-      );
-      return;
-    }
-    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-    withoutDatabaseObservation(() => maintainRuntimeTelemetryHistory(sqlite));
+    await getRuntimeTelemetryPersistence().maintainHistory();
   }
 
   private async recordStop(terminalMetrics: RuntimeMetrics, reason: string): Promise<void> {
-    if (resolveDatabaseBackend() === 'postgres') {
-      const [{ getPostgresPersistenceBackend }, { recordPostgresRuntimeTelemetryStop }] = await Promise.all([
-        import('@/db/runtime'),
-        import('@/db/postgres/telemetry-runtime'),
-      ]);
-      await recordPostgresRuntimeTelemetryStop(
-        getPostgresPersistenceBackend().context.pool,
-        { instanceId: this.instanceId, reason, terminalMetrics },
-      );
-      return;
-    }
-    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-    withoutDatabaseObservation(() => {
-      sqlite.prepare(`
-        UPDATE runtime_telemetry_instances
-        SET stopped_at = ?, last_seen_at = ?, terminal_reason = ?, terminal_metrics = ?
-        WHERE instance_id = ?
-      `).run(
-        terminalMetrics.sampledAt,
-        terminalMetrics.sampledAt,
-        reason,
-        JSON.stringify(terminalMetrics),
-        this.instanceId,
-      );
+    await getRuntimeTelemetryPersistence().recordStop({
+      instanceId: this.instanceId,
+      reason,
+      terminalMetrics,
     });
   }
 
   private async persist(metrics: RuntimeMetrics): Promise<void> {
-    if (resolveDatabaseBackend() === 'postgres') {
-      const [{ getPostgresPersistenceBackend }, { persistPostgresRuntimeTelemetry }] = await Promise.all([
-        import('@/db/runtime'),
-        import('@/db/postgres/telemetry-runtime'),
-      ]);
-      const pool = getPostgresPersistenceBackend().context.pool;
-      await persistPostgresRuntimeTelemetry(pool, {
-        role: this.role,
-        instanceId: this.instanceId,
-        pid: process.pid,
-        startedAt: this.startedAt,
-        metrics,
-        resolutionSeconds: Math.max(1, Math.round(this.intervalMs / 1_000)),
-        highWaterMetrics: this.instanceHighWater,
-      });
-      const maintenanceIntervalMs = positiveInteger(
-        process.env.MC_TELEMETRY_MAINTENANCE_INTERVAL_MS,
-        60 * 60_000,
-      );
-      if (Date.now() - this.lastMaintenanceAt >= maintenanceIntervalMs) {
-        await this.maintainHistory();
-        this.lastMaintenanceAt = Date.now();
-      }
-      return;
-    }
-    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-    withoutDatabaseObservation(() => {
-      const serialized = JSON.stringify(metrics);
-      sqlite.prepare(`
-        INSERT INTO runtime_telemetry (
-          role, instance_id, pid, started_at, heartbeat_at, metrics
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(role) DO UPDATE SET
-          instance_id = excluded.instance_id,
-          pid = excluded.pid,
-          started_at = excluded.started_at,
-          heartbeat_at = excluded.heartbeat_at,
-          metrics = excluded.metrics
-      `).run(
-        this.role,
-        this.instanceId,
-        process.pid,
-        this.startedAt,
-        metrics.sampledAt,
-        serialized,
-      );
-      sqlite.prepare(`
-        INSERT INTO runtime_telemetry_samples (
-          instance_id, role, pid, sampled_at, resolution_seconds, metrics
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(instance_id, sampled_at, resolution_seconds) DO UPDATE SET
-          metrics = excluded.metrics
-      `).run(
-        this.instanceId,
-        this.role,
-        process.pid,
-        metrics.sampledAt,
-        Math.max(1, Math.round(this.intervalMs / 1_000)),
-        serialized,
-      );
-      sqlite.prepare(`
-        UPDATE runtime_telemetry_instances
-        SET last_seen_at = ?, restart_count = ?, high_water_metrics = ?
-        WHERE instance_id = ?
-      `).run(
-        metrics.sampledAt,
-        metrics.container.restartCount,
-        JSON.stringify(this.instanceHighWater),
-        this.instanceId,
-      );
-      const maintenanceIntervalMs = positiveInteger(
-        process.env.MC_TELEMETRY_MAINTENANCE_INTERVAL_MS,
-        60 * 60_000,
-      );
-      if (Date.now() - this.lastMaintenanceAt >= maintenanceIntervalMs) {
-        maintainRuntimeTelemetryHistory(sqlite);
-        this.lastMaintenanceAt = Date.now();
-      }
+    await getRuntimeTelemetryPersistence().persist({
+      role: this.role,
+      instanceId: this.instanceId,
+      pid: process.pid,
+      startedAt: this.startedAt,
+      metrics,
+      resolutionSeconds: Math.max(1, Math.round(this.intervalMs / 1_000)),
+      highWaterMetrics: this.instanceHighWater,
     });
+    const maintenanceIntervalMs = positiveInteger(
+      process.env.MC_TELEMETRY_MAINTENANCE_INTERVAL_MS,
+      60 * 60_000,
+    );
+    if (Date.now() - this.lastMaintenanceAt >= maintenanceIntervalMs) {
+      await this.maintainHistory();
+      this.lastMaintenanceAt = Date.now();
+    }
   }
 }
 
@@ -1476,24 +1265,7 @@ export function recordLivenessProbe(durationMs: number): void {
 }
 
 export async function getRuntimeTelemetry(): Promise<RuntimeTelemetryRecord[]> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetry }] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/telemetry-runtime'),
-    ]);
-    return getPostgresRuntimeTelemetry(getPostgresPersistenceBackend().context.pool);
-  }
-  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-  const rows = withoutDatabaseObservation(() => sqlite.prepare(`
-      SELECT role, instance_id AS instanceId, pid, started_at AS startedAt,
-        heartbeat_at AS heartbeatAt, metrics
-      FROM runtime_telemetry
-      ORDER BY role
-    `).all()) as Array<Omit<RuntimeTelemetryRecord, 'metrics'> & { metrics: string }>;
-  return rows.map((row) => ({
-    ...row,
-    metrics: deserializeRuntimeMetrics(row.metrics),
-  }));
+  return getRuntimeTelemetryPersistence().getCurrent();
 }
 
 export function getRuntimeTelemetryHistory(
@@ -1518,152 +1290,28 @@ export async function getRuntimeTelemetryHistory(
       ?? new Date(Date.now() - 6 * 60 * 60_000).toISOString();
     const limit = Math.min(10_000, Math.max(1, hoursOrOptions.limit ?? 1_000));
 
-    if (resolveDatabaseBackend() === 'postgres') {
-      const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryHistory }] = await Promise.all([
-        import('@/db/runtime'),
-        import('@/db/postgres/telemetry-runtime'),
-      ]);
-      return getPostgresRuntimeTelemetryHistory(getPostgresPersistenceBackend().context.pool, {
-        role: hoursOrOptions.role,
-        since,
-        limit,
-      });
-    }
-
-    const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-    const roleFilter = hoursOrOptions.role ? 'AND role = ?' : '';
-    const query = sqlite.prepare(`
-      SELECT id, role, instanceId, pid, sampledAt, resolutionSeconds, metrics
-      FROM (
-        SELECT id, role, instance_id AS instanceId, pid,
-          sampled_at AS sampledAt, resolution_seconds AS resolutionSeconds, metrics
-        FROM runtime_telemetry_samples
-        WHERE sampled_at >= ?
-          ${roleFilter}
-        ORDER BY sampled_at DESC
-        LIMIT ?
-      )
-      ORDER BY sampledAt
-    `);
-    const rows = withoutDatabaseObservation(() => (
-      hoursOrOptions.role
-        ? query.all(since, hoursOrOptions.role, limit)
-        : query.all(since, limit)
-    )) as Array<Omit<RuntimeTelemetrySample, 'metrics'> & { metrics: string }>;
-    return rows.map((row) => ({
-      ...row,
-      metrics: deserializeRuntimeMetrics(row.metrics),
-    }));
+    return getRuntimeTelemetryPersistence().getHistory({
+      role: hoursOrOptions.role,
+      since,
+      limit,
+    });
   }
 
   const boundedHours = Math.min(72, Math.max(1, hoursOrOptions));
   const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
 
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryHistory }] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/telemetry-runtime'),
-    ]);
-    return getPostgresRuntimeTelemetryHistory(getPostgresPersistenceBackend().context.pool, {
-      role,
-      since: cutoff,
-      limit: 10_000,
-    });
-  }
-
-  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-  const rows = withoutDatabaseObservation(() => sqlite.prepare(`
-      SELECT id, role, instance_id AS instanceId, pid, sampled_at AS sampledAt,
-        resolution_seconds AS resolutionSeconds, metrics
-      FROM runtime_telemetry_samples
-      WHERE sampled_at >= ? AND (? IS NULL OR role = ?)
-      ORDER BY sampled_at
-    `).all(cutoff, role ?? null, role ?? null)) as Array<
-    Omit<RuntimeTelemetrySample, 'metrics'> & { metrics: string }
-  >;
-  return rows.map((row) => ({
-    ...row,
-    metrics: deserializeRuntimeMetrics(row.metrics),
-  }));
+  return getRuntimeTelemetryPersistence().getHistory({
+    role,
+    since: cutoff,
+  });
 }
 
 export async function getRuntimeTelemetryAlertHistory(
   hours = 1,
 ): Promise<RuntimeTelemetrySample[]> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryAlertHistory }] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/telemetry-runtime'),
-    ]);
-    return getPostgresRuntimeTelemetryAlertHistory(getPostgresPersistenceBackend().context.pool, hours);
-  }
-  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-  const boundedHours = Math.min(72, Math.max(1, hours));
-  const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
-  const rows = withoutDatabaseObservation(() => sqlite.prepare(`
-      WITH gc_samples AS (
-        SELECT
-          id,
-          role,
-          instance_id AS instanceId,
-          pid,
-          sampled_at AS sampledAt,
-          resolution_seconds AS resolutionSeconds,
-          metrics,
-          ROW_NUMBER() OVER (
-            PARTITION BY instance_id ORDER BY sampled_at ASC
-          ) AS oldestRank,
-          ROW_NUMBER() OVER (
-            PARTITION BY instance_id ORDER BY sampled_at DESC
-          ) AS newestRank
-        FROM runtime_telemetry_samples
-        WHERE sampled_at >= ?
-          AND json_extract(metrics, '$.memory.postGcFloor.heapUsedBytes') IS NOT NULL
-      )
-      SELECT id, role, instanceId, pid, sampledAt, resolutionSeconds, metrics
-      FROM gc_samples
-      WHERE oldestRank = 1 OR newestRank = 1
-      ORDER BY sampledAt
-    `).all(cutoff)) as Array<
-    Omit<RuntimeTelemetrySample, 'metrics'> & { metrics: string }
-  >;
-  return rows.map((row) => ({
-    ...row,
-    metrics: deserializeRuntimeMetrics(row.metrics),
-  }));
+  return getRuntimeTelemetryPersistence().getAlertHistory(hours);
 }
 
 export async function getRuntimeTelemetryInstances(hours = 72): Promise<RuntimeTelemetryInstance[]> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    const [{ getPostgresPersistenceBackend }, { getPostgresRuntimeTelemetryInstances }] = await Promise.all([
-      import('@/db/runtime'),
-      import('@/db/postgres/telemetry-runtime'),
-    ]);
-    return getPostgresRuntimeTelemetryInstances(getPostgresPersistenceBackend().context.pool, hours);
-  }
-  const { sqlite, withoutDatabaseObservation } = await loadSQLiteRuntime();
-  const boundedHours = Math.min(72, Math.max(1, hours));
-  const cutoff = new Date(Date.now() - boundedHours * 60 * 60_000).toISOString();
-  const rows = withoutDatabaseObservation(() => sqlite.prepare(`
-      SELECT instance_id AS instanceId, role, pid, started_at AS startedAt,
-        last_seen_at AS lastSeenAt, stopped_at AS stoppedAt,
-        terminal_reason AS terminalReason, restart_count AS restartCount,
-        build_sha AS buildSha, runtime_mode AS runtimeMode,
-        high_water_metrics AS highWaterMetrics, terminal_metrics AS terminalMetrics
-      FROM runtime_telemetry_instances
-      WHERE last_seen_at >= ?
-      ORDER BY started_at DESC
-    `).all(cutoff)) as Array<
-    Omit<RuntimeTelemetryInstance, 'highWaterMetrics' | 'terminalMetrics'> & {
-      highWaterMetrics: string;
-      terminalMetrics: string | null;
-    }
-  >;
-  return rows.map((row) => ({
-    ...row,
-    highWaterMetrics: JSON.parse(row.highWaterMetrics) as RuntimeMemoryValues,
-    terminalMetrics: row.terminalMetrics
-      ? deserializeRuntimeMetrics(row.terminalMetrics)
-      : null,
-  }));
+  return getRuntimeTelemetryPersistence().getInstances(hours);
 }

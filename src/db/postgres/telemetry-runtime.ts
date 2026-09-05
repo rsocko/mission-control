@@ -8,6 +8,10 @@ import type {
   RuntimeTelemetrySample,
 } from '@/lib/telemetry/runtime';
 import { aggregateSamples, normalizeRuntimeMetrics } from '@/lib/telemetry/runtime';
+import type {
+  RuntimeTelemetryHistoryOptions,
+  RuntimeTelemetryPersistence,
+} from '@/lib/telemetry/runtime-persistence';
 
 /**
  * PostgreSQL-only counterpart to `src/lib/telemetry/runtime.ts`'s raw
@@ -320,7 +324,7 @@ export async function getPostgresRuntimeTelemetry(pool: Pool): Promise<RuntimeTe
 
 export async function getPostgresRuntimeTelemetryHistory(
   pool: Pool,
-  options: { role?: RuntimeRole; since: string; limit: number },
+  options: RuntimeTelemetryHistoryOptions,
 ): Promise<RuntimeTelemetrySample[]> {
   const { rows } = await pool.query<RawSampleRow>(
     options.role
@@ -333,11 +337,13 @@ export async function getPostgresRuntimeTelemetryHistory(
               FROM runtime_telemetry_samples
               WHERE sampled_at >= $1 AND role = $2
               ORDER BY sampled_at DESC
-              LIMIT $3
+              ${options.limit === undefined ? '' : 'LIMIT $3'}
             ) recent
             ORDER BY sampled_at
           `,
-          values: [options.since, options.role, options.limit],
+          values: options.limit === undefined
+           ? [options.since, options.role]
+           : [options.since, options.role, options.limit],
         }
       : {
           text: `
@@ -348,11 +354,13 @@ export async function getPostgresRuntimeTelemetryHistory(
               FROM runtime_telemetry_samples
               WHERE sampled_at >= $1
               ORDER BY sampled_at DESC
-              LIMIT $2
+              ${options.limit === undefined ? '' : 'LIMIT $2'}
             ) recent
             ORDER BY sampled_at
           `,
-          values: [options.since, options.limit],
+          values: options.limit === undefined
+           ? [options.since]
+           : [options.since, options.limit],
         },
   );
   return rows.map((row) => ({
@@ -439,4 +447,25 @@ export async function getPostgresRuntimeTelemetryInstances(
     ...row,
     terminalMetrics: row.terminalMetrics ? normalizeRuntimeMetrics(row.terminalMetrics) : null,
   }));
+}
+
+export function createPostgresRuntimeTelemetryPersistence(
+  pool: Pool,
+): RuntimeTelemetryPersistence {
+  return {
+    getDatabaseTelemetry: () => undefined,
+    registerInstance: (registration) => registerPostgresRuntimeInstance(pool, registration),
+    persist: (params) => persistPostgresRuntimeTelemetry(pool, params),
+    recordStop: (params) => recordPostgresRuntimeTelemetryStop(pool, params),
+    maintainHistory: (now, options) => (
+      maintainPostgresRuntimeTelemetryHistory(pool, now, options)
+    ),
+    getCurrent: () => getPostgresRuntimeTelemetry(pool),
+    getHistory: (options) => getPostgresRuntimeTelemetryHistory(pool, {
+      ...options,
+      limit: options.limit ?? 10_000,
+    }),
+    getAlertHistory: (hours) => getPostgresRuntimeTelemetryAlertHistory(pool, hours),
+    getInstances: (hours) => getPostgresRuntimeTelemetryInstances(pool, hours),
+  };
 }

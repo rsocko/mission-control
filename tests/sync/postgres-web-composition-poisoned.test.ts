@@ -194,6 +194,19 @@ vi.mock('@/db/postgres/sync/connector-operation-lease-repository', () => ({
 vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: () => mocks.keyword,
 }));
+vi.mock('@/db/postgres/telemetry-runtime', () => ({
+  createPostgresRuntimeTelemetryPersistence: () => ({
+    getDatabaseTelemetry: () => undefined,
+    registerInstance: vi.fn(async () => undefined),
+    persist: vi.fn(async () => undefined),
+    recordStop: vi.fn(async () => undefined),
+    maintainHistory: vi.fn(async () => undefined),
+    getCurrent: vi.fn(async () => []),
+    getHistory: vi.fn(async () => []),
+    getAlertHistory: vi.fn(async () => []),
+    getInstances: vi.fn(async () => []),
+  }),
+}));
 vi.mock('@/db/postgres/semantic-index/repository', () => ({
   createPostgresSemanticIndexRepository: () => ({}),
 }));

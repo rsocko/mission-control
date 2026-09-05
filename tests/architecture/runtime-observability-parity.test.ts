@@ -21,29 +21,6 @@ describe('runtime observability PostgreSQL parity', () => {
       expect(graph.tierBRoutes).not.toContain(route);
       expect(graph.cleanRoutes).toContain(route);
     }
-    expect({
-      apiRoutes: graph.apiRoutes.length,
-      tierARoutes: graph.tierARoutes.length,
-      tierBRoutes: graph.tierBRoutes.length,
-      cleanRoutes: graph.cleanRoutes.length,
-      directTaintSourceRoutes: graph.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: graph.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: graph.directDbNamespaceRoutes.length,
-      taintedLibA: graph.taintedLibA.length,
-      taintedApiHelpers: graph.taintedApiHelpers.length,
-      totalMigrationUnits: graph.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 99,
-      tierBRoutes: 5,
-      cleanRoutes: 162,
-      directTaintSourceRoutes: 69,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 70,
-      taintedLibA: 56,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 155,
-    });
   });
 
   it('keeps backend selection and SQLite evaluation out of route-facing seams', () => {

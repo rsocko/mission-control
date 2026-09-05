@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, test } from 'node:test';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -8,6 +8,7 @@ import {
   assertPostgresRouteSentinel,
   createPostgresRouteBaseline,
   evaluatePostgresRouteSentinel,
+  POSTGRES_ROUTE_BASELINE_PATH,
   runPostgresRouteSentinel,
 } from './postgres-route-sentinel.mjs';
 import {
@@ -32,8 +33,77 @@ async function createFixture(files) {
   return root;
 }
 
+async function listFiles(root) {
+  const entries = await readdir(root, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const entryPath = path.join(root, entry.name);
+    return entry.isDirectory() ? listFiles(entryPath) : [entryPath];
+  }));
+  return nested.flat();
+}
+
 test('the current repository exactly matches the canonical PostgreSQL route baseline', async () => {
   await runPostgresRouteSentinel();
+});
+
+test('historical layer tests stay decoupled from later exact-current decrements', async () => {
+  const sourceFiles = (await Promise.all(
+    ['tests', 'scripts'].map((directory) => listFiles(path.join(process.cwd(), directory))),
+  )).flat().filter((file) => /\.(?:ts|tsx|mjs)$/u.test(file));
+  const exactCurrentOwners = new Set([
+    'scripts/postgres-route-sentinel.mjs',
+    'scripts/postgres-route-sentinel.test.mjs',
+  ]);
+  const countFields = [
+    'apiRoutes',
+    'tierARoutes',
+    'tierBRoutes',
+    'cleanRoutes',
+    'directTaintSourceRoutes',
+    'transitiveOnlyTaintSourceRoutes',
+    'directDbNamespaceRoutes',
+    'taintedLibA',
+    'taintedApiHelpers',
+    'totalMigrationUnits',
+  ];
+  const baselineReaders = [];
+  const fullTupleOwners = [];
+
+  for (const file of sourceFiles) {
+    const source = await readFile(file, 'utf8');
+    const relative = normalizeRepoPath(path.relative(process.cwd(), file));
+    if (exactCurrentOwners.has(relative)) continue;
+    if (
+      source.includes(POSTGRES_ROUTE_BASELINE_PATH) ||
+      source.includes('POSTGRES_ROUTE_BASELINE_PATH')
+    ) {
+      baselineReaders.push(relative);
+    }
+    const copiedCountFields = countFields.filter((field) =>
+      new RegExp(`\\b${field}:\\s*[^,\\n}]+\\.length\\b`, 'u').test(source)
+    );
+    if (copiedCountFields.length >= 5) {
+      fullTupleOwners.push(relative);
+    }
+  }
+
+  assert.deepEqual(baselineReaders, []);
+  assert.deepEqual(fullTupleOwners, []);
+});
+
+test('declared count drift fails even when every path allowlist still matches', () => {
+  const graph = computeWebPersistenceGraph(process.cwd());
+  const baseline = createPostgresRouteBaseline(graph);
+  baseline.counts = {
+    ...baseline.counts,
+    totalMigrationUnits: baseline.counts.totalMigrationUnits + 1,
+  };
+
+  const violations = evaluatePostgresRouteSentinel(baseline, graph);
+
+  assert.ok(violations.some((violation) =>
+    violation.includes('baseline counts do not match the current graph')
+  ));
 });
 
 test('a synthetic SQLite edge added to a previously clean route fails the sentinel', async () => {
@@ -87,6 +157,26 @@ test('the exact-current Tier A and Tier B allowlists cannot hide same-count swap
   assert.ok(violations.some((violation) =>
     violation.includes('new tierARoutes entries are not in the exact-current allowlist') &&
     violation.includes('src/app/api/c/route.ts')
+  ));
+});
+
+test('the exact-current tainted-library allowlist cannot hide a same-count swap', async () => {
+  const root = await createFixture({
+    'src/db/index.ts': 'export const sqlite = {};\n',
+    'src/lib/original.ts': "import '@/db';\n",
+    'src/app/api/example/route.ts': "import '@/lib/original';\n",
+  });
+  const graph = computeWebPersistenceGraph(root);
+  const baseline = createPostgresRouteBaseline(graph);
+  const swapped = structuredClone(graph);
+  swapped.taintedLibA = ['src/lib/replacement.ts'];
+
+  const violations = evaluatePostgresRouteSentinel(baseline, swapped);
+
+  assert.ok(violations.some((violation) =>
+    violation.includes('current.taintedLibA must exactly match the canonical baseline') &&
+    violation.includes('src/lib/replacement.ts') &&
+    violation.includes('src/lib/original.ts')
   ));
 });
 

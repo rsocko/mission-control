@@ -604,24 +604,31 @@ every `src/app/api/**/route.ts(x)` file as Tier A (fails at PostgreSQL
 *import* time - a static edge reaches `@/db` or a SQLite driver package),
 Tier B (fails only at *call* time - the only path is a dynamic `import()`/
 `require()`), or clean. `tests/architecture/web-persistence-baseline.json`
-commits the exact current sets and counts (266 routes, Tier A 221, Tier B 39,
-clean 6, tainted `src/lib` 123, tainted shared API helpers 6, total migration
-units 350 = Tier A + tainted-lib + tainted-helpers), plus a `finalTarget` of
-zero for every count. `tests/architecture/web-persistence-baseline.test.ts`
-recomputes the census from current source on every run and fails on: any set
-gaining an entry absent from the baseline, any count exceeding its baseline
-ceiling (`cleanRoutes` uses the same check inverted, as a floor), or the
-partition/total invariants no longer holding. Set-based (not count-only)
-comparison is deliberate and is itself covered by synthetic meta-tests in the
-same file: a later layer cannot pass the ratchet by swapping one allowed
-tainted file for a different, unlisted one at an unchanged count, or by
-"fixing" a Tier A route merely by turning its static import into a dynamic
-one (which would shrink Tier A but must simultaneously add a new,
-baseline-absent entry to Tier B, failing that tier's own independent
-ceiling). `LEGACY_RAW_SQLITE_IMPORTS` and other legacy allowlist entries from
-the ratchet in "Current dependency inventory" above are not grandfathered
-here: if reachable from a route, they correctly still count as Tier A/B
-taint. This ratchet is deliberately a separate file from
+commits the exact current graph: every path array, every count, the partition
+invariants, and a `finalTarget` of zero for every taint count. The historical
+`decrementHistory` and `layerUpdates` entries in that file are archival
+provenance, not a second live assertion surface.
+
+**Ratchet ownership.** `scripts/postgres-route-sentinel.mjs` is the sole
+exact-current baseline reader and graph/path allowlist gate. Historical layer
+tests do not reread the JSON or copy the current global count tuple. They assert
+only monotonic behavior owned by that layer: migrated routes remain clean,
+removed libraries remain outside the taint graph, source-level adapter
+boundaries remain intact, and (where useful) the total migration units do not
+exceed that layer's post-migration ceiling. A later unrelated decrement can
+therefore update only the canonical baseline, while any regression in an older
+layer still fails its local invariant.
+
+Set-based (not count-only) comparison in the sentinel is deliberate and covered
+by dependency-free synthetic tests: a later layer cannot pass by swapping one
+allowed tainted route or library for an unlisted one at the same count, or by
+"fixing" a Tier A route merely by turning its static import into a dynamic one.
+The sentinel also compares every declared count to the recomputed graph, so
+baseline count drift fails even when all path arrays still match.
+`LEGACY_RAW_SQLITE_IMPORTS` and other legacy allowlist entries from the ratchet
+in "Current dependency inventory" above are not grandfathered here: if
+reachable from a route, they correctly still count as Tier A/B taint. This
+ratchet is deliberately separate from
 `persistence-boundaries.test.ts`'s narrower raw-handle/driver-import
 allowlist ratchet (a different, adapter-boundary-scoped check carried over
 from the worker layers); neither duplicates the other.
@@ -651,17 +658,20 @@ promotes the route census to a dependency-free CI gate run with
 `MC_DATABASE_BACKEND=postgres`. It does not execute route handlers or contact a
 database or external service. Instead, it recomputes the static and deferred
 import graph and treats the canonical baseline's nonzero `tierARoutes` and
-`tierBRoutes` arrays as explicit, exact-current allowlists. The check fails when
-a currently clean route gains any SQLite reachability, a new route is added
-without classification, either allowlist changes without a deliberate baseline
-update, a path is not sorted/unique/POSIX-normalized, or declared counts and
-partitions drift. This preserves the honest current state rather than claiming
-parity is complete; later parity layers tighten the gate by updating the same
-canonical baseline as their taint sets shrink. `scripts/
-postgres-route-sentinel.test.mjs` runs without Vitest and proves that a synthetic
-SQLite edge into a previously clean route fails, that same-count allowlist swaps
-fail, and that Windows and Linux path forms normalize identically. The existing
-poisoned-SQLite composition tests remain the dynamic complement for migrated
+`tierBRoutes` arrays as explicit, exact-current allowlists while also pinning
+the source, route-inventory, clean-route, tainted-library, and shared-helper
+arrays. The check fails when a currently clean route gains any SQLite
+reachability, a new route is added without classification, any graph array
+changes without a deliberate baseline update, a path is not
+sorted/unique/POSIX-normalized, or declared counts and partitions drift. This
+preserves the honest current state rather than claiming parity is complete;
+later parity layers tighten the gate by updating the same canonical baseline as
+their taint sets shrink. `scripts/postgres-route-sentinel.test.mjs` runs without
+Vitest and proves that count drift, same-count route and library swaps, static
+and deferred SQLite reach, and non-canonical paths all fail. It also prevents
+historical tests and contracts from reclaiming baseline-reader or global-tuple
+ownership. The existing poisoned-SQLite composition tests remain the dynamic
+complement for migrated
 surfaces: `tests/sync/postgres-web-composition-poisoned.test.ts`, the AI and
 runtime-observability route suites under `tests/api/`, and the analytics,
 ideation, project-hierarchy, and project-organization suites under `tests/db/`.
@@ -1115,8 +1125,9 @@ The exact L07 graph is:
 The two task roots leave the direct sets; the MCP forwarding route leaves the
 transitive-only set. All three enter `cleanRoutes`. Tier B, tainted libraries,
 tainted API helpers, and the static/dynamic taint-source sets are unchanged.
-`tests/architecture/task-write-taint-decrement.test.ts` pins the exact paths and
-counts.
+`tests/architecture/task-write-taint-decrement.test.ts` keeps the three
+layer-owned routes clean and enforces the monotonic L07 migration-unit ceiling;
+the PostgreSQL route sentinel owns the exact current paths and counts.
 
 ### Proof and exclusions
 
@@ -1504,9 +1515,8 @@ committed baseline after both merge is `taintedLibA` 123 → 112 (nine L06a
 files plus the two L02 files), `directDbNamespaceRoutes` 144 → 143 (L02's
 contribution only, unrelated to L06a), and `totalMigrationUnits` 350 → 338.
 This combined figure — not either layer's own isolated delta above — is what
-`tests/architecture/web-persistence-baseline.json` and
-`tests/architecture/web-persistence-baseline.test.ts`'s exact-equality check
-enforce on `main` after both merges.
+`tests/architecture/web-persistence-baseline.json` and the dependency-free
+PostgreSQL route sentinel enforce on `main` after both merges.
 
 **Known limitation: no local validation was run for this layer**, for the
 same approved-registry `qs@6.16.0` restore failure documented under Layer

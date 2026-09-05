@@ -7,12 +7,10 @@ import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 /**
  * Fixture-level unit tests for the `computeWebPersistenceGraph` parser
- * itself, independent of the real repository's current state - the real
- * repo's `web-persistence-baseline.test.ts` ratchet only proves the parser
- * agrees with the committed baseline for whatever patterns exist *today*; it
- * cannot demonstrate a parser bug whose triggering pattern doesn't currently
- * occur anywhere under `src/`. Both cases below were found by independent
- * review and are regression-locked here against synthetic fixtures.
+ * itself, independent of the real repository's current state. The PostgreSQL
+ * route sentinel proves the parser agrees with the committed baseline for
+ * patterns that exist today; these fixtures cover parser failures whose
+ * triggering syntax may not occur anywhere under `src/`.
  */
 
 const roots: string[] = [];

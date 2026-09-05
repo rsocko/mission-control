@@ -7,12 +7,9 @@ import { computeWebPersistenceGraph } from './web-persistence-graph';
 /**
  * Layer L04 decrement proof.
  *
- * The generic ratchet in `web-persistence-baseline.test.ts` only guarantees
- * that the taint footprint never *grows*. This file pins what L04 actually
- * removed, file by file, from the exact 13-file owned set, and — for the one
- * owned file whose residual taint belonged to a different layer — records the
- * exact former edge rather than accepting a prose deferral. L06b resolves that
- * edge; this suite now pins all 13 L04-owned files as clean.
+ * The PostgreSQL route sentinel owns the exact current graph. This file keeps
+ * the L04-owned files clean and retains only a monotonic layer ceiling, so
+ * later parity decrements do not require edits here.
  */
 
 /** The full L04-owned file set: every one of these must be persistence-clean. */
@@ -73,28 +70,6 @@ function valueImportSpecifiers(source: string): string[] {
   return specifiers;
 }
 
-const baseline = JSON.parse(
-  readFileSync(join(process.cwd(), 'tests/architecture/web-persistence-baseline.json'), 'utf8'),
-) as {
-  counts: Record<string, number>;
-  decrementHistory?: Array<{
-    layer: string;
-    totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTaintedApiHelpers: string[];
-    removedTaintedLibA: string[];
-    removedTierARoutes: string[];
-    newlyCleanRoutes: string[];
-    tierBReclassifications: string[];
-    notMigratedFromTheOwnedFileSet: Array<{ file: string; reason: string }>;
-    ownedFilesWithResidualForeignLayerTaint?: Array<{
-      file: string;
-      persistenceMigrated: boolean;
-      blockedBy: string[];
-      evidence: string;
-    }>;
-  }>;
-};
-
 const current = computeWebPersistenceGraph(process.cwd());
 const taintedA = new Set([
   ...current.taintedLibA,
@@ -103,25 +78,8 @@ const taintedA = new Set([
 ]);
 
 describe('L04 task-core taint decrement', () => {
-  it('records the layer in the baseline decrement history with no deferrals', () => {
-    const entry = baseline.decrementHistory?.find((record) => record.layer === 'L04');
-    expect(entry, 'L04 must be recorded in web-persistence-baseline.json').toBeDefined();
-    expect(entry?.totalMigrationUnits).toEqual({ from: 338, to: 325, delta: -13 });
-    expect(entry?.tierBReclassifications).toEqual([]);
-    // No file from the owned set may be parked as "not migrated".
-    expect(entry?.notMigratedFromTheOwnedFileSet).toEqual([]);
-    expect(
-      entry?.removedTaintedApiHelpers.concat(entry.removedTaintedLibA).sort(),
-    ).toEqual(OWNED.filter(
-      (file) => file !== 'src/lib/tasks/task-move-write-through.ts',
-    ).sort());
-
-    const historicalResidual = entry?.ownedFilesWithResidualForeignLayerTaint ?? [];
-    expect(historicalResidual.map((record) => record.file))
-      .toEqual(['src/lib/tasks/task-move-write-through.ts']);
-    expect(historicalResidual[0].persistenceMigrated).toBe(true);
-    expect(historicalResidual[0].blockedBy).toEqual(['src/lib/connectors/transfer-identity.ts']);
-    expect(historicalResidual[0].evidence.length).toBeGreaterThan(60);
+  it('stays at or below the L04 migration-unit ceiling', () => {
+    expect(current.totalMigrationUnits).toBeLessThanOrEqual(325);
   });
 
   it.each(OWNED)('%s evaluates no database handle or SQLite driver', (file) => {
@@ -178,31 +136,5 @@ describe('L04 task-core taint decrement', () => {
     expect(seam).not.toMatch(/better-sqlite3/);
     expect(seam).not.toMatch(/from\s+'@\/db/);
     expect(seam).not.toMatch(/import\(\s*'@\/db/);
-  });
-
-  it('holds the exact recomputed counts this layer committed', () => {
-    expect({
-      apiRoutes: current.apiRoutes.length,
-      taintedLibA: current.taintedLibA.length,
-      taintedApiHelpers: current.taintedApiHelpers.length,
-      tierARoutes: current.tierARoutes.length,
-      tierBRoutes: current.tierBRoutes.length,
-      cleanRoutes: current.cleanRoutes.length,
-      directTaintSourceRoutes: current.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: current.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
-      totalMigrationUnits: current.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      taintedLibA: 56,
-      taintedApiHelpers: 0,
-      tierARoutes: 99,
-      tierBRoutes: 5,
-      cleanRoutes: 162,
-      directTaintSourceRoutes: 69,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 70,
-      totalMigrationUnits: 155,
-    });
   });
 });

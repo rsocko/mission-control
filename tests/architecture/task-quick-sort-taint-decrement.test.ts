@@ -66,14 +66,14 @@ describe('task quick-sort persistence decrement', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 118,
-      tierBRoutes: 13,
-      cleanRoutes: 135,
+      tierBRoutes: 5,
+      cleanRoutes: 143,
       directTaintSourceRoutes: 88,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 89,
-      taintedLibA: 60,
+      taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 178,
+      totalMigrationUnits: 175,
     });
   });
 });

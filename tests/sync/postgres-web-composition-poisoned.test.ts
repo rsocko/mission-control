@@ -250,7 +250,9 @@ vi.mock('@/db/postgres/semantic-index/repository', () => ({
   createPostgresSemanticIndexRepository: () => ({}),
 }));
 vi.mock('@/db/postgres/semantic-index/source-port', () => ({
-  createPostgresSemanticSourcePort: () => ({}),
+  createPostgresSemanticSourcePort: () => ({
+    get: vi.fn(async () => null),
+  }),
 }));
 vi.mock('@/lib/ai/durable-runs/postgres-adapter', () => ({
   PostgresDurableAiRunRepository: class {},
@@ -332,6 +334,8 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
       { getKeywordSearchRepository },
       { enrichWithAI },
       { publishSemanticEntityUpsert },
+      { getSemanticSourcePort },
+      { getDurableAiRunRepository },
     ] = await Promise.all([
       import('@/lib/connectors/registry-runtime'),
       import('@/lib/persistence/runtime'),
@@ -339,6 +343,8 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
       import('@/lib/search/keyword-runtime'),
       import('@/lib/notifications/enrichment/ai-enrichment-service'),
       import('@/lib/semantic-index/publication-service'),
+      import('@/lib/semantic-index/source/facade'),
+      import('@/lib/ai/durable-runs/runtime'),
     ]);
 
     expect(getConnectorRegistry().getAllConnectors()).toEqual([]);
@@ -369,6 +375,9 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
     await expect(
       publishSemanticEntityUpsert('task', 'task'),
     ).resolves.toEqual({ status: 'skipped' });
+    await expect((await getSemanticSourcePort()).get('task', 'missing'))
+      .resolves.toBeNull();
+    await expect(getDurableAiRunRepository()).resolves.toBeDefined();
     expect(mocks.backendInitialize).toHaveBeenCalledTimes(2);
     expect(mocks.backendShutdown).toHaveBeenCalledTimes(1);
     expect(mocks.resumeSemantic).toHaveBeenCalledTimes(2);

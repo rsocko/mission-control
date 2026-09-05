@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through task quick-sort workflow parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through task quick-sort workflow parity and L18 AI execution and memory control-plane persistence, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "6205bb0ece832ed0225b8ee31e1cbf6996308d93+task-quick-sort",
+  "generatedFromCommit": "6205bb0ece832ed0225b8ee31e1cbf6996308d93+task-quick-sort+L18",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -42,14 +42,14 @@
   "counts": {
     "apiRoutes": 266,
     "tierARoutes": 118,
-    "tierBRoutes": 13,
-    "cleanRoutes": 135,
+    "tierBRoutes": 5,
+    "cleanRoutes": 143,
     "directTaintSourceRoutes": 88,
     "transitiveOnlyTaintSourceRoutes": 30,
     "directDbNamespaceRoutes": 89,
-    "taintedLibA": 60,
+    "taintedLibA": 57,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 178
+    "totalMigrationUnits": 175
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -454,14 +454,6 @@
     "src/app/api/webhooks/[connectorId]/route.ts"
   ],
   "tierBRoutes": [
-    "src/app/api/ai/intake-document/route.ts",
-    "src/app/api/ai/memories/[id]/route.ts",
-    "src/app/api/ai/memories/route.ts",
-    "src/app/api/ai/runs/[runId]/cancel/route.ts",
-    "src/app/api/ai/runs/[runId]/events/route.ts",
-    "src/app/api/ai/runs/[runId]/retry/route.ts",
-    "src/app/api/ai/runs/[runId]/route.ts",
-    "src/app/api/ai/runs/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
     "src/app/api/insights/observations/route.ts",
     "src/app/api/sync/retained/resolve/route.ts",
@@ -469,8 +461,16 @@
     "src/app/api/tasks/move/execute/route.ts"
   ],
   "cleanRoutes": [
+    "src/app/api/ai/intake-document/route.ts",
+    "src/app/api/ai/memories/[id]/route.ts",
+    "src/app/api/ai/memories/route.ts",
     "src/app/api/ai/models/route.ts",
     "src/app/api/ai/provider/route.ts",
+    "src/app/api/ai/runs/[runId]/cancel/route.ts",
+    "src/app/api/ai/runs/[runId]/events/route.ts",
+    "src/app/api/ai/runs/[runId]/retry/route.ts",
+    "src/app/api/ai/runs/[runId]/route.ts",
+    "src/app/api/ai/runs/route.ts",
     "src/app/api/assets/thumbnails/[filename]/route.ts",
     "src/app/api/auth/microsoft/callback/route.ts",
     "src/app/api/auth/microsoft/connect/route.ts",
@@ -839,7 +839,6 @@
     "src/lib/ai/index.ts",
     "src/lib/ai/provider-factory.ts",
     "src/lib/ai/tools/index.ts",
-    "src/lib/ai/tools/intake-tools.ts",
     "src/lib/ai/tools/notification-tools.ts",
     "src/lib/ai/tools/reasoning-tools.ts",
     "src/lib/ai/tools/task-tools.ts",
@@ -854,8 +853,6 @@
     "src/lib/graph/service.ts",
     "src/lib/graph/universe-service.ts",
     "src/lib/houston-memory/retrieval.ts",
-    "src/lib/intake/ai-parser.ts",
-    "src/lib/intake/index.ts",
     "src/lib/integrations/n8n.ts",
     "src/lib/notifications/index.ts",
     "src/lib/notifications/push-policy/resolver.ts",
@@ -1625,6 +1622,48 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation on base 6205bb0ece832ed0225b8ee31e1cbf6996308d93 moves the three quick-sort workflow routes from Tier A to clean, removes src/lib/quick-sort/operations.ts from taintedLibA, adds no Tier B route or tainted helper, and changes the graph from 266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182 to 266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178."
+    },
+    {
+      "layer": "L18",
+      "title": "AI execution and memory control-plane PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 182,
+        "to": 179,
+        "delta": -3
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/ai/tools/intake-tools.ts",
+        "src/lib/intake/ai-parser.ts",
+        "src/lib/intake/index.ts"
+      ],
+      "removedTierARoutes": [],
+      "newlyCleanRoutes": [
+        "src/app/api/ai/intake-document/route.ts",
+        "src/app/api/ai/memories/[id]/route.ts",
+        "src/app/api/ai/memories/route.ts",
+        "src/app/api/ai/runs/[runId]/cancel/route.ts",
+        "src/app/api/ai/runs/[runId]/events/route.ts",
+        "src/app/api/ai/runs/[runId]/retry/route.ts",
+        "src/app/api/ai/runs/[runId]/route.ts",
+        "src/app/api/ai/runs/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [],
+      "removedDirectDbNamespaceRoutes": [],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "removedTierBRoutes": [
+        "src/app/api/ai/intake-document/route.ts",
+        "src/app/api/ai/memories/[id]/route.ts",
+        "src/app/api/ai/memories/route.ts",
+        "src/app/api/ai/runs/[runId]/cancel/route.ts",
+        "src/app/api/ai/runs/[runId]/events/route.ts",
+        "src/app/api/ai/runs/[runId]/retry/route.ts",
+        "src/app/api/ai/runs/[runId]/route.ts",
+        "src/app/api/ai/runs/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on base 6205bb0ece832ed0225b8ee31e1cbf6996308d93 moves all eight owned AI execution, memory, and intake routes from Tier B to clean without changing route source. Startup composition now selects durable-run repositories and semantic source ports for both backends, provider-client.ts remains backend-neutral, PostgreSQL never imports SQLite, and intake's neutral async provider path also removes ai-parser.ts, intake/index.ts, and ai/tools/intake-tools.ts from taintedLibA. The graph is exactly 266 routes, A121/B5/clean140, direct91/transitive30/directDB92, 58 tainted libraries, zero helpers, and 179 total migration units."
     }
   ],
   "layerUpdates": [
@@ -1706,6 +1745,16 @@
         "Operation application and undo continue to invoke the existing task PATCH handler with x-expected-task-updated-at, preserving task revision CAS and all existing write-through ordering instead of duplicating task mutation logic.",
         "Operation reservation is now conflict-safe under concurrent retries, finalization writes operation state and ordered log inputs in one transaction, and undo claim/finalization remains fenced and idempotent.",
         "The three owned routes and src/lib/quick-sort/operations.ts evaluate no SQLite handle or schema. PostgreSQL startup registers the complete task-core composition and cannot fall back to SQLite."
+      ]
+    },
+    {
+      "layer": "L18",
+      "summary": "Web/API PostgreSQL parity: durable AI run control, retained Houston memory, and document intake now use startup-selected backend-neutral persistence and provider capabilities.",
+      "changes": [
+        "All eight owned AI routes move from Tier B to clean without source changes. The five durable-run routes resolve one process-wide repository registered by the database composition root; missing composition fails closed and no runtime path imports the SQLite adapter.",
+        "Houston memory reads and writes continue through CorePersistenceRepositories, while semantic publication and authoritative entity validation now use startup-selected process-wide ports. SQLite and PostgreSQL adapters are constructed only inside src/db/runtime.ts and are cleared with lifecycle fencing.",
+        "Document intake and Houston summarization load persisted AI configuration through the landed neutral configuration service before constructing a provider client. Provider selection, routing-policy enforcement, request telemetry, admission control, and external AI-call ordering remain shared with legacy synchronous callers.",
+        "The route-only decrement also removes ai-parser.ts, intake/index.ts, and ai/tools/intake-tools.ts from taintedLibA. No held suggestion, search, planning, task-ancillary, schema, migration, dependency, Next.js, or build path changed."
       ]
     }
   ]

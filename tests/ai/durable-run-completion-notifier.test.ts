@@ -27,19 +27,24 @@ let store: InstanceType<
 >;
 let notifyDurableAiRunCompletion:
   typeof import('@/lib/ai/durable-runs/completion-notifier').notifyDurableAiRunCompletion;
+let durableRuntime: typeof import('@/lib/ai/durable-runs/runtime');
 
 beforeAll(async () => {
-  const [databaseModule, sqliteAdapter, notifier] = await Promise.all([
+  const [databaseModule, sqliteAdapter, notifier, runtime] = await Promise.all([
     import('@/db'),
     import('@/lib/ai/durable-runs/sqlite-adapter'),
     import('@/lib/ai/durable-runs/completion-notifier'),
+    import('@/lib/ai/durable-runs/runtime'),
   ]);
   database = databaseModule;
   store = new sqliteAdapter.SqliteDurableAiRunStore();
   notifyDurableAiRunCompletion = notifier.notifyDurableAiRunCompletion;
+  durableRuntime = runtime;
+  durableRuntime.registerDurableAiRunRepository(store);
 });
 
 afterAll(() => {
+  durableRuntime.clearDurableAiRunRepository(store);
   database.sqlite.close();
   rmSync(testDirectory, { recursive: true, force: true });
 });

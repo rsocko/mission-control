@@ -82,6 +82,11 @@ import {
 } from '@/lib/settings/mode-route-services';
 import { executeCrossAccountTaskMove } from '@/lib/tasks/task-move-service';
 import { registerCrossAccountTaskMoveService } from '@/lib/tasks/cross-account-route-service';
+import type { ScoutStatusChangeRepository } from '@/lib/connectors/scout/status-change-repository';
+import {
+  clearScoutStatusChangeRepository,
+  registerScoutStatusChangeRepository,
+} from '@/lib/connectors/scout/status-change-runtime';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import {
@@ -89,6 +94,9 @@ import {
   createPostgresWorkerPersistenceRepositories,
 } from './postgres/repositories';
 import { createPostgresTaskCorePersistence } from './postgres/repositories/task-core-repositories';
+import {
+  createPostgresScoutStatusChangeRepository,
+} from './postgres/repositories/scout-status-change-repository';
 import { createPostgresConnectorOperationLeaseRepository } from './postgres/sync/connector-operation-lease-repository';
 import { createPostgresSyncControlStateRepository } from './postgres/sync/control-state-repository';
 import { createPostgresConnectorMaintenanceLockRepository } from './postgres/sync/maintenance-lock-repository';
@@ -142,6 +150,7 @@ interface DatabaseRuntimeRegistry {
   durableAiRunRepository: DurableAiRunRepository | null;
   aiEnrichmentService: AIEnrichmentService | null;
   taskCorePersistence: TaskCorePersistence | null;
+  scoutStatusChangeRepository: ScoutStatusChangeRepository | null;
   runtimeHealthPersistence: RuntimeHealthPersistence | null;
   runtimeTelemetryPersistence: RuntimeTelemetryPersistence | null;
   initialized: boolean;
@@ -217,6 +226,7 @@ function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
       durableAiRunRepository: null,
       aiEnrichmentService: null,
       taskCorePersistence: null,
+      scoutStatusChangeRepository: null,
       runtimeHealthPersistence: null,
       runtimeTelemetryPersistence: null,
       initialized: false,
@@ -330,6 +340,9 @@ function clearPostgresRuntimeComposition(): void {
   if (runtime.taskCorePersistence) {
     clearSelectedTaskCorePersistence(runtime.taskCorePersistence);
   }
+  if (runtime.scoutStatusChangeRepository) {
+    clearScoutStatusChangeRepository(runtime.scoutStatusChangeRepository);
+  }
   if (runtime.workerRepositories) {
     if (runtime.workerFacade) {
       clearWorkerPersistenceRepositories(runtime.workerFacade);
@@ -363,6 +376,7 @@ function clearPostgresRuntimeComposition(): void {
   runtime.semanticSourcePort = null;
   runtime.aiEnrichmentService = null;
   runtime.taskCorePersistence = null;
+  runtime.scoutStatusChangeRepository = null;
 }
 
 function clearAiControlPlaneComposition(runtime: DatabaseRuntimeRegistry): void {
@@ -873,6 +887,8 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   // task-core surface under PostgreSQL.
   runtime.taskCorePersistence = createPostgresTaskCorePersistence(db);
   registerTaskCorePersistence(runtime.taskCorePersistence);
+  runtime.scoutStatusChangeRepository = createPostgresScoutStatusChangeRepository(pool);
+  registerScoutStatusChangeRepository(runtime.scoutStatusChangeRepository);
   runtime.workerRepositories = createPostgresWorkerPersistenceRepositories(
     db,
     pool,

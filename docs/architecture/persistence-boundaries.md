@@ -2315,14 +2315,15 @@ preference settings, and task-tag assignment. Scout/triage state, connector
 transfer, routines, daily completions, and production cutover are also outside
 this layer.
 
-On base `8d690f82bc9fc8651a376fc99a2030e3e99f477a`, the authoritative
+On base `285fbf41dd1fdab0e2f61d557765e8510c3060ee`, the authoritative
 sentinel moves from
-`266/A82/B5/clean179/direct52/transitive30/directDB53/lib51/helpers0/units133`
+`266/A80/B5/clean181/direct50/transitive30/directDB51/lib51/helpers0/units131`
 to
-`266/A78/B5/clean183/direct48/transitive30/directDB50/lib51/helpers0/units129`.
+`266/A76/B5/clean185/direct46/transitive30/directDB48/lib51/helpers0/units127`.
 All four routes move directly from Tier A to clean, with no Tier B or library
-reclassification. The canonical baseline and fail-closed sentinel remain the
-only exact-current graph owners.
+reclassification, while retaining the landed Scout status-change/ack
+decrement. The canonical baseline and fail-closed sentinel remain the only
+exact-current graph owners.
 
 The implementation changes 11 source paths: the four routes, task-core and
 core-settings contracts, four SQLite/PostgreSQL adapters, and the existing
@@ -2357,6 +2358,37 @@ settings-preference baseline, the exact graph moves from
 to
 `266/A85/B5/clean176/direct55/transitive30/directDB56/lib51/helpers0/units136`,
 with no Tier B reclassification and no new taint.
+
+## Web/API PostgreSQL parity: Scout status-change control plane
+
+The Scout write-back control plane now resolves `GET
+/api/scout/status-changes` and `POST /api/scout/status-changes/ack` through one
+backend-neutral `ScoutStatusChangeRepository`. SQLite and PostgreSQL adapters
+preserve source identity, source-type filtering before pagination, stable
+`updated_at`/task-ID ordering, and a request-time snapshot fence. Route
+responses expose only the existing status contract; task metadata and connector
+payloads never cross the repository boundary.
+
+Acknowledgements normalize timestamps and advance the shared
+`scout_write_back_synced_at` cursor monotonically. SQLite uses an immediate
+transaction. PostgreSQL uses a transaction-scoped advisory lock before reading
+and updating the JSONB setting, so concurrent workers and replayed
+acknowledgements cannot regress the cursor or observe a stale no-op result.
+The MCP consumer advances this global cursor only after an unfiltered,
+non-explicit, complete response; explicit, filtered, and paginated reads remain
+replayable and are never auto-acknowledged.
+External connector I/O remains outside both repository transactions.
+
+The slice excludes Scout ingest, reconciliation, parallel comparison,
+connector transfer, triage actions, taxonomy/prioritization, notifications,
+search, and production/Homelab cutover. The reconciled implementation contains
+21 paths, below the frozen 39-path maximum. The canonical baseline and
+fail-closed sentinel remain the sole exact-current graph owners. Both routes
+move directly from Tier A to clean, changing the graph from
+`266/A82/B5/clean179/direct52/transitive30/directDB53/lib51/helpers0/units133`
+to
+`266/A80/B5/clean181/direct50/transitive30/directDB51/lib51/helpers0/units131`,
+with no Tier B reclassification.
 
 ## Backend-specific exceptions
 

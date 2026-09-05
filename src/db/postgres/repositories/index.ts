@@ -95,6 +95,9 @@ export { createPostgresAnalyticsPersistence } from './analytics-repositories';
 export { createPostgresFinanceWebPersistence } from './finance-web-repository';
 export { createPostgresRoutinesRepository } from './routines-repository';
 export {
+  createPostgresScoutStatusChangeRepository,
+} from './scout-status-change-repository';
+export {
   createPostgresWebhookIntegrationsRepository,
 } from './webhook-integrations-repository';
 

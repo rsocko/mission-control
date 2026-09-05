@@ -207,7 +207,14 @@ export function registerScoutTools(server: McpServer) {
       if (since) params.set('since', since);
       if (sourceTypes?.length) params.set('sourceTypes', sourceTypes.join(','));
 
-      const res = await mcGet<{ changes: unknown[]; count: number; since: string | null; cursorSource: string; queriedAt: string }>(`/api/scout/status-changes?${params.toString()}`);
+      const res = await mcGet<{
+        changes: unknown[];
+        count: number;
+        hasMore: boolean;
+        since: string | null;
+        cursorSource: string;
+        queriedAt: string;
+      }>(`/api/scout/status-changes?${params.toString()}`);
 
       if (!res.ok) {
         return { content: [{ type: 'text' as const, text: `Error: ${res.error}` }], isError: true };
@@ -215,8 +222,10 @@ export function registerScoutTools(server: McpServer) {
 
       const data = res.data!;
 
-      // Auto-acknowledge if requested and there were changes
-      if (acknowledge && data.count > 0) {
+      const canAcknowledge = !since && !data.hasMore && !sourceTypes?.length;
+
+      // A global cursor is safe only after an unfiltered, complete snapshot.
+      if (acknowledge && data.count > 0 && canAcknowledge) {
         const ackRes = await mcPost<{ success: boolean; cursor: string }>('/api/scout/status-changes/ack', {
           acknowledgedAt: data.queriedAt,
         });
@@ -226,7 +235,11 @@ export function registerScoutTools(server: McpServer) {
       }
 
       const cursorInfo = data.cursorSource === 'write_back_cursor' ? ' (auto from last ack)' : data.cursorSource === 'explicit' ? ' (explicit)' : '';
-      const ackInfo = acknowledge && data.count > 0 ? ' — cursor advanced' : '';
+      const ackInfo = acknowledge && data.count > 0
+        ? canAcknowledge
+          ? ' — cursor advanced'
+          : ' — cursor not advanced because the result is explicit, filtered, or incomplete'
+        : '';
       const summary = `Status sync: ${data.count} change(s) found (since: ${data.since || 'all time'}${cursorInfo}, queried at: ${data.queriedAt})${ackInfo}`;
 
       return {

@@ -1879,12 +1879,10 @@ transitive-only Tier A, direct-`@/db`, and helper counts are unchanged. No
 suggestion, search, planning, task-ancillary, schema, migration, dependency,
 Next.js, or build path is part of this layer.
 
-The CI-proven cap is 44 paths: 10 production, 32 tests/helpers, and 2
+The CI-proven cap is 43 paths: 9 production, 32 tests/helpers, and 2
 architecture/documentation paths. The expansion from the original 24-path
-inventory is limited to the PostgreSQL Houston-memory repository predicate
-exercised by live integration coverage, the 17 established graph readers, and
-two SQLite durable-run suites that now register their selected repository
-explicitly.
+inventory is limited to the 17 established graph readers and two SQLite
+durable-run suites that now register their selected repository explicitly.
 
 ## Backend-specific exceptions
 

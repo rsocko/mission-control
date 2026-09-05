@@ -6,7 +6,6 @@ import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 const PRODUCTION_PATHS = [
   'src/db/runtime.ts',
-  'src/db/postgres/repositories/houston-memory-repository.ts',
   'src/lib/ai/durable-runs/runtime.ts',
   'src/lib/ai/provider-client.ts',
   'src/lib/ai/provider-factory.ts',
@@ -101,8 +100,8 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L18 AI execution and memory control-plane parity', () => {
-  it('pins the CI-proven 44-path cap', () => {
-    expect(PRODUCTION_PATHS).toHaveLength(10);
+  it('pins the CI-proven 43-path cap', () => {
+    expect(PRODUCTION_PATHS).toHaveLength(9);
     expect(TEST_PATHS).toHaveLength(32);
     expect(ARCHITECTURE_PATHS).toHaveLength(2);
     for (const path of [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS]) {

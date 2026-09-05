@@ -56,6 +56,7 @@ const TEST_PATHS = [
   'tests/db/postgres-notification-push-repository.integration.test.ts',
   'tests/db/sqlite-notification-push-repository.test.ts',
   'tests/notifications/scheduled-trigger-dedup.test.ts',
+  'tests/sync/postgres-web-composition-poisoned.test.ts',
 ] as const;
 
 const ARCHITECTURE_PATHS = [
@@ -86,13 +87,13 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('notification push taint decrement', () => {
-  it('pins the CI-proven 42-path cap and its 12 production paths', () => {
+  it('pins the reviewed 43-path cap and its 12 production paths', () => {
     expect(PRODUCTION_PATHS).toHaveLength(12);
-    expect(TEST_PATHS).toHaveLength(29);
+    expect(TEST_PATHS).toHaveLength(30);
     expect(ARCHITECTURE_PATHS).toHaveLength(1);
     const paths = [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS];
-    expect(paths).toHaveLength(42);
-    expect(new Set(paths).size).toBe(42);
+    expect(paths).toHaveLength(43);
+    expect(new Set(paths).size).toBe(43);
     for (const path of paths) {
       expect(existsSync(join(process.cwd(), path)), path).toBe(true);
     }
@@ -112,7 +113,12 @@ describe('notification push taint decrement', () => {
     expect(source('src/lib/push/scheduler.ts')).not.toMatch(
       /from\s*['"](?:@\/lib\/push\/triggers|\.\/triggers)['"]/,
     );
-    expect(source('src/instrumentation.ts')).toContain('registerScheduledPushHandlers({');
+    const instrumentation = source('src/instrumentation.ts');
+    const sqliteGuard = instrumentation.indexOf("resolveDatabaseBackend() === 'sqlite'");
+    const triggerImport = instrumentation.indexOf("import('@/lib/push/triggers')");
+    expect(sqliteGuard).toBeGreaterThan(-1);
+    expect(triggerImport).toBeGreaterThan(sqliteGuard);
+    expect(instrumentation).toContain('registerScheduledPushHandlers({');
   });
 
   it('records the exact owned decrement with no deferred migration', () => {

@@ -30,16 +30,19 @@ export async function register() {
     registerScheduledPushHandlers,
     scheduledSummariesEnabled,
   } = await import('@/lib/push/scheduler');
-  const {
-    triggerMorningNotification,
-    triggerTriageNudge,
-    triggerCarryForwardReminder,
-  } = await import('@/lib/push/triggers');
-  registerScheduledPushHandlers({
-    triggerMorningNotification,
-    triggerTriageNudge,
-    triggerCarryForwardReminder,
-  });
+  const { resolveDatabaseBackend } = await import('@/db/runtime-backend');
+  if (resolveDatabaseBackend() === 'sqlite') {
+    const {
+      triggerMorningNotification,
+      triggerTriageNudge,
+      triggerCarryForwardReminder,
+    } = await import('@/lib/push/triggers');
+    registerScheduledPushHandlers({
+      triggerMorningNotification,
+      triggerTriageNudge,
+      triggerCarryForwardReminder,
+    });
+  }
   const { isPublicDemoMode } = await import('@/lib/public-demo');
   if (isPublicDemoMode()) {
     try {
@@ -136,7 +139,10 @@ export async function register() {
       'Instrumentation: push notification scheduler initialized',
     );
   } catch (err) {
-    syncLogger.warn({ err }, 'Instrumentation: push notification scheduler init failed (non-fatal)');
+    syncLogger.warn(
+      { errorName: err instanceof Error ? err.name : 'UnknownError' },
+      'Instrumentation: push notification scheduler init failed (non-fatal)',
+    );
   }
   if (!durableSyncMode) {
     try {

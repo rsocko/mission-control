@@ -1958,9 +1958,9 @@ The bounded layer owns only `/api/push/preferences` and
 Notification actions, re-enrichment, trigger delivery, recent wins, task and
 project organization, finance, webhook integrations, and the AI control plane
 remain excluded. The exact composed graph is
-`266/108/5/153/78/30/79/55/0/163`. Full-CI discovery added two test-only
-consumers to the frozen inventory, so the CI-proven cap is 42 paths while the
-approved production cap remains unchanged at 12 paths.
+`266/108/5/153/78/30/79/55/0/163`. Full CI and final PostgreSQL boundary
+review added three test-only consumers to the frozen inventory, so the reviewed
+cap is 43 paths while the approved production cap remains unchanged at 12 paths.
 
 ## Backend-specific exceptions
 

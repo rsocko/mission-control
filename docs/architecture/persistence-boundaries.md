@@ -2309,6 +2309,37 @@ to
 `266/A85/B5/clean176/direct55/transitive30/directDB56/lib51/helpers0/units136`,
 with no Tier B reclassification and no new taint.
 
+## Web/API PostgreSQL parity: Scout status-change control plane
+
+The Scout write-back control plane now resolves `GET
+/api/scout/status-changes` and `POST /api/scout/status-changes/ack` through one
+backend-neutral `ScoutStatusChangeRepository`. SQLite and PostgreSQL adapters
+preserve source identity, source-type filtering before pagination, stable
+`updated_at`/task-ID ordering, and a request-time snapshot fence. Route
+responses expose only the existing status contract; task metadata and connector
+payloads never cross the repository boundary.
+
+Acknowledgements normalize timestamps and advance the shared
+`scout_write_back_synced_at` cursor monotonically. SQLite uses an immediate
+transaction. PostgreSQL uses a transaction-scoped advisory lock before reading
+and updating the JSONB setting, so concurrent workers and replayed
+acknowledgements cannot regress the cursor or observe a stale no-op result.
+The MCP consumer advances this global cursor only after an unfiltered,
+non-explicit, complete response; explicit, filtered, and paginated reads remain
+replayable and are never auto-acknowledged.
+External connector I/O remains outside both repository transactions.
+
+The slice excludes Scout ingest, reconciliation, parallel comparison,
+connector transfer, triage actions, taxonomy/prioritization, notifications,
+search, and production/Homelab cutover. The reconciled implementation contains
+21 paths, below the frozen 39-path maximum. The canonical baseline and
+fail-closed sentinel remain the sole exact-current graph owners. Both routes
+move directly from Tier A to clean, changing the graph from
+`266/A82/B5/clean179/direct52/transitive30/directDB53/lib51/helpers0/units133`
+to
+`266/A80/B5/clean181/direct50/transitive30/directDB51/lib51/helpers0/units131`,
+with no Tier B reclassification.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

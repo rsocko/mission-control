@@ -136,7 +136,10 @@ describe('poisoned-SQLite PostgreSQL AI control-plane routes', () => {
       settings: {
         get: vi.fn(async () => null),
         getMany: vi.fn(async () => ({
-          ai_provider_config: null,
+          ai_provider_config: {
+            provider: 'ollama',
+            model: 'test-model',
+          },
           ai_routing_policy: null,
         })),
         setMany: vi.fn(async () => undefined),

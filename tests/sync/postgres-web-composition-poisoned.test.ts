@@ -250,7 +250,9 @@ vi.mock('@/db/postgres/semantic-index/repository', () => ({
   createPostgresSemanticIndexRepository: () => ({}),
 }));
 vi.mock('@/db/postgres/semantic-index/source-port', () => ({
-  createPostgresSemanticSourcePort: () => ({}),
+  createPostgresSemanticSourcePort: () => ({
+    get: vi.fn(async () => null),
+  }),
 }));
 vi.mock('@/lib/ai/durable-runs/postgres-adapter', () => ({
   PostgresDurableAiRunRepository: class {},

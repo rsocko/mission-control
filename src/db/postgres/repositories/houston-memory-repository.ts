@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, inArray, isNull, lt, lte } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, inArray, isNull, lt, lte, sql } from 'drizzle-orm';
 import { houstonConversationMemories } from '@/db/postgres/schema';
 import type { PostgresDatabase } from '../runtime';
 import type {
@@ -69,10 +69,10 @@ export class PostgresHoustonMemoryRepository implements HoustonMemoryRepository 
           retainUntil: input.retainUntil,
           updatedAt: input.now,
         },
-        setWhere: and(
-          eq(houstonConversationMemories.authorizationScope, input.authorizationScope),
-          isNull(houstonConversationMemories.excludedAt),
-        ),
+        setWhere: sql`
+          ${houstonConversationMemories.authorizationScope} = ${input.authorizationScope}
+          AND ${houstonConversationMemories.excludedAt} IS NULL
+        `,
       });
     const stored = await this.get(input.id, input.authorizationScope);
     if (!stored) throw new Error('Houston memory could not be persisted');

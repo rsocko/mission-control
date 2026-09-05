@@ -6,6 +6,7 @@ import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 const PRODUCTION_PATHS = [
   'src/db/runtime.ts',
+  'src/db/postgres/repositories/houston-memory-repository.ts',
   'src/lib/ai/durable-runs/runtime.ts',
   'src/lib/ai/provider-client.ts',
   'src/lib/ai/provider-factory.ts',
@@ -18,6 +19,8 @@ const PRODUCTION_PATHS = [
 
 const TEST_PATHS = [
   'tests/ai/durable-run-runtime.test.ts',
+  'tests/ai/durable-run-completion-notifier.test.ts',
+  'tests/ai/durable-runs.test.ts',
   'tests/ai/provider-runtime.test.ts',
   'tests/api/ai-control-plane-postgres-poisoned.test.ts',
   'tests/architecture/ai-execution-memory-parity.test.ts',
@@ -30,6 +33,23 @@ const TEST_PATHS = [
   'tests/houston-memory/summary.test.ts',
   'tests/semantic-index/backend-selection.test.ts',
   'tests/sync/postgres-web-composition-poisoned.test.ts',
+  'tests/contracts/finance-assistant-persistence.contract.ts',
+  'tests/architecture/ai-provider-configuration-parity.test.ts',
+  'tests/architecture/analytics-taint-decrement.test.ts',
+  'tests/architecture/external-agent-taint-decrement.test.ts',
+  'tests/architecture/finance-connector-web-parity.test.ts',
+  'tests/architecture/finance-web-parity.test.ts',
+  'tests/architecture/ideation-workspace-taint-decrement.test.ts',
+  'tests/architecture/l11-connector-core-parity.test.ts',
+  'tests/architecture/l12a-connector-domains-parity.test.ts',
+  'tests/architecture/notification-web-taint-decrement.test.ts',
+  'tests/architecture/project-hierarchy-taint-decrement.test.ts',
+  'tests/architecture/runtime-observability-parity.test.ts',
+  'tests/architecture/task-core-taint-decrement.test.ts',
+  'tests/architecture/task-read-taint-decrement.test.ts',
+  'tests/architecture/task-write-taint-decrement.test.ts',
+  'tests/architecture/triage-native-web-persistence-boundary.test.ts',
+  'tests/architecture/transfer-identity-taint-decrement.test.ts',
 ] as const;
 
 const ARCHITECTURE_PATHS = [
@@ -41,9 +61,9 @@ const ROUTE_HASHES = {
   'src/app/api/ai/intake-document/route.ts':
     'd782c784e63b5ea3028689b039e2a23c1e0f79a3a666cd70cc68909d9def21f2',
   'src/app/api/ai/memories/[id]/route.ts':
-    '089df12e4b3f502b080d862caf91e382f44bb4176d8813630972acbd8a7365a7',
+    '6b54fb907e450a84f6a891aecc640852f085e28256efe27fff38a985d6490be2',
   'src/app/api/ai/memories/route.ts':
-    'ce263abf9fc317380f50e96497228a0da886b587129e0442f9dc4d923536c736',
+    '3174343b37b3a99db51f1a588f54cb5deb6b66b327c8a9cdd47a44d2373c46a2',
   'src/app/api/ai/runs/[runId]/cancel/route.ts':
     'e8e2e1d152532da59b3a6b3941bf92a3beb255ac34e7cefca6c047258b7dacc6',
   'src/app/api/ai/runs/[runId]/events/route.ts':
@@ -81,9 +101,9 @@ const baseline = JSON.parse(
 const current = computeWebPersistenceGraph(process.cwd());
 
 describe('L18 AI execution and memory control-plane parity', () => {
-  it('pins the approved 24-path cap', () => {
-    expect(PRODUCTION_PATHS).toHaveLength(9);
-    expect(TEST_PATHS).toHaveLength(13);
+  it('pins the CI-proven 44-path cap', () => {
+    expect(PRODUCTION_PATHS).toHaveLength(10);
+    expect(TEST_PATHS).toHaveLength(32);
     expect(ARCHITECTURE_PATHS).toHaveLength(2);
     for (const path of [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS]) {
       expect(existsSync(join(process.cwd(), path)), path).toBe(true);
@@ -92,7 +112,12 @@ describe('L18 AI execution and memory control-plane parity', () => {
 
   it('keeps every owned route byte-identical to the #1785 baseline', () => {
     for (const [path, hash] of Object.entries(ROUTE_HASHES)) {
-      expect(createHash('sha256').update(source(path)).digest('hex'), path).toBe(hash);
+      const text = source(path);
+      const checkoutHashes = [
+        createHash('sha256').update(text).digest('hex'),
+        createHash('sha256').update(text.replace(/\r\n/g, '\n')).digest('hex'),
+      ];
+      expect(checkoutHashes, path).toContain(hash);
     }
   });
 

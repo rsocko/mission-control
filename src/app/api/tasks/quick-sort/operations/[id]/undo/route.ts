@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { quickSortLog, quickSortOperations } from '@/db/schema';
-import { and, eq, isNull } from 'drizzle-orm';
 import { PATCH as patchTask } from '@/app/api/tasks/[id]/route';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import {
   buildUndoPatch,
   captureQuickSortTask,
@@ -14,10 +12,8 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
-  const operation = await db.select()
-    .from(quickSortOperations)
-    .where(eq(quickSortOperations.id, id))
-    .get();
+  const quickSort = (await getTaskCorePersistence()).quickSort;
+  const operation = await quickSort.getOperation(id);
   if (!operation) return NextResponse.json({ error: 'Undo operation not found' }, { status: 404 });
   if (operation.state === 'undone') {
     return NextResponse.json({ operationId: id, taskId: operation.taskId, undone: true });
@@ -38,15 +34,7 @@ export async function POST(
     }
   }
 
-  const claimed = await db.update(quickSortOperations)
-    .set({ state: 'undoing' })
-    .where(and(
-      eq(quickSortOperations.id, id),
-      eq(quickSortOperations.state, 'applied'),
-      isNull(quickSortOperations.undoneAt),
-    ))
-    .returning({ id: quickSortOperations.id })
-    .get();
+  const claimed = await quickSort.claimUndo(id);
   if (!claimed) {
     return NextResponse.json({ error: 'Undo operation is already in progress' }, { status: 409 });
   }
@@ -65,9 +53,7 @@ export async function POST(
       { params: Promise.resolve({ id: operation.taskId }) },
     );
     if (!patchResponse.ok) {
-      await db.update(quickSortOperations)
-        .set({ state: 'applied' })
-        .where(eq(quickSortOperations.id, id));
+      await quickSort.releaseUndo(id);
       return new NextResponse(await patchResponse.text(), {
         status: patchResponse.status,
         headers: { 'Content-Type': patchResponse.headers.get('Content-Type') ?? 'application/json' },
@@ -76,14 +62,8 @@ export async function POST(
   }
 
   const undoneAt = new Date().toISOString();
-  runTransaction((tx) => {
-    tx.update(quickSortOperations).set({
-      state: 'undone',
-      undoneAt,
-    }).where(eq(quickSortOperations.id, id)).run();
-    tx.update(quickSortLog).set({ reversedAt: undoneAt })
-      .where(eq(quickSortLog.operationId, id))
-      .run();
-  });
+  if (!await quickSort.finalizeUndo(id, undoneAt)) {
+    return NextResponse.json({ error: 'Undo operation is already in progress' }, { status: 409 });
+  }
   return NextResponse.json({ operationId: id, taskId: operation.taskId, undone: true });
 }

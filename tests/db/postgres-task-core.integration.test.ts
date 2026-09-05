@@ -78,6 +78,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           task_attachments,
           task_linked_sources,
           task_schedules,
+          quick_sort_operations,
           task_triage_log,
           project_phase_items,
           project_phases,
@@ -354,18 +355,41 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
       for (const row of rows) {
         await client.query(
           `INSERT INTO task_triage_log (
-            id, task_id, mode, action, triaged_at, reversed_at
-          ) VALUES ($1,$2,$3,$4,$5,$6)`,
+            id, task_id, operation_id, mode, action, triaged_at, reversed_at
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
           [
             row.id,
             row.taskId,
-            'no_priority',
+            row.operationId ?? null,
+            row.mode ?? 'no_priority',
             row.action,
             row.triagedAt,
             row.reversedAt ?? null,
           ],
         );
       }
+    },
+    async listQuickSortLogs(operationId) {
+      const result = await client.query<{
+        id: string;
+        operation_id: string | null;
+        mode: string;
+        action: string;
+        reversed_at: string | null;
+      }>(
+        `SELECT id, operation_id, mode, action, reversed_at
+         FROM task_triage_log
+         WHERE operation_id = $1
+         ORDER BY id`,
+        [operationId],
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        operationId: row.operation_id,
+        mode: row.mode,
+        action: row.action,
+        reversedAt: row.reversed_at,
+      }));
     },
     async insertPriorityEntities(rows: SeedPriorityEntity[]) {
       for (const row of rows) {

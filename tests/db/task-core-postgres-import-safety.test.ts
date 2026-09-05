@@ -83,12 +83,15 @@ let modules: {
   groupCounts: typeof import('@/app/api/tasks/group-counts/route');
   quickSort: typeof import('@/app/api/tasks/quick-sort/route');
   quickSortSuggestions: typeof import('@/app/api/tasks/quick-sort/suggestions/route');
+  quickSortStats: typeof import('@/app/api/tasks/quick-sort-stats/route');
+  quickSortOperations: typeof import('@/app/api/tasks/quick-sort/operations/route');
+  quickSortUndo: typeof import('@/app/api/tasks/quick-sort/operations/[id]/undo/route');
 };
 
 const calls: string[] = [];
 
 function createPostgresReadDatabaseDouble() {
-  const select = vi.fn((selection: Record<string, unknown>) => {
+  const select = vi.fn((selection: Record<string, unknown> = {}) => {
     const keys = Object.keys(selection);
     const terminal = keys.includes('attachmentId')
       ? [{
@@ -341,6 +344,21 @@ function fakePersistence(): TaskCorePersistence {
       }),
       reconcileTaskRefresh: () => record('reconcileTaskRefresh', false),
     },
+    quickSort: {
+      captureTask: () => record('captureQuickSortTask', null),
+      getOperation: () => record('getQuickSortOperation', null),
+      reserveOperation: () => {
+        throw new Error('reserveQuickSortOperation is not used by this proof');
+      },
+      discardApplyingOperation: () => record('discardQuickSortOperation', false),
+      finalizeOperation: () => record('finalizeQuickSortOperation', null),
+      claimUndo: () => record('claimQuickSortUndo', false),
+      releaseUndo: () => record('releaseQuickSortUndo', false),
+      finalizeUndo: () => record('finalizeQuickSortUndo', false),
+      countActivityByModeSince: () => record('countQuickSortActivity', []),
+      listActivityTimestampsSince: () => record('listQuickSortActivity', []),
+      recordActivity: () => record('recordQuickSortActivity', undefined),
+    },
   };
 }
 
@@ -392,6 +410,9 @@ beforeAll(async () => {
     groupCounts: await import('@/app/api/tasks/group-counts/route'),
     quickSort: await import('@/app/api/tasks/quick-sort/route'),
     quickSortSuggestions: await import('@/app/api/tasks/quick-sort/suggestions/route'),
+    quickSortStats: await import('@/app/api/tasks/quick-sort-stats/route'),
+    quickSortOperations: await import('@/app/api/tasks/quick-sort/operations/route'),
+    quickSortUndo: await import('@/app/api/tasks/quick-sort/operations/[id]/undo/route'),
   };
 });
 
@@ -493,7 +514,7 @@ describe('task-core under PostgreSQL with a poisoned SQLite module', () => {
     expect(calls).toContain('getAvailableTags');
   });
 
-  it('executes all nine L05 routes through the genuine PostgreSQL adapter', async () => {
+  it('executes task-read and quick-sort routes through the genuine PostgreSQL adapter', async () => {
     const database = createPostgresReadDatabaseDouble();
     runtime.registerTaskCorePersistence(createPostgresTaskCorePersistence(database as never));
     try {
@@ -528,10 +549,81 @@ describe('task-core under PostgreSQL with a poisoned SQLite module', () => {
       expect((await modules.quickSortSuggestions.GET(
         new Request('http://localhost/api/tasks/quick-sort/suggestions?taskIds=task-1'),
       )).status).toBe(200);
+      expect((await modules.quickSortStats.GET()).status).toBe(200);
+      expect((await modules.quickSortOperations.POST(new Request(
+        'http://localhost/api/tasks/quick-sort/operations',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            operationId: 'operation-1',
+            taskId: 'missing',
+            mode: 'no_priority',
+            action: 'skipped',
+            label: 'Skip',
+            contextKey: 'queue:no-priority',
+            queueIndex: 0,
+            patch: {},
+          }),
+        },
+      ))).status).toBe(404);
+      expect((await modules.quickSortUndo.POST(
+        new Request('http://localhost/api/tasks/quick-sort/operations/missing/undo', {
+          method: 'POST',
+        }),
+        { params: Promise.resolve({ id: 'missing' }) },
+      )).status).toBe(404);
       expect(database.select).toHaveBeenCalled();
     } finally {
       runtime.registerTaskCorePersistence(fakePersistence());
     }
+  });
+
+  it('executes the quick-sort workflow routes through the registered composition', async () => {
+    const stats = await modules.quickSortStats.GET();
+    expect(stats.status).toBe(200);
+    expect(calls).toContain('countQuickSortActivity');
+    expect(calls).toContain('listQuickSortActivity');
+
+    const logged = await modules.quickSortStats.POST(new Request(
+      'http://localhost/api/tasks/quick-sort-stats',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ taskId: 'task-1', mode: 'no_priority', action: 'applied' }),
+      },
+    ));
+    expect(logged.status).toBe(200);
+    expect(calls).toContain('recordQuickSortActivity');
+
+    const applied = await modules.quickSortOperations.POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: 'operation-1',
+          taskId: 'missing',
+          mode: 'no_priority',
+          action: 'skipped',
+          label: 'Skip',
+          contextKey: 'queue:no-priority',
+          queueIndex: 0,
+          patch: {},
+        }),
+      },
+    ));
+    expect(applied.status).toBe(404);
+    expect(calls).toContain('captureQuickSortTask');
+
+    const undone = await modules.quickSortUndo.POST(
+      new Request('http://localhost/api/tasks/quick-sort/operations/missing/undo', {
+        method: 'POST',
+      }),
+      { params: Promise.resolve({ id: 'missing' }) },
+    );
+    expect(undone.status).toBe(404);
+    expect(calls).toContain('getQuickSortOperation');
   });
 
   it('runs both task-move strategies without a SQLite handle', async () => {

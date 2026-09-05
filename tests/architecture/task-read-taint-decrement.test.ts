@@ -89,7 +89,7 @@ describe('L05 task-read taint decrement', () => {
     expect(digest(current.tierBRoutes))
       .toBe('2c839bdae24fab27c245d516a003c03e2952ee107ed6ba0c47ba41ffda86ff40');
     expect(digest(current.taintedLibA))
-      .toBe('60fd13dc48ee641028587e1bddf3eb8ef57cfb000445996039ab99288629d1d6');
+      .toBe('9fdc0a77141ad9371cc2daafb7bf10fc5260e7ada63c3877e9611ed72eef283f');
     expect(digest(current.taintedApiHelpers))
       .toBe('4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945');
     expect(current.taintedApiHelpers).toEqual([]);
@@ -120,15 +120,15 @@ describe('L05 task-read taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 121,
+      tierARoutes: 118,
       tierBRoutes: 5,
-      cleanRoutes: 140,
-      directTaintSourceRoutes: 91,
+      cleanRoutes: 143,
+      directTaintSourceRoutes: 88,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 92,
-      taintedLibA: 58,
+      directDbNamespaceRoutes: 89,
+      taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 179,
+      totalMigrationUnits: 175,
     });
   });
 });

@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -73,6 +74,9 @@ import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import {
   CLOSED_TASK_STATUSES,
+  parseTaskQuickSortAction,
+  parseTaskQuickSortOperationState,
+  parseTaskQuickSortQueueMode,
   type AvailableTaskTag,
   type InboxListEntry,
   type LocalTaskDeletionRequest,
@@ -135,9 +139,14 @@ import {
   type TaskQueryScope,
   type TaskRemovalOutcome,
   type TaskRemovalRepository,
+  type TaskQuickSortLogEntry,
+  type TaskQuickSortOperation,
+  type TaskQuickSortOperationReservation,
   type TaskQuickSortOrder,
+  type TaskQuickSortPersistenceRepository,
   type TaskQuickSortQueueMode,
   type TaskQuickSortQueueRow,
+  type TaskQuickSortReservationOutcome,
   type TaskQuickSortScope,
   type TaskQuickSortSuggestionInputs,
   type TaskReadRepository,
@@ -3226,6 +3235,197 @@ class PostgresTaskTransferIdentityRepository implements TaskTransferIdentityRepo
   }
 }
 
+type PostgresQuickSortOperationRow = typeof quickSortOperations.$inferSelect;
+
+function toPostgresQuickSortOperation(
+  row: PostgresQuickSortOperationRow,
+): TaskQuickSortOperation {
+  return {
+    ...row,
+    mode: parseTaskQuickSortQueueMode(row.mode),
+    action: parseTaskQuickSortAction(row.action),
+    state: parseTaskQuickSortOperationState(row.state),
+  };
+}
+
+class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async captureTask(taskId: string) {
+    const rows = await this.db.select({
+      updatedAt: tasks.updatedAt,
+      status: tasks.status,
+      statusReason: tasks.statusReason,
+      localDisposition: tasks.localDisposition,
+      priority: tasks.priority,
+      planningHorizon: tasks.planningHorizon,
+      dueDate: tasks.dueDate,
+      completedAt: tasks.completedAt,
+      microStatus: tasks.microStatus,
+      snoozedUntil: tasks.snoozedUntil,
+      reminderAt: tasks.reminderAt,
+      effort: tasks.effort,
+      tagId: taskTags.tagId,
+    }).from(tasks)
+      .leftJoin(taskTags, eq(taskTags.taskId, tasks.id))
+      .where(eq(tasks.id, taskId));
+    const task = rows[0];
+    if (!task) return null;
+    return {
+      updatedAt: task.updatedAt,
+      status: task.status,
+      statusReason: task.statusReason,
+      localDisposition: task.localDisposition,
+      priority: task.priority,
+      planningHorizon: task.planningHorizon,
+      dueDate: task.dueDate,
+      completedAt: task.completedAt,
+      microStatus: task.microStatus,
+      snoozedUntil: task.snoozedUntil,
+      reminderAt: task.reminderAt,
+      effort: task.effort,
+      tagIds: rows.flatMap((row) => row.tagId === null ? [] : [row.tagId]).sort(),
+    };
+  }
+
+  async getOperation(id: string): Promise<TaskQuickSortOperation | null> {
+    const [operation] = await this.db.select().from(quickSortOperations)
+      .where(eq(quickSortOperations.id, id))
+      .limit(1);
+    return operation ? toPostgresQuickSortOperation(operation) : null;
+  }
+
+  async reserveOperation(
+    input: TaskQuickSortOperationReservation,
+  ): Promise<TaskQuickSortReservationOutcome> {
+    return this.db.transaction(async (tx) => {
+      const inserted = await tx.insert(quickSortOperations).values({
+        ...input,
+        state: 'applying',
+        undoneAt: null,
+      }).onConflictDoNothing().returning();
+      if (inserted[0]) {
+        return {
+          kind: 'reserved',
+          operation: toPostgresQuickSortOperation(inserted[0]),
+        };
+      }
+
+      const [existing] = await tx.select().from(quickSortOperations)
+        .where(eq(quickSortOperations.id, input.id))
+        .limit(1);
+      if (!existing) {
+        throw new Error(`Quick Sort operation ${input.id} conflicted but could not be read`);
+      }
+      return { kind: 'existing', operation: toPostgresQuickSortOperation(existing) };
+    });
+  }
+
+  async discardApplyingOperation(id: string): Promise<boolean> {
+    const deleted = await this.db.delete(quickSortOperations).where(and(
+      eq(quickSortOperations.id, id),
+      eq(quickSortOperations.state, 'applying'),
+    )).returning({ id: quickSortOperations.id });
+    return deleted.length === 1;
+  }
+
+  async finalizeOperation(
+    id: string,
+    afterSnapshot: TaskQuickSortOperation['afterSnapshot'],
+    logs: readonly TaskQuickSortLogEntry[],
+  ): Promise<TaskQuickSortOperation | null> {
+    return this.db.transaction(async (tx) => {
+      const changed = await tx.update(quickSortOperations).set({
+        afterSnapshot,
+        state: 'applied',
+      }).where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'applying'),
+      )).returning({ id: quickSortOperations.id });
+      if (changed.length !== 1) return null;
+      if (logs.length > 0) {
+        await tx.insert(quickSortLog).values(logs.map((entry) => ({ ...entry })));
+      }
+      const [operation] = await tx.select().from(quickSortOperations)
+        .where(eq(quickSortOperations.id, id))
+        .limit(1);
+      if (!operation) throw new Error(`Finalized Quick Sort operation ${id} disappeared`);
+      return toPostgresQuickSortOperation(operation);
+    });
+  }
+
+  async claimUndo(id: string): Promise<boolean> {
+    const changed = await this.db.update(quickSortOperations)
+      .set({ state: 'undoing' })
+      .where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'applied'),
+        isNull(quickSortOperations.undoneAt),
+      ))
+      .returning({ id: quickSortOperations.id });
+    return changed.length === 1;
+  }
+
+  async releaseUndo(id: string): Promise<boolean> {
+    const changed = await this.db.update(quickSortOperations)
+      .set({ state: 'applied' })
+      .where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'undoing'),
+        isNull(quickSortOperations.undoneAt),
+      ))
+      .returning({ id: quickSortOperations.id });
+    return changed.length === 1;
+  }
+
+  async finalizeUndo(id: string, undoneAt: string): Promise<boolean> {
+    return this.db.transaction(async (tx) => {
+      const changed = await tx.update(quickSortOperations).set({
+        state: 'undone',
+        undoneAt,
+      }).where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'undoing'),
+        isNull(quickSortOperations.undoneAt),
+      )).returning({ id: quickSortOperations.id });
+      if (changed.length !== 1) return false;
+      await tx.update(quickSortLog).set({ reversedAt: undoneAt })
+        .where(eq(quickSortLog.operationId, id));
+      return true;
+    });
+  }
+
+  async countActivityByModeSince(since: string) {
+    const rows = await this.db.select({
+      mode: quickSortLog.mode,
+      count: sql<number>`count(*)::int`,
+    }).from(quickSortLog).where(and(
+      gte(quickSortLog.triagedAt, since),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    )).groupBy(quickSortLog.mode);
+    return rows.map((row) => ({
+      mode: parseTaskQuickSortQueueMode(row.mode),
+      count: Number(row.count),
+    }));
+  }
+
+  async listActivityTimestampsSince(since: string): Promise<string[]> {
+    const rows = await this.db.select({ triagedAt: quickSortLog.triagedAt })
+      .from(quickSortLog)
+      .where(and(
+        gte(quickSortLog.triagedAt, since),
+        isNull(quickSortLog.reversedAt),
+        ne(quickSortLog.action, 'skipped'),
+      ));
+    return rows.map((row) => row.triagedAt);
+  }
+
+  async recordActivity(entry: TaskQuickSortLogEntry): Promise<void> {
+    await this.db.insert(quickSortLog).values({ ...entry });
+  }
+}
+
 /**
  * Builds the whole PostgreSQL task-core composition atomically: either every
  * member resolves or nothing is registered, so there is never a
@@ -3253,5 +3453,6 @@ export function createPostgresTaskCorePersistence(
     priorityEntities: new PostgresPriorityEntityRepository(db),
     sourceListNames: new PostgresSourceListNameRepository(db),
     transferIdentity: new PostgresTaskTransferIdentityRepository(db),
+    quickSort: new PostgresTaskQuickSortRepository(db),
   };
 }

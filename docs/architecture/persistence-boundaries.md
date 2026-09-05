@@ -1844,6 +1844,31 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
+## Web/API PostgreSQL parity: task quick-sort workflow persistence
+
+The quick-sort activity, operation-apply, and operation-undo routes now use a
+bounded `TaskCorePersistence.quickSort` port. The existing task-core composition
+remains the sole owner: startup constructs the SQLite or PostgreSQL adapter
+atomically, and route or helper evaluation cannot import, initialize, or fall
+back to SQLite in PostgreSQL mode.
+
+The port owns task snapshot reads, conflict-safe operation reservation,
+operation/log finalization, undo claim/release/finalization, and activity
+statistics. Applying and undoing task fields still delegate to the existing task
+`PATCH` handler with `x-expected-task-updated-at`; this preserves the landed task
+revision CAS, field policy, and external write ordering rather than duplicating
+that behavior in the quick-sort adapter. Operation finalization and log creation
+share one transaction, as do undo state and log reversal. Concurrent reservation
+returns the existing operation, concurrent undo has one claimant, and completed
+undo remains replay-safe.
+
+The exact graph transition from base
+`6205bb0ece832ed0225b8ee31e1cbf6996308d93` is
+`266/A121/B13/clean132/direct91/transitive30/directDB92/lib61/helpers0/units182`
+to
+`266/A118/B13/clean135/direct88/transitive30/directDB89/lib60/helpers0/units178`.
+All three owned routes become clean, `src/lib/quick-sort/operations.ts` leaves
+the tainted-library set, and no route moves to Tier B.
 ## Web/API PostgreSQL parity: Layer L18 (AI execution and memory control plane)
 
 Layer L18 removes the deferred SQLite reach from document intake, retained

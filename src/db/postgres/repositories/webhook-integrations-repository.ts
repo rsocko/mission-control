@@ -853,9 +853,7 @@ export function createPostgresWebhookIntegrationsRepository(
             entry.tasksUpdated,
             entry.tasksRemoved,
             entry.notificationsAdded,
-            // The caller supplies already-serialized JSON text; both backends
-            // persist it through their JSON encoder so the stored bytes match.
-            JSON.stringify(entry.errors),
+            entry.errors,
             entry.syncedAt,
           ],
         );

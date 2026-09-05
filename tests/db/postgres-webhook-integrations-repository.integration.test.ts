@@ -1030,7 +1030,7 @@ describePostgres('postgres webhook integrations repository', () => {
 
     expect(await rows(
       `SELECT connector_id AS "connectorId", success, tasks_added AS "tasksAdded",
-              alerts_added AS "notificationsAdded", synced_at AS "syncedAt"
+              alerts_added AS "notificationsAdded", errors, synced_at AS "syncedAt"
        FROM sync_log WHERE id = $1`,
       ['pg-sync-1'],
     )).toEqual([{
@@ -1038,6 +1038,7 @@ describePostgres('postgres webhook integrations repository', () => {
       success: true,
       tasksAdded: 1,
       notificationsAdded: 1,
+      errors: [],
       syncedAt: BASE_TIME,
     }]);
   });

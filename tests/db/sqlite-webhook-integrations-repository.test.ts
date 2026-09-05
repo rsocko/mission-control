@@ -922,12 +922,14 @@ describe('sqlite webhook integrations repository', () => {
 
       expect(sqlite.prepare(
         'SELECT connector_id AS connectorId, success, tasks_added AS tasksAdded,'
-        + ' alerts_added AS notificationsAdded, synced_at AS syncedAt FROM sync_log WHERE id = ?',
+        + ' alerts_added AS notificationsAdded, errors, synced_at AS syncedAt'
+        + ' FROM sync_log WHERE id = ?',
       ).get('sync-1')).toEqual({
         connectorId: 'custom-rest',
         success: 1,
         tasksAdded: 1,
         notificationsAdded: 1,
+        errors: '[]',
         syncedAt: BASE_TIME,
       });
     });

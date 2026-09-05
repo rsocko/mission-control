@@ -69,15 +69,15 @@ describe('L11 connector-core PostgreSQL parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 110,
+      tierARoutes: 99,
       tierBRoutes: 5,
-      cleanRoutes: 151,
-      directTaintSourceRoutes: 80,
+      cleanRoutes: 162,
+      directTaintSourceRoutes: 69,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 81,
-      taintedLibA: 57,
+      directDbNamespaceRoutes: 70,
+      taintedLibA: 56,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 167,
+      totalMigrationUnits: 155,
     });
   });
 });

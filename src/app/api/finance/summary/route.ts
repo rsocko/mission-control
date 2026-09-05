@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { financeTransactions, kidProfiles } from '@/db/schema';
-import { and, eq, gte, lte, sql, isNotNull } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
 import { ApiErrors } from '@/lib/api-error';
 import { getPersistedFinanceConnectorConfig } from '@/lib/connectors/monarch-money/config';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -19,71 +17,13 @@ export async function GET(request: Request) {
 
   try {
     const config = await getPersistedFinanceConnectorConfig(connectorId);
-    const conditions = [
-      eq(financeTransactions.connectorInstanceId, config.id),
-      eq(financeTransactions.lifecycleStatus, 'active'),
-      gte(financeTransactions.date, startDate),
-      lte(financeTransactions.date, endDate),
-    ];
-
-    const where = and(...conditions);
-
-    // Total spending
-    const totalResult = await db.select({
-      total: sql<number>`COALESCE(SUM(ABS(${financeTransactions.amount})), 0)`,
-      count: sql<number>`COUNT(*)`,
-    })
-      .from(financeTransactions)
-      .where(where);
-
-    // Per-category breakdown
-    const byCategory = await db.select({
-      category: financeTransactions.confirmedCategory,
-      total: sql<number>`COALESCE(SUM(ABS(${financeTransactions.amount})), 0)`,
-      count: sql<number>`COUNT(*)`,
-    })
-      .from(financeTransactions)
-      .where(where)
-      .groupBy(financeTransactions.confirmedCategory)
-      .orderBy(sql`SUM(ABS(${financeTransactions.amount})) DESC`);
-
-    // Per-kid breakdown (single GROUP BY instead of N queries)
-    const kids = await db.select().from(kidProfiles);
-    const kidSpendingRows = await db.select({
-      kidId: financeTransactions.assignedKidId,
-      total: sql<number>`COALESCE(SUM(ABS(${financeTransactions.amount})), 0)`,
-      count: sql<number>`COUNT(*)`,
-    })
-      .from(financeTransactions)
-      .where(
-        and(
-          ...conditions,
-          isNotNull(financeTransactions.assignedKidId)
-        )
-      )
-      .groupBy(financeTransactions.assignedKidId);
-
-    const kidSpendingMap = new Map(
-      kidSpendingRows.map(r => [r.kidId, { total: r.total, count: r.count }])
-    );
-
-    const byKid = kids.map((kid) => ({
-      kidId: kid.id,
-      kidName: kid.name,
-      total: kidSpendingMap.get(kid.id)?.total || 0,
-      transactionCount: kidSpendingMap.get(kid.id)?.count || 0,
-    }));
+    const summary = await (
+      await getWorkerPersistenceRepositories()
+    ).finance.web.readSummary({ connectorId: config.id, startDate, endDate });
 
     return NextResponse.json({
       period: { startDate, endDate },
-      total: totalResult[0]?.total || 0,
-      transactionCount: totalResult[0]?.count || 0,
-      byCategory: byCategory.map(c => ({
-        category: c.category,
-        total: c.total,
-        count: c.count,
-      })),
-      byKid,
+      ...summary,
     });
   } catch (error) {
     if (error instanceof Error && /not configured|required when multiple/.test(error.message)) {

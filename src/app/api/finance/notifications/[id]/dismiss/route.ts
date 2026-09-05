@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { notifications } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 export async function PATCH(
   request: Request,
@@ -17,21 +15,9 @@ export async function PATCH(
 
     const dismissedAt = new Date().toISOString();
 
-    await db
-      .update(notifications)
-      .set({
-        state: 'dismissed',
-        readState: 'read',
-        disposition: 'dismissed',
-        readAt: dismissedAt,
-        dismissedAt,
-      })
-      .where(
-        and(
-          eq(notifications.id, id),
-          eq(notifications.category, 'finance'),
-        )
-      );
+    await (
+      await getWorkerPersistenceRepositories()
+    ).finance.web.dismissNotification(id, dismissedAt);
 
     return NextResponse.json({
       success: true,

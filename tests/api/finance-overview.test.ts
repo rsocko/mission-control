@@ -3,6 +3,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createSqliteFinanceWebPersistence } from '@/db/persistence/sqlite-finance-web-repository';
+
+const mocks = vi.hoisted(() => ({
+  getWorkerPersistenceRepositories: vi.fn(),
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: mocks.getWorkerPersistenceRepositories,
+}));
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-finance-overview-'));
 const databasePath = join(tempDirectory, 'overview.db');
@@ -36,6 +45,11 @@ beforeAll(async () => {
   vi.resetModules();
   const dbModule = await import('@/db');
   sqlite = dbModule.sqlite;
+  mocks.getWorkerPersistenceRepositories.mockResolvedValue({
+    finance: {
+      web: createSqliteFinanceWebPersistence(sqlite),
+    },
+  });
   const now = '2026-08-08T12:00:00.000Z';
   sqlite.prepare(`
     INSERT INTO connector_configs (

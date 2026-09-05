@@ -65,6 +65,7 @@ import { loadFinanceInsightProjectionFacts } from './sqlite-finance-insight-proj
 import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-query';
 import { createSqliteExternalAgentControlRepository } from './sqlite-external-agent-control-repository';
 import { createSqliteAnalyticsPersistence } from './sqlite-analytics-repositories';
+import { createSqliteFinanceWebPersistence } from './sqlite-finance-web-repository';
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
@@ -157,6 +158,7 @@ export function createSqliteWorkerPersistenceRepositories(
     },
     recovery: createSqliteFinanceConnectionRecoveryPersistence(sqlite, db),
     operator: createSqliteFinanceOperatorPersistence({ sqlite, db }),
+    web: createSqliteFinanceWebPersistence(sqlite),
   };
   repositories = {
     connectors: coreRepositories.connectors,

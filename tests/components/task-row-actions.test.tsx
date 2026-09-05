@@ -65,6 +65,19 @@ describe('TaskRowActions', () => {
     await waitFor(() => expect(onSetDueDate).toHaveBeenCalledWith(null));
   });
 
+  it('places the recurrence indicator beneath the due date', () => {
+    renderActions({ dueDate: '2026-08-08', recurrence: 'weekly' });
+
+    const dueDateButton = screen.getByRole('button', { name: /^Change due date/ });
+    const recurrence = screen.getByLabelText('Repeats: weekly');
+    const dateColumn = dueDateButton.closest('.flex-col');
+
+    expect(dateColumn).toHaveClass('flex-col');
+    expect(dateColumn).toContainElement(dueDateButton);
+    expect(dateColumn).toContainElement(recurrence);
+    expect(dueDateButton.compareDocumentPosition(recurrence) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('routes existing notes to read mode and missing notes to edit mode', () => {
     const onOpenNotes = vi.fn();
     const { rerender } = renderActions({ hasDescription: true, onOpenNotes });

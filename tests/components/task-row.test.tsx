@@ -67,6 +67,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
     smartScore?: number | null;
     planningHorizon?: string | null;
     effort?: number | null;
+    recurrence?: string | null;
     priority: string;
     status: string;
     onFilterPriority?: (priority: string) => void;
@@ -77,6 +78,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
       data-score={props.smartScore}
       data-horizon={props.planningHorizon}
       data-effort={props.effort}
+      data-recurrence={props.recurrence}
       data-priority={props.priority}
       data-status={props.status}
     >
@@ -354,6 +356,8 @@ describe('TaskRow', () => {
             effort: 3,
             planningHorizon: 'soon',
             smartScore: 72,
+            dueDate: '2026-08-24',
+            metadata: JSON.stringify({ recurrence: 'weekly' }),
           }}
           onComplete={noop}
           {...actionProps}
@@ -365,6 +369,7 @@ describe('TaskRow', () => {
       expect(properties).toHaveAttribute('data-score', '72');
       expect(properties).toHaveAttribute('data-horizon', 'soon');
       expect(properties).toHaveAttribute('data-effort', '3');
+      expect(properties).toHaveAttribute('data-recurrence', 'weekly');
       expect(properties).toHaveAttribute('data-priority', 'high');
       expect(properties).toHaveAttribute('data-status', 'in_progress');
 

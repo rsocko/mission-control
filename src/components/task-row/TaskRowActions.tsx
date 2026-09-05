@@ -12,6 +12,7 @@ import {
   Filter,
   Loader2,
   MoreHorizontal,
+  Repeat,
   Sun,
   XCircle,
 } from 'lucide-react';
@@ -550,6 +551,7 @@ export interface TaskRowActionsProps {
   planningHorizon?: PlanningHorizon | null;
   effort?: number | null;
   dueDate: string | null;
+  recurrence?: string | null;
   hasDescription: boolean;
   isInMyDay: boolean;
   priority: string;
@@ -584,6 +586,7 @@ export function TaskRowActions({
   planningHorizon,
   effort,
   dueDate,
+  recurrence,
   hasDescription,
   isInMyDay,
   priority,
@@ -671,7 +674,7 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'hidden h-8 items-center justify-start @min-[480px]:flex',
+        'hidden h-9 flex-col items-center justify-center @min-[480px]:flex',
         dense ? 'w-[56px]' : 'w-[72px]',
         !dueDate && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
@@ -681,6 +684,16 @@ export function TaskRowActions({
           disabledReason={taskFieldBlockedReason(editPolicy, 'dueDate')}
           onChange={onSetDueDate}
         />
+        {recurrence && (
+          <Tooltip content={`Repeats: ${recurrence}`}>
+            <span
+              aria-label={`Repeats: ${recurrence}`}
+              className="-mt-0.5 flex h-2 items-center justify-center text-blue-400"
+            >
+              <Repeat size={8} aria-hidden="true" />
+            </span>
+          </Tooltip>
+        )}
       </span>
 
       <span className={cn(

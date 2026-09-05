@@ -69,6 +69,8 @@ export interface SeedSourceList {
   icon?: string | null;
   iconColor?: string | null;
   hidden?: boolean;
+  wellKnownListName?: string | null;
+  sortOrder?: number;
 }
 
 export interface SeedConnector {
@@ -1926,11 +1928,51 @@ export function describeTaskCoreContract(
         expect(await moves().findTargetListBySourceId('other', 'list-a')).toBeNull();
       });
 
+      it('resolves a deterministic default destination for legacy transfer callers', async () => {
+        await harness.insertSourceLists([
+          {
+            id: 'sl-fallback',
+            connectorInstanceId: 'target-fallback',
+            sourceId: 'fallback-list',
+            name: 'Fallback',
+            sortOrder: 20,
+          },
+          {
+            id: 'sl-first',
+            connectorInstanceId: 'target-fallback',
+            sourceId: 'first-list',
+            name: 'First',
+            sortOrder: 10,
+          },
+          {
+            id: 'sl-default',
+            connectorInstanceId: 'target-1',
+            sourceId: 'default-list',
+            name: 'Default',
+            wellKnownListName: 'defaultList',
+            sortOrder: 50,
+          },
+        ]);
+
+        expect(await moves().findDefaultTargetList('target-1')).toEqual({
+          id: 'sl-default',
+          name: 'Default',
+          sourceId: 'default-list',
+        });
+        expect(await moves().findDefaultTargetList('target-fallback')).toEqual({
+          id: 'sl-first',
+          name: 'First',
+          sourceId: 'first-list',
+        });
+        expect(await moves().findDefaultTargetList('missing')).toBeNull();
+      });
+
       /* -------------------- optimistic move claim -------------------- */
 
       const claim = (overrides: Record<string, unknown> = {}) => ({
         taskId: 'wt-source',
         expectedSourceId: 'remote:wt-source',
+        expectedSourceConnectorInstanceId: 'source-1',
         expectedSyncStatus: 'synced',
         claimSyncStatus: 'move_in_progress',
         claimToken: 'token-1',
@@ -1964,6 +2006,9 @@ export function describeTaskCoreContract(
       it('refuses a claim whose observed sourceId or task id no longer matches', async () => {
         expect(await moves().claimTaskMove(claim({ expectedSourceId: 'remote:stale' })))
           .toBe(false);
+        expect(await moves().claimTaskMove(claim({
+          expectedSourceConnectorInstanceId: 'source-other',
+        }))).toBe(false);
         expect(await moves().claimTaskMove(claim({ taskId: 'missing' }))).toBe(false);
         expect((await moves().getTask('wt-source'))?.syncStatus).toBe('synced');
       });

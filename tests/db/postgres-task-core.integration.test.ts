@@ -198,8 +198,8 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         await client.query(
           `INSERT INTO source_lists (
             id, connector_instance_id, source_id, name, type, user_display_name, group_id,
-            icon, icon_color, hidden
-          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+            icon, icon_color, hidden, well_known_list_name, sort_order
+          ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
           [
             row.id,
             row.connectorInstanceId,
@@ -211,6 +211,8 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.icon ?? null,
             row.iconColor ?? null,
             row.hidden ?? false,
+            row.wellKnownListName ?? null,
+            row.sortOrder ?? 0,
           ],
         );
       }

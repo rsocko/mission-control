@@ -517,6 +517,40 @@ work is performed. See the
 
 ## Domain migration sequence
 
+### Connector transfer and sync control plane
+
+This bounded layer owns only the legacy
+`connectors/[id]/cross-account` transfer endpoint and
+`sync/tasks/resolve` identity lookup. Cross-account execution is selected by a
+process-wide, backend-neutral route service registered from the database
+composition root for both SQLite and PostgreSQL. It verifies source-connector
+ownership, resolves an omitted destination through the task-core list
+repository, and delegates to the canonical write-through task move. The route
+therefore inherits optimistic claim fencing, transfer identity, compensation,
+durable cleanup intent, replay handling, redacted upstream failures, and remote
+I/O ordering instead of recreating those semantics.
+
+Task identity resolution uses the canonical connector/source identity lookup
+from task-core persistence. The shared SQLite and live-PostgreSQL contract pins
+deterministic destination-list selection: prefer `defaultList`, then lowest
+`sortOrder`, then stable `id`. PostgreSQL startup and both routes have
+poisoned-SQLite proofs; there is no SQLite load, fallback, dual write, or
+backend probe in either request path.
+
+The reconciled cap is 23 changed paths: 9 production paths, 12 test paths, and
+2 architecture/ratchet paths. Retained-list purge, GitHub bulk transfer, sync
+cleanup, retained-resolution claims, Scout/triage, and webhook integration are
+explicitly excluded. The canonical baseline and fail-closed PostgreSQL route
+sentinel are the sole exact-current graph owners.
+
+Against base `e500c02459870755a5aa91a92843f479f6d63bea`, the exact graph moves
+from `266/85/5/176/55/30/56/51/0/136` to
+`266/83/5/178/53/30/54/51/0/134`, ordered as API routes / Tier A / Tier B /
+clean / direct taint / transitive-only taint / direct `@/db` / tainted
+libraries / tainted helpers / total migration units. Both owned routes move
+from Tier A directly to clean; Tier B and every library/helper set remain
+unchanged.
+
 Migrate one correctness-sensitive workflow at a time:
 
 1. define the command/query port and domain outcomes;

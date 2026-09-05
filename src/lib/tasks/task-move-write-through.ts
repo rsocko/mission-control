@@ -78,6 +78,13 @@ class TaskMoveSourceChangedError extends Error {
   }
 }
 
+class TaskMoveRemoteCreateError extends Error {
+  constructor(readonly originalError: unknown) {
+    super('Remote task creation failed');
+    this.name = 'TaskMoveRemoteCreateError';
+  }
+}
+
 function serviceResult(
   body: Record<string, unknown>,
   status = 200,
@@ -140,6 +147,7 @@ export async function executeWriteThroughTaskMove(
       targetConnectorInstanceId,
       targetSourceListId,
       sourceAction,
+      expectedSourceConnectorInstanceId,
       subtaskStrategy = 'move-as-subtasks',
       addCrossReference = true,
     } = body;
@@ -188,9 +196,22 @@ export async function executeWriteThroughTaskMove(
     moves = writeThroughMoves;
     const core = await getCorePersistenceRepositoriesForBackend();
     const initialTask = await writeThroughMoves.getTask(taskId);
-    if (!initialTask) {
+    if (
+      !initialTask
+      || (
+        expectedSourceConnectorInstanceId
+        && initialTask.connectorInstanceId !== expectedSourceConnectorInstanceId
+      )
+    ) {
       return failureResponse(
-        serviceResult({ error: 'Task not found' }, 404),
+        serviceResult(
+          {
+            error: expectedSourceConnectorInstanceId
+              ? 'Task not found for this connector'
+              : 'Task not found',
+          },
+          404,
+        ),
         'source_task_not_found',
       );
     }
@@ -679,7 +700,12 @@ export async function executeWriteThroughTaskMove(
       };
 
       const createDestination = async () => {
-        const createdTask = await targetConnector.createTask!(taskPayload);
+        let createdTask: TaskItem;
+        try {
+          createdTask = await targetConnector.createTask!(taskPayload);
+        } catch (error) {
+          throw new TaskMoveRemoteCreateError(error);
+        }
         newSourceId = createdTask.sourceId;
         newTaskNativeId = newSourceId;
         createdRemoteSourceIds.push(newSourceId);
@@ -1247,6 +1273,16 @@ export async function executeWriteThroughTaskMove(
         error,
       );
     }
+    if (error instanceof TaskMoveRemoteCreateError && !compensationError) {
+      return failureResponse(
+        serviceResult(
+          { error: 'Failed to create in target. The external service returned an error.' },
+          502,
+        ),
+        'destination_create_failed',
+        error.originalError,
+      );
+    }
     return failureResponse(
       serviceResult(
         {
@@ -1332,6 +1368,7 @@ async function claimTaskMove(
   const claimed = await moves.claimTaskMove({
     taskId: sourceTask.id,
     expectedSourceId: sourceTask.sourceId,
+    expectedSourceConnectorInstanceId: sourceTask.connectorInstanceId,
     expectedSyncStatus: sourceTask.syncStatus,
     claimSyncStatus: 'move_in_progress',
     claimToken: token,

@@ -929,7 +929,7 @@ describe('sqlite webhook integrations repository', () => {
         success: 1,
         tasksAdded: 1,
         notificationsAdded: 1,
-        errors: '[]',
+        errors: '"[]"',
         syncedAt: BASE_TIME,
       });
     });

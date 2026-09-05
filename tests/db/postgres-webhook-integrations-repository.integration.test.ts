@@ -1038,7 +1038,7 @@ describePostgres('postgres webhook integrations repository', () => {
       success: true,
       tasksAdded: 1,
       notificationsAdded: 1,
-      errors: [],
+      errors: '[]',
       syncedAt: BASE_TIME,
     }]);
   });

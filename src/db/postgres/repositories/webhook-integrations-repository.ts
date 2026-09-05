@@ -853,7 +853,8 @@ export function createPostgresWebhookIntegrationsRepository(
             entry.tasksUpdated,
             entry.tasksRemoved,
             entry.notificationsAdded,
-            entry.errors,
+            // SQLite's JSON-mode column encodes this contract string once too.
+            JSON.stringify(entry.errors),
             entry.syncedAt,
           ],
         );

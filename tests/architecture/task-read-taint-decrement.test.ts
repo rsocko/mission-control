@@ -83,10 +83,11 @@ describe('L05 task-read taint decrement', () => {
     // deferred `import()` of the AI provider config resolver. That single
     // reclassification is declared in the baseline's `decrementHistory` and
     // asserted by `analytics-taint-decrement.test.ts`. L08a then removed its
-    // eight owned Tier B triage routes. The non-route digests reflect the
-    // composed L16, L17, and L08a removals; taintedApiHelpers remains empty.
+    // eight owned Tier B triage routes, and runtime observability parity
+    // removed six more. The non-route digests reflect the composed L16, L17,
+    // and L08a removals; taintedApiHelpers remains empty.
     expect(digest(current.tierBRoutes))
-      .toBe('d195feeee7fe0547f0ebd57596f59592548cdf3b1e984da245c7d1e02271fc52');
+      .toBe('1b40233b2898ab0993be3818f0e14101924c117728cf430e8fb3982c14c31622');
     expect(digest(current.taintedLibA))
       .toBe('69b17cfe5ae56abda59e494e4cb7290047f515824a241f555d4020cbbc805925');
     expect(digest(current.taintedApiHelpers))
@@ -120,8 +121,8 @@ describe('L05 task-read taint decrement', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 121,
-      tierBRoutes: 19,
-      cleanRoutes: 126,
+      tierBRoutes: 13,
+      cleanRoutes: 132,
       directTaintSourceRoutes: 91,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 92,

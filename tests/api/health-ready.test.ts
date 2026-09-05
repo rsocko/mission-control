@@ -1,11 +1,19 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DatabaseHealthProbeResult } from '@/lib/telemetry/database-health-probe';
 
-const mockGet = vi.fn();
-const mockPrepare = vi.fn(() => ({ get: mockGet }));
-
-vi.mock('@/db', () => ({
-  sqlite: { prepare: mockPrepare },
-  withoutDatabaseObservation: <T>(callback: () => T) => callback(),
+const mockInspect = vi.fn<() => Promise<DatabaseHealthProbeResult>>(async () => ({
+  connected: true,
+  severity: 'healthy' as const,
+  message: 'Connected',
+  sizeBytes: 4096,
+  backend: { kind: 'sqlite' },
+}));
+const mockHasSeedMarker = vi.fn(async () => true);
+vi.mock('@/lib/telemetry/database-health-runtime', () => ({
+  databaseHealthProbe: {
+    inspect: mockInspect,
+    hasSeedMarker: mockHasSeedMarker,
+  },
 }));
 vi.mock('@/lib/public-demo', () => ({
   isPublicDemoMode: () => true,
@@ -33,11 +41,6 @@ beforeEach(() => {
 
 describe('public demo health', () => {
   it('reports ready after the initialization marker is recorded', async () => {
-    mockGet
-      .mockReturnValueOnce({ ok: 1 })
-      .mockReturnValueOnce({ page_count: 1 })
-      .mockReturnValueOnce({ page_size: 4096 })
-      .mockReturnValueOnce({ seeded_at: '2026-08-02T00:00:00.000Z' });
     const { GET } = await import('@/app/api/health/ready/route');
 
     const response = await GET();
@@ -49,15 +52,12 @@ describe('public demo health', () => {
       revision: 'revision-1',
       lifecycle,
     });
-    expect(mockPrepare).not.toHaveBeenCalledWith(expect.stringContaining('COUNT(*)'));
+    expect(mockInspect).toHaveBeenCalledOnce();
+    expect(mockHasSeedMarker).toHaveBeenCalledOnce();
   });
 
   it('does not report ready before initialization completes', async () => {
-    mockGet
-      .mockReturnValueOnce({ ok: 1 })
-      .mockReturnValueOnce({ page_count: 1 })
-      .mockReturnValueOnce({ page_size: 4096 })
-      .mockReturnValueOnce(undefined);
+    mockHasSeedMarker.mockResolvedValueOnce(false);
     const { GET } = await import('@/app/api/health/ready/route');
 
     const response = await GET();
@@ -66,12 +66,39 @@ describe('public demo health', () => {
     expect(await response.json()).toEqual(expect.objectContaining({ ready: false }));
   });
 
+  it('does not evaluate the seed marker when the database is disconnected', async () => {
+    mockInspect.mockResolvedValueOnce({
+      connected: false,
+      severity: 'critical',
+      message: 'PostgreSQL is unavailable',
+      backend: { kind: 'postgres' },
+    });
+    const { GET } = await import('@/app/api/health/ready/route');
+
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual(expect.objectContaining({ ready: false }));
+    expect(mockHasSeedMarker).not.toHaveBeenCalled();
+  });
+
+  it('fails closed without exposing database errors', async () => {
+    mockInspect.mockRejectedValueOnce(new Error('driver-internal-marker'));
+    const { GET } = await import('@/app/api/health/ready/route');
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(503);
+    expect(body).toEqual({
+      ready: false,
+      mode: 'public-demo',
+      revision: 'revision-1',
+    });
+    expect(JSON.stringify(body)).not.toContain('driver-internal-marker');
+  });
+
   it('does not report ready while the runtime is draining', async () => {
-    mockGet
-      .mockReturnValueOnce({ ok: 1 })
-      .mockReturnValueOnce({ page_count: 1 })
-      .mockReturnValueOnce({ page_size: 4096 })
-      .mockReturnValueOnce({ seeded_at: '2026-08-02T00:00:00.000Z' });
     mockIsRuntimeReady.mockReturnValueOnce(false);
     const { GET } = await import('@/app/api/health/ready/route');
 
@@ -85,11 +112,6 @@ describe('public demo health', () => {
     vi.resetModules();
     delete process.env.MC_DEPLOYMENT_REVISION;
     process.env.MC_BUILD_SHA = 'full-build-sha';
-    mockGet
-      .mockReturnValueOnce({ ok: 1 })
-      .mockReturnValueOnce({ page_count: 1 })
-      .mockReturnValueOnce({ page_size: 4096 })
-      .mockReturnValueOnce({ seeded_at: '2026-08-02T00:00:00.000Z' });
 
     const { GET } = await import('@/app/api/health/ready/route');
     const response = await GET();

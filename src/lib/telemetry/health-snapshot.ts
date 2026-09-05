@@ -32,9 +32,12 @@ import {
 } from './health-snapshot-status';
 import { withDatabaseOperation } from './database-operation-context';
 import {
-  createHealthSnapshotStore,
   databaseHealthProbe,
 } from './database-health-runtime';
+import {
+  readWorkerHealthSnapshot,
+  writeWorkerHealthSnapshot,
+} from './health-snapshot-runtime';
 
 export type ConnectorHealthStatus =
   | 'healthy'
@@ -85,8 +88,6 @@ export interface WorkerHealthSnapshot extends WorkerHealthSnapshotIdentity {
 }
 
 const MAX_CONNECTORS = 1_000;
-const healthSnapshotStore = createHealthSnapshotStore<MaterializedHealthSummary>();
-
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -341,16 +342,14 @@ export async function generateWorkerHealthSnapshot(
     generationDurationMs: Math.round(performance.now() - startedAt),
     summary,
   };
-  await healthSnapshotStore.write(
+  await writeWorkerHealthSnapshot(
     snapshot,
     () => ensureHealthSnapshotCanRun(shouldDefer),
   );
   return snapshot;
 }
 
-export async function readWorkerHealthSnapshot(): Promise<WorkerHealthSnapshot | null> {
-  return healthSnapshotStore.read();
-}
+export { readWorkerHealthSnapshot };
 
 export class WorkerHealthSnapshotScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;

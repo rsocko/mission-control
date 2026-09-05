@@ -96,10 +96,13 @@ describe('L12c finance end-user web/API PostgreSQL parity', () => {
 
   it('keeps external category I/O between a fenced claim and completion', () => {
     const snapshot = source('src/lib/connectors/monarch-money/snapshot-sync.ts');
+    const connector = source('src/lib/connectors/monarch-money/index.ts');
     const claim = snapshot.indexOf('web.claimCategoryUpdate');
     const externalWrite = snapshot.indexOf('new MonarchBridgeClient(config).updateCategory');
     const complete = snapshot.indexOf('web.completeCategoryUpdate');
     const failure = snapshot.indexOf('web.failCategoryUpdate');
+    expect(connector).not.toContain('Legacy finance category write-back is unavailable');
+    expect(connector).toContain("await import('./snapshot-sync')");
     expect(claim).toBeGreaterThan(0);
     expect(externalWrite).toBeGreaterThan(claim);
     expect(complete).toBeGreaterThan(externalWrite);
@@ -158,8 +161,8 @@ describe('L12c finance end-user web/API PostgreSQL parity', () => {
     }).toEqual({
       apiRoutes: 266,
       tierARoutes: 121,
-      tierBRoutes: 19,
-      cleanRoutes: 126,
+      tierBRoutes: 13,
+      cleanRoutes: 132,
       directTaintSourceRoutes: 91,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 92,
@@ -170,8 +173,8 @@ describe('L12c finance end-user web/API PostgreSQL parity', () => {
     expect(baseline.counts).toEqual({
       apiRoutes: 266,
       tierARoutes: 121,
-      tierBRoutes: 19,
-      cleanRoutes: 126,
+      tierBRoutes: 13,
+      cleanRoutes: 132,
       directTaintSourceRoutes: 91,
       transitiveOnlyTaintSourceRoutes: 30,
       directDbNamespaceRoutes: 92,

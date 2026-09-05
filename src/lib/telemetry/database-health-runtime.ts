@@ -1,50 +1,75 @@
-import { PostgresDatabaseHealthProbe } from '@/db/postgres/health';
-import { getPostgresPersistenceBackend } from '@/db/runtime';
-import { resolveDatabaseBackend } from '@/db/runtime-backend';
-import type {
-  HealthSnapshotStore,
-} from './health-snapshot-store';
 import type { DatabaseHealthProbe } from './database-health-probe';
-import { PostgresHealthSnapshotStore } from './postgres-health-snapshot-store';
+import type { HealthSnapshotStore } from './health-snapshot-store';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 
-async function selectedDatabaseHealthProbe(): Promise<DatabaseHealthProbe> {
-  if (resolveDatabaseBackend() === 'postgres') {
-    return new PostgresDatabaseHealthProbe(
-      getPostgresPersistenceBackend().context.pool,
+export interface RuntimeHealthPersistence {
+  databaseHealthProbe: DatabaseHealthProbe;
+  createHealthSnapshotStore<TSummary>(): HealthSnapshotStore<TSummary>;
+}
+
+interface RuntimeHealthPersistenceRegistry {
+  selected: RuntimeHealthPersistence | null;
+}
+
+const REGISTRY_KEY = 'mission-control.runtime-health-persistence-registry';
+const REGISTRY_SCHEMA_VERSION = 1;
+
+function registry(): RuntimeHealthPersistenceRegistry {
+  return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
+    selected: null,
+  }));
+}
+
+export function registerRuntimeHealthPersistence(
+  persistence: RuntimeHealthPersistence,
+): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const state = registry();
+  if (state.selected && state.selected !== persistence) {
+    throw new Error('Runtime health persistence is already selected');
+  }
+  state.selected = persistence;
+}
+
+export function clearRuntimeHealthPersistence(
+  persistence: RuntimeHealthPersistence,
+): void {
+  const state = registry();
+  if (state.selected === persistence) state.selected = null;
+}
+
+export function getRuntimeHealthPersistence(): RuntimeHealthPersistence {
+  assertPersistenceCompositionAccessAllowed();
+  const persistence = registry().selected;
+  if (!persistence) {
+    throw new Error(
+      'Runtime health persistence has not been registered. Initialize the database '
+      + 'runtime before using health persistence.',
     );
   }
-  const [
-    { sqlite, withoutDatabaseObservation },
-    { SqliteDatabaseHealthProbe },
-  ] = await Promise.all([
-    import('@/db'),
-    import('./sqlite-database-health-probe'),
-  ]);
-  return new SqliteDatabaseHealthProbe(sqlite, withoutDatabaseObservation);
+  return persistence;
 }
 
 export const databaseHealthProbe: DatabaseHealthProbe = {
-  inspect: async () => (await selectedDatabaseHealthProbe()).inspect(),
-  hasSeedMarker: async () => (await selectedDatabaseHealthProbe()).hasSeedMarker(),
+  inspect: () => getRuntimeHealthPersistence().databaseHealthProbe.inspect(),
+  hasSeedMarker: () => getRuntimeHealthPersistence().databaseHealthProbe.hasSeedMarker(),
 };
 
 export function createHealthSnapshotStore<TSummary>(): HealthSnapshotStore<TSummary> {
-  let selectedStore: Promise<HealthSnapshotStore<TSummary>> | null = null;
-  const getStore = (): Promise<HealthSnapshotStore<TSummary>> => {
-    if (selectedStore) return selectedStore;
-    selectedStore = resolveDatabaseBackend() === 'postgres'
-      ? Promise.resolve(new PostgresHealthSnapshotStore<TSummary>(
-          getPostgresPersistenceBackend().context.db,
-        ))
-      : Promise.all([
-          import('@/db'),
-          import('./sqlite-health-snapshot-store'),
-        ]).then(([{ sqlite, withoutDatabaseObservation }, { SqliteHealthSnapshotStore }]) =>
-          new SqliteHealthSnapshotStore<TSummary>(sqlite, withoutDatabaseObservation));
-    return selectedStore;
-  };
   return {
-    write: async (snapshot, validate) => (await getStore()).write(snapshot, validate),
-    read: async () => (await getStore()).read(),
+    write: (snapshot, validate) => (
+      getRuntimeHealthPersistence()
+        .createHealthSnapshotStore<TSummary>()
+        .write(snapshot, validate)
+    ),
+    read: () => (
+      getRuntimeHealthPersistence()
+        .createHealthSnapshotStore<TSummary>()
+        .read()
+    ),
   };
 }

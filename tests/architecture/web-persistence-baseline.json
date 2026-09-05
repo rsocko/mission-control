@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through L12c finance end-user web/API parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "6ef6496090dc88c54e428e8e0dbb290f79bce879+L12c",
+  "generatedFromCommit": "c354e567a84c744e19ba238a08616a8f082920f5+L12c",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -42,8 +42,8 @@
   "counts": {
     "apiRoutes": 266,
     "tierARoutes": 121,
-    "tierBRoutes": 19,
-    "cleanRoutes": 126,
+    "tierBRoutes": 13,
+    "cleanRoutes": 132,
     "directTaintSourceRoutes": 91,
     "transitiveOnlyTaintSourceRoutes": 30,
     "directDbNamespaceRoutes": 92,
@@ -466,16 +466,10 @@
     "src/app/api/ai/runs/[runId]/route.ts",
     "src/app/api/ai/runs/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
-    "src/app/api/health/live/route.ts",
-    "src/app/api/health/ready/route.ts",
-    "src/app/api/health/route.ts",
-    "src/app/api/health/runtime/route.ts",
     "src/app/api/insights/observations/route.ts",
-    "src/app/api/metrics/route.ts",
     "src/app/api/sync/retained/resolve/route.ts",
     "src/app/api/tasks/[id]/move/route.ts",
-    "src/app/api/tasks/move/execute/route.ts",
-    "src/app/api/telemetry/runtime/route.ts"
+    "src/app/api/tasks/move/execute/route.ts"
   ],
   "cleanRoutes": [
     "src/app/api/ai/models/route.ts",
@@ -523,6 +517,10 @@
     "src/app/api/finance/transactions/[id]/category/route.ts",
     "src/app/api/finance/transactions/[id]/kid/route.ts",
     "src/app/api/finance/transactions/route.ts",
+    "src/app/api/health/live/route.ts",
+    "src/app/api/health/ready/route.ts",
+    "src/app/api/health/route.ts",
+    "src/app/api/health/runtime/route.ts",
     "src/app/api/hub-projects/[id]/tasks/route.ts",
     "src/app/api/ideation/workspaces/[id]/duplicate/route.ts",
     "src/app/api/ideation/workspaces/[id]/route.ts",
@@ -533,6 +531,7 @@
     "src/app/api/manifest/route.ts",
     "src/app/api/mcp/route.ts",
     "src/app/api/mcp/tasks/[id]/route.ts",
+    "src/app/api/metrics/route.ts",
     "src/app/api/native/logout/route.ts",
     "src/app/api/native/push/registrations/[registrationId]/route.ts",
     "src/app/api/native/push/registrations/route.ts",
@@ -574,6 +573,7 @@
     "src/app/api/tasks/quick-sort/route.ts",
     "src/app/api/tasks/quick-sort/suggestions/route.ts",
     "src/app/api/tasks/route.ts",
+    "src/app/api/telemetry/runtime/route.ts",
     "src/app/api/triage/auto-sync/route.ts",
     "src/app/api/triage/backfill-embeds/route.ts",
     "src/app/api/triage/backfill-thumbnails/route.ts",
@@ -1503,6 +1503,40 @@
       "verification": "Exact computeWebPersistenceGraph recomputation on current main 415c6c5a174c9fc17fa51fbe47f9f5900b8bdeb9 moves the seven owned finance connector/operator routes from Tier A to clean, removes health/test/recovery from both direct-taint and direct @/db, removes the four owned finance libraries from taintedLibA, adds no Tier B route, tainted helper, raw-driver import, or database namespace, and reduces total migration units from 204 to 193."
     },
     {
+      "layer": "runtime-observability",
+      "title": "runtime observability and health PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 193,
+        "to": 193,
+        "delta": 0
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [],
+      "removedTierARoutes": [],
+      "newlyCleanRoutes": [
+        "src/app/api/health/live/route.ts",
+        "src/app/api/health/ready/route.ts",
+        "src/app/api/health/route.ts",
+        "src/app/api/health/runtime/route.ts",
+        "src/app/api/metrics/route.ts",
+        "src/app/api/telemetry/runtime/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [],
+      "removedDirectDbNamespaceRoutes": [],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "removedTierBRoutes": [
+        "src/app/api/health/live/route.ts",
+        "src/app/api/health/ready/route.ts",
+        "src/app/api/health/route.ts",
+        "src/app/api/health/runtime/route.ts",
+        "src/app/api/metrics/route.ts",
+        "src/app/api/telemetry/runtime/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on base 6ef6496090dc88c54e428e8e0dbb290f79bce879 moves all six owned runtime observability routes from Tier B to clean through startup-selected health, snapshot, and telemetry contracts. The graph is exactly 266 routes, A130/B13/clean123, direct97/transitive33/directDB98, 63 tainted libraries, zero helpers, and 193 total migration units. No route is reclassified into Tier A or Tier B and no taint-side set grows."
+    },
+    {
       "layer": "L12c",
       "title": "finance end-user web/API PostgreSQL parity",
       "totalMigrationUnits": {
@@ -1560,7 +1594,7 @@
       ],
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
-      "verification": "Exact computeWebPersistenceGraph recomputation on current main 6ef6496090dc88c54e428e8e0dbb290f79bce879 moves the seven owned finance end-user routes from Tier A to clean, transitively cleans the two finance alert routes through the shared Monarch snapshot module, removes six direct-taint and direct @/db route imports, removes operations.ts and snapshot-sync.ts from taintedLibA, adds no Tier B route or tainted helper, and reduces total migration units from 193 to 182."
+      "verification": "Exact computeWebPersistenceGraph recomputation on current main c354e567a84c744e19ba238a08616a8f082920f5 moves the seven owned finance end-user routes from Tier A to clean, transitively cleans the two finance alert routes through the shared Monarch snapshot module, removes six direct-taint and direct @/db route imports, removes operations.ts and snapshot-sync.ts from taintedLibA, adds no Tier B route or tainted helper, and reduces total migration units from 193 to 182."
     }
   ],
   "layerUpdates": [

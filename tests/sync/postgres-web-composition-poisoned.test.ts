@@ -169,6 +169,7 @@ const mocks = vi.hoisted(() => {
   const enrich = vi.fn(async () => ({ summary: 'postgres' }));
   const createEnrichmentExecutor = vi.fn(async () => enrich);
   const publish = vi.fn(async () => ({ status: 'skipped' as const }));
+  const monarchUpdateCategory = vi.fn(async () => undefined);
   return {
     sqliteTouch,
     pool,
@@ -188,6 +189,7 @@ const mocks = vi.hoisted(() => {
     enrich,
     createEnrichmentExecutor,
     publish,
+    monarchUpdateCategory,
     demoMode: false,
   };
 });
@@ -231,6 +233,19 @@ vi.mock('@/db/postgres/sync/connector-operation-lease-repository', () => ({
 vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: () => mocks.keyword,
 }));
+vi.mock('@/db/postgres/telemetry-runtime', () => ({
+  createPostgresRuntimeTelemetryPersistence: () => ({
+    getDatabaseTelemetry: () => undefined,
+    registerInstance: vi.fn(async () => undefined),
+    persist: vi.fn(async () => undefined),
+    recordStop: vi.fn(async () => undefined),
+    maintainHistory: vi.fn(async () => undefined),
+    getCurrent: vi.fn(async () => []),
+    getHistory: vi.fn(async () => []),
+    getAlertHistory: vi.fn(async () => []),
+    getInstances: vi.fn(async () => []),
+  }),
+}));
 vi.mock('@/db/postgres/semantic-index/repository', () => ({
   createPostgresSemanticIndexRepository: () => ({}),
 }));
@@ -267,6 +282,15 @@ vi.mock('@/lib/mode', () => ({
   isDemoMode: () => mocks.demoMode,
   getTimezone: () => 'UTC',
 }));
+vi.mock('@/lib/connectors/monarch-money/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/connectors/monarch-money/client')>();
+  return {
+    ...actual,
+    MonarchBridgeClient: class {
+      updateCategory = mocks.monarchUpdateCategory;
+    },
+  };
+});
 vi.mock('@/lib/telemetry/runtime', () => ({
   startRuntimeTelemetry: vi.fn(async () => undefined),
 }));
@@ -585,6 +609,18 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
         'http://localhost:3000/api/finance/transactions?connectorId=finance',
       ))).status).toBe(200);
 
+      expect((await category.PATCH(
+        financeRequest('http://localhost:3000/api/finance/transactions/transaction/category', {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'category-write-1',
+          },
+          body: JSON.stringify({ connectorId: 'finance', categoryId: 'category' }),
+        }),
+        { params: Promise.resolve({ id: 'transaction' }) },
+      )).status).toBe(200);
+
       mocks.demoMode = true;
       try {
         expect((await category.PATCH(
@@ -605,6 +641,24 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
       expect(mocks.financeWeb.readOperationsOverview).toHaveBeenCalled();
       expect(mocks.financeWeb.readSummary).toHaveBeenCalled();
       expect(mocks.financeWeb.listTransactions).toHaveBeenCalled();
+      expect(mocks.financeWeb.claimCategoryUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        connectorId: 'finance',
+        transactionId: 'transaction',
+        categoryId: 'category',
+        idempotencyKey: 'category-write-1',
+      }));
+      expect(mocks.monarchUpdateCategory).toHaveBeenCalledWith(
+        'upstream',
+        'category',
+        expect.any(AbortSignal),
+      );
+      expect(mocks.financeWeb.completeCategoryUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        connectorId: 'finance',
+        transactionId: 'transaction',
+        categoryId: 'category',
+        idempotencyKey: 'category-write-1',
+        claimToken: 'claim-token',
+      }));
       expect(mocks.financeWeb.updateDemoCategory).toHaveBeenCalled();
       expect(mocks.sqliteTouch).not.toHaveBeenCalled();
     });

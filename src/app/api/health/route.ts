@@ -4,9 +4,9 @@ import logger from '@/lib/logger';
 import { getRuntimeLifecycleSnapshot, isRuntimeReady } from '@/lib/runtime/lifecycle';
 import { publicRuntimeRelease } from '@/lib/runtime/release';
 import {
-  readWorkerHealthSnapshot,
   type MaterializedHealthSummary,
 } from '@/lib/telemetry/health-snapshot';
+import { readWorkerHealthSnapshot } from '@/lib/telemetry/health-snapshot-runtime';
 import {
   classifyWorkerHealthSnapshot,
   mergeHealthDatabaseSeverity,

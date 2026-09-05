@@ -227,6 +227,8 @@ beforeAll(async () => {
         icon: row.icon ?? null,
         iconColor: row.iconColor ?? null,
         hidden: row.hidden ?? false,
+        wellKnownListName: row.wellKnownListName ?? null,
+        sortOrder: row.sortOrder ?? 0,
       })));
     },
     async insertMyDayItems(rows) {

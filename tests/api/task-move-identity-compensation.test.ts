@@ -136,6 +136,11 @@ function registerMoves(): void {
         name: 'Repo B',
         sourceId: 'acme/repo-b',
       }),
+      findDefaultTargetList: async () => ({
+        id: 'target-list-row',
+        name: 'Repo B',
+        sourceId: 'acme/repo-b',
+      }),
       listTaskTagRefs: async () => [],
       listChildTasks: async () => [],
       listAttachmentMetadata: async () => [],

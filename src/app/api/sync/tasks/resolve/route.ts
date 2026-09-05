@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
-import db from '@/db';
-import { tasks } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
+import { getTaskByRetentionIdentity } from '@/lib/tasks/local-task-lifecycle';
 
 export async function GET(request: Request) {
   const url = new URL(request.url);
@@ -12,13 +10,10 @@ export async function GET(request: Request) {
     return ApiErrors.badRequest('connectorId and sourceId are required');
   }
 
-  const [task] = await db.select({ id: tasks.id })
-    .from(tasks)
-    .where(and(
-      eq(tasks.connectorInstanceId, connectorId),
-      eq(tasks.sourceId, sourceId),
-    ))
-    .limit(1);
+  const task = await getTaskByRetentionIdentity({
+    connectorId,
+    taskSourceId: sourceId,
+  });
 
   return NextResponse.json({ taskId: task?.id ?? null });
 }

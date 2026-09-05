@@ -153,6 +153,19 @@ describe('process-wide runtime registries', () => {
     expect(secondRuntime.getRelativeReminderTimezoneRepository()).toBe(timezoneRepository);
   });
 
+  it('shares the cross-account task move service across isolated module evaluations', async () => {
+    const firstRuntime = await import('@/lib/tasks/cross-account-route-service');
+    const service = {
+      execute: vi.fn(async () => ({ status: 200, body: { success: true } })),
+    };
+    firstRuntime.registerCrossAccountTaskMoveService(service);
+
+    resetModulesPreservingProcessRuntimeRegistries(vi.resetModules);
+    const secondRuntime = await import('@/lib/tasks/cross-account-route-service');
+
+    expect(secondRuntime.getCrossAccountTaskMoveService()).toBe(service);
+  });
+
   it('shares runtime observability compositions across isolated module evaluations', async () => {
     const firstHealth = await import('@/lib/telemetry/database-health-runtime');
     const firstTelemetry = await import('@/lib/telemetry/runtime-persistence');

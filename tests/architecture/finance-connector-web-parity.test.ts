@@ -222,27 +222,27 @@ describe('L12b finance connector/operator web parity', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 110,
+      tierARoutes: 108,
       tierBRoutes: 5,
-      cleanRoutes: 151,
-      directTaintSourceRoutes: 80,
+      cleanRoutes: 153,
+      directTaintSourceRoutes: 78,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 81,
+      directDbNamespaceRoutes: 79,
       taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 167,
+      totalMigrationUnits: 165,
     });
     expect(baseline.counts).toEqual({
       apiRoutes: 266,
-      tierARoutes: 110,
+      tierARoutes: 108,
       tierBRoutes: 5,
-      cleanRoutes: 151,
-      directTaintSourceRoutes: 80,
+      cleanRoutes: 153,
+      directTaintSourceRoutes: 78,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 81,
+      directDbNamespaceRoutes: 79,
       taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 167,
+      totalMigrationUnits: 165,
     });
   });
 });

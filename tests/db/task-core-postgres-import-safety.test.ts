@@ -298,6 +298,7 @@ function fakePersistence(): TaskCorePersistence {
       listAttachmentContents: () => record('listAttachmentContents', []),
       getTaskSchedule: () => record('getTaskSchedule', null),
       findTargetListBySourceId: () => record('findTargetListBySourceId', null),
+      findDefaultTargetList: () => record('findDefaultTargetList', null),
       claimTaskMove: () => record('claimTaskMove', false),
       releaseTaskMoveClaim: () => record('releaseTaskMoveClaim', undefined),
       discardMaterializedDestination: () => record('discardMaterializedDestination', undefined),

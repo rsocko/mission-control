@@ -160,6 +160,7 @@ const writeThroughMovesFake = {
     return row ? { ...row, metadata: row.metadata ?? {} } : null;
   },
   findTargetListBySourceId: async () => nextSelectRow(),
+  findDefaultTargetList: async () => nextSelectRow(),
   listTaskTagRefs: async () => nextSelectRows(),
   listChildTasks: async () => nextSelectRows().map((row) => ({
     ...row,
@@ -747,6 +748,38 @@ describe('POST /api/tasks/move/execute', () => {
     expect(res.status).toBe(404);
   });
 
+  it('rejects a source task whose connector identity changed before execution', async () => {
+    selectResults.push([{
+      id: 'task-1',
+      title: 'Test',
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'source-other',
+      sourceId: 'remote-1',
+      sourceListId: 'list-a',
+      status: 'todo',
+      syncStatus: 'synced',
+      metadata: {},
+    }]);
+    const { executeTaskMove } = await import('@/lib/tasks/task-move-service');
+
+    const result = await executeTaskMove({
+      strategy: 'write-through',
+      input: {
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-2',
+        targetSourceListId: 'list-1',
+        sourceAction: 'move',
+        expectedSourceConnectorInstanceId: 'source-1',
+      },
+    });
+
+    expect(result).toEqual({
+      status: 404,
+      body: { error: 'Task not found for this connector' },
+    });
+    expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
   it('returns 404 when target connector does not exist', async () => {
     selectResults.push([{ id: 'task-1', title: 'Test', connectorType: 'microsoft-todo', connectorInstanceId: 'inst-1', sourceListId: 'list-a' }]); // task found
     selectResults.push([]); // target connector not found
@@ -1054,6 +1087,45 @@ describe('POST /api/tasks/move/execute', () => {
     expect(data.sourceAction).toBe('copy');
     expect(mockDeleteTask).not.toHaveBeenCalled();
     expect(mockAddComment).toHaveBeenCalled(); // cross-reference
+  });
+
+  it('returns a redacted 502 when remote destination creation fails', async () => {
+    selectResults.push([{
+      id: 'task-1', title: 'Sensitive title', description: null, connectorType: 'microsoft-todo',
+      connectorInstanceId: 'inst-1', sourceListId: 'list-a', sourceListName: 'My List',
+      status: 'todo', priority: 'medium', dueDate: null, assignee: null,
+      sourceId: 'ms-source-1', metadata: null,
+    }]);
+    selectResults.push([{
+      id: 'inst-2',
+      type: 'microsoft-todo',
+      name: 'Microsoft To Do',
+      capabilities: { read: true, write: true, taskCreate: true },
+    }]);
+    selectResults.push([{ name: 'Tasks', sourceId: 'list-1' }]);
+    selectResults.push([]);
+    selectResults.push([]);
+    selectResults.push([]);
+    mockCreateTask.mockRejectedValueOnce(
+      new Error('upstream payload contains Sensitive title'),
+    );
+
+    const { POST } = await import('@/app/api/tasks/move/execute/route');
+    const response = await POST(new Request(`${BASE}/api/tasks/move/execute`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-2',
+        targetSourceListId: 'list-1',
+        sourceAction: 'copy',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: 'Failed to create in target. The external service returned an error.',
+    });
   });
 
   it('passes schedule recurrence to target task creation', async () => {

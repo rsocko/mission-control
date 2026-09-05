@@ -78,6 +78,8 @@ import {
   registerDemoSeedCommandService,
   registerRelativeReminderTimezoneRepository,
 } from '@/lib/settings/mode-route-services';
+import { executeCrossAccountTaskMove } from '@/lib/tasks/task-move-service';
+import { registerCrossAccountTaskMoveService } from '@/lib/tasks/cross-account-route-service';
 import { PostgresPersistenceBackend } from './postgres/runtime';
 import { resolveDatabaseBackend } from './runtime-backend';
 import {
@@ -618,6 +620,9 @@ async function registerStableRuntimeServices(): Promise<void> {
   assertCanRegisterSemanticPublicationService(semanticService);
   registerConnectorRuntimeRegistry();
   registerSemanticPublicationService(semanticService);
+  registerCrossAccountTaskMoveService({
+    execute: executeCrossAccountTaskMove,
+  });
 }
 
 async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean): Promise<void> {

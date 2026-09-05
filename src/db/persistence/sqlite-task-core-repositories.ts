@@ -2741,6 +2741,32 @@ class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveReposi
     return row ?? null;
   }
 
+  async findDefaultTargetList(
+    connectorInstanceId: string,
+  ): Promise<TaskMoveListRow | null> {
+    const projection = {
+      id: sourceLists.id,
+      name: sourceLists.name,
+      sourceId: sourceLists.sourceId,
+    };
+    const [defaultList] = await this.database.select(projection)
+      .from(sourceLists)
+      .where(and(
+        eq(sourceLists.connectorInstanceId, connectorInstanceId),
+        eq(sourceLists.wellKnownListName, 'defaultList'),
+      ))
+      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.id))
+      .limit(1);
+    if (defaultList) return defaultList;
+
+    const [firstList] = await this.database.select(projection)
+      .from(sourceLists)
+      .where(eq(sourceLists.connectorInstanceId, connectorInstanceId))
+      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.id))
+      .limit(1);
+    return firstList ?? null;
+  }
+
   async claimTaskMove(request: TaskMoveClaimRequest): Promise<boolean> {
     return this.runTransaction((tx) => {
       const result = tx.update(tasks).set({
@@ -2749,6 +2775,7 @@ class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveReposi
       }).where(and(
         eq(tasks.id, request.taskId),
         eq(tasks.sourceId, request.expectedSourceId),
+        eq(tasks.connectorInstanceId, request.expectedSourceConnectorInstanceId),
         eq(tasks.syncStatus, request.expectedSyncStatus),
       )).run();
       return result.changes === 1;

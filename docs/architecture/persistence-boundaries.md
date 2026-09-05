@@ -1933,6 +1933,41 @@ landed task quick-sort and L18 decrements, the graph moves from
 expansion adds 19 test-only paths to the approved 28-path maximum, for a
 47-path maximum and 46 actual changed paths.
 
+## Web/API PostgreSQL parity: connector transfer/sync control plane
+
+This bounded layer owns only the legacy
+`connectors/[id]/cross-account` transfer endpoint and
+`sync/tasks/resolve` identity lookup. Cross-account execution is selected by a
+process-wide, backend-neutral route service registered from the database
+composition root for both SQLite and PostgreSQL. The implementation verifies
+source-connector ownership, resolves an omitted destination through the
+task-core list repository, and delegates to the canonical write-through task
+move. It therefore inherits the existing optimistic claim fence, transfer
+identity, compensation, durable cleanup intent, replay handling, and remote-I/O
+ordering rather than recreating them in the route.
+
+Task identity resolution now uses the canonical connector/source identity
+lookup from task-core persistence. The shared SQLite and live-PostgreSQL
+contract also pins deterministic destination-list selection: prefer
+`defaultList`, then lowest `sortOrder`, then stable `id`. PostgreSQL startup and
+both routes have poisoned-SQLite proofs; there is no SQLite load, fallback,
+dual write, or backend probe in either request path.
+
+The cap is 42 changed paths: 9 production paths, 11 direct
+contract/route/runtime tests, 19 inherited exact-current graph expectation
+updates, 2 graph artifacts, and this architecture document. Retained-list
+purge, GitHub bulk transfer, sync cleanup, retained-resolution claims,
+Scout/triage, and webhook integration are explicitly excluded. Bulk transfer
+and retained resolution already use portable persistence and retain their
+existing Tier B classification.
+
+The exact graph moves from `266/110/5/151/80/30/81/57/0/167` to
+`266/108/5/153/78/30/79/57/0/165`, ordered as API routes / Tier A / Tier B /
+clean / direct taint / transitive-only taint / direct `@/db` / tainted
+libraries / tainted helpers / total migration units. Both owned routes move
+from Tier A directly to clean; Tier B and every library/helper set remain
+unchanged.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

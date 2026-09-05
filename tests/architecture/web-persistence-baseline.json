@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-05",
-  "generatedFromCommit": "4906f4718f2f3c0da54c22b3f051468ffd37d52b+notification-push",
+  "generatedFromCommit": "614715c62798562f6c69fe705bd3f53f82a9d47d+ai-search",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 92,
+    "tierARoutes": 91,
     "tierBRoutes": 5,
-    "cleanRoutes": 169,
-    "directTaintSourceRoutes": 62,
+    "cleanRoutes": 170,
+    "directTaintSourceRoutes": 61,
     "transitiveOnlyTaintSourceRoutes": 30,
-    "directDbNamespaceRoutes": 63,
-    "taintedLibA": 54,
+    "directDbNamespaceRoutes": 62,
+    "taintedLibA": 51,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 146
+    "totalMigrationUnits": 142
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -342,7 +342,6 @@
     "src/app/api/ai/infer-tags/route.ts",
     "src/app/api/ai/plan-day/route.ts",
     "src/app/api/ai/route.ts",
-    "src/app/api/ai/search/route.ts",
     "src/app/api/ai/smart-priority/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
@@ -445,6 +444,7 @@
     "src/app/api/ai/runs/[runId]/retry/route.ts",
     "src/app/api/ai/runs/[runId]/route.ts",
     "src/app/api/ai/runs/route.ts",
+    "src/app/api/ai/search/route.ts",
     "src/app/api/assets/thumbnails/[filename]/route.ts",
     "src/app/api/auth/microsoft/callback/route.ts",
     "src/app/api/auth/microsoft/connect/route.ts",
@@ -609,7 +609,6 @@
     "src/app/api/ai/context-tasks/route.ts",
     "src/app/api/ai/context-triage/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/search/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
     "src/app/api/bug-report/route.ts",
@@ -705,7 +704,6 @@
     "src/app/api/ai/context-tasks/route.ts",
     "src/app/api/ai/context-triage/route.ts",
     "src/app/api/ai/plan-day/route.ts",
-    "src/app/api/ai/search/route.ts",
     "src/app/api/ai/suggest-energy-tags/route.ts",
     "src/app/api/ai/suggest-focus/route.ts",
     "src/app/api/bug-report/route.ts",
@@ -810,9 +808,6 @@
     "src/lib/public-demo-runtime.ts",
     "src/lib/push/triggers.ts",
     "src/lib/reports/burn.ts",
-    "src/lib/search/embedding-request.ts",
-    "src/lib/search/index.ts",
-    "src/lib/search/semantic.ts",
     "src/lib/semantic-index/config.ts",
     "src/lib/semantic-index/index.ts",
     "src/lib/semantic-index/runtime.ts",
@@ -1810,6 +1805,37 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "The fail-closed PostgreSQL route sentinel moves the two push preference/scheduler routes from direct Tier A to clean and removes quiet-hours.ts plus scheduler.ts from taintedLibA. The exact graph is 266 routes, A92/B5/clean169, direct62/transitive30/directDB63, 54 tainted libraries, zero helpers, and 146 total migration units."
+    },
+    {
+      "layer": "ai-search",
+      "title": "AI search visibility PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 146,
+        "to": 142,
+        "delta": -4
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/search/embedding-request.ts",
+        "src/lib/search/index.ts",
+        "src/lib/search/semantic.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/ai/search/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/ai/search/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/ai/search/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/ai/search/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "The fail-closed PostgreSQL route sentinel confirms that AI search obtains the deterministic soft-deleted connector visibility set from the startup-selected core persistence composition before launching the unchanged concurrent search and status branches. SQLite and PostgreSQL implement the same narrow connector query; PostgreSQL cannot evaluate or fall back to SQLite. The async AI configuration and semantic query runtime remove embedding-request.ts, search/index.ts, and semantic.ts from Tier A without adding Tier B reach. Exact graph: 266 routes, A91/B5/clean170, direct61/transitive30/directDB62, 51 tainted libraries, zero helpers, and 142 total migration units."
     }
   ],
   "layerUpdates": [
@@ -1932,6 +1958,17 @@
         "Scheduler handler registration is process-wide, idempotent, cycle-safe, resettable in tests, and fail-closed; PostgreSQL startup does not import the excluded SQLite-backed trigger-delivery module.",
         "The reconciled change retains exactly 12 production paths and uses the canonical baseline plus fail-closed route sentinel as the sole exact-current graph gate."
       ]
+    },
+    {
+      "layer": "ai-search",
+      "summary": "Web/API PostgreSQL parity: AI search resolves soft-deleted connector visibility through the selected core persistence composition.",
+      "changes": [
+        "ConnectorRepository gains a narrow listDeletedIds query. SQLite orders IDs with COLLATE BINARY and PostgreSQL with COLLATE \"C\", preserving one deterministic privacy-filter input across both adapters.",
+        "The AI search route resolves that visibility set before launching its unchanged concurrent search and semantic-status branches. Status-only requests still bypass persistence and search, while visibility failures still prevent either branch from starting.",
+        "Embedding configuration now uses the async provider configuration service, while a startup-selected semantic query runtime supplies the active repository and embedding provider without a SQLite fallback.",
+        "The route leaves Tier A and becomes clean, removing one route and three search libraries from import-time taint without changing Tier B reach, ranking, provider selection, or publication and backfill behavior."
+      ],
+      "verification": "Exact computeWebPersistenceGraph recomputation removes the AI search route plus embedding-request.ts, search/index.ts, and semantic.ts from Tier A with no Tier B reclassification or newly tainted library. The composed graph is 266 routes, 91 Tier A, 5 Tier B, 170 clean, 61 direct, 30 transitive-only, 62 direct @/db, 51 tainted libraries, 0 tainted API helpers, and 142 total migration units."
     }
   ]
 }

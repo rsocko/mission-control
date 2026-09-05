@@ -4,6 +4,7 @@ import {
   type SearchIndexHarness,
 } from './harness';
 import { createSemanticTestDatabase } from '../semantic-index/harness';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 /**
  * Resolved-route identity behaviour for the embedding route (issue #1661),
@@ -26,69 +27,37 @@ import { createSemanticTestDatabase } from '../semantic-index/harness';
  * credentials — not the completion ones — are proven to be the ones used.
  */
 
-const CONTEXT = {
-  featureId: 'semantic-embedding' as const,
-  sensitivity: 'restricted' as const,
-  allowedRoutes: ['ollama'] as const,
-  correlationId: 'embedding-correlation',
-};
-
 const mocks = vi.hoisted(() => ({
-  runtime: null as unknown,
   semanticSearchEnabled: true,
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
-    // The completion route is deliberately different in every field, so any
-    // accidental use of it is visible rather than silently equivalent.
-    provider: 'openai',
-    model: 'gpt-4o-mini',
-    baseUrl: 'https://completion.example.test/v1',
-    apiKey: 'completion-secret',
-    configured: true,
-    embeddingProvider: 'bifrost',
-    embeddingModel: 'ollama/nomic-embed-text:latest',
-    embeddingBaseUrl: 'https://bifrost.example.test/v1',
-    embeddingApiKey: 'embedding-secret',
-    embeddingConfigured: true,
-    semanticSearchEnabled: mocks.semanticSearchEnabled,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      // The completion route is deliberately different in every field, so any
+      // accidental use of it is visible rather than silently equivalent.
+      provider: 'openai',
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://completion.example.test/v1',
+      apiKey: 'completion-secret',
+      configured: true,
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'ollama/nomic-embed-text:latest',
+      embeddingBaseUrl: 'https://bifrost.example.test/v1',
+      embeddingApiKey: 'embedding-secret',
+      embeddingConfigured: true,
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: ['bifrost-copilot', 'ollama'] },
+        restricted: { allowedRoutes: ['bifrost-copilot', 'ollama'] },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: {},
+    },
   }),
-}));
-
-vi.mock('@/lib/ai/provider-factory', async () => {
-  // The real route resolution is used: it is what turns a Bifrost proxy route
-  // plus response metadata into the provider/model that names a vector space.
-  const policy = await import('@/lib/ai/sensitivity-policy');
-  return {
-    AIRoutingDeniedError: policy.AIRoutingDeniedError,
-    getAIRequestContext: vi.fn(() => CONTEXT),
-    getAIRoutingHeaders: vi.fn(() => ({
-      'x-mc-ai-feature-id': CONTEXT.featureId,
-      'x-mc-ai-sensitivity': CONTEXT.sensitivity,
-      'x-mc-ai-allowed-routes': CONTEXT.allowedRoutes.join(','),
-      'x-mc-correlation-id': CONTEXT.correlationId,
-    })),
-    getAIRouteOutcome: vi.fn((
-      context: Parameters<typeof policy.resolveAIRouteOutcome>[0],
-      response: { modelId: string; headers?: Record<string, string> },
-      metadata?: Parameters<typeof policy.resolveAIRouteOutcome>[4],
-      configured?: { provider: string; model: string },
-    ) => policy.resolveAIRouteOutcome(
-      context,
-      configured?.provider ?? 'bifrost',
-      configured?.model ?? response.modelId,
-      response.headers,
-      metadata,
-    )),
-  };
-});
-
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  getSemanticIndexRuntime: async () => mocks.runtime,
-  scheduleSemanticBackfill: vi.fn(),
-  publishSemanticUpsert: vi.fn(),
-  publishSemanticDelete: vi.fn(),
 }));
 
 const RESOLVED_PROVIDER = 'ollama';
@@ -143,12 +112,14 @@ describe('resolved-route identity provisioning', () => {
   let index: Awaited<ReturnType<typeof createIndexService>>;
 
   beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.restoreAllMocks();
     mocks.semanticSearchEnabled = true;
     index = await createIndexService();
   });
 
   afterEach(() => {
+    resetProcessRuntimeRegistries();
     index.close();
   });
 
@@ -239,20 +210,24 @@ describe('embedding operational status and query cache across a cutover', () => 
   let semantic: typeof import('@/lib/search/semantic');
 
   beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.resetModules();
     vi.restoreAllMocks();
     mocks.semanticSearchEnabled = true;
     harness = createSearchIndexHarness();
-    mocks.runtime = {
-      repository: harness.repository,
-      embeddings: harness.embeddings,
-      config: {},
-    };
     semantic = await import('@/lib/search/semantic');
+    semantic.registerSemanticSearchRuntime({
+      resolve: async () => ({
+        repository: harness.repository,
+        embeddings: harness.embeddings,
+      }),
+      scheduleBackfill: vi.fn(),
+    });
     semantic.resetSemanticSearchStateForTests();
   });
 
   afterEach(() => {
+    resetProcessRuntimeRegistries();
     harness.close();
   });
 

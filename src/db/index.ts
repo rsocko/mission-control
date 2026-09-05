@@ -21,6 +21,11 @@ import {
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
+import type { SemanticSearchRuntime } from '@/lib/search/semantic';
+import {
+  getSemanticIndexRuntime,
+  scheduleSemanticBackfill,
+} from '@/lib/semantic-index/runtime';
 
 // Keep connection creation lazy so Next.js build workers do not race to open
 // the database during static analysis.
@@ -43,6 +48,7 @@ type SqliteCompositionModules = {
   taskCoreRuntime: typeof import('@/lib/tasks/core/runtime');
   taskCorePersistence:
     typeof import('./persistence/sqlite-task-core-repositories').sqliteTaskCorePersistence;
+  semanticSearch: typeof import('@/lib/search/semantic');
 };
 let sqliteCompositionModules: SqliteCompositionModules | null = null;
 let sqliteCompositionModulesPromise: Promise<SqliteCompositionModules> | null = null;
@@ -50,6 +56,15 @@ let sqliteCompositionPromise: Promise<void> | null = null;
 let sqliteCompositionShutdownPromise: Promise<void> | null = null;
 let sqliteCompositionState: 'cold' | 'initializing' | 'active' | 'stopping' | 'stopped' = 'cold';
 const databaseTelemetry = new DatabaseTelemetryCollector();
+const sqliteSemanticSearchRuntime: SemanticSearchRuntime = {
+  async resolve() {
+    const { repository, embeddings } = await getSemanticIndexRuntime();
+    return { repository, embeddings };
+  },
+  async scheduleBackfill() {
+    return scheduleSemanticBackfill();
+  },
+};
 
 function resetPartialDatabaseInitialization(): void {
   try {
@@ -89,6 +104,7 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     import('@/lib/triage/persistence'),
     import('@/lib/tasks/core/runtime'),
     import('./persistence/sqlite-task-core-repositories'),
+    import('@/lib/search/semantic'),
   ]).then(([
     core,
     workerRuntime,
@@ -97,6 +113,7 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     triageRuntime,
     taskCoreRuntime,
     taskCorePersistence,
+    semanticSearch,
   ]) => ({
     createCoreRepositories: core.createSqliteCorePersistenceRepositories,
     workerRuntime,
@@ -105,6 +122,7 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     triageRuntime,
     taskCoreRuntime,
     taskCorePersistence: taskCorePersistence.sqliteTaskCorePersistence,
+    semanticSearch,
   }));
   sqliteCompositionModulesPromise = pending;
   try {
@@ -166,6 +184,9 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     );
   }
   modules.workerRuntime.assertCanRegisterSqliteWorkerRuntimeServices();
+  modules.semanticSearch.assertCanRegisterSemanticSearchRuntime(
+    sqliteSemanticSearchRuntime,
+  );
 
   try {
     modules.coreRuntime.registerCorePersistenceRepositories(composition.coreRepositories);
@@ -180,8 +201,10 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     }
     modules.workerRuntime.registerSqliteWorkerRuntimeServices();
     modules.taskCoreRuntime.registerTaskCorePersistence(composition.taskCorePersistence);
+    modules.semanticSearch.registerSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     sqliteCompositionState = 'active';
   } catch (error) {
+    modules.semanticSearch.clearSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     modules.taskCoreRuntime.clearSelectedTaskCorePersistence(
       composition.taskCorePersistence,
     );
@@ -293,6 +316,9 @@ export function shutdownSqlitePersistenceComposition(): Promise<void> {
       );
       sqliteCompositionModules.taskCoreRuntime.clearSelectedTaskCorePersistence(
         sqliteComposition.taskCorePersistence,
+      );
+      sqliteCompositionModules.semanticSearch.clearSemanticSearchRuntime(
+        sqliteSemanticSearchRuntime,
       );
     }
     sqliteCompositionState = 'stopped';

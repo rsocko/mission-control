@@ -37,6 +37,12 @@ export interface ConnectorTestResultCommand {
 export interface ConnectorRepository {
   get(id: string): Promise<ConnectorConfig | null>;
   listEnabled(): Promise<ConnectorConfig[]>;
+  /**
+   * Returns every soft-deleted connector ID in deterministic binary order.
+   * Optional only for legacy test compositions; route consumers must fail closed
+   * unless the selected backend implements `ConnectorDeletedIdsRepository`.
+   */
+  listDeletedIds?(): Promise<string[]>;
   upsert(connector: ConnectorConfig): Promise<ConnectorConfig>;
   /**
    * Records the outcome of a manual connection test so the settings connection
@@ -67,6 +73,10 @@ export interface ConnectorRepository {
     key: string,
     patch: Partial<T>,
   ): Promise<ConnectorSettingsStatePatchResult<T>>;
+}
+
+export interface ConnectorDeletedIdsRepository extends ConnectorRepository {
+  listDeletedIds(): Promise<string[]>;
 }
 
 export interface NotificationRepository {

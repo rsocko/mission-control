@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 /**
  * Semantic embedding performance and shared-infrastructure tests.
@@ -18,42 +19,33 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   scheduleSemanticBackfill: vi.fn(),
+  semanticSearchEnabled: true,
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: vi.fn().mockReturnValue({
-    provider: 'ollama',
-    configured: true,
-    baseUrl: 'http://localhost:11434/v1',
-    apiKey: undefined,
-    embeddingModel: 'nomic-embed-text',
-    semanticSearchEnabled: true,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'ollama',
+      configured: true,
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: undefined,
+      embeddingProvider: 'ollama',
+      embeddingModel: 'nomic-embed-text',
+      embeddingBaseUrl: 'http://localhost:11434/v1',
+      embeddingConfigured: true,
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+      houstonMemoryEnabled: false,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: ['ollama'] },
+        restricted: { allowedRoutes: ['ollama'] },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: { rymessage: 'local-only' },
+    },
   }),
-}));
-
-vi.mock('@/lib/ai/provider-factory', () => ({
-  AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
-  getAIRequestContext: vi.fn(() => ({
-    featureId: 'semantic-embedding',
-    sensitivity: 'restricted',
-    allowedRoutes: ['ollama'],
-    correlationId: 'test-correlation',
-  })),
-  getAIRoutingHeaders: vi.fn(() => ({})),
-  getAIRouteOutcome: vi.fn(() => ({
-    provider: 'ollama',
-    model: 'nomic-embed-text',
-    fallbackOccurred: false,
-  })),
-}));
-
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  getSemanticIndexRuntime: vi.fn(async () => {
-    throw new Error('the semantic index runtime must not be touched by these tests');
-  }),
-  scheduleSemanticBackfill: mocks.scheduleSemanticBackfill,
-  publishSemanticUpsert: vi.fn(),
-  publishSemanticDelete: vi.fn(),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -69,11 +61,20 @@ function fakeEmbedding(seed = 0): number[] {
 }
 
 describe('Semantic search — unit tests (mocked)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.restoreAllMocks();
     mocks.scheduleSemanticBackfill.mockReset();
+    mocks.semanticSearchEnabled = true;
     vi.stubEnv('MC_EMBEDDING_REQUEST_MAX_RETRIES', '2');
     vi.stubEnv('MC_EMBEDDING_REQUEST_RETRY_BASE_MS', '1');
+    const semantic = await import('@/lib/search/semantic');
+    semantic.registerSemanticSearchRuntime({
+      resolve: async () => {
+        throw new Error('the semantic index runtime must not be touched by these tests');
+      },
+      scheduleBackfill: mocks.scheduleSemanticBackfill,
+    });
   });
 
   it('generateEmbedding calls Ollama with correct payload', async () => {
@@ -122,22 +123,7 @@ describe('Semantic search — unit tests (mocked)', () => {
   });
 
   it('keeps shared embedding infrastructure available when search enrichment is disabled', async () => {
-    const ai = await import('@/lib/ai/config-resolver');
-    vi.mocked(ai.getResolvedAIConfig).mockReturnValueOnce({
-      provider: 'ollama',
-      configured: true,
-      baseUrl: 'http://localhost:11434/v1',
-      apiKey: undefined,
-      model: 'llama3.1:8b',
-      embeddingProvider: 'ollama',
-      embeddingModel: 'nomic-embed-text',
-      embeddingBaseUrl: 'http://localhost:11434/v1',
-      embeddingApiKey: undefined,
-      embeddingConfigured: true,
-      semanticSearchEnabled: false,
-      houstonMemoryEnabled: false,
-      houstonMemoryRetentionDays: 90,
-    });
+    mocks.semanticSearchEnabled = false;
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding(7) }] }), {
         status: 200,
@@ -153,15 +139,15 @@ describe('Semantic search — unit tests (mocked)', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding() }] }), { status: 200 }),
     );
-    const ai = await import('@/lib/ai/provider-factory');
     const { generateEmbedding } = await import('@/lib/search/semantic');
 
     await generateEmbedding('private message', { sources: ['rymessage'] });
 
-    expect(ai.getAIRequestContext).toHaveBeenCalledWith(
-      'semantic-embedding',
-      { sources: ['rymessage'] },
-    );
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][1]?.headers).toMatchObject({
+      'x-mc-ai-feature-id': 'semantic-embedding',
+      'x-mc-ai-sensitivity': 'local-only',
+      'x-mc-ai-allowed-routes': 'ollama',
+    });
   });
 
   it('cosine similarity computation is fast for 1000 items', () => {

@@ -39,10 +39,14 @@
  * implementation.
  */
 
-import { AIRoutingDeniedError } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
+import { AIRoutingDeniedError } from '@/lib/ai/sensitivity-policy';
 import { aiLogger, semanticIndexLogger } from '@/lib/logger';
-import { isSemanticIndexEnabled } from '@/lib/semantic-index/config';
+import {
+  assertPersistenceCompositionAccessAllowed,
+  assertPersistenceCompositionPublicationAllowed,
+} from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import type {
   SemanticDocumentMetadataValue,
@@ -57,6 +61,7 @@ import type {
   SemanticQueryResult,
   SemanticQueryScan,
   SemanticRunProgress,
+  SemanticRunStatus,
   SemanticScanCapability,
   SemanticVectorRecord,
 } from '@/lib/semantic-index/contracts';
@@ -65,20 +70,74 @@ import type {
   SemanticEmbeddingRoute,
 } from '@/lib/semantic-index/embedding-provider';
 import {
-  getSemanticIndexRuntime,
-  scheduleSemanticBackfill,
-  type SemanticBackfillSchedule,
-} from '@/lib/semantic-index/runtime';
-import {
   getConfiguredEmbeddingRoute,
   getEmbeddingConfig,
   requestEmbeddingWithRetries,
   type EmbeddingConfig,
 } from './embedding-request';
-import type { SearchResult } from './fts';
+import { searchFTS, type SearchResult } from './fts';
+import { fuseHybridResults } from './hybrid-ranking';
 import { QueryEmbeddingCache } from './query-embedding-cache';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
+type SearchMode = 'keyword' | 'semantic' | 'hybrid';
+
+export interface SemanticBackfillSchedule {
+  status: 'scheduled' | 'existing' | 'skipped';
+  reason?: string;
+  indexId?: string;
+  runId?: string;
+  runStatus?: SemanticRunStatus;
+}
+
+export interface SemanticSearchRuntime {
+  resolve(): Promise<{
+    repository: SemanticIndexRepository;
+    embeddings: SemanticEmbeddingProvider;
+  }>;
+  scheduleBackfill(): Promise<SemanticBackfillSchedule>;
+}
+
+interface SemanticSearchRuntimeRegistry {
+  selected: SemanticSearchRuntime | null;
+}
+
+const SEMANTIC_SEARCH_RUNTIME_KEY = 'mission-control.semantic-search-runtime';
+const SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION = 1;
+
+function semanticSearchRuntimeRegistry(): SemanticSearchRuntimeRegistry {
+  return getProcessRuntimeSlot(
+    SEMANTIC_SEARCH_RUNTIME_KEY,
+    SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION,
+    () => ({ selected: null }),
+  );
+}
+
+export function registerSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertCanRegisterSemanticSearchRuntime(runtime);
+  semanticSearchRuntimeRegistry().selected = runtime;
+}
+
+export function assertCanRegisterSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = semanticSearchRuntimeRegistry().selected;
+  if (selected && selected !== runtime) {
+    throw new Error('Semantic search runtime is already selected');
+  }
+}
+
+export function clearSemanticSearchRuntime(expected?: SemanticSearchRuntime): void {
+  const registry = semanticSearchRuntimeRegistry();
+  if (expected && registry.selected !== expected) return;
+  registry.selected = null;
+}
+
+export function getSemanticSearchRuntime(): SemanticSearchRuntime {
+  assertPersistenceCompositionAccessAllowed();
+  const runtime = semanticSearchRuntimeRegistry().selected;
+  if (!runtime) throw new Error('Semantic search runtime has not been registered');
+  return runtime;
+}
 
 interface SearchFilters {
   source?: string;
@@ -88,6 +147,23 @@ interface SearchFilters {
   excludeConnectorInstanceIds?: string[];
 }
 
+type SearchOptions = SearchFilters & {
+  type?: SearchScope;
+  mode?: SearchMode;
+  limit?: number;
+};
+
+export interface SearchBranchTiming {
+  status: 'completed';
+  durationMs: number;
+  resultCount: number;
+}
+
+export interface SearchExecution {
+  results: SearchResult[];
+  branches: Partial<Record<'keyword' | 'semantic' | 'fusion', SearchBranchTiming>>;
+}
+
 function positiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -95,6 +171,129 @@ function positiveInteger(value: string | undefined, fallback: number) {
 
 function normalizeLimit(limit = 20) {
   return Math.max(1, Math.min(limit, 50));
+}
+
+export async function search(
+  query: string,
+  options: SearchOptions = {},
+): Promise<SearchResult[]> {
+  return (await searchWithBranches(query, options)).results;
+}
+
+export async function searchWithBranches(
+  query: string,
+  options: SearchOptions = {},
+): Promise<SearchExecution> {
+  return executeSearchWithBranches(query, options, semanticSearch);
+}
+
+export async function executeSearchWithBranches(
+  query: string,
+  options: SearchOptions,
+  searchSemantic: typeof semanticSearch,
+): Promise<SearchExecution> {
+  const normalizedQuery = query.trim();
+  if (!normalizedQuery) {
+    return { results: [], branches: {} };
+  }
+
+  const type = options.type ?? 'all';
+  const mode = options.mode ?? 'hybrid';
+  const limit = normalizeLimit(options.limit);
+  const branchLimit = Math.max(limit * 2, limit);
+  const filters: SearchFilters = {
+    source: options.source,
+    status: options.status,
+    excludeDone: options.excludeDone,
+    universeEligible: options.universeEligible,
+    excludeConnectorInstanceIds: options.excludeConnectorInstanceIds,
+  };
+  if (mode === 'keyword') {
+    const startedAt = performance.now();
+    const results = await searchFTS(normalizedQuery, { type, limit, ...filters });
+    return {
+      results,
+      branches: {
+        keyword: {
+          status: 'completed',
+          durationMs: Math.round(performance.now() - startedAt),
+          resultCount: results.length,
+        },
+      },
+    };
+  }
+
+  if (mode === 'semantic') {
+    const startedAt = performance.now();
+    const results = await searchSemantic(normalizedQuery, { type, limit, ...filters });
+    return {
+      results,
+      branches: {
+        semantic: {
+          status: 'completed',
+          durationMs: Math.round(performance.now() - startedAt),
+          resultCount: results.length,
+        },
+      },
+    };
+  }
+
+  const channelScopes: SearchScope[] = type === 'all'
+    ? ['tasks', 'notifications']
+    : [type];
+  const [keywordBranch, semanticBranch] = await Promise.all([
+    timeSearchBranch(async () => (
+      await Promise.all(channelScopes.map((scope) => searchFTS(normalizedQuery, {
+        type: scope,
+        limit: branchLimit,
+        ...filters,
+      })))
+    ).flat()),
+    timeSearchBranch(async () => (
+      await Promise.all(channelScopes.map((scope) => searchSemantic(normalizedQuery, {
+        type: scope,
+        limit: branchLimit,
+        ...filters,
+      })))
+    ).flat()),
+  ]);
+
+  const fusionStartedAt = performance.now();
+  const results = fuseHybridResults(
+    normalizedQuery,
+    keywordBranch.results,
+    semanticBranch.results,
+    {
+      limit,
+      perKindLimit: type === 'all' ? Math.max(1, Math.ceil(limit * 0.75)) : limit,
+    },
+  );
+  const fusionDurationMs = performance.now() - fusionStartedAt;
+  return {
+    results,
+    branches: {
+      keyword: keywordBranch.timing,
+      semantic: semanticBranch.timing,
+      fusion: {
+        status: 'completed',
+        durationMs: Number(fusionDurationMs.toFixed(3)),
+        resultCount: results.length,
+      },
+    },
+  };
+}
+
+async function timeSearchBranch(load: () => Promise<SearchResult[]>) {
+  const startedAt = performance.now();
+  const results = await load();
+  return {
+    results,
+    timing: {
+      status: 'completed' as const,
+      durationMs: Math.round(performance.now() - startedAt),
+      resultCount: results.length,
+    },
+  };
 }
 
 function truncate(text: string | null | undefined, max = 160) {
@@ -221,7 +420,7 @@ async function readActiveEmbeddingIdentity(
 ): Promise<SemanticIndexIdentity | null> {
   try {
     const route = getConfiguredEmbeddingRoute(config);
-    const { repository } = await getSemanticIndexRuntime();
+    const { repository } = await getSemanticSearchRuntime().resolve();
     const identity = await repository.getActiveIdentity();
     if (!identity) return null;
     return routeMatchesIdentity(identity, route) ? identity : null;
@@ -242,7 +441,7 @@ async function readActiveEmbeddingIdentity(
  * Never returns credentials, endpoints, or content.
  */
 export async function getEmbeddingOperationalStatus(): Promise<EmbeddingOperationalStatus> {
-  const resolved = getResolvedAIConfig();
+  const { resolved } = await loadAIProviderConfiguration();
   const configuredFallback: EmbeddingRouteIdentity = {
     provider: resolved.embeddingProvider ?? resolved.provider,
     model: resolved.embeddingModel,
@@ -507,7 +706,8 @@ function statusResult(
  * never returns content, query text, vectors, or credentials.
  */
 export async function getSemanticSearchStatus(): Promise<SemanticSearchStatus> {
-  if (!getResolvedAIConfig().semanticSearchEnabled) {
+  const { resolved } = await loadAIProviderConfiguration();
+  if (!resolved.semanticSearchEnabled) {
     return statusResult(
       'disabled',
       'Semantic search enrichment is turned off in AI settings.',
@@ -527,8 +727,29 @@ export async function getSemanticSearchStatus(): Promise<SemanticSearchStatus> {
   }
 }
 
+export async function getSearchStatus(mode: SearchMode = 'hybrid') {
+  if (mode === 'keyword') {
+    return {
+      available: true,
+      enabled: false,
+      state: 'not-requested' as const,
+      note: null,
+      semanticMetrics: null,
+    };
+  }
+
+  const status = await getSemanticSearchStatus();
+  return {
+    available: status.available,
+    enabled: status.state !== 'disabled',
+    state: status.state,
+    note: status.note,
+    semanticMetrics: getSemanticSearchMetrics(),
+  };
+}
+
 async function readSemanticSearchStatus(): Promise<SemanticSearchStatus> {
-  const { repository, embeddings } = await getSemanticIndexRuntime();
+  const { repository, embeddings } = await getSemanticSearchRuntime().resolve();
   const resolution = await embeddings.resolveRoute('standard');
   const route = resolution.status === 'ok' ? resolution.route : null;
 
@@ -688,12 +909,22 @@ function unavailable(state: Exclude<SemanticSearchState, 'ready' | 'degraded'>):
  * against a foreign one.
  */
 async function resolveRetrievalContext(): Promise<RetrievalContext> {
-  if (!isSemanticIndexEnabled()) return unavailable('disabled');
+  if (/^(1|true|yes|on)$/i.test(process.env.MC_SEMANTIC_INDEX_WORKER_DISABLED?.trim() ?? '')) {
+    return unavailable('disabled');
+  }
+  try {
+    const { resolved } = await loadAIProviderConfiguration();
+    if (!resolved.semanticSearchEnabled && !resolved.houstonMemoryEnabled) {
+      return unavailable('disabled');
+    }
+  } catch {
+    return unavailable('disabled');
+  }
 
   let repository: SemanticIndexRepository;
   let embeddings: SemanticEmbeddingProvider;
   try {
-    ({ repository, embeddings } = await getSemanticIndexRuntime());
+    ({ repository, embeddings } = await getSemanticSearchRuntime().resolve());
   } catch (error) {
     recordRetrievalFailure('runtime', error);
     return unavailable('unconfigured');
@@ -1111,5 +1342,5 @@ export async function findSimilarTaskEmbeddings(
  * checkpointed slices.
  */
 export async function rebuildEmbeddingIndex(): Promise<SemanticBackfillSchedule> {
-  return scheduleSemanticBackfill();
+  return getSemanticSearchRuntime().scheduleBackfill();
 }

@@ -4,26 +4,23 @@ import {
   rebuildSearchIndex,
   removeAlertFromIndex,
   removeTaskFromIndex,
-  searchFTS,
   warmUpFTS,
-  type SearchResult,
   type SearchableNotificationRecord,
   type SearchableTaskRecord,
 } from './fts';
 import {
-  getSemanticSearchMetrics,
-  getSemanticSearchStatus,
+  getSearchStatus,
   rebuildEmbeddingIndex,
-  semanticSearch,
+  search,
+  searchWithBranches,
+  type SearchBranchTiming,
+  type SearchExecution,
 } from './semantic';
 import {
   publishSemanticEntityDelete,
   publishSemanticEntityUpsert,
-} from '@/lib/semantic-index/publication';
-import { fuseHybridResults } from './hybrid-ranking';
+} from '@/lib/semantic-index/publication-service';
 
-type SearchScope = 'tasks' | 'notifications' | 'all';
-type SearchMode = 'keyword' | 'semantic' | 'hybrid';
 export interface SearchFilters {
   source?: string;
   status?: string;
@@ -32,159 +29,8 @@ export interface SearchFilters {
   excludeConnectorInstanceIds?: string[];
 }
 
-type SearchOptions = SearchFilters & {
-  type?: SearchScope;
-  mode?: SearchMode;
-  limit?: number;
-};
-
-export interface SearchBranchTiming {
-  status: 'completed';
-  durationMs: number;
-  resultCount: number;
-}
-
-export interface SearchExecution {
-  results: SearchResult[];
-  branches: Partial<Record<'keyword' | 'semantic' | 'fusion', SearchBranchTiming>>;
-}
-
-function normalizeLimit(limit = 20) {
-  return Math.max(1, Math.min(limit, 50));
-}
-
-export async function search(
-  query: string,
-  options: SearchOptions = {},
-): Promise<SearchResult[]> {
-  return (await searchWithBranches(query, options)).results;
-}
-
-export async function searchWithBranches(
-  query: string,
-  options: SearchOptions = {},
-): Promise<SearchExecution> {
-  const normalizedQuery = query.trim();
-  if (!normalizedQuery) {
-    return { results: [], branches: {} };
-  }
-
-  const type = options.type ?? 'all';
-  const mode = options.mode ?? 'hybrid';
-  const limit = normalizeLimit(options.limit);
-  const branchLimit = Math.max(limit * 2, limit);
-  const filters: SearchFilters = {
-    source: options.source,
-    status: options.status,
-    excludeDone: options.excludeDone,
-    universeEligible: options.universeEligible,
-    excludeConnectorInstanceIds: options.excludeConnectorInstanceIds,
-  };
-  if (mode === 'keyword') {
-    const startedAt = performance.now();
-    const results = await searchFTS(normalizedQuery, { type, limit, ...filters });
-    return {
-      results,
-      branches: {
-        keyword: {
-          status: 'completed',
-          durationMs: Math.round(performance.now() - startedAt),
-          resultCount: results.length,
-        },
-      },
-    };
-  }
-
-  if (mode === 'semantic') {
-    const startedAt = performance.now();
-    const results = await semanticSearch(normalizedQuery, { type, limit, ...filters });
-    return {
-      results,
-      branches: {
-        semantic: {
-          status: 'completed',
-          durationMs: Math.round(performance.now() - startedAt),
-          resultCount: results.length,
-        },
-      },
-    };
-  }
-
-  const channelScopes: SearchScope[] = type === 'all'
-    ? ['tasks', 'notifications']
-    : [type];
-  const [keywordBranch, semanticBranch] = await Promise.all([
-    timeSearchBranch(async () => (
-      await Promise.all(channelScopes.map((scope) => searchFTS(normalizedQuery, {
-        type: scope,
-        limit: branchLimit,
-        ...filters,
-      })))
-    ).flat()),
-    timeSearchBranch(async () => (
-      await Promise.all(channelScopes.map((scope) => semanticSearch(normalizedQuery, {
-        type: scope,
-        limit: branchLimit,
-        ...filters,
-      })))
-    ).flat()),
-  ]);
-  const ftsResults = keywordBranch.results;
-  const semanticResults = semanticBranch.results;
-
-  const fusionStartedAt = performance.now();
-  const results = fuseHybridResults(normalizedQuery, ftsResults, semanticResults, {
-    limit,
-    perKindLimit: type === 'all' ? Math.max(1, Math.ceil(limit * 0.75)) : limit,
-  });
-  const fusionDurationMs = performance.now() - fusionStartedAt;
-  return {
-    results,
-    branches: {
-      keyword: keywordBranch.timing,
-      semantic: semanticBranch.timing,
-      fusion: {
-        status: 'completed',
-        durationMs: Number(fusionDurationMs.toFixed(3)),
-        resultCount: results.length,
-      },
-    },
-  };
-}
-
-async function timeSearchBranch(load: () => Promise<SearchResult[]>) {
-  const startedAt = performance.now();
-  const results = await load();
-  return {
-    results,
-    timing: {
-      status: 'completed' as const,
-      durationMs: Math.round(performance.now() - startedAt),
-      resultCount: results.length,
-    },
-  };
-}
-
-export async function getSearchStatus(mode: SearchMode = 'hybrid') {
-  if (mode === 'keyword') {
-    return {
-      available: true,
-      enabled: false,
-      state: 'not-requested' as const,
-      note: null,
-      semanticMetrics: null,
-    };
-  }
-
-  const status = await getSemanticSearchStatus();
-  return {
-    available: status.available,
-    enabled: status.state !== 'disabled',
-    state: status.state,
-    note: status.note,
-    semanticMetrics: getSemanticSearchMetrics(),
-  };
-}
+export { getSearchStatus, search, searchWithBranches };
+export type { SearchBranchTiming, SearchExecution };
 
 /**
  * Publishes a semantic intent for an entity whose authoritative write already

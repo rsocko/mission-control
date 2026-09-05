@@ -704,10 +704,11 @@ display names.
 ### The contract
 
 `src/lib/tasks/core/contracts.ts` defines `TaskCorePersistence`, now a composition
-of fifteen narrowly-named repositories (`collections`, `details`, `creates`,
-`mutations`, `removals`, `filterInputs`, `queries`, `policyIdentities`,
-`lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`, `priorityEntities`,
-`sourceListNames`, `transferIdentity`). It is deliberately **not** a generic
+of eighteen narrowly-named repositories (`collections`, `details`, `creates`,
+`mutations`, `removals`, `taskReads`, `filterInputs`, `queries`,
+`policyIdentities`, `lifecycle`, `scoutDeletion`, `moves`, `writeThroughMoves`,
+`priorityEntities`, `sourceListNames`, `transferIdentity`, `quickSort`,
+`ancillary`). It is deliberately **not** a generic
 table/dialect query API, and it has no "run this callback in a transaction"
 escape hatch: the inputs are domain values (`TaskFilterSpec`, `TaskListPage`,
 `PendingSyncTaskMoveRequest`, `TaskMoveDestinationMaterialization`,
@@ -2113,6 +2114,66 @@ raw SQLite handle at all.
   eleven routes — including the unauthenticated-mutation rejections, the
   signature failures, the duplicate-delivery short circuit, and the
   connector-status gates.
+
+## Web/API PostgreSQL parity: task ancillary lifecycle persistence
+
+The bounded ancillary layer adds one `TaskCorePersistence.ancillary` repository
+to the existing atomic task-core composition. It owns persistence for exactly
+five routes:
+
+- `/api/tasks/[id]/attachments`;
+- `/api/tasks/[id]/copy`;
+- `/api/tasks/[id]/promote`;
+- `/api/tasks/[id]/subtasks`; and
+- `/api/tasks/[id]/tags`.
+
+Both task-core adapters construct the capability in the same composition step;
+there is no ancillary registry, per-route backend choice, SQLite fallback, or
+direct database import in any owned route. AI breakdown and move preview/execute
+remain excluded: breakdown has separate AI ownership, while move behavior
+continues to use the landed task-core move and transfer-identity contracts.
+
+The repository preserves the route contracts rather than absorbing caller
+policy. Authorization, connector construction, network calls, rule evaluation,
+field policy, and source write-back remain route-side. Adapter operations own
+only durable state:
+
+- attachment reads preserve stable created-at/id ordering and exact metadata;
+  stored binary, empty-text, and null content remain distinguishable;
+- attachment deletion performs the remote delete first, then a guarded local
+  delete against the observed source attachment identity;
+- copy snapshots and writes the task graph atomically, preserves deterministic
+  tag/project/subtask ordering, and makes replay of the caller-supplied copy ID
+  idempotent;
+- promotion compares the expected task revision, parent, and checklist state,
+  so stale or concurrent promotion cannot succeed twice;
+- accepted subtask proposals compare the complete ordered snapshot, while
+  direct write-through subtasks persist local intent before source creation and
+  settle that exact intent afterward;
+- tag mutation normalizes duplicate slugs, serializes with proposal acceptance,
+  and commits the local mutation before asynchronous source write-back.
+
+PostgreSQL uses transactions, row locks, and shared advisory-lock namespaces for
+copy replay and concurrent proposal/tag mutation. SQLite uses the existing
+task-core transaction runner. Failure rolls back the complete adapter operation
+on both backends; stale CAS outcomes and existing route errors are preserved
+instead of being inferred from backend messages.
+
+After the L20 webhook decrement landed on `main`, the authoritative sentinel
+transition for this layer is
+`266/A99/B5/clean162/direct69/transitive30/directDB70/lib56/helpers0/units155`
+to
+`266/A94/B5/clean167/direct64/transitive30/directDB65/lib56/helpers0/units150`.
+All five owned routes move directly from Tier A to clean, Tier B and library
+taint remain unchanged, and `web-persistence-baseline.json` plus the fail-closed
+PostgreSQL route sentinel are the sole exact-current graph gate.
+
+The reconciled change keeps exactly eight production paths: the existing
+task-core contract, two adapters/composition files, and five routes. Shared
+SQLite/live-PostgreSQL contracts cover rollback, stale revision rejection,
+concurrent proposal/tag mutation, copy idempotency, attachment
+binary/text/empty/null behavior, and deterministic ordering. Live-PostgreSQL
+route coverage poisons SQLite loading for all five routes.
 
 ## Backend-specific exceptions
 

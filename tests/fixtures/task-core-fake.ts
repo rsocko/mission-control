@@ -6,6 +6,7 @@ import type {
   TaskMutationRepository,
   TaskRemovalRepository,
   TaskReadRepository,
+  TaskAncillaryRepository,
 } from '@/lib/tasks/core/contracts';
 import {
   clearTaskCorePersistence,
@@ -31,6 +32,7 @@ export interface FakeTaskCoreInputs {
   creates?: Partial<TaskCreateRepository>;
   mutations?: Partial<TaskMutationRepository>;
   removals?: Partial<TaskRemovalRepository>;
+  ancillary?: Partial<TaskAncillaryRepository>;
 }
 
 export function createFakeTaskReadRepository(
@@ -111,6 +113,25 @@ export function registerFakeTaskCorePersistence(
       applyTaskRemoval: async () => ({ kind: 'not-found' }),
       finalizeRemoteTaskRemoval: async () => ({ kind: 'not-found' }),
       ...inputs.removals,
+    },
+    ancillary: {
+      getTask: async () => null,
+      getAttachmentListContext: async () => ({ task: null, attachments: [] }),
+      getAttachmentDeleteContext: async () => ({ task: null, attachment: null }),
+      insertAttachment: async () => ({ kind: 'task-not-found' }),
+      deleteAttachment: async () => false,
+      copyTask: async () => ({ kind: 'task-not-found' }),
+      promoteSubtask: async () => ({ kind: 'not-found' }),
+      listSubtasks: async () => [],
+      getSubtaskProposalSnapshot: async () => null,
+      createSubtask: async () => ({ kind: 'parent-not-found' }),
+      acceptSubtaskProposal: async () => ({ kind: 'stale' }),
+      completeSubtaskWriteThrough: async () => false,
+      failSubtaskWriteThrough: async () => false,
+      getTagMutationContext: async () => ({ task: null, storedCapabilities: {} }),
+      addTaskTags: async () => ({ addedTags: [], rejectedTags: [] }),
+      removeTaskTag: async () => ({ removed: false, tagName: null }),
+      ...inputs.ancillary,
     },
     taskReads: createFakeTaskReadRepository(inputs.taskReads),
     filterInputs: {

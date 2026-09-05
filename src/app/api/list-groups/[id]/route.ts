@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { listGroups, sourceLists } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { validateNameForGraphApi } from '@/lib/validation/emoji-safety';
 import { ApiErrors } from '@/lib/api-error';
+import {
+  deleteListGroup,
+  updateListGroup,
+} from '@/lib/list-groups/service';
 
 export async function PATCH(
   request: Request,
@@ -13,7 +14,7 @@ export async function PATCH(
 
   try {
     const body = await request.json();
-    const updates: Record<string, string | number | null> = {};
+    const updates: Parameters<typeof updateListGroup>[1] = {};
 
     if ('name' in body) {
       const name = typeof body.name === 'string' ? body.name.trim() : '';
@@ -54,7 +55,7 @@ export async function PATCH(
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
 
-    await db.update(listGroups).set(updates).where(eq(listGroups.id, id));
+    await updateListGroup(id, updates);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to update list group', error);
@@ -68,8 +69,7 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    await db.update(sourceLists).set({ groupId: null }).where(eq(sourceLists.groupId, id));
-    await db.delete(listGroups).where(eq(listGroups.id, id));
+    await deleteListGroup(id);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete list group', error);

@@ -1909,6 +1909,30 @@ architecture/documentation paths. The expansion from the original 24-path
 inventory is limited to the 17 established graph readers and two SQLite
 durable-run suites that now register their selected repository explicitly.
 
+## Web/API PostgreSQL parity: Layer L19 (project organization)
+
+Project administration, phase lifecycle, rule-match previews, and list-group
+organization now resolve two backend-neutral capabilities atomically nested
+under the existing `projectAutomation` worker slot. They sit beside, rather
+than replace, L15 `projectAutomation.hierarchy`; no parallel runtime registry,
+backend probe, fallback, or dual write was introduced. See
+[project-organization-persistence.md](./project-organization-persistence.md)
+for the complete route inventory and behavioral contract.
+
+SQLite owns its driver and uses immediate mutations plus deferred composite
+reads. PostgreSQL uses SERIALIZABLE mutations, REPEATABLE READ snapshots,
+bounded serialization/deadlock retry, byte-stable `COLLATE "C"` ordering, a
+dedicated list-organization lock, and the existing per-project advisory
+namespace for project and phase mutations. Phase administration therefore
+continues to participate in L15 revision triggers and optimistic CAS fencing.
+
+All eight owned routes move directly from Tier A to clean. Composed after the
+landed task quick-sort and L18 decrements, the graph moves from
+`266/118/5/143/88/30/89/57/0/175` to
+`266/110/5/151/80/30/81/57/0/167`. The CI-exposed exact-current ratchet
+expansion adds 19 test-only paths to the approved 28-path maximum, for a
+47-path maximum and 46 actual changed paths.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

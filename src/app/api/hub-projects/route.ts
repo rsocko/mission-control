@@ -1,24 +1,12 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import {
-  hubProjects,
-  projectAutoIncludeExclusions,
-  taskProjects,
-  projectPhases,
-} from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
-import { normalizeProjectJsonCollections, resolveProjectIconColor } from '@/lib/projects/normalize-project';
 import {
-  hubProjectRulesChanged,
-  parseHubProjectUpdate,
-} from '@/lib/projects/hub-project-update';
-import { normalizeAutoIncludeRules, reevaluateProject } from '@/lib/rules';
-import { dbLogger } from '@/lib/logger';
-import {
-  publishSemanticEntityDelete,
-  publishSemanticEntityUpsert,
-} from '@/lib/semantic-index/publication';
+  createHubProject,
+  deleteHubProject,
+  listHubProjects,
+  updateHubProject,
+} from '@/lib/projects/organization-service';
+import { parseHubProjectUpdate } from '@/lib/projects/hub-project-update';
 
 /**
  * GET /api/hub-projects — List all hub projects
@@ -32,35 +20,7 @@ export async function GET(request: Request) {
     const includeHidden = searchParams.get('includeHidden') === 'true';
     const includePhases = searchParams.get('includePhases') === 'true';
 
-    const projectRows = includeHidden
-      ? await db.select().from(hubProjects).orderBy(hubProjects.name)
-      : await db.select().from(hubProjects).where(eq(hubProjects.hidden, false)).orderBy(hubProjects.name);
-    const projects = projectRows.map(normalizeProjectJsonCollections);
-
-    if (includePhases) {
-      const allPhases = await db.select({
-        id: projectPhases.id,
-        projectId: projectPhases.projectId,
-        name: projectPhases.name,
-        sortOrder: projectPhases.sortOrder,
-      }).from(projectPhases).orderBy(projectPhases.sortOrder);
-
-      const phasesByProject = new Map<string, { id: string; name: string }[]>();
-      for (const phase of allPhases) {
-        if (!phase.projectId) continue;
-        const list = phasesByProject.get(phase.projectId) || [];
-        list.push({ id: phase.id, name: phase.name });
-        phasesByProject.set(phase.projectId, list);
-      }
-
-      const projectsWithPhases = projects.map((p) => ({
-        ...p,
-        phases: phasesByProject.get(p.id) || [],
-      }));
-
-      return NextResponse.json({ projects: projectsWithPhases });
-    }
-
+    const projects = await listHubProjects({ includeHidden, includePhases });
     return NextResponse.json({ projects });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch projects', error);
@@ -73,44 +33,40 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { name, description, color, icon, iconColor, sourceBindings, autoIncludeRules, kanbanColumns, defaultView, category, targetDate, metadata } = body;
+    const {
+      name,
+      description,
+      color,
+      icon,
+      iconColor,
+      sourceBindings,
+      autoIncludeRules,
+      kanbanColumns,
+      defaultView,
+      category,
+      targetDate,
+      metadata,
+    } = body;
 
     if (!name) {
       return ApiErrors.badRequest('Project name is required');
     }
 
-    const id = `proj-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-    const now = new Date().toISOString();
-    const projectColor = color || '#3b82f6';
-
-    await db.insert(hubProjects).values({
-      id,
+    const result = await createHubProject({
       name,
-      description: description || null,
-      color: projectColor,
-      icon: icon || null,
-      iconColor: resolveProjectIconColor(iconColor, projectColor),
-      sourceBindings: sourceBindings || [],
-      autoIncludeRules: normalizeAutoIncludeRules(autoIncludeRules),
-      kanbanColumns: kanbanColumns || [],
-      defaultView: defaultView || 'list',
-      category: category || null,
-      targetDate: targetDate || null,
-      metadata: metadata || {},
-      createdAt: now,
-      updatedAt: now,
+      description,
+      color,
+      icon,
+      iconColor,
+      sourceBindings,
+      autoIncludeRules,
+      kanbanColumns,
+      defaultView,
+      category,
+      targetDate,
+      metadata,
     });
-
-    let evaluation = null;
-    let evaluationFailed = false;
-    try {
-      evaluation = await reevaluateProject(id);
-    } catch (error) {
-      evaluationFailed = true;
-      dbLogger.error({ err: error, projectId: id }, 'Project created but auto-include evaluation failed');
-    }
-    await publishSemanticEntityUpsert('project', id);
-    return NextResponse.json({ id, evaluation, evaluationFailed }, { status: 201 });
+    return NextResponse.json(result, { status: 201 });
   } catch (error) {
     return ApiErrors.internal('Failed to create project', error);
   }
@@ -136,30 +92,8 @@ export async function PATCH(request: Request) {
     if (!parsedUpdates.success) {
       return ApiErrors.badRequest(parsedUpdates.message);
     }
-    const updates = {
-      ...parsedUpdates.updates,
-      updatedAt: new Date().toISOString(),
-    };
-    await db.update(hubProjects).set(updates).where(eq(hubProjects.id, projectId));
-
-    let evaluation = null;
-    let evaluationFailed = false;
-    if (hubProjectRulesChanged(parsedUpdates.updates)) {
-      try {
-        evaluation = await reevaluateProject(projectId);
-      } catch (error) {
-        evaluationFailed = true;
-        dbLogger.error({ err: error, projectId }, 'Project rules saved but auto-include evaluation failed');
-      }
-    }
-    const affectedTasks = await db.select({ taskId: taskProjects.taskId })
-      .from(taskProjects)
-      .where(eq(taskProjects.projectId, projectId));
-    await Promise.all([
-      publishSemanticEntityUpsert('project', projectId),
-      ...affectedTasks.map(({ taskId }) => publishSemanticEntityUpsert('task', taskId)),
-    ]);
-    return NextResponse.json({ success: true, evaluation, evaluationFailed });
+    const result = await updateHubProject(projectId, parsedUpdates.updates);
+    return NextResponse.json({ success: true, ...result });
   } catch (error) {
     return ApiErrors.internal('Failed to update project', error);
   }
@@ -177,17 +111,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    const affectedTasks = await db.select({ taskId: taskProjects.taskId })
-      .from(taskProjects)
-      .where(eq(taskProjects.projectId, projectId));
-    await db.delete(projectAutoIncludeExclusions)
-      .where(eq(projectAutoIncludeExclusions.projectId, projectId));
-    await db.delete(taskProjects).where(eq(taskProjects.projectId, projectId));
-    await db.delete(hubProjects).where(eq(hubProjects.id, projectId));
-    await Promise.all([
-      publishSemanticEntityDelete('project', projectId),
-      ...affectedTasks.map(({ taskId }) => publishSemanticEntityUpsert('task', taskId)),
-    ]);
+    await deleteHubProject(projectId, 'memberships');
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete project', error);

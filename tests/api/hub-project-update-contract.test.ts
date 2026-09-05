@@ -1,41 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { setUpdate, updateWhere, selectWhere, reevaluateProject } = vi.hoisted(() => ({
-  setUpdate: vi.fn(),
-  updateWhere: vi.fn(),
-  selectWhere: vi.fn(),
-  reevaluateProject: vi.fn(),
+const { updateHubProject } = vi.hoisted(() => ({
+  updateHubProject: vi.fn(),
 }));
 
-const update = vi.fn(() => ({ set: setUpdate }));
-const select = vi.fn(() => ({
-  from: vi.fn(() => ({ where: selectWhere })),
-}));
-
-vi.mock('@/db', () => ({
-  default: {
-    update,
-    select,
-  },
-  runTransaction: vi.fn(),
-}));
-
-vi.mock('@/db/schema', () => {
-  const table = { id: 'id' };
-  return {
-    hubProjects: table,
-    projectAutoIncludeExclusions: table,
-    projectMilestones: table,
-    projectPhaseItems: table,
-    projectPhases: table,
-    projectTags: table,
-    taskProjects: table,
-  };
-});
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(() => 'where'),
-  inArray: vi.fn(() => 'where'),
+vi.mock('@/lib/projects/organization-service', () => ({
+  updateHubProject,
 }));
 
 vi.mock('@/lib/rules', () => ({
@@ -49,20 +19,11 @@ vi.mock('@/lib/rules', () => ({
         ))
       : []
   ),
-  reevaluateProject,
-}));
-
-vi.mock('@/lib/logger', () => ({
-  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
-  dbLogger: { error: vi.fn() },
-  requestContext: { getStore: vi.fn() },
 }));
 
 beforeEach(() => {
   vi.clearAllMocks();
-  setUpdate.mockReturnValue({ where: updateWhere });
-  updateWhere.mockResolvedValue(undefined);
-  selectWhere.mockResolvedValue([]);
+  updateHubProject.mockResolvedValue({ evaluation: null, evaluationFailed: false });
 });
 
 async function callCollectionPatch(body: unknown) {
@@ -100,7 +61,7 @@ describe('hub project PATCH route contract', () => {
     expect(collectionResponse.status).toBe(400);
     expect(itemResponse.status).toBe(400);
     expect(await collectionResponse.json()).toEqual(await itemResponse.json());
-    expect(update).not.toHaveBeenCalled();
+    expect(updateHubProject).not.toHaveBeenCalled();
   });
 
   it('allows the same valid fields and normalized values from both PATCH routes', async () => {
@@ -123,14 +84,15 @@ describe('hub project PATCH route contract', () => {
 
     expect(collectionResponse.status).toBe(200);
     expect(itemResponse.status).toBe(200);
-    expect(setUpdate).toHaveBeenCalledTimes(2);
-    for (const [savedUpdates] of setUpdate.mock.calls) {
+    expect(updateHubProject).toHaveBeenCalledTimes(2);
+    for (const [projectId, savedUpdates] of updateHubProject.mock.calls) {
+      expect(projectId).toBe('project-1');
       expect(savedUpdates).toMatchObject({
         ...updates,
         name: 'Renamed project',
-        updatedAt: expect.any(String),
       });
       expect(savedUpdates).not.toHaveProperty('id');
+      expect(savedUpdates).not.toHaveProperty('updatedAt');
     }
   });
 });

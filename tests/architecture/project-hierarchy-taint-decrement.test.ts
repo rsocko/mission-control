@@ -152,15 +152,15 @@ describe('L15 project-hierarchy taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 118,
+      tierARoutes: 110,
       tierBRoutes: 5,
-      cleanRoutes: 143,
-      directTaintSourceRoutes: 88,
+      cleanRoutes: 151,
+      directTaintSourceRoutes: 80,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 89,
+      directDbNamespaceRoutes: 81,
       taintedLibA: 57,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 175,
+      totalMigrationUnits: 167,
     });
   });
 });

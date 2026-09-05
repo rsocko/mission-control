@@ -10,6 +10,10 @@ import {
   type ProjectRuleMatch,
 } from '@/db/persistence/project-automation';
 import { createPostgresProjectHierarchyRepository } from './project-hierarchy-repository';
+import {
+  createPostgresListOrganizationRepository,
+  createPostgresProjectAdministrationRepository,
+} from './project-organization-repositories';
 
 const QUERY_BATCH_SIZE = 500;
 const MAX_TRANSACTION_ATTEMPTS = 3;
@@ -107,6 +111,7 @@ async function listProjects(client: Pool | PoolClient): Promise<ProjectAutomatio
     SELECT id, auto_include_rules AS "autoIncludeRules",
            source_bindings AS "sourceBindings"
     FROM hub_projects
+    ORDER BY id COLLATE "C" ASC
   `)).map(projectFromRow);
 }
 
@@ -124,6 +129,7 @@ async function loadTasks(
                source_list_id AS "sourceListId"
         FROM tasks
         WHERE id = ANY($1::text[])
+        ORDER BY id COLLATE "C" ASC
       `, [taskIdBatch]));
     }
   } else {
@@ -131,6 +137,7 @@ async function loadTasks(
       SELECT id, title, status, connector_instance_id AS "connectorInstanceId",
              source_list_id AS "sourceListId"
       FROM tasks
+      ORDER BY id COLLATE "C" ASC
     `));
   }
   if (taskRows.length === 0) return [];
@@ -142,6 +149,7 @@ async function loadTasks(
       FROM task_tags task_tag
       INNER JOIN tags tag ON tag.id = task_tag.tag_id
       WHERE task_tag.task_id = ANY($1::text[])
+      ORDER BY task_tag.task_id COLLATE "C" ASC, tag.id COLLATE "C" ASC
     `, [taskIdBatch]);
     for (const row of rows) {
       const values = tagsByTask.get(row.taskId) ?? { names: [], slugs: [] };
@@ -282,5 +290,7 @@ export function createPostgresProjectAutomationRepository(
       }
     },
     hierarchy: createPostgresProjectHierarchyRepository(pool),
+    projectAdministration: createPostgresProjectAdministrationRepository(pool),
+    listOrganization: createPostgresListOrganizationRepository(pool),
   };
 }

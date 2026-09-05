@@ -522,7 +522,7 @@ describePostgres('postgres webhook integrations repository', () => {
         primaryActionId: 'pg-action-1',
         receivedAt: BASE_TIME,
         sortAt: BASE_TIME,
-        expiresAt: null,
+        expiresAt: '2026-09-05T12:00:00.000Z',
         metadata: { webhookId: WEBHOOK_ID },
         presentation: {},
       },
@@ -542,10 +542,15 @@ describePostgres('postgres webhook integrations repository', () => {
 
     expect(result).toMatchObject({ id: 'pg-alert-1', created: true });
     expect(await rows(
-      `SELECT primary_action_id AS "primaryActionId", is_actionable AS "isActionable"
+      `SELECT primary_action_id AS "primaryActionId", is_actionable AS "isActionable",
+              expires_at AS "expiresAt"
        FROM notifications WHERE id = $1`,
       ['pg-alert-1'],
-    )).toEqual([{ primaryActionId: 'pg-action-1', isActionable: true }]);
+    )).toEqual([{
+      primaryActionId: 'pg-action-1',
+      isActionable: true,
+      expiresAt: '2026-09-05T12:00:00.000Z',
+    }]);
     expect(await rows(
       `SELECT id, action_type AS "actionType" FROM notification_actions
        WHERE notification_id = $1`,

@@ -523,7 +523,6 @@ export function createPostgresWebhookIntegrationsRepository(
               primaryActionId: notification.primaryActionId ?? null,
               receivedAt: notification.receivedAt,
               sortAt: notification.sortAt,
-              expiresAt: notification.expiresAt ?? null,
               relatedTaskId: notification.relatedTaskId ?? null,
               relatedProjectId: null,
               relatedEntityType: null,
@@ -549,6 +548,10 @@ export function createPostgresWebhookIntegrationsRepository(
                 }]
               : [],
           });
+          await client.query(
+            'UPDATE notifications SET expires_at = $1 WHERE id = $2',
+            [notification.expiresAt ?? null, result.id],
+          );
           return result;
         });
       },

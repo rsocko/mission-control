@@ -442,7 +442,7 @@ describe('sqlite webhook integrations repository', () => {
           primaryActionId: 'action-1',
           receivedAt: BASE_TIME,
           sortAt: BASE_TIME,
-          expiresAt: null,
+          expiresAt: '2026-09-05T12:00:00.000Z',
           metadata: { webhookId: WEBHOOK_ID },
           presentation: {},
         },
@@ -462,12 +462,14 @@ describe('sqlite webhook integrations repository', () => {
 
       expect(result).toMatchObject({ id: 'alert-1', created: true });
       expect(sqlite.prepare(
-        'SELECT id, primary_action_id AS primaryActionId, is_actionable AS isActionable'
+        'SELECT id, primary_action_id AS primaryActionId, is_actionable AS isActionable,'
+        + ' expires_at AS expiresAt'
         + ' FROM notifications WHERE id = ?',
       ).get('alert-1')).toEqual({
         id: 'alert-1',
         primaryActionId: 'action-1',
         isActionable: 1,
+        expiresAt: '2026-09-05T12:00:00.000Z',
       });
       expect(sqlite.prepare(
         'SELECT id, action_type AS actionType FROM notification_actions WHERE notification_id = ?',

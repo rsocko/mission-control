@@ -84,15 +84,15 @@ describe('Layer L08b triage native persistence boundary', () => {
       totalMigrationUnits: graph.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      tierARoutes: 121,
+      tierARoutes: 118,
       tierBRoutes: 13,
-      cleanRoutes: 132,
-      directTaintSourceRoutes: 91,
+      cleanRoutes: 135,
+      directTaintSourceRoutes: 88,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 92,
-      taintedLibA: 61,
+      directDbNamespaceRoutes: 89,
+      taintedLibA: 60,
       taintedApiHelpers: 0,
-      totalMigrationUnits: 182,
+      totalMigrationUnits: 178,
     });
   });
 

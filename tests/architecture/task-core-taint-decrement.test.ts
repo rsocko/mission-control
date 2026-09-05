@@ -194,15 +194,15 @@ describe('L04 task-core taint decrement', () => {
       totalMigrationUnits: current.totalMigrationUnits,
     }).toEqual({
       apiRoutes: 266,
-      taintedLibA: 61,
+      taintedLibA: 60,
       taintedApiHelpers: 0,
-      tierARoutes: 121,
+      tierARoutes: 118,
       tierBRoutes: 13,
-      cleanRoutes: 132,
-      directTaintSourceRoutes: 91,
+      cleanRoutes: 135,
+      directTaintSourceRoutes: 88,
       transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 92,
-      totalMigrationUnits: 182,
+      directDbNamespaceRoutes: 89,
+      totalMigrationUnits: 178,
     });
   });
 });

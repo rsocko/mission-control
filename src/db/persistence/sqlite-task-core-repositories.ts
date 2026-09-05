@@ -3318,7 +3318,7 @@ class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepositor
       gte(quickSortLog.triagedAt, since),
       isNull(quickSortLog.reversedAt),
       ne(quickSortLog.action, 'skipped'),
-    )).groupBy(quickSortLog.mode);
+    )).groupBy(quickSortLog.mode).all();
     return rows.map((row) => ({
       mode: parseTaskQuickSortQueueMode(row.mode),
       count: Number(row.count),

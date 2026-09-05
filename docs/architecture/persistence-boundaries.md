@@ -646,6 +646,28 @@ cause; only the corrected, self-consistent `directTaintSourceRoutes`/
 `transitiveOnlyTaintSourceRoutes` split (143/78, which sums exactly to 221 by
 construction) is used as a ratchet field.
 
+**Dedicated PostgreSQL route sentinel.** `scripts/postgres-route-sentinel.mjs`
+promotes the route census to a dependency-free CI gate run with
+`MC_DATABASE_BACKEND=postgres`. It does not execute route handlers or contact a
+database or external service. Instead, it recomputes the static and deferred
+import graph and treats the canonical baseline's nonzero `tierARoutes` and
+`tierBRoutes` arrays as explicit, exact-current allowlists. The check fails when
+a currently clean route gains any SQLite reachability, a new route is added
+without classification, either allowlist changes without a deliberate baseline
+update, a path is not sorted/unique/POSIX-normalized, or declared counts and
+partitions drift. This preserves the honest current state rather than claiming
+parity is complete; later parity layers tighten the gate by updating the same
+canonical baseline as their taint sets shrink. `scripts/
+postgres-route-sentinel.test.mjs` runs without Vitest and proves that a synthetic
+SQLite edge into a previously clean route fails, that same-count allowlist swaps
+fail, and that Windows and Linux path forms normalize identically. The existing
+poisoned-SQLite composition tests remain the dynamic complement for migrated
+surfaces: `tests/sync/postgres-web-composition-poisoned.test.ts`, the AI and
+runtime-observability route suites under `tests/api/`, and the analytics,
+ideation, project-hierarchy, and project-organization suites under `tests/db/`.
+The sentinel is deterministic architecture reachability protection, not a claim
+that static analysis proves every runtime branch.
+
 **Known limitation: no local validation was run for this layer.** The
 approved-registry npm restore failed on a `qs@6.16.0` 404 against
 `https://packagefeedproxy.microsoft.io/npm/`; per this repository's

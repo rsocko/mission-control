@@ -114,12 +114,14 @@ describe('resolved-route identity provisioning', () => {
   beforeEach(async () => {
     resetProcessRuntimeRegistries();
     vi.restoreAllMocks();
+    vi.stubEnv('AI_APPROVED_BIFROST_HOSTS', 'bifrost.example.test');
     mocks.semanticSearchEnabled = true;
     index = await createIndexService();
   });
 
   afterEach(() => {
     resetProcessRuntimeRegistries();
+    vi.unstubAllEnvs();
     index.close();
   });
 
@@ -213,6 +215,7 @@ describe('embedding operational status and query cache across a cutover', () => 
     resetProcessRuntimeRegistries();
     vi.resetModules();
     vi.restoreAllMocks();
+    vi.stubEnv('AI_APPROVED_BIFROST_HOSTS', 'bifrost.example.test');
     mocks.semanticSearchEnabled = true;
     harness = createSearchIndexHarness();
     semantic = await import('@/lib/search/semantic');
@@ -228,6 +231,7 @@ describe('embedding operational status and query cache across a cutover', () => 
 
   afterEach(() => {
     resetProcessRuntimeRegistries();
+    vi.unstubAllEnvs();
     harness.close();
   });
 

@@ -148,7 +148,8 @@ describe('Layer 6 semantic worker package boundary', () => {
   it('makes the packaged provider default lazy while the harness injects its explicit route', () => {
     const completeGraph = applicationGraph(ROOT, true);
     expect(completeGraph).toContain('src/lib/search/embedding-request.ts');
-    expect(completeGraph).toContain('src/lib/ai/config-resolver.ts');
+    expect(completeGraph).not.toContain('src/lib/ai/config-resolver.ts');
+    expect(completeGraph).toContain('src/lib/ai/provider-configuration-service.ts');
     expect(source('src/lib/semantic-index/embedding-provider.ts'))
       .toContain("await import('@/lib/search/embedding-request')");
     expect(source(ROOT)).toContain('getEmbeddingConfig: async');

@@ -50,6 +50,7 @@ vi.mock('@/lib/ai/provider-configuration-service', () => ({
 
 vi.mock('@/lib/logger', () => ({
   aiLogger: { info: vi.fn(), warn: vi.fn() },
+  requestContext: { getStore: vi.fn(() => undefined) },
   semanticIndexLogger: {
     debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
   },

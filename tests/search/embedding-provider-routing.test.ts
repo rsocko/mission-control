@@ -33,6 +33,7 @@ vi.mock('@/lib/ai/provider-configuration-service', () => ({
 vi.mock('@/lib/logger', () => ({
   aiLogger: { info: vi.fn(), warn: vi.fn() },
   dbLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
 describe('embedding provider requests', () => {

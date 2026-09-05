@@ -14,12 +14,7 @@ import {
   clearKeywordSearchRepository,
   registerKeywordSearchRepository,
 } from '@/lib/search/keyword-runtime';
-import {
-  assertCanRegisterSemanticSearchRuntime,
-  clearSemanticSearchRuntime,
-  registerSemanticSearchRuntime,
-  type SemanticSearchRuntime,
-} from '@/lib/search/semantic';
+import type { SemanticSearchRuntime } from '@/lib/search/semantic';
 import {
   clearSyncControlStateRepository,
   registerSyncControlStateRepository,
@@ -167,6 +162,38 @@ interface DatabaseRuntimeRegistry {
 
 const DATABASE_RUNTIME_REGISTRY_KEY = 'mission-control.database-runtime-registry';
 const DATABASE_RUNTIME_REGISTRY_SCHEMA_VERSION = 1;
+const SEMANTIC_SEARCH_RUNTIME_KEY = 'mission-control.semantic-search-runtime';
+const SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION = 1;
+
+interface SemanticSearchRuntimeRegistry {
+  selected: SemanticSearchRuntime | null;
+}
+
+function semanticSearchRuntimeRegistry(): SemanticSearchRuntimeRegistry {
+  return getProcessRuntimeSlot(
+    SEMANTIC_SEARCH_RUNTIME_KEY,
+    SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION,
+    () => ({ selected: null }),
+  );
+}
+
+function assertCanSelectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = semanticSearchRuntimeRegistry().selected;
+  if (selected && selected !== runtime) {
+    throw new Error('Semantic search runtime is already selected');
+  }
+}
+
+function selectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertCanSelectSemanticSearchRuntime(runtime);
+  semanticSearchRuntimeRegistry().selected = runtime;
+}
+
+function clearSelectedSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  const registry = semanticSearchRuntimeRegistry();
+  if (registry.selected === runtime) registry.selected = null;
+}
 
 function databaseRuntimeRegistry(): DatabaseRuntimeRegistry {
   return getProcessRuntimeSlot(
@@ -315,7 +342,7 @@ function clearPostgresRuntimeComposition(): void {
     clearKeywordSearchRepository(runtime.keywordSearchRepository);
   }
   if (runtime.semanticSearchRuntime) {
-    clearSemanticSearchRuntime(runtime.semanticSearchRuntime);
+    clearSelectedSemanticSearchRuntime(runtime.semanticSearchRuntime);
   }
   if (runtime.aiEnrichmentService) {
     clearAIEnrichmentService(runtime.aiEnrichmentService);
@@ -810,7 +837,7 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
       }
     },
   };
-  assertCanRegisterSemanticSearchRuntime(semanticSearchRuntime);
+  assertCanSelectSemanticSearchRuntime(semanticSearchRuntime);
   const { db, pool, vector } = runtime.backend.context;
   runtime.runtimeHealthPersistence = {
     databaseHealthProbe: new PostgresDatabaseHealthProbe(pool),
@@ -856,7 +883,7 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   runtime.semanticSourcePort = createPostgresSemanticSourcePort(pool);
   runtime.durableAiRunRepository = new PostgresDurableAiRunRepository(pool);
   registerSemanticSourcePort(runtime.semanticSourcePort);
-  registerSemanticSearchRuntime(runtime.semanticSearchRuntime);
+  selectSemanticSearchRuntime(runtime.semanticSearchRuntime);
   registerDurableAiRunRepository(runtime.durableAiRunRepository);
   await registerStableRuntimeServices();
   if (!isCurrentGeneration()) return;

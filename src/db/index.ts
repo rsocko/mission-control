@@ -18,6 +18,7 @@ import {
   assertPersistenceCompositionPublicationAllowed,
   isPersistenceCompositionAccessBlocked,
 } from '@/lib/persistence/composition-lifecycle';
+import { getProcessRuntimeSlot } from '@/lib/runtime/process-runtime-slot';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
 import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
@@ -48,7 +49,6 @@ type SqliteCompositionModules = {
   taskCoreRuntime: typeof import('@/lib/tasks/core/runtime');
   taskCorePersistence:
     typeof import('./persistence/sqlite-task-core-repositories').sqliteTaskCorePersistence;
-  semanticSearch: typeof import('@/lib/search/semantic');
 };
 let sqliteCompositionModules: SqliteCompositionModules | null = null;
 let sqliteCompositionModulesPromise: Promise<SqliteCompositionModules> | null = null;
@@ -65,6 +65,38 @@ const sqliteSemanticSearchRuntime: SemanticSearchRuntime = {
     return scheduleSemanticBackfill();
   },
 };
+interface SemanticSearchRuntimeRegistry {
+  selected: SemanticSearchRuntime | null;
+}
+const SEMANTIC_SEARCH_RUNTIME_KEY = 'mission-control.semantic-search-runtime';
+const SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION = 1;
+
+function semanticSearchRuntimeRegistry(): SemanticSearchRuntimeRegistry {
+  return getProcessRuntimeSlot(
+    SEMANTIC_SEARCH_RUNTIME_KEY,
+    SEMANTIC_SEARCH_RUNTIME_SCHEMA_VERSION,
+    () => ({ selected: null }),
+  );
+}
+
+function assertCanSelectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertPersistenceCompositionPublicationAllowed();
+  const selected = semanticSearchRuntimeRegistry().selected;
+  if (selected && selected !== runtime) {
+    throw new Error('Semantic search runtime is already selected');
+  }
+}
+
+function selectSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  assertCanSelectSemanticSearchRuntime(runtime);
+  const registry = semanticSearchRuntimeRegistry();
+  registry.selected = runtime;
+}
+
+function clearSelectedSemanticSearchRuntime(runtime: SemanticSearchRuntime): void {
+  const registry = semanticSearchRuntimeRegistry();
+  if (registry.selected === runtime) registry.selected = null;
+}
 
 function resetPartialDatabaseInitialization(): void {
   try {
@@ -104,7 +136,6 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     import('@/lib/triage/persistence'),
     import('@/lib/tasks/core/runtime'),
     import('./persistence/sqlite-task-core-repositories'),
-    import('@/lib/search/semantic'),
   ]).then(([
     core,
     workerRuntime,
@@ -113,7 +144,6 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     triageRuntime,
     taskCoreRuntime,
     taskCorePersistence,
-    semanticSearch,
   ]) => ({
     createCoreRepositories: core.createSqliteCorePersistenceRepositories,
     workerRuntime,
@@ -122,7 +152,6 @@ async function loadSqliteCompositionModules(): Promise<SqliteCompositionModules>
     triageRuntime,
     taskCoreRuntime,
     taskCorePersistence: taskCorePersistence.sqliteTaskCorePersistence,
-    semanticSearch,
   }));
   sqliteCompositionModulesPromise = pending;
   try {
@@ -184,9 +213,7 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     );
   }
   modules.workerRuntime.assertCanRegisterSqliteWorkerRuntimeServices();
-  modules.semanticSearch.assertCanRegisterSemanticSearchRuntime(
-    sqliteSemanticSearchRuntime,
-  );
+  assertCanSelectSemanticSearchRuntime(sqliteSemanticSearchRuntime);
 
   try {
     modules.coreRuntime.registerCorePersistenceRepositories(composition.coreRepositories);
@@ -201,10 +228,10 @@ function publishSqliteComposition(modules: SqliteCompositionModules): void {
     }
     modules.workerRuntime.registerSqliteWorkerRuntimeServices();
     modules.taskCoreRuntime.registerTaskCorePersistence(composition.taskCorePersistence);
-    modules.semanticSearch.registerSemanticSearchRuntime(sqliteSemanticSearchRuntime);
+    selectSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     sqliteCompositionState = 'active';
   } catch (error) {
-    modules.semanticSearch.clearSemanticSearchRuntime(sqliteSemanticSearchRuntime);
+    clearSelectedSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     modules.taskCoreRuntime.clearSelectedTaskCorePersistence(
       composition.taskCorePersistence,
     );
@@ -317,9 +344,7 @@ export function shutdownSqlitePersistenceComposition(): Promise<void> {
       sqliteCompositionModules.taskCoreRuntime.clearSelectedTaskCorePersistence(
         sqliteComposition.taskCorePersistence,
       );
-      sqliteCompositionModules.semanticSearch.clearSemanticSearchRuntime(
-        sqliteSemanticSearchRuntime,
-      );
+      clearSelectedSemanticSearchRuntime(sqliteSemanticSearchRuntime);
     }
     sqliteCompositionState = 'stopped';
   })();

@@ -75,7 +75,7 @@ describe('POST /api/connectors/[id]/cross-account', () => {
       status: 201,
       body: {
         newTaskId: 'task-2',
-        newSourceId: 'remote-2',
+        newSourceId: 'target-list:remote-2',
         sourceAction: 'copy',
         warnings: [],
       },

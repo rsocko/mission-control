@@ -114,6 +114,13 @@ export async function executeCrossAccountTaskMove(
   });
   if (result.status < 200 || result.status >= 300) return result;
 
+  const targetSourceId = result.body.newSourceId;
+  const targetRemoteId = targetConnector.type === 'microsoft-todo'
+    && typeof targetSourceId === 'string'
+    && targetSourceId.includes(':')
+    ? targetSourceId.slice(targetSourceId.indexOf(':') + 1)
+    : targetSourceId;
+
   return {
     status: 200,
     body: {
@@ -121,7 +128,7 @@ export async function executeCrossAccountTaskMove(
       action: input.action,
       sourceTaskId: input.taskId,
       targetTaskId: result.body.newTaskId,
-      targetRemoteId: result.body.newSourceId,
+      targetRemoteId,
       targetInstance: input.targetInstanceId,
       ...(Array.isArray(result.body.warnings) ? { warnings: result.body.warnings } : {}),
     },

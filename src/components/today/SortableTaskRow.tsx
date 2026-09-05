@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import Image from 'next/image';
-import { Clock, GripVertical, Repeat, RotateCcw, Square, Sun, Target } from 'lucide-react';
+import { Clock, GripVertical, RotateCcw, Square, Sun, Target } from 'lucide-react';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
@@ -102,8 +102,7 @@ export function SortableTaskRow({
   const { tagFilter, setTagFilter } = useDashboardViewStore();
   const selectedTagFilters = activeTagFilters ?? tagFilter;
   const isMobile = useIsMobile();
-  const taskMeta = item.metadata ? (() => { try { return JSON.parse(item.metadata); } catch { return null; } })() : null;
-  const recurrence = taskMeta?.recurrence;
+  const recurrence = extractRecurrenceFromMetadata(item.metadata);
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -250,13 +249,6 @@ export function SortableTaskRow({
               ⏱ {item.estimatedDuration >= 60 ? `${Math.floor(item.estimatedDuration / 60)}h${item.estimatedDuration % 60 ? ` ${item.estimatedDuration % 60}m` : ''}` : `${item.estimatedDuration}m`}
             </span>
           )}
-          {recurrence && (
-            <Tooltip content={`Repeats: ${recurrence}`}>
-              <span className="hidden flex-shrink-0 items-center text-xs text-blue-400 @min-[640px]:flex">
-                <Repeat size={10} />
-              </span>
-            </Tooltip>
-          )}
         </div>
       </div>
       <TaskRowActions
@@ -265,6 +257,7 @@ export function SortableTaskRow({
         planningHorizon={item.planningHorizon}
         effort={item.effort}
         dueDate={item.dueDate}
+        recurrence={recurrence}
         hasDescription={item.hasDescription}
         isInMyDay
         priority={item.priority}

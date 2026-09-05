@@ -56,6 +56,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
     smartScore?: number | null;
     planningHorizon?: string | null;
     effort?: number | null;
+    recurrence?: string | null;
     priority: string;
     status: string;
     onFilterPriority?: (priority: string) => void;
@@ -67,6 +68,7 @@ vi.mock('@/components/task-row/TaskRowActions', () => ({
         data-score={props.smartScore}
         data-horizon={props.planningHorizon}
         data-effort={props.effort}
+        data-recurrence={props.recurrence}
         data-priority={props.priority}
         data-status={props.status}
       />
@@ -112,7 +114,7 @@ const item: MyDayItem = {
 };
 
 describe('SortableTaskRow aligned properties', () => {
-  it('passes comparable properties to the shared grid and keeps secondary signals with task metadata', () => {
+  it('passes comparable properties and recurrence to the shared grid', () => {
     const onFilterPriority = vi.fn();
     const onFilterStatus = vi.fn();
     const { container } = render(
@@ -138,18 +140,16 @@ describe('SortableTaskRow aligned properties', () => {
     const children = Array.from(row?.children ?? []);
     const actions = screen.getByTestId('task-row-actions');
     const duration = screen.getByTitle('Estimated: 30min');
-    const recurrence = screen.getByText('Narrow row').closest('.flex-1')
-      ?.querySelector<HTMLElement>('[data-tooltip="Repeats: weekly"]') ?? null;
     const taskCopy = screen.getByText('Narrow row').closest('.flex-1');
 
     expect(actions).toHaveAttribute('data-score', '80');
     expect(actions).toHaveAttribute('data-horizon', 'soon');
     expect(actions).toHaveAttribute('data-effort', '3');
+    expect(actions).toHaveAttribute('data-recurrence', 'weekly');
     expect(actions).toHaveAttribute('data-priority', 'high');
     expect(actions).toHaveAttribute('data-status', 'in_progress');
     expect(duration).toHaveClass('hidden', '@min-[640px]:flex');
     expect(taskCopy).toContainElement(duration);
-    expect(taskCopy).toContainElement(recurrence);
     expect(children.indexOf(actions)).toBeGreaterThan(children.indexOf(taskCopy!));
 
     fireEvent.click(screen.getByRole('button', { name: 'Filter priority' }));

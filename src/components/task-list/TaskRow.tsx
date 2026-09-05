@@ -1,7 +1,7 @@
 'use client';
 
 import type { ReactNode } from 'react';
-import { ArrowLeftRight, Bell, ChartNetwork, Clock, Repeat, RotateCcw, Timer } from 'lucide-react';
+import { ArrowLeftRight, Bell, ChartNetwork, Clock, RotateCcw, Timer } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
@@ -33,7 +33,7 @@ import { cn } from '@/lib/utils';
  *   attr-p1 — lowest priority, hidden below 960px
  *   attr-p2 — hidden below 720px
  */
-const ATTR_P1 = 'hidden @min-[960px]:flex'; // recurrence, estimated duration
+const ATTR_P1 = 'hidden @min-[960px]:flex'; // estimated duration
 const ATTR_P2 = 'hidden @min-[720px]:flex'; // effort, status, snoozed, reminder
 
 function ProjectBadge({ projectIds, projects, projectFilter, onToggleProject }: {
@@ -354,13 +354,6 @@ export function TaskRow({
                 onToggleProject={(projectId) => rowFilters.onToggleProject?.(projectId)}
               />
             )}
-            {recurrence && (
-              <Tooltip content={`Repeats: ${recurrence}`}>
-                <span className={`text-xs flex-shrink-0 ${ATTR_P1} items-center text-blue-400`}>
-                  <Repeat size={10} />
-                </span>
-              </Tooltip>
-            )}
             {(task.pushCount ?? 0) >= 2 && (
               <span
                 className={`text-xs flex-shrink-0 ${ATTR_P2} items-center gap-0.5 rounded border border-amber-800/30 bg-amber-900/20 px-1.5 py-0.5 text-amber-400`}
@@ -405,6 +398,7 @@ export function TaskRow({
         planningHorizon={task.planningHorizon}
         effort={task.effort}
         dueDate={task.dueDate}
+        recurrence={recurrence}
         hasDescription={task.hasDescription}
         isInMyDay={isInMyDay}
         priority={task.priority}

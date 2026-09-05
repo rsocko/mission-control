@@ -116,7 +116,9 @@ describe('PushNotificationScheduler lifecycle', () => {
     mocks.setScheduledSummariesEnabled
       .mockRejectedValueOnce(new Error('temporary failure'))
       .mockResolvedValue(undefined);
-    const schedulerModule = await import('@/lib/push/scheduler');
+    const schedulerModule = await vi.importActual<typeof import('@/lib/push/scheduler')>(
+      '@/lib/push/scheduler',
+    );
     await schedulerModule._resetPushNotificationSchedulerForTests();
     const scheduler = new schedulerModule.PushNotificationScheduler();
 

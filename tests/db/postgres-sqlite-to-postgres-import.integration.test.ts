@@ -10,10 +10,12 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
+import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import { createPostgresPool } from '@/db/postgres/connection';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { runPostgresMigrations } from '@/db/postgres/migrations';
 import {
+  cleanupDisposableRehearsalTarget,
   copyAllTables,
   runSqliteToPostgresImport,
 } from '../../scripts/lib/sqlite-to-postgres-import';
@@ -24,6 +26,181 @@ vi.unmock('drizzle-orm');
 const sharedPostgresUrl = process.env.MC_TEST_POSTGRES_IMPORT_URL
   ?? process.env.MC_TEST_POSTGRES_URL;
 const describePostgresImport = describe.skipIf(!sharedPostgresUrl);
+const REHEARSAL_TIMESTAMP = '2026-01-15T07:00:00-05:00';
+
+function createRepresentativeSyntheticSource(): {
+  readonly directory: string;
+  readonly sourcePath: string;
+} {
+  const directory = mkdtempSync(join(tmpdir(), 'mc-import-representative-source-'));
+  const sourcePath = join(directory, 'mission-control-import-rehearsal.sqlite3');
+  cpSync(
+    resolve(
+      process.cwd(),
+      'tests',
+      'fixtures',
+      'persisted-state',
+      'sqlite',
+      'v1-0047-isolate-sync-worker.sqlite3',
+    ),
+    sourcePath,
+  );
+  const sqlite = new Database(sourcePath);
+  try {
+    runOrderedDatabaseBootstrap(sqlite, resolve(process.cwd(), 'drizzle'));
+    sqlite.prepare(`
+      UPDATE sync_jobs
+      SET status = 'succeeded', completed_at = ?, updated_at = ?
+      WHERE id = 'fixture-sync-job-0047'
+    `).run(REHEARSAL_TIMESTAMP, REHEARSAL_TIMESTAMP);
+    sqlite.prepare(`
+      UPDATE connector_configs
+      SET enabled = 0,
+          settings = ?,
+          deleted_at = NULL,
+          updated_at = ?
+      WHERE id = 'fixture-connector-0047'
+    `).run(
+      JSON.stringify({ fixtureVersion: 1, nested: { enabled: false }, labels: ['a', 'b'] }),
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, description,
+        created_at, updated_at, depth, is_checklist_item, metadata, last_synced_at,
+        is_bulk_import
+      ) VALUES (?, ?, 'synthetic', 'fixture-connector-0047', ?, NULL, ?, ?, 0, 0, ?, ?, 1)
+    `).run(
+      'rehearsal-parent-task',
+      'synthetic:rehearsal-parent',
+      'Synthetic parent',
+      REHEARSAL_TIMESTAMP,
+      REHEARSAL_TIMESTAMP,
+      JSON.stringify({ edge: 'parent', nested: { order: 1 } }),
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, description,
+        created_at, updated_at, parent_id, depth, is_checklist_item, metadata,
+        last_synced_at
+      ) VALUES (?, ?, 'synthetic', 'fixture-connector-0047', ?, ?, ?, ?, ?, 1, 1, ?, ?)
+    `).run(
+      'rehearsal-child-task',
+      'synthetic:rehearsal-child',
+      'Synthetic child',
+      'Ordering-sensitive child',
+      REHEARSAL_TIMESTAMP,
+      REHEARSAL_TIMESTAMP,
+      'rehearsal-parent-task',
+      JSON.stringify({ edge: 'child', unicode: 'caf\u00e9' }),
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO task_dependencies (
+        id, task_id, depends_on_task_id, connector_instance_id, created_at
+      ) VALUES (?, ?, ?, ?, ?)
+    `).run(
+      'rehearsal-dependency',
+      'rehearsal-child-task',
+      'rehearsal-parent-task',
+      'fixture-connector-0047',
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO task_schedules (task_id, scheduled_date, scheduled_time)
+      VALUES ('rehearsal-parent-task', '2026-01-16', NULL)
+    `).run();
+    sqlite.prepare(`
+      INSERT INTO finance_transactions (
+        id, connector_instance_id, upstream_transaction_id, date, amount,
+        merchant_name, notes, tags, attribution_reasons, tag_references,
+        is_pending, is_recurring, source_fingerprint, provenance_provider,
+        provenance_fetched_at, synced_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, 1, 0, ?, 'demo', ?, ?)
+    `).run(
+      'rehearsal-finance-transaction',
+      'fixture-connector-0047',
+      'synthetic-finance-upstream',
+      '2026-01-15',
+      -42.75,
+      'Synthetic Merchant',
+      JSON.stringify(['synthetic', 'edge-case']),
+      JSON.stringify(['deterministic-fixture']),
+      JSON.stringify([]),
+      'synthetic-fingerprint',
+      REHEARSAL_TIMESTAMP,
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO triage_items (
+        id, source_platform, source_id, source_url, canonical_url, title,
+        description, captured_at, ingested_at, ai_categories,
+        ai_suggested_actions, raw_metadata, actions_taken, source_order
+      ) VALUES (?, 'web', ?, ?, NULL, ?, NULL, ?, ?, ?, ?, ?, ?, 7)
+    `).run(
+      'rehearsal-triage-item',
+      'synthetic-triage-source',
+      'https://example.test/rehearsal',
+      'Synthetic triage item',
+      REHEARSAL_TIMESTAMP,
+      REHEARSAL_TIMESTAMP,
+      JSON.stringify(['software-development']),
+      JSON.stringify([{ type: 'create-task', confidence: 0.9 }]),
+      JSON.stringify({ source: 'synthetic', nullable: null }),
+      JSON.stringify([]),
+    );
+    sqlite.prepare(`
+      INSERT INTO triage_action_claims (
+        id, triage_item_id, action_type, state, claimed_at, result
+      ) VALUES (?, ?, 'create-task', 'completed', ?, ?)
+    `).run(
+      'rehearsal-triage-claim',
+      'rehearsal-triage-item',
+      REHEARSAL_TIMESTAMP,
+      JSON.stringify({ taskId: 'rehearsal-parent-task' }),
+    );
+    sqlite.prepare(`
+      INSERT INTO subtask_templates (
+        id, name, type, subtasks, workflow_tasks, is_built_in, created_at, updated_at
+      ) VALUES (?, ?, 'workflow', ?, ?, 0, ?, ?)
+    `).run(
+      'rehearsal-workflow-template',
+      'Synthetic workflow',
+      JSON.stringify([]),
+      JSON.stringify([
+        { title: 'First deterministic step', priority: 'high' },
+        { title: 'Second deterministic step', subtasks: ['Verify import'] },
+      ]),
+      REHEARSAL_TIMESTAMP,
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO routines (
+        id, name, cadence_type, cadence_config, sort_order,
+        is_active, is_archived, created_at, updated_at
+      ) VALUES (?, ?, 'specific_days', ?, 1.5, 1, 0, ?, ?)
+    `).run(
+      'rehearsal-routine',
+      'Synthetic routine',
+      JSON.stringify({ days: [1, 3, 5], timezone: 'America/New_York' }),
+      REHEARSAL_TIMESTAMP,
+      REHEARSAL_TIMESTAMP,
+    );
+    sqlite.prepare(`
+      INSERT INTO sync_job_events (
+        id, job_id, connector_id, event_type, payload, created_at
+      ) VALUES (9000, 'fixture-sync-job-0047', 'fixture-connector-0047', 'rehearsal',
+        ?, ?)
+    `).run(
+      JSON.stringify({ sequenceProbe: true, order: 2 }),
+      REHEARSAL_TIMESTAMP,
+    );
+  } finally {
+    sqlite.close();
+  }
+  return { directory, sourcePath };
+}
 
 describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
   const databaseName = `mission_control_import_test_${process.pid}_${Date.now()}`;
@@ -145,6 +322,342 @@ describePostgresImport('SQLite-to-PostgreSQL import integration', () => {
       await pool.end();
     }
   }, 120_000);
+
+  it('rehearses representative domains, reruns deterministically, and cleans failed imports', async () => {
+    assertSafeIntegrationTestTarget(postgresUrl);
+    const source = createRepresentativeSyntheticSource();
+    const importOptions = {
+      sqliteSourcePath: source.sourcePath,
+      postgresUrl,
+      rehearsal: true,
+      resetDisposableRehearsalTarget: true,
+      confirmWritersStopped: true,
+    } as const;
+    const pool = createPostgresPool(resolvePostgresConfig({
+      MC_POSTGRES_URL: postgresUrl,
+      MC_POSTGRES_APPLICATION_NAME: 'mission-control-representative-import-test',
+    }));
+    try {
+      const first = await runSqliteToPostgresImport(importOptions);
+      expect(first.evidence.command.activationChanged).toBe(false);
+      expect(first.evidence.verdict.ready_for_cutover_planning).toBe(true);
+      expect(first.invariants).toMatchObject({
+        allCopiedTableCountsMatch: true,
+        orphanTaskProjects: 0,
+        orphanTaskDependencies: 0,
+        orphanSyncJobEvents: 0,
+        orphanNotificationTasks: 0,
+      });
+      const counts = new Map(first.copiedTables.map((count) => [count.table, count]));
+      for (const table of [
+        'connector_configs',
+        'tasks',
+        'task_dependencies',
+        'task_schedules',
+        'finance_transactions',
+        'triage_items',
+        'triage_action_claims',
+        'subtask_templates',
+        'routines',
+        'sync_job_events',
+      ]) {
+        expect(counts.get(table)?.sourceRows).toBeGreaterThan(0);
+        expect(counts.get(table)?.targetRows).toBe(counts.get(table)?.sourceRows);
+      }
+
+      const connector = await pool.query<{
+        enabled: boolean;
+        settings: unknown;
+        deleted_at: string | null;
+      }>(`
+        SELECT enabled, settings, deleted_at
+        FROM connector_configs
+        WHERE id = 'fixture-connector-0047'
+      `);
+      expect(connector.rows[0]).toEqual({
+        enabled: false,
+        settings: {
+          fixtureVersion: 1,
+          nested: { enabled: false },
+          labels: ['a', 'b'],
+        },
+        deleted_at: null,
+      });
+      const task = await pool.query<{
+        parent_id: string | null;
+        status: string;
+        description: string | null;
+        is_bulk_import: boolean;
+        last_synced_at: string;
+        metadata: unknown;
+      }>(`
+        SELECT parent_id, status, description, is_bulk_import, last_synced_at, metadata
+        FROM tasks
+        WHERE id = 'rehearsal-parent-task'
+      `);
+      expect(task.rows[0]).toEqual({
+        parent_id: null,
+        status: 'todo',
+        description: null,
+        is_bulk_import: true,
+        last_synced_at: REHEARSAL_TIMESTAMP,
+        metadata: { edge: 'parent', nested: { order: 1 } },
+      });
+      const relationships = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM task_dependencies d
+        JOIN tasks child ON child.id = d.task_id
+        JOIN tasks parent ON parent.id = d.depends_on_task_id
+        WHERE d.id = 'rehearsal-dependency'
+          AND child.parent_id = parent.id
+      `);
+      expect(relationships.rows[0]?.count).toBe('1');
+      const schedule = await pool.query<{
+        scheduled_time: string | null;
+        is_time_blocked: boolean;
+        recurrence_mode: string;
+      }>(`
+        SELECT scheduled_time, is_time_blocked, recurrence_mode
+        FROM task_schedules
+        WHERE task_id = 'rehearsal-parent-task'
+      `);
+      expect(schedule.rows[0]).toEqual({
+        scheduled_time: null,
+        is_time_blocked: false,
+        recurrence_mode: 'schedule',
+      });
+      const finance = await pool.query<{
+        amount: number;
+        notes: string | null;
+        is_pending: boolean;
+        is_recurring: boolean;
+        tags: unknown;
+        lifecycle_status: string;
+      }>(`
+        SELECT amount, notes, is_pending, is_recurring, tags, lifecycle_status
+        FROM finance_transactions
+        WHERE id = 'rehearsal-finance-transaction'
+      `);
+      expect(finance.rows[0]).toEqual({
+        amount: -42.75,
+        notes: null,
+        is_pending: true,
+        is_recurring: false,
+        tags: ['synthetic', 'edge-case'],
+        lifecycle_status: 'active',
+      });
+      const triage = await pool.query<{
+        canonical_url: string | null;
+        description: string | null;
+        status: string;
+        raw_metadata: unknown;
+        source_order: number;
+      }>(`
+        SELECT canonical_url, description, status, raw_metadata, source_order
+        FROM triage_items
+        WHERE id = 'rehearsal-triage-item'
+      `);
+      expect(triage.rows[0]).toEqual({
+        canonical_url: null,
+        description: null,
+        status: 'pending',
+        raw_metadata: { source: 'synthetic', nullable: null },
+        source_order: 7,
+      });
+      const workflow = await pool.query<{
+        type: string;
+        workflow_tasks: unknown;
+        is_built_in: boolean;
+      }>(`
+        SELECT type, workflow_tasks, is_built_in
+        FROM subtask_templates
+        WHERE id = 'rehearsal-workflow-template'
+      `);
+      expect(workflow.rows[0]).toEqual({
+        type: 'workflow',
+        workflow_tasks: [
+          { title: 'First deterministic step', priority: 'high' },
+          { title: 'Second deterministic step', subtasks: ['Verify import'] },
+        ],
+        is_built_in: false,
+      });
+      const routine = await pool.query<{
+        cadence_config: unknown;
+        sort_order: number;
+        is_active: boolean;
+        is_archived: boolean;
+      }>(`
+        SELECT cadence_config, sort_order, is_active, is_archived
+        FROM routines
+        WHERE id = 'rehearsal-routine'
+      `);
+      expect(routine.rows[0]).toEqual({
+        cadence_config: { days: [1, 3, 5], timezone: 'America/New_York' },
+        sort_order: 1.5,
+        is_active: true,
+        is_archived: false,
+      });
+      const indexes = await pool.query<{ indexname: string }>(`
+        SELECT indexname
+        FROM pg_indexes
+        WHERE schemaname = 'public'
+          AND indexname IN (
+            'idx_tasks_source_connector',
+            'idx_task_dependencies_pair_type',
+            'idx_finance_transactions_connector_upstream',
+            'idx_triage_items_source',
+            'idx_sync_job_events_job'
+          )
+        ORDER BY indexname
+      `);
+      expect(indexes.rows.map(({ indexname }) => indexname)).toEqual([
+        'idx_finance_transactions_connector_upstream',
+        'idx_sync_job_events_job',
+        'idx_task_dependencies_pair_type',
+        'idx_tasks_source_connector',
+        'idx_triage_items_source',
+      ]);
+      await expect(pool.query(`
+        INSERT INTO triage_items (
+          id, source_platform, source_id, source_url, title, captured_at, ingested_at
+        ) VALUES (
+          'rehearsal-triage-conflict', 'web', 'synthetic-triage-source',
+          'https://example.test/conflict', 'Conflict', '${REHEARSAL_TIMESTAMP}',
+          '${REHEARSAL_TIMESTAMP}'
+        )
+      `)).rejects.toMatchObject({ code: '23505' });
+      await expect(pool.query(`
+        INSERT INTO task_dependencies (
+          id, task_id, depends_on_task_id, created_at
+        ) VALUES (
+          'rehearsal-orphan-dependency', 'rehearsal-child-task',
+          'missing-rehearsal-parent', '${REHEARSAL_TIMESTAMP}'
+        )
+      `)).rejects.toMatchObject({ code: '23503' });
+      const nextEvent = await pool.query<{ id: number }>(`
+        INSERT INTO sync_job_events (
+          job_id, connector_id, event_type, payload, created_at
+        ) VALUES (
+          'fixture-sync-job-0047', 'fixture-connector-0047', 'sequence_probe',
+          '{"afterImport":true}', '${REHEARSAL_TIMESTAMP}'
+        )
+        RETURNING id
+      `);
+      expect(nextEvent.rows[0]?.id).toBeGreaterThan(9000);
+
+      const snapshotCopiedCounts = async (): Promise<Record<string, number>> => {
+        const entries: Array<[string, number]> = [];
+        for (const { table } of first.copiedTables) {
+          if (!/^[a-z0-9_]+$/.test(table)) {
+            throw new Error(`Unsafe synthetic table name: ${table}`);
+          }
+          const count = await pool.query<{ count: string }>(
+            `SELECT COUNT(*)::text AS count FROM "${table}"`,
+          );
+          entries.push([table, Number(count.rows[0]?.count)]);
+        }
+        return Object.fromEntries(entries);
+      };
+      const totalRows = first.copiedTables.reduce((sum, count) => sum + count.sourceRows, 0);
+      const countsBeforeRejectedRerun = await snapshotCopiedCounts();
+      await expect(runSqliteToPostgresImport({
+        ...importOptions,
+        resetDisposableRehearsalTarget: false,
+      })).rejects.toThrow('PostgreSQL target is not empty');
+      expect(await snapshotCopiedCounts()).toEqual(countsBeforeRejectedRerun);
+      const retainedConnector = await pool.query<{
+        enabled: boolean;
+        settings: unknown;
+        deleted_at: string | null;
+      }>(`
+        SELECT enabled, settings, deleted_at
+        FROM connector_configs
+        WHERE id = 'fixture-connector-0047'
+      `);
+      expect(retainedConnector.rows[0]).toEqual(connector.rows[0]);
+
+      const malformed = new Database(source.sourcePath);
+      try {
+        malformed.prepare(`
+          UPDATE connector_configs
+          SET enabled = 'synthetic-secret-invalid-boolean'
+          WHERE id = 'fixture-connector-0047'
+        `).run();
+      } finally {
+        malformed.close();
+      }
+      const expectMalformedFailure = async (
+        resetDisposableRehearsalTarget: boolean,
+      ): Promise<void> => {
+        let failedImportError: unknown;
+        try {
+          await runSqliteToPostgresImport({
+            ...importOptions,
+            resetDisposableRehearsalTarget,
+          });
+        } catch (error) {
+          failedImportError = error;
+        }
+        if (!(failedImportError instanceof Error)) {
+          throw new Error('Malformed synthetic import did not fail with an Error.');
+        }
+        expect(failedImportError.message).toContain(
+          'connector_configs.enabled (invalid-boolean)',
+        );
+        expect(failedImportError.message).not.toContain('synthetic-secret-invalid-boolean');
+      };
+
+      await cleanupDisposableRehearsalTarget(pool);
+      await runPostgresMigrations(pool);
+      await expectMalformedFailure(false);
+      const tablesAfterRollback = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_type = 'BASE TABLE'
+      `);
+      expect(Number(tablesAfterRollback.rows[0]?.count)).toBeGreaterThan(0);
+      const rolledBackCounts = await snapshotCopiedCounts();
+      expect(Object.values(rolledBackCounts).every((count) => count === 0)).toBe(true);
+
+      await expectMalformedFailure(true);
+      const remainingTables = await pool.query<{ count: string }>(`
+        SELECT COUNT(*)::text AS count
+        FROM information_schema.tables
+        WHERE table_schema = 'public'
+          AND table_type = 'BASE TABLE'
+      `);
+      expect(remainingTables.rows[0]?.count).toBe('0');
+      const remainingMigrationSchema = await pool.query<{ exists: boolean }>(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM information_schema.schemata
+          WHERE schema_name = 'drizzle'
+        ) AS exists
+      `);
+      expect(remainingMigrationSchema.rows[0]?.exists).toBe(false);
+
+      const repaired = new Database(source.sourcePath);
+      try {
+        repaired.prepare(`
+          UPDATE connector_configs
+          SET enabled = 0
+          WHERE id = 'fixture-connector-0047'
+        `).run();
+      } finally {
+        repaired.close();
+      }
+      const rerun = await runSqliteToPostgresImport(importOptions);
+      expect(rerun.copiedTables).toEqual(first.copiedTables);
+      expect(rerun.copiedTables.reduce((sum, count) => sum + count.sourceRows, 0))
+        .toBe(totalRows);
+      expect(rerun.evidence.verdict.ready_for_cutover_planning).toBe(true);
+      expect(rerun.evidence.command.activationChanged).toBe(false);
+    } finally {
+      await pool.end();
+      rmSync(source.directory, { recursive: true, force: true });
+    }
+  }, 180_000);
 
   it('imports legacy semantic rows without PostgreSQL-only columns as version zero', async () => {
     assertSafeIntegrationTestTarget(postgresUrl);

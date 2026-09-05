@@ -13,9 +13,11 @@ change production backend selection, deployment configuration, secrets, data, or
 homelab Compose from this checklist.
 
 The SQLite-to-PostgreSQL importer and rehearsal tooling tracked by
-[#1681](https://github.com/rsocko/mission-control/issues/1681) is a hard
-dependency. Until #1681 settles command names, flags, and output shape, references
-to importer commands and artifact paths in this document are placeholders.
+[#1681](https://github.com/rsocko/mission-control/issues/1681) is available as
+`npm run db:import:postgres`. Its line-oriented, secret-safe `summary` output is
+the machine-readable rehearsal artifact; retain that output with the application
+revision and operator attestations described below. Import success is only an
+input to later cutover planning and never changes activation state.
 
 ## Deliverables before cutover planning
 
@@ -226,10 +228,13 @@ PostgreSQL. That runbook should require final backup retention, accepted
 invariant/search/worker evidence, known rollback status, homelab configuration
 readiness, and explicit human activation approval.
 
-## Documentation follow-up after #1681
+## Rehearsal command reference
 
-After #1681 lands, replace placeholders here and in
-`docs/operations/postgresql.md` with the real importer command names, output file
-locations, dry-run/final-run distinction, and sample redacted output. Then update
-`docs/design/active/database-scaling-strategy.md` to point from the high-level
-cutover strategy to the concrete importer and runbook-input documents.
+Use the synthetic fixture command in
+[`postgresql.md`](./postgresql.md#sqlite-to-postgresql-import-rehearsal) for
+disposable rehearsals. Use `--dry-run` for source-only validation, and reserve a
+non-rehearsal `--sqlite-source` import for a separately approved maintenance
+window with confirmed writer shutdown. The importer prints the redacted evidence
+package as its final `summary` line; capture it through the operator's approved
+logging or artifact mechanism rather than adding environment-specific output
+paths to the repository.

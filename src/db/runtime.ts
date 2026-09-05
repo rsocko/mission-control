@@ -608,6 +608,13 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       ]
     ),
   }),
+  routines: new Proxy({} as WorkerPersistenceRepositories['routines'], {
+    get: (_target, property) => (
+      requirePostgresWorkerRepositories().routines[
+        property as keyof WorkerPersistenceRepositories['routines']
+      ]
+    ),
+  }),
   webhookIntegrations: new Proxy(
     {} as WorkerPersistenceRepositories['webhookIntegrations'],
     {

@@ -15,6 +15,7 @@ import type {
 } from './notification-entity-linking';
 import type { ExternalAgentControlPersistence } from './external-agent-control';
 import type { AnalyticsPersistence } from './analytics';
+import type { RoutinesRepository } from './routines';
 import type { WebhookIntegrationsPersistence } from './webhook-integrations';
 import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
 
@@ -92,6 +93,8 @@ export interface WorkerPersistenceRepositories {
    * a backend supports every analytics surface or none.
    */
   analytics: AnalyticsPersistence;
+  /** Personal routine definitions and cadence-sensitive completion lifecycle. */
+  routines: RoutinesRepository;
   /**
    * Layer 20: the webhook configuration/delivery/log surface — inbound webhook
    * CRUD plus their replay/log tables, outbound webhook subscriptions, the n8n

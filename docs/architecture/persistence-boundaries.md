@@ -2249,6 +2249,31 @@ to
 `266/A88/B5/clean173/direct58/transitive30/directDB59/lib51/helpers0/units139`,
 with no Tier A-to-B reclassification.
 
+## Web/API PostgreSQL parity: personal-planning routines
+
+Routine collection, item lifecycle, and completions resolve one backend-neutral
+`WorkerPersistenceRepositories.routines` capability. The scope is exactly three
+routes and the existing `routines` / `routine_completions` table pair; broader
+daily-planning, My Day, mobile, navigation, reset, AI, task, notification,
+webhook, and project surfaces remain separate.
+
+SQLite uses immediate transactions for sort allocation and cadence-sensitive
+completion creation. PostgreSQL uses explicit READ COMMITTED transactions with
+transaction-scoped advisory locks for the sort namespace and each
+`(routineId, date)` completion namespace. Each post-lock statement therefore
+sees the prior writer's commit. Daily and specific-day duplicate creation
+remains a 409 conflict under concurrency, while over-completion cadences
+continue to allow multiple same-day records. Local calendar dates, streak input
+ordering, soft archive, and both completion delete forms are unchanged. See
+[routines-persistence.md](./routines-persistence.md) for the complete contract.
+
+All three owned routes move directly from Tier A to clean. Composed after the
+settings-preference baseline, the exact graph moves from
+`266/A88/B5/clean173/direct58/transitive30/directDB59/lib51/helpers0/units139`
+to
+`266/A85/B5/clean176/direct55/transitive30/directDB56/lib51/helpers0/units136`,
+with no Tier B reclassification and no new taint.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

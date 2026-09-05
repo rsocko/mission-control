@@ -66,6 +66,7 @@ import { sqliteFinanceTransactionQuery } from './sqlite-finance-transaction-quer
 import { createSqliteExternalAgentControlRepository } from './sqlite-external-agent-control-repository';
 import { createSqliteAnalyticsPersistence } from './sqlite-analytics-repositories';
 import { createSqliteFinanceWebPersistence } from './sqlite-finance-web-repository';
+import { createSqliteRoutinesRepository } from './sqlite-routines-repository';
 import {
   createSqliteWebhookIntegrationsRepository,
 } from './sqlite-webhook-integrations-repository';
@@ -192,6 +193,7 @@ export function createSqliteWorkerPersistenceRepositories(
     finance,
     ideationWorkspaces: new SqliteIdeationWorkspaceRepository(sqlite),
     analytics: createSqliteAnalyticsPersistence(db),
+    routines: createSqliteRoutinesRepository(sqlite),
     webhookIntegrations: createSqliteWebhookIntegrationsRepository(sqlite, db),
   };
   return repositories;

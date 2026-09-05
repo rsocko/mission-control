@@ -7,29 +7,33 @@ import {
   T2,
   type SearchIndexHarness,
 } from './harness';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 const mocks = vi.hoisted(() => ({
   semanticSearchEnabled: true,
-  runtime: null as unknown,
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
-    provider: 'openai',
-    configured: true,
-    baseUrl: 'https://api.openai.test/v1',
-    apiKey: 'test',
-    model: 'gpt-4o-mini',
-    embeddingModel: 'text-embedding-3-small',
-    semanticSearchEnabled: mocks.semanticSearchEnabled,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'openai',
+      configured: true,
+      baseUrl: 'https://api.openai.test/v1',
+      apiKey: 'test',
+      model: 'gpt-4o-mini',
+      embeddingModel: 'text-embedding-3-small',
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: ['openai'] },
+        restricted: { allowedRoutes: ['openai'] },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: {},
+    },
   }),
-}));
-
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  getSemanticIndexRuntime: async () => mocks.runtime,
-  scheduleSemanticBackfill: vi.fn(),
-  publishSemanticUpsert: vi.fn(),
-  publishSemanticDelete: vi.fn(),
 }));
 
 describe('findSimilarTaskEmbeddings', () => {
@@ -37,19 +41,23 @@ describe('findSimilarTaskEmbeddings', () => {
   let semantic: typeof import('@/lib/search/semantic');
 
   beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.resetModules();
     mocks.semanticSearchEnabled = true;
     harness = createSearchIndexHarness();
-    mocks.runtime = {
-      repository: harness.repository,
-      embeddings: harness.embeddings,
-      config: {},
-    };
     semantic = await import('@/lib/search/semantic');
+    semantic.registerSemanticSearchRuntime({
+      resolve: async () => ({
+        repository: harness.repository,
+        embeddings: harness.embeddings,
+      }),
+      scheduleBackfill: vi.fn(),
+    });
     semantic.resetSemanticSearchStateForTests();
   });
 
   afterEach(() => {
+    resetProcessRuntimeRegistries();
     harness.close();
   });
 
@@ -237,11 +245,6 @@ describe('findSimilarTaskEmbeddings', () => {
   it('reports partial when the bounded repository scan reaches its ceiling', async () => {
     harness.close();
     harness = createSearchIndexHarness(1);
-    mocks.runtime = {
-      repository: harness.repository,
-      embeddings: harness.embeddings,
-      config: {},
-    };
     await seedNeighbourCorpus();
 
     const result = await semantic.findSimilarTaskEmbeddings('source', {

@@ -1,9 +1,12 @@
-import db from '@/db';
-import { notifications, notificationActions } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
 import logger from '@/lib/logger';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
-import { indexNotificationSearch, removeNotificationSearch } from '@/lib/search';
+import { indexAlert, removeAlertFromIndex } from '@/lib/search/fts';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication-service';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { WebhookSearchableNotification } from '@/db/persistence/webhook-integrations';
 
 /**
  * RyMessage Inbound Webhook
@@ -101,13 +104,19 @@ function buildAlertBody(action: RyMessageActionPayload): string | null {
   return parts.length > 0 ? parts.join(' — ') : null;
 }
 
-async function reindexNotification(id: string) {
-  const [notification] = await db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.id, id))
-    .limit(1);
-  if (notification) await indexNotificationSearch(notification);
+/**
+ * Keyword indexing stays inline and immediate; the semantic side is only
+ * published. This mirrors `indexNotificationSearch`/`removeNotificationSearch`
+ * without importing the SQLite-bound search barrel from a neutral route.
+ */
+async function reindexNotification(notification: WebhookSearchableNotification) {
+  await indexAlert(notification);
+  await publishSemanticEntityUpsert('alert', notification.id);
+}
+
+async function removeNotificationFromSearch(notificationId: string) {
+  await removeAlertFromIndex(notificationId);
+  await publishSemanticEntityDelete('alert', notificationId);
 }
 
 export async function POST(request: Request) {
@@ -127,77 +136,17 @@ export async function POST(request: Request) {
 
     const sourceId = buildSourceId(action);
     const now = new Date().toISOString();
+    const ingest = (await getWorkerPersistenceRepositories()).webhookIntegrations.ingest;
 
     switch (event) {
       case 'action.created': {
-        // Check if notification already exists (idempotent)
-        const [existing] = await db.select({ id: notifications.id })
-          .from(notifications)
-          .where(and(
-            eq(notifications.connectorType, CONNECTOR_TYPE),
-            eq(notifications.sourceId, sourceId),
-          ))
-          .limit(1);
-
         const { level, levelRank } = normalizeNotificationLevel(mapSeverity(action.severity));
-
-        if (existing) {
-          // Already exists — treat as update
-          await db.update(notifications).set({
-            title: action.title,
-            body: buildAlertBody(action),
-            level,
-            levelRank,
-            category: mapCategory(action.kind),
-            isActionable: isActionable(action.recommendation),
-            sortAt: now,
-            metadata: action as unknown as Record<string, unknown>,
-          }).where(eq(notifications.id, existing.id));
-          await reindexNotification(existing.id);
-
-          return Response.json({ success: true, action: 'updated', id: existing.id });
-        }
-
         const id = crypto.randomUUID();
-        await db.insert(notifications).values({
-          id,
-          sourceId,
-          connectorType: CONNECTOR_TYPE,
-          connectorInstanceId: CONNECTOR_INSTANCE_ID,
-          title: action.title,
-          body: buildAlertBody(action),
-          level,
-          levelRank,
-          category: mapCategory(action.kind),
-          state: 'unread',
-          isActionable: isActionable(action.recommendation),
-          receivedAt: action.createdAt || now,
-          sortAt: now,
-          expiresAt: null,
-          relatedTaskId: action.taskLinkId || null,
-          metadata: action as unknown as Record<string, unknown>,
-          presentation: {},
-        });
-        await reindexNotification(id);
 
-        return Response.json({ success: true, action: 'created', id }, { status: 201 });
-      }
-
-      case 'action.updated': {
-        const [existing] = await db.select({ id: notifications.id })
-          .from(notifications)
-          .where(and(
-            eq(notifications.connectorType, CONNECTOR_TYPE),
-            eq(notifications.sourceId, sourceId),
-          ))
-          .limit(1);
-
-        const { level, levelRank } = normalizeNotificationLevel(mapSeverity(action.severity));
-
-        if (!existing) {
-          // Not seen before — create it
-          const id = crypto.randomUUID();
-          await db.insert(notifications).values({
+        // Idempotent: an existing notification for this source is updated in place.
+        const result = await ingest.upsertNotificationBySource({
+          match: { connectorType: CONNECTOR_TYPE, sourceId },
+          insert: {
             id,
             sourceId,
             connectorType: CONNECTOR_TYPE,
@@ -215,70 +164,103 @@ export async function POST(request: Request) {
             relatedTaskId: action.taskLinkId || null,
             metadata: action as unknown as Record<string, unknown>,
             presentation: {},
-          });
-          await reindexNotification(id);
-          return Response.json({ success: true, action: 'created', id }, { status: 201 });
-        }
+          },
+          update: {
+            title: action.title,
+            body: buildAlertBody(action),
+            level,
+            levelRank,
+            category: mapCategory(action.kind),
+            isActionable: isActionable(action.recommendation),
+            sortAt: now,
+            metadata: action as unknown as Record<string, unknown>,
+          },
+        });
+        await reindexNotification(result.search);
 
-        await db.update(notifications).set({
-          title: action.title,
-          body: buildAlertBody(action),
-          level,
-          levelRank,
-          category: mapCategory(action.kind),
-          isActionable: isActionable(action.recommendation),
-          relatedTaskId: action.taskLinkId || null,
-          sortAt: now,
-          metadata: action as unknown as Record<string, unknown>,
-        }).where(eq(notifications.id, existing.id));
-        await reindexNotification(existing.id);
+        return result.created
+          ? Response.json({ success: true, action: 'created', id: result.id }, { status: 201 })
+          : Response.json({ success: true, action: 'updated', id: result.id });
+      }
 
-        return Response.json({ success: true, action: 'updated', id: existing.id });
+      case 'action.updated': {
+        const { level, levelRank } = normalizeNotificationLevel(mapSeverity(action.severity));
+        const id = crypto.randomUUID();
+
+        const result = await ingest.upsertNotificationBySource({
+          match: { connectorType: CONNECTOR_TYPE, sourceId },
+          insert: {
+            id,
+            sourceId,
+            connectorType: CONNECTOR_TYPE,
+            connectorInstanceId: CONNECTOR_INSTANCE_ID,
+            title: action.title,
+            body: buildAlertBody(action),
+            level,
+            levelRank,
+            category: mapCategory(action.kind),
+            state: 'unread',
+            isActionable: isActionable(action.recommendation),
+            receivedAt: action.createdAt || now,
+            sortAt: now,
+            expiresAt: null,
+            relatedTaskId: action.taskLinkId || null,
+            metadata: action as unknown as Record<string, unknown>,
+            presentation: {},
+          },
+          update: {
+            title: action.title,
+            body: buildAlertBody(action),
+            level,
+            levelRank,
+            category: mapCategory(action.kind),
+            isActionable: isActionable(action.recommendation),
+            relatedTaskId: action.taskLinkId || null,
+            sortAt: now,
+            metadata: action as unknown as Record<string, unknown>,
+          },
+        });
+        await reindexNotification(result.search);
+
+        return result.created
+          ? Response.json({ success: true, action: 'created', id: result.id }, { status: 201 })
+          : Response.json({ success: true, action: 'updated', id: result.id });
       }
 
       case 'action.dismissed':
       case 'action.handled':
       case 'action.completed': {
         // Terminal states — remove the notification
-        const [existing] = await db.select({ id: notifications.id })
-          .from(notifications)
-          .where(and(
-            eq(notifications.connectorType, CONNECTOR_TYPE),
-            eq(notifications.sourceId, sourceId),
-          ))
-          .limit(1);
+        const deletedId = await ingest.deleteNotificationBySource({
+          connectorType: CONNECTOR_TYPE,
+          sourceId,
+        });
 
-        if (existing) {
-          await db.delete(notificationActions).where(eq(notificationActions.notificationId, existing.id));
-          await db.delete(notifications).where(eq(notifications.id, existing.id));
-          await removeNotificationSearch(existing.id);
-          return Response.json({ success: true, action: 'deleted', id: existing.id });
+        if (deletedId) {
+          await removeNotificationFromSearch(deletedId);
+          return Response.json({ success: true, action: 'deleted', id: deletedId });
         }
 
         return Response.json({ success: true, action: 'noop', reason: 'notification not found' });
       }
 
       case 'action.snoozed': {
-        const [existing] = await db.select({ id: notifications.id })
-          .from(notifications)
-          .where(and(
-            eq(notifications.connectorType, CONNECTOR_TYPE),
-            eq(notifications.sourceId, sourceId),
-          ))
-          .limit(1);
+        const snoozedUntil = action.snoozedUntil
+          ? new Date(action.snoozedUntil).toISOString()
+          : null;
 
-        if (existing) {
-          const snoozedUntil = action.snoozedUntil
-            ? new Date(action.snoozedUntil).toISOString()
-            : null;
+        const snoozedId = await ingest.snoozeNotificationBySource({
+          connectorType: CONNECTOR_TYPE,
+          sourceId,
+          snoozedUntil,
+          metadata: {
+            ...(action as unknown as Record<string, unknown>),
+            snoozedUntil: action.snoozedUntil,
+          },
+        });
 
-          await db.update(notifications).set({
-            snoozedUntil,
-            expiresAt: snoozedUntil,
-            metadata: { ...(action as unknown as Record<string, unknown>), snoozedUntil: action.snoozedUntil },
-          }).where(eq(notifications.id, existing.id));
-
-          return Response.json({ success: true, action: 'snoozed', id: existing.id });
+        if (snoozedId) {
+          return Response.json({ success: true, action: 'snoozed', id: snoozedId });
         }
 
         return Response.json({ success: true, action: 'noop', reason: 'notification not found' });

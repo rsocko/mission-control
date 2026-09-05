@@ -148,10 +148,21 @@ describe('Layer 6 semantic worker package boundary', () => {
   it('makes the packaged provider default lazy while the harness injects its explicit route', () => {
     const completeGraph = applicationGraph(ROOT, true);
     expect(completeGraph).toContain('src/lib/search/embedding-request.ts');
-    expect(completeGraph).toContain('src/lib/ai/config-resolver.ts');
+    expect(completeGraph).not.toContain('src/lib/ai/config-resolver.ts');
+    expect(completeGraph).toContain('src/lib/ai/provider-configuration-service.ts');
     expect(source('src/lib/semantic-index/embedding-provider.ts'))
       .toContain("await import('@/lib/search/embedding-request')");
     expect(source(ROOT)).toContain('getEmbeddingConfig: async');
+  });
+
+  it('keeps database startup off the route semantic module without hiding it dynamically', () => {
+    for (const path of ['src/db/index.ts', 'src/db/runtime.ts']) {
+      expect(applicationImports(path).filter(
+        ({ specifier }) => specifier === '@/lib/search/semantic',
+      )).toEqual([]);
+      expect(source(path)).toContain("'mission-control.semantic-search-runtime'");
+    }
+    expect(source('src/db/index.ts')).toContain("from '@/lib/semantic-index/runtime'");
   });
 
   it('detects forbidden SQLite dependencies reachable only through re-exports', () => {

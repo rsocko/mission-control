@@ -1,60 +1,54 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const routingHeaders = {
-  'x-mc-ai-feature-id': 'semantic-embedding',
-  'x-mc-ai-sensitivity': 'restricted',
-  'x-mc-ai-allowed-routes': 'azure-private',
-  'x-mc-correlation-id': 'embedding-correlation',
-};
-
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
-    provider: 'ollama',
-    model: 'llama3.1:8b',
-    configured: true,
-    baseUrl: 'http://localhost:11434/v1',
-    embeddingProvider: 'bifrost',
-    embeddingModel: 'azure/text-embedding-3-small',
-    embeddingBaseUrl: 'https://bifrost.example.test/v1',
-    embeddingApiKey: 'embedding-secret',
-    embeddingConfigured: true,
-    semanticSearchEnabled: true,
-  }),
+const mocks = vi.hoisted(() => ({
+  allowedRoutes: ['bifrost-copilot', 'azure-private'],
 }));
 
-vi.mock('@/lib/ai/provider-factory', () => ({
-  AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
-  getAIRequestContext: () => ({
-    featureId: 'semantic-embedding',
-    sensitivity: 'restricted',
-    allowedRoutes: ['azure-private'],
-    correlationId: 'embedding-correlation',
-  }),
-  getAIRoutingHeaders: vi.fn(() => routingHeaders),
-  getAIRouteOutcome: (
-    context: unknown,
-    _response: unknown,
-    metadata?: { provider?: string; model?: string; fallbackOccurred?: boolean },
-  ) => ({
-    provider: metadata?.provider || 'azure',
-    model: metadata?.model || 'text-embedding-3-small',
-    fallbackOccurred: metadata?.fallbackOccurred ?? false,
-    context,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'ollama',
+      model: 'llama3.1:8b',
+      configured: true,
+      baseUrl: 'http://localhost:11434/v1',
+      embeddingProvider: 'bifrost',
+      embeddingModel: 'azure/text-embedding-3-small',
+      embeddingBaseUrl: 'https://bifrost.example.test/v1',
+      embeddingApiKey: 'embedding-secret',
+      embeddingConfigured: true,
+      semanticSearchEnabled: true,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: mocks.allowedRoutes },
+        restricted: { allowedRoutes: mocks.allowedRoutes },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: {},
+    },
   }),
 }));
 
 vi.mock('@/lib/logger', () => ({
   aiLogger: { info: vi.fn(), warn: vi.fn() },
   dbLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+  requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
 describe('embedding provider requests', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    mocks.allowedRoutes = ['bifrost-copilot', 'azure-private'];
+    vi.stubEnv('AI_APPROVED_BIFROST_HOSTS', 'bifrost.example.test');
     vi.stubEnv('MC_DB_PATH', ':memory:');
     vi.stubEnv('MC_EMBEDDING_REQUEST_MAX_RETRIES', '2');
     vi.stubEnv('MC_EMBEDDING_REQUEST_RETRY_BASE_MS', '1');
     vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
   });
 
   it('sends credentials and complete policy metadata and records Bifrost fallback identity', async () => {
@@ -84,7 +78,10 @@ describe('embedding provider requests', () => {
     const request = fetchSpy.mock.calls[0][1];
     expect(request?.headers).toMatchObject({
       Authorization: 'Bearer embedding-secret',
-      ...routingHeaders,
+      'x-mc-ai-feature-id': 'semantic-embedding',
+      'x-mc-ai-sensitivity': 'restricted',
+      'x-mc-ai-allowed-routes': 'bifrost-copilot,azure-private',
+      'x-mc-correlation-id': expect.any(String),
     });
   });
 
@@ -124,15 +121,7 @@ describe('embedding provider requests', () => {
   });
 
   it('stops before egress when sensitivity policy denies the embedding route', async () => {
-    const ai = await import('@/lib/ai/provider-factory');
-    vi.mocked(ai.getAIRoutingHeaders).mockImplementationOnce(() => {
-      throw new ai.AIRoutingDeniedError('bifrost', {
-        featureId: 'semantic-embedding',
-        sensitivity: 'restricted',
-        allowedRoutes: ['azure-private'],
-        correlationId: 'embedding-correlation',
-      });
-    });
+    mocks.allowedRoutes = ['ollama'];
     const fetchSpy = vi.spyOn(globalThis, 'fetch');
     const { testEmbeddingConnection } = await import('@/lib/search/semantic');
 
@@ -141,15 +130,7 @@ describe('embedding provider requests', () => {
   });
 
   it('reports a policy-denied embedding route without throwing from status', async () => {
-    const ai = await import('@/lib/ai/provider-factory');
-    vi.mocked(ai.getAIRoutingHeaders).mockImplementationOnce(() => {
-      throw new ai.AIRoutingDeniedError('bifrost', {
-        featureId: 'semantic-embedding',
-        sensitivity: 'restricted',
-        allowedRoutes: ['azure-private'],
-        correlationId: 'embedding-correlation',
-      });
-    });
+    mocks.allowedRoutes = ['ollama'];
     const { getEmbeddingOperationalStatus } = await import('@/lib/search/semantic');
 
     await expect(getEmbeddingOperationalStatus()).resolves.toMatchObject({

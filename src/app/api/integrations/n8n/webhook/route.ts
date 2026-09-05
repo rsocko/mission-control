@@ -1,10 +1,13 @@
-import db from '@/db';
-import { notifications, notificationActions, tasks } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
 import { getN8nConfig, parseN8NSettings } from '@/lib/integrations/n8n';
 import { ApiErrors } from '@/lib/api-error';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
-import { indexNotificationSearch } from '@/lib/search';
+import { indexAlert } from '@/lib/search/fts';
+import { publishSemanticEntityUpsert } from '@/lib/semantic-index/publication-service';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type {
+  WebhookIngestRepository,
+  WebhookSearchableNotification,
+} from '@/db/persistence/webhook-integrations';
 
 type N8NWebhookBody = {
   type?: string;
@@ -25,37 +28,14 @@ function asBoolean(value: unknown, fallback = false) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
-async function syncOpenUrlAction(notificationId: string, actionUrl?: string | null, label = 'Open') {
-  await db.delete(notificationActions).where(and(
-    eq(notificationActions.notificationId, notificationId),
-    eq(notificationActions.actionType, 'open_url'),
-  ));
-
-  if (!actionUrl) {
-    return;
-  }
-
-  await db.insert(notificationActions).values({
-    id: crypto.randomUUID(),
-    notificationId,
-    actionType: 'open_url',
-    label,
-    variant: 'primary',
-    isPrimary: true,
-    sortOrder: 0,
-    payload: { url: actionUrl },
-    opensExternal: true,
-    createdBy: 'connector',
-  });
-}
-
-async function reindexNotification(id: string) {
-  const [notification] = await db
-    .select()
-    .from(notifications)
-    .where(eq(notifications.id, id))
-    .limit(1);
-  if (notification) await indexNotificationSearch(notification);
+/**
+ * Keyword indexing stays inline and immediate; the semantic side is only
+ * published. This mirrors `indexNotificationSearch` without importing the
+ * SQLite-bound search barrel from a backend-neutral route.
+ */
+async function reindexNotification(notification: WebhookSearchableNotification) {
+  await indexAlert(notification);
+  await publishSemanticEntityUpsert('alert', notification.id);
 }
 
 export async function POST(request: Request) {
@@ -78,12 +58,15 @@ export async function POST(request: Request) {
       return Response.json({ error: 'Webhook type is required' }, { status: 400 });
     }
 
+    const ingest: WebhookIngestRepository = (await getWorkerPersistenceRepositories())
+      .webhookIntegrations.ingest;
+
     switch (type) {
       case 'task.create': {
         const id = crypto.randomUUID();
         const sourceId = asString(payload.sourceId, `n8n:${id}`);
 
-        await db.insert(tasks).values({
+        await ingest.createTask({
           id,
           sourceId,
           connectorType: 'n8n',
@@ -96,8 +79,6 @@ export async function POST(request: Request) {
           createdAt: now,
           updatedAt: now,
           completedAt: asString(payload.status) === 'done' ? now : null,
-          depth: 0,
-          isChecklistItem: false,
           sourceListId: asString(payload.sourceListId) || null,
           sourceListName: asString(payload.sourceListName) || null,
           assignee: asString(payload.assignee) || null,
@@ -115,40 +96,36 @@ export async function POST(request: Request) {
         const { level, levelRank } = normalizeNotificationLevel(payload.severity);
         const isActionable = asBoolean(payload.isActionable, Boolean(actionUrl)) && Boolean(actionUrl);
 
-        await db.insert(notifications).values({
-          id,
-          sourceId: asString(payload.sourceId, `n8n:${id}`),
-          connectorType: 'n8n',
-          connectorInstanceId,
-          title: asString(payload.title, 'New alert'),
-          body: asString(payload.body) || null,
-          level,
-          levelRank,
-          category: asString(payload.category, 'n8n'),
-          state: 'unread',
-          isActionable,
-          receivedAt: now,
-          sortAt: now,
-          expiresAt: asString(payload.expiresAt) || null,
-          relatedTaskId: asString(payload.relatedTaskId) || null,
-          metadata: payload,
-          presentation: {},
+        const search = await ingest.createNotification({
+          notification: {
+            id,
+            sourceId: asString(payload.sourceId, `n8n:${id}`),
+            connectorType: 'n8n',
+            connectorInstanceId,
+            title: asString(payload.title, 'New alert'),
+            body: asString(payload.body) || null,
+            level,
+            levelRank,
+            category: asString(payload.category, 'n8n'),
+            state: 'unread',
+            isActionable,
+            receivedAt: now,
+            sortAt: now,
+            expiresAt: asString(payload.expiresAt) || null,
+            relatedTaskId: asString(payload.relatedTaskId) || null,
+            metadata: payload,
+            presentation: {},
+          },
+          openUrlAction: { url: actionUrl, label: 'Open' },
         });
 
-        await syncOpenUrlAction(id, actionUrl);
-        await reindexNotification(id);
+        await reindexNotification(search);
 
         return Response.json({ success: true, created: 'alert', id }, { status: 201 });
       }
 
       case 'shipment.update': {
         const sourceId = asString(payload.sourceId, asString(payload.shipmentId, `shipment:${crypto.randomUUID()}`));
-        const [existing] = await db
-          .select()
-          .from(notifications)
-          .where(and(eq(notifications.connectorType, 'n8n'), eq(notifications.sourceId, sourceId)))
-          .limit(1);
-
         const actionUrl = asString(payload.actionUrl) || null;
         const { level, levelRank } = normalizeNotificationLevel(payload.severity);
         const isActionable = asBoolean(payload.isActionable, Boolean(actionUrl)) && Boolean(actionUrl);
@@ -170,18 +147,19 @@ export async function POST(request: Request) {
           metadata: payload,
         };
 
-        if (existing) {
-          await db.update(notifications).set(values).where(eq(notifications.id, existing.id));
-          await syncOpenUrlAction(existing.id, actionUrl);
-          await reindexNotification(existing.id);
-          return Response.json({ success: true, updated: 'shipment', id: existing.id });
-        }
-
         const id = crypto.randomUUID();
-        await db.insert(notifications).values({ id, ...values, presentation: {} });
-        await syncOpenUrlAction(id, actionUrl);
-        await reindexNotification(id);
-        return Response.json({ success: true, created: 'shipment', id }, { status: 201 });
+        const result = await ingest.upsertNotificationBySource({
+          match: { connectorType: 'n8n', sourceId },
+          insert: { id, ...values, presentation: {} },
+          update: values,
+          openUrlAction: { url: actionUrl, label: 'Open' },
+        });
+
+        await reindexNotification(result.search);
+
+        return result.created
+          ? Response.json({ success: true, created: 'shipment', id: result.id }, { status: 201 })
+          : Response.json({ success: true, updated: 'shipment', id: result.id });
       }
 
       case 'reminder':
@@ -194,28 +172,30 @@ export async function POST(request: Request) {
         const { level, levelRank } = normalizeNotificationLevel(payload.severity);
         const isActionable = asBoolean(payload.isActionable, Boolean(actionUrl)) && Boolean(actionUrl);
 
-        await db.insert(notifications).values({
-          id,
-          sourceId: asString(payload.sourceId, `n8n:${id}`),
-          connectorType: 'n8n',
-          connectorInstanceId,
-          title: asString(payload.title, type === 'reminder' ? 'Reminder' : 'Custom alert'),
-          body: asString(payload.body) || null,
-          level,
-          levelRank,
-          category,
-          state: 'unread',
-          isActionable,
-          receivedAt: now,
-          sortAt: now,
-          expiresAt: asString(payload.expiresAt) || null,
-          relatedTaskId: asString(payload.relatedTaskId) || null,
-          metadata: payload,
-          presentation: {},
+        const search = await ingest.createNotification({
+          notification: {
+            id,
+            sourceId: asString(payload.sourceId, `n8n:${id}`),
+            connectorType: 'n8n',
+            connectorInstanceId,
+            title: asString(payload.title, type === 'reminder' ? 'Reminder' : 'Custom alert'),
+            body: asString(payload.body) || null,
+            level,
+            levelRank,
+            category,
+            state: 'unread',
+            isActionable,
+            receivedAt: now,
+            sortAt: now,
+            expiresAt: asString(payload.expiresAt) || null,
+            relatedTaskId: asString(payload.relatedTaskId) || null,
+            metadata: payload,
+            presentation: {},
+          },
+          openUrlAction: { url: actionUrl, label: 'Open' },
         });
 
-        await syncOpenUrlAction(id, actionUrl);
-        await reindexNotification(id);
+        await reindexNotification(search);
 
         return Response.json({ success: true, created: category, id }, { status: 201 });
       }

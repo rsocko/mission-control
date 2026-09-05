@@ -1,11 +1,15 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { routines, routineCompletions } from '@/db/schema';
-import { eq, and, gte, lte, desc, asc } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
 import { calculateStreak, getIntervalStatus, getWeeklyProgress } from '@/lib/routines/streaks';
 import type { CadenceConfig } from '@/lib/routines/streaks';
 import { ApiErrors } from '@/lib/api-error';
+import {
+  ROUTINE_CADENCE_TYPES,
+  type RoutineCadenceType,
+  createRoutine,
+  listRoutineCompletions,
+  listRoutines,
+} from '@/lib/routines/service';
 
 /** Format a Date as YYYY-MM-DD in local time (avoids UTC rollover). */
 function formatDateLocal(d: Date): string {
@@ -49,30 +53,23 @@ export async function GET(request: Request) {
   const weekSunday = getWeekSunday(weekMonday);
 
   try {
-    // Fetch routines
-    const allRoutines = await db.select()
-      .from(routines)
-      .where(includeArchived ? undefined : eq(routines.isArchived, false))
-      .orderBy(asc(routines.sortOrder), asc(routines.createdAt));
+    const allRoutines = await listRoutines(includeArchived);
 
-    // Fetch all completions for the current week
-    const weekCompletions = await db.select()
-      .from(routineCompletions)
-      .where(and(
-        gte(routineCompletions.date, weekMonday),
-        lte(routineCompletions.date, weekSunday),
-      ))
-      .orderBy(asc(routineCompletions.date));
+    const weekCompletions = await listRoutineCompletions({
+      fromInclusive: weekMonday,
+      toInclusive: weekSunday,
+      order: 'ascending',
+    });
 
     // Fetch last 365 days of completions for streak calculation
     const streakStartDate = new Date(today + 'T12:00:00');
     streakStartDate.setDate(streakStartDate.getDate() - 365);
     const streakStartStr = formatDateLocal(streakStartDate);
 
-    const allCompletions = await db.select()
-      .from(routineCompletions)
-      .where(gte(routineCompletions.date, streakStartStr))
-      .orderBy(desc(routineCompletions.date));
+    const allCompletions = await listRoutineCompletions({
+      fromInclusive: streakStartStr,
+      order: 'descending',
+    });
 
     // Build response
     const result = allRoutines.map(routine => {
@@ -131,30 +128,22 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest('name and cadenceType are required');
     }
 
-    const validCadences = ['daily', 'specific_days', 'x_per_week', 'every_n_days', 'weekly', 'monthly', 'quarterly'];
-    if (!validCadences.includes(cadenceType)) {
-      return ApiErrors.badRequest(`Invalid cadenceType. Must be one of: ${validCadences.join(', ')}`);
+    if (!ROUTINE_CADENCE_TYPES.includes(cadenceType as RoutineCadenceType)) {
+      return ApiErrors.badRequest(
+        `Invalid cadenceType. Must be one of: ${ROUTINE_CADENCE_TYPES.join(', ')}`,
+      );
     }
 
     const id = `routine-${crypto.randomUUID().slice(0, 8)}`;
     const now = new Date().toISOString();
 
-    // Get next sort order
-    const existing = await db.select({ sortOrder: routines.sortOrder })
-      .from(routines)
-      .orderBy(desc(routines.sortOrder));
-    const nextOrder = existing.length > 0 ? (existing[0].sortOrder || 0) + 1 : 0;
-
-    await db.insert(routines).values({
+    await createRoutine({
       id,
       name,
-      cadenceType,
+      cadenceType: cadenceType as RoutineCadenceType,
       cadenceConfig: cadenceConfig || {},
       description: description || null,
       icon: icon || null,
-      sortOrder: nextOrder,
-      isActive: true,
-      isArchived: false,
       createdAt: now,
       updatedAt: now,
     });

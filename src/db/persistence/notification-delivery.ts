@@ -5,6 +5,7 @@ import {
 } from '@/lib/notifications/push-payload';
 import { decodeStrictJsonObject } from './value-codecs';
 import type { NotificationWebPersistence } from './notification-web';
+import type { NotificationPushPersistence } from './notification-push';
 
 export type NotificationDeliverySuppressionReason =
   | 'channel_disabled'
@@ -95,6 +96,7 @@ export interface NotificationDeliveryRepository {
     invalidatedAt: string;
     reason: string;
   }): Promise<boolean>;
+  push: NotificationPushPersistence;
   web: NotificationWebPersistence;
 }
 

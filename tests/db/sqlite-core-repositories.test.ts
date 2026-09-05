@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { runOrderedDatabaseBootstrap } from '@/db/bootstrap/registry';
 import {
   createSqliteCorePersistenceRepositories,
+  SqliteConnectorRepository,
 } from '@/db/persistence/sqlite-core-repositories';
 import {
   coreConnectorFixture,
@@ -12,6 +13,7 @@ import {
   coreTaskFixture,
   describeCorePersistenceRepositoriesContract,
 } from '../contracts/core-persistence-repositories.contract';
+import { describeConnectorDeletedIdsContract } from '../contracts/connector-deleted-ids.contract';
 
 function createHarness() {
   const sqlite = new Database(':memory:');
@@ -212,6 +214,13 @@ function createHarness() {
 }
 
 describeCorePersistenceRepositoriesContract('SQLite', createHarness);
+describeConnectorDeletedIdsContract('SQLite', () => {
+  const harness = createHarness();
+  return {
+    repository: new SqliteConnectorRepository(harness.sqlite),
+    close: harness.close,
+  };
+});
 
 describe('SQLite core repository compatibility behavior', () => {
   it('reads legacy connector configuration with double-encoded JSON', async () => {

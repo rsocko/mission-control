@@ -217,4 +217,4 @@ index, and every table it reads already ships in `drizzle/postgres`:
 | `tests/db/sqlite-analytics-repositories.test.ts` | SQLite driver over a real temporary database |
 | `tests/db/postgres-analytics-repositories.integration.test.ts` | PostgreSQL driver plus no-transaction and pooled-client-release proofs |
 | `tests/db/postgres-analytics-poisoned.test.ts` | All six route handlers and five services run with `@/db` throwing |
-| `tests/architecture/analytics-taint-decrement.test.ts` | Owned file sets, adapter confinement, and the exact composed graph |
+| `tests/architecture/analytics-taint-decrement.test.ts` | Owned route/library cleanliness, adapter confinement, and the monotonic L17 migration-unit ceiling; the PostgreSQL route sentinel owns the exact current graph |

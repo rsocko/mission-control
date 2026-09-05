@@ -7,33 +7,34 @@ import {
   T1,
   type SearchIndexHarness,
 } from './harness';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 const mocks = vi.hoisted(() => ({
   semanticSearchEnabled: true,
-  runtime: null as unknown,
   runtimeError: null as Error | null,
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
-    provider: 'openai',
-    configured: true,
-    baseUrl: 'https://api.openai.test/v1',
-    apiKey: 'super-secret-key',
-    model: 'gpt-4o-mini',
-    embeddingModel: 'text-embedding-3-small',
-    semanticSearchEnabled: mocks.semanticSearchEnabled,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'openai',
+      configured: true,
+      baseUrl: 'https://api.openai.test/v1',
+      apiKey: 'super-secret-key',
+      model: 'gpt-4o-mini',
+      embeddingModel: 'text-embedding-3-small',
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: ['openai'] },
+        restricted: { allowedRoutes: ['openai'] },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: {},
+    },
   }),
-}));
-
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  getSemanticIndexRuntime: async () => {
-    if (mocks.runtimeError) throw mocks.runtimeError;
-    return mocks.runtime;
-  },
-  scheduleSemanticBackfill: vi.fn(),
-  publishSemanticUpsert: vi.fn(),
-  publishSemanticDelete: vi.fn(),
 }));
 
 describe('semantic search status and readiness observability', () => {
@@ -41,20 +42,27 @@ describe('semantic search status and readiness observability', () => {
   let semantic: typeof import('@/lib/search/semantic');
 
   beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.resetModules();
     mocks.semanticSearchEnabled = true;
     mocks.runtimeError = null;
     harness = createSearchIndexHarness();
-    mocks.runtime = {
-      repository: harness.repository,
-      embeddings: harness.embeddings,
-      config: {},
-    };
     semantic = await import('@/lib/search/semantic');
+    semantic.registerSemanticSearchRuntime({
+      resolve: async () => {
+        if (mocks.runtimeError) throw mocks.runtimeError;
+        return {
+          repository: harness.repository,
+          embeddings: harness.embeddings,
+        };
+      },
+      scheduleBackfill: vi.fn(),
+    });
     semantic.resetSemanticSearchStateForTests();
   });
 
   afterEach(() => {
+    resetProcessRuntimeRegistries();
     harness.close();
   });
 

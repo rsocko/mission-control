@@ -1,65 +1,24 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { appSettings } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import logger from '@/lib/logger';
-
-const SETTINGS_KEY = 'dopamine-menu';
-
-export interface DopamineReward {
-  id: string;
-  emoji: string;
-  label: string;
-}
-
-export interface DopamineMenuSettings {
-  enabled: boolean;
-  threshold: number;
-  rewards: DopamineReward[];
-}
-
-const DEFAULT_REWARDS: DopamineReward[] = [
-  { id: '1', emoji: '☕', label: 'Coffee break' },
-  { id: '2', emoji: '🎵', label: 'Fresh playlist' },
-  { id: '3', emoji: '🚶', label: '10-min walk' },
-  { id: '4', emoji: '📱', label: 'Phone break' },
-  { id: '5', emoji: '🎮', label: 'Quick game' },
-  { id: '6', emoji: '✨', label: 'Your choice' },
-];
-
-const DEFAULT_SETTINGS: DopamineMenuSettings = {
-  enabled: true,
-  threshold: 5,
-  rewards: DEFAULT_REWARDS,
-};
+import {
+  DEFAULT_DOPAMINE_MENU_SETTINGS,
+  getPreferenceSettingsRepositoryForBackend,
+  type DopamineMenuSettingsPatch,
+} from '@/lib/settings/preference-settings';
 
 export async function GET() {
   try {
-    const [row] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY));
-
-    if (!row) {
-      return NextResponse.json(DEFAULT_SETTINGS);
-    }
-
-    const stored = row.value as Partial<DopamineMenuSettings>;
-    return NextResponse.json({
-      enabled: stored.enabled ?? DEFAULT_SETTINGS.enabled,
-      threshold: stored.threshold ?? DEFAULT_SETTINGS.threshold,
-      rewards: stored.rewards ?? DEFAULT_SETTINGS.rewards,
-    });
+    const repository = await getPreferenceSettingsRepositoryForBackend();
+    return NextResponse.json(await repository.getDopamineMenu());
   } catch (error) {
     logger.error({ err: error }, 'Failed to fetch dopamine menu settings');
-    return NextResponse.json(DEFAULT_SETTINGS);
+    return NextResponse.json(DEFAULT_DOPAMINE_MENU_SETTINGS);
   }
 }
 
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const now = new Date().toISOString();
 
     // Validate threshold if provided
     if (body.threshold !== undefined) {
@@ -82,32 +41,8 @@ export async function PATCH(request: Request) {
       }
     }
 
-    // Merge with existing settings
-    const [existing] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SETTINGS_KEY));
-
-    const current = (existing?.value as Partial<DopamineMenuSettings>) || {};
-    const updated: DopamineMenuSettings = {
-      enabled: body.enabled ?? current.enabled ?? DEFAULT_SETTINGS.enabled,
-      threshold: body.threshold ?? current.threshold ?? DEFAULT_SETTINGS.threshold,
-      rewards: body.rewards ?? current.rewards ?? DEFAULT_SETTINGS.rewards,
-    };
-
-    if (existing) {
-      await db
-        .update(appSettings)
-        .set({ value: updated, updatedAt: now })
-        .where(eq(appSettings.key, SETTINGS_KEY));
-    } else {
-      await db.insert(appSettings).values({
-        key: SETTINGS_KEY,
-        value: updated,
-        updatedAt: now,
-      });
-    }
-
+    const repository = await getPreferenceSettingsRepositoryForBackend();
+    const updated = await repository.patchDopamineMenu(body as DopamineMenuSettingsPatch);
     return NextResponse.json(updated);
   } catch (error) {
     logger.error({ err: error }, 'Failed to update dopamine menu settings');

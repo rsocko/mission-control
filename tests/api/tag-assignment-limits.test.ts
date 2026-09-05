@@ -3,6 +3,7 @@
  */
 import { NextResponse } from 'next/server';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
 const {
   mockGetCapabilities,
@@ -16,6 +17,11 @@ const {
   mockInitializeConnector: vi.fn(),
   mockIsConnectorEnabled: vi.fn(),
   mockEvaluateRulesForTasks: vi.fn(),
+}));
+const ancillaryMocks = vi.hoisted(() => ({
+  getTagMutationContext: vi.fn(),
+  addTaskTags: vi.fn(),
+  removeTaskTag: vi.fn(),
 }));
 
 // ─── Shared DB mock ─────────────────────────────────────────────────────────
@@ -67,8 +73,11 @@ vi.mock('@/db/schema', () => ({
   connectorConfigs: { id: 'id', capabilities: 'capabilities' },
 }));
 
-vi.mock('@/lib/connectors', () => ({
-  connectorRegistry: { getConnector: mockGetConnector },
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
+    getConnector: mockGetConnector,
+    replaceConnector: mockInitializeConnector,
+  }),
 }));
 
 vi.mock('@/lib/connectors/capabilities', () => ({
@@ -76,8 +85,11 @@ vi.mock('@/lib/connectors/capabilities', () => ({
   isConnectorEnabled: mockIsConnectorEnabled,
 }));
 
-vi.mock('@/lib/sync', () => ({
-  syncScheduler: { initializeConnectorFromDb: mockInitializeConnector },
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    connectors: { get: vi.fn().mockResolvedValue(null) },
+    execution: { support: { assertConfigSupported: vi.fn() } },
+  }),
 }));
 
 vi.mock('@/lib/rules', () => ({
@@ -91,6 +103,12 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/api-error', () => ({
   ApiErrors: {
+    notFound: vi.fn((entity: string) =>
+      NextResponse.json({ error: `${entity} not found` }, { status: 404 }),
+    ),
+    forbidden: vi.fn((msg: string) =>
+      NextResponse.json({ error: msg }, { status: 403 }),
+    ),
     internal: vi.fn((msg: string) => {
       return NextResponse.json({ error: msg, code: 'INTERNAL_ERROR' }, { status: 500 });
     }),
@@ -122,6 +140,27 @@ beforeEach(() => {
   });
   mockGetCapabilities.mockResolvedValue(null);
   mockIsConnectorEnabled.mockResolvedValue(true);
+  ancillaryMocks.getTagMutationContext.mockResolvedValue({
+    task: {
+      id: 'task-1',
+      connectorInstanceId: 'local',
+      sourceId: 'local:1',
+      connectorType: 'local',
+      updatedAt: '2026-08-01T12:00:00Z',
+    },
+    storedCapabilities: {},
+  });
+  ancillaryMocks.addTaskTags.mockImplementation(async (input: {
+    candidates: Array<{ id: string; name: string }>;
+  }) => ({
+    addedTags: input.candidates.map((tag) => ({ id: tag.id, name: tag.name })),
+    rejectedTags: [],
+  }));
+  ancillaryMocks.removeTaskTag.mockResolvedValue({
+    removed: true,
+    tagName: 'needs-triage',
+  });
+  registerFakeTaskCorePersistence({ ancillary: ancillaryMocks });
 });
 
 describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
@@ -166,8 +205,6 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
 
   it('should accept exactly 20 tags', async () => {
     // Mock task lookup to return a task
-    mockDb.select.mockImplementation(() => chainable([{ connectorInstanceId: null, sourceId: 'local:1', connectorType: 'local' }]));
-
     const exactlyTwenty = Array.from({ length: 20 }, (_, i) => `tag-${i}`);
     const { POST } = await import('@/app/api/tasks/[id]/tags/route');
     const request = new Request(`${BASE}/api/tasks/task-1/tags`, {
@@ -181,8 +218,6 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
   });
 
   it('should truncate tag names to 100 characters', async () => {
-    mockDb.select.mockImplementation(() => chainable([{ connectorInstanceId: null, sourceId: 'local:1', connectorType: 'local' }]));
-
     const longTag = 'a'.repeat(150);
     const { POST } = await import('@/app/api/tasks/[id]/tags/route');
     const request = new Request(`${BASE}/api/tasks/task-1/tags`, {
@@ -196,7 +231,6 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
   });
 
   it('keeps a successful tag write successful when auto-include evaluation fails', async () => {
-    mockDb.select.mockImplementation(() => chainable([{ connectorInstanceId: null, sourceId: 'local:1', connectorType: 'local' }]));
     mockEvaluateRulesForTasks.mockRejectedValueOnce(new Error('rule evaluation failed'));
 
     const { POST } = await import('@/app/api/tasks/[id]/tags/route');
@@ -235,7 +269,14 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
   });
 
   it('writes Microsoft To Do tag removal through despite legacy stored capabilities', async () => {
-    const removeTagFromTask = vi.fn().mockResolvedValue(undefined);
+    const order: string[] = [];
+    ancillaryMocks.removeTaskTag.mockImplementationOnce(async () => {
+      order.push('local');
+      return { removed: true, tagName: 'needs-triage' };
+    });
+    const removeTagFromTask = vi.fn(async () => {
+      order.push('source');
+    });
     mockGetCapabilities.mockResolvedValue({
       read: true,
       write: true,
@@ -254,23 +295,15 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
       type: 'microsoft-todo',
       removeTagFromTask,
     });
-    mockDb.select.mockImplementation((selection?: Record<string, unknown>) => {
-      if (selection?.sourceId) {
-        return chainable([{
-          connectorInstanceId: 'todo-1',
-          sourceId: 'list-1:task-1',
-          connectorType: 'microsoft-todo',
-        }]);
-      }
-      if (selection?.capabilities) {
-        return chainable([{
-          capabilities: { tags: false, tagWriteBack: false },
-        }]);
-      }
-      if (selection?.name) {
-        return chainable([{ name: 'needs-triage' }]);
-      }
-      return chainable([]);
+    ancillaryMocks.getTagMutationContext.mockResolvedValue({
+      task: {
+        id: 'task-1',
+        connectorInstanceId: 'todo-1',
+        sourceId: 'list-1:task-1',
+        connectorType: 'microsoft-todo',
+        updatedAt: '2026-08-01T12:00:00Z',
+      },
+      storedCapabilities: { tags: false, tagWriteBack: false },
     });
 
     const { DELETE } = await import('@/app/api/tasks/[id]/tags/route');
@@ -287,6 +320,7 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
         'needs-triage',
       );
     });
+    expect(order).toEqual(['local', 'source']);
   });
 
   it('persists Scout tags locally without invoking connector write-back', async () => {
@@ -296,14 +330,16 @@ describe('POST /api/tasks/[id]/tags — input limits (PR #305)', () => {
       taskSourceModel: 'ingested',
       statusWriteBack: 'pull',
     });
-    mockDb.select
-      .mockReturnValueOnce(chainable([{
+    ancillaryMocks.getTagMutationContext.mockResolvedValue({
+      task: {
+        id: 'task-1',
         connectorInstanceId: 'scout-primary',
         sourceId: 'scout:email:item-1',
         connectorType: 'scout',
-      }]))
-      .mockReturnValueOnce(chainable([]))
-      .mockReturnValueOnce(chainable([]));
+        updatedAt: '2026-08-01T12:00:00Z',
+      },
+      storedCapabilities: {},
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/tags/route');
     const response = await POST(new Request(`${BASE}/api/tasks/task-1/tags`, {

@@ -1,7 +1,5 @@
-import db from '@/db';
-import { outboundWebhooks } from '@/db/schema';
-import { desc } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 function normalizeEventTypes(value: unknown) {
   return Array.isArray(value)
@@ -11,10 +9,8 @@ function normalizeEventTypes(value: unknown) {
 
 export async function GET() {
   try {
-    const webhooks = await db
-      .select()
-      .from(outboundWebhooks)
-      .orderBy(desc(outboundWebhooks.createdAt));
+    const repositories = await getWorkerPersistenceRepositories();
+    const webhooks = await repositories.webhookIntegrations.outbound.list();
 
     return Response.json({ webhooks });
   } catch (error) {
@@ -42,14 +38,14 @@ export async function POST(request: Request) {
 
     const id = crypto.randomUUID();
     const createdAt = new Date().toISOString();
+    const repositories = await getWorkerPersistenceRepositories();
 
-    await db.insert(outboundWebhooks).values({
+    await repositories.webhookIntegrations.outbound.create({
       id,
       name,
       url,
       secret: secret || null,
       eventTypes,
-      enabled: true,
       createdAt,
     });
 

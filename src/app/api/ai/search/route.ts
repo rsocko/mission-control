@@ -1,8 +1,6 @@
-import { getSearchStatus, searchWithBranches } from '@/lib/search';
+import { getSearchStatus, searchWithBranches } from '@/lib/search/semantic';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
-import { isNotNull } from 'drizzle-orm';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -52,11 +50,16 @@ export async function GET(request: Request) {
   }
 
   const startMs = performance.now();
-  const excludedConnectorInstanceIds = universeEligible
-    ? (await db.select({ id: connectorConfigs.id })
-        .from(connectorConfigs)
-        .where(isNotNull(connectorConfigs.deletedAt))).map((row) => row.id)
-    : [];
+  let excludedConnectorInstanceIds: string[] = [];
+  if (universeEligible) {
+    const connectorRepository = getCorePersistenceRepositories().connectors;
+    if (typeof connectorRepository.listDeletedIds !== 'function') {
+      throw new Error(
+        'Connector deleted-ID persistence is not registered. Initialize the selected persistence backend before searching private data.',
+      );
+    }
+    excludedConnectorInstanceIds = await connectorRepository.listDeletedIds();
+  }
 
   const searchOptions = {
     type,

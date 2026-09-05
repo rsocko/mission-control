@@ -210,6 +210,10 @@ vi.mock('@/db', () => ({
     throw new Error('SQLite was evaluated');
   },
 }));
+vi.mock('@/lib/push/triggers', () => {
+  mocks.sqliteTouch();
+  throw new Error('SQLite-backed push triggers were evaluated');
+});
 vi.mock('@/db/runtime-backend', () => ({
   resolveDatabaseBackend: () => 'postgres',
 }));

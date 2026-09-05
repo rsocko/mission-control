@@ -1,16 +1,9 @@
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
-import db, { sqlite } from '@/db';
-import { inboundWebhooks, inboundWebhookLog, tasks, notificationActions } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { sql } from 'drizzle-orm';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { normalizeNotificationUrl } from '@/lib/notifications/providers';
 import { normalizeNotificationLevel } from '@/lib/notifications/levels';
-import {
-  createNotificationsInTransaction,
-  wakeNotificationDeliveryDispatcher,
-} from '@/lib/notifications';
+import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
 import { getExternalAgent } from '@/lib/external-agents/registry';
 import {
   getDispatch,
@@ -29,9 +22,18 @@ import {
   readBoundedRequestBody,
   RequestBodyTooLargeError,
 } from '@/lib/api/bounded-body';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type {
+  InboundWebhookLogCompaction,
+  InboundWebhookRepository,
+} from '@/db/persistence/webhook-integrations';
 
 const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
+/** Replay-suppression window for a claimed delivery key. */
 const REPLAY_WINDOW_MS = 5 * 60 * 1_000;
+const LOG_RETENTION_MS = 30 * 24 * 60 * 60 * 1_000;
+const LOG_COMPACTION_INTERVAL_MS = 60 * 60 * 1_000;
+const LOG_RETAIN_LATEST = 1000;
 const WEBHOOK_RATE_POLICY: RateLimitPolicy = {
   name: 'inbound-webhook-id',
   limit: 60,
@@ -65,18 +67,15 @@ export async function POST(
   const now = new Date().toISOString();
 
   // Load webhook config
-  const [webhook] = await db
-    .select()
-    .from(inboundWebhooks)
-    .where(eq(inboundWebhooks.id, id))
-    .limit(1);
+  const inbound = (await getWorkerPersistenceRepositories()).webhookIntegrations.inbound;
+  const webhook = await inbound.findForDelivery(id);
 
   if (!webhook) {
     return Response.json({ error: 'Unknown webhook endpoint' }, { status: 404 });
   }
 
   if (!webhook.enabled) {
-    await logReceive(id, 'auth_failed', 403, null, null, 'Webhook is disabled', null, now);
+    await logReceive(inbound, id, 'auth_failed', 403, null, null, 'Webhook is disabled', null, now);
     return Response.json({ error: 'Webhook endpoint is disabled' }, { status: 403 });
   }
 
@@ -124,7 +123,7 @@ export async function POST(
         { status: 413 },
       );
     }
-    await logReceive(id, 'parse_error', 400, null, null, 'Failed to read request body', null, now);
+    await logReceive(inbound, id, 'parse_error', 400, null, null, 'Failed to read request body', null, now);
     return Response.json({ error: 'Failed to read request body' }, { status: 400 });
   }
   const rawBody = new TextDecoder().decode(rawBytes);
@@ -136,7 +135,7 @@ export async function POST(
       || request.headers.get('x-mc-signature');
 
     if (!signature) {
-      await logReceive(id, 'auth_failed', 401, null, null, 'Missing signature header', safePayloadPreview(rawBody), now);
+      await logReceive(inbound, id, 'auth_failed', 401, null, null, 'Missing signature header', safePayloadPreview(rawBody), now);
       return Response.json({ error: 'Missing signature' }, { status: 401 });
     }
 
@@ -146,7 +145,7 @@ export async function POST(
       ? Buffer.from(suppliedHex, 'hex')
       : Buffer.alloc(0);
     if (supplied.length !== expected.length || !timingSafeEqual(expected, supplied)) {
-      await logReceive(id, 'auth_failed', 401, null, null, 'Signature verification failed', safePayloadPreview(rawBody), now);
+      await logReceive(inbound, id, 'auth_failed', 401, null, null, 'Signature verification failed', safePayloadPreview(rawBody), now);
       return Response.json({ error: 'Invalid signature' }, { status: 401 });
     }
   }
@@ -159,12 +158,12 @@ export async function POST(
       throw new Error('Payload must be a JSON object');
     }
   } catch (parseError) {
-    await logReceive(id, 'parse_error', 400, null, null, `Invalid JSON: ${parseError}`, safePayloadPreview(rawBody), now);
+    await logReceive(inbound, id, 'parse_error', 400, null, null, `Invalid JSON: ${parseError}`, safePayloadPreview(rawBody), now);
     return Response.json({ error: 'Invalid JSON payload' }, { status: 400 });
   }
 
   const deliveryKey = getDeliveryKey(rawBytes);
-  if (!claimWebhookDelivery(id, deliveryKey, now)) {
+  if (!(await claimWebhookDelivery(inbound, id, deliveryKey, now))) {
     logger.info({ webhookId: id, deliveryKey }, 'Ignored duplicate inbound webhook');
     return Response.json({ success: true, duplicate: true }, { status: 200 });
   }
@@ -176,8 +175,9 @@ export async function POST(
     if (payload.type === 'agent-result') {
       const dispatchId = typeof payload.dispatchId === 'string' ? payload.dispatchId : '';
       if (!dispatchId) {
-        releaseWebhookDelivery(id, deliveryKey);
+        await releaseWebhookDelivery(inbound, id, deliveryKey);
         await logReceive(
+          inbound,
           id,
           'parse_error',
           422,
@@ -198,8 +198,9 @@ export async function POST(
         || agent.deletedAt
         || agent.inboundWebhookId !== id
       ) {
-        releaseWebhookDelivery(id, deliveryKey);
+        await releaseWebhookDelivery(inbound, id, deliveryKey);
         await logReceive(
+          inbound,
           id,
           'auth_failed',
           404,
@@ -213,6 +214,7 @@ export async function POST(
       }
       if (!webhook.secret) {
         await logReceive(
+          inbound,
           id,
           'auth_failed',
           403,
@@ -233,13 +235,14 @@ export async function POST(
         { agentAuthenticated: true },
       );
       sideEffectCommitted = true;
-      await db.update(inboundWebhooks).set({
-        totalReceived: sql`${inboundWebhooks.totalReceived} + 1`,
-        lastReceivedAt: now,
+      await inbound.recordDeliveryStats({
+        webhookId: id,
+        receivedAt: now,
         lastStatus: result.duplicate ? 200 : 202,
         updatedAt: now,
-      }).where(eq(inboundWebhooks.id, id));
+      });
       await logReceive(
+        inbound,
         id,
         'success',
         result.duplicate ? 200 : 202,
@@ -261,7 +264,7 @@ export async function POST(
       createdId = crypto.randomUUID();
       createdType = 'task';
 
-      await db.insert(tasks).values({
+      await inbound.createTask({
         id: createdId,
         sourceId: `inbound:${webhook.id}:${createdId}`,
         connectorType: 'inbound-webhook',
@@ -273,8 +276,6 @@ export async function POST(
         dueDate: extractString(payload, mappings.dueDate, ['dueDate', 'due_date', 'due', 'deadline']) || null,
         createdAt: now,
         updatedAt: now,
-        depth: 0,
-        isChecklistItem: false,
         sourceListId: null,
         sourceListName: webhook.sourceLabel,
         assignee: extractString(payload, mappings.assignee, ['assignee', 'assigned_to']) || null,
@@ -297,14 +298,15 @@ export async function POST(
       const rawActionUrl = extractString(payload, mappings.actionUrl, ['actionUrl', 'action_url', 'url', 'link']);
       const actionUrl = normalizeNotificationUrl(rawActionUrl);
       if (rawActionUrl && !actionUrl) {
-        releaseWebhookDelivery(id, deliveryKey);
-        await db.update(inboundWebhooks).set({
-          totalReceived: sql`${inboundWebhooks.totalReceived} + 1`,
-          lastReceivedAt: now,
+        await releaseWebhookDelivery(inbound, id, deliveryKey);
+        await inbound.recordDeliveryStats({
+          webhookId: id,
+          receivedAt: now,
           lastStatus: 400,
           updatedAt: now,
-        }).where(eq(inboundWebhooks.id, id));
+        });
         await logReceive(
+          inbound,
           id,
           'parse_error',
           400,
@@ -318,8 +320,8 @@ export async function POST(
       }
       const actionId = actionUrl ? crypto.randomUUID() : null;
 
-      const creationResult = db.transaction((tx) => {
-        const [result] = createNotificationsInTransaction(tx, [{
+      const creationResult = await inbound.createAlert({
+        notification: {
           id: createdId,
           sourceId: `inbound:${webhook.id}:${createdId}`,
           connectorType: 'inbound-webhook',
@@ -328,7 +330,7 @@ export async function POST(
           body: extractString(payload, mappings.body, ['body', 'description', 'text', 'content', 'message']) || null,
           level,
           category: extractString(payload, mappings.category, ['category', 'type', 'source']) || webhook.sourceLabel,
-          templateKey,
+          templateKey: templateKey ?? null,
           state: 'unread',
           isActionable: Boolean(actionId),
           primaryActionId: actionId,
@@ -337,40 +339,37 @@ export async function POST(
           expiresAt: extractString(payload, mappings.expiresAt, ['expiresAt', 'expires_at', 'expiry']) || null,
           metadata: { webhookId: webhook.id, webhookName: webhook.name, originalPayload: payload },
           presentation: {},
-        }]);
-
-        if (result.created && actionUrl && actionId) {
-          tx.insert(notificationActions).values({
-            id: actionId,
-            notificationId: createdId,
-            actionType: 'open_url',
-            label: `Open ${webhook.sourceLabel}`,
-            icon: 'external-link',
-            variant: 'primary',
-            isPrimary: true,
-            sortOrder: 0,
-            payload: { url: actionUrl },
-            opensExternal: true,
-            createdBy: 'connector',
-          }).run();
-        }
-        return result;
+        },
+        action: actionUrl && actionId
+          ? {
+              id: actionId,
+              actionType: 'open_url',
+              label: `Open ${webhook.sourceLabel}`,
+              icon: 'external-link',
+              variant: 'primary',
+              isPrimary: true,
+              sortOrder: 0,
+              payload: { url: actionUrl },
+              opensExternal: true,
+              createdBy: 'connector',
+            }
+          : null,
       });
       sideEffectCommitted = true;
-      if (creationResult.deliveryEvent?.status === 'pending') {
+      if (creationResult.pendingDelivery) {
         wakeNotificationDeliveryDispatcher();
       }
     }
 
     // Update webhook stats
-    await db.update(inboundWebhooks).set({
-      totalReceived: sql`${inboundWebhooks.totalReceived} + 1`,
-      lastReceivedAt: now,
+    await inbound.recordDeliveryStats({
+      webhookId: id,
+      receivedAt: now,
       lastStatus: 201,
       updatedAt: now,
-    }).where(eq(inboundWebhooks.id, id));
+    });
 
-    await logReceive(id, 'success', 201, createdType, createdId, null, safePayloadPreview(rawBody), now);
+    await logReceive(inbound, id, 'success', 201, createdType, createdId, null, safePayloadPreview(rawBody), now);
 
     return Response.json({
       success: true,
@@ -378,18 +377,18 @@ export async function POST(
       id: createdId,
     }, { status: 201 });
   } catch (error) {
-    if (!sideEffectCommitted) releaseWebhookDelivery(id, deliveryKey);
+    if (!sideEffectCommitted) await releaseWebhookDelivery(inbound, id, deliveryKey);
     // Update stats even on error
-    await db.update(inboundWebhooks).set({
-      totalReceived: sql`${inboundWebhooks.totalReceived} + 1`,
-      lastReceivedAt: now,
+    await inbound.recordDeliveryStats({
+      webhookId: id,
+      receivedAt: now,
       lastStatus: 500,
       updatedAt: now,
-    }).where(eq(inboundWebhooks.id, id)).catch((err) => {
+    }).catch((err) => {
       logger.error({ err, webhookId: id }, 'Failed to update webhook stats after error');
     });
 
-    await logReceive(id, 'error', 500, null, null, `${error}`, safePayloadPreview(rawBody), now);
+    await logReceive(inbound, id, 'error', 500, null, null, `${error}`, safePayloadPreview(rawBody), now);
 
     if (isExternalAgentError(error)) {
       return Response.json(
@@ -481,6 +480,7 @@ function safePayloadPreview(rawBody: string) {
 
 /** Write an entry to the inbound webhook log */
 async function logReceive(
+  inbound: InboundWebhookRepository,
   webhookId: string,
   status: string,
   httpStatus: number,
@@ -491,18 +491,20 @@ async function logReceive(
   receivedAt: string,
 ) {
   try {
-    await db.insert(inboundWebhookLog).values({
-      id: crypto.randomUUID(),
-      webhookId,
-      status,
-      httpStatus,
-      createdType,
-      createdId,
-      errorMessage,
-      payloadPreview,
-      receivedAt,
+    await inbound.appendLog({
+      entry: {
+        id: crypto.randomUUID(),
+        webhookId,
+        status,
+        httpStatus,
+        createdType,
+        createdId,
+        errorMessage,
+        payloadPreview,
+        receivedAt,
+      },
+      compaction: dueLogCompaction(webhookId),
     });
-    compactWebhookLogs(webhookId);
   } catch (error) {
     logger.warn({ err: error, webhookId }, 'Failed to persist inbound webhook log');
   }
@@ -512,49 +514,42 @@ function getDeliveryKey(rawBytes: Uint8Array): string {
   return `payload:${createHash('sha256').update(rawBytes).digest('hex')}`;
 }
 
-function claimWebhookDelivery(webhookId: string, deliveryKey: string, receivedAt: string): boolean {
+async function claimWebhookDelivery(
+  inbound: InboundWebhookRepository,
+  webhookId: string,
+  deliveryKey: string,
+  receivedAt: string,
+): Promise<boolean> {
   replayCleanupCounter++;
-  if (replayCleanupCounter % 100 === 1) {
-    sqlite.prepare('DELETE FROM inbound_webhook_replays WHERE expires_at <= ?').run(receivedAt);
-  }
-  sqlite.prepare(`
-    DELETE FROM inbound_webhook_replays
-    WHERE webhook_id = ? AND delivery_key = ? AND expires_at <= ?
-  `).run(webhookId, deliveryKey, receivedAt);
-  const expiresAt = new Date(Date.parse(receivedAt) + REPLAY_WINDOW_MS).toISOString();
-  const result = sqlite.prepare(`
-    INSERT OR IGNORE INTO inbound_webhook_replays (
-      id, webhook_id, delivery_key, received_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?)
-  `).run(crypto.randomUUID(), webhookId, deliveryKey, receivedAt, expiresAt);
-  return result.changes === 1;
+  return inbound.claimDelivery({
+    id: crypto.randomUUID(),
+    webhookId,
+    deliveryKey,
+    receivedAt,
+    expiresAt: new Date(Date.parse(receivedAt) + REPLAY_WINDOW_MS).toISOString(),
+    sweepExpiredBefore: replayCleanupCounter % 100 === 1 ? receivedAt : null,
+  });
 }
 
-function releaseWebhookDelivery(webhookId: string, deliveryKey: string): void {
-  sqlite.prepare(`
-    DELETE FROM inbound_webhook_replays
-    WHERE webhook_id = ? AND delivery_key = ?
-  `).run(webhookId, deliveryKey);
+async function releaseWebhookDelivery(
+  inbound: InboundWebhookRepository,
+  webhookId: string,
+  deliveryKey: string,
+): Promise<void> {
+  await inbound.releaseDelivery({ webhookId, deliveryKey });
 }
 
-function compactWebhookLogs(webhookId: string): void {
+/**
+ * Bounded log retention runs at most hourly per webhook; the rest of the time
+ * the append stays a single insert.
+ */
+function dueLogCompaction(webhookId: string): InboundWebhookLogCompaction | null {
   const now = Date.now();
   const lastCompactedAt = lastLogCompaction.get(webhookId) ?? 0;
-  if (now - lastCompactedAt < 60 * 60 * 1_000) return;
+  if (now - lastCompactedAt < LOG_COMPACTION_INTERVAL_MS) return null;
   lastLogCompaction.set(webhookId, now);
-  const retentionThreshold = new Date(now - 30 * 24 * 60 * 60 * 1_000).toISOString();
-  sqlite.prepare(`
-    DELETE FROM inbound_webhook_log
-    WHERE webhook_id = ? AND received_at < ?
-  `).run(webhookId, retentionThreshold);
-  sqlite.prepare(`
-    DELETE FROM inbound_webhook_log
-    WHERE webhook_id = ?
-      AND id NOT IN (
-        SELECT id FROM inbound_webhook_log
-        WHERE webhook_id = ?
-        ORDER BY received_at DESC
-        LIMIT 1000
-      )
-  `).run(webhookId, webhookId);
+  return {
+    retentionCutoff: new Date(now - LOG_RETENTION_MS).toISOString(),
+    retainLatest: LOG_RETAIN_LATEST,
+  };
 }

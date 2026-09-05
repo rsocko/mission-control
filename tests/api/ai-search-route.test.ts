@@ -1,13 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
+  calls: [] as string[],
   getSearchStatus: vi.fn(),
+  listDeletedIds: vi.fn(),
   searchWithBranches: vi.fn(),
-  select: vi.fn(),
 }));
 
-vi.mock('@/lib/search', () => mocks);
-vi.mock('@/db', () => ({ default: { select: mocks.select } }));
+vi.mock('@/lib/search/semantic', () => mocks);
+vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositories: () => ({
+    connectors: { listDeletedIds: mocks.listDeletedIds },
+  }),
+}));
 vi.mock('@/lib/telemetry/operations', () => ({
   withRuntimeOperation: vi.fn((_operation, run: () => unknown) => run()),
 }));
@@ -15,13 +20,10 @@ vi.mock('@/lib/telemetry/operations', () => ({
 describe('AI search route', () => {
   beforeEach(() => {
     mocks.getSearchStatus.mockReset();
+    mocks.listDeletedIds.mockReset();
     mocks.searchWithBranches.mockReset();
-    mocks.select.mockReset();
-    mocks.select.mockReturnValue({
-      from: () => ({
-        where: () => Promise.resolve([{ id: 'deleted-connector' }]),
-      }),
-    });
+    mocks.calls.length = 0;
+    mocks.listDeletedIds.mockResolvedValue(['deleted-connector']);
     mocks.getSearchStatus.mockResolvedValue({
       available: true,
       enabled: true,
@@ -69,6 +71,7 @@ describe('AI search route', () => {
     });
     expect(JSON.stringify(body)).not.toContain('embedding":[');
     expect(mocks.searchWithBranches).not.toHaveBeenCalled();
+    expect(mocks.listDeletedIds).not.toHaveBeenCalled();
   });
 
   it('returns explicit branch timings with keyword results', async () => {
@@ -123,5 +126,54 @@ describe('AI search route', () => {
       universeEligible: true,
       excludeConnectorInstanceIds: ['deleted-connector'],
     }));
+  });
+
+  it('starts search and status concurrently only after resolving the privacy scope', async () => {
+    let resolveDeletedIds!: (ids: string[]) => void;
+    const deletedIds = new Promise<string[]>((resolve) => {
+      resolveDeletedIds = resolve;
+    });
+    mocks.listDeletedIds.mockImplementation(async () => {
+      mocks.calls.push('privacy-start');
+      const ids = await deletedIds;
+      mocks.calls.push('privacy-end');
+      return ids;
+    });
+    mocks.searchWithBranches.mockImplementation(async () => {
+      mocks.calls.push('search');
+      return { results: [], branches: {} };
+    });
+    mocks.getSearchStatus.mockImplementation(async () => {
+      mocks.calls.push('status');
+      return {
+        available: true,
+        enabled: false,
+        state: 'not-requested',
+        note: null,
+        semanticMetrics: null,
+      };
+    });
+
+    const { GET } = await import('@/app/api/ai/search/route');
+    const response = GET(new Request(
+      'http://localhost/api/ai/search?q=planning&mode=hybrid&universeEligible=true',
+    ));
+    await Promise.resolve();
+    expect(mocks.calls).toEqual(['privacy-start']);
+
+    resolveDeletedIds(['deleted-b', 'deleted-a']);
+    await expect(response).resolves.toHaveProperty('status', 200);
+    expect(mocks.calls).toEqual(['privacy-start', 'privacy-end', 'search', 'status']);
+  });
+
+  it('does not start search or status when privacy scope resolution fails', async () => {
+    mocks.listDeletedIds.mockRejectedValue(new Error('visibility unavailable'));
+
+    const { GET } = await import('@/app/api/ai/search/route');
+    await expect(GET(new Request(
+      'http://localhost/api/ai/search?q=planning&mode=hybrid&universeEligible=true',
+    ))).rejects.toThrow('visibility unavailable');
+    expect(mocks.searchWithBranches).not.toHaveBeenCalled();
+    expect(mocks.getSearchStatus).not.toHaveBeenCalled();
   });
 });

@@ -415,6 +415,62 @@ jobs:
             *) echo "Invalid documentation classification." >&2; exit 1 ;;
           esac
 
+  postgres-route-sentinel-worker:
+    name: PostgreSQL route sentinel worker
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Enforce PostgreSQL route sentinel
+        env:
+          MC_DATABASE_BACKEND: postgres
+        run: npm run test:postgres-route-sentinel
+
+  postgres-route-sentinel:
+    name: PostgreSQL route sentinel
+    if: always()
+    needs:
+      - changes
+      - postgres-route-sentinel-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm PostgreSQL route sentinel passed
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.postgres-route-sentinel-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+             echo "Change classification did not succeed." >&2
+             exit 1
+          fi
+          case "${DOCS_ONLY}" in
+             true) test "${WORKER_RESULT}" = "skipped" ;;
+             false) test "${WORKER_RESULT}" = "success" ;;
+             *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
   persisted-state-compatibility:
     name: Persisted-state compatibility
     if: >-

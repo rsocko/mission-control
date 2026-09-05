@@ -195,6 +195,8 @@ for (const file of workflowFiles) {
     const workerRuntimeResult = workflow.jobs?.['worker-runtime'];
     const shards = workflow.jobs?.['unit-test-shards'];
     const unitTestsResult = workflow.jobs?.['unit-tests'];
+    const postgresRouteSentinelWorker = workflow.jobs?.['postgres-route-sentinel-worker'];
+    const postgresRouteSentinelResult = workflow.jobs?.['postgres-route-sentinel'];
     const postgresIntegrationShards = workflow.jobs?.['postgres-integration-shards'];
     const postgresIntegrationResult = workflow.jobs?.['postgres-integration'];
     const expensiveStepCondition = "needs.changes.outputs.docs_only != 'true'";
@@ -202,6 +204,7 @@ for (const file of workflowFiles) {
       changes && impeccableWorker && impeccableResult && lintWorker &&
         productionBuildWorker && lintResult && productionBuildResult &&
         workflowPolicyResult && workerRuntimeResult && shards && unitTestsResult &&
+        postgresRouteSentinelWorker && postgresRouteSentinelResult &&
         postgresIntegrationShards && postgresIntegrationResult,
       'ci.yml must classify changes, isolate expensive workers, and expose every required check',
     );
@@ -280,6 +283,47 @@ for (const file of workflowFiles) {
       'production build worker must depend on change classification',
     );
     assert.deepEqual(shards.needs, ['changes'], 'unit-test shards must depend on change classification');
+    assert.deepEqual(
+      postgresRouteSentinelWorker.needs,
+      ['changes'],
+      'PostgreSQL route sentinel worker must depend on change classification',
+    );
+    assert.equal(
+      postgresRouteSentinelWorker.name,
+      'PostgreSQL route sentinel worker',
+      'PostgreSQL route sentinel worker must not claim the required check name',
+    );
+    for (const invariant of [
+      'always()',
+      "needs.changes.result != 'success'",
+      expensiveStepCondition,
+    ]) {
+      assert.ok(
+        postgresRouteSentinelWorker.if.includes(invariant),
+        `PostgreSQL route sentinel worker must enforce ${invariant}`,
+      );
+    }
+    const postgresRouteSentinelStep = postgresRouteSentinelWorker.steps?.find(
+      (step) => step.name === 'Enforce PostgreSQL route sentinel',
+    );
+    assert.equal(
+      postgresRouteSentinelStep?.env?.MC_DATABASE_BACKEND,
+      'postgres',
+      'PostgreSQL route sentinel must run with the production backend selected',
+    );
+    assert.equal(
+      postgresRouteSentinelStep?.run,
+      'npm run test:postgres-route-sentinel',
+      'PostgreSQL route sentinel must use its dependency-free npm script',
+    );
+    assert.equal(
+      postgresRouteSentinelWorker.steps?.some((step) =>
+        step.run === 'npm ci --no-audit --no-fund' ||
+        step.uses?.startsWith('actions/cache/')
+      ),
+      false,
+      'PostgreSQL route sentinel must not restore dependencies or npm caches',
+    );
     for (const [jobName, job] of Object.entries({
       'lint-worker': lintWorker,
       'production-build-worker': productionBuildWorker,
@@ -529,6 +573,14 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
         decisionEnv: 'DOCS_ONLY',
         decisionValue: '${{ needs.changes.outputs.docs_only }}',
       },
+      'postgres-route-sentinel': {
+        job: postgresRouteSentinelResult,
+        name: 'PostgreSQL route sentinel',
+        needs: ['changes', 'postgres-route-sentinel-worker'],
+        workerResult: '${{ needs.postgres-route-sentinel-worker.result }}',
+        decisionEnv: 'DOCS_ONLY',
+        decisionValue: '${{ needs.changes.outputs.docs_only }}',
+      },
       'postgres-integration': {
         job: postgresIntegrationResult,
         name: 'PostgreSQL integration',
@@ -544,6 +596,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
         'Impeccable integration',
         'Lint',
         'PostgreSQL integration',
+        'PostgreSQL route sentinel',
         'Production build',
         'Unit tests',
         'Worker runtime',
@@ -590,6 +643,8 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
         jobName === 'workflow-policy' ||
         jobName === 'worker-runtime' ||
         jobName === 'unit-tests' ||
+        jobName === 'postgres-route-sentinel-worker' ||
+        jobName === 'postgres-route-sentinel' ||
         jobName === 'postgres-integration'
       ) continue;
       const cacheRestores =

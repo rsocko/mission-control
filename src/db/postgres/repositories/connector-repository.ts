@@ -1,6 +1,9 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm';
 import type { ConnectorConfig } from '@/types';
-import type { ConnectorRepository, ConnectorTestResultCommand } from '@/db/persistence/core-repositories';
+import type {
+  ConnectorDeletedIdsRepository,
+  ConnectorTestResultCommand,
+} from '@/db/persistence/core-repositories';
 import { RepositoryError } from '@/db/persistence/contracts';
 import {
   mergeConnectorSettings,
@@ -41,7 +44,7 @@ function toSettings(value: unknown): Record<string, unknown> {
  * always clears `deleted_at`, since supplying a full connector record implies
  * the connector is active again.
  */
-export class PostgresConnectorRepository implements ConnectorRepository {
+export class PostgresConnectorRepository implements ConnectorDeletedIdsRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
   async get(id: string): Promise<ConnectorConfig | null> {
@@ -59,6 +62,15 @@ export class PostgresConnectorRepository implements ConnectorRepository {
       .from(connectorConfigs)
       .where(and(eq(connectorConfigs.enabled, true), isNull(connectorConfigs.deletedAt)));
     return rows.map(toConnectorConfig);
+  }
+
+  async listDeletedIds(): Promise<string[]> {
+    const rows = await this.db
+      .select({ id: connectorConfigs.id })
+      .from(connectorConfigs)
+      .where(isNotNull(connectorConfigs.deletedAt))
+      .orderBy(sql`${connectorConfigs.id} COLLATE "C"`);
+    return rows.map(({ id }) => id);
   }
 
   async upsert(connector: ConnectorConfig): Promise<ConnectorConfig> {

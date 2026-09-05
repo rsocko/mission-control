@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('generic connector webhooks', () => {
   let db: typeof import('@/db').default;
@@ -13,8 +14,10 @@ describe('generic connector webhooks', () => {
     vi.doUnmock('crypto');
     vi.resetModules();
 
-    const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
+    // The route now resolves its persistence through the worker composition, so
+    // the SQLite composition must be registered before the handler runs.
+    const dbModule = await importInitializedSqliteDatabase();
+    const [schemaModule, routeModule] = await Promise.all([
       import('@/db/schema'),
       import('@/app/api/webhooks/[connectorId]/route'),
     ]);
@@ -49,8 +52,9 @@ describe('generic connector webhooks', () => {
     });
   });
 
-  afterAll(() => {
+  afterAll(async () => {
     sqlite.close();
+    await (await import('@/db/runtime')).shutdownRuntimeDatabase();
     delete process.env.MC_DB_PATH;
   });
 

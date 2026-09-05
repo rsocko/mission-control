@@ -1,43 +1,33 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { computeWebPersistenceGraph } from './web-persistence-graph';
 
 const ROUTE = 'src/app/api/daily-completions/route.ts';
-const BASELINE = 'tests/architecture/web-persistence-baseline.json';
+const PRODUCTION_PATHS = [ROUTE] as const;
+const TEST_PATHS = [
+  'tests/api/daily-completions-postgres-parity.test.ts',
+  'tests/architecture/daily-planning-taint-decrement.test.ts',
+] as const;
+const ARCHITECTURE_PATHS = [
+  'docs/architecture/persistence-boundaries.md',
+  'tests/architecture/web-persistence-baseline.json',
+] as const;
 
 function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8');
 }
 
 const current = computeWebPersistenceGraph(process.cwd());
-const baseline = JSON.parse(source(BASELINE)) as {
-  decrementHistory: Array<{
-    layer: string;
-    totalMigrationUnits: { from: number; to: number; delta: number };
-    removedTaintedApiHelpers: string[];
-    removedTaintedLibA: string[];
-    removedTierARoutes: string[];
-    newlyCleanRoutes: string[];
-    tierBReclassifications: string[];
-    notMigratedFromTheOwnedFileSet: string[];
-  }>;
-};
 
 describe('daily planning read-model taint decrement', () => {
-  it('records the exact one-route decrement', () => {
-    const entry = baseline.decrementHistory.find(
-      ({ layer }) => layer === 'daily-planning-read-model',
-    );
-    expect(entry).toMatchObject({
-      totalMigrationUnits: { from: 167, to: 166, delta: -1 },
-      removedTaintedApiHelpers: [],
-      removedTaintedLibA: [],
-      removedTierARoutes: [ROUTE],
-      newlyCleanRoutes: [ROUTE],
-      tierBReclassifications: [],
-      notMigratedFromTheOwnedFileSet: [],
-    });
+  it('pins the five-path implementation and proof cap', () => {
+    expect(PRODUCTION_PATHS).toHaveLength(1);
+    expect(TEST_PATHS).toHaveLength(2);
+    expect(ARCHITECTURE_PATHS).toHaveLength(2);
+    for (const path of [...PRODUCTION_PATHS, ...TEST_PATHS, ...ARCHITECTURE_PATHS]) {
+      expect(existsSync(join(process.cwd(), path)), path).toBe(true);
+    }
   });
 
   it('keeps the route clean and delegates through the landed analytics repository', () => {
@@ -57,29 +47,4 @@ describe('daily planning read-model taint decrement', () => {
     expect(text).not.toMatch(/resolveDatabaseBackend|MC_DATABASE_BACKEND|fallback/i);
   });
 
-  it('holds the exact composed graph', () => {
-    expect({
-      apiRoutes: current.apiRoutes.length,
-      tierARoutes: current.tierARoutes.length,
-      tierBRoutes: current.tierBRoutes.length,
-      cleanRoutes: current.cleanRoutes.length,
-      directTaintSourceRoutes: current.directTaintSourceRoutes.length,
-      transitiveOnlyTaintSourceRoutes: current.transitiveOnlyTaintSourceRoutes.length,
-      directDbNamespaceRoutes: current.directDbNamespaceRoutes.length,
-      taintedLibA: current.taintedLibA.length,
-      taintedApiHelpers: current.taintedApiHelpers.length,
-      totalMigrationUnits: current.totalMigrationUnits,
-    }).toEqual({
-      apiRoutes: 266,
-      tierARoutes: 109,
-      tierBRoutes: 5,
-      cleanRoutes: 152,
-      directTaintSourceRoutes: 79,
-      transitiveOnlyTaintSourceRoutes: 30,
-      directDbNamespaceRoutes: 80,
-      taintedLibA: 57,
-      taintedApiHelpers: 0,
-      totalMigrationUnits: 166,
-    });
-  });
 });

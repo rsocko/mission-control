@@ -18,6 +18,10 @@ import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-regist
 const mocks = vi.hoisted(() => {
   const registerCore = vi.fn();
   const registerWorker = vi.fn();
+  const executeCrossAccountTaskMove = vi.fn(async () => ({
+    status: 200,
+    body: { success: true },
+  }));
   const backend = {
     initialize: vi.fn(async () => {}),
     shutdown: vi.fn(async () => undefined),
@@ -28,10 +32,12 @@ const mocks = vi.hoisted(() => {
       };
     },
   };
-  return { backend, registerCore, registerWorker };
+  return { backend, executeCrossAccountTaskMove, registerCore, registerWorker };
 });
 
-vi.mock('@/db', () => ({ initializeDatabase: vi.fn() }));
+vi.mock('@/db', () => {
+  throw new Error('POISON: PostgreSQL runtime must not import SQLite');
+});
 vi.mock('@/db/runtime-backend', () => ({ resolveDatabaseBackend: () => 'postgres' }));
 vi.mock('@/lib/persistence/runtime', () => ({
   registerCorePersistenceRepositories: mocks.registerCore,
@@ -62,6 +68,9 @@ vi.mock('@/db/postgres/sync/connector-operation-lease-repository', () => ({
 }));
 vi.mock('@/db/postgres/search', () => ({
   createPostgresKeywordSearchRepository: vi.fn(() => ({})),
+}));
+vi.mock('@/lib/tasks/task-move-service', () => ({
+  executeCrossAccountTaskMove: mocks.executeCrossAccountTaskMove,
 }));
 // Poisoned: importing either module fails the test immediately, proving
 // the PostgreSQL branch never reaches them.
@@ -113,5 +122,33 @@ describe('initializeRuntimeDatabase PostgreSQL branch: mode-route-services regis
     const repository = getRelativeReminderTimezoneRepository();
     expect(repository).toBeDefined();
     expect(typeof repository.applyTimezoneRecompute).toBe('function');
+  });
+
+  it('registers the canonical cross-account move service for PostgreSQL', async () => {
+    const { initializeRuntimeDatabase } = await import('@/db/runtime');
+    const { getCrossAccountTaskMoveService } = await import(
+      '@/lib/tasks/cross-account-route-service'
+    );
+
+    await initializeRuntimeDatabase();
+
+    await expect(getCrossAccountTaskMoveService().execute(
+      'source-1',
+      {
+        taskId: 'task-1',
+        targetInstanceId: 'target-1',
+        action: 'move',
+      },
+      'trace-1',
+    )).resolves.toEqual({ status: 200, body: { success: true } });
+    expect(mocks.executeCrossAccountTaskMove).toHaveBeenCalledWith(
+      'source-1',
+      {
+        taskId: 'task-1',
+        targetInstanceId: 'target-1',
+        action: 'move',
+      },
+      'trace-1',
+    );
   });
 });

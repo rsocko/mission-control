@@ -7,30 +7,34 @@ import {
   T1,
   type SearchIndexHarness,
 } from './harness';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 const mocks = vi.hoisted(() => ({
   semanticSearchEnabled: true,
-  runtime: null as unknown,
   scheduleSemanticBackfill: vi.fn(),
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
-    provider: 'openai',
-    configured: true,
-    baseUrl: 'https://api.openai.test/v1',
-    apiKey: 'test',
-    model: 'gpt-4o-mini',
-    embeddingModel: 'text-embedding-3-small',
-    semanticSearchEnabled: mocks.semanticSearchEnabled,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'openai',
+      configured: true,
+      baseUrl: 'https://api.openai.test/v1',
+      apiKey: 'test',
+      model: 'gpt-4o-mini',
+      embeddingModel: 'text-embedding-3-small',
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: ['openai'] },
+        restricted: { allowedRoutes: ['openai'] },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: {},
+    },
   }),
-}));
-
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  getSemanticIndexRuntime: async () => mocks.runtime,
-  scheduleSemanticBackfill: mocks.scheduleSemanticBackfill,
-  publishSemanticUpsert: vi.fn(),
-  publishSemanticDelete: vi.fn(),
 }));
 
 describe('semanticSearch over the durable index', () => {
@@ -38,20 +42,24 @@ describe('semanticSearch over the durable index', () => {
   let semantic: typeof import('@/lib/search/semantic');
 
   beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.resetModules();
     mocks.semanticSearchEnabled = true;
     mocks.scheduleSemanticBackfill.mockReset();
     harness = createSearchIndexHarness();
-    mocks.runtime = {
-      repository: harness.repository,
-      embeddings: harness.embeddings,
-      config: {},
-    };
     semantic = await import('@/lib/search/semantic');
+    semantic.registerSemanticSearchRuntime({
+      resolve: async () => ({
+        repository: harness.repository,
+        embeddings: harness.embeddings,
+      }),
+      scheduleBackfill: mocks.scheduleSemanticBackfill,
+    });
     semantic.resetSemanticSearchStateForTests();
   });
 
   afterEach(() => {
+    resetProcessRuntimeRegistries();
     harness.close();
   });
 

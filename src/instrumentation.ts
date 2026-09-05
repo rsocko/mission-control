@@ -25,6 +25,24 @@ export async function register() {
     );
     terminateFailedStartup(error);
   }
+  const {
+    pushNotificationScheduler,
+    registerScheduledPushHandlers,
+    scheduledSummariesEnabled,
+  } = await import('@/lib/push/scheduler');
+  const { resolveDatabaseBackend } = await import('@/db/runtime-backend');
+  if (resolveDatabaseBackend() === 'sqlite') {
+    const {
+      triggerMorningNotification,
+      triggerTriageNudge,
+      triggerCarryForwardReminder,
+    } = await import('@/lib/push/triggers');
+    registerScheduledPushHandlers({
+      triggerMorningNotification,
+      triggerTriageNudge,
+      triggerCarryForwardReminder,
+    });
+  }
   const { isPublicDemoMode } = await import('@/lib/public-demo');
   if (isPublicDemoMode()) {
     try {
@@ -50,10 +68,6 @@ export async function register() {
   wakeNotificationDeliveryDispatcher();
   const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
   await startRuntimeTelemetry('web');
-  const {
-    pushNotificationScheduler,
-    scheduledSummariesEnabled,
-  } = await import('@/lib/push/scheduler');
   const { wakeNotificationWritebackDispatcher } = await import(
     '@/lib/notifications/notification-writeback'
   );
@@ -117,7 +131,7 @@ export async function register() {
 
   // Initialize push notification scheduler (morning, triage nudge, carry-forward)
   try {
-    if (scheduledSummariesEnabled()) {
+    if (await scheduledSummariesEnabled()) {
       await pushNotificationScheduler.start();
     }
     syncLogger.info(
@@ -125,7 +139,10 @@ export async function register() {
       'Instrumentation: push notification scheduler initialized',
     );
   } catch (err) {
-    syncLogger.warn({ err }, 'Instrumentation: push notification scheduler init failed (non-fatal)');
+    syncLogger.warn(
+      { errorName: err instanceof Error ? err.name : 'UnknownError' },
+      'Instrumentation: push notification scheduler init failed (non-fatal)',
+    );
   }
   if (!durableSyncMode) {
     try {

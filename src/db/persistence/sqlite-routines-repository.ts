@@ -154,7 +154,7 @@ export function createSqliteRoutinesRepository(
     },
 
     async createCompletion(command): Promise<CreateRoutineCompletionResult> {
-      return sqlite.transaction(() => {
+      return sqlite.transaction((): CreateRoutineCompletionResult => {
         const routine = sqlite.prepare(
           'SELECT cadence_type AS cadenceType FROM routines WHERE id = ?',
         ).get(command.routineId) as { cadenceType: string } | undefined;

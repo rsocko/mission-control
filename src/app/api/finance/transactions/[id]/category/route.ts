@@ -5,10 +5,8 @@ import { getPersistedFinanceConnectorConfig } from '@/lib/connectors/monarch-mon
 import { MonarchBridgeError } from '@/lib/connectors/monarch-money/client';
 import { ApiErrors } from '@/lib/api-error';
 import { isDemoMode } from '@/lib/mode';
-import db from '@/db';
-import { financeTransactions } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
 import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 const requestSchema = z.object({
   categoryId: z.string().trim().min(1).max(200),
@@ -33,15 +31,14 @@ export async function PATCH(
     const idempotencyKey = request.headers.get('idempotency-key')?.trim() || undefined;
 
     if (isDemoMode()) {
-      const result = await db.update(financeTransactions).set({
-        confirmedCategory: categoryId,
-        triageStatus: 'confirmed',
-      }).where(and(
-        eq(financeTransactions.id, id),
-        eq(financeTransactions.connectorInstanceId, config.id),
-        eq(financeTransactions.lifecycleStatus, 'active'),
-      ));
-      if (result.changes === 0) {
+      const updated = await (
+        await getWorkerPersistenceRepositories()
+      ).finance.web.updateDemoCategory({
+        connectorId: config.id,
+        transactionId: id,
+        categoryId,
+      });
+      if (!updated) {
         return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
       }
       return NextResponse.json({ status: 'updated', transactionId: id, categoryId });

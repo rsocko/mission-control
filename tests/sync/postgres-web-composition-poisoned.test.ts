@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => {
               syncedLists: [],
             }
       )),
-      listEnabled: vi.fn(async () => []),
+      listEnabled: vi.fn(async () => [] as Array<Record<string, unknown>>),
       recordTestResult: vi.fn(async () => ({ recorded: true })),
     },
     notifications: {},
@@ -91,6 +91,40 @@ const mocks = vi.hoisted(() => {
   const financeDatasets = {
     listState: vi.fn(async () => []),
   };
+  const financeWeb = {
+    listKidsWithSpending: vi.fn(async () => []),
+    listTransactions: vi.fn(async () => []),
+    readSummary: vi.fn(async () => ({
+      total: 0,
+      transactionCount: 0,
+      byCategory: [],
+      byKid: [],
+    })),
+    listNotifications: vi.fn(async () => []),
+    dismissNotification: vi.fn(async () => undefined),
+    updateDemoCategory: vi.fn(async () => true),
+    readOperationsOverview: vi.fn(async () => ({
+      connectors: [{ id: 'finance', name: 'Finance' }],
+      connector: { id: 'finance', name: 'Finance' },
+      attention: {
+        total: 0,
+        pendingExceptions: 0,
+        retryRequested: 0,
+        failedWritebacks: 0,
+        openAlerts: 0,
+      },
+      alerts: [],
+      subjects: [],
+      digest: [],
+    })),
+    claimCategoryUpdate: vi.fn(async () => ({
+      outcome: 'claimed' as const,
+      upstreamTransactionId: 'upstream',
+      claimToken: 'claim-token',
+    })),
+    completeCategoryUpdate: vi.fn(async () => true),
+    failCategoryUpdate: vi.fn(async () => true),
+  };
   const worker = {
     connectors: core.connectors,
     syncRuns: {},
@@ -109,6 +143,7 @@ const mocks = vi.hoisted(() => {
     finance: {
       attribution: financeAttribution,
       datasets: financeDatasets,
+      web: financeWeb,
       operator: financeOperator,
       insights: {
         connectors: {
@@ -134,6 +169,7 @@ const mocks = vi.hoisted(() => {
   const enrich = vi.fn(async () => ({ summary: 'postgres' }));
   const createEnrichmentExecutor = vi.fn(async () => enrich);
   const publish = vi.fn(async () => ({ status: 'skipped' as const }));
+  const monarchUpdateCategory = vi.fn(async () => undefined);
   return {
     sqliteTouch,
     pool,
@@ -146,12 +182,15 @@ const mocks = vi.hoisted(() => {
     financeOperator,
     financeAttribution,
     financeDatasets,
+    financeWeb,
     queue,
     lease,
     keyword,
     enrich,
     createEnrichmentExecutor,
     publish,
+    monarchUpdateCategory,
+    demoMode: false,
   };
 });
 
@@ -239,6 +278,19 @@ vi.mock('@/lib/public-demo', () => ({
 vi.mock('@/lib/public-demo-runtime', () => ({
   initializePublicDemoData: vi.fn(async () => undefined),
 }));
+vi.mock('@/lib/mode', () => ({
+  isDemoMode: () => mocks.demoMode,
+  getTimezone: () => 'UTC',
+}));
+vi.mock('@/lib/connectors/monarch-money/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/connectors/monarch-money/client')>();
+  return {
+    ...actual,
+    MonarchBridgeClient: class {
+      updateCategory = mocks.monarchUpdateCategory;
+    },
+  };
+});
 vi.mock('@/lib/telemetry/runtime', () => ({
   startRuntimeTelemetry: vi.fn(async () => undefined),
 }));
@@ -507,6 +559,107 @@ describe('poisoned-SQLite PostgreSQL web composition', () => {
         idempotencyKey: 'operator-idempotency-key-1',
       })).resolves.toMatchObject({ status: 'rolled-back' });
       expect(mocks.financeOperator.rollbackCutover).toHaveBeenCalled();
+      expect(mocks.sqliteTouch).not.toHaveBeenCalled();
+    });
+
+    it('serves the finance web routes through the composed PostgreSQL port', async () => {
+      mocks.core.connectors.listEnabled.mockResolvedValue([{
+        id: 'finance',
+        type: 'finance-manager',
+        name: 'Finance',
+        enabled: true,
+        syncMode: 'poll',
+        capabilities: { read: true, write: true, delete: false },
+        credentials: {},
+        settings: {},
+        syncedLists: [],
+      }]);
+      const [kids, notifications, dismiss, overview, summary, transactions, category] =
+        await Promise.all([
+          import('@/app/api/finance/kids/route'),
+          import('@/app/api/finance/notifications/route'),
+          import('@/app/api/finance/notifications/[id]/dismiss/route'),
+          import('@/app/api/finance/overview/route'),
+          import('@/app/api/finance/summary/route'),
+          import('@/app/api/finance/transactions/route'),
+          import('@/app/api/finance/transactions/[id]/category/route'),
+        ]);
+
+      expect((await kids.GET(financeRequest(
+        'http://localhost:3000/api/finance/kids?connectorId=finance',
+      ))).status).toBe(200);
+      expect((await notifications.GET(financeRequest(
+        'http://localhost:3000/api/finance/notifications?dismissed=false',
+      ))).status).toBe(200);
+      expect((await dismiss.PATCH(
+        financeRequest(
+          'http://localhost:3000/api/finance/notifications/notification/dismiss',
+          { method: 'PATCH' },
+        ),
+        { params: Promise.resolve({ id: 'notification' }) },
+      )).status).toBe(200);
+      expect((await overview.GET(financeRequest(
+        'http://localhost:3000/api/finance/overview?connectorId=finance',
+      ))).status).toBe(200);
+      expect((await summary.GET(financeRequest(
+        'http://localhost:3000/api/finance/summary?connectorId=finance'
+          + '&startDate=2026-08-01&endDate=2026-08-31',
+      ))).status).toBe(200);
+      expect((await transactions.GET(financeRequest(
+        'http://localhost:3000/api/finance/transactions?connectorId=finance',
+      ))).status).toBe(200);
+
+      expect((await category.PATCH(
+        financeRequest('http://localhost:3000/api/finance/transactions/transaction/category', {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/json',
+            'idempotency-key': 'category-write-1',
+          },
+          body: JSON.stringify({ connectorId: 'finance', categoryId: 'category' }),
+        }),
+        { params: Promise.resolve({ id: 'transaction' }) },
+      )).status).toBe(200);
+
+      mocks.demoMode = true;
+      try {
+        expect((await category.PATCH(
+          financeRequest('http://localhost:3000/api/finance/transactions/transaction/category', {
+            method: 'PATCH',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ connectorId: 'finance', categoryId: 'category' }),
+          }),
+          { params: Promise.resolve({ id: 'transaction' }) },
+        )).status).toBe(200);
+      } finally {
+        mocks.demoMode = false;
+      }
+
+      expect(mocks.financeWeb.listKidsWithSpending).toHaveBeenCalled();
+      expect(mocks.financeWeb.listNotifications).toHaveBeenCalled();
+      expect(mocks.financeWeb.dismissNotification).toHaveBeenCalled();
+      expect(mocks.financeWeb.readOperationsOverview).toHaveBeenCalled();
+      expect(mocks.financeWeb.readSummary).toHaveBeenCalled();
+      expect(mocks.financeWeb.listTransactions).toHaveBeenCalled();
+      expect(mocks.financeWeb.claimCategoryUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        connectorId: 'finance',
+        transactionId: 'transaction',
+        categoryId: 'category',
+        idempotencyKey: 'category-write-1',
+      }));
+      expect(mocks.monarchUpdateCategory).toHaveBeenCalledWith(
+        'upstream',
+        'category',
+        expect.any(AbortSignal),
+      );
+      expect(mocks.financeWeb.completeCategoryUpdate).toHaveBeenCalledWith(expect.objectContaining({
+        connectorId: 'finance',
+        transactionId: 'transaction',
+        categoryId: 'category',
+        idempotencyKey: 'category-write-1',
+        claimToken: 'claim-token',
+      }));
+      expect(mocks.financeWeb.updateDemoCategory).toHaveBeenCalled();
       expect(mocks.sqliteTouch).not.toHaveBeenCalled();
     });
   });

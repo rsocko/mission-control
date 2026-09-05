@@ -10,7 +10,7 @@ export async function GET(request: Request) {
 
   try {
     const connectorId = new URL(request.url).searchParams.get('connectorId');
-    const overview = getFinanceOperationsOverview(connectorId);
+    const overview = await getFinanceOperationsOverview(connectorId);
     if (!overview) {
       return NextResponse.json(
         { error: 'Finance connector is not configured', code: 'connector_not_configured' },

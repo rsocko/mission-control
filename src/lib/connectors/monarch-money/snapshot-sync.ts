@@ -1,7 +1,7 @@
 import 'server-only';
 
-import { createHash, randomUUID } from 'node:crypto';
-import { sqlite } from '@/db';
+import { randomUUID } from 'node:crypto';
+import { FinanceWebPersistenceError } from '@/db/persistence/finance-web';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type {
   ConnectorConfig,
@@ -11,7 +11,6 @@ import type {
 import {
   MonarchBridgeClient,
   MonarchBridgeError,
-  type MonarchTransaction,
 } from './client';
 import {
   MONARCH_TRANSACTION_MAX_BACKFILL_DAYS,
@@ -43,14 +42,6 @@ function boundedInteger(value: unknown, fallback: number, minimum: number, maxim
     : fallback;
 }
 
-function localTransactionId(connectorId: string, upstreamId: string): string {
-  return `finance:${connectorId}:${upstreamId}`;
-}
-
-function fingerprint(transaction: MonarchTransaction): string {
-  return createHash('sha256').update(JSON.stringify(transaction)).digest('hex');
-}
-
 function errorDetails(error: unknown): { code: string; message: string } {
   if (error instanceof MonarchBridgeError) {
     return { code: error.code, message: error.message };
@@ -65,103 +56,6 @@ function throwIfAborted(signal?: AbortSignal): void {
   if (signal?.aborted) {
     throw signal.reason instanceof Error ? signal.reason : new Error('Sync cancelled');
   }
-}
-
-export function upsertFinanceTransactionPage(
-  connectorId: string,
-  generationId: string,
-  transactions: MonarchTransaction[],
-  provenance: { provider: 'demo' | 'live'; fetchedAt: string },
-  now: string,
-): { added: number; updated: number } {
-  const find = sqlite.prepare(`
-    SELECT id, source_fingerprint AS sourceFingerprint
-    FROM finance_transactions
-    WHERE connector_instance_id = ? AND upstream_transaction_id = ?
-  `);
-  const insert = sqlite.prepare(`
-    INSERT INTO finance_transactions (
-      id, connector_instance_id, upstream_transaction_id, date, amount,
-      merchant_name, merchant_logo_url, category_id, original_category,
-      confirmed_category, account_id, account_name, card_last4,
-      assigned_kid_id, kid_assignment_method, triage_status, flag_reason,
-      is_pending, is_recurring, notes, tags, tag_references, lifecycle_status, deleted_at,
-      provenance_provider, provenance_fetched_at, source_fingerprint, source_url,
-      last_seen_generation_id, first_seen_at, last_seen_at, synced_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?,
-      NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, 'active', NULL,
-      ?, ?, ?, NULL, ?, ?, ?, ?
-    )
-  `);
-  const update = sqlite.prepare(`
-    UPDATE finance_transactions
-    SET date = ?, amount = ?, merchant_name = ?, merchant_logo_url = ?,
-        category_id = ?, original_category = ?, account_id = ?, account_name = ?,
-        card_last4 = ?, is_pending = ?, is_recurring = ?, notes = ?, tags = ?,
-        tag_references = ?,
-        lifecycle_status = 'active', deleted_at = NULL, provenance_provider = ?,
-        provenance_fetched_at = ?, source_fingerprint = ?,
-        last_seen_generation_id = ?, last_seen_at = ?, synced_at = ?
-    WHERE connector_instance_id = ? AND upstream_transaction_id = ?
-  `);
-
-  return sqlite.transaction(() => {
-    let added = 0;
-    let updated = 0;
-    for (const transaction of transactions) {
-      const hash = fingerprint(transaction);
-      const existing = find.get(connectorId, transaction.id) as
-        | { id: string; sourceFingerprint: string }
-        | undefined;
-      const values = [
-        transaction.date,
-        transaction.amount,
-        transaction.merchant.name,
-        transaction.merchant.logoUrl,
-        transaction.category?.id ?? null,
-        transaction.category?.name ?? null,
-        transaction.account.id,
-        transaction.account.displayName,
-        transaction.account.mask,
-        transaction.isPending ? 1 : 0,
-        transaction.isRecurring ? 1 : 0,
-        transaction.notes,
-        JSON.stringify(transaction.tags),
-        JSON.stringify(transaction.tagReferences.map((tag) => tag.id)),
-      ] as const;
-      if (!existing) {
-        insert.run(
-          localTransactionId(connectorId, transaction.id),
-          connectorId,
-          transaction.id,
-          ...values,
-          provenance.provider,
-          provenance.fetchedAt,
-          hash,
-          generationId,
-          now,
-          now,
-          now,
-        );
-        added++;
-      } else {
-        update.run(
-          ...values,
-          provenance.provider,
-          provenance.fetchedAt,
-          hash,
-          generationId,
-          now,
-          now,
-          connectorId,
-          transaction.id,
-        );
-        if (existing.sourceFingerprint !== hash) updated++;
-      }
-    }
-    return { added, updated };
-  }).immediate();
 }
 
 export class FinanceSnapshotSynchronizer {
@@ -331,165 +225,66 @@ export async function updateFinanceCategory(
     categoryName: string;
   },
 ): Promise<{ idempotencyKey: string; status: 'updated' }> {
-  const transaction = sqlite.prepare(`
-    SELECT id, upstream_transaction_id AS upstreamTransactionId
-    FROM finance_transactions
-    WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
-  `).get(transactionId, config.id) as
-    | { id: string; upstreamTransactionId: string }
-    | undefined;
-  if (!transaction) {
-    throw new MonarchBridgeError('transaction_not_found', 'Finance transaction was not found', false, 404);
-  }
-
   const now = new Date().toISOString();
-  const claim = sqlite.transaction(() => {
-    const existing = sqlite.prepare(`
-      SELECT transaction_id AS transactionId, requested_value AS requestedValue,
-             status, updated_at AS updatedAt
-      FROM finance_mutation_audit
-      WHERE connector_id = ? AND idempotency_key = ?
-    `).get(config.id, idempotencyKey) as
-      | {
-          transactionId: string;
-          requestedValue: string;
-          status: 'pending' | 'processing' | 'succeeded' | 'failed';
-          updatedAt: string;
-        }
-      | undefined;
-    if (existing && (
-      existing.transactionId !== transactionId
-      || existing.requestedValue !== categoryId
-    )) {
-      return 'conflict' as const;
-    }
-    if (existing?.status === 'succeeded') return 'succeeded' as const;
-    if (expectedTransactionVersion) {
-      const current = sqlite.prepare(`
-        SELECT source_fingerprint AS sourceFingerprint,
-               last_seen_at AS lastSeenAt, assigned_kid_id AS assignedKidId,
-               confirmed_category AS confirmedCategory,
-               manual_decided_at AS manualDecidedAt
-        FROM finance_transactions
-        WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
-      `).get(transactionId, config.id) as {
-        sourceFingerprint: string;
-        lastSeenAt: string;
-        assignedKidId: string | null;
-        confirmedCategory: string | null;
-        manualDecidedAt: string | null;
-      } | undefined;
-      if (
-        !current
-        || current.sourceFingerprint !== expectedTransactionVersion.sourceFingerprint
-        || current.lastSeenAt !== expectedTransactionVersion.lastSeenAt
-        || current.assignedKidId !== expectedTransactionVersion.assignedKidId
-        || current.confirmedCategory !== expectedTransactionVersion.confirmedCategory
-        || current.manualDecidedAt !== expectedTransactionVersion.manualDecidedAt
-      ) {
-        return 'transaction-conflict' as const;
-      }
-      const currentCategory = sqlite.prepare(`
-        SELECT name FROM finance_categories
-        WHERE connector_id = ? AND upstream_category_id = ?
-          AND is_active = 1 AND source_is_active = 1
-      `).get(config.id, categoryId) as { name: string } | undefined;
-      if (
-        !currentCategory
-        || currentCategory.name !== expectedTransactionVersion.categoryName
-      ) {
-        return 'category-conflict' as const;
-      }
-    }
-    const otherProcessingMutation = sqlite.prepare(`
-      SELECT 1
-      FROM finance_mutation_audit
-      WHERE connector_id = ? AND transaction_id = ?
-        AND status = 'processing' AND idempotency_key <> ?
-      LIMIT 1
-    `).get(config.id, transactionId, idempotencyKey);
-    if (otherProcessingMutation) return 'processing' as const;
-    if (
-      existing?.status === 'processing'
-      && Date.parse(existing.updatedAt) > Date.now() - MUTATION_CLAIM_STALE_MS
-    ) {
-      return 'processing' as const;
-    }
-    if (existing) {
-      sqlite.prepare(`
-        UPDATE finance_mutation_audit
-        SET status = 'processing', attempt_count = attempt_count + 1,
-            last_error_code = NULL, last_error_message = NULL, updated_at = ?
-        WHERE connector_id = ? AND idempotency_key = ?
-      `).run(now, config.id, idempotencyKey);
-    } else {
-      sqlite.prepare(`
-        INSERT INTO finance_mutation_audit (
-          id, idempotency_key, connector_id, transaction_id,
-          upstream_transaction_id, operation, requested_value, status,
-          attempt_count, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'category_update', ?, 'processing', 1, ?, ?)
-      `).run(
-        randomUUID(),
-        idempotencyKey,
-        config.id,
-        transactionId,
-        transaction.upstreamTransactionId,
-        categoryId,
-        now,
-        now,
+  const web = (await getWorkerPersistenceRepositories()).finance.web;
+  let claim;
+  try {
+    claim = await web.claimCategoryUpdate({
+      connectorId: config.id,
+      transactionId,
+      categoryId,
+      idempotencyKey,
+      now,
+      staleBefore: new Date(Date.now() - MUTATION_CLAIM_STALE_MS).toISOString(),
+      expectedTransactionVersion,
+    });
+  } catch (error) {
+    if (error instanceof FinanceWebPersistenceError) {
+      throw new MonarchBridgeError(
+        error.code,
+        error.message,
+        error.retryable,
+        error.status,
       );
     }
-    return 'claimed' as const;
-  }).immediate();
-  if (claim === 'succeeded') return { idempotencyKey, status: 'updated' };
-  if (claim === 'conflict') {
-    throw new MonarchBridgeError('idempotency_conflict', 'Idempotency key was already used', false, 409);
+    throw error;
   }
-  if (claim === 'transaction-conflict') {
-    throw new MonarchBridgeError('transaction_conflict', 'Finance transaction changed after approval', false, 409);
-  }
-  if (claim === 'category-conflict') {
-    throw new MonarchBridgeError('category_conflict', 'Finance category changed after approval', false, 409);
-  }
-  if (claim === 'processing') {
-    throw new MonarchBridgeError('mutation_in_progress', 'Category update is already in progress', true, 409);
-  }
+  if (claim.outcome === 'replayed') return { idempotencyKey, status: 'updated' };
 
   try {
     await new MonarchBridgeClient(config).updateCategory(
-      transaction.upstreamTransactionId,
+      claim.upstreamTransactionId,
       categoryId,
       signal,
     );
     const completedAt = new Date().toISOString();
-    sqlite.transaction(() => {
-      sqlite.prepare(`
-        UPDATE finance_transactions
-        SET confirmed_category = ?, triage_status = 'confirmed'
-        WHERE id = ? AND connector_instance_id = ?
-      `).run(categoryId, transactionId, config.id);
-      sqlite.prepare(`
-        UPDATE finance_mutation_audit
-        SET status = 'succeeded', completed_at = ?, updated_at = ?,
-            last_error_code = NULL, last_error_message = NULL
-        WHERE connector_id = ? AND idempotency_key = ?
-      `).run(completedAt, completedAt, config.id, idempotencyKey);
-    }).immediate();
+    const completed = await web.completeCategoryUpdate({
+      connectorId: config.id,
+      transactionId,
+      categoryId,
+      idempotencyKey,
+      claimToken: claim.claimToken,
+      completedAt,
+    });
+    if (!completed) {
+      throw new MonarchBridgeError(
+        'mutation_claim_lost',
+        'Category update claim was superseded',
+        true,
+        409,
+      );
+    }
     return { idempotencyKey, status: 'updated' };
   } catch (error) {
     const failure = errorDetails(error);
-    sqlite.prepare(`
-      UPDATE finance_mutation_audit
-      SET status = 'failed', last_error_code = ?, last_error_message = ?, updated_at = ?
-      WHERE connector_id = ? AND idempotency_key = ?
-    `).run(
-      failure.code,
-      failure.message,
-      new Date().toISOString(),
-      config.id,
+    await web.failCategoryUpdate({
+      connectorId: config.id,
       idempotencyKey,
-    );
+      claimToken: claim.claimToken,
+      errorCode: failure.code,
+      errorMessage: failure.message,
+      failedAt: new Date().toISOString(),
+    });
     throw error;
   }
 }

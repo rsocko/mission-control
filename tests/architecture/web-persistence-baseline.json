@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L08a triage web persistence, L08b triage native persistence, L12b finance connector/operator parity, and runtime observability parity. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed and enforced by web-persistence-baseline.test.ts via computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts). Every count below is a ceiling: a later layer may only decrease it (or leave it unchanged), never increase it. Every taint-side path array is an allowlist ceiling (recomputed sets must be subsets of the baseline set); cleanRoutes is a floor (recomputed set must be a superset). LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
   "generatedAt": "2026-09-04",
-  "generatedFromCommit": "6ef6496090dc88c54e428e8e0dbb290f79bce879+runtime-observability",
+  "generatedFromCommit": "c354e567a84c744e19ba238a08616a8f082920f5+L12c",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 130,
+    "tierARoutes": 121,
     "tierBRoutes": 13,
-    "cleanRoutes": 123,
-    "directTaintSourceRoutes": 97,
-    "transitiveOnlyTaintSourceRoutes": 33,
-    "directDbNamespaceRoutes": 98,
-    "taintedLibA": 63,
+    "cleanRoutes": 132,
+    "directTaintSourceRoutes": 91,
+    "transitiveOnlyTaintSourceRoutes": 30,
+    "directDbNamespaceRoutes": 92,
+    "taintedLibA": 61,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 193
+    "totalMigrationUnits": 182
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -356,15 +356,6 @@
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
-    "src/app/api/finance/alerts/[id]/dismiss/route.ts",
-    "src/app/api/finance/alerts/route.ts",
-    "src/app/api/finance/kids/route.ts",
-    "src/app/api/finance/notifications/[id]/dismiss/route.ts",
-    "src/app/api/finance/notifications/route.ts",
-    "src/app/api/finance/overview/route.ts",
-    "src/app/api/finance/summary/route.ts",
-    "src/app/api/finance/transactions/[id]/category/route.ts",
-    "src/app/api/finance/transactions/route.ts",
     "src/app/api/focus-items/route.ts",
     "src/app/api/goals/develop/route.ts",
     "src/app/api/goals/promote/route.ts",
@@ -512,11 +503,20 @@
     "src/app/api/external-agents/dispatches/route.ts",
     "src/app/api/external-agents/import/route.ts",
     "src/app/api/external-agents/route.ts",
+    "src/app/api/finance/alerts/[id]/dismiss/route.ts",
+    "src/app/api/finance/alerts/route.ts",
     "src/app/api/finance/insights/[occurrenceId]/route.ts",
     "src/app/api/finance/insights/presentation/route.ts",
     "src/app/api/finance/insights/route.ts",
+    "src/app/api/finance/kids/route.ts",
+    "src/app/api/finance/notifications/[id]/dismiss/route.ts",
+    "src/app/api/finance/notifications/route.ts",
+    "src/app/api/finance/overview/route.ts",
+    "src/app/api/finance/summary/route.ts",
     "src/app/api/finance/sync/route.ts",
+    "src/app/api/finance/transactions/[id]/category/route.ts",
     "src/app/api/finance/transactions/[id]/kid/route.ts",
+    "src/app/api/finance/transactions/route.ts",
     "src/app/api/health/live/route.ts",
     "src/app/api/health/ready/route.ts",
     "src/app/api/health/route.ts",
@@ -619,12 +619,6 @@
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
-    "src/app/api/finance/kids/route.ts",
-    "src/app/api/finance/notifications/[id]/dismiss/route.ts",
-    "src/app/api/finance/notifications/route.ts",
-    "src/app/api/finance/summary/route.ts",
-    "src/app/api/finance/transactions/[id]/category/route.ts",
-    "src/app/api/finance/transactions/route.ts",
     "src/app/api/focus-items/route.ts",
     "src/app/api/goals/develop/route.ts",
     "src/app/api/goals/promote/route.ts",
@@ -714,9 +708,6 @@
     "src/app/api/ai/suggest-micro-status/route.ts",
     "src/app/api/ai/triage-alerts/route.ts",
     "src/app/api/ai/whats-next/route.ts",
-    "src/app/api/finance/alerts/[id]/dismiss/route.ts",
-    "src/app/api/finance/alerts/route.ts",
-    "src/app/api/finance/overview/route.ts",
     "src/app/api/graph/nodes/[nodeId]/neighbors/route.ts",
     "src/app/api/graph/universe/route.ts",
     "src/app/api/ideation/expand/route.ts",
@@ -754,12 +745,6 @@
     "src/app/api/energy/route.ts",
     "src/app/api/export/route.ts",
     "src/app/api/features/route.ts",
-    "src/app/api/finance/kids/route.ts",
-    "src/app/api/finance/notifications/[id]/dismiss/route.ts",
-    "src/app/api/finance/notifications/route.ts",
-    "src/app/api/finance/summary/route.ts",
-    "src/app/api/finance/transactions/[id]/category/route.ts",
-    "src/app/api/finance/transactions/route.ts",
     "src/app/api/focus-items/route.ts",
     "src/app/api/goals/develop/route.ts",
     "src/app/api/goals/promote/route.ts",
@@ -869,9 +854,7 @@
     "src/lib/alertmanager/service.ts",
     "src/lib/connectors/document-intelligence/task-actions.ts",
     "src/lib/connectors/monarch-money/identity-sqlite.ts",
-    "src/lib/connectors/monarch-money/snapshot-sync.ts",
     "src/lib/connectors/scout/reconciliation-service.ts",
-    "src/lib/finance/operations.ts",
     "src/lib/graph/filtered-subgraph.ts",
     "src/lib/graph/neighbors-service.ts",
     "src/lib/graph/service.ts",
@@ -1552,6 +1535,66 @@
       "tierBReclassifications": [],
       "notMigratedFromTheOwnedFileSet": [],
       "verification": "Exact computeWebPersistenceGraph recomputation on base 6ef6496090dc88c54e428e8e0dbb290f79bce879 moves all six owned runtime observability routes from Tier B to clean through startup-selected health, snapshot, and telemetry contracts. The graph is exactly 266 routes, A130/B13/clean123, direct97/transitive33/directDB98, 63 tainted libraries, zero helpers, and 193 total migration units. No route is reclassified into Tier A or Tier B and no taint-side set grows."
+    },
+    {
+      "layer": "L12c",
+      "title": "finance end-user web/API PostgreSQL parity",
+      "totalMigrationUnits": {
+        "from": 193,
+        "to": 182,
+        "delta": -11
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/connectors/monarch-money/snapshot-sync.ts",
+        "src/lib/finance/operations.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/finance/alerts/[id]/dismiss/route.ts",
+        "src/app/api/finance/alerts/route.ts",
+        "src/app/api/finance/kids/route.ts",
+        "src/app/api/finance/notifications/[id]/dismiss/route.ts",
+        "src/app/api/finance/notifications/route.ts",
+        "src/app/api/finance/overview/route.ts",
+        "src/app/api/finance/summary/route.ts",
+        "src/app/api/finance/transactions/[id]/category/route.ts",
+        "src/app/api/finance/transactions/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/finance/alerts/[id]/dismiss/route.ts",
+        "src/app/api/finance/alerts/route.ts",
+        "src/app/api/finance/kids/route.ts",
+        "src/app/api/finance/notifications/[id]/dismiss/route.ts",
+        "src/app/api/finance/notifications/route.ts",
+        "src/app/api/finance/overview/route.ts",
+        "src/app/api/finance/summary/route.ts",
+        "src/app/api/finance/transactions/[id]/category/route.ts",
+        "src/app/api/finance/transactions/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/finance/kids/route.ts",
+        "src/app/api/finance/notifications/[id]/dismiss/route.ts",
+        "src/app/api/finance/notifications/route.ts",
+        "src/app/api/finance/summary/route.ts",
+        "src/app/api/finance/transactions/[id]/category/route.ts",
+        "src/app/api/finance/transactions/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/finance/kids/route.ts",
+        "src/app/api/finance/notifications/[id]/dismiss/route.ts",
+        "src/app/api/finance/notifications/route.ts",
+        "src/app/api/finance/summary/route.ts",
+        "src/app/api/finance/transactions/[id]/category/route.ts",
+        "src/app/api/finance/transactions/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [
+        "src/app/api/finance/alerts/[id]/dismiss/route.ts",
+        "src/app/api/finance/alerts/route.ts",
+        "src/app/api/finance/overview/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on current main c354e567a84c744e19ba238a08616a8f082920f5 moves the seven owned finance end-user routes from Tier A to clean, transitively cleans the two finance alert routes through the shared Monarch snapshot module, removes six direct-taint and direct @/db route imports, removes operations.ts and snapshot-sync.ts from taintedLibA, adds no Tier B route or tainted helper, and reduces total migration units from 193 to 182."
     }
   ],
   "layerUpdates": [
@@ -1613,6 +1656,16 @@
         "SQLite and PostgreSQL adapters preserve exact replay, rate-window, retention, reservation ownership, token reassignment, target rotation, unregister ownership, and exact-count logout semantics without fallback, dual writes, or raw handles.",
         "Token parsing and hashing, constant-time comparison, scope/expiry/binding checks, encryption, canonical request hashing, schema validation, APNs configuration, HTTP envelopes, and triage item creation remain service-owned and outside repository transactions.",
         "Four native routes leave Tier A, four native libraries leave taintedLibA, and no route is added to Tier B."
+      ]
+    },
+    {
+      "layer": "L12c",
+      "summary": "Web/API PostgreSQL parity: remaining end-user finance reads, notification dismissal, demo category mutation, and live Monarch category write-back now use FinanceWorkerPersistence.web.",
+      "changes": [
+        "The seven-route ownership cap is finance kids, notifications list/dismiss, overview, summary, transactions list, and transaction category update. Finance alerts become clean only as a transitive graph effect and were not reworked.",
+        "FinanceWorkerPersistence now composes a driver-neutral web port atomically. SQLite and PostgreSQL adapters preserve finance projections, ordering, summaries, scoped dismissal, and operations-overview calculations; PostgreSQL selection never imports or evaluates SQLite.",
+        "Live category write-back claims and validates persistence before provider I/O, then conditionally finalizes or fails with a claim-token fence. PostgreSQL serializes connector claims with an advisory transaction lock and both adapters preserve idempotent replay, CAS conflicts, stale retry, and competing-mutation behavior.",
+        "snapshot-sync.ts no longer owns an obsolete raw-SQLite page helper; active snapshot ingestion remains on the finance snapshot port delivered by earlier finance layers."
       ]
     }
   ]

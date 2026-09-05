@@ -305,6 +305,13 @@ redaction, compare-and-swap and generation fences, idempotency, and recovery
 semantics. Bridge and Tyrion calls, bounded recovery sync, retry scheduling,
 and dispatcher wakes remain outside database transactions.
 
+The remaining end-user Finance APIs use the backend-selected
+`FinanceWorkerPersistence.web` sub-port for kids and spending, transactions,
+summaries, finance notifications, dismissal, and operations-overview reads.
+Category write-back keeps provider I/O between a durable claim and a
+claim-token-fenced completion/failure update. PostgreSQL uses native finance
+tables and never falls back to SQLite.
+
 See [Monarch dataset sync operations](../operations/monarch-dataset-sync.md) for
 ordering, retries, status fields, and recovery.
 

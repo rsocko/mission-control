@@ -1819,6 +1819,31 @@ A130/B13/clean123. All six owned health, metrics, and runtime telemetry routes
 move from Tier B to clean; every Tier A, direct-taint, direct-`@/db`,
 tainted-library, helper, and total-migration-unit count is unchanged.
 
+## Web/API PostgreSQL parity: Layer L12c (finance end-user surfaces)
+
+Layer L12c adds the driver-free `finance.web` sub-port to the existing atomic
+`FinanceWorkerPersistence` composition. It owns the seven end-user Finance
+routes for kids, finance notifications and dismissal, overview, summary,
+transaction listing, and transaction category updates. The SQLite and
+PostgreSQL adapters preserve the existing projections, filters, ordering,
+summary calculations, Finance-only dismissal, and demo mutation behavior.
+
+Live category changes still claim and validate durable state before Monarch
+I/O. Successful provider calls are finalized in a transaction only while the
+claim token remains current; failed calls record the sanitized bridge error
+under the same fence. SQLite serializes claims with an immediate transaction,
+while PostgreSQL combines a connector-scoped advisory transaction lock with
+row locking. Idempotent replay, stale-claim recovery, competing mutation
+rejection, and transaction/category compare-and-swap checks remain equivalent.
+
+`src/lib/finance/operations.ts` and the active category-write path in
+`snapshot-sync.ts` now resolve the selected finance composition asynchronously.
+The obsolete raw-SQLite snapshot page helper was removed; snapshot ingestion
+already uses the earlier `finance.snapshots` port. PostgreSQL selection does not
+import, evaluate, or fall back to SQLite. The two Finance alert routes become
+clean transitively through the shared Monarch module but are not otherwise
+changed by this layer.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

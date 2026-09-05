@@ -248,16 +248,13 @@ describe('Layer 7 final PostgreSQL worker persistence boundary', () => {
     expect(configuredTriageSqliteEdges.filter((edge) =>
       !POSTGRES_GUARDED_DYNAMIC_IMPORTERS.has(edge.split(' -> ')[0])
     )).toEqual([]);
-    expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(2);
-    const categoryFailure = monarchClient.indexOf(
-      'Legacy finance category write-back is unavailable',
-    );
+    expect(monarchClient.match(/MC_DATABASE_BACKEND === 'postgres'/g)).toHaveLength(1);
     const attributionFailure = monarchClient.indexOf(
       'Legacy finance attribution write-back is unavailable',
     );
-    expect(categoryFailure).toBeGreaterThan(-1);
+    expect(monarchClient).not.toContain('Legacy finance category write-back is unavailable');
     expect(attributionFailure).toBeGreaterThan(-1);
-    expect(categoryFailure).toBeLessThan(monarchClient.indexOf("import('./snapshot-sync')"));
+    expect(monarchClient).toContain("import('./snapshot-sync')");
     expect(attributionFailure)
       .toBeLessThan(monarchClient.indexOf("import('./attribution-service')"));
   });

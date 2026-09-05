@@ -248,9 +248,6 @@ export class FinanceManagerConnector implements IConnector {
     idempotencyKey?: string,
     signal?: AbortSignal,
   ): Promise<{ idempotencyKey: string; status: 'updated' }> {
-    if (process.env.MC_DATABASE_BACKEND === 'postgres') {
-      throw new Error('Legacy finance category write-back is unavailable on PostgreSQL');
-    }
     const { updateFinanceCategory } = await import('./snapshot-sync');
     return updateFinanceCategory(
       this.requireConfig(),

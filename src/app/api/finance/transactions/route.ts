@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { financeTransactions } from '@/db/schema';
-import { and, gte, lte, eq, sql } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { getPersistedFinanceConnectorConfig } from '@/lib/connectors/monarch-money/config';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -28,24 +26,17 @@ export async function GET(request: Request) {
 
   try {
     const config = await getPersistedFinanceConnectorConfig(connectorId);
-    const conditions = [
-      eq(financeTransactions.connectorInstanceId, config.id),
-      eq(financeTransactions.lifecycleStatus, 'active'),
-    ];
-
-    if (startDate) conditions.push(gte(financeTransactions.date, startDate));
-    if (endDate) conditions.push(lte(financeTransactions.date, endDate));
-    if (kidId) conditions.push(eq(financeTransactions.assignedKidId, kidId));
-    if (category) conditions.push(eq(financeTransactions.confirmedCategory, category));
-    if (triageStatus) conditions.push(eq(financeTransactions.triageStatus, triageStatus));
-
-    const where = conditions.length > 0 ? and(...conditions) : undefined;
-
-    const transactions = await db.select()
-      .from(financeTransactions)
-      .where(where)
-      .orderBy(sql`${financeTransactions.date} DESC`)
-      .limit(parsedLimit);
+    const transactions = await (
+      await getWorkerPersistenceRepositories()
+    ).finance.web.listTransactions({
+      connectorId: config.id,
+      startDate,
+      endDate,
+      kidId,
+      category,
+      triageStatus,
+      limit: parsedLimit,
+    });
 
     return NextResponse.json({ transactions, total: transactions.length });
   } catch (error) {

@@ -6,6 +6,7 @@ import type { FinanceDatasetPersistence } from './finance-datasets';
 import type { FinanceInsightPersistence } from './finance-insights';
 import type { FinanceOperatorPersistence } from './finance-operator';
 import type { FinanceSnapshotPersistence } from './finance-snapshot';
+import type { FinanceWebPersistence } from './finance-web';
 
 export const FINANCE_IDENTITY_NAMESPACE_CREDENTIAL = 'identityNamespace';
 
@@ -41,6 +42,7 @@ export interface FinanceCorePersistence {
  * reachable.
  */
 export interface FinanceWorkerPersistence extends FinanceCorePersistence {
+  readonly web: FinanceWebPersistence;
   readonly insights: FinanceInsightPersistence;
   readonly attention: FinanceAttentionPersistence;
   readonly recovery: FinanceConnectionRecoveryPersistence;

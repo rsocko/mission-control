@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { listGroups } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { reorderListGroups } from '@/lib/list-groups/service';
 
 /**
  * Bulk-update group sortOrder values.
@@ -17,15 +15,7 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'orderedIds must be a non-empty array' }, { status: 400 });
     }
 
-    runTransaction((tx) => {
-      for (let i = 0; i < orderedIds.length; i++) {
-        tx.update(listGroups)
-          .set({ sortOrder: i })
-          .where(eq(listGroups.id, orderedIds[i]))
-          .run();
-      }
-    });
-
+    await reorderListGroups(orderedIds);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to reorder groups', error);

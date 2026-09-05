@@ -2,6 +2,10 @@ import type Database from 'better-sqlite3';
 import type { SourceBinding } from '@/types';
 import { createSqliteProjectHierarchyRepository } from './sqlite-project-hierarchy-repository';
 import {
+  createSqliteListOrganizationRepository,
+  createSqliteProjectAdministrationRepository,
+} from './sqlite-project-organization-repositories';
+import {
   matchProjectAutomationTasks,
   type AutoIncludeRule,
   type ProjectAutomationProject,
@@ -69,6 +73,7 @@ function listProjects(sqlite: Database.Database): ProjectAutomationProject[] {
   return (sqlite.prepare(`
     SELECT id, auto_include_rules AS autoIncludeRules, source_bindings AS sourceBindings
     FROM hub_projects
+    ORDER BY id COLLATE BINARY ASC
   `).all() as ProjectRow[]).map(projectFromRow);
 }
 
@@ -87,6 +92,7 @@ function loadTasks(
                source_list_id AS sourceListId
         FROM tasks
         WHERE id IN (${placeholders})
+        ORDER BY id COLLATE BINARY ASC
       `).all(...taskIdBatch) as TaskRow[]);
     }
   } else {
@@ -94,6 +100,7 @@ function loadTasks(
       SELECT id, title, status, connector_instance_id AS connectorInstanceId,
              source_list_id AS sourceListId
       FROM tasks
+      ORDER BY id COLLATE BINARY ASC
     `).all() as TaskRow[]);
   }
   if (taskRows.length === 0) return [];
@@ -106,6 +113,7 @@ function loadTasks(
       FROM task_tags task_tag
       INNER JOIN tags tag ON tag.id = task_tag.tag_id
       WHERE task_tag.task_id IN (${placeholders})
+      ORDER BY task_tag.task_id COLLATE BINARY ASC, tag.id COLLATE BINARY ASC
     `).all(...taskIdBatch) as Array<{ taskId: string; name: string; slug: string }>;
     for (const row of rows) {
       const values = tagsByTask.get(row.taskId) ?? { names: [], slugs: [] };
@@ -240,5 +248,7 @@ export function createSqliteProjectAutomationRepository(
       return Promise.resolve();
     },
     hierarchy: createSqliteProjectHierarchyRepository(sqlite),
+    projectAdministration: createSqliteProjectAdministrationRepository(sqlite),
+    listOrganization: createSqliteListOrganizationRepository(sqlite),
   };
 }

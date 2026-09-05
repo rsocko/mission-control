@@ -1844,6 +1844,29 @@ import, evaluate, or fall back to SQLite. The two Finance alert routes become
 clean transitively through the shared Monarch module but are not otherwise
 changed by this layer.
 
+## Web/API PostgreSQL parity: Layer L18 (project organization)
+
+Project administration, phase lifecycle, rule-match previews, and list-group
+organization now resolve two backend-neutral capabilities atomically nested
+under the existing `projectAutomation` worker slot. They sit beside, rather
+than replace, L15 `projectAutomation.hierarchy`; no parallel runtime registry,
+backend probe, fallback, or dual write was introduced. See
+[project-organization-persistence.md](./project-organization-persistence.md)
+for the complete route inventory and behavioral contract.
+
+SQLite owns its driver and uses immediate mutations plus deferred composite
+reads. PostgreSQL uses SERIALIZABLE mutations, REPEATABLE READ snapshots,
+bounded serialization/deadlock retry, byte-stable `COLLATE "C"` ordering, a
+dedicated list-organization lock, and the existing per-project advisory
+namespace for project and phase mutations. Phase administration therefore
+continues to participate in L15 revision triggers and optimistic CAS fencing.
+
+All eight owned routes move directly from Tier A to clean. The exact composed
+graph is 266 API routes, 113 Tier A, 13 Tier B, 140 clean, 83 direct
+taint-source routes, 30 transitive-only Tier A routes, 84 direct `@/db`
+namespace routes, 61 tainted libraries, zero tainted API helpers, and 174 total
+migration units.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

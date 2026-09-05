@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import { eq } from 'drizzle-orm';
 import type * as SchemaModule from '@/db/schema';
 import {
   describeTaskCoreContract,
@@ -66,6 +67,7 @@ beforeAll(async () => {
         schema.myDayItems,
         schema.priorityEntities,
         schema.sourceRankings,
+        schema.quickSortOperations,
         schema.quickSortLog,
         schema.sourceLists,
         schema.connectorConfigs,
@@ -154,11 +156,23 @@ beforeAll(async () => {
       await db.insert(schema.quickSortLog).values(rows.map((row) => ({
         id: row.id,
         taskId: row.taskId,
-        mode: 'no_priority',
+        operationId: row.operationId ?? null,
+        mode: row.mode ?? 'no_priority',
         action: row.action,
         triagedAt: row.triagedAt,
         reversedAt: row.reversedAt ?? null,
       })));
+    },
+    async listQuickSortLogs(operationId) {
+      return db.select({
+        id: schema.quickSortLog.id,
+        operationId: schema.quickSortLog.operationId,
+        mode: schema.quickSortLog.mode,
+        action: schema.quickSortLog.action,
+        reversedAt: schema.quickSortLog.reversedAt,
+      }).from(schema.quickSortLog)
+        .where(eq(schema.quickSortLog.operationId, operationId))
+        .orderBy(schema.quickSortLog.id);
     },
     async insertTags(rows: SeedTag[]) {
       if (rows.length === 0) return;

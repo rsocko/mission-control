@@ -3,6 +3,7 @@ import {
   asc,
   desc,
   eq,
+  gte,
   inArray,
   isNotNull,
   isNull,
@@ -76,6 +77,9 @@ import {
 } from './sqlite-task-filter';
 import {
   CLOSED_TASK_STATUSES,
+  parseTaskQuickSortAction,
+  parseTaskQuickSortOperationState,
+  parseTaskQuickSortQueueMode,
   type AvailableTaskTag,
   type InboxListEntry,
   type LocalTaskDeletionRequest,
@@ -138,9 +142,14 @@ import {
   type TaskQueryScope,
   type TaskRemovalOutcome,
   type TaskRemovalRepository,
+  type TaskQuickSortLogEntry,
+  type TaskQuickSortOperation,
+  type TaskQuickSortOperationReservation,
   type TaskQuickSortOrder,
+  type TaskQuickSortPersistenceRepository,
   type TaskQuickSortQueueMode,
   type TaskQuickSortQueueRow,
+  type TaskQuickSortReservationOutcome,
   type TaskQuickSortScope,
   type TaskQuickSortSuggestionInputs,
   type TaskReadRepository,
@@ -3134,6 +3143,205 @@ class SqliteTaskTransferIdentityRepository implements TaskTransferIdentityReposi
   }
 }
 
+type SqliteQuickSortOperationRow = typeof quickSortOperations.$inferSelect;
+
+function toSqliteQuickSortOperation(
+  row: SqliteQuickSortOperationRow,
+): TaskQuickSortOperation {
+  return {
+    ...row,
+    mode: parseTaskQuickSortQueueMode(row.mode),
+    action: parseTaskQuickSortAction(row.action),
+    state: parseTaskQuickSortOperationState(row.state),
+  };
+}
+
+class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async captureTask(taskId: string) {
+    const rows = this.database.select({
+      updatedAt: tasks.updatedAt,
+      status: tasks.status,
+      statusReason: tasks.statusReason,
+      localDisposition: tasks.localDisposition,
+      priority: tasks.priority,
+      planningHorizon: tasks.planningHorizon,
+      dueDate: tasks.dueDate,
+      completedAt: tasks.completedAt,
+      microStatus: tasks.microStatus,
+      snoozedUntil: tasks.snoozedUntil,
+      reminderAt: tasks.reminderAt,
+      effort: tasks.effort,
+      tagId: taskTags.tagId,
+    }).from(tasks)
+      .leftJoin(taskTags, eq(taskTags.taskId, tasks.id))
+      .where(eq(tasks.id, taskId))
+      .all();
+    const task = rows[0];
+    if (!task) return null;
+    return {
+      updatedAt: task.updatedAt,
+      status: task.status,
+      statusReason: task.statusReason,
+      localDisposition: task.localDisposition,
+      priority: task.priority,
+      planningHorizon: task.planningHorizon,
+      dueDate: task.dueDate,
+      completedAt: task.completedAt,
+      microStatus: task.microStatus,
+      snoozedUntil: task.snoozedUntil,
+      reminderAt: task.reminderAt,
+      effort: task.effort,
+      tagIds: rows.flatMap((row) => row.tagId === null ? [] : [row.tagId]).sort(),
+    };
+  }
+
+  async getOperation(id: string): Promise<TaskQuickSortOperation | null> {
+    const operation = this.database.select().from(quickSortOperations)
+      .where(eq(quickSortOperations.id, id))
+      .get();
+    return operation ? toSqliteQuickSortOperation(operation) : null;
+  }
+
+  async reserveOperation(
+    input: TaskQuickSortOperationReservation,
+  ): Promise<TaskQuickSortReservationOutcome> {
+    return this.runTransaction((tx) => {
+      const inserted = tx.insert(quickSortOperations).values({
+        ...input,
+        state: 'applying',
+        undoneAt: null,
+      }).onConflictDoNothing().returning({ id: quickSortOperations.id }).get();
+      const operation: TaskQuickSortOperation = {
+        ...input,
+        state: 'applying',
+        undoneAt: null,
+      };
+      if (inserted) return { kind: 'reserved', operation };
+
+      const existing = tx.select().from(quickSortOperations)
+        .where(eq(quickSortOperations.id, input.id))
+        .get();
+      if (!existing) {
+        throw new Error(`Quick Sort operation ${input.id} conflicted but could not be read`);
+      }
+      return { kind: 'existing', operation: toSqliteQuickSortOperation(existing) };
+    });
+  }
+
+  async discardApplyingOperation(id: string): Promise<boolean> {
+    const deleted = this.database.delete(quickSortOperations).where(and(
+      eq(quickSortOperations.id, id),
+      eq(quickSortOperations.state, 'applying'),
+    )).returning({ id: quickSortOperations.id }).get();
+    return deleted !== undefined;
+  }
+
+  async finalizeOperation(
+    id: string,
+    afterSnapshot: TaskQuickSortOperation['afterSnapshot'],
+    logs: readonly TaskQuickSortLogEntry[],
+  ): Promise<TaskQuickSortOperation | null> {
+    return this.runTransaction((tx) => {
+      const changed = tx.update(quickSortOperations).set({
+        afterSnapshot,
+        state: 'applied',
+      }).where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'applying'),
+      )).returning({ id: quickSortOperations.id }).get();
+      if (!changed) return null;
+      if (logs.length > 0) {
+        tx.insert(quickSortLog).values(logs.map((entry) => ({ ...entry }))).run();
+      }
+      const operation = tx.select().from(quickSortOperations)
+        .where(eq(quickSortOperations.id, id))
+        .get();
+      if (!operation) throw new Error(`Finalized Quick Sort operation ${id} disappeared`);
+      return toSqliteQuickSortOperation(operation);
+    });
+  }
+
+  async claimUndo(id: string): Promise<boolean> {
+    const changed = this.database.update(quickSortOperations)
+      .set({ state: 'undoing' })
+      .where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'applied'),
+        isNull(quickSortOperations.undoneAt),
+      ))
+      .returning({ id: quickSortOperations.id })
+      .get();
+    return changed !== undefined;
+  }
+
+  async releaseUndo(id: string): Promise<boolean> {
+    const changed = this.database.update(quickSortOperations)
+      .set({ state: 'applied' })
+      .where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'undoing'),
+        isNull(quickSortOperations.undoneAt),
+      ))
+      .returning({ id: quickSortOperations.id })
+      .get();
+    return changed !== undefined;
+  }
+
+  async finalizeUndo(id: string, undoneAt: string): Promise<boolean> {
+    return this.runTransaction((tx) => {
+      const changed = tx.update(quickSortOperations).set({
+        state: 'undone',
+        undoneAt,
+      }).where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'undoing'),
+        isNull(quickSortOperations.undoneAt),
+      )).returning({ id: quickSortOperations.id }).get();
+      if (!changed) return false;
+      tx.update(quickSortLog).set({ reversedAt: undoneAt })
+        .where(eq(quickSortLog.operationId, id))
+        .run();
+      return true;
+    });
+  }
+
+  async countActivityByModeSince(since: string) {
+    const rows = this.database.select({
+      mode: quickSortLog.mode,
+      count: sql<number>`count(*)`,
+    }).from(quickSortLog).where(and(
+      gte(quickSortLog.triagedAt, since),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    )).groupBy(quickSortLog.mode);
+    return rows.map((row) => ({
+      mode: parseTaskQuickSortQueueMode(row.mode),
+      count: Number(row.count),
+    }));
+  }
+
+  async listActivityTimestampsSince(since: string): Promise<string[]> {
+    const rows = this.database.select({ triagedAt: quickSortLog.triagedAt })
+      .from(quickSortLog)
+      .where(and(
+        gte(quickSortLog.triagedAt, since),
+        isNull(quickSortLog.reversedAt),
+        ne(quickSortLog.action, 'skipped'),
+      ))
+      .all();
+    return rows.map((row) => row.triagedAt);
+  }
+
+  async recordActivity(entry: TaskQuickSortLogEntry): Promise<void> {
+    this.database.insert(quickSortLog).values({ ...entry }).run();
+  }
+}
+
 /* ------------------------------------------------------------------ */
 
 /**
@@ -3165,6 +3373,7 @@ export function createSqliteTaskCorePersistence(
     priorityEntities: new SqlitePriorityEntityRepository(database),
     sourceListNames: new SqliteSourceListNameRepository(database),
     transferIdentity: new SqliteTaskTransferIdentityRepository(database, transactionRunner),
+    quickSort: new SqliteTaskQuickSortRepository(database, transactionRunner),
   };
 }
 

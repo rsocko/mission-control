@@ -172,7 +172,8 @@ beforeAll(async () => {
         reversedAt: schema.quickSortLog.reversedAt,
       }).from(schema.quickSortLog)
         .where(eq(schema.quickSortLog.operationId, operationId))
-        .orderBy(schema.quickSortLog.id);
+        .orderBy(schema.quickSortLog.id)
+        .all();
     },
     async insertTags(rows: SeedTag[]) {
       if (rows.length === 0) return;

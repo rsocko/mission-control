@@ -29,7 +29,6 @@ const SQLITE_ADAPTER = 'src/db/persistence/sqlite-ai-workflow-repository.ts';
 const POSTGRES_ADAPTER = 'src/db/postgres/repositories/ai-workflow-repository.ts';
 const HOUSTON_MEMORY_TOOLS = 'src/lib/ai/tools/houston-memory-tools.ts';
 const HOUSTON_MEMORY_RETRIEVAL_CORE = 'src/lib/houston-memory/retrieval-core.ts';
-const HOUSTON_MEMORY_LEGACY_RETRIEVAL = 'src/lib/houston-memory/retrieval.ts';
 
 const OWNED_TESTS = [
   'tests/contracts/ai-workflow-persistence.contract.ts',
@@ -195,15 +194,9 @@ describe('AI application workflow parity taint decrement', () => {
     expect(triageTools).not.toContain("from '@/lib/triage/query'");
   });
 
-  it('keeps Houston memory retrieval sharing one algorithm without a 16th tainted-lib decrement', () => {
-    expect(current.taintedLibA).toContain(HOUSTON_MEMORY_LEGACY_RETRIEVAL);
+  it('keeps Houston tools on the shared retrieval core without a 16th tainted-lib decrement', () => {
     expect(current.taintedLibA).not.toContain(HOUSTON_MEMORY_RETRIEVAL_CORE);
     expect(current.taintedLibA).not.toContain(HOUSTON_MEMORY_TOOLS);
-
-    const legacy = source(HOUSTON_MEMORY_LEGACY_RETRIEVAL);
-    expect(legacy).toContain(
-      "from '@/lib/semantic-index/runtime'",
-    );
 
     const tools = source(HOUSTON_MEMORY_TOOLS);
     expect(tools).not.toContain("import('@/lib/houston-memory/retrieval')");

@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, hubProjects, taskProjects, tags, taskTags } from '@/db/schema';
-import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import {
+  getAsyncAIModel,
+  getAsyncAIProviderConfiguration,
+  getAsyncAIRouteOutcome,
+} from '@/lib/ai/provider-runtime';
 import { generateText } from 'ai';
-import { eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
 import { getLocalToday } from '@/lib/utils/date';
 import { ApiErrors } from '@/lib/api-error';
@@ -14,6 +14,11 @@ import {
   parsePhaseProposalText,
   PHASE_PLANNING_COLORS,
 } from '@/lib/projects/phase-planning';
+import {
+  getHubProject,
+  listPhasePlanningTasks,
+} from '@/lib/projects/organization-service';
+import type { PhasePlanningContextTask } from '@/db/persistence/project-organization';
 
 const requestSchema = z.object({
   projectId: z.string().trim().min(1),
@@ -24,54 +29,12 @@ const requestSchema = z.object({
   instruction: z.string().trim().max(4000).optional(),
 });
 
-type PlanningTask = typeof tasks.$inferSelect & {
-  tags: string[];
-  projectNames: string[];
-};
-
 async function fetchPlanningTasks(taskIds: string[]) {
   const uniqueTaskIds = [...new Set(taskIds)];
   if (uniqueTaskIds.length === 0) {
-    return [] as PlanningTask[];
+    return [] as PhasePlanningContextTask[];
   }
-
-  const [taskRows, tagRows, projectRows] = await Promise.all([
-    db.select().from(tasks).where(inArray(tasks.id, uniqueTaskIds)),
-    db
-      .select({ taskId: taskTags.taskId, tagName: tags.name })
-      .from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(inArray(taskTags.taskId, uniqueTaskIds)),
-    db
-      .select({ taskId: taskProjects.taskId, projectName: hubProjects.name })
-      .from(taskProjects)
-      .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-      .where(inArray(taskProjects.taskId, uniqueTaskIds)),
-  ]);
-
-  const tagMap = new Map<string, string[]>();
-  for (const row of tagRows) {
-    const bucket = tagMap.get(row.taskId) || [];
-    bucket.push(row.tagName);
-    tagMap.set(row.taskId, bucket);
-  }
-
-  const projectNameMap = new Map<string, string[]>();
-  for (const row of projectRows) {
-    const bucket = projectNameMap.get(row.taskId) || [];
-    bucket.push(row.projectName);
-    projectNameMap.set(row.taskId, bucket);
-  }
-
-  const sortIndex = new Map(uniqueTaskIds.map((id, index) => [id, index]));
-
-  return taskRows
-    .map((task) => ({
-      ...task,
-      tags: tagMap.get(task.id) || [],
-      projectNames: projectNameMap.get(task.id) || [],
-    }))
-    .sort((a, b) => (sortIndex.get(a.id) ?? 0) - (sortIndex.get(b.id) ?? 0));
+  return listPhasePlanningTasks(uniqueTaskIds);
 }
 
 export async function POST(request: Request) {
@@ -84,7 +47,7 @@ export async function POST(request: Request) {
     }
 
     const { projectId, currentPhases, instruction } = parsedBody.data;
-    const project = (await db.select().from(hubProjects).where(eq(hubProjects.id, projectId)).limit(1))[0];
+    const project = await getHubProject(projectId);
 
     if (!project) {
       return NextResponse.json({ error: 'Project not found' }, { status: 404 });
@@ -104,11 +67,11 @@ export async function POST(request: Request) {
       });
     }
 
-    if (!getResolvedAIConfig().configured) {
+    if (!(await getAsyncAIProviderConfiguration()).configured) {
       return NextResponse.json({ error: 'AI provider is not configured' }, { status: 503 });
     }
 
-    const route = getAIModel('project-phase-refinement', {
+    const route = await getAsyncAIModel('project-phase-refinement', {
       sources: projectTasks.map((task) => task.connectorType),
     });
     const today = getLocalToday();
@@ -192,7 +155,7 @@ Return JSON only.`,
 
     return NextResponse.json({
       proposal,
-      routing: getAIRouteOutcome(route.context, result.response),
+      routing: getAsyncAIRouteOutcome(route, result.response),
     });
   } catch (error) {
     return ApiErrors.internal('Failed to refine phase suggestion', error);

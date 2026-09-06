@@ -6,6 +6,7 @@ import {
   requireScoutIngestionReconciliationPersistence,
   type WorkerPersistenceRepositories,
 } from './persistence/worker-repositories';
+import { requireAIWorkflowPersistence } from './persistence/ai-workflows';
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
 import type { SyncControlStateRepository } from '@/lib/sync/control-state';
 import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
@@ -699,6 +700,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       get: (_target, property) => (
         requireOperationalUtilityPersistence(requirePostgresWorkerRepositories())[
           property as keyof NonNullable<WorkerPersistenceRepositories['operationalUtility']>
+        ]
+      ),
+    },
+  ),
+  aiWorkflows: new Proxy(
+    {} as NonNullable<WorkerPersistenceRepositories['aiWorkflows']>,
+    {
+      get: (_target, property) => (
+        requireAIWorkflowPersistence(requirePostgresWorkerRepositories())[
+          property as keyof NonNullable<WorkerPersistenceRepositories['aiWorkflows']>
         ]
       ),
     },

@@ -1,11 +1,11 @@
 import { NextResponse } from 'next/server';
 import { generateText, Output } from 'ai';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
-import db from '@/db';
-import { hubProjects, tags, taskProjects, tasks, taskTags } from '@/db/schema';
-import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import {
+  getAsyncAIModel,
+  getAsyncAIProviderConfiguration,
+  getAsyncAIRouteOutcome,
+} from '@/lib/ai/provider-runtime';
 import {
   aiBreakdownOutputSchema,
   buildBreakdownPrompt,
@@ -13,6 +13,7 @@ import {
   normalizeBreakdownProposals,
 } from '@/lib/ai/task-breakdown';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 import logger from '@/lib/logger';
 
 const taskIdSchema = z.string().trim().min(1).max(200);
@@ -33,47 +34,21 @@ export async function POST(
   const taskId = parsedId.data;
 
   try {
-    const [task] = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      description: tasks.description,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      effort: tasks.effort,
-      sourceListName: tasks.sourceListName,
-      connectorType: tasks.connectorType,
-      updatedAt: tasks.updatedAt,
-    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    const context = await (await getAIWorkflowPersistence()).getTaskBreakdownContext(taskId);
 
-    if (!task) {
+    if (!context) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
+    const { task, subtaskTitles, tagNames, projectNames } = context;
 
-    if (!getResolvedAIConfig().configured) {
+    if (!(await getAsyncAIProviderConfiguration()).configured) {
       return NextResponse.json({ error: 'AI provider is not configured' }, { status: 503 });
     }
-
-    const [existingSubtasks, taskTagRows, projectRows] = await Promise.all([
-      db.select({ title: tasks.title })
-        .from(tasks)
-        .where(eq(tasks.parentId, taskId))
-        .limit(30),
-      db.select({ name: tags.name })
-        .from(taskTags)
-        .innerJoin(tags, eq(taskTags.tagId, tags.id))
-        .where(eq(taskTags.taskId, taskId))
-        .limit(20),
-      db.select({ name: hubProjects.name })
-        .from(taskProjects)
-        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-        .where(eq(taskProjects.taskId, taskId))
-        .limit(10),
-    ]);
 
     let output: unknown;
     let routing;
     try {
-      const route = getAIModel('task-breakdown', {
+      const route = await getAsyncAIModel('task-breakdown', {
         sources: [task.connectorType],
       });
       const result = await generateText({
@@ -82,16 +57,16 @@ export async function POST(
         system: 'You are a precise task decomposition assistant. Return only the requested structured output.',
         prompt: buildBreakdownPrompt({
           ...task,
-          tags: taskTagRows.map((row) => row.name),
-          projects: projectRows.map((row) => row.name),
-          existingSubtasks: existingSubtasks.map((row) => row.title),
+          tags: tagNames,
+          projects: projectNames,
+          existingSubtasks: subtaskTitles,
         }),
         maxOutputTokens: 1400,
         maxRetries: 1,
         abortSignal: AbortSignal.timeout(30_000),
       });
       output = result.output;
-      routing = getAIRouteOutcome(route.context, result.response);
+      routing = getAsyncAIRouteOutcome(route, result.response);
     } catch (error) {
       logger.warn({ err: error, taskId }, 'AI task breakdown generation failed');
       return NextResponse.json(
@@ -102,7 +77,7 @@ export async function POST(
 
     const proposals = normalizeBreakdownProposals(
       output,
-      existingSubtasks.map((row) => row.title),
+      subtaskTitles,
     );
     if (proposals.length === 0) {
       return NextResponse.json(
@@ -110,10 +85,6 @@ export async function POST(
         { status: 422 },
       );
     }
-
-    const tagNames = taskTagRows.map((row) => row.name);
-    const projectNames = projectRows.map((row) => row.name);
-    const subtaskTitles = existingSubtasks.map((row) => row.title);
 
     return NextResponse.json({
       contextVersion: createBreakdownContextVersion({

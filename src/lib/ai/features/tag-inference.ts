@@ -1,24 +1,24 @@
 import { generateText } from 'ai';
-import db from '@/db';
-import { tags, tasks, taskTags } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
+import { getAIWorkflowPersistence } from '../workflow-persistence';
 
 export async function inferTags(): Promise<{
   suggestions: Array<{ taskId: string; title: string; suggestedTags: string[]; confidence: number }>;
   routing?: AIRouteOutcome;
 }> {
-  const allTasksList = await db.select().from(tasks).where(eq(tasks.status, 'todo')).limit(50);
-  const allTagRecords = await db.select().from(taskTags);
-  const taggedTaskIds = new Set(allTagRecords.map(taskTag => taskTag.taskId));
+  const persistence = await getAIWorkflowPersistence();
+  const allTasksList = await persistence.recommendations.listTagInferenceTasks(50);
+  const taggedTaskIds = new Set(await persistence.recommendations.listTaggedTaskIds());
   const untagged = allTasksList.filter(task => !taggedTaskIds.has(task.id)).slice(0, 15);
 
   if (untagged.length === 0) return { suggestions: [] };
 
-  const availableTags = await db.select().from(tags);
-  const tagNames = availableTags.map(tag => tag.name);
-  const route = getAIModel('tag-inference', {
+  const tagNames = await persistence.recommendations.listAvailableTagNames();
+  const route = await getAsyncAIModel('tag-inference', {
     sources: untagged.map(task => task.connectorType),
   });
   const taskList = untagged.map((task, index) => (
@@ -29,7 +29,7 @@ export async function inferTags(): Promise<{
     system: `You suggest tags for tasks. Available tags: ${tagNames.join(', ')}. You may also suggest new tags if none fit. Respond ONLY in JSON: {"suggestions": [{"index": 1, "tags": ["work", "urgent"], "confidence": 0.8}]}`,
     messages: [{ role: 'user', content: `Suggest tags for these tasks:\n\n${taskList}` }],
   });
-  const routing = getAIRouteOutcome(route.context, result.response);
+  const routing = getAsyncAIRouteOutcome(route, result.response);
 
   try {
     const parsed = JSON.parse(result.text) as {

@@ -73,6 +73,39 @@ export type ProjectPhaseUpdate =
   Partial<Record<ProjectPhaseMutableField, unknown>>
   & { updatedAt: string };
 
+export interface PhasePlanningContextTask {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  priority: string;
+  dueDate: string | null;
+  connectorType: string;
+  sourceListName: string | null;
+  updatedAt: string;
+  tags: string[];
+  projectNames: string[];
+}
+
+export interface GoalDevelopmentContext {
+  task: {
+    id: string;
+    title: string;
+    description: string | null;
+    connectorType: string;
+  };
+  tags: Array<{ name: string; slug: string }>;
+  linkedProjects: Array<{
+    name: string;
+    description: string | null;
+    category: string | null;
+  }>;
+  existingProjects: Array<{
+    name: string;
+    category: string | null;
+  }>;
+}
+
 export interface ProjectAdministrationPersistence {
   listProjects(input: {
     includeHidden: boolean;
@@ -102,6 +135,14 @@ export interface ProjectAdministrationPersistence {
     updates: ProjectPhaseUpdate,
   ): Promise<ProjectPhase | null>;
   deletePhase(phaseId: string): Promise<void>;
+  listPhasePlanningTaskIds(projectId: string | null): Promise<string[]>;
+  listPhasePlanningTasks(
+    taskIds: readonly string[],
+  ): Promise<PhasePlanningContextTask[]>;
+  getGoalDevelopmentContext(
+    taskId: string,
+    existingProjectLimit: number,
+  ): Promise<GoalDevelopmentContext | null>;
 }
 
 export interface ListOrganizationGroup {

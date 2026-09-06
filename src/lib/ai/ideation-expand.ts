@@ -2,7 +2,7 @@ import 'server-only';
 
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import { getAIModel } from '@/lib/ai/provider-factory';
+import { getAsyncAIModel } from '@/lib/ai/provider-runtime';
 import {
   IDEATION_EXPAND_MAX_CONTEXT_NODES,
   IDEATION_EXPAND_MAX_PROPOSALS,
@@ -85,7 +85,7 @@ export async function generateIdeationExpansion(
   input: z.infer<typeof ideationExpansionRequestSchema>,
   abortSignal?: AbortSignal,
 ): Promise<IdeationExpansionProposal[]> {
-  const route = getAIModel('ideation-expansion');
+  const route = await getAsyncAIModel('ideation-expansion');
   const selectedChildren = input.contextNodes.filter((node) => node.parentId === input.selectedNode.id);
   const context = input.contextNodes.map((node) => ({
     id: node.id,

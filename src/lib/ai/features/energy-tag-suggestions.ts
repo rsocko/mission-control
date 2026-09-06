@@ -1,19 +1,13 @@
 import { generateText } from 'ai';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { inArray, sql } from 'drizzle-orm';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
 import { getEnergyTagsForTasks } from './energy-tag-queries';
 import { normalizeEnergyTagSuggestions } from './normalization';
-
-type EnergyTask = {
-  id: string;
-  title: string;
-  description: string | null;
-  priority: string;
-  connectorType: string;
-};
+import { getAIDailyPlanningPersistence } from '../workflow-persistence';
+import type { EnergySuggestionTask } from '@/db/persistence/daily-planning';
 
 export { normalizeEnergyTagSuggestions } from './normalization';
 
@@ -27,39 +21,23 @@ export async function suggestEnergyTags(taskIds?: string[]): Promise<{
   }>;
   routing?: AIRouteOutcome;
 }> {
-  let targetTasks: EnergyTask[];
+  const persistence = await getAIDailyPlanningPersistence();
+  const suggestions = persistence.energySuggestions;
+  let targetTasks: EnergySuggestionTask[];
   if (taskIds && taskIds.length > 0) {
     const existingEnergyMap = await getEnergyTagsForTasks(taskIds);
     const untagged = taskIds.filter(id => !existingEnergyMap.has(id));
     if (untagged.length === 0) return { suggestions: [] };
-    targetTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      description: tasks.description,
-      priority: tasks.priority,
-      connectorType: tasks.connectorType,
-    })
-      .from(tasks)
-      .where(inArray(tasks.id, untagged))
-      .limit(30);
+    targetTasks = await suggestions.listTasksByIds(untagged, 30);
   } else {
-    const openTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      description: tasks.description,
-      priority: tasks.priority,
-      connectorType: tasks.connectorType,
-    })
-      .from(tasks)
-      .where(sql`${tasks.status} NOT IN ('done', 'cancelled') AND ${tasks.depth} = 0`)
-      .limit(50);
+    const openTasks = await suggestions.listOpenTopLevelTasks(50);
     const allEnergyMap = await getEnergyTagsForTasks(openTasks.map(task => task.id));
     targetTasks = openTasks.filter(task => !allEnergyMap.has(task.id));
   }
 
   if (targetTasks.length === 0) return { suggestions: [] };
 
-  const route = getAIModel('energy-tag-suggestion', {
+  const route = await getAsyncAIModel('energy-tag-suggestion', {
     sources: targetTasks.map(task => task.connectorType),
   });
   const taskList = targetTasks.map(task => (
@@ -87,6 +65,6 @@ Return empty array [] if no confident suggestions.`,
 
   return {
     suggestions: normalizeEnergyTagSuggestions(result.text, targetTasks),
-    routing: getAIRouteOutcome(route.context, result.response),
+    routing: getAsyncAIRouteOutcome(route, result.response),
   };
 }

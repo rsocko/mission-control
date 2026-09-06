@@ -21,9 +21,42 @@ function chainable<T>(terminal: T) {
   return chain;
 }
 
-const mockInsert = vi.fn(() => chainable([]));
-const mockSelect = vi.fn(() => chainable([]));
-const mockUpdate = vi.fn(() => chainable(undefined));
+const mockInsert = vi.fn((...args: unknown[]) => {
+  void args;
+  return chainable([]);
+});
+const mockSelect = vi.fn((...args: unknown[]) => {
+  void args;
+  return chainable([]);
+});
+const mockUpdate = vi.fn((...args: unknown[]) => {
+  void args;
+  return chainable(undefined);
+});
+const aiWorkflowMocks = vi.hoisted(() => ({
+  getTask: vi.fn(async (taskId: string): Promise<{
+    id: string;
+    title: string;
+    description: string | null;
+    connectorType: string;
+  } | null> => {
+    void taskId;
+    return null;
+  }),
+  listTaskTags: vi.fn(async (taskId: string) => {
+    void taskId;
+    return [];
+  }),
+  listLinkedProjects: vi.fn(async (taskId: string) => {
+    void taskId;
+    return [];
+  }),
+  listExistingProjects: vi.fn(async (limit: number) => {
+    void limit;
+    return [];
+  }),
+  getAsyncAIProviderConfiguration: vi.fn(async () => ({ configured: true })),
+}));
 
 vi.mock('@/db', () => {
   // Deep chainable proxy: every property access and every function call
@@ -92,6 +125,49 @@ vi.mock('@/lib/ai/provider-factory', () => ({
   })),
 }));
 
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIProviderConfiguration: aiWorkflowMocks.getAsyncAIProviderConfiguration,
+  getAsyncAIModel: vi.fn(async () => ({
+    model: 'mock-model',
+    context: {
+      featureId: 'goal-development',
+      sensitivity: 'standard',
+      allowedRoutes: ['openai'],
+      correlationId: 'test-correlation',
+    },
+    configured: { provider: 'openai', model: 'mock-model' },
+  })),
+  getAsyncAIRouteOutcome: vi.fn(() => ({
+    provider: 'openai',
+    model: 'mock-model-id',
+    fallbackOccurred: false,
+  })),
+}));
+
+vi.mock('@/lib/ai/workflow-persistence', () => ({
+  getAIWorkflowPersistence: async () => ({
+    goals: {
+      getTask: aiWorkflowMocks.getTask,
+      listTaskTags: aiWorkflowMocks.listTaskTags,
+      listLinkedProjects: aiWorkflowMocks.listLinkedProjects,
+      listExistingProjects: aiWorkflowMocks.listExistingProjects,
+    },
+  }),
+}));
+
+vi.mock('@/lib/projects/organization-service', () => ({
+  getGoalDevelopmentContext: async (taskId: string, projectLimit: number) => {
+    const task = await aiWorkflowMocks.getTask(taskId);
+    if (!task) return null;
+    return {
+      task,
+      tags: await aiWorkflowMocks.listTaskTags(taskId),
+      linkedProjects: await aiWorkflowMocks.listLinkedProjects(taskId),
+      existingProjects: await aiWorkflowMocks.listExistingProjects(projectLimit),
+    };
+  },
+}));
+
 vi.mock('ai', () => ({
   generateText: vi.fn(() => Promise.resolve({
     text: JSON.stringify({
@@ -117,6 +193,11 @@ vi.mock('ai', () => ({
 describe('GET /api/goals', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    aiWorkflowMocks.getAsyncAIProviderConfiguration.mockResolvedValue({ configured: true });
+    aiWorkflowMocks.getTask.mockResolvedValue(null);
+    aiWorkflowMocks.listTaskTags.mockResolvedValue([]);
+    aiWorkflowMocks.listLinkedProjects.mockResolvedValue([]);
+    aiWorkflowMocks.listExistingProjects.mockResolvedValue([]);
   });
 
   it('should return empty items when no matching tags exist', async () => {
@@ -186,6 +267,11 @@ describe('GET /api/goals', () => {
 describe('POST /api/goals/develop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    aiWorkflowMocks.getAsyncAIProviderConfiguration.mockResolvedValue({ configured: true });
+    aiWorkflowMocks.getTask.mockResolvedValue(null);
+    aiWorkflowMocks.listTaskTags.mockResolvedValue([]);
+    aiWorkflowMocks.listLinkedProjects.mockResolvedValue([]);
+    aiWorkflowMocks.listExistingProjects.mockResolvedValue([]);
   });
 
   it('should return 400 when taskId is missing', async () => {
@@ -215,8 +301,9 @@ describe('POST /api/goals/develop', () => {
   });
 
   it('should return 503 when AI not configured', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-    vi.mocked(getResolvedAIConfig).mockReturnValueOnce({ configured: false } as ReturnType<typeof getResolvedAIConfig>);
+    aiWorkflowMocks.getAsyncAIProviderConfiguration.mockResolvedValueOnce({
+      configured: false,
+    });
 
     const { POST } = await import('@/app/api/goals/develop/route');
     const request = new Request('http://localhost:3099/api/goals/develop', {
@@ -229,18 +316,11 @@ describe('POST /api/goals/develop', () => {
   });
 
   it('should return a proposal when task exists', async () => {
-    // First call: task lookup returns a task; subsequent calls return empty arrays
-    let callCount = 0;
-    mockSelect.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return chainable([{
-          id: 'task-1', title: 'Build a dashboard', description: 'Analytics dashboard',
-          status: 'todo', priority: 'high', createdAt: '2026-01-01', updatedAt: '2026-01-01',
-          metadata: {},
-        }]);
-      }
-      return chainable([]);
+    aiWorkflowMocks.getTask.mockResolvedValue({
+      id: 'task-1',
+      title: 'Build a dashboard',
+      description: 'Analytics dashboard',
+      connectorType: 'local',
     });
 
     const { POST } = await import('@/app/api/goals/develop/route');

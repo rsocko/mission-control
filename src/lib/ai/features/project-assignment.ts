@@ -1,9 +1,10 @@
 import { generateText } from 'ai';
-import db from '@/db';
-import { hubProjects, tasks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
+import { getAIWorkflowPersistence } from '../workflow-persistence';
 
 export async function autoAssignProjects(): Promise<{
   assignments: Array<{
@@ -15,11 +16,12 @@ export async function autoAssignProjects(): Promise<{
   }>;
   routing?: AIRouteOutcome;
 }> {
-  const projects = await db.select().from(hubProjects);
+  const persistence = await getAIWorkflowPersistence();
+  const projects = await persistence.recommendations.listAssignmentProjects();
   if (projects.length === 0) return { assignments: [] };
 
-  const allTasks = await db.select().from(tasks).where(eq(tasks.status, 'todo')).limit(30);
-  const route = getAIModel('project-assignment', {
+  const allTasks = await persistence.recommendations.listAssignmentTasks(30);
+  const route = await getAsyncAIModel('project-assignment', {
     sources: allTasks.map(task => task.connectorType),
   });
   const projectList = projects
@@ -33,7 +35,7 @@ export async function autoAssignProjects(): Promise<{
     system: `You assign tasks to projects. Available projects:\n${projectList}\n\nRespond ONLY in JSON: {"assignments": [{"index": 1, "project": "Project Name", "confidence": 0.9}]}. Only assign if confidence > 0.6.`,
     messages: [{ role: 'user', content: `Assign these tasks to the most appropriate project:\n\n${taskList}` }],
   });
-  const routing = getAIRouteOutcome(route.context, result.response);
+  const routing = getAsyncAIRouteOutcome(route, result.response);
 
   try {
     const parsed = JSON.parse(result.text) as {

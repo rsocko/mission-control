@@ -28,6 +28,7 @@ import type {
   WeeklyOneThingCandidate,
   WeeklyOneThingRecord,
 } from './daily-planning';
+import { createSqliteAIDailyPlanningExtensions } from './sqlite-ai-workflow-repository';
 
 const BATCH_SIZE = 400;
 
@@ -135,6 +136,7 @@ const ONE_THING_COLUMNS = `
 export function createSqliteDailyPlanningPersistence(
   sqlite: Database.Database,
 ): DailyPlanningPersistence {
+  const aiDailyPlanning = createSqliteAIDailyPlanningExtensions(sqlite);
   function appendSignal(
     taskId: string,
     eventType: string,
@@ -259,6 +261,7 @@ export function createSqliteDailyPlanningPersistence(
         }).immediate();
       },
     },
+    energySuggestions: aiDailyPlanning.energySuggestions,
 
     focus: {
       async listBoard({ date, weekMonday }) {
@@ -386,6 +389,7 @@ export function createSqliteDailyPlanningPersistence(
           return { outcome: 'moved' };
         }).immediate();
       },
+      getSuggestionContext: aiDailyPlanning.getFocusSuggestionContext,
     },
 
     dashboard: {
@@ -1223,6 +1227,7 @@ export function createSqliteDailyPlanningPersistence(
         sqlite.prepare('DELETE FROM task_schedules WHERE task_id = ?').run(taskId);
       },
     },
+    dayPlan: aiDailyPlanning.dayPlan,
 
     recentWins: {
       async listRecentCompletions({ completedFrom }) {

@@ -1,6 +1,6 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse } from 'next/server';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { getAsyncAIProviderConfiguration } from '@/lib/ai/provider-runtime';
 import {
   generateIdeationExpansion,
   ideationExpansionRequestSchema,
@@ -88,7 +88,7 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid ideation expansion request' }, { status: 400 });
   }
-  if (!getResolvedAIConfig().configured) {
+  if (!(await getAsyncAIProviderConfiguration()).configured) {
     return NextResponse.json({ error: 'AI provider is not configured' }, { status: 503 });
   }
 

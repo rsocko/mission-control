@@ -57,6 +57,9 @@ import {
 import {
   createPostgresOperationalUtilityRepository,
 } from './operational-utility-repository';
+import {
+  createPostgresAIWorkflowPersistence,
+} from './ai-workflow-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -120,6 +123,11 @@ export {
 export {
   createPostgresOperationalUtilityRepository,
 } from './operational-utility-repository';
+export { createPostgresAIWorkflowPersistence } from './ai-workflow-repository';
+export {
+  createPostgresAIDailyPlanningExtensions,
+  createPostgresAIProjectOrganizationExtensions,
+} from './ai-workflow-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -188,6 +196,7 @@ export function createPostgresWorkerPersistenceRepositories(
 ): WorkerPersistenceRepositories {
   const financeCore = createPostgresFinanceWorkerPersistence(pool);
   const graphReporting = createPostgresGraphReportingRepository(db, pool);
+  const aiWorkflows = createPostgresAIWorkflowPersistence(pool);
   return {
     connectors: core.connectors,
     syncRuns: new PostgresSyncRunRepository(db),
@@ -226,5 +235,6 @@ export function createPostgresWorkerPersistenceRepositories(
     scoutIngestionReconciliation:
       createPostgresScoutIngestionReconciliationRepository(pool),
     operationalUtility: createPostgresOperationalUtilityRepository(db, pool),
+    aiWorkflows,
   };
 }

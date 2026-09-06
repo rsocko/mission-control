@@ -27,6 +27,7 @@ import type {
   WeeklyOneThingCandidate,
   WeeklyOneThingRecord,
 } from '@/db/persistence/daily-planning';
+import { createPostgresAIDailyPlanningExtensions } from './ai-workflow-repository';
 
 const BATCH_SIZE = 400;
 
@@ -196,6 +197,7 @@ function suggestionFromRow(row: RawSuggestionRow): MyDaySuggestionRecord {
 export function createPostgresDailyPlanningPersistence(
   pool: Pool,
 ): DailyPlanningPersistence {
+  const aiDailyPlanning = createPostgresAIDailyPlanningExtensions(pool);
   async function appendSignal(
     client: PoolClient,
     taskId: string,
@@ -335,6 +337,7 @@ export function createPostgresDailyPlanningPersistence(
         });
       },
     },
+    energySuggestions: aiDailyPlanning.energySuggestions,
 
     focus: {
       async listBoard({ date, weekMonday }) {
@@ -499,6 +502,7 @@ export function createPostgresDailyPlanningPersistence(
           },
         );
       },
+      getSuggestionContext: aiDailyPlanning.getFocusSuggestionContext,
     },
 
     dashboard: {
@@ -1408,6 +1412,7 @@ export function createPostgresDailyPlanningPersistence(
         await pool.query('DELETE FROM task_schedules WHERE task_id = $1', [taskId]);
       },
     },
+    dayPlan: aiDailyPlanning.dayPlan,
 
     recentWins: {
       async listRecentCompletions({ completedFrom }) {

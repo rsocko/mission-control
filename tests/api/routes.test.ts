@@ -62,6 +62,30 @@ vi.mock('@/db', () => ({
   runTransaction: vi.fn(),
 }));
 
+vi.mock('@/lib/ai/workflow-persistence', () => ({
+  getAIWorkflowPersistence: vi.fn().mockResolvedValue({
+    context: {
+      loadDigestSnapshot: vi.fn().mockResolvedValue({
+        counts: {
+          open: 0,
+          overdue: 0,
+          dueToday: 0,
+          inProgress: 0,
+          critical: 0,
+          unreadNotifications: 0,
+          urgentNotifications: 0,
+        },
+        overdue: [],
+        dueToday: [],
+        inProgress: [],
+        notifications: [],
+        sources: [],
+        rowCount: 0,
+      }),
+    },
+  }),
+}));
+
 vi.mock('@/lib/ai/finance-approval-store', () => {
   class InvalidHoustonFinanceApprovalError extends Error {
     constructor(

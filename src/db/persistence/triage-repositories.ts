@@ -1,4 +1,5 @@
 import type {
+  TriageActionRecord,
   TriageItem,
   TriageSourcePlatform,
   TriageStatus,
@@ -476,6 +477,158 @@ export interface TriageNativePersistenceRepositories {
   readonly apns: NativeApnsRepository;
 }
 
+// ─── ACTION EXECUTION (claims, action records, undo) ─────────────────────────
+
+export interface TriageActionClaimRecord {
+  readonly id: string;
+  readonly triageItemId: string;
+  readonly actionType: string;
+  readonly state: 'pending' | 'completed';
+  readonly claimedAt: string;
+  readonly completedAt: string | null;
+  readonly result: unknown;
+}
+
+export interface TriageActionClaimReservation {
+  readonly claimId: string;
+  readonly triageItemId: string;
+  readonly actionType: string;
+  readonly claimedAt: string;
+}
+
+/**
+ * Compare-and-set fence for a non-claimed action write. `null` means the caller
+ * accepted an unfenced write (non-undoable actions keep their original
+ * last-writer-wins behaviour).
+ */
+export interface TriageActionVersionFence {
+  readonly actionsTaken: readonly TriageActionRecord[];
+  readonly status: string;
+  readonly snoozedUntil: string | null;
+}
+
+export interface TriageActionAppendInput {
+  readonly triageItemId: string;
+  readonly status: string;
+  readonly snoozedUntil: string | null;
+  readonly record: TriageActionRecord;
+  readonly fence: TriageActionVersionFence | null;
+}
+
+export interface TriageActionSetInput {
+  readonly triageItemId: string;
+  readonly actions: readonly TriageActionRecord[];
+  readonly expectedActions: readonly TriageActionRecord[];
+  /** Omitted when the write only rewrites the action history (undo claim/rollback). */
+  readonly status?: string;
+  readonly snoozedUntil?: string | null;
+}
+
+/**
+ * Bounded action-execution surface for the triage action routes. It owns the
+ * durable `create_task_todo` claim lifecycle plus the item writes that record,
+ * fence, and undo an action — including portable JSON-array append, which never
+ * exposes SQLite's `json_insert` to callers.
+ */
+export interface TriageActionRepository {
+  /** Full item snapshot used to decide an action; `null` when the item is gone. */
+  getActionSnapshot(triageItemId: string): Promise<TriageItem | null>;
+  readClaim(input: {
+    readonly triageItemId: string;
+    readonly actionType: string;
+  }): Promise<TriageActionClaimRecord | null>;
+  /** Inserts the claim; resolves `false` when another caller already holds it. */
+  reserveClaim(
+    reservation: TriageActionClaimReservation,
+  ): Promise<{ readonly acquired: boolean }>;
+  /** Refreshes `claimedAt` on a still-pending claim. */
+  heartbeatClaim(input: {
+    readonly claimId: string;
+    readonly claimedAt: string;
+  }): Promise<boolean>;
+  /** Records the resolved external target on a still-pending claim. */
+  recordClaimTarget(input: {
+    readonly claimId: string;
+    readonly claimedAt: string;
+    readonly target: Record<string, unknown>;
+  }): Promise<boolean>;
+  /** Deletes a pending claim, optionally fenced on its observed `claimedAt`. */
+  releaseClaim(input: {
+    readonly claimId: string;
+    readonly expectedClaimedAt?: string;
+  }): Promise<boolean>;
+  /**
+   * One transaction: settle the pending claim and append its action record to
+   * the item, marking the item `actioned`. Resolves the item as stored after
+   * the transaction regardless of whether this caller won the claim.
+   */
+  completeClaim(input: {
+    readonly claimId: string;
+    readonly triageItemId: string;
+    readonly record: TriageActionRecord;
+    readonly completedAt: string;
+  }): Promise<{
+    readonly completed: boolean;
+    readonly item: TriageItem | null;
+  }>;
+  /** Appends one action record and sets status/snooze, honouring the optional fence. */
+  appendAction(input: TriageActionAppendInput): Promise<TriageItem | null>;
+  /** Compare-and-set of the whole action history (undo claim, rollback, and undo). */
+  casActions(input: TriageActionSetInput): Promise<TriageItem | null>;
+}
+
+// ─── DOCUMENT-INTELLIGENCE TASK ACTIONS ──────────────────────────────────────
+
+/**
+ * Grouped with the triage action surface (rather than published as its own
+ * worker slot) because the OWL document action is registered atomically with
+ * triage action execution: the same triage action path completes, defers, and
+ * reopens an OWL action, and a backend either supports both or neither.
+ */
+export interface DocumentActionTaskSnapshot {
+  readonly id: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceId: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly status: string;
+  readonly statusReason: string | null;
+  readonly snoozedUntil: string | null;
+  readonly priority: string;
+  readonly dueDate: string | null;
+  readonly completedAt: string | null;
+  readonly metadata: unknown;
+}
+
+export interface DocumentActionTaskWrite {
+  readonly taskId: string;
+  /** Serialized metadata JSON produced by the caller. */
+  readonly metadata: string;
+  readonly updatedAt: string;
+  readonly lastSyncedAt: string;
+  readonly syncStatus: string;
+  readonly columns: Readonly<Record<string, string | null>>;
+  /** Identity the task must still have for the local write to apply. */
+  readonly expectedIdentity: {
+    readonly connectorType: string;
+    readonly connectorInstanceId: string;
+    readonly sourceId: string;
+  };
+}
+
+export interface DocumentActionTaskRepository {
+  getTask(taskId: string): Promise<DocumentActionTaskSnapshot | null>;
+  /**
+   * Re-reads the task inside one transaction, applies the write only when the
+   * task identity still matches, and reports the identity drift otherwise.
+   */
+  applyTaskWrite(input: DocumentActionTaskWrite): Promise<
+    | { readonly kind: 'applied'; readonly task: DocumentActionTaskSnapshot }
+    | { readonly kind: 'identity-changed' }
+  >;
+}
+
 export interface TriagePersistenceRepositories {
   readonly capture: TriageCaptureRepository;
   readonly syncState: TriageSyncStateRepository;
@@ -485,6 +638,8 @@ export interface TriagePersistenceRepositories {
   readonly health: TriageQueueHealthRepository;
   readonly maintenance: TriageMaintenanceRepository;
   readonly native: TriageNativePersistenceRepositories;
+  readonly actions: TriageActionRepository;
+  readonly documentTaskActions: DocumentActionTaskRepository;
 }
 
 export function assertValidTriageCaptureBatch(items: readonly TriageItem[]): void {

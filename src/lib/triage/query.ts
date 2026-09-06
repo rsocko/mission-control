@@ -1,14 +1,12 @@
 /**
- * Legacy action-path lookup. The portable queue list/filter surface lives in
- * `queue-query.ts`; this module deliberately retains the action routes' existing
- * SQLite ownership until their excluded AI and external-action dependencies are
- * migrated together.
+ * Action-path triage lookup. The portable queue list/filter surface lives in
+ * `queue-query.ts`; this module keeps the single-item read the action routes
+ * need, now served by the composed triage persistence repositories so the
+ * action routes no longer evaluate SQLite at import time.
  */
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import type { TriageItem } from '@/types';
-import { ensureSeedData, mapRow } from './shared';
+import { ensureSeedData } from './shared';
+import { getTriagePersistenceRepositories } from './persistence';
 
 export {
   isValidTriageSource,
@@ -20,6 +18,5 @@ export {
 
 export async function getTriageItemById(id: string): Promise<TriageItem | null> {
   await ensureSeedData();
-  const [row] = await db.select().from(triageItems).where(eq(triageItems.id, id));
-  return row ? mapRow(row) : null;
+  return getTriagePersistenceRepositories().items.get(id);
 }

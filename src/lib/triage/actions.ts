@@ -6,11 +6,11 @@
  * so only consumers that actually execute actions should import from here —
  * query-only or capture-only consumers should use `./query` / `./capture`
  * instead to avoid pulling this wiring into their bundle.
+ *
+ * Persistence is owned by the composed triage action repository; every remote
+ * call, semantic publication, and claim-recovery decision stays here.
  */
 import { randomUUID } from 'crypto';
-import db, { runTransaction } from '@/db';
-import { triageActionClaims, triageItems } from '@/db/schema';
-import { and, eq, sql } from 'drizzle-orm';
 import type { TriageActionRecord, TriageActionType, TriageItem, TriageStatus } from '@/types';
 import logger from '@/lib/logger';
 import { saveToKarakeep } from './actions/karakeep';
@@ -30,14 +30,19 @@ import {
   deferDocumentAction,
   reopenDocumentAction,
 } from './actions/document-intelligence';
-import { ensureSeedData, mapRow, safeJsonObject } from './shared';
-import { getTriageItemById } from './query';
+import { ensureSeedData, safeJsonObject } from './shared';
+import { getTriagePersistenceRepositories } from './persistence';
 
 const SNOOZE_DURATION_MS = 1000 * 60 * 60 * 24;
 const IDEMPOTENT_ACTIONS = new Set<TriageActionType>(['create_task_todo']);
 const CLAIM_SETTLE_ATTEMPTS = 40;
 const CLAIM_SETTLE_DELAY_MS = 25;
 const CLAIM_RECONCILIATION_GRACE_MS = 5 * 60 * 1000;
+const TASK_CREATION_ACTION_TYPE = 'create_task_todo';
+
+function actions() {
+  return getTriagePersistenceRepositories().actions;
+}
 
 export class TriageActionInProgressError extends Error {
   constructor(readonly triageItemId: string) {
@@ -58,43 +63,40 @@ export type TriageTaskClaim =
     };
 
 async function readTaskClaim(id: string) {
-  const [claim] = await db.select().from(triageActionClaims).where(and(
-    eq(triageActionClaims.triageItemId, id),
-    eq(triageActionClaims.actionType, 'create_task_todo'),
-  ));
-  return claim;
+  return actions().readClaim({
+    triageItemId: id,
+    actionType: TASK_CREATION_ACTION_TYPE,
+  });
 }
 
 export async function reserveTriageTaskCreation(id: string): Promise<TriageTaskClaim | null> {
   await ensureSeedData();
-  const [existing] = await db.select().from(triageItems).where(eq(triageItems.id, id));
-  if (!existing) return null;
+  const item = await actions().getActionSnapshot(id);
+  if (!item) return null;
 
-  const item = mapRow(existing);
-  const recorded = item.actionsTaken.find((action) => action.actionType === 'create_task_todo');
+  const recorded = item.actionsTaken.find(
+    (action) => action.actionType === TASK_CREATION_ACTION_TYPE,
+  );
   if (recorded) {
     return { kind: 'completed', item, record: recorded };
   }
 
   const claimId = randomUUID();
-  const claimed = await db.insert(triageActionClaims).values({
-    id: claimId,
+  const { acquired } = await actions().reserveClaim({
+    claimId,
     triageItemId: id,
-    actionType: 'create_task_todo',
-    state: 'pending',
+    actionType: TASK_CREATION_ACTION_TYPE,
     claimedAt: new Date().toISOString(),
-  }).onConflictDoNothing({
-    target: [triageActionClaims.triageItemId, triageActionClaims.actionType],
-  }).returning({ id: triageActionClaims.id }).get();
+  });
 
-  if (claimed) {
+  if (acquired) {
     return { kind: 'claimed', claimId, item };
   }
 
   for (let attempt = 0; attempt < CLAIM_SETTLE_ATTEMPTS; attempt++) {
     const claim = await readTaskClaim(id);
     if (claim?.state === 'completed') {
-      const current = await getTriageItemById(id);
+      const current = await actions().getActionSnapshot(id);
       if (!current) return null;
       return {
         kind: 'completed',
@@ -122,64 +124,41 @@ export async function completeTriageTaskCreation(
   claimId: string,
   record: TriageActionRecord,
 ): Promise<TriageItem> {
-  const completedAt = new Date().toISOString();
-  runTransaction((tx) => {
-    const completed = tx.update(triageActionClaims).set({
-      state: 'completed',
-      completedAt,
-      result: record,
-    }).where(and(
-      eq(triageActionClaims.id, claimId),
-      eq(triageActionClaims.state, 'pending'),
-    )).run();
-    if (completed.changes === 0) return;
-    tx.update(triageItems).set({
-      status: 'actioned',
-      snoozedUntil: null,
-      actionsTaken: sql`json_insert(${triageItems.actionsTaken}, '$[#]', json(${JSON.stringify(record)}))`,
-    }).where(eq(triageItems.id, id)).run();
+  const { item } = await actions().completeClaim({
+    claimId,
+    triageItemId: id,
+    record,
+    completedAt: new Date().toISOString(),
   });
 
-  const updated = await getTriageItemById(id);
-  if (!updated) throw new Error('Triage item disappeared while completing task creation');
+  if (!item) throw new Error('Triage item disappeared while completing task creation');
   await publishSemanticEntityUpsert('triage-item', id);
-  return updated;
+  return item;
 }
 
 async function heartbeatTriageTaskCreation(claimId: string): Promise<boolean> {
-  const heartbeat = await db.update(triageActionClaims).set({
+  return actions().heartbeatClaim({
+    claimId,
     claimedAt: new Date().toISOString(),
-  }).where(and(
-    eq(triageActionClaims.id, claimId),
-    eq(triageActionClaims.state, 'pending'),
-  )).returning({ id: triageActionClaims.id }).get();
-  return Boolean(heartbeat);
+  });
 }
 
 async function recordTriageTaskTarget(
   claimId: string,
   target: { listId: string; listName: string },
 ): Promise<boolean> {
-  const recorded = await db.update(triageActionClaims).set({
+  return actions().recordClaimTarget({
+    claimId,
     claimedAt: new Date().toISOString(),
-    result: target,
-  }).where(and(
-    eq(triageActionClaims.id, claimId),
-    eq(triageActionClaims.state, 'pending'),
-  )).returning({ id: triageActionClaims.id }).get();
-  return Boolean(recorded);
+    target,
+  });
 }
 
 export async function releaseTriageTaskCreation(
   claimId: string,
   expectedClaimedAt?: string,
 ): Promise<boolean> {
-  const released = await db.delete(triageActionClaims).where(and(
-    eq(triageActionClaims.id, claimId),
-    eq(triageActionClaims.state, 'pending'),
-    ...(expectedClaimedAt ? [eq(triageActionClaims.claimedAt, expectedClaimedAt)] : []),
-  )).returning({ id: triageActionClaims.id }).get();
-  return Boolean(released);
+  return actions().releaseClaim({ claimId, expectedClaimedAt });
 }
 
 export async function applyTriageAction(
@@ -195,10 +174,9 @@ export async function applyTriageAction(
 ) {
   await ensureSeedData();
 
-  const [existing] = await db.select().from(triageItems).where(eq(triageItems.id, id));
-  if (!existing) return null;
+  const item = await actions().getActionSnapshot(id);
+  if (!item) return null;
 
-  const item = mapRow(existing);
   if (item.actionsTaken.at(-1)?.metadata?.undoInProgress === true) {
     throw new TriageActionInProgressError(id);
   }
@@ -358,52 +336,50 @@ export async function applyTriageAction(
       ? new Date(Date.now() + SNOOZE_DURATION_MS).toISOString()
       : null;
 
-  const itemUpdate = {
-    status: nextStatus,
-    snoozedUntil,
-    actionsTaken: sql`json_insert(${triageItems.actionsTaken}, '$[#]', json(${JSON.stringify(record)}))`,
-  };
-
   if (actionClaimId) {
     return completeTriageTaskCreation(id, actionClaimId, record);
-  } else {
-    const actionVersionCondition = isUndoableTriageAction(actionType)
-      ? sql`${triageItems.actionsTaken} = ${JSON.stringify(existing.actionsTaken)}
-          AND ${triageItems.status} = ${existing.status}
-          AND ${triageItems.snoozedUntil} IS ${existing.snoozedUntil}`
-      : undefined;
-    const updated = await db.update(triageItems)
-      .set(itemUpdate)
-      .where(and(eq(triageItems.id, id), actionVersionCondition))
-      .returning()
-      .get();
-    if (!updated && actionVersionCondition) {
-      if (concurrencyAttempt >= 3) {
-        throw new TriageActionInProgressError(id);
-      }
-      return applyTriageAction(
-        id,
-        actionType,
-        note,
-        overrides,
-        todoOptions,
-        modelCatalogOptions,
-        knowledgeBaseOptions,
-        options,
-        concurrencyAttempt + 1,
-      );
-    }
-    if (!updated) return null;
-
-    if (actionType === 'complete_action' && item.sourcePlatform === 'document-intelligence' && !skip) {
-      const result = await completeDocumentAction(item);
-      if (!result.success) {
-        logger.warn({ triageItemId: id, err: result.error }, 'DI complete_action write-back failed (action recorded locally)');
-      }
-    }
-    await publishSemanticEntityUpsert('triage-item', id);
-    return mapRow(updated);
   }
+
+  const fence = isUndoableTriageAction(actionType)
+    ? {
+        actionsTaken: item.actionsTaken,
+        status: item.status,
+        snoozedUntil: item.snoozedUntil ?? null,
+      }
+    : null;
+  const updated = await actions().appendAction({
+    triageItemId: id,
+    status: nextStatus,
+    snoozedUntil,
+    record,
+    fence,
+  });
+  if (!updated && fence) {
+    if (concurrencyAttempt >= 3) {
+      throw new TriageActionInProgressError(id);
+    }
+    return applyTriageAction(
+      id,
+      actionType,
+      note,
+      overrides,
+      todoOptions,
+      modelCatalogOptions,
+      knowledgeBaseOptions,
+      options,
+      concurrencyAttempt + 1,
+    );
+  }
+  if (!updated) return null;
+
+  if (actionType === 'complete_action' && item.sourcePlatform === 'document-intelligence' && !skip) {
+    const result = await completeDocumentAction(item);
+    if (!result.success) {
+      logger.warn({ triageItemId: id, err: result.error }, 'DI complete_action write-back failed (action recorded locally)');
+    }
+  }
+  await publishSemanticEntityUpsert('triage-item', id);
+  return updated;
 }
 
 export async function undoTriageAction(
@@ -414,10 +390,9 @@ export async function undoTriageAction(
   if (!isUndoableTriageAction(actionType)) return null;
   await ensureSeedData();
 
-  const [existing] = await db.select().from(triageItems).where(eq(triageItems.id, id));
-  if (!existing) return null;
+  const item = await actions().getActionSnapshot(id);
+  if (!item) return null;
 
-  const item = mapRow(existing);
   const latestAction = item.actionsTaken.at(-1);
   if (
     latestAction?.id !== actionId
@@ -448,7 +423,7 @@ export async function undoTriageAction(
     metadata: originalMetadata,
   };
   const originalActions = [...item.actionsTaken.slice(0, -1), originalAction];
-  let expectedActions = item.actionsTaken;
+  let expectedActions: TriageActionRecord[] = item.actionsTaken;
   if (actionType === 'complete_action' && item.sourcePlatform === 'document-intelligence') {
     const claimedAction: TriageActionRecord = {
       ...originalAction,
@@ -460,46 +435,37 @@ export async function undoTriageAction(
       },
     };
     const claimedActions = [...originalActions.slice(0, -1), claimedAction];
-    const claim = await db.update(triageItems)
-      .set({ actionsTaken: claimedActions })
-      .where(and(
-        eq(triageItems.id, id),
-        sql`${triageItems.actionsTaken} = ${JSON.stringify(expectedActions)}`,
-      ))
-      .returning({ id: triageItems.id })
-      .get();
+    const claim = await actions().casActions({
+      triageItemId: id,
+      actions: claimedActions,
+      expectedActions,
+    });
     if (!claim) return null;
     expectedActions = claimedActions;
 
     try {
       await reopenDocumentAction(item);
     } catch (error) {
-      await db.update(triageItems)
-        .set({ actionsTaken: originalActions })
-        .where(and(
-          eq(triageItems.id, id),
-          sql`${triageItems.actionsTaken} = ${JSON.stringify(expectedActions)}`,
-        ));
+      await actions().casActions({
+        triageItemId: id,
+        actions: originalActions,
+        expectedActions,
+      });
       throw error;
     }
   }
 
-  const updated = await db.update(triageItems)
-    .set({
-      status: previousStatus,
-      snoozedUntil: previousSnoozedUntil,
-      actionsTaken: item.actionsTaken.slice(0, -1),
-    })
-    .where(and(
-      eq(triageItems.id, id),
-      sql`${triageItems.actionsTaken} = ${JSON.stringify(expectedActions)}`,
-    ))
-    .returning()
-    .get();
+  const updated = await actions().casActions({
+    triageItemId: id,
+    actions: item.actionsTaken.slice(0, -1),
+    expectedActions,
+    status: previousStatus,
+    snoozedUntil: previousSnoozedUntil ?? null,
+  });
 
   if (!updated) return null;
   await publishSemanticEntityUpsert('triage-item', id);
-  return mapRow(updated);
+  return updated;
 }
 
 export function isUndoableTriageAction(actionType: string): actionType is TriageActionType {

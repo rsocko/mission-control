@@ -19,6 +19,9 @@ import type { RoutinesRepository } from './routines';
 import type { WebhookIntegrationsPersistence } from './webhook-integrations';
 import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
 import type { GraphReportingPersistence } from './graph-reporting';
+import type {
+  ScoutIngestionReconciliationPersistence,
+} from './scout-ingestion-reconciliation';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -108,6 +111,25 @@ export interface WorkerPersistenceRepositories {
   webhookIntegrations: WebhookIntegrationsPersistence;
   /** Backend-neutral graph, project dependency, portfolio, and burn-report persistence. */
   graphReporting?: GraphReportingPersistence;
+  /**
+   * Scout push ingestion, the Scout parallel-comparison projection, and Scout
+   * reconciliation runs/suggestions. Published as its own top-level slot
+   * because these tables share no rows and no serialization namespace with any
+   * other worker surface, and grouped into one slot because a backend either
+   * supports the whole Scout ingestion/reconciliation contract or none of it.
+   */
+  scoutIngestionReconciliation?: ScoutIngestionReconciliationPersistence;
+}
+
+export function requireScoutIngestionReconciliationPersistence(
+  repositories: WorkerPersistenceRepositories,
+): ScoutIngestionReconciliationPersistence {
+  if (!repositories.scoutIngestionReconciliation) {
+    throw new Error(
+      'Scout ingestion and reconciliation persistence is not available in the selected backend',
+    );
+  }
+  return repositories.scoutIngestionReconciliation;
 }
 
 export function requireGraphReportingPersistence(

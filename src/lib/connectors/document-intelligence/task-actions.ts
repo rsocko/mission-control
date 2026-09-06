@@ -1,11 +1,9 @@
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem } from '@/types';
 import { connectorRegistry } from '@/lib/connectors';
 import { syncScheduler } from '@/lib/sync';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 import type { DocActionFeedback } from './document-client';
 import type { DocSourceAction } from './document-parser';
 
@@ -199,7 +197,8 @@ async function performOwlTaskActionNow(
   taskId: string,
   input: OwlTaskActionInput,
 ): Promise<OwlTaskActionResult> {
-  const task = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1).then((rows) => rows[0]);
+  const documentTaskActions = getTriagePersistenceRepositories().documentTaskActions;
+  const task = await documentTaskActions.getTask(taskId);
   if (!task) {
     throw new OwlTaskActionError('Task not found', 'NOT_FOUND', 404);
   }
@@ -260,8 +259,7 @@ async function performOwlTaskActionNow(
   }
 
   const now = new Date().toISOString();
-  const latestTask = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1)
-    .then((rows) => rows[0]);
+  const latestTask = await documentTaskActions.getTask(taskId);
   if (
     !latestTask
     || latestTask.connectorType !== 'document-intelligence'
@@ -317,52 +315,37 @@ async function performOwlTaskActionNow(
       ? input.value
       : latestTask.priority);
 
-  const updates: Partial<typeof tasks.$inferInsert> = {
-    metadata,
-    updatedAt: now,
-    lastSyncedAt: now,
-    syncStatus: 'synced',
-  };
+  const columns: Record<string, string | null> = {};
   if (refreshedTask) {
-    Object.assign(updates, {
-      title: refreshedTask.title,
-      description: refreshedTask.description ?? null,
-      dueDate: refreshedTask.dueDate ?? null,
-      priority,
-    });
+    columns.title = refreshedTask.title;
+    columns.description = refreshedTask.description ?? null;
+    columns.due_date = refreshedTask.dueDate ?? null;
+    columns.priority = priority;
   }
   if (input.action === 'source_action') {
-    Object.assign(updates, {
-      status,
-      statusReason,
-      snoozedUntil,
-      completedAt: status === 'done' || status === 'cancelled'
-        ? refreshedTask?.completedAt || now
-        : null,
-    });
+    columns.status = status;
+    columns.status_reason = statusReason;
+    columns.snoozed_until = snoozedUntil;
+    columns.completed_at = status === 'done' || status === 'cancelled'
+      ? refreshedTask?.completedAt || now
+      : null;
   } else if (input.action === 'complete') {
-    Object.assign(updates, {
-      status,
-      statusReason,
-      snoozedUntil,
-      completedAt: now,
-    });
+    columns.status = status;
+    columns.status_reason = statusReason;
+    columns.snoozed_until = snoozedUntil;
+    columns.completed_at = now;
   } else if (input.action === 'snooze') {
-    Object.assign(updates, {
-      status,
-      statusReason,
-      snoozedUntil,
-      completedAt: null,
-    });
+    columns.status = status;
+    columns.status_reason = statusReason;
+    columns.snoozed_until = snoozedUntil;
+    columns.completed_at = null;
   } else if (input.action === 'not_an_action') {
-    Object.assign(updates, {
-      status,
-      statusReason,
-      snoozedUntil,
-      completedAt: now,
-    });
+    columns.status = status;
+    columns.status_reason = statusReason;
+    columns.snoozed_until = snoozedUntil;
+    columns.completed_at = now;
   } else if (input.field === 'urgency') {
-    updates.priority = priority;
+    columns.priority = priority;
   }
 
   function findSourceAction(
@@ -391,7 +374,26 @@ async function performOwlTaskActionNow(
       : null;
   }
 
-  await db.update(tasks).set(updates).where(eq(tasks.id, taskId));
+  const applied = await documentTaskActions.applyTaskWrite({
+    taskId,
+    metadata: JSON.stringify(metadata),
+    updatedAt: now,
+    lastSyncedAt: now,
+    syncStatus: 'synced',
+    columns,
+    expectedIdentity: {
+      connectorType: task.connectorType,
+      connectorInstanceId: task.connectorInstanceId,
+      sourceId: task.sourceId,
+    },
+  });
+  if (applied.kind === 'identity-changed') {
+    throw new OwlTaskActionError(
+      'Task changed while the OWL action was being applied; refresh to reconcile the source result',
+      'TASK_CHANGED',
+      409,
+    );
+  }
 
   return {
     status,

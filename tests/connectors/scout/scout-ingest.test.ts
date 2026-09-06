@@ -8,118 +8,53 @@
  * - Scout provenance metadata in task JSON
  * - Validation (bad items, missing fields)
  * - Edge cases (closed tasks not updated, tag resolution)
+ *
+ * The route now owns no SQLite: `@/db` and `@/db/schema` are poisoned here so
+ * the suite fails loudly if the handler ever reaches back into them, and every
+ * write is observed through the backend-neutral ingestion port.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { TaskFieldStateRecord } from '@/lib/tasks/field-state';
+import {
+  FakeScoutIngestion,
+  type FakeTask,
+} from '../../contracts/scout-ingestion-reconciliation-persistence.contract';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-let mockTasksStore: Record<string, unknown>[] = [];
-let mockSourceListsStore: Record<string, unknown>[] = [];
-let mockFieldStates: Record<string, unknown>[] = [];
-let mockSuppressions: Record<string, unknown>[] = [];
-let mockLinkedSources: Record<string, unknown>[] = [];
-let mockTransactionTask: Record<string, unknown> | null = null;
-let mockTransactionTaskOverride: Record<string, unknown> | null = null;
-let mockConflictWinnerId: string | null = null;
-let taskInsertChanges = 1;
+vi.mock('@/db', () => {
+  throw new Error('SQLite database module must not be evaluated');
+});
+vi.mock('@/db/schema', () => {
+  throw new Error('SQLite schema module must not be evaluated');
+});
 
-const onConflictDoUpdateFn = vi.fn(() => ({ run: vi.fn() }));
-const insertValuesFn = vi.fn((_values: unknown) => ({
-  run: vi.fn(),
-  onConflictDoNothing: vi.fn(() => ({
-    run: vi.fn(() => ({ changes: taskInsertChanges })),
-  })),
-  onConflictDoUpdate: onConflictDoUpdateFn,
-}));
-const mockInsert = vi.fn(() => ({ values: insertValuesFn }));
-const updateSetFn = vi.fn((_values: unknown) => ({ where: vi.fn(() => ({ run: vi.fn() })) }));
-const mockUpdate = vi.fn(() => ({ set: updateSetFn }));
-
-function mockSelectChain(results: unknown[]) {
-  const candidate = results[0];
-  if (
-    typeof candidate === 'object'
-    && candidate !== null
-    && 'title' in candidate
-    && 'status' in candidate
-    && 'metadata' in candidate
-  ) {
-    mockTransactionTask = candidate as Record<string, unknown>;
-  }
-  const whereResult = Object.assign(results, {
-    all: vi.fn(() => results),
-    get: vi.fn(() => results[0]),
-  });
-  return {
-    from: vi.fn(() => ({
-      where: vi.fn(() => whereResult),
-      all: vi.fn(() => results),
-    })),
-  };
-}
-
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => mockSelectChain([])),
-    insert: mockInsert,
-    update: mockUpdate,
-  },
-  runTransaction: vi.fn((fn: (tx: unknown) => unknown) => fn({
-    select: vi.fn((selection?: Record<string, unknown>) => {
-      const rows = selection?.sourceId === 'suppression_source_id'
-        ? mockSuppressions
-        : selection?.taskId === 'task_id'
-          ? mockLinkedSources
-          : selection?.id === 'id' && Object.keys(selection).length === 1
-            ? mockConflictWinnerId ? [{ id: mockConflictWinnerId }] : []
-            : selection?.status
-              ? mockTransactionTaskOverride
-                ? [mockTransactionTaskOverride]
-                : mockTransactionTask
-                  ? [mockTransactionTask]
-                  : []
-              : mockFieldStates;
-      return mockSelectChain(rows);
-    }),
-    insert: mockInsert,
-    update: mockUpdate,
-  })),
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: { id: 'id', sourceId: 'source_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', title: 'title', description: 'description', status: 'status', priority: 'priority', dueDate: 'due_date', sourceListId: 'source_list_id', sourceListName: 'source_list_name', metadata: 'metadata', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', createdAt: 'created_at', updatedAt: 'updated_at', depth: 'depth', isChecklistItem: 'is_checklist_item', snoozedUntil: 'snoozed_until' },
-  tags: { id: 'id', name: 'name', slug: 'slug', type: 'type', source: 'source', color: 'color', confirmed: 'confirmed', createdAt: 'created_at' },
-  taskTags: { taskId: 'task_id', tagId: 'tag_id' },
-  taskProjects: { taskId: 'task_id', projectId: 'project_id' },
-  taskFieldStates: { taskId: 'task_id', fieldName: 'field_name' },
-  taskIngestSuppressions: { connectorInstanceId: 'suppression_connector_instance_id', sourceId: 'suppression_source_id' },
-  sourceLists: { id: 'id', connectorInstanceId: 'connector_instance_id', sourceId: 'source_id', name: 'name', type: 'type', taskCount: 'task_count', lastSyncedAt: 'last_synced_at', sortOrder: 'sort_order', hidden: 'hidden' },
-  taskLinkedSources: { id: 'id', taskId: 'task_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', sourceId: 'source_id', title: 'title', linkedAt: 'linked_at', matchConfidence: 'match_confidence', metadata: 'metadata' },
-  connectorConfigs: { id: 'id', enabled: 'enabled', settings: 'settings' },
-  triageItems: { id: 'id', sourcePlatform: 'source_platform', sourceId: 'source_id', status: 'status' },
-  hubProjects: { id: 'id' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((...args: unknown[]) => ({ op: 'eq', args })),
-  and: vi.fn((...args: unknown[]) => ({ op: 'and', args })),
-  ne: vi.fn((...args: unknown[]) => ({ op: 'ne', args })),
-  inArray: vi.fn((...args: unknown[]) => ({ op: 'inArray', args })),
-  notInArray: vi.fn((...args: unknown[]) => ({ op: 'notInArray', args })),
-}));
+const mockFindFuzzyMatches = vi.hoisted(() => vi.fn(() => []));
 
 vi.mock('@/lib/dedup', () => ({
-  findFuzzyMatches: vi.fn(() => []),
+  findFuzzyMatches: mockFindFuzzyMatches,
   isAutoLinkMatch: vi.fn(() => false),
 }));
 
 vi.mock('@/lib/events', () => ({
-  emitEvent: vi.fn(),
+  emitEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock('@/lib/semantic-index/publication', () => ({
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/lib/logger', () => ({
   default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+const workerRepositories = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => workerRepositories.current,
 }));
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────
@@ -168,17 +103,35 @@ function expectedMetadata(item = validItem()) {
   });
 }
 
-function directConnectorConfig(overrides: Record<string, unknown> = {}) {
+function existingTask(overrides: Partial<FakeTask> = {}): FakeTask {
   return {
-    id: 'scout-primary',
-    enabled: true,
-    settings: {
-      landingMode: 'direct',
-      allowedSourceTypes: ['email', 'teams', 'meeting', 'planner', 'cross-source'],
-      hybridConfidenceThreshold: 0.8,
-      autoProjectId: null,
-      ...overrides,
-    },
+    id: 'tsk-existing',
+    sourceId: 'scout:email:msg-123',
+    connectorType: 'scout',
+    title: 'Reply to Johnson about project timeline',
+    description: 'Johnson asked about Q3 delivery dates in yesterday\'s email',
+    priority: 'medium',
+    dueDate: null,
+    metadata: expectedMetadata(),
+    status: 'todo',
+    snoozedUntil: null,
+    ...overrides,
+  };
+}
+
+function fieldState(
+  fieldName: string,
+  value: unknown,
+  locallyOverridden = false,
+): TaskFieldStateRecord {
+  return {
+    taskId: 'tsk-existing',
+    fieldName,
+    sourceValue: JSON.stringify(value),
+    locallyOverridden,
+    sourceObservedAt: '2026-08-01T00:00:00.000Z',
+    localEditedAt: locallyOverridden ? '2026-08-02T00:00:00.000Z' : null,
+    updatedAt: '2026-08-02T00:00:00.000Z',
   };
 }
 
@@ -186,29 +139,14 @@ function directConnectorConfig(overrides: Record<string, unknown> = {}) {
 
 describe('POST /api/scout/ingest', () => {
   let POST: (request: Request) => Promise<Response>;
-  let db: { select: ReturnType<typeof vi.fn> };
+  let ingestion: FakeScoutIngestion;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mockTasksStore = [];
-    mockSourceListsStore = [];
-    mockFieldStates = [];
-    mockSuppressions = [];
-    mockLinkedSources = [];
-    mockTransactionTask = null;
-    mockTransactionTaskOverride = null;
-    mockConflictWinnerId = null;
-    taskInsertChanges = 1;
-
-    // Re-setup the db mock so select returns correct data
-    const dbMod = await import('@/db');
-    db = dbMod.default as unknown as { select: ReturnType<typeof vi.fn> };
-
-    let selectCall = 0;
-    db.select.mockImplementation(() => {
-      selectCall++;
-      return mockSelectChain(selectCall === 1 ? [directConnectorConfig()] : []);
-    });
+    ingestion = new FakeScoutIngestion();
+    workerRepositories.current = {
+      scoutIngestionReconciliation: { ingestion },
+    };
 
     const mod = await import('@/app/api/scout/ingest/route');
     POST = mod.POST;
@@ -246,13 +184,13 @@ describe('POST /api/scout/ingest', () => {
       }
     });
 
-    it('accepts requests with valid Bearer token', async () => {
+    it('accepts requests with a valid bearer token', async () => {
       const originalKey = process.env.MC_API_KEY;
       process.env.MC_API_KEY = 'test-secret-key';
       try {
         const req = new Request('http://localhost:3099/api/scout/ingest', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer test-secret-key' },
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${'test-secret-key'}` },
           body: JSON.stringify({ items: [validItem()] }),
         });
         const res = await POST(req);
@@ -328,6 +266,25 @@ describe('POST /api/scout/ingest', () => {
       const json = await res.json();
       expect(json.error).toContain('suggestedTags');
     });
+
+    it('validates the whole request before writing anything', async () => {
+      const res = await POST(makeRequest({
+        items: [validItem(), validItem({ sourceId: 'scout:email:bad', title: '' })],
+      }));
+
+      expect(res.status).toBe(400);
+      expect(ingestion.creations).toEqual([]);
+      expect(ingestion.triageWrites).toEqual([]);
+    });
+
+    it('rejects the batch when the connector is disabled', async () => {
+      ingestion.connector = { ...ingestion.connector, enabled: false };
+
+      const res = await POST(makeRequest({ items: [validItem()] }));
+
+      expect(res.status).toBe(403);
+      expect(ingestion.creations).toEqual([]);
+    });
   });
 
   describe('task creation', () => {
@@ -364,44 +321,38 @@ describe('POST /api/scout/ingest', () => {
       expect(json.total).toBe(3);
     });
 
-    it('calls insert with scout connectorType and provenance metadata', async () => {
+    it('writes the task with scout connector identity, tags, and provenance metadata', async () => {
       await POST(makeRequest({ items: [validItem()] }));
 
-      // Verify db.insert was called (for source list + task + tags)
-      expect(mockInsert).toHaveBeenCalled();
-
-      // Verify the values function was called with task data
-      expect(insertValuesFn).toHaveBeenCalled();
+      expect(ingestion.creations).toHaveLength(1);
+      const creation = ingestion.creations[0];
+      expect(creation).toMatchObject({
+        connectorType: 'scout',
+        connectorInstanceId: 'scout-primary',
+        sourceId: 'scout:email:msg-123',
+        sourceListId: 'scout:email-actions',
+        sourceListName: 'Email Actions',
+        status: 'todo',
+      });
+      expect(creation.tags.map((tag) => tag.id)).toEqual(['tag-work', 'tag-urgent-reply']);
+      expect(JSON.parse(creation.metadata)).toMatchObject({
+        sourceType: 'email',
+        scoutContext: expect.objectContaining({ confidence: 0.85 }),
+      });
     });
 
     it('records initial source snapshots without local overrides', async () => {
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
 
-      const snapshotInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const values = call[0];
-        return Array.isArray(values)
-          && values.length === 4
-          && values.every((value) => (
-            typeof value === 'object'
-            && value !== null
-            && 'sourceValue' in value
-          ));
-      });
-      expect(snapshotInsert?.[0]).toEqual(expect.arrayContaining([
+      expect(ingestion.creations[0].fieldStates).toEqual(expect.arrayContaining([
         expect.objectContaining({
           fieldName: 'title',
           sourceValue: '"Reply to Johnson about project timeline"',
           locallyOverridden: false,
         }),
-        expect.objectContaining({
-          fieldName: 'description',
-          locallyOverridden: false,
-        }),
-        expect.objectContaining({
-          fieldName: 'priority',
-          locallyOverridden: false,
-        }),
+        expect.objectContaining({ fieldName: 'description', locallyOverridden: false }),
+        expect.objectContaining({ fieldName: 'priority', locallyOverridden: false }),
         expect.objectContaining({
           fieldName: 'dueDate',
           sourceValue: 'null',
@@ -411,37 +362,20 @@ describe('POST /api/scout/ingest', () => {
     });
 
     it('requeues a concurrent first-ingest loser through normal merge semantics', async () => {
-      taskInsertChanges = 0;
-      mockConflictWinnerId = 'tsk-concurrent-winner';
-      let selectCall = 0;
-      db.select.mockImplementation(() => {
-        selectCall++;
-        if (selectCall === 1) return mockSelectChain([directConnectorConfig()]);
-        if (selectCall === 6) {
-          return mockSelectChain([{
-            id: 'tsk-concurrent-winner',
-            title: 'Earlier concurrent observation',
-            description: null,
-            priority: 'none',
-            dueDate: null,
-            metadata: '{}',
-            status: 'todo',
-            snoozedUntil: null,
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.conflictWinnerId = 'tsk-concurrent-winner';
+      ingestion.tasks.set('tsk-concurrent-winner', existingTask({
+        id: 'tsk-concurrent-winner',
+        title: 'Earlier concurrent observation',
+        description: null,
+        priority: 'none',
+        metadata: '{}',
+      }));
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       const json = await res.json();
 
       expect(res.status).toBe(200);
-      expect(json).toMatchObject({
-        created: 0,
-        updated: 1,
-        skipped: 0,
-        total: 1,
-      });
+      expect(json).toMatchObject({ created: 0, updated: 1, skipped: 0, total: 1 });
       expect(json.items).toEqual([expect.objectContaining({
         mcTaskId: 'tsk-concurrent-winner',
         action: 'updated',
@@ -466,16 +400,7 @@ describe('POST /api/scout/ingest', () => {
       const json = await res.json();
       expect(json.created).toBe(1);
 
-      // Verify the metadata passed to insert contains the scoutContext fields
-      const insertCalls = insertValuesFn.mock.calls;
-      const taskInsert = insertCalls.find((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown>;
-        return val.connectorType === 'scout' && val.sourceId === 'scout:email:wire-format-test';
-      });
-      expect(taskInsert).toBeTruthy();
-      const metadata = JSON.parse(
-        (taskInsert![0] as Record<string, unknown>).metadata as string,
-      );
+      const metadata = JSON.parse(ingestion.creations[0].metadata);
       expect(metadata.scoutContext.confidence).toBe(0.91);
       expect(metadata.scoutContext.reasoning).toBe('Test reasoning value');
       expect(metadata.scoutContext.originalSource).toEqual({ type: 'email', from: 'test@example.com' });
@@ -484,39 +409,13 @@ describe('POST /api/scout/ingest', () => {
 
   describe('deduplication', () => {
     it('skips unchanged existing task', async () => {
-      mockFieldStates = [
-        ['title', 'Reply to Johnson about project timeline'],
-        ['description', 'Johnson asked about Q3 delivery dates in yesterday\'s email'],
-        ['priority', 'medium'],
-        ['dueDate', null],
-      ].map(([fieldName, value]) => ({
-        taskId: 'tsk-existing',
-        fieldName,
-        sourceValue: JSON.stringify(value),
-        locallyOverridden: false,
-        sourceObservedAt: '2026-08-01T00:00:00.000Z',
-        localEditedAt: null,
-        updatedAt: '2026-08-01T00:00:00.000Z',
-      }));
-      // Mock: first select (source list check) returns nothing, second (task check) returns existing
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        // The findExistingTask call returns an existing task
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: 'Reply to Johnson about project timeline',
-            description: 'Johnson asked about Q3 delivery dates in yesterday\'s email',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-existing', existingTask());
+      ingestion.fieldStates.set('tsk-existing', [
+        fieldState('title', 'Reply to Johnson about project timeline'),
+        fieldState('description', 'Johnson asked about Q3 delivery dates in yesterday\'s email'),
+        fieldState('priority', 'medium'),
+        fieldState('dueDate', null),
+      ]);
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
@@ -529,23 +428,12 @@ describe('POST /api/scout/ingest', () => {
     });
 
     it('updates existing task when content changed', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: 'Old title that differs',
-            description: 'Old description',
-            priority: 'low',
-            dueDate: null,
-            metadata: '{}',
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-existing', existingTask({
+        title: 'Old title that differs',
+        description: 'Old description',
+        priority: 'low',
+        metadata: '{}',
+      }));
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
@@ -554,105 +442,44 @@ describe('POST /api/scout/ingest', () => {
       expect(json.updated).toBe(1);
       expect(json.items[0].action).toBe('updated');
       expect(json.items[0].mcTaskId).toBe('tsk-existing');
-      expect(json.items[0].appliedFields).toEqual([
-        'title',
-        'description',
-        'priority',
-      ]);
+      expect(json.items[0].appliedFields).toEqual(['title', 'description', 'priority']);
       expect(json.items[0].unchangedFields).toContain('dueDate');
-      expect(mockUpdate).toHaveBeenCalled();
-      expect(updateSetFn.mock.calls.every((call) =>
-        !(call[0] && typeof call[0] === 'object' && 'localDisposition' in call[0]),
-      )).toBe(true);
+      expect(ingestion.mergeWrites[0].taskWrite).toMatchObject({
+        rendered: {
+          title: 'Reply to Johnson about project timeline',
+          priority: 'medium',
+        },
+      });
     });
 
     it('advances source snapshots without overwriting local overrides', async () => {
-      mockTransactionTask = {
+      ingestion.tasks.set('tsk-existing', existingTask({
         title: 'Local title',
         description: null,
         priority: 'none',
-        dueDate: null,
-      };
-      mockFieldStates = [{
-        taskId: 'tsk-existing',
-        fieldName: 'title',
-        sourceValue: '"Old source title"',
-        locallyOverridden: true,
-        sourceObservedAt: '2026-08-01T00:00:00.000Z',
-        localEditedAt: '2026-08-02T00:00:00.000Z',
-        updatedAt: '2026-08-02T00:00:00.000Z',
-      }];
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: 'Local title',
-            description: null,
-            priority: 'none',
-            dueDate: null,
-            metadata: '{}',
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+        metadata: '{}',
+      }));
+      ingestion.fieldStates.set('tsk-existing', [
+        fieldState('title', 'Old source title', true),
+      ]);
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
-      const taskUpdate = updateSetFn.mock.calls.find((call) => (
-        (call[0] as Record<string, unknown>).lastSyncedAt !== undefined
-      ));
-      expect(taskUpdate?.[0]).not.toHaveProperty('title');
-      expect(insertValuesFn).toHaveBeenCalledWith(expect.objectContaining({
-        taskId: 'tsk-existing',
-        fieldName: 'title',
-        sourceValue: '"Reply to Johnson about project timeline"',
-        locallyOverridden: true,
-      }));
+      expect(ingestion.mergeWrites[0].taskWrite?.rendered).not.toHaveProperty('title');
+      expect(ingestion.mergeWrites[0].observations).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          fieldName: 'title',
+          sourceValue: '"Reply to Johnson about project timeline"',
+          locallyOverridden: true,
+        }),
+      ]));
     });
 
     it('preserves a local edit committed after the initial deduplication read', async () => {
       const item = validItem();
-      mockFieldStates = [{
-        taskId: 'tsk-existing',
-        fieldName: 'title',
-        sourceValue: JSON.stringify(item.title),
-        locallyOverridden: true,
-        sourceObservedAt: '2026-08-01T00:00:00.000Z',
-        localEditedAt: '2026-08-02T00:00:00.000Z',
-        updatedAt: '2026-08-02T00:00:00.000Z',
-      }];
-      mockTransactionTaskOverride = {
-        id: 'tsk-existing',
-        title: 'Concurrent local title',
-        description: item.description,
-        priority: item.priority,
-        dueDate: null,
-        metadata: expectedMetadata(item),
-        status: 'todo',
-        snoozedUntil: null,
-      };
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: item.title,
-            description: item.description,
-            priority: item.priority,
-            dueDate: null,
-            metadata: expectedMetadata(item),
-            status: 'todo',
-            snoozedUntil: null,
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-existing', existingTask());
+      ingestion.fieldStates.set('tsk-existing', [fieldState('title', item.title, true)]);
+      ingestion.mergeSnapshotOverride = existingTask({ title: 'Concurrent local title' });
 
       const res = await POST(makeRequest({ items: [item] }));
       expect(res.status).toBe(200);
@@ -664,88 +491,47 @@ describe('POST /api/scout/ingest', () => {
 
     it('clears an override when the source converges without changing the rendered task', async () => {
       const item = validItem({ priority: 'high' });
-      mockFieldStates = [{
-        taskId: 'tsk-existing',
-        fieldName: 'priority',
-        sourceValue: '"none"',
-        locallyOverridden: true,
-        sourceObservedAt: '2026-08-01T00:00:00.000Z',
-        localEditedAt: '2026-08-02T00:00:00.000Z',
-        updatedAt: '2026-08-02T00:00:00.000Z',
-      }];
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: item.title,
-            description: item.description,
-            priority: 'high',
-            dueDate: null,
-            metadata: expectedMetadata(item),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-existing', existingTask({
+        priority: 'high',
+        metadata: expectedMetadata(item),
+      }));
+      ingestion.fieldStates.set('tsk-existing', [fieldState('priority', 'none', true)]);
 
       const res = await POST(makeRequest({ items: [item] }));
       expect(res.status).toBe(200);
       expect((await res.json()).updated).toBe(1);
-      expect(insertValuesFn).toHaveBeenCalledWith(expect.objectContaining({
-        taskId: 'tsk-existing',
-        fieldName: 'priority',
-        sourceValue: '"high"',
-        locallyOverridden: false,
-      }));
+      expect(ingestion.mergeWrites[0].observations).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          fieldName: 'priority',
+          sourceValue: '"high"',
+          locallyOverridden: false,
+        }),
+      ]));
     });
 
     it('preserves overrides independently across all mergeable fields', async () => {
-      mockFieldStates = [
-        ['title', 'Old source title'],
-        ['description', 'Old source description'],
-        ['priority', 'low'],
-        ['dueDate', '2026-08-01'],
-      ].map(([fieldName, value]) => ({
-        taskId: 'tsk-existing',
-        fieldName,
-        sourceValue: JSON.stringify(value),
-        locallyOverridden: true,
-        sourceObservedAt: '2026-08-01T00:00:00.000Z',
-        localEditedAt: '2026-08-02T00:00:00.000Z',
-        updatedAt: '2026-08-02T00:00:00.000Z',
+      ingestion.tasks.set('tsk-existing', existingTask({
+        title: 'Local title',
+        description: 'Local description',
+        priority: 'critical',
+        dueDate: '2026-09-01',
+        metadata: JSON.stringify({ missionControl: { pinned: true } }),
       }));
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: 'Local title',
-            description: 'Local description',
-            priority: 'critical',
-            dueDate: '2026-09-01',
-            metadata: JSON.stringify({ missionControl: { pinned: true } }),
-            status: 'todo',
-            snoozedUntil: null,
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.fieldStates.set('tsk-existing', [
+        fieldState('title', 'Old source title', true),
+        fieldState('description', 'Old source description', true),
+        fieldState('priority', 'low', true),
+        fieldState('dueDate', '2026-08-01', true),
+      ]);
 
       const res = await POST(makeRequest({ items: [validItem({ dueDate: '2026-08-15' })] }));
       const json = await res.json();
-      const taskUpdate = updateSetFn.mock.calls.find((call) => (
-        (call[0] as Record<string, unknown>).lastSyncedAt !== undefined
-      ));
 
-      expect(taskUpdate?.[0]).not.toHaveProperty('title');
-      expect(taskUpdate?.[0]).not.toHaveProperty('description');
-      expect(taskUpdate?.[0]).not.toHaveProperty('priority');
-      expect(taskUpdate?.[0]).not.toHaveProperty('dueDate');
+      const rendered = ingestion.mergeWrites[0].taskWrite?.rendered ?? {};
+      expect(rendered).not.toHaveProperty('title');
+      expect(rendered).not.toHaveProperty('description');
+      expect(rendered).not.toHaveProperty('priority');
+      expect(rendered).not.toHaveProperty('dueDate');
       expect(json.items[0]).toMatchObject({
         action: 'updated',
         appliedFields: [],
@@ -755,104 +541,44 @@ describe('POST /api/scout/ingest', () => {
     });
 
     it('clears an override when Scout converges on the local value', async () => {
-      mockTransactionTask = {
-        title: 'Reply to Johnson about project timeline',
-        description: 'Johnson asked about Q3 delivery dates in yesterday\'s email',
+      ingestion.tasks.set('tsk-existing', existingTask({
         priority: 'high',
-        dueDate: null,
-      };
-      mockFieldStates = [
-        {
-          taskId: 'tsk-existing',
-          fieldName: 'priority',
-          sourceValue: '"medium"',
-          locallyOverridden: true,
-          sourceObservedAt: '2026-08-01T00:00:00.000Z',
-          localEditedAt: '2026-08-02T00:00:00.000Z',
-          updatedAt: '2026-08-02T00:00:00.000Z',
-        },
-        ...[
-          ['title', 'Reply to Johnson about project timeline'],
-          ['description', 'Johnson asked about Q3 delivery dates in yesterday\'s email'],
-          ['dueDate', null],
-        ].map(([fieldName, value]) => ({
-          taskId: 'tsk-existing',
-          fieldName,
-          sourceValue: JSON.stringify(value),
-          locallyOverridden: false,
-          sourceObservedAt: '2026-08-01T00:00:00.000Z',
-          localEditedAt: null,
-          updatedAt: '2026-08-01T00:00:00.000Z',
-        })),
-      ];
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: 'Reply to Johnson about project timeline',
-            description: 'Johnson asked about Q3 delivery dates in yesterday\'s email',
-            priority: 'high',
-            dueDate: null,
-            metadata: '{}',
-            status: 'todo',
-            snoozedUntil: null,
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+        metadata: '{}',
+      }));
+      ingestion.fieldStates.set('tsk-existing', [
+        fieldState('priority', 'medium', true),
+        fieldState('title', 'Reply to Johnson about project timeline'),
+        fieldState('description', 'Johnson asked about Q3 delivery dates in yesterday\'s email'),
+        fieldState('dueDate', null),
+      ]);
 
       const res = await POST(makeRequest({ items: [validItem({ priority: 'high' })] }));
       const json = await res.json();
       expect(json.items[0].appliedFields).toContain('priority');
-      expect(insertValuesFn).toHaveBeenCalledWith(expect.objectContaining({
-        taskId: 'tsk-existing',
-        fieldName: 'priority',
-        locallyOverridden: false,
-      }));
+      expect(ingestion.mergeWrites[0].observations).toEqual(expect.arrayContaining([
+        expect.objectContaining({ fieldName: 'priority', locallyOverridden: false }),
+      ]));
     });
 
     it('refreshes Scout provenance while preserving unrelated metadata', async () => {
       const item = validItem();
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: item.title,
-            description: item.description,
-            priority: item.priority,
-            dueDate: null,
-            metadata: JSON.stringify({
-              recurrence: 'weekly',
-              mcOwned: { pinned: true },
-              sourceType: 'email',
-              scoutContext: {
-                confidence: 0.2,
-                reasoning: 'Stale provenance',
-                extractedAt: item.context.extractedAt,
-              },
-            }),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-existing', existingTask({
+        metadata: JSON.stringify({
+          recurrence: 'weekly',
+          mcOwned: { pinned: true },
+          sourceType: 'email',
+          scoutContext: {
+            confidence: 0.2,
+            reasoning: 'Stale provenance',
+            extractedAt: item.context.extractedAt,
+          },
+        }),
+      }));
 
       const res = await POST(makeRequest({ items: [item] }));
       expect(res.status).toBe(200);
       expect((await res.json()).updated).toBe(1);
-      const taskUpdate = updateSetFn.mock.calls.find((call) => (
-        (call[0] as Record<string, unknown>).lastSyncedAt !== undefined
-      ));
-      const metadata = JSON.parse(
-        (taskUpdate?.[0] as Record<string, unknown>).metadata as string,
-      );
-      expect(metadata).toMatchObject({
+      expect(JSON.parse(ingestion.mergeWrites[0].taskWrite!.metadata)).toMatchObject({
         recurrence: 'weekly',
         mcOwned: { pinned: true },
         sourceType: 'email',
@@ -865,50 +591,22 @@ describe('POST /api/scout/ingest', () => {
 
     it('preserves malformed legacy metadata without aborting the ingest batch', async () => {
       const item = validItem();
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing',
-            title: item.title,
-            description: item.description,
-            priority: item.priority,
-            dueDate: null,
-            metadata: 'not-json',
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-existing', existingTask({ metadata: 'not-json' }));
 
       const res = await POST(makeRequest({ items: [item] }));
       expect(res.status).toBe(200);
       expect((await res.json()).updated).toBe(1);
-      const taskUpdate = updateSetFn.mock.calls.find((call) => (
-        (call[0] as Record<string, unknown>).lastSyncedAt !== undefined
-      ));
-      expect(JSON.parse(
-        (taskUpdate?.[0] as Record<string, unknown>).metadata as string,
-      )).toMatchObject({
+      expect(JSON.parse(ingestion.mergeWrites[0].taskWrite!.metadata)).toMatchObject({
         legacyMetadata: 'not-json',
         sourceType: 'email',
       });
     });
 
     it('suppresses a tombstoned item before task creation or source linking', async () => {
-      mockSuppressions = [{ sourceId: 'scout:email:msg-123' }];
+      ingestion.suppressions.add('scout:email:msg-123');
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       const json = await res.json();
-      const taskOrLinkInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.connectorType === 'scout' && (
-          value.sourceId === 'scout:email:msg-123'
-          || value.taskId !== undefined
-        );
-      });
 
       expect(json.items[0]).toMatchObject({
         action: 'suppressed',
@@ -917,17 +615,15 @@ describe('POST /api/scout/ingest', () => {
         preservedOverrides: [],
         unchangedFields: [],
       });
-      expect(taskOrLinkInsert).toBeUndefined();
+      expect(ingestion.creations).toEqual([]);
+      expect(ingestion.linkWrites).toEqual([]);
     });
 
     it('keeps repeated pushes attached to the existing linked task', async () => {
-      mockLinkedSources = [{ taskId: 'remote-task-1' }];
+      ingestion.links.set('scout:email:msg-123', 'remote-task-1');
 
       const res = await POST(makeRequest({ items: [validItem({ title: 'Changed source title' })] }));
       const json = await res.json();
-      const taskInsert = insertValuesFn.mock.calls.find((call) => (
-        (call[0] as Record<string, unknown>).connectorType === 'scout'
-      ));
 
       expect(json.items[0]).toMatchObject({
         action: 'linked',
@@ -935,27 +631,18 @@ describe('POST /api/scout/ingest', () => {
         mcTaskId: 'remote-task-1',
         linkedTo: 'remote-task-1',
       });
-      expect(taskInsert).toBeUndefined();
+      expect(ingestion.creations).toEqual([]);
     });
 
     it('skips update for completed tasks', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-done',
-            title: 'Old title',
-            description: null,
-            priority: 'none',
-            dueDate: null,
-            metadata: '{}',
-            status: 'done',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.tasks.set('tsk-done', existingTask({
+        id: 'tsk-done',
+        title: 'Old title',
+        description: null,
+        priority: 'none',
+        metadata: '{}',
+        status: 'done',
+      }));
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
@@ -964,31 +651,58 @@ describe('POST /api/scout/ingest', () => {
       expect(json.skipped).toBe(1);
       expect(json.items[0].action).toBe('suppressed');
       expect(json.items[0].reason).toBe('task_closed');
+      expect(ingestion.mergeWrites).toEqual([]);
     });
   });
 
   describe('source list auto-creation', () => {
-    it('calls insert for source list when none exists', async () => {
+    it('creates the source list for a newly ingested source type', async () => {
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
-      // Insert called for: source list, task, tags (x2)
-      expect(mockInsert).toHaveBeenCalled();
+      expect(ingestion.createdSourceLists).toEqual(['scout:email-actions']);
+      expect(ingestion.countRefreshes).toEqual([
+        expect.objectContaining({ sourceListId: 'scout:email-actions' }),
+      ]);
     });
 
     it('does not re-create source list if it already exists', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 4) {
-          return mockSelectChain([{ id: 'sl-scout-email' }]);
-        }
-        return mockSelectChain([]);
-      });
+      ingestion.sourceLists.add('scout:email-actions');
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       expect(res.status).toBe(200);
+      expect(ingestion.createdSourceLists).toEqual([]);
     });
+  });
+
+  it('normalizes PostgreSQL jsonb candidate metadata before fuzzy matching', async () => {
+    ingestion.crossConnectorCandidates = [{
+      id: 'github-task-1',
+      title: 'Reply to Johnson about project timeline',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-primary',
+      sourceId: 'github:issue:1',
+      metadata: {
+        scoutContext: {
+          from: 'johnson@corp.com',
+          sourceSubject: 'Re: Q3 Project Timeline',
+        },
+      },
+    }];
+
+    const res = await POST(makeRequest({ items: [validItem()] }));
+
+    expect(res.status).toBe(200);
+    expect(mockFindFuzzyMatches).toHaveBeenCalledWith(
+      expect.any(String),
+      [expect.objectContaining({
+        id: 'github-task-1',
+        metadata: JSON.stringify(ingestion.crossConnectorCandidates[0].metadata),
+      })],
+      expect.objectContaining({
+        contextFrom: 'johnson@corp.com',
+        contextSubject: 'Re: Q3 Project Timeline',
+      }),
+    );
   });
 
   describe('all source types accepted', () => {
@@ -1007,14 +721,18 @@ describe('POST /api/scout/ingest', () => {
   });
 
   describe('connector settings', () => {
+    function withSettings(overrides: Record<string, unknown>) {
+      ingestion.connector = {
+        ...ingestion.connector,
+        settings: {
+          ...(ingestion.connector.settings as Record<string, unknown>),
+          ...overrides,
+        },
+      };
+    }
+
     it('skips source types that are not allowed', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        return mockSelectChain(callCount === 1
-          ? [directConnectorConfig({ allowedSourceTypes: ['teams'] })]
-          : []);
-      });
+      withSettings({ allowedSourceTypes: ['teams'] });
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       const json = await res.json();
@@ -1028,43 +746,24 @@ describe('POST /api/scout/ingest', () => {
     });
 
     it('routes triage-mode items into the Scout triage source', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        return mockSelectChain(callCount === 1
-          ? [directConnectorConfig({ landingMode: 'triage' })]
-          : []);
-      });
+      withSettings({ landingMode: 'triage' });
 
       const res = await POST(makeRequest({ items: [validItem()] }));
       const json = await res.json();
-      const triageInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.sourcePlatform === 'scout';
-      });
 
       expect(json.created).toBe(0);
       expect(json.triaged).toBe(1);
       expect(json.items[0].action).toBe('triaged');
-      expect(triageInsert?.[0]).toMatchObject({
+      expect(json.items[0].reason).toBe('landing_mode');
+      expect(ingestion.triageWrites[0]).toMatchObject({
         sourcePlatform: 'scout',
         sourceId: 'scout:email:msg-123',
-        status: 'pending',
       });
-      expect(onConflictDoUpdateFn).toHaveBeenCalledWith(expect.objectContaining({
-        target: ['source_platform', 'source_id'],
-        setWhere: expect.objectContaining({ op: 'notInArray' }),
-      }));
+      expect(ingestion.creations).toEqual([]);
     });
 
     it('routes low-confidence hybrid items to triage', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        return mockSelectChain(callCount === 1
-          ? [directConnectorConfig({ landingMode: 'hybrid', hybridConfidenceThreshold: 0.8 })]
-          : []);
-      });
+      withSettings({ landingMode: 'hybrid', hybridConfidenceThreshold: 0.8 });
 
       const res = await POST(makeRequest({
         items: [validItem({ confidence: 0.79 })],
@@ -1076,45 +775,23 @@ describe('POST /api/scout/ingest', () => {
     });
 
     it('stores the effective default project on triaged items', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return mockSelectChain([directConnectorConfig({
-            landingMode: 'triage',
-            autoProjectId: 'proj-triage',
-          })]);
-        }
-        if (callCount === 5) return mockSelectChain([{ id: 'proj-triage' }]);
-        return mockSelectChain([]);
-      });
+      withSettings({ landingMode: 'triage', autoProjectId: 'proj-triage' });
+      ingestion.projects.add('proj-triage');
 
       await POST(makeRequest({ items: [validItem()] }));
-      const triageInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.sourcePlatform === 'scout';
-      });
 
-      expect(triageInsert?.[0]).toMatchObject({
-        rawMetadata: expect.objectContaining({
-          effectiveProjectId: 'proj-triage',
-          priority: 'medium',
-          suggestedTags: ['work', 'urgent-reply'],
-        }),
+      expect(ingestion.triageWrites[0].values.rawMetadata).toMatchObject({
+        effectiveProjectId: 'proj-triage',
+        priority: 'medium',
+        suggestedTags: ['work', 'urgent-reply'],
       });
     });
 
     it('refreshes pending triage items from repeat pushes', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return mockSelectChain([directConnectorConfig({ landingMode: 'triage' })]);
-        }
-        if (callCount === 4) {
-          return mockSelectChain([{ id: 'triage-existing', status: 'pending' }]);
-        }
-        return mockSelectChain([]);
+      withSettings({ landingMode: 'triage' });
+      ingestion.triageItems.set('scout:email:msg-123', {
+        id: 'triage-existing',
+        status: 'pending',
       });
 
       const res = await POST(makeRequest({
@@ -1127,29 +804,20 @@ describe('POST /api/scout/ingest', () => {
         reason: 'triage_updated',
         triageItemId: 'triage-existing',
       });
-      expect(updateSetFn).toHaveBeenCalledWith(expect.objectContaining({
+      expect(ingestion.triageWrites[0].values).toMatchObject({
         title: 'Updated triage title',
         aiRelevanceScore: 70,
-      }));
+      });
     });
 
     it('keeps previously triaged items in triage when routing becomes direct', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) return mockSelectChain([directConnectorConfig()]);
-        if (callCount === 4) {
-          return mockSelectChain([{ id: 'triage-existing', status: 'pending' }]);
-        }
-        return mockSelectChain([]);
+      ingestion.triageItems.set('scout:email:msg-123', {
+        id: 'triage-existing',
+        status: 'pending',
       });
 
       const res = await POST(makeRequest({ items: [validItem({ confidence: 0.99 })] }));
       const json = await res.json();
-      const taskInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.connectorType === 'scout';
-      });
 
       expect(json.created).toBe(0);
       expect(json.triaged).toBe(1);
@@ -1158,73 +826,57 @@ describe('POST /api/scout/ingest', () => {
         reason: 'triage_updated',
         triageItemId: 'triage-existing',
       });
-      expect(taskInsert).toBeUndefined();
+      expect(ingestion.creations).toEqual([]);
+    });
+
+    it('never reopens a closed triage item', async () => {
+      ingestion.triageItems.set('scout:email:msg-123', {
+        id: 'triage-closed',
+        status: 'actioned',
+      });
+
+      const res = await POST(makeRequest({ items: [validItem({ confidence: 0.99 })] }));
+      const json = await res.json();
+
+      expect(json.triaged).toBe(0);
+      expect(json.skipped).toBe(1);
+      expect(json.items[0]).toMatchObject({
+        action: 'suppressed',
+        reason: 'triage_closed',
+        triageItemId: 'triage-closed',
+      });
     });
 
     it('uses the configured project when Scout does not suggest one', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return mockSelectChain([directConnectorConfig({ autoProjectId: 'proj-default' })]);
-        }
-        if (callCount === 6) {
-          return mockSelectChain([{ id: 'proj-default' }]);
-        }
-        return mockSelectChain([]);
-      });
+      withSettings({ autoProjectId: 'proj-default' });
+      ingestion.projects.add('proj-default');
 
       await POST(makeRequest({ items: [validItem()] }));
-      const projectInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.projectId !== undefined;
-      });
 
-      expect(projectInsert?.[0]).toMatchObject({ projectId: 'proj-default' });
+      expect(ingestion.creations[0].projectId).toBe('proj-default');
     });
 
     it('prefers Scout project suggestions over the configured fallback', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return mockSelectChain([directConnectorConfig({ autoProjectId: 'proj-default' })]);
-        }
-        if (callCount === 6) return mockSelectChain([{ id: 'proj-suggested' }]);
-        return mockSelectChain([]);
-      });
+      withSettings({ autoProjectId: 'proj-default' });
+      ingestion.projects.add('proj-default');
+      ingestion.projects.add('proj-suggested');
 
       await POST(makeRequest({
         items: [validItem({ suggestedProjectId: 'proj-suggested' })],
       }));
-      const projectInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.projectId !== undefined;
-      });
 
-      expect(projectInsert?.[0]).toMatchObject({ projectId: 'proj-suggested' });
+      expect(ingestion.creations[0].projectId).toBe('proj-suggested');
     });
 
     it('falls back when Scout suggests an unknown project', async () => {
-      let callCount = 0;
-      db.select.mockImplementation(() => {
-        callCount++;
-        if (callCount === 1) {
-          return mockSelectChain([directConnectorConfig({ autoProjectId: 'proj-default' })]);
-        }
-        if (callCount === 7) return mockSelectChain([{ id: 'proj-default' }]);
-        return mockSelectChain([]);
-      });
+      withSettings({ autoProjectId: 'proj-default' });
+      ingestion.projects.add('proj-default');
 
       await POST(makeRequest({
         items: [validItem({ suggestedProjectId: 'proj-missing' })],
       }));
-      const projectInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const value = call[0] as Record<string, unknown>;
-        return value.projectId !== undefined;
-      });
 
-      expect(projectInsert?.[0]).toMatchObject({ projectId: 'proj-default' });
+      expect(ingestion.creations[0].projectId).toBe('proj-default');
     });
   });
 });

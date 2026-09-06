@@ -51,6 +51,9 @@ import {
   createPostgresWebhookIntegrationsRepository,
 } from './webhook-integrations-repository';
 import { createPostgresGraphReportingRepository } from './graph-reporting-repository';
+import {
+  createPostgresScoutIngestionReconciliationRepository,
+} from './scout-ingestion-reconciliation-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -108,6 +111,9 @@ export {
   createPostgresWebhookIntegrationsRepository,
 } from './webhook-integrations-repository';
 export { createPostgresGraphReportingRepository } from './graph-reporting-repository';
+export {
+  createPostgresScoutIngestionReconciliationRepository,
+} from './scout-ingestion-reconciliation-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -211,5 +217,7 @@ export function createPostgresWorkerPersistenceRepositories(
     dailyPlanning: createPostgresDailyPlanningPersistence(pool),
     webhookIntegrations: createPostgresWebhookIntegrationsRepository(pool),
     graphReporting,
+    scoutIngestionReconciliation:
+      createPostgresScoutIngestionReconciliationRepository(pool),
   };
 }

@@ -1,15 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from '@/db/schema';
 import {
   parseNotificationDeliveryPayload,
   type ApnsRegistrationRecord,
   type NotificationDeliveryRepository,
+  type NotificationPushRule,
   type WebPushSubscriptionRecord,
 } from './notification-delivery';
 import { needsAttention } from '@/lib/notifications/lifecycle';
 import { isQuietHour } from '@/lib/notifications/quiet-hours-window';
 import { createSqliteNotificationWebRepository } from './sqlite-notification-web-repository';
 import { createSqliteNotificationPushRepository } from './sqlite-notification-push-repository';
+import {
+  createSqliteNotificationCreation,
+  createSqliteStoredNotificationPushPolicyResolver,
+  installSqliteNotificationCreationTransactionCompatibility,
+} from './sqlite-notification-creation';
 
 interface RawClaim {
   id: string;
@@ -72,9 +80,36 @@ function parseKeys(value: unknown): WebPushSubscriptionRecord['keys'] {
   };
 }
 
+function parseTriageNudgeCount(
+  row: { source_id: string; metadata: unknown },
+  sourcePrefix: string,
+): number | null {
+  let metadata = row.metadata;
+  if (typeof metadata === 'string') {
+    try {
+      metadata = JSON.parse(metadata) as unknown;
+    } catch {
+      metadata = {};
+    }
+  }
+  const metadataCount = metadata
+    && typeof metadata === 'object'
+    && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).queueSize
+    : undefined;
+  if (typeof metadataCount === 'number' && Number.isInteger(metadataCount) && metadataCount >= 0) {
+    return metadataCount;
+  }
+  const sourceCount = Number(row.source_id.slice(sourcePrefix.length));
+  return Number.isInteger(sourceCount) && sourceCount >= 0 ? sourceCount : null;
+}
+
 export function createSqliteNotificationDeliveryRepository(
   sqlite: Database.Database,
 ): NotificationDeliveryRepository {
+  const database = drizzle(sqlite, { schema });
+  installSqliteNotificationCreationTransactionCompatibility(database);
+  const creation = createSqliteNotificationCreation(database);
   const terminalizeExhausted = sqlite.prepare(`
     UPDATE notification_delivery_events
     SET status = 'failed',
@@ -345,5 +380,135 @@ export function createSqliteNotificationDeliveryRepository(
 
     push: createSqliteNotificationPushRepository(sqlite),
     web: createSqliteNotificationWebRepository(sqlite),
+    creation,
+    pushRules: {
+      async save(input) {
+        const now = new Date().toISOString();
+        const id = input.id ?? randomUUID();
+        sqlite.prepare(`
+          INSERT INTO notification_push_rules (
+            id, connector_instance_id, template_key, enabled, min_level,
+            preview, max_per_hour, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(connector_instance_id, template_key) DO UPDATE SET
+            enabled = excluded.enabled,
+            min_level = excluded.min_level,
+            preview = excluded.preview,
+            max_per_hour = excluded.max_per_hour,
+            updated_at = excluded.updated_at
+        `).run(
+          id,
+          input.connectorInstanceId,
+          input.templateKey,
+          input.enabled ? 1 : 0,
+          input.minLevel,
+          input.preview,
+          input.maxPerHour ?? null,
+          now,
+          now,
+        );
+        const saved = sqlite.prepare(`
+          SELECT id, connector_instance_id AS connectorInstanceId,
+                 template_key AS templateKey, enabled, min_level AS minLevel,
+                 preview, max_per_hour AS maxPerHour,
+                 created_at AS createdAt, updated_at AS updatedAt
+          FROM notification_push_rules
+          WHERE connector_instance_id = ? AND template_key = ?
+        `).get(input.connectorInstanceId, input.templateKey) as
+          | (Omit<NotificationPushRule, 'enabled'> & { enabled: number })
+          | undefined;
+        if (!saved) throw new Error('Notification push rule was not persisted');
+        return { ...saved, enabled: Boolean(saved.enabled) };
+      },
+
+      async listOverrides(connectorInstanceId, templateKey) {
+        const rows = sqlite.prepare(`
+          SELECT id, connector_instance_id AS connectorInstanceId,
+                 template_key AS templateKey, enabled, min_level AS minLevel,
+                 preview, max_per_hour AS maxPerHour,
+                 created_at AS createdAt, updated_at AS updatedAt
+          FROM notification_push_rules
+          WHERE connector_instance_id = ?
+            AND (? IS NULL OR template_key IN (?, '*'))
+        `).all(
+          connectorInstanceId,
+          templateKey ?? null,
+          templateKey ?? null,
+        ) as Array<Omit<NotificationPushRule, 'enabled'> & { enabled: number }>;
+        return rows.map(row => ({ ...row, enabled: Boolean(row.enabled) }));
+      },
+
+      async reset(connectorInstanceId, templateKey) {
+        sqlite.prepare(`
+          DELETE FROM notification_push_rules
+          WHERE connector_instance_id = ? AND template_key = ?
+        `).run(connectorInstanceId, templateKey);
+      },
+    },
+    policy: {
+      async resolve(input) {
+        return createSqliteStoredNotificationPushPolicyResolver(database).resolve(input);
+      },
+    },
+    scheduledTriggers: {
+      async getMorningSnapshot(localDate) {
+        const planned = sqlite.prepare(`
+          SELECT COUNT(*) AS count
+          FROM tasks
+          WHERE id IN (
+            SELECT task_id FROM my_day_items WHERE date = ? LIMIT 50
+          )
+            AND status NOT IN ('done', 'cancelled')
+        `).get(localDate) as { count: number };
+        const overdue = sqlite.prepare(`
+          SELECT COUNT(*) AS count
+          FROM (
+            SELECT id FROM tasks
+            WHERE due_date < ? AND status NOT IN ('done', 'cancelled')
+            LIMIT 100
+          )
+        `).get(localDate) as { count: number };
+        return {
+          plannedCount: Number(planned.count),
+          overdueCount: Number(overdue.count),
+        };
+      },
+
+      async getTriageSnapshot(localDate) {
+        const count = sqlite.prepare(`
+          SELECT COUNT(*) AS count FROM triage_items WHERE status = 'pending'
+        `).get() as { count: number };
+        const sourcePrefix = `push:triage_nudge:${localDate}:`;
+        const prior = sqlite.prepare(`
+          SELECT source_id, metadata
+          FROM notifications
+          WHERE connector_type = 'system'
+            AND connector_instance_id = 'push-triggers'
+            AND template_key = 'triage_nudge'
+            AND source_id LIKE ? ESCAPE '\\'
+        `).all(`${sourcePrefix.replace(/[%_\\]/g, '\\$&')}%`) as Array<{
+          source_id: string;
+          metadata: unknown;
+        }>;
+        let highWater: number | null = null;
+        for (const row of prior) {
+          const value = parseTriageNudgeCount(row, sourcePrefix);
+          if (value !== null && (highWater === null || value > highWater)) highWater = value;
+        }
+        return { pendingCount: Number(count.count), highWater };
+      },
+
+      async getCarryForwardSnapshot(localDate) {
+        const rows = sqlite.prepare(`
+          SELECT title
+          FROM tasks
+          WHERE id IN (
+            SELECT task_id FROM my_day_items WHERE date = ? LIMIT 50
+          )
+            AND status NOT IN ('done', 'cancelled')
+        `).all(localDate) as Array<{ title: string }>;
+        return { incompleteTaskTitles: rows.map(row => row.title) };
+      },
+    },
   };
 }

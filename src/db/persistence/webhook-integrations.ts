@@ -426,6 +426,142 @@ export interface WebhookSyncLogEntry {
   syncedAt: string;
 }
 
+// ─── Alertmanager lifecycle ingestion and operations ────────────────────────
+
+export interface AlertmanagerControl {
+  paused: boolean;
+  updatedAt: string | null;
+}
+
+export type AlertmanagerEventKind =
+  | 'webhook_request'
+  | 'operator_action'
+  | 'synthetic_test';
+
+export interface AlertmanagerIngestResult {
+  accepted: number;
+  applied: number;
+  stale: number;
+  created: number;
+  updated: number;
+  duplicateReceipts: number;
+}
+
+export interface AlertmanagerIntegrationEventRecord extends AlertmanagerIngestResult {
+  id: string;
+  integration: string;
+  kind: AlertmanagerEventKind;
+  outcome: string;
+  authenticated: boolean;
+  httpStatus: number;
+  detail: string | null;
+  occurredAt: string;
+}
+
+export interface AlertmanagerIntegrationEventInput {
+  event: AlertmanagerIntegrationEventRecord;
+  retainLatest: number;
+  pruneBatchSize: number;
+}
+
+export interface SetAlertmanagerPausedInput {
+  integration: string;
+  paused: boolean;
+  updatedAt: string;
+  auditEvent: AlertmanagerIntegrationEventRecord;
+  retainLatest: number;
+  pruneBatchSize: number;
+}
+
+export interface AlertmanagerStatusSnapshot {
+  control: AlertmanagerControl;
+  lastRequest: AlertmanagerIntegrationEventRecord | null;
+  lastAuthenticatedReceipt: AlertmanagerIntegrationEventRecord | null;
+  lastSuccessfulProjection: AlertmanagerIntegrationEventRecord | null;
+  lastSyntheticTest: AlertmanagerIntegrationEventRecord | null;
+  recentFailures: AlertmanagerIntegrationEventRecord[];
+  counts: {
+    requests: number;
+    failures: number;
+    intentionalDrops: number;
+    accepted: number;
+    applied: number;
+    created: number;
+    updated: number;
+    stale: number;
+    duplicateReceipts: number;
+  };
+}
+
+export interface AlertmanagerProjectionAction {
+  id: string;
+  actionType: 'open_url';
+  label: string;
+  icon: string;
+  variant: 'primary' | 'secondary';
+  isPrimary: boolean;
+  sortOrder: number;
+  payload: { url: string; kind: string };
+  opensExternal: true;
+  createdBy: 'connector';
+}
+
+export interface AlertmanagerProjection {
+  newNotificationId: string;
+  sourceId: string;
+  title: string;
+  body: string | null;
+  level: string;
+  category: string;
+  templateKey: string;
+  readState: 'unread' | 'read';
+  sourceState: 'active' | 'resolved';
+  sourceActivityAt: string;
+  sourceActivityKey: string;
+  receivedAt: string;
+  sortAt: string;
+  dedupeKey: string;
+  metadata: Record<string, unknown>;
+  presentation: Record<string, unknown>;
+  isActionable: boolean;
+  occurrenceKey: string;
+  actions: readonly AlertmanagerProjectionAction[];
+}
+
+export interface AlertmanagerLifecycleWrite {
+  source: string;
+  eventId: string;
+  fingerprint: string;
+  status: 'firing' | 'resolved';
+  occurredAt: string;
+  projection: AlertmanagerProjection;
+}
+
+export interface IngestAlertmanagerBatchInput {
+  integration: string;
+  receivedAt: string;
+  suppressDeliveries: boolean;
+  events: readonly AlertmanagerLifecycleWrite[];
+}
+
+export interface IngestAlertmanagerBatchResult extends AlertmanagerIngestResult {
+  pendingDelivery: boolean;
+}
+
+export interface AlertmanagerSyntheticInspection {
+  projectionCount: number;
+  sourceState: string | null;
+  receiptCount: number;
+  firingDeliveryCount: number | null;
+}
+
+export interface AlertmanagerSyntheticIdentity {
+  integration: string;
+  source: string;
+  fingerprint: string;
+  sourceId: string;
+}
+
 // ─── Ports ──────────────────────────────────────────────────────────────────
 
 export interface InboundWebhookRepository {
@@ -479,6 +615,18 @@ export interface WebhookIngestRepository {
   appendSyncLog(entry: WebhookSyncLogEntry): Promise<void>;
 }
 
+export interface AlertmanagerRepository {
+  getControl(): Promise<AlertmanagerControl>;
+  setPaused(input: SetAlertmanagerPausedInput): Promise<AlertmanagerControl>;
+  recordEvent(input: AlertmanagerIntegrationEventInput): Promise<void>;
+  getStatus(integration: string): Promise<AlertmanagerStatusSnapshot>;
+  ingestBatch(input: IngestAlertmanagerBatchInput): Promise<IngestAlertmanagerBatchResult>;
+  inspectSyntheticLifecycle(
+    identity: AlertmanagerSyntheticIdentity,
+  ): Promise<AlertmanagerSyntheticInspection>;
+  cleanupSyntheticLifecycle(identity: AlertmanagerSyntheticIdentity): Promise<void>;
+}
+
 /**
  * The whole Layer L20 surface, registered atomically: a backend either
  * supports every webhook configuration/delivery/log surface or none of them.
@@ -488,4 +636,5 @@ export interface WebhookIntegrationsPersistence {
   outbound: OutboundWebhookRepository;
   integrations: IntegrationConfigRepository;
   ingest: WebhookIngestRepository;
+  alertmanager?: AlertmanagerRepository;
 }

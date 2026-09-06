@@ -1,6 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import type {
+  AlertmanagerIntegrationEventInput,
+  AlertmanagerIntegrationEventRecord,
+  AlertmanagerStatusSnapshot,
+  AlertmanagerSyntheticIdentity,
+  AlertmanagerSyntheticInspection,
   AppendInboundWebhookLogInput,
   ClaimInboundWebhookDeliveryInput,
   ConnectorWebhookConfig,
@@ -38,9 +43,11 @@ import type {
   WebhookTaskUpdate,
 } from '@/db/persistence/webhook-integrations';
 import { ingestPostgresConnectorNotificationInTransaction } from './connector-execution-repositories';
+import { createPostgresNotificationsInTransaction } from './notification-delivery-repository';
 
 type Client = Pool | PoolClient;
 type Column = [string, unknown];
+const ALERTMANAGER_CONTROL_KEY = 'alertmanager-integration-control';
 
 async function query<T extends QueryResultRow>(
   client: Client,
@@ -248,6 +255,73 @@ async function findNotificationIdBySource(
     [connectorType, sourceId],
   );
   return row?.id ?? null;
+}
+
+async function insertAlertmanagerEvent(
+  client: Client,
+  event: AlertmanagerIntegrationEventRecord,
+): Promise<void> {
+  await client.query(
+    `
+      INSERT INTO alertmanager_integration_events (
+        id, integration, kind, outcome, authenticated, http_status, accepted,
+        applied, created, updated, stale, duplicate_receipts, detail, occurred_at
+      ) VALUES (
+        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+      )
+    `,
+    [
+      event.id,
+      event.integration,
+      event.kind,
+      event.outcome,
+      event.authenticated,
+      event.httpStatus,
+      event.accepted,
+      event.applied,
+      event.created,
+      event.updated,
+      event.stale,
+      event.duplicateReceipts,
+      event.detail,
+      event.occurredAt,
+    ],
+  );
+}
+
+async function pruneAlertmanagerEvents(
+  client: Client,
+  input: Pick<AlertmanagerIntegrationEventInput, 'retainLatest' | 'pruneBatchSize'>,
+  integration: string,
+): Promise<void> {
+  await client.query(
+    `
+      WITH protected AS (
+        (SELECT id FROM alertmanager_integration_events
+         WHERE integration = $1 AND kind = 'webhook_request' AND outcome = 'projected'
+         ORDER BY occurred_at DESC, id DESC LIMIT 1)
+        UNION
+        (SELECT id FROM alertmanager_integration_events
+         WHERE integration = $1 AND kind = 'synthetic_test'
+         ORDER BY occurred_at DESC, id DESC LIMIT 1)
+        UNION
+        (SELECT id FROM alertmanager_integration_events
+         WHERE integration = $1 AND kind = 'webhook_request'
+           AND authenticated = true AND outcome NOT IN ('projected', 'paused')
+         ORDER BY occurred_at DESC, id DESC LIMIT 1)
+      ),
+      expired AS (
+        SELECT id FROM alertmanager_integration_events
+        WHERE integration = $1
+        ORDER BY occurred_at DESC, id DESC
+        LIMIT $2 OFFSET $3
+      )
+      DELETE FROM alertmanager_integration_events
+      WHERE id IN (SELECT id FROM expired)
+        AND id NOT IN (SELECT id FROM protected)
+    `,
+    [integration, input.pruneBatchSize, input.retainLatest],
+  );
 }
 
 /**
@@ -858,6 +932,391 @@ export function createPostgresWebhookIntegrationsRepository(
             entry.syncedAt,
           ],
         );
+      },
+    },
+
+    alertmanager: {
+      async getControl() {
+        const [row] = await query<{ value: unknown; updatedAt: string }>(
+          pool,
+          `SELECT value, updated_at AS "updatedAt" FROM app_settings WHERE key = $1 LIMIT 1`,
+          [ALERTMANAGER_CONTROL_KEY],
+        );
+        const value = row?.value;
+        return {
+          paused: Boolean(
+            value && typeof value === 'object' && 'paused' in value && value.paused === true,
+          ),
+          updatedAt: row?.updatedAt ?? null,
+        };
+      },
+
+      async setPaused(input) {
+        await transaction(pool, async (client) => {
+          await client.query(
+            `
+              INSERT INTO app_settings (key, value, updated_at)
+              VALUES ($1, $2, $3)
+              ON CONFLICT (key) DO UPDATE
+              SET value = EXCLUDED.value, updated_at = EXCLUDED.updated_at
+            `,
+            [ALERTMANAGER_CONTROL_KEY, { paused: input.paused }, input.updatedAt],
+          );
+          await insertAlertmanagerEvent(client, input.auditEvent);
+        });
+        await pruneAlertmanagerEvents(pool, input, input.integration);
+        return { paused: input.paused, updatedAt: input.updatedAt };
+      },
+
+      async recordEvent(input) {
+        await insertAlertmanagerEvent(pool, input.event);
+        await pruneAlertmanagerEvents(pool, input, input.event.integration);
+      },
+
+      async getStatus(integration): Promise<AlertmanagerStatusSnapshot> {
+        const EVENT_COLUMNS = `
+          id, integration, kind, outcome, authenticated, http_status AS "httpStatus",
+          accepted, applied, created, updated, stale,
+          duplicate_receipts AS "duplicateReceipts", detail, occurred_at AS "occurredAt"
+        `;
+        const [
+          controlRows,
+          lastRequestRows,
+          lastAuthenticatedRows,
+          lastSuccessfulRows,
+          lastSyntheticRows,
+          recentFailures,
+          countRows,
+        ] = await Promise.all([
+          query<{ value: unknown; updatedAt: string }>(
+            pool,
+            `SELECT value, updated_at AS "updatedAt" FROM app_settings WHERE key = $1 LIMIT 1`,
+            [ALERTMANAGER_CONTROL_KEY],
+          ),
+          query<AlertmanagerIntegrationEventRecord>(
+            pool,
+            `SELECT ${EVENT_COLUMNS} FROM alertmanager_integration_events
+             WHERE integration = $1 AND kind = 'webhook_request'
+             ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+            [integration],
+          ),
+          query<AlertmanagerIntegrationEventRecord>(
+            pool,
+            `SELECT ${EVENT_COLUMNS} FROM alertmanager_integration_events
+             WHERE integration = $1 AND kind = 'webhook_request' AND authenticated = true
+             ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+            [integration],
+          ),
+          query<AlertmanagerIntegrationEventRecord>(
+            pool,
+            `SELECT ${EVENT_COLUMNS} FROM alertmanager_integration_events
+             WHERE integration = $1 AND kind = 'webhook_request' AND outcome = 'projected'
+             ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+            [integration],
+          ),
+          query<AlertmanagerIntegrationEventRecord>(
+            pool,
+            `SELECT ${EVENT_COLUMNS} FROM alertmanager_integration_events
+             WHERE integration = $1 AND kind = 'synthetic_test'
+             ORDER BY occurred_at DESC, id DESC LIMIT 1`,
+            [integration],
+          ),
+          query<AlertmanagerIntegrationEventRecord>(
+            pool,
+            `SELECT ${EVENT_COLUMNS} FROM alertmanager_integration_events
+             WHERE integration = $1 AND kind = 'webhook_request'
+               AND authenticated = true AND outcome NOT IN ('projected', 'paused')
+             ORDER BY occurred_at DESC, id DESC LIMIT 5`,
+            [integration],
+          ),
+          query<Record<keyof AlertmanagerStatusSnapshot['counts'], string>>(
+            pool,
+            `
+              SELECT
+                count(*) FILTER (WHERE kind = 'webhook_request') AS requests,
+                count(*) FILTER (
+                  WHERE kind = 'webhook_request' AND authenticated = true
+                    AND outcome NOT IN ('projected', 'paused')
+                ) AS failures,
+                count(*) FILTER (
+                  WHERE kind = 'webhook_request' AND outcome = 'paused'
+                ) AS "intentionalDrops",
+                coalesce(sum(accepted), 0) AS accepted,
+                coalesce(sum(applied), 0) AS applied,
+                coalesce(sum(created), 0) AS created,
+                coalesce(sum(updated), 0) AS updated,
+                coalesce(sum(stale), 0) AS stale,
+                coalesce(sum(duplicate_receipts), 0) AS "duplicateReceipts"
+              FROM alertmanager_integration_events WHERE integration = $1
+            `,
+            [integration],
+          ),
+        ]);
+        const controlValue = controlRows[0]?.value;
+        const rawCounts = countRows[0];
+        return {
+          control: {
+            paused: Boolean(
+              controlValue
+              && typeof controlValue === 'object'
+              && 'paused' in controlValue
+              && controlValue.paused === true,
+            ),
+            updatedAt: controlRows[0]?.updatedAt ?? null,
+          },
+          lastRequest: lastRequestRows[0] ?? null,
+          lastAuthenticatedReceipt: lastAuthenticatedRows[0] ?? null,
+          lastSuccessfulProjection: lastSuccessfulRows[0] ?? null,
+          lastSyntheticTest: lastSyntheticRows[0] ?? null,
+          recentFailures,
+          counts: {
+            requests: Number(rawCounts?.requests ?? 0),
+            failures: Number(rawCounts?.failures ?? 0),
+            intentionalDrops: Number(rawCounts?.intentionalDrops ?? 0),
+            accepted: Number(rawCounts?.accepted ?? 0),
+            applied: Number(rawCounts?.applied ?? 0),
+            created: Number(rawCounts?.created ?? 0),
+            updated: Number(rawCounts?.updated ?? 0),
+            stale: Number(rawCounts?.stale ?? 0),
+            duplicateReceipts: Number(rawCounts?.duplicateReceipts ?? 0),
+          },
+        };
+      },
+
+      async ingestBatch(input) {
+        return transaction(pool, async (client) => {
+          const totals = {
+            accepted: input.events.length,
+            applied: 0,
+            stale: 0,
+            created: 0,
+            updated: 0,
+            duplicateReceipts: 0,
+            pendingDelivery: false,
+          };
+          const sourceIds = [...new Set(input.events.map(event => event.projection.sourceId))]
+            .sort();
+          for (const sourceId of sourceIds) {
+            await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+              `alertmanager-incident:${sourceId}`,
+            ]);
+          }
+
+          for (const event of input.events) {
+            const [current] = await query<{
+              id: string;
+              sourceState: string;
+              lastSourceActivityAt: string | null;
+            }>(
+              client,
+              `
+                SELECT id, source_state AS "sourceState",
+                       last_source_activity_at AS "lastSourceActivityAt"
+                FROM notifications WHERE source_id = $1 FOR UPDATE
+              `,
+              [event.projection.sourceId],
+            );
+            const incomingTime = Date.parse(event.occurredAt);
+            const currentTime = current?.lastSourceActivityAt
+              ? Date.parse(current.lastSourceActivityAt)
+              : null;
+            const stale = currentTime !== null && (
+              incomingTime < currentTime
+              || (
+                incomingTime === currentTime
+                && current.sourceState === 'resolved'
+                && event.status === 'firing'
+              )
+            );
+            const [existingReceipt] = await query<{ id: string }>(
+              client,
+              `
+                SELECT id FROM homelab_alert_receipts
+                WHERE integration = $1 AND source = $2 AND event_id = $3
+                FOR UPDATE
+              `,
+              [input.integration, event.source, event.eventId],
+            );
+            if (existingReceipt) {
+              await client.query(
+                `
+                  UPDATE homelab_alert_receipts
+                  SET last_received_at = $2, delivery_count = delivery_count + 1, applied = $3
+                  WHERE id = $1
+                `,
+                [existingReceipt.id, input.receivedAt, !stale],
+              );
+              totals.duplicateReceipts++;
+            } else {
+              await client.query(
+                `
+                  INSERT INTO homelab_alert_receipts (
+                    id, integration, source, event_id, fingerprint, status, occurred_at,
+                    notification_id, first_received_at, last_received_at, delivery_count, applied
+                  ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, 1, $10)
+                `,
+                [
+                  randomUUID(),
+                  input.integration,
+                  event.source,
+                  event.eventId,
+                  event.fingerprint,
+                  event.status,
+                  event.occurredAt,
+                  current?.id ?? event.projection.sourceId,
+                  input.receivedAt,
+                  !stale,
+                ],
+              );
+            }
+            if (stale) {
+              totals.stale++;
+              continue;
+            }
+
+            const projection = event.projection;
+            const [creation] = await createPostgresNotificationsInTransaction(client, [{
+              id: current?.id ?? projection.newNotificationId,
+              sourceId: projection.sourceId,
+              connectorType: 'homelab',
+              connectorInstanceId: input.integration,
+              title: projection.title,
+              body: projection.body,
+              level: projection.level,
+              category: projection.category,
+              templateKey: projection.templateKey,
+              readState: projection.readState,
+              sourceState: projection.sourceState,
+              sourceActivityAt: projection.sourceActivityAt,
+              sourceActivityKey: projection.sourceActivityKey,
+              reopenPolicy: 'handled',
+              occurrenceKey: projection.occurrenceKey,
+              isActionable: projection.isActionable,
+              primaryActionId: null,
+              receivedAt: projection.receivedAt,
+              sortAt: projection.sortAt,
+              dedupeKey: projection.dedupeKey,
+              relatedTaskId: null,
+              relatedProjectId: null,
+              relatedEntityType: null,
+              relatedEntityId: null,
+              navigationTarget: null,
+              metadata: projection.metadata,
+              presentation: projection.presentation,
+            }], {
+              now: new Date(input.receivedAt),
+              wakeDispatcher: false,
+            });
+            const notificationId = creation.notification.id;
+            await client.query(
+              `
+                DELETE FROM notification_actions
+                WHERE notification_id = $1 AND created_by = 'connector'
+                  AND action_type = 'open_url'
+              `,
+              [notificationId],
+            );
+            for (const action of projection.actions) {
+              await insertAction(client, notificationId, action);
+            }
+            await client.query(
+              `
+                UPDATE notifications
+                SET primary_action_id = $2, is_actionable = $3,
+                    last_source_synced_at = $4,
+                    source_resolved_at = CASE
+                      WHEN $5 = 'resolved' THEN coalesce(source_resolved_at, $4)
+                      ELSE NULL
+                    END
+                WHERE id = $1
+              `,
+              [
+                notificationId,
+                projection.actions[0]?.id ?? null,
+                projection.sourceState === 'active' && projection.actions.length > 0,
+                input.receivedAt,
+                projection.sourceState,
+              ],
+            );
+            if (input.suppressDeliveries) {
+              await client.query(
+                'DELETE FROM notification_delivery_events WHERE notification_id = $1',
+                [notificationId],
+              );
+            }
+            await client.query(
+              `
+                UPDATE homelab_alert_receipts SET notification_id = $4
+                WHERE integration = $1 AND source = $2 AND event_id = $3
+              `,
+              [input.integration, event.source, event.eventId, notificationId],
+            );
+            totals.applied++;
+            if (creation.created) totals.created++;
+            else totals.updated++;
+            totals.pendingDelivery ||= !input.suppressDeliveries
+              && creation.deliveryEvents.some(delivery => delivery.status === 'pending');
+          }
+          return totals;
+        });
+      },
+
+      async inspectSyntheticLifecycle(
+        identity: AlertmanagerSyntheticIdentity,
+      ): Promise<AlertmanagerSyntheticInspection> {
+        const [projections, receipts] = await Promise.all([
+          query<{ sourceState: string }>(
+            pool,
+            `SELECT source_state AS "sourceState" FROM notifications WHERE source_id = $1`,
+            [identity.sourceId],
+          ),
+          query<{ status: string; deliveryCount: number }>(
+            pool,
+            `
+              SELECT status, delivery_count AS "deliveryCount"
+              FROM homelab_alert_receipts
+              WHERE integration = $1 AND source = $2 AND fingerprint = $3
+            `,
+            [identity.integration, identity.source, identity.fingerprint],
+          ),
+        ]);
+        return {
+          projectionCount: projections.length,
+          sourceState: projections[0]?.sourceState ?? null,
+          receiptCount: receipts.length,
+          firingDeliveryCount: receipts.find(receipt => receipt.status === 'firing')
+            ?.deliveryCount ?? null,
+        };
+      },
+
+      async cleanupSyntheticLifecycle(identity) {
+        await transaction(pool, async (client) => {
+          const [projection] = await query<{ id: string }>(
+            client,
+            'SELECT id FROM notifications WHERE source_id = $1 FOR UPDATE',
+            [identity.sourceId],
+          );
+          if (projection) {
+            await client.query(
+              'DELETE FROM notification_actions WHERE notification_id = $1',
+              [projection.id],
+            );
+            await client.query(
+              'DELETE FROM notification_delivery_events WHERE notification_id = $1',
+              [projection.id],
+            );
+          }
+          await client.query(
+            `
+              DELETE FROM homelab_alert_receipts
+              WHERE integration = $1 AND source = $2 AND fingerprint = $3
+            `,
+            [identity.integration, identity.source, identity.fingerprint],
+          );
+          await client.query('DELETE FROM notifications WHERE source_id = $1', [
+            identity.sourceId,
+          ]);
+        });
       },
     },
   };

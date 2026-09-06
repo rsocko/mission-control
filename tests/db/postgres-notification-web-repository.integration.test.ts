@@ -12,10 +12,10 @@ import type { NotificationWebPersistence } from '@/db/persistence/notification-w
 
 /**
  * PostgreSQL integration tests for NotificationWebPersistence.
- * Requires a live PostgreSQL connection (skipped in CI without PG_TEST_URL).
+ * Requires a live PostgreSQL connection (skipped without MC_TEST_POSTGRES_URL).
  */
 describe('PostgreSQL NotificationWebPersistence integration', () => {
-  const PG_URL = process.env.PG_TEST_URL;
+  const PG_URL = process.env.MC_TEST_POSTGRES_URL;
 
   it.skipIf(!PG_URL)('connects to PostgreSQL and creates the repository', async () => {
     const { createPostgresNotificationWebRepository } = await import(
@@ -57,13 +57,100 @@ describe('PostgreSQL NotificationWebPersistence integration', () => {
       await pool.end();
     }
   });
+
+  it.skipIf(!PG_URL)('uses JSONB enrichment selection and fences workflow finalization', async () => {
+    const { createPostgresNotificationWebRepository } = await import(
+      '@/db/postgres/repositories/notification-web-repository'
+    );
+    const { Pool } = await import('pg');
+    const pool = new Pool({ connectionString: PG_URL });
+    const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const notificationId = `notification-web-${suffix}`;
+    const enrichedId = `notification-web-enriched-${suffix}`;
+    const actionId = `notification-action-${suffix}`;
+    const followUpId = `notification-follow-up-${suffix}`;
+    try {
+      const repo = createPostgresNotificationWebRepository(pool);
+      await pool.query(`
+        INSERT INTO notifications (
+          id, source_id, connector_type, connector_instance_id,
+          title, received_at, sort_at, metadata, presentation, is_actionable
+        ) VALUES
+          ($1, $2, 'n8n', 'n8n-1', 'Workflow', $3, $3, '{}'::jsonb, '{}'::jsonb, true),
+          ($4, $5, 'n8n', 'n8n-1', 'Enriched', $3, $3,
+           '{"enrichment":{"version":1}}'::jsonb, '{}'::jsonb, false)
+      `, [
+        notificationId,
+        `source-${notificationId}`,
+        '2026-09-05T12:00:00.000Z',
+        enrichedId,
+        `source-${enrichedId}`,
+      ]);
+      await pool.query(`
+        INSERT INTO notification_actions (
+          id, notification_id, action_type, label, is_primary, payload
+        ) VALUES ($1, $2, 'run_workflow', 'Run', true, '{}'::jsonb)
+      `, [actionId, notificationId]);
+
+      const unenriched = await repo.listNotificationsForReEnrichment({
+        scope: 'unenriched',
+        limit: 500,
+      });
+      expect(unenriched.map(row => row.id)).toContain(notificationId);
+      expect(unenriched.map(row => row.id)).not.toContain(enrichedId);
+
+      const claimedAt = '2026-09-05T12:01:00.000Z';
+      await expect(repo.claimWorkflowAction({
+        notificationId,
+        actionId,
+        claimedAt,
+        recoveryCutoff: '2026-09-05T11:56:00.000Z',
+      })).resolves.toBe(true);
+      const finalize = (claim: string) => repo.finalizeWorkflowAction({
+        notificationId,
+        actionId,
+        claimedAt: claim,
+        now: '2026-09-05T12:02:00.000Z',
+        success: true,
+        error: null,
+        groupKey: `workflow:${notificationId}`,
+        followUp: {
+          id: followUpId,
+          sourceId: `source-${followUpId}`,
+          title: 'Workflow completed',
+          body: 'The workflow completed successfully.',
+          level: 'heads_up',
+          levelRank: 2,
+          groupKey: `workflow:${notificationId}`,
+          relatedTaskId: null,
+          relatedProjectId: null,
+          relatedEntityId: notificationId,
+          metadata: { outcome: 'completed' },
+          presentation: { sourceName: 'Workflow' },
+          retryAction: null,
+        },
+      });
+      await expect(finalize('2026-09-05T12:01:01.000Z')).resolves.toBe(false);
+      await expect(finalize(claimedAt)).resolves.toBe(true);
+    } finally {
+      await pool.query(
+        'DELETE FROM notification_actions WHERE id = $1 OR notification_id = $2',
+        [actionId, followUpId],
+      ).catch(() => {});
+      await pool.query(
+        'DELETE FROM notifications WHERE id = ANY($1::text[])',
+        [[notificationId, enrichedId, followUpId]],
+      ).catch(() => {});
+      await pool.end();
+    }
+  });
 });
 
 // Run the shared backend-parity contract suite against a live PostgreSQL
 // connection so that ordering, lifecycle, writeback claim/lease/retry, and
 // JSONB/boolean/null marshalling are verified identically to the SQLite adapter.
-describe.skipIf(!process.env.PG_TEST_URL)('PostgreSQL NotificationWebPersistence contract', () => {
-  const PG_URL = process.env.PG_TEST_URL;
+describe.skipIf(!process.env.MC_TEST_POSTGRES_URL)('PostgreSQL NotificationWebPersistence contract', () => {
+  const PG_URL = process.env.MC_TEST_POSTGRES_URL;
   let pool: import('pg').Pool;
   let repo: NotificationWebPersistence;
   let seed: NotificationWebContractSeed;

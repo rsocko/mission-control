@@ -8,15 +8,12 @@
  *
  * Refs: #1539, #1540, #1541, #1542
  */
-import db from '@/db';
-import { tasks, myDayItems, notifications, triageItems } from '@/db/schema';
-import { eq, and, lt, ne, inArray, like, sql } from 'drizzle-orm';
-import { getPreferences } from '@/lib/notifications/quiet-hours';
 import {
   createNotification,
   type CreateNotificationResult,
   type MissionControlPushPayload,
 } from '@/lib/notifications';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { getLocalToday } from '@/lib/utils/date';
 import logger from '@/lib/logger';
 
@@ -60,40 +57,9 @@ async function writeNotificationRecord(opts: {
   });
 }
 
-function parseTriageNudgeCount(
-  row: Pick<typeof notifications.$inferSelect, 'sourceId' | 'metadata'>,
-  sourcePrefix: string,
-): number | null {
-  const metadata = row.metadata && typeof row.metadata === 'object'
-    ? row.metadata as Record<string, unknown>
-    : {};
-  const metadataCount = metadata.queueSize;
-  if (typeof metadataCount === 'number' && Number.isInteger(metadataCount) && metadataCount >= 0) {
-    return metadataCount;
-  }
-
-  const sourceCount = Number(row.sourceId.slice(sourcePrefix.length));
-  return Number.isInteger(sourceCount) && sourceCount >= 0 ? sourceCount : null;
-}
-
 export async function getTriageNudgeHighWater(today = getLocalToday()): Promise<number | null> {
-  const sourcePrefix = `push:triage_nudge:${today}:`;
-  const priorNudges = await db.select({
-    sourceId: notifications.sourceId,
-    metadata: notifications.metadata,
-  }).from(notifications).where(and(
-    eq(notifications.connectorType, 'system'),
-    eq(notifications.connectorInstanceId, 'push-triggers'),
-    eq(notifications.templateKey, 'triage_nudge'),
-    like(notifications.sourceId, `${sourcePrefix}%`),
-  ));
-
-  let highWater: number | null = null;
-  for (const row of priorNudges) {
-    const count = parseTriageNudgeCount(row, sourcePrefix);
-    if (count !== null && (highWater === null || count > highWater)) highWater = count;
-  }
-  return highWater;
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  return (await repository.scheduledTriggers.getTriageSnapshot(today)).highWater;
 }
 
 /**
@@ -139,42 +105,13 @@ async function getCalendarSummary(): Promise<{ count: number; summary: string }>
  * Generates a summary notification to kick off the day.
  */
 export async function triggerMorningNotification(): Promise<boolean> {
-  const prefs = await getPreferences();
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const prefs = await repository.push.getPreferences();
   if (!prefs.morningEnabled) return false;
 
   const today = getLocalToday();
-
-  // 1. Tasks due today
-  const todayMyDay = await db.select({ taskId: myDayItems.taskId })
-    .from(myDayItems)
-    .where(eq(myDayItems.date, today))
-    .limit(50);
-
-  const todayTaskIds = todayMyDay.map(i => i.taskId);
-  let plannedCount = 0;
-  if (todayTaskIds.length > 0) {
-    const plannedTasks = await db.select({ id: tasks.id })
-      .from(tasks)
-      .where(and(
-        inArray(tasks.id, todayTaskIds),
-        ne(tasks.status, 'done'),
-        ne(tasks.status, 'cancelled'),
-      ));
-    plannedCount = plannedTasks.length;
-  }
-
-  // 2. Overdue tasks (due before today, not completed/cancelled)
-  const overdueTasks = await db.select({ id: tasks.id })
-    .from(tasks)
-    .where(and(
-      lt(tasks.dueDate, today),
-      ne(tasks.status, 'done'),
-      ne(tasks.status, 'cancelled'),
-    ))
-    .limit(100);
-  const overdueCount = overdueTasks.length;
-
-  // 3. Calendar events
+  const { plannedCount, overdueCount } = await repository.scheduledTriggers
+    .getMorningSnapshot(today);
   const calendar = await getCalendarSummary();
 
   // Build notification body
@@ -240,21 +177,17 @@ export async function triggerMorningNotification(): Promise<boolean> {
  * Includes deduplication to prevent re-notifying for the same breach.
  */
 export async function triggerTriageNudge(): Promise<boolean> {
-  const prefs = await getPreferences();
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const prefs = await repository.push.getPreferences();
   if (!prefs.triageNudgeEnabled) return false;
 
-  // Count unprocessed triage items using SQL COUNT for accuracy
-  const [{ count: rawCount }] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(triageItems)
-    .where(eq(triageItems.status, 'pending'));
-
-  const count = Number(rawCount);
+  const today = getLocalToday();
+  const snapshot = await repository.scheduledTriggers.getTriageSnapshot(today);
+  const count = snapshot.pendingCount;
   const threshold = prefs.triageNudgeThreshold ?? 5;
   if (count < threshold) return false;
 
-  const today = getLocalToday();
-  const highWater = await getTriageNudgeHighWater(today);
+  const highWater = snapshot.highWater;
   if (highWater !== null && count <= highWater) {
     logger.info({ count, highWater }, 'Triage nudge skipped (queue has not grown)');
     return false;
@@ -299,35 +232,18 @@ export async function triggerTriageNudge(): Promise<boolean> {
  * Generates notification listing the incomplete count.
  */
 export async function triggerCarryForwardReminder(): Promise<boolean> {
-  const prefs = await getPreferences();
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const prefs = await repository.push.getPreferences();
   if (!prefs.carryForwardEnabled) return false;
 
   const today = getLocalToday();
-
-  // Get today's My Day items
-  const todayMyDay = await db.select({ taskId: myDayItems.taskId })
-    .from(myDayItems)
-    .where(eq(myDayItems.date, today))
-    .limit(50);
-
-  const todayTaskIds = todayMyDay.map(i => i.taskId);
-  if (todayTaskIds.length === 0) return false;
-
-  // Find incomplete tasks among today's items (exclude done and cancelled)
-  const incompleteTasks = await db
-    .select({ id: tasks.id, title: tasks.title })
-    .from(tasks)
-    .where(and(
-      inArray(tasks.id, todayTaskIds),
-      ne(tasks.status, 'done'),
-      ne(tasks.status, 'cancelled'),
-    ));
-
-  const incompleteCount = incompleteTasks.length;
+  const { incompleteTaskTitles } = await repository.scheduledTriggers
+    .getCarryForwardSnapshot(today);
+  const incompleteCount = incompleteTaskTitles.length;
   if (incompleteCount === 0) return false;
 
   // Build body with up to 3 task names for context
-  const preview = incompleteTasks.slice(0, 3).map(t => t.title);
+  const preview = incompleteTaskTitles.slice(0, 3);
   let body = `${incompleteCount} ${incompleteCount === 1 ? 'task remains' : 'tasks remain'} incomplete.`;
   if (preview.length > 0) {
     body += '\n• ' + preview.join('\n• ');

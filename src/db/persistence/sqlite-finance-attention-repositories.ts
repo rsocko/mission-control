@@ -14,9 +14,9 @@ import {
   tasks,
 } from '@/db/schema';
 import {
-  createNotificationsInTransaction,
-  type CreateNotificationInput,
-} from '@/lib/notifications/service';
+  createSqliteNotificationsInTransaction,
+} from './sqlite-notification-creation';
+import type { CreateNotificationInput } from './notification-delivery';
 import type { InboundNotification } from '@/types';
 import { formatDateInLocalTimezone } from '@/lib/utils/date';
 import {
@@ -62,7 +62,7 @@ import {
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = BetterSQLite3Database<typeof schema>;
-type Transaction = Parameters<typeof createNotificationsInTransaction>[0];
+type Transaction = Parameters<typeof createSqliteNotificationsInTransaction>[0];
 
 interface SqliteFinanceAttentionHandles {
   sqlite: SqliteDatabase;
@@ -495,7 +495,7 @@ function providerNotification(notification: {
 
 function syncFinanceAttentionNotificationPresentation(
   transaction: Transaction,
-  results: ReturnType<typeof createNotificationsInTransaction>,
+  results: ReturnType<typeof createSqliteNotificationsInTransaction>,
 ): void {
   for (const result of results) {
     const resolved = resolveFinanceAttentionNotificationPresentation({
@@ -630,7 +630,7 @@ export function createSqliteFinanceAttentionRoutingPersistence(
           const inputs: CreateNotificationInput[] = pendingNotifications.map((signal) => (
             financeAttentionNotificationInput(signal, decisionAt)
           ));
-          const routed = createNotificationsInTransaction(transaction, inputs, {
+          const routed = createSqliteNotificationsInTransaction(transaction, inputs, {
             now: decisionAt,
             wakeDispatcher: false,
           });

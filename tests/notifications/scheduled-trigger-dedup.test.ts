@@ -19,6 +19,7 @@ beforeAll(async () => {
   db = database.default;
   schema = await import('@/db/schema');
   pushPersistence = createSqliteNotificationPushRepository(database.sqlite);
+  await database.initializeSqlitePersistenceComposition();
   ({ triggerTriageNudge } = await import('@/lib/push/triggers'));
 });
 

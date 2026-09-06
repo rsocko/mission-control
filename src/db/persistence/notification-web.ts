@@ -1,5 +1,4 @@
 import type { NotificationQuery } from '@/lib/notifications/query';
-import type { NotificationView } from '@/lib/notifications/views';
 import type { NotificationState } from '@/types';
 
 // ─── Mutation action/result types (shared with notification-writeback) ───────
@@ -208,6 +207,144 @@ export interface WebSubscriptionInput {
   userAgent: string | null;
 }
 
+// ─── Action, enrichment, and classification shapes ──────────────────────────
+
+export interface NotificationActionNotification {
+  id: string;
+  sourceId: string;
+  connectorType: string;
+  connectorInstanceId: string;
+  title: string;
+  body: string | null;
+  level: string;
+  category: string;
+  templateKey: string | null;
+  state: string;
+  readState: string;
+  disposition: string;
+  sourceState: string;
+  navigationTarget: string | null;
+  relatedTaskId: string | null;
+  relatedProjectId: string | null;
+  groupKey: string | null;
+  metadata: unknown;
+  presentation: unknown;
+  lastSourceActivityAt: string | null;
+  lastSourceActivityKey: string | null;
+}
+
+export interface NotificationRouteAction {
+  id: string;
+  notificationId: string;
+  actionType: string;
+  payload: unknown;
+}
+
+export type NotificationRouteLifecycleState = 'read' | 'archived' | 'dismissed';
+
+export interface ReminderActionInput {
+  notificationId: string;
+  actionId: string;
+  taskId: string;
+  actionType: 'remind_later' | 'complete_task' | 'dismiss_reminder';
+  now: string;
+  reminderAt: string | null;
+}
+
+export type ReminderActionResult =
+  | { applied: true }
+  | {
+      applied: false;
+      conflict:
+        | 'missing'
+        | 'handled'
+        | 'task_terminal'
+        | 'action_claimed'
+        | 'reminder_changed';
+    };
+
+export interface WorkflowFollowUpInput {
+  id: string;
+  sourceId: string;
+  title: string;
+  body: string;
+  level: 'heads_up' | 'action_needed';
+  levelRank: number;
+  groupKey: string;
+  relatedTaskId: string | null;
+  relatedProjectId: string | null;
+  relatedEntityId: string;
+  metadata: Record<string, unknown>;
+  presentation: Record<string, unknown>;
+  retryAction: {
+    id: string;
+    payload: Record<string, unknown>;
+  } | null;
+}
+
+export interface ReEnrichmentNotification {
+  id: string;
+  sourceId: string;
+  connectorType: string;
+  connectorInstanceId: string;
+  title: string;
+  body: string | null;
+  level: string;
+  category: string;
+  state: string;
+  readState: string;
+  isActionable: boolean;
+  metadata: unknown;
+}
+
+export type ReEnrichmentScope =
+  | { scope: 'all'; limit: number }
+  | { scope: 'unenriched'; limit: number }
+  | { scope: 'connector'; connectorType: string; limit: number }
+  | { scope: 'ids'; ids: string[] };
+
+export interface ReEnrichedNotificationInput {
+  id: string;
+  title: string;
+  body: string | null;
+  category: string;
+  templateKey: string | null;
+  relatedTaskId: string | null;
+  relatedProjectId: string | null;
+  relatedEntityType: string | null;
+  relatedEntityId: string | null;
+  navigationTarget: string | null;
+  metadata: Record<string, unknown>;
+  presentation: Record<string, unknown>;
+  providerSignature: boolean;
+  isActionable: boolean;
+  primaryActionId: string | null;
+  actions: Array<{
+    id: string;
+    notificationId: string;
+    actionType: string;
+    label: string;
+    icon?: string | null;
+    variant: string;
+    isPrimary: boolean;
+    sortOrder: number;
+    payload: Record<string, unknown>;
+    opensExternal: boolean;
+    requiresConfirmation: boolean;
+    createdBy: string;
+  }>;
+}
+
+export interface NotificationClassificationItem {
+  id: string;
+  title: string;
+  level: string;
+  category: string;
+  isActionable: boolean;
+  connectorType: string;
+  receivedAt: string;
+}
+
 // ─── Contract ───────────────────────────────────────────────────────────────
 
 export interface NotificationWebPersistence {
@@ -219,6 +356,46 @@ export interface NotificationWebPersistence {
   }): Promise<NotificationQueryResult>;
 
   recoverStaleActions(recoveryCutoff: string): Promise<void>;
+
+  // Action route
+  findNotificationForAction(id: string): Promise<NotificationActionNotification | null>;
+  findNotificationAction(
+    notificationId: string,
+    actionId: string,
+  ): Promise<NotificationRouteAction | null>;
+  updateNotificationFromAction(input: {
+    notificationId: string;
+    state: NotificationRouteLifecycleState;
+    now: string;
+  }): Promise<void>;
+  getReminderMorningHour(): Promise<number>;
+  applyReminderAction(input: ReminderActionInput): Promise<ReminderActionResult>;
+  findWorkflowEndpoint(
+    workflowId: string,
+  ): Promise<{ found: boolean; url: string | null }>;
+  claimWorkflowAction(input: {
+    notificationId: string;
+    actionId: string;
+    claimedAt: string;
+    recoveryCutoff: string;
+  }): Promise<boolean>;
+  finalizeWorkflowAction(input: {
+    notificationId: string;
+    actionId: string;
+    claimedAt: string;
+    now: string;
+    success: boolean;
+    error: string | null;
+    groupKey: string;
+    followUp: WorkflowFollowUpInput;
+  }): Promise<boolean>;
+
+  // Re-enrichment and notification triage
+  listNotificationsForReEnrichment(
+    input: ReEnrichmentScope,
+  ): Promise<ReEnrichmentNotification[]>;
+  saveReEnrichedNotification(input: ReEnrichedNotificationInput): Promise<void>;
+  listNotificationsForClassification(limit: number): Promise<NotificationClassificationItem[]>;
 
   // Single mutations
   restoreSnapshots(snapshots: RestoreSnapshot[]): Promise<{ updatedCount: number }>;

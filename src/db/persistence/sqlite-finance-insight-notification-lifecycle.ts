@@ -7,10 +7,12 @@ import db, { sqlite } from '@/db';
 import * as schema from '@/db/schema';
 import { notificationActions, notifications } from '@/db/schema';
 import {
-  createNotificationsInTransaction,
-  type CreateNotificationInput,
-  type CreateNotificationResult,
-} from '@/lib/notifications/service';
+  createSqliteNotificationsInTransaction,
+} from './sqlite-notification-creation';
+import type {
+  CreateNotificationInput,
+  CreateNotificationResult,
+} from './notification-delivery';
 import {
   materializeNotificationActions,
   registerDefaultNotificationProviders,
@@ -51,7 +53,7 @@ import type {
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = BetterSQLite3Database<typeof schema>;
-type NotificationTransaction = Parameters<typeof createNotificationsInTransaction>[0];
+type NotificationTransaction = Parameters<typeof createSqliteNotificationsInTransaction>[0];
 
 // ─── cutover.ts-only legacy helpers (unchanged behavior) ────────────────────
 
@@ -279,7 +281,7 @@ export function createSqliteFinanceInsightNotificationLifecyclePersistence(
       const results = handles.db.transaction((transaction) => {
         reconcilePortable(transaction, input.connectorId, input.reconcile, input.now);
         const createInputs = input.ingest.map(toCreateNotificationInput);
-        const created = createNotificationsInTransaction(transaction, createInputs, {
+        const created = createSqliteNotificationsInTransaction(transaction, createInputs, {
           now,
           wakeDispatcher: false,
         });

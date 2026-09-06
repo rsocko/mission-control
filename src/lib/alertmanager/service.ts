@@ -1,25 +1,62 @@
 import 'server-only';
 
-import { and, eq, sql } from 'drizzle-orm';
-import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { runTransaction } from '@/db';
-import * as schema from '@/db/schema';
-import {
-  homelabAlertReceipts,
-  notificationActions,
-  notificationDeliveryEvents,
-  notifications,
-} from '@/db/schema';
-import {
-  createNotificationsInTransaction,
-  wakeNotificationDeliveryDispatcher,
-} from '@/lib/notifications';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { wakeNotificationDeliveryDispatcher } from '@/lib/notifications/dispatcher-wake';
 import {
   homelabAlertLifecycleEventV1Schema,
   type HomelabAlertLifecycleEventV1,
 } from './contracts';
 
-type AlertDatabase = BetterSQLite3Database<typeof schema>;
+interface AlertmanagerProjectionAction {
+  id: string;
+  actionType: 'open_url';
+  label: string;
+  icon: string;
+  variant: 'primary' | 'secondary';
+  isPrimary: boolean;
+  sortOrder: number;
+  payload: { url: string; kind: string };
+  opensExternal: true;
+  createdBy: 'connector';
+}
+
+interface AlertmanagerLifecycleWrite {
+  source: string;
+  eventId: string;
+  fingerprint: string;
+  status: 'firing' | 'resolved';
+  occurredAt: string;
+  projection: {
+    newNotificationId: string;
+    sourceId: string;
+    title: string;
+    body: string | null;
+    level: string;
+    category: string;
+    templateKey: string;
+    readState: 'unread' | 'read';
+    sourceState: 'active' | 'resolved';
+    sourceActivityAt: string;
+    sourceActivityKey: string;
+    receivedAt: string;
+    sortAt: string;
+    dedupeKey: string;
+    metadata: Record<string, unknown>;
+    presentation: Record<string, unknown>;
+    isActionable: boolean;
+    occurrenceKey: string;
+    actions: readonly AlertmanagerProjectionAction[];
+  };
+}
+
+interface AlertmanagerRepository {
+  ingestBatch(input: {
+    integration: string;
+    receivedAt: string;
+    suppressDeliveries: boolean;
+    events: readonly AlertmanagerLifecycleWrite[];
+  }): Promise<IngestHomelabAlertResult & { pendingDelivery: boolean }>;
+}
 
 const linkLabels = {
   dashboard: 'Open dashboard',
@@ -67,19 +104,6 @@ function levelFor(event: HomelabAlertLifecycleEventV1) {
   return 'fyi';
 }
 
-function eventPrecedesProjection(
-  event: HomelabAlertLifecycleEventV1,
-  current: typeof notifications.$inferSelect | undefined,
-): boolean {
-  if (!current?.lastSourceActivityAt) return false;
-  const incomingTime = Date.parse(event.occurredAt);
-  const currentTime = Date.parse(current.lastSourceActivityAt);
-  if (incomingTime < currentTime) return true;
-  return incomingTime === currentTime
-    && current.sourceState === 'resolved'
-    && event.status === 'firing';
-}
-
 function createPresentation(event: HomelabAlertLifecycleEventV1) {
   const context = event.node || event.site || event.service || 'Homelab';
   const contextStats = [
@@ -106,20 +130,11 @@ function createPresentation(event: HomelabAlertLifecycleEventV1) {
   };
 }
 
-function replaceExternalActions(
-  database: AlertDatabase,
-  notificationId: string,
+function projectionActions(
   event: HomelabAlertLifecycleEventV1,
-): void {
-  database.delete(notificationActions).where(and(
-    eq(notificationActions.notificationId, notificationId),
-    eq(notificationActions.createdBy, 'connector'),
-    eq(notificationActions.actionType, 'open_url'),
-  )).run();
-
-  const actions = (event.links ?? []).map((link, index) => ({
+): AlertmanagerProjectionAction[] {
+  return (event.links ?? []).map((link, index) => ({
     id: crypto.randomUUID(),
-    notificationId,
     actionType: 'open_url',
     label: linkLabels[link.kind],
     icon: 'external-link',
@@ -128,61 +143,72 @@ function replaceExternalActions(
     sortOrder: index,
     payload: { url: link.url, kind: link.kind },
     opensExternal: true,
-    requiresConfirmation: false,
     createdBy: 'connector',
   }));
-  if (actions.length > 0) database.insert(notificationActions).values(actions).run();
-  database.update(notifications).set({
-    primaryActionId: actions[0]?.id ?? null,
-    isActionable: event.status === 'firing' && actions.length > 0,
-  }).where(eq(notifications.id, notificationId)).run();
 }
 
-function persistReceipt(
-  database: AlertDatabase,
+function lifecycleWrite(
   integration: string,
   event: HomelabAlertLifecycleEventV1,
-  notificationId: string,
   receivedAt: string,
-  applied: boolean,
-): boolean {
-  const existing = database.select({ id: homelabAlertReceipts.id })
-    .from(homelabAlertReceipts)
-    .where(and(
-      eq(homelabAlertReceipts.integration, integration),
-      eq(homelabAlertReceipts.source, event.source),
-      eq(homelabAlertReceipts.eventId, event.eventId),
-    ))
-    .get();
-  if (existing) {
-    database.update(homelabAlertReceipts).set({
-      lastReceivedAt: receivedAt,
-      deliveryCount: sql`${homelabAlertReceipts.deliveryCount} + 1`,
-      applied,
-    }).where(eq(homelabAlertReceipts.id, existing.id)).run();
-    return true;
-  }
-  database.insert(homelabAlertReceipts).values({
-    id: crypto.randomUUID(),
-    integration,
+): AlertmanagerLifecycleWrite {
+  const sourceId = notificationIdentity(integration, event);
+  const actions = projectionActions(event);
+  return {
     source: event.source,
     eventId: event.eventId,
     fingerprint: event.fingerprint,
     status: event.status,
     occurredAt: event.occurredAt,
-    notificationId,
-    firstReceivedAt: receivedAt,
-    lastReceivedAt: receivedAt,
-    deliveryCount: 1,
-    applied,
-  }).run();
-  return false;
+    projection: {
+      newNotificationId: crypto.randomUUID(),
+      sourceId,
+      title: event.service ? `${event.service}: ${event.summary}` : event.summary,
+      body: event.description ?? null,
+      level: levelFor(event),
+      category: event.category ?? categoryFor(event.type),
+      templateKey: event.type,
+      readState: event.status === 'firing' ? 'unread' : 'read',
+      sourceState: event.status === 'firing' ? 'active' : 'resolved',
+      sourceActivityAt: event.occurredAt,
+      sourceActivityKey: `${event.status}:${event.eventId}`,
+      receivedAt,
+      sortAt: event.occurredAt,
+      dedupeKey: sourceId,
+      metadata: {
+        schemaVersion: event.schemaVersion,
+        eventId: event.eventId,
+        source: event.source,
+        fingerprint: event.fingerprint,
+        status: event.status,
+        startsAt: event.startsAt,
+        endsAt: event.endsAt,
+        severity: event.severity,
+        type: event.type,
+        category: event.category ?? categoryFor(event.type),
+        service: event.service,
+        node: event.node,
+        site: event.site,
+        environment: event.environment,
+        owner: event.owner,
+        actionRequired: event.actionRequired,
+        metrics: event.metrics ?? [],
+        links: event.links ?? [],
+        runbookKey: event.runbookKey,
+      },
+      presentation: createPresentation(event),
+      isActionable: event.status === 'firing' && actions.length > 0,
+      occurrenceKey: event.eventId,
+      actions,
+    },
+  };
 }
 
-export function ingestHomelabAlertEvents(
+export async function ingestHomelabAlertEvents(
   rawEvents: readonly HomelabAlertLifecycleEventV1[],
   options: IngestHomelabAlertOptions,
-): IngestHomelabAlertResult {
+  repository?: AlertmanagerRepository,
+): Promise<IngestHomelabAlertResult> {
   const integration = options.integration.trim();
   if (!integration || integration.length > 100) {
     throw new Error('integration must contain between 1 and 100 characters');
@@ -192,107 +218,19 @@ export function ingestHomelabAlertEvents(
     .max(100)
     .parse(rawEvents);
   const receivedAt = (options.receivedAt ?? new Date()).toISOString();
-  let shouldWakeDispatcher = false;
-
-  const result = runTransaction((transaction) => {
-    const totals: IngestHomelabAlertResult = {
-      accepted: events.length,
-      applied: 0,
-      stale: 0,
-      created: 0,
-      updated: 0,
-      duplicateReceipts: 0,
-    };
-
-    for (const event of events) {
-      const sourceId = notificationIdentity(integration, event);
-      const current = transaction.select().from(notifications)
-        .where(eq(notifications.sourceId, sourceId))
-        .get();
-      const stale = eventPrecedesProjection(event, current);
-      const duplicate = persistReceipt(
-        transaction,
-        integration,
-        event,
-        current?.id ?? sourceId,
-        receivedAt,
-        !stale,
-      );
-      if (duplicate) totals.duplicateReceipts++;
-      if (stale) {
-        totals.stale++;
-        continue;
-      }
-
-      const [creation] = createNotificationsInTransaction(transaction, [{
-        id: current?.id,
-        sourceId,
-        connectorType: 'homelab',
-        connectorInstanceId: integration,
-        title: event.service ? `${event.service}: ${event.summary}` : event.summary,
-        body: event.description ?? null,
-        level: levelFor(event),
-        category: event.category ?? categoryFor(event.type),
-        templateKey: event.type,
-        readState: event.status === 'firing' ? 'unread' : 'read',
-        sourceState: event.status === 'firing' ? 'active' : 'resolved',
-        sourceActivityAt: event.occurredAt,
-        sourceActivityKey: `${event.status}:${event.eventId}`,
-        reopenPolicy: 'handled',
-        receivedAt,
-        sortAt: event.occurredAt,
-        dedupeKey: sourceId,
-        metadata: {
-          schemaVersion: event.schemaVersion,
-          eventId: event.eventId,
-          source: event.source,
-          fingerprint: event.fingerprint,
-          status: event.status,
-          startsAt: event.startsAt,
-          endsAt: event.endsAt,
-          severity: event.severity,
-          type: event.type,
-          category: event.category ?? categoryFor(event.type),
-          service: event.service,
-          node: event.node,
-          site: event.site,
-          environment: event.environment,
-          owner: event.owner,
-          actionRequired: event.actionRequired,
-          metrics: event.metrics ?? [],
-          links: event.links ?? [],
-          runbookKey: event.runbookKey,
-        },
-        presentation: createPresentation(event),
-        isActionable: event.status === 'firing' && (event.links?.length ?? 0) > 0,
-        occurrenceKey: event.eventId,
-      }], {
-        now: options.receivedAt,
-        wakeDispatcher: false,
-      });
-      replaceExternalActions(transaction, creation.notification.id, event);
-      if (options.suppressDeliveries) {
-        transaction.delete(notificationDeliveryEvents)
-          .where(eq(notificationDeliveryEvents.notificationId, creation.notification.id))
-          .run();
-      }
-      transaction.update(homelabAlertReceipts).set({
-        notificationId: creation.notification.id,
-      }).where(and(
-        eq(homelabAlertReceipts.integration, integration),
-        eq(homelabAlertReceipts.source, event.source),
-        eq(homelabAlertReceipts.eventId, event.eventId),
-      )).run();
-      totals.applied++;
-      if (creation.created) totals.created++;
-      else totals.updated++;
-      shouldWakeDispatcher ||= !options.suppressDeliveries
-        && creation.deliveryEvents.some(delivery => delivery.status === 'pending');
-    }
-    return totals;
+  const persistence = repository
+    ?? (await getWorkerPersistenceRepositories()).webhookIntegrations.alertmanager;
+  if (!persistence) {
+    throw new Error('Alertmanager persistence is not available in the selected backend');
+  }
+  const { pendingDelivery, ...result } = await persistence.ingestBatch({
+    integration,
+    receivedAt,
+    suppressDeliveries: options.suppressDeliveries ?? false,
+    events: events.map(event => lifecycleWrite(integration, event, receivedAt)),
   });
 
-  if (options.wakeDispatcher !== false && shouldWakeDispatcher) {
+  if (options.wakeDispatcher !== false && pendingDelivery) {
     wakeNotificationDeliveryDispatcher();
   }
   return result;

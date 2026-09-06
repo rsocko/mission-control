@@ -243,7 +243,7 @@ export async function POST(request: Request) {
         detail: 'Authenticated batch intentionally dropped while intake was paused',
       }, true);
     }
-    const result = ingestHomelabAlertEvents(events, { integration });
+    const result = await ingestHomelabAlertEvents(events, { integration });
     return respondWithAudit(Response.json({ success: true, ...result }), {
       integration,
       kind: 'webhook_request',

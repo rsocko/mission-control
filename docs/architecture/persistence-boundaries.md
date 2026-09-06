@@ -2479,6 +2479,56 @@ sentinel remain the sole exact-current owners; the task-organization layer test
 owns only route cleanliness, boundary constraints, and the monotonic 90-unit
 ceiling.
 
+## Web/API PostgreSQL parity: notification delivery and Alertmanager
+
+Seven routes use the startup-selected worker composition without importing a
+database handle: Alertmanager control, synthetic testing, and webhook intake;
+notification action execution, re-enrichment, and notification triage; and the
+scheduled push trigger. The eight application libraries behind those routes are
+also backend-neutral. The bounded change owns 32 production paths, 11
+test/baseline paths, and two documentation paths.
+
+`NotificationDeliveryRepository` composes notification creation, push rules,
+policy resolution, scheduled-trigger reads, and notification-web operations.
+The existing `WebhookIntegrationsPersistence` composition adds the
+`alertmanager` sub-port. SQLite adapters own Drizzle/SQLite transactions and JSON
+text handling; PostgreSQL adapters own `pg` transactions, JSONB predicates, and
+database serialization. Callers receive typed booleans, parsed JSON values,
+nullable values, and ISO timestamps. Backend selection remains exclusively at
+startup, with no request-time fallback or dual write.
+
+The adapters preserve these workflow boundaries:
+
+- Alertmanager authenticates, rate-limits, validates, normalizes, checks pause
+  state, commits lifecycle projection, and then commits the required operational
+  receipt in the same external order as before. A receipt failure after
+  projection still returns retryable `503`; deterministic incident identities
+  serialize concurrent PostgreSQL retries without a new schema object.
+- Provider actions and task completion remain outside repository transactions.
+  Workflow actions claim before network I/O, use
+  `notification-action:<actionId>` downstream, and finalize only when the stored
+  `claimedAt` equals the worker's claim timestamp.
+- Re-enrichment selects the same four scopes in the same order, performs
+  enrichment outside transactions, and atomically replaces each notification
+  and its pending connector actions. One row failure remains a partial result
+  rather than rolling back successful rows.
+- Scheduled triggers perform calendar I/O before notification persistence and
+  preserve local-date daily dedupe, triage high-water checks, policy snapshots,
+  and post-commit dispatcher wakeups. Existing unique identities provide the
+  required retry safety; no additional lock namespace is introduced.
+- Notification triage extracts only its pure classifier. The broader AI triage
+  route and its SQLite-backed historical query remain outside this layer.
+
+The exact graph moves from
+`266/A45/B5/clean216/direct24/transitive21/directDB26/lib45/helpers0/units90`
+to
+`266/A38/B5/clean223/direct22/transitive16/directDB24/lib37/helpers0/units75`.
+All seven routes move from Tier A to clean, all eight libraries leave
+`taintedLibA`, and no route moves to Tier B. The canonical baseline and
+fail-closed sentinel remain the only exact-current graph owners; the layer
+ratchet owns only the path cap, exclusions, cleanliness, and monotonic 75-unit
+ceiling.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

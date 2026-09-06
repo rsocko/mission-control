@@ -8,9 +8,9 @@ import db, { sqlite } from '@/db';
 import * as schema from '@/db/schema';
 import { notificationActions, notifications } from '@/db/schema';
 import {
-  createNotificationsInTransaction,
-  type CreateNotificationInput,
-} from '@/lib/notifications/service';
+  createSqliteNotificationsInTransaction,
+} from './sqlite-notification-creation';
+import type { CreateNotificationInput } from './notification-delivery';
 import { FINANCE_PROVIDER_ALIASES } from '@/lib/finance-insights/provider';
 import type {
   FinanceInsightNotificationIngestItem,
@@ -39,7 +39,7 @@ import { syncFinanceProviderPresentation } from './sqlite-finance-insight-notifi
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = BetterSQLite3Database<typeof schema>;
-type NotificationTransaction = Parameters<typeof createNotificationsInTransaction>[0];
+type NotificationTransaction = Parameters<typeof createSqliteNotificationsInTransaction>[0];
 
 interface SqliteFinanceOperatorHandles {
   sqlite: SqliteDatabase;
@@ -587,7 +587,7 @@ export function createSqliteFinanceOperatorPersistence(
             AND template_key = 'anomaly'
             AND source_state = 'active'
         `).run(command.now, command.now);
-        const created = createNotificationsInTransaction(
+        const created = createSqliteNotificationsInTransaction(
           transaction,
           command.ingest.map(toCreateNotificationInput),
           { now: new Date(command.now), wakeDispatcher: false },

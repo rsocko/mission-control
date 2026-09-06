@@ -1,25 +1,15 @@
+import { randomUUID } from 'crypto';
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { notifications, notificationActions } from '@/db/schema';
-import { and, eq, desc, inArray, sql } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { enrichAlert } from '@/lib/notifications/enrichment';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 import { materializeNotificationActions } from '@/lib/notifications/providers';
 import type { InboundNotification } from '@/types';
-import { randomUUID } from 'crypto';
 
 /**
  * POST /api/notifications/re-enrich
  *
  * Re-runs the enrichment pipeline on existing notifications.
- * Useful after parser improvements, AI model upgrades, or new entity data.
- *
- * Body:
- *   - scope: 'all' | 'unenriched' | 'connector' | 'ids' (default: 'unenriched')
- *   - connectorType?: string (required when scope = 'connector')
- *   - ids?: string[] (required when scope = 'ids')
- *   - enableAI?: boolean (default: false — opt-in for bulk re-enrichment)
- *   - limit?: number (default: 100, max: 500)
  */
 export async function POST(request: Request) {
   try {
@@ -29,119 +19,37 @@ export async function POST(request: Request) {
     const ids = body.ids as string[] | undefined;
     const enableAI = body.enableAI === true;
     const limit = Math.min(Math.max(parseInt(body.limit || '100', 10), 1), 500);
+    const persistence = await getNotificationWebPersistence();
 
-    // ─── Build query based on scope ────────────────────────────────────
-    let rows: Array<{
-      id: string;
-      sourceId: string;
-      connectorType: string;
-      connectorInstanceId: string;
-      title: string;
-      body: string | null;
-      level: string;
-      category: string;
-      state: string;
-      readState: string;
-      isActionable: boolean;
-      metadata: unknown;
-    }>;
-
+    let selection:
+      | { scope: 'all'; limit: number }
+      | { scope: 'unenriched'; limit: number }
+      | { scope: 'connector'; connectorType: string; limit: number }
+      | { scope: 'ids'; ids: string[] };
     switch (scope) {
       case 'all':
-        rows = await db.select({
-          id: notifications.id,
-          sourceId: notifications.sourceId,
-          connectorType: notifications.connectorType,
-          connectorInstanceId: notifications.connectorInstanceId,
-          title: notifications.title,
-          body: notifications.body,
-          level: notifications.level,
-          category: notifications.category,
-          state: notifications.state,
-          readState: notifications.readState,
-          isActionable: notifications.isActionable,
-          metadata: notifications.metadata,
-        })
-          .from(notifications)
-          .orderBy(desc(notifications.receivedAt))
-          .limit(limit);
-        break;
-
       case 'unenriched':
-        // Notifications that haven't been enriched yet (empty presentation or no enrichment metadata)
-        rows = await db.select({
-          id: notifications.id,
-          sourceId: notifications.sourceId,
-          connectorType: notifications.connectorType,
-          connectorInstanceId: notifications.connectorInstanceId,
-          title: notifications.title,
-          body: notifications.body,
-          level: notifications.level,
-          category: notifications.category,
-          state: notifications.state,
-          readState: notifications.readState,
-          isActionable: notifications.isActionable,
-          metadata: notifications.metadata,
-        })
-          .from(notifications)
-          .where(
-            sql`json_extract(${notifications.metadata}, '$.enrichment') IS NULL`
-          )
-          .orderBy(desc(notifications.receivedAt))
-          .limit(limit);
+        selection = { scope, limit };
         break;
-
       case 'connector':
         if (!connectorType) {
           return ApiErrors.badRequest('connectorType is required when scope is "connector"');
         }
-        rows = await db.select({
-          id: notifications.id,
-          sourceId: notifications.sourceId,
-          connectorType: notifications.connectorType,
-          connectorInstanceId: notifications.connectorInstanceId,
-          title: notifications.title,
-          body: notifications.body,
-          level: notifications.level,
-          category: notifications.category,
-          state: notifications.state,
-          readState: notifications.readState,
-          isActionable: notifications.isActionable,
-          metadata: notifications.metadata,
-        })
-          .from(notifications)
-          .where(eq(notifications.connectorType, connectorType))
-          .orderBy(desc(notifications.receivedAt))
-          .limit(limit);
+        selection = { scope, connectorType, limit };
         break;
-
       case 'ids':
         if (!ids?.length) {
           return ApiErrors.badRequest('ids array is required when scope is "ids"');
         }
-        rows = await db.select({
-          id: notifications.id,
-          sourceId: notifications.sourceId,
-          connectorType: notifications.connectorType,
-          connectorInstanceId: notifications.connectorInstanceId,
-          title: notifications.title,
-          body: notifications.body,
-          level: notifications.level,
-          category: notifications.category,
-          state: notifications.state,
-          readState: notifications.readState,
-          isActionable: notifications.isActionable,
-          metadata: notifications.metadata,
-        })
-          .from(notifications)
-          .where(inArray(notifications.id, ids.slice(0, 500)));
+        selection = { scope, ids: ids.slice(0, 500) };
         break;
-
       default:
-        return ApiErrors.badRequest(`Invalid scope: ${scope}. Use 'all', 'unenriched', 'connector', or 'ids'.`);
+        return ApiErrors.badRequest(
+          `Invalid scope: ${scope}. Use 'all', 'unenriched', 'connector', or 'ids'.`,
+        );
     }
 
-    // ─── Re-enrich each notification ──────────────────────────────────
+    const rows = await persistence.listNotificationsForReEnrichment(selection);
     let enriched = 0;
     let linked = 0;
     let aiEnriched = 0;
@@ -149,9 +57,9 @@ export async function POST(request: Request) {
 
     for (const row of rows) {
       try {
-        const metadata = (typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata) as Record<string, unknown>;
-
-        // Build a pseudo-InboundNotification for the enrichment pipeline
+        const metadata = (
+          typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata
+        ) as Record<string, unknown>;
         const notificationItem: InboundNotification = {
           id: row.id,
           sourceId: row.sourceId,
@@ -188,49 +96,27 @@ export async function POST(request: Request) {
           result.actions,
           randomUUID,
         );
-        const primaryActionId = actionRecords.find(action => action.isPrimary)?.id || null;
-
-        db.transaction(tx => {
-          tx.update(notifications)
-            .set({
-              title: result.title,
-              body: result.body,
-              category: result.category,
-              templateKey: result.templateKey,
-              relatedTaskId: result.relatedTaskId,
-              relatedProjectId: result.relatedProjectId,
-              relatedEntityType: result.relatedEntityType,
-              relatedEntityId: result.relatedEntityId,
-              navigationTarget: result.navigationTarget,
-              metadata: enrichedMetadata,
-              presentation: result.presentation,
-              ...(result.providerSignature
-                ? {
-                    isActionable: result.isActionable,
-                    primaryActionId,
-                  }
-                : {}),
-            })
-            .where(eq(notifications.id, row.id))
-            .run();
-
-          if (result.providerSignature) {
-            tx.delete(notificationActions)
-              .where(and(
-                eq(notificationActions.notificationId, row.id),
-                eq(notificationActions.createdBy, 'connector'),
-                eq(notificationActions.executionState, 'pending'),
-              ))
-              .run();
-            if (actionRecords.length > 0) {
-              tx.insert(notificationActions).values(actionRecords).run();
-            }
-          }
+        await persistence.saveReEnrichedNotification({
+          id: row.id,
+          title: result.title,
+          body: result.body,
+          category: result.category,
+          templateKey: result.templateKey,
+          relatedTaskId: result.relatedTaskId,
+          relatedProjectId: result.relatedProjectId,
+          relatedEntityType: result.relatedEntityType,
+          relatedEntityId: result.relatedEntityId,
+          navigationTarget: result.navigationTarget,
+          metadata: enrichedMetadata,
+          presentation: result.presentation,
+          providerSignature: Boolean(result.providerSignature),
+          isActionable: result.isActionable,
+          primaryActionId: actionRecords.find(action => action.isPrimary)?.id || null,
+          actions: actionRecords,
         });
-
         enriched++;
-      } catch (err) {
-        errors.push(`${row.id}: ${err instanceof Error ? err.message : String(err)}`);
+      } catch (error) {
+        errors.push(`${row.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
@@ -242,7 +128,9 @@ export async function POST(request: Request) {
       aiEnriched,
       errors: errors.length > 0 ? errors.slice(0, 10) : undefined,
     });
-  } catch (err) {
-    return ApiErrors.internal(err instanceof Error ? err.message : 'Re-enrichment failed');
+  } catch (error) {
+    return ApiErrors.internal(
+      error instanceof Error ? error.message : 'Re-enrichment failed',
+    );
   }
 }

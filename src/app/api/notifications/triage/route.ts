@@ -1,6 +1,7 @@
-import { classifyNotifications } from '@/lib/ai/features/notification-classification';
+import { classifyNotificationItems } from '@/lib/ai/features/notification-classifier';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 
 /**
  * GET /api/notifications/triage
@@ -10,7 +11,9 @@ import { ApiErrors } from '@/lib/api-error';
  */
 export async function GET() {
   try {
-    const result = await classifyNotifications();
+    const persistence = await getNotificationWebPersistence();
+    const unread = await persistence.listNotificationsForClassification(20);
+    const result = await classifyNotificationItems(unread);
     return Response.json(result);
   } catch (error) {
     aiLogger.error({ err: error }, 'Notification triage request failed');

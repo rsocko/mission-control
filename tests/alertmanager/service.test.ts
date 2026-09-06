@@ -27,6 +27,7 @@ function event(
 describe('homelab alert lifecycle service', () => {
   let db: typeof import('@/db').default;
   let sqlite: typeof import('@/db').sqlite;
+  let database: typeof import('@/db');
   let schema: typeof import('@/db/schema');
   let ingest: typeof import('@/lib/alertmanager/service').ingestHomelabAlertEvents;
   const receivedAt = new Date('2026-08-22T20:10:00.000Z');
@@ -37,12 +38,14 @@ describe('homelab alert lifecycle service', () => {
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
-    [db, { sqlite }, schema, { ingestHomelabAlertEvents: ingest }] = await Promise.all([
+    [db, database, schema, { ingestHomelabAlertEvents: ingest }] = await Promise.all([
       import('@/db').then(module => module.default),
       import('@/db'),
       import('@/db/schema'),
       import('@/lib/alertmanager/service'),
     ]);
+    sqlite = database.sqlite;
+    await database.initializeSqlitePersistenceComposition();
   }, 30_000);
 
   beforeEach(async () => {
@@ -79,14 +82,14 @@ describe('homelab alert lifecycle service', () => {
   });
 
   it('settles firing incidents and rejects stale firing regression', async () => {
-    ingest([event()], { integration: 'homelab', receivedAt, wakeDispatcher: false });
-    ingest([event({
+    await ingest([event()], { integration: 'homelab', receivedAt, wakeDispatcher: false });
+    await ingest([event({
       eventId: 'event-resolved-1',
       status: 'resolved',
       occurredAt: '2026-08-22T20:30:00.000Z',
       endsAt: '2026-08-22T20:30:00.000Z',
     })], { integration: 'homelab', receivedAt, wakeDispatcher: false });
-    const stale = ingest([event({
+    const stale = await ingest([event({
       eventId: 'event-firing-stale',
       occurredAt: '2026-08-22T20:00:00.000Z',
     })], { integration: 'homelab', receivedAt, wakeDispatcher: false });
@@ -102,13 +105,13 @@ describe('homelab alert lifecycle service', () => {
   });
 
   it('preserves local handling through resolution and reopens a new occurrence', async () => {
-    ingest([event()], { integration: 'homelab', receivedAt, wakeDispatcher: false });
+    await ingest([event()], { integration: 'homelab', receivedAt, wakeDispatcher: false });
     await db.update(schema.notifications).set({
       disposition: 'handled',
       state: 'archived',
       handledAt: receivedAt.toISOString(),
     });
-    ingest([event({
+    await ingest([event({
       eventId: 'event-resolved-1',
       status: 'resolved',
       occurredAt: '2026-08-22T20:30:00.000Z',
@@ -116,7 +119,7 @@ describe('homelab alert lifecycle service', () => {
     })], { integration: 'homelab', receivedAt, wakeDispatcher: false });
     expect((await db.select().from(schema.notifications))[0].disposition).toBe('handled');
 
-    ingest([event({
+    await ingest([event({
       eventId: 'event-firing-2',
       startsAt: '2026-08-22T21:00:00.000Z',
       occurredAt: '2026-08-22T21:00:00.000Z',
@@ -139,11 +142,11 @@ describe('homelab alert lifecycle service', () => {
       END
     `);
 
-    expect(() => ingest([
+    await expect(ingest([
       event({ fingerprint: 'good01', eventId: 'good-event' }),
       event({ fingerprint: 'bad02', eventId: 'bad-event' }),
     ], { integration: 'homelab', receivedAt, wakeDispatcher: false }))
-      .toThrow(/simulated storage failure/);
+      .rejects.toThrow(/simulated storage failure/);
     expect(await db.select().from(schema.notifications)).toEqual([]);
     expect(await db.select().from(schema.homelabAlertReceipts)).toEqual([]);
   });

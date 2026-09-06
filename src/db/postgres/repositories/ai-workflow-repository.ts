@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
+import { formatDateInLocalTimezone } from '@/lib/utils/date';
 import type {
   AIDigestSnapshot,
   AIWorkflowPersistence,
@@ -19,8 +20,27 @@ import type {
   PhasePlanningContextTask,
   ProjectAdministrationPersistence,
 } from '@/db/persistence/project-organization';
+import type {
+  AIDayPlanPersistence,
+  AIDispatchPersistence,
+  AIGoalsBoardPersistence,
+  AIIdeationPersistence,
+  AIMaintenancePersistence,
+  AIResetsPersistence,
+  AITaskToolsPersistence,
+  DayPlanSuggestionSnapshot,
+  GoalLinkedProjectRow,
+  GoalTagRow,
+  MaintenanceAgentType,
+  MaintenanceClaimResult,
+  MaintenanceScanCandidate,
+  ResetPatch,
+  ResetRow,
+} from '@/db/persistence/ai-workflows';
 
-interface AIWorkflowBackend extends AIWorkflowPersistence {
+interface AIWorkflowBackend extends Omit<AIWorkflowPersistence,
+  'dayPlan' | 'taskTools' | 'dispatch' | 'maintenance' | 'goalsBoard' | 'ideation' | 'resets'
+> {
   recommendations: AIWorkflowPersistence['recommendations'] & {
     listEnergySuggestionTasksByIds: EnergySuggestionPersistence['listTasksByIds'];
     listOpenTopLevelEnergySuggestionTasks:
@@ -55,6 +75,14 @@ const NOTIFICATION_NEEDS_ATTENTION = `
   AND read_state = 'unread'
   AND (level IS NULL OR level IN ('urgent', 'action_needed', 'heads_up', 'fyi'))
 `;
+/** Bare inbox membership (no read-state/level filter), parameterized on `nowPlaceholder`. */
+function notificationIsInboxSqlPg(nowPlaceholder: string): string {
+  return `
+  disposition = 'inbox'
+  AND source_state IN ('active', 'unknown')
+  AND (snoozed_until IS NULL OR snoozed_until <= ${nowPlaceholder})
+`;
+}
 const PRIORITY_ORDER = `
   CASE priority
     WHEN 'critical' THEN 0
@@ -343,6 +371,1004 @@ async function applyEnergyTags(
   } finally {
     client.release();
   }
+}
+
+function isUniqueViolationError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error
+    && (error as { code?: unknown }).code === '23505';
+}
+
+function createPostgresTaskToolsPersistence(pool: Pool): AITaskToolsPersistence {
+  return {
+    async getSummary({ today, overdueLimit }) {
+      const [counts, bySourceRows, overdueItems] = await Promise.all([
+        query<{ total: number; open: number; overdue: number; critical: number; done: number }>(
+          pool, `
+            SELECT
+              COUNT(*)::int AS total,
+              COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled') THEN 1 ELSE 0 END), 0)::int AS open,
+              COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled')
+                AND due_date IS NOT NULL AND due_date < $1 THEN 1 ELSE 0 END), 0)::int AS overdue,
+              COALESCE(SUM(CASE WHEN status NOT IN ('done', 'cancelled')
+                AND priority IN ('critical', 'high') THEN 1 ELSE 0 END), 0)::int AS critical,
+              COALESCE(SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END), 0)::int AS done
+            FROM tasks
+          `, [today],
+        ),
+        query<{ connectorType: string; count: number }>(pool, `
+          SELECT connector_type AS "connectorType", COUNT(*)::int AS count
+          FROM tasks
+          WHERE status NOT IN ('done', 'cancelled')
+          GROUP BY connector_type
+        `),
+        query<TaskToolsSummaryOverdueRow>(pool, `
+          SELECT id, title, status, micro_status AS "microStatus", due_date AS "dueDate",
+                 priority, connector_type AS source
+          FROM tasks
+          WHERE status NOT IN ('done', 'cancelled') AND due_date IS NOT NULL AND due_date < $1
+          ORDER BY due_date COLLATE "C" ASC, id COLLATE "C" ASC
+          LIMIT $2
+        `, [today, overdueLimit]),
+      ]);
+      const [row] = counts;
+      return {
+        total: Number(row?.total ?? 0),
+        open: Number(row?.open ?? 0),
+        overdue: Number(row?.overdue ?? 0),
+        critical: Number(row?.critical ?? 0),
+        done: Number(row?.done ?? 0),
+        bySource: Object.fromEntries(bySourceRows.map((r) => [r.connectorType, r.count])),
+        overdueItems,
+      };
+    },
+    async search(filters) {
+      const conditions: string[] = [];
+      const params: unknown[] = [];
+      if (filters.status) { params.push(filters.status); conditions.push(`status = $${params.length}`); }
+      if (filters.priority) { params.push(filters.priority); conditions.push(`priority = $${params.length}`); }
+      if (filters.source) { params.push(filters.source); conditions.push(`connector_type = $${params.length}`); }
+      if (filters.query) {
+        params.push(`%${filters.query}%`);
+        const queryParamIndex = params.length;
+        conditions.push(`(
+          title ILIKE $${queryParamIndex} OR COALESCE(description, '') ILIKE $${queryParamIndex}
+        )`);
+      }
+      params.push(filters.limit);
+      const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+      const rows = await query<{
+        id: string; title: string; status: string; microStatus: string | null;
+        priority: string; dueDate: string | null; connectorType: string;
+        sourceListName: string | null; description: string | null;
+      }>(pool, `
+        SELECT id, title, status, micro_status AS "microStatus", priority, due_date AS "dueDate",
+               connector_type AS "connectorType", source_list_name AS "sourceListName", description
+        FROM tasks
+        ${where}
+        ORDER BY updated_at COLLATE "C" DESC, id COLLATE "C" ASC
+        LIMIT $${params.length}
+      `, params);
+      return rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        status: row.status,
+        microStatus: row.microStatus,
+        priority: row.priority,
+        dueDate: row.dueDate,
+        source: row.connectorType,
+        sourceList: row.sourceListName,
+        description: row.description ? row.description.slice(0, 100) : null,
+      }));
+    },
+    listAllTags: () => query(pool, `SELECT id, name, type, color FROM tags`),
+    listTaskTags: (taskId) => query(pool, `
+      SELECT tag.id, tag.name, tag.type, tag.color
+      FROM task_tags tt
+      INNER JOIN tags tag ON tag.id = tt.tag_id
+      WHERE tt.task_id = $1
+    `, [taskId]),
+  };
+}
+
+interface TaskToolsSummaryOverdueRow {
+  id: string;
+  title: string;
+  status: string;
+  microStatus: string | null;
+  dueDate: string | null;
+  priority: string;
+  source: string;
+}
+
+function createPostgresDispatchPersistence(pool: Pool): AIDispatchPersistence {
+  return {
+    async getCustomAgentContext({ taskLimit, notificationLimit }) {
+      const now = new Date().toISOString();
+      const [openTasks, unreadNotifications] = await Promise.all([
+        query<{ id: string; title: string; priority: string; dueDate: string | null; connectorType: string }>(
+          pool, `
+            SELECT id, title, priority, due_date AS "dueDate", connector_type AS "connectorType"
+            FROM tasks
+            WHERE status = 'todo'
+            ORDER BY id COLLATE "C" ASC
+            LIMIT $1
+          `, [taskLimit],
+        ),
+        query<{ id: string; title: string; level: string; connectorType: string }>(pool, `
+          SELECT id, title, level, connector_type AS "connectorType"
+          FROM notifications
+          WHERE ${NOTIFICATION_NEEDS_ATTENTION}
+          ORDER BY received_at COLLATE "C" DESC, id COLLATE "C" ASC
+          LIMIT $2
+        `, [now, notificationLimit]),
+      ]);
+      return { openTasks, unreadNotifications };
+    },
+  };
+}
+
+function createPostgresDayPlanPersistence(pool: Pool): AIDayPlanPersistence {
+  return {
+    async listSuggestions({ today, limit }) {
+      const [suggestions, counts] = await Promise.all([
+        query<DayPlanSuggestionSnapshot['suggestions'][number]>(pool, `
+          SELECT id, title, priority, due_date AS "dueDate",
+                 connector_type AS "connectorType",
+                 CASE
+                   WHEN due_date IS NOT NULL AND due_date < $1 THEN 'overdue'
+                   WHEN due_date = $1 THEN 'due-today'
+                   ELSE 'priority'
+                 END AS reason
+          FROM tasks
+          WHERE status = 'todo'
+            AND (
+              (due_date IS NOT NULL AND due_date <= $1)
+              OR priority IN ('critical', 'high')
+            )
+          ORDER BY
+            CASE
+              WHEN due_date IS NOT NULL AND due_date < $1 THEN 0
+              WHEN due_date = $1 THEN 1
+              WHEN priority = 'critical' THEN 2
+              ELSE 3
+            END ASC,
+            due_date ASC NULLS LAST,
+            ${PRIORITY_ORDER},
+            id COLLATE "C" ASC
+          LIMIT $2
+        `, [today, limit]),
+        query<{ open: number; overdue: number; dueToday: number }>(pool, `
+          SELECT
+            COUNT(*)::int AS open,
+            COALESCE(SUM(CASE WHEN due_date IS NOT NULL AND due_date < $1 THEN 1 ELSE 0 END), 0)::int AS overdue,
+            COALESCE(SUM(CASE WHEN due_date = $1 THEN 1 ELSE 0 END), 0)::int AS "dueToday"
+          FROM tasks
+          WHERE status = 'todo'
+        `, [today]),
+      ]);
+      return {
+        suggestions,
+        counts: counts[0] ?? { open: 0, overdue: 0, dueToday: 0 },
+      };
+    },
+  };
+}
+
+/**
+ * The single source of truth for "is this row still eligible?", rendered with
+ * placeholders starting at `$${offset}`. The scan projects it as a flag and
+ * `commitBatch` re-applies it inside the mutating statement, so a row that
+ * changed between the two can never be mutated on the strength of a stale scan.
+ */
+function maintenanceEligibility(
+  agentType: MaintenanceAgentType,
+  now: string,
+  offset: number,
+): { text: string; values: unknown[] } {
+  const nowDate = new Date(now);
+  const placeholder = (index: number) => `$${offset + index}`;
+  switch (agentType) {
+    case 'dismiss-old-notifications': {
+      const cutoff = new Date(nowDate.getTime() - 7 * 24 * 60 * 60 * 1_000).toISOString();
+      return {
+        text: `${notificationIsInboxSqlPg(placeholder(0))}
+          AND read_state = 'unread'
+          AND level IN ('fyi', 'digest')
+          AND received_at < ${placeholder(1)}`,
+        values: [now, cutoff],
+      };
+    }
+    case 'cleanup-done': {
+      const cutoff = new Date(nowDate.getTime() - 30 * 24 * 60 * 60 * 1_000).toISOString();
+      return {
+        text: `status = 'done' AND completed_at IS NOT NULL AND completed_at < ${placeholder(0)}`,
+        values: [cutoff],
+      };
+    }
+    case 'snooze-low-priority': {
+      const today = formatDateInLocalTimezone(nowDate);
+      return {
+        text: `status = 'todo' AND due_date IS NOT NULL AND due_date < ${placeholder(0)}
+          AND priority IN ('low', 'none')`,
+        values: [today],
+      };
+    }
+    case 'bulk-prioritize': {
+      const today = formatDateInLocalTimezone(nowDate);
+      const tomorrow = formatDateInLocalTimezone(new Date(nowDate.getTime() + 24 * 60 * 60 * 1_000));
+      const threeDays = formatDateInLocalTimezone(new Date(nowDate.getTime() + 3 * 24 * 60 * 60 * 1_000));
+      return {
+        text: `status = 'todo' AND due_date IS NOT NULL AND (
+          (due_date <= ${placeholder(0)} AND priority <> 'critical')
+          OR (due_date > ${placeholder(0)} AND due_date <= ${placeholder(1)} AND priority = 'none')
+          OR (due_date > ${placeholder(1)} AND due_date <= ${placeholder(2)} AND priority = 'none')
+        )`,
+        values: [today, tomorrow, threeDays],
+      };
+    }
+  }
+}
+
+function maintenanceScanSql(
+  agentType: MaintenanceAgentType,
+  cursor: string | null,
+  limit: number,
+  now: string,
+): { text: string; values: unknown[] } {
+  const eligibility = maintenanceEligibility(agentType, now, 1);
+  const values = [...eligibility.values];
+  // The cursor comparison uses the same collation as the ordering, so a resume
+  // can neither skip nor repeat rows under a non-C database collation.
+  const cursorClause = cursor ? ` AND id COLLATE "C" > $${values.length + 1}` : '';
+  if (cursor) values.push(cursor);
+  const limitPlaceholder = `$${values.length + 1}`;
+  values.push(limit);
+
+  const nowDate = new Date(now);
+  const source = agentType === 'dismiss-old-notifications' ? 'notifications' : 'tasks';
+  const extraColumns = agentType === 'bulk-prioritize'
+    ? ', priority, due_date AS "dueDate"'
+    : agentType === 'snooze-low-priority'
+      ? `, 'due date -> ${formatDateInLocalTimezone(
+          new Date(nowDate.getTime() + 7 * 24 * 60 * 60 * 1_000),
+        )}' AS result`
+      : '';
+
+  return {
+    text: `
+      SELECT id, title${extraColumns},
+        CASE WHEN ${eligibility.text} THEN TRUE ELSE FALSE END AS eligible
+      FROM ${source}
+      WHERE TRUE ${cursorClause}
+      ORDER BY id COLLATE "C"
+      LIMIT ${limitPlaceholder}
+    `,
+    values,
+  };
+}
+
+async function maintenanceScanBatch(
+  pool: Pool,
+  agentType: MaintenanceAgentType,
+  cursor: string | null,
+  limit: number,
+  now: string,
+): Promise<MaintenanceScanCandidate[]> {
+  const { text, values } = maintenanceScanSql(agentType, cursor, limit, now);
+  if (agentType === 'bulk-prioritize') {
+    const rows = await query<{ id: string; title: string; priority: string; dueDate: string; eligible: boolean }>(
+      pool, text, values,
+    );
+    const today = formatDateInLocalTimezone(new Date(now));
+    const tomorrow = formatDateInLocalTimezone(new Date(new Date(now).getTime() + 24 * 60 * 60 * 1_000));
+    return rows.map((row) => {
+      const newPriority = row.dueDate <= today ? 'critical' : row.dueDate <= tomorrow ? 'high' : 'medium';
+      return { id: row.id, title: row.title, result: `${row.priority} -> ${newPriority}`, eligible: row.eligible };
+    });
+  }
+  const rows = await query<{ id: string; title: string; result?: string; eligible: boolean }>(pool, text, values);
+  return rows.map((row) => ({ id: row.id, title: row.title, result: row.result, eligible: row.eligible }));
+}
+
+async function maintenanceApplyMutations(
+  client: Pool | PoolClient,
+  agentType: MaintenanceAgentType,
+  ids: readonly string[],
+  now: string,
+  completedAt: string,
+): Promise<number> {
+  if (ids.length === 0) return 0;
+  const nowDate = new Date(now);
+  switch (agentType) {
+    case 'dismiss-old-notifications': {
+      const eligibility = maintenanceEligibility(agentType, now, 3);
+      const result = await client.query(`
+        UPDATE notifications
+        SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
+            read_at = COALESCE(read_at, $1), dismissed_at = $1
+        WHERE id = ANY($2::text[]) AND (${eligibility.text})
+      `, [completedAt, ids, ...eligibility.values]);
+      return result.rowCount ?? 0;
+    }
+    case 'cleanup-done': {
+      const eligibility = maintenanceEligibility(agentType, now, 3);
+      const result = await client.query(`
+        UPDATE tasks SET status = 'cancelled', updated_at = $1
+        WHERE id = ANY($2::text[]) AND (${eligibility.text})
+      `, [completedAt, ids, ...eligibility.values]);
+      return result.rowCount ?? 0;
+    }
+    case 'snooze-low-priority': {
+      const newDate = formatDateInLocalTimezone(new Date(nowDate.getTime() + 7 * 24 * 60 * 60 * 1_000));
+      const eligibility = maintenanceEligibility(agentType, now, 4);
+      const result = await client.query(`
+        UPDATE tasks SET due_date = $1, updated_at = $2
+        WHERE id = ANY($3::text[]) AND (${eligibility.text})
+      `, [newDate, completedAt, ids, ...eligibility.values]);
+      return result.rowCount ?? 0;
+    }
+    case 'bulk-prioritize': {
+      const today = formatDateInLocalTimezone(nowDate);
+      const tomorrow = formatDateInLocalTimezone(new Date(nowDate.getTime() + 24 * 60 * 60 * 1_000));
+      const eligibility = maintenanceEligibility(agentType, now, 5);
+      const result = await client.query(`
+        UPDATE tasks
+        SET priority = CASE
+          WHEN due_date <= $1 THEN 'critical'
+          WHEN due_date <= $2 THEN 'high'
+          ELSE 'medium'
+        END,
+        updated_at = $3
+        WHERE id = ANY($4::text[]) AND (${eligibility.text})
+      `, [today, tomorrow, completedAt, ids, ...eligibility.values]);
+      return result.rowCount ?? 0;
+    }
+  }
+}
+
+function createPostgresMaintenancePersistence(pool: Pool): AIMaintenancePersistence {
+  return {
+    async claimRun({ runId, agentType, dryRun, cursor, leaseExpiresAt, startedAt }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`maintenance-agent:${agentType}`],
+        );
+        await client.query(`
+          UPDATE maintenance_agent_runs
+          SET status = 'timed_out', has_more = TRUE,
+              error_message = 'Lease expired before the run completed', completed_at = $1
+          WHERE agent_type = $2 AND status = 'running' AND lease_expires_at <= $3
+        `, [startedAt, agentType, startedAt]);
+
+        let effectiveCursor = cursor;
+        if (!effectiveCursor && !dryRun) {
+          const [previous] = await query<{ status: string; checkpointEnd: string | null }>(client, `
+            SELECT status, checkpoint_end AS "checkpointEnd"
+            FROM maintenance_agent_runs
+            WHERE agent_type = $1 AND dry_run = FALSE
+            ORDER BY started_at DESC, id COLLATE "C" DESC
+            LIMIT 1
+          `, [agentType]);
+          if (previous?.status === 'partial') effectiveCursor = previous.checkpointEnd;
+        }
+
+        let claimed = true;
+        try {
+          await client.query(`
+            INSERT INTO maintenance_agent_runs (
+              id, agent_type, status, dry_run, checkpoint_start, lease_expires_at, started_at
+            ) VALUES ($1, $2, 'running', $3, $4, $5, $6)
+          `, [runId, agentType, dryRun, effectiveCursor, leaseExpiresAt, startedAt]);
+        } catch (error) {
+          if (!isUniqueViolationError(error)) throw error;
+          claimed = false;
+        }
+        await client.query(claimed ? 'COMMIT' : 'ROLLBACK');
+        return { claimed, cursor: effectiveCursor };
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    scanBatch: ({ agentType, cursor, limit, now }) => maintenanceScanBatch(pool, agentType, cursor, limit, now),
+    async commitBatch({
+      runId, agentType, ids, now, completedAt, status, checkpoint, scanned, hasMore, error, guard,
+    }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const applied = await maintenanceApplyMutations(client, agentType, ids, now, completedAt);
+        guard?.();
+        await client.query(`
+          UPDATE maintenance_agent_runs
+          SET status = $1, checkpoint_end = $2, scanned_count = $3, mutation_count = $4,
+              has_more = $5, error_message = $6, completed_at = $7
+          WHERE id = $8
+        `, [status, checkpoint, scanned, applied, hasMore, error ?? null, completedAt, runId]);
+        await client.query('COMMIT');
+        return { applied };
+      } catch (err) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw err;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+function createPostgresGoalsBoardPersistence(pool: Pool): AIGoalsBoardPersistence {
+  return {
+    async listGoalTasks({ tagSlugs, projectId }) {
+      if (tagSlugs.length === 0) return [];
+      const taggedRows = await query<{ taskId: string }>(pool, `
+        SELECT DISTINCT tt.task_id AS "taskId"
+        FROM task_tags tt
+        INNER JOIN tags tag ON tag.id = tt.tag_id
+        WHERE tag.slug = ANY($1::text[])
+      `, [tagSlugs]);
+      let taskIds = taggedRows.map((row) => row.taskId);
+      if (taskIds.length === 0) return [];
+      if (projectId) {
+        const projectRows = await query<{ taskId: string }>(pool, `
+          SELECT task_id AS "taskId" FROM task_projects
+          WHERE project_id = $1 AND task_id = ANY($2::text[])
+        `, [projectId, taskIds]);
+        taskIds = projectRows.map((row) => row.taskId);
+      }
+      if (taskIds.length === 0) return [];
+
+      const [taskRows, tagRows, projectRows] = await Promise.all([
+        query<{
+          id: string; title: string; description: string | null; status: string; priority: string;
+          dueDate: string | null; createdAt: string; updatedAt: string; connectorType: string;
+        }>(pool, `
+          SELECT id, title, description, status, priority, due_date AS "dueDate",
+                 created_at AS "createdAt", updated_at AS "updatedAt", connector_type AS "connectorType"
+          FROM tasks WHERE id = ANY($1::text[])
+        `, [taskIds]),
+        query<{ taskId: string; id: string; name: string; slug: string; color: string | null; type: string }>(
+          pool, `
+            SELECT tt.task_id AS "taskId", tag.id, tag.name, tag.slug, tag.color, tag.type
+            FROM task_tags tt
+            INNER JOIN tags tag ON tag.id = tt.tag_id
+            WHERE tt.task_id = ANY($1::text[])
+          `, [taskIds],
+        ),
+        query<{ taskId: string; id: string; name: string; color: string | null; icon: string | null }>(pool, `
+          SELECT tp.task_id AS "taskId", p.id, p.name, p.color, p.icon
+          FROM task_projects tp
+          INNER JOIN hub_projects p ON p.id = tp.project_id
+          WHERE tp.task_id = ANY($1::text[])
+        `, [taskIds]),
+      ]);
+      const linkedProjectIds = [...new Set(projectRows.map((row) => row.id))];
+      const statsById = new Map<string, { total: number; done: number }>();
+      const milestonesById = new Map<string, Array<{
+        id: string; name: string; targetDate: string | null; completed: boolean; sortOrder: number;
+      }>>();
+      if (linkedProjectIds.length > 0) {
+        const [statsRows, milestoneRows] = await Promise.all([
+          query<{ projectId: string; total: number; done: number }>(pool, `
+            SELECT tp.project_id AS "projectId",
+                   COUNT(*)::int AS total,
+                   SUM(CASE WHEN t.status = 'done' THEN 1 ELSE 0 END)::int AS done
+            FROM task_projects tp
+            INNER JOIN tasks t ON t.id = tp.task_id
+            WHERE tp.project_id = ANY($1::text[])
+            GROUP BY tp.project_id
+          `, [linkedProjectIds]),
+          query<{
+            id: string; projectId: string; name: string; targetDate: string | null;
+            completedAt: string | null; sortOrder: number;
+          }>(pool, `
+            SELECT id, project_id AS "projectId", name, target_date AS "targetDate",
+                   completed_at AS "completedAt", sort_order AS "sortOrder"
+            FROM project_milestones
+            WHERE project_id = ANY($1::text[])
+          `, [linkedProjectIds]),
+        ]);
+        for (const row of statsRows) statsById.set(row.projectId, { total: row.total, done: row.done ?? 0 });
+        for (const row of milestoneRows) {
+          const list = milestonesById.get(row.projectId) ?? [];
+          list.push({
+            id: row.id, name: row.name, targetDate: row.targetDate,
+            completed: Boolean(row.completedAt), sortOrder: row.sortOrder,
+          });
+          milestonesById.set(row.projectId, list);
+        }
+      }
+
+      const tagsByTask = new Map<string, GoalTagRow[]>();
+      for (const row of tagRows) {
+        const list = tagsByTask.get(row.taskId) ?? [];
+        list.push({ id: row.id, name: row.name, slug: row.slug, color: row.color, type: row.type });
+        tagsByTask.set(row.taskId, list);
+      }
+      const projectsByTask = new Map<string, GoalLinkedProjectRow[]>();
+      for (const row of projectRows) {
+        const list = projectsByTask.get(row.taskId) ?? [];
+        const stats = statsById.get(row.id);
+        const milestones = (milestonesById.get(row.id) ?? [])
+          .sort((a, b) => a.sortOrder - b.sortOrder)
+          .map(({ id, name, targetDate, completed }) => ({ id, name, targetDate, completed }));
+        list.push({
+          id: row.id,
+          name: row.name,
+          color: row.color,
+          icon: row.icon,
+          totalTasks: stats?.total ?? 0,
+          doneTasks: stats?.done ?? 0,
+          milestones,
+        });
+        projectsByTask.set(row.taskId, list);
+      }
+
+      return taskRows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        description: row.description,
+        status: row.status,
+        priority: row.priority,
+        dueDate: row.dueDate,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+        connectorType: row.connectorType,
+        tags: tagsByTask.get(row.id) ?? [],
+        linkedProjects: projectsByTask.get(row.id) ?? [],
+      }));
+    },
+    async countGoalTags() {
+      const rows = await query<{ taskId: string; slug: string }>(pool, `
+        SELECT tt.task_id AS "taskId", tag.slug AS slug
+        FROM task_tags tt
+        INNER JOIN tags tag ON tag.id = tt.tag_id
+        WHERE tag.slug IN ('goal', 'idea', 'brainstorm')
+      `);
+      return {
+        goal: new Set(rows.filter((r) => r.slug === 'goal').map((r) => r.taskId)).size,
+        idea: new Set(rows.filter((r) => r.slug === 'idea').map((r) => r.taskId)).size,
+        brainstorm: new Set(rows.filter((r) => r.slug === 'brainstorm').map((r) => r.taskId)).size,
+      };
+    },
+    async promoteGoal({ taskId, projectId, projectName, projectDescription, category, color, phases, now }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`project:${projectId}`]);
+        const [task] = await query<{ id: string; description: string | null; metadata: Record<string, unknown> }>(
+          client, `SELECT id, description, metadata FROM tasks WHERE id = $1 LIMIT 1 FOR UPDATE`, [taskId],
+        );
+        if (!task) {
+          await client.query('ROLLBACK');
+          return { kind: 'not-found' } as const;
+        }
+
+        await client.query(`
+          INSERT INTO hub_projects (
+            id, name, description, color, icon, source_bindings, auto_include_rules,
+            kanban_columns, default_view, category, target_date, status, metadata,
+            sort_order, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, NULL, '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'list', $5, NULL,
+            'active', $6::jsonb, 0, $7, $7
+          )
+        `, [
+          projectId, projectName, projectDescription ?? task.description ?? null, color, category,
+          JSON.stringify({ promotedFrom: taskId }), now,
+        ]);
+        await client.query(`
+          INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
+        `, [task.id, projectId]);
+
+        const tasksCreated: string[] = [];
+        for (let phaseIdx = 0; phaseIdx < phases.length; phaseIdx += 1) {
+          const phase = phases[phaseIdx];
+          const phaseId = `phase-${projectId}-${phaseIdx + 1}`;
+          await client.query(`
+            INSERT INTO project_phases (
+              id, project_id, name, description, status, color, estimated_days,
+              target_start, target_end, sort_order, completed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, NULL, NULL, NULL, NULL, $6, NULL, $7, $7)
+          `, [
+            phaseId, projectId, phase.name, phase.description,
+            phaseIdx === 0 ? 'in_progress' : 'pending', phaseIdx, now,
+          ]);
+
+          for (let taskIdx = 0; taskIdx < phase.tasks.length; taskIdx += 1) {
+            const phaseTask = phase.tasks[taskIdx];
+            const newTaskId = `mc-goal-${projectId}-p${phaseIdx + 1}-t${taskIdx + 1}`;
+            await client.query(`
+              INSERT INTO tasks (
+                id, source_id, connector_type, connector_instance_id, title, description,
+                status, priority, due_date, created_at, updated_at, completed_at, parent_id,
+                depth, is_checklist_item, source_list_id, source_list_name, assignee, metadata,
+                sync_status, last_synced_at, kanban_column, kanban_order
+              ) VALUES ($1, $2, 'mission-control', 'mc-local', $3, $4, 'todo', 'medium', NULL, $5, $5,
+                NULL, NULL, 0, FALSE, NULL, NULL, NULL, '{}'::jsonb, 'synced', $5, NULL, NULL)
+            `, [newTaskId, newTaskId, phaseTask.title, phaseTask.description, now]);
+
+            await client.query(`
+              INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
+            `, [newTaskId, projectId]);
+
+            await client.query(`
+              INSERT INTO project_phase_items (
+                id, phase_id, task_id, sort_order, estimated_effort_hours, is_proposed,
+                proposal_type, created_at
+              ) VALUES ($1, $2, $3, $4, NULL, FALSE, NULL, $5)
+            `, [`ppi-${phaseId}-${taskIdx}`, phaseId, newTaskId, taskIdx, now]);
+
+            tasksCreated.push(newTaskId);
+          }
+        }
+
+        await client.query(`
+          UPDATE tasks SET status = 'done', completed_at = $1, updated_at = $1, metadata = $2::jsonb
+          WHERE id = $3
+        `, [now, JSON.stringify({ ...task.metadata, promotedToProject: projectId }), taskId]);
+
+        await client.query('COMMIT');
+        return { kind: 'promoted', projectId, tasksCreated } as const;
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+function createPostgresIdeationPersistence(pool: Pool): AIIdeationPersistence {
+  return {
+    async convertDraft({ project, phases, tasks: taskInputs, phaseItems, dependencies, now }) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`project:${project.id}`]);
+
+        await client.query(`
+          INSERT INTO hub_projects (
+            id, name, description, color, icon, icon_color, source_bindings,
+            auto_include_rules, kanban_columns, default_view, metadata, created_at, updated_at
+          ) VALUES (
+            $1, $2, 'Created from the Graph ideation canvas.', $3, 'Lightbulb', $3,
+            '[]'::jsonb, '[]'::jsonb, '[]'::jsonb, 'list', $4::jsonb, $5, $5
+          )
+        `, [project.id, project.name, project.color, JSON.stringify(project.metadata), now]);
+
+        for (const phase of phases) {
+          await client.query(`
+            INSERT INTO project_phases (
+              id, project_id, name, description, status, color, sort_order, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, 'pending', $5, $6, $7, $7)
+          `, [phase.id, project.id, phase.name, phase.description, phase.color, phase.sortOrder, now]);
+        }
+
+        for (const task of taskInputs) {
+          await client.query(`
+            INSERT INTO tasks (
+              id, source_id, connector_type, connector_instance_id, title, description,
+              status, priority, assignee, due_date, created_at, updated_at, completed_at,
+              parent_id, depth, is_checklist_item, metadata, sync_status, last_synced_at,
+              push_retry_count, effort, is_bulk_import
+            ) VALUES ($1, $2, 'local', 'local', $3, $4, $5, $6, $7, $8, $9, $9, NULL, $10, $11,
+              FALSE, $12::jsonb, 'synced', $9, 0, $13, FALSE)
+          `, [
+            task.id, task.id, task.title, task.description, task.status, task.priority,
+            task.assignee, task.dueDate, now, task.parentId, task.depth,
+            JSON.stringify(task.metadata), task.effort,
+          ]);
+          await client.query(`
+            INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)
+          `, [task.id, project.id]);
+        }
+
+        for (const item of phaseItems) {
+          await client.query(`
+            INSERT INTO project_phase_items (id, phase_id, task_id, sort_order, created_at)
+            VALUES ($1, $2, $3, $4, $5)
+          `, [randomUUID(), item.phaseId, item.taskId, item.sortOrder, now]);
+        }
+
+        const tagIdBySlug = new Map<string, string>();
+        const tagSlugs = new Set<string>();
+        for (const task of taskInputs) {
+          for (const tagName of task.tagNames) {
+            const slug = tagName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            if (slug) tagSlugs.add(slug);
+          }
+        }
+        for (const slug of [...tagSlugs].sort()) {
+          await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`tag-slug:${slug}`]);
+        }
+        for (const task of taskInputs) {
+          for (const tagName of task.tagNames) {
+            const slug = tagName.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+            if (!slug) continue;
+            let tagId = tagIdBySlug.get(slug);
+            if (!tagId) {
+              // `tags.slug` carries no unique constraint, so it is not a valid
+              // ON CONFLICT arbiter. The slug's advisory lock is already held
+              // for this transaction, so a read-then-insert is safe, and the
+              // lowest id is picked deterministically when duplicates exist.
+              const [existing] = await query<{ id: string }>(
+                client,
+                'SELECT id FROM tags WHERE slug = $1 ORDER BY id COLLATE "C" ASC LIMIT 1',
+                [slug],
+              );
+              tagId = existing?.id;
+              if (!tagId) {
+                tagId = `tag-${randomUUID()}`;
+                await client.query(`
+                  INSERT INTO tags (id, name, slug, type, source, color, confirmed, created_at)
+                  VALUES ($1, $2, $3, 'hub', 'ideation', '#34d399', TRUE, $4)
+                `, [tagId, tagName, slug, now]);
+              }
+              tagIdBySlug.set(slug, tagId);
+            }
+            await client.query(`
+              INSERT INTO task_tags (task_id, tag_id) VALUES ($1, $2)
+            `, [task.id, tagId]);
+          }
+        }
+
+        for (const dependency of dependencies) {
+          await client.query(`
+            INSERT INTO task_dependencies (
+              id, task_id, depends_on_task_id, type, connector_instance_id,
+              sync_status, sync_action, sync_error, last_synced_at, created_at
+            ) VALUES ($1, $2, $3, $4, NULL, 'local', NULL, NULL, NULL, $5)
+          `, [randomUUID(), dependency.taskId, dependency.dependsOnTaskId, dependency.type, now]);
+        }
+
+        await client.query('COMMIT');
+        return { projectId: project.id };
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+  };
+}
+
+function resetRow(row: {
+  id: string; type: string; periodStart: string; periodEnd: string;
+  wentWell: string | null; needsAdjustment: string | null; notes: string | null;
+  stats: unknown; aiSummary: string | null; staleActions: unknown;
+  carryForwardItems: unknown; monthlyWin: string | null; monthlyChange: string | null;
+  intentions: unknown; completedAt: string | null; createdAt: string; updatedAt: string;
+}): ResetRow {
+  return {
+    ...row,
+    staleActions: row.staleActions ?? [],
+    carryForwardItems: row.carryForwardItems ?? [],
+    intentions: row.intentions ?? null,
+  };
+}
+
+const RESET_COLUMNS_PG = `
+  id, type, period_start AS "periodStart", period_end AS "periodEnd",
+  went_well AS "wentWell", needs_adjustment AS "needsAdjustment", notes,
+  stats, ai_summary AS "aiSummary", stale_actions AS "staleActions",
+  carry_forward_items AS "carryForwardItems", monthly_win AS "monthlyWin",
+  monthly_change AS "monthlyChange", intentions, completed_at AS "completedAt",
+  created_at AS "createdAt", updated_at AS "updatedAt"
+`;
+
+const RESET_PATCH_COLUMNS_PG: Record<keyof ResetPatch, string> = {
+  wentWell: 'went_well',
+  needsAdjustment: 'needs_adjustment',
+  notes: 'notes',
+  stats: 'stats',
+  aiSummary: 'ai_summary',
+  staleActions: 'stale_actions',
+  carryForwardItems: 'carry_forward_items',
+  monthlyWin: 'monthly_win',
+  monthlyChange: 'monthly_change',
+  intentions: 'intentions',
+  completedAt: 'completed_at',
+};
+
+const RESET_JSON_PATCH_KEYS_PG = new Set<keyof ResetPatch>([
+  'stats', 'staleActions', 'carryForwardItems', 'intentions',
+]);
+
+/** The keys the caller actually supplied — an explicit `null` counts, `undefined` does not. */
+function presentResetPatchKeysPg(fields: ResetPatch): Array<keyof ResetPatch> {
+  return (Object.keys(RESET_PATCH_COLUMNS_PG) as Array<keyof ResetPatch>)
+    .filter((key) => fields[key] !== undefined);
+}
+
+function serializeResetPatchValuePg(key: keyof ResetPatch, value: unknown): unknown {
+  if (!RESET_JSON_PATCH_KEYS_PG.has(key)) return value;
+  if (value === undefined || value === null) {
+    return key === 'staleActions' || key === 'carryForwardItems' ? JSON.stringify([]) : null;
+  }
+  return JSON.stringify(value);
+}
+
+function createPostgresResetsPersistence(pool: Pool): AIResetsPersistence {
+  return {
+    async get(type, periodStart) {
+      const [row] = await query<Parameters<typeof resetRow>[0]>(pool, `
+        SELECT ${RESET_COLUMNS_PG} FROM resets WHERE type = $1 AND period_start = $2 LIMIT 1
+      `, [type, periodStart]);
+      return row ? resetRow(row) : null;
+    },
+    async list(type, limit) {
+      const rows = type
+        ? await query<Parameters<typeof resetRow>[0]>(pool, `
+            SELECT ${RESET_COLUMNS_PG} FROM resets WHERE type = $1
+            ORDER BY period_start DESC LIMIT $2
+          `, [type, limit])
+        : await query<Parameters<typeof resetRow>[0]>(pool, `
+            SELECT ${RESET_COLUMNS_PG} FROM resets ORDER BY period_start DESC LIMIT $1
+          `, [limit]);
+      return rows.map(resetRow);
+    },
+    async upsert({ type, periodStart, periodEnd, now, fields }) {
+      const keys = presentResetPatchKeysPg(fields);
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(
+          'SELECT pg_advisory_xact_lock(hashtext($1))',
+          [`reset:${type}:${periodStart}`],
+        );
+        const [existing] = await query<{ id: string }>(client, `
+          SELECT id FROM resets WHERE type = $1 AND period_start = $2 LIMIT 1
+        `, [type, periodStart]);
+
+        if (existing) {
+          // Only the supplied keys are written, so omitted fields keep their
+          // stored value while an explicit null still clears the column.
+          const setClauses = keys.map((key, index) => `${RESET_PATCH_COLUMNS_PG[key]} = $${index + 1}${
+            RESET_JSON_PATCH_KEYS_PG.has(key) ? '::jsonb' : ''
+          }`);
+          const values = keys.map((key) => serializeResetPatchValuePg(key, fields[key]));
+          await client.query(`
+            UPDATE resets SET ${[...setClauses, `updated_at = $${keys.length + 1}`].join(', ')}
+            WHERE id = $${keys.length + 2}
+          `, [...values, now, existing.id]);
+        } else {
+          const id = `reset-${randomUUID().slice(0, 8)}`;
+          await client.query(`
+            INSERT INTO resets (
+              id, type, period_start, period_end, went_well, needs_adjustment, notes, stats,
+              ai_summary, stale_actions, carry_forward_items, monthly_win, monthly_change,
+              intentions, completed_at, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10::jsonb, $11::jsonb, $12, $13, $14::jsonb, $15, $16, $16)
+          `, [
+            id, type, periodStart, periodEnd,
+            fields.wentWell ?? null,
+            fields.needsAdjustment ?? null,
+            fields.notes ?? null,
+            fields.stats !== undefined && fields.stats !== null
+              ? JSON.stringify(fields.stats)
+              : null,
+            fields.aiSummary ?? null,
+            JSON.stringify(fields.staleActions ?? []),
+            JSON.stringify(fields.carryForwardItems ?? []),
+            fields.monthlyWin ?? null,
+            fields.monthlyChange ?? null,
+            fields.intentions !== undefined && fields.intentions !== null
+              ? JSON.stringify(fields.intentions)
+              : null,
+            fields.completedAt ?? null,
+            now,
+          ]);
+        }
+        const [row] = await query<Parameters<typeof resetRow>[0]>(client, `
+          SELECT ${RESET_COLUMNS_PG} FROM resets WHERE type = $1 AND period_start = $2 LIMIT 1
+        `, [type, periodStart]);
+        await client.query('COMMIT');
+        return resetRow(row);
+      } catch (error) {
+        await client.query('ROLLBACK').catch(() => undefined);
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+    async patch(id, updates, now) {
+      const keys = presentResetPatchKeysPg(updates);
+      if (keys.length > 0) {
+        const setClauses = keys.map((key, index) => `${RESET_PATCH_COLUMNS_PG[key]} = $${index + 1}${
+          RESET_JSON_PATCH_KEYS_PG.has(key) ? '::jsonb' : ''
+        }`);
+        const values = keys.map((key) => serializeResetPatchValuePg(key, updates[key]));
+        await pool.query(`
+          UPDATE resets SET ${setClauses.join(', ')}, updated_at = $${keys.length + 1}
+          WHERE id = $${keys.length + 2}
+        `, [...values, now, id]);
+      }
+      const [row] = await query<Parameters<typeof resetRow>[0]>(pool, `
+        SELECT ${RESET_COLUMNS_PG} FROM resets WHERE id = $1 LIMIT 1
+      `, [id]);
+      return row ? resetRow(row) : null;
+    },
+    async aggregateStats({
+      periodStart, periodEnd, periodStartIso, periodEndExclusiveIso,
+      staleThresholdExclusiveIso, staleLimit,
+    }) {
+      const [
+        completedTasks, createdTaskCountRows, carriedForwardCountRows, activeRoutines,
+        periodCompletions, focusItems, staleTasks, energyData,
+      ] = await Promise.all([
+        query<{ id: string; title: string; completedAt: string | null }>(pool, `
+          SELECT id, title, completed_at AS "completedAt"
+          FROM tasks
+          WHERE status = 'done' AND completed_at >= $1 AND completed_at < $2
+        `, [periodStartIso, periodEndExclusiveIso]),
+        query<{ count: number }>(pool, `
+          SELECT COUNT(*)::int AS count FROM tasks WHERE created_at >= $1 AND created_at < $2
+        `, [periodStartIso, periodEndExclusiveIso]),
+        query<{ count: number }>(pool, `
+          SELECT COUNT(*)::int AS count FROM tasks
+          WHERE status NOT IN ('done', 'cancelled') AND created_at < $1
+        `, [periodEndExclusiveIso]),
+        query<{ id: string; cadenceType: string }>(pool, `
+          SELECT id, cadence_type AS "cadenceType" FROM routines
+          WHERE is_active = TRUE AND is_archived = FALSE
+        `),
+        query<{ routineId: string; date: string }>(pool, `
+          SELECT routine_id AS "routineId", date FROM routine_completions
+          WHERE date >= $1 AND date <= $2
+        `, [periodStart, periodEnd]),
+        query<{ taskId: string; date: string; slot: number }>(pool, `
+          SELECT task_id AS "taskId", date, slot FROM focus_items
+          WHERE scope = 'today' AND date >= $1 AND date <= $2
+        `, [periodStart, periodEnd]),
+        query<ResetStatsStaleTaskRow>(pool, `
+          SELECT id, title, updated_at AS "updatedAt", status, priority, source_id AS "sourceId",
+                 connector_type AS "connectorType", connector_instance_id AS "connectorInstanceId"
+          FROM tasks
+          WHERE status NOT IN ('done', 'cancelled') AND updated_at < $1
+          LIMIT $2
+        `, [staleThresholdExclusiveIso, staleLimit]),
+        query<{ date: string; level: string }>(pool, `
+          SELECT date, level FROM energy_checkins WHERE date >= $1 AND date <= $2
+        `, [periodStart, periodEnd]),
+      ]);
+      const focusTaskIds = [...new Set(focusItems.map((item) => item.taskId))];
+      const focusTaskStatuses = focusTaskIds.length > 0
+        ? await query<{ id: string; title: string; status: string }>(pool, `
+            SELECT id, title, status FROM tasks WHERE id = ANY($1::text[])
+          `, [focusTaskIds])
+        : [];
+      return {
+        completedTasks,
+        createdTaskCount: createdTaskCountRows[0]?.count ?? 0,
+        carriedForwardCount: carriedForwardCountRows[0]?.count ?? 0,
+        activeRoutines,
+        periodCompletions,
+        focusItems,
+        staleTasks,
+        energyData,
+        focusTaskStatuses,
+      };
+    },
+  };
+}
+
+interface ResetStatsStaleTaskRow {
+  id: string;
+  title: string;
+  updatedAt: string;
+  status: string;
+  priority: string;
+  sourceId: string;
+  connectorType: string;
+  connectorInstanceId: string;
 }
 
 function createPostgresAIWorkflowBackend(
@@ -671,6 +1697,13 @@ export function createPostgresAIWorkflowPersistence(pool: Pool): AIWorkflowPersi
       listWhatsNextNotifications: backend.recommendations.listWhatsNextNotifications,
     },
     listTaskConnectorTypes: backend.listTaskConnectorTypes,
+    dayPlan: createPostgresDayPlanPersistence(pool),
+    taskTools: createPostgresTaskToolsPersistence(pool),
+    dispatch: createPostgresDispatchPersistence(pool),
+    maintenance: createPostgresMaintenancePersistence(pool),
+    goalsBoard: createPostgresGoalsBoardPersistence(pool),
+    ideation: createPostgresIdeationPersistence(pool),
+    resets: createPostgresResetsPersistence(pool),
   };
 }
 

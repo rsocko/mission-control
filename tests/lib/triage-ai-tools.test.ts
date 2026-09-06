@@ -4,7 +4,7 @@ const { listTriageItems } = vi.hoisted(() => ({
   listTriageItems: vi.fn(),
 }));
 
-vi.mock('@/lib/triage/query', () => ({ listTriageItems }));
+vi.mock('@/lib/triage/queue-query', () => ({ listTriageItems }));
 
 import { triageTools } from '@/lib/ai/tools/triage-tools';
 import { TRIAGE_SUMMARY_RESOURCE_URI } from '@/lib/triage/summary-contract';

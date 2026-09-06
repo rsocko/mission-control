@@ -138,6 +138,8 @@ vi.mock('ai', () => ({
     },
   })),
   Output: { object: vi.fn() },
+  tool: vi.fn((definition: unknown) => definition),
+  zodSchema: vi.fn((schema: unknown) => schema),
 }));
 vi.mock('@/lib/tasks/core/runtime', () => ({
   getTaskCorePersistence: async () => ({
@@ -286,6 +288,132 @@ const aiWorkflows: AIWorkflowPersistence = {
     listWhatsNextNotifications: async () => [{ connectorType: 'local' }],
   },
   listTaskConnectorTypes: async () => ['local'],
+  dayPlan: {
+    listSuggestions: async () => ({
+      suggestions: [{
+        id: 'task-energy',
+        title: 'Deep work',
+        priority: 'high',
+        dueDate: '2026-09-01',
+        connectorType: 'local',
+        reason: 'overdue' as const,
+      }],
+      counts: { open: 1, overdue: 1, dueToday: 0 },
+    }),
+  },
+  taskTools: {
+    getSummary: async () => ({
+      total: 1,
+      open: 1,
+      overdue: 1,
+      critical: 1,
+      done: 0,
+      bySource: { local: 1 },
+      overdueItems: [{
+        id: 'task-energy',
+        title: 'Deep work',
+        status: 'todo',
+        microStatus: null,
+        dueDate: '2026-09-01',
+        priority: 'high',
+        source: 'local',
+      }],
+    }),
+    search: async () => [{
+      id: 'task-energy',
+      title: 'Deep work',
+      status: 'todo',
+      microStatus: null,
+      priority: 'high',
+      dueDate: '2026-09-01',
+      source: 'local',
+      sourceList: 'Work',
+      description: null,
+    }],
+    listAllTags: async () => [{ id: 'tag-1', name: 'Engineering', type: 'hub', color: '#10b981' }],
+    listTaskTags: async () => [{ id: 'tag-1', name: 'Engineering', type: 'hub', color: '#10b981' }],
+  },
+  dispatch: {
+    getCustomAgentContext: async () => ({
+      openTasks: [{
+        id: 'task-energy',
+        title: 'Deep work',
+        priority: 'high',
+        dueDate: '2026-09-01',
+        connectorType: 'local',
+      }],
+      unreadNotifications: [{
+        id: 'notice-1',
+        title: 'Review',
+        level: 'urgent',
+        connectorType: 'local',
+      }],
+    }),
+  },
+  maintenance: {
+    claimRun: async () => ({ claimed: true, cursor: null }),
+    scanBatch: async () => [],
+    commitBatch: async () => ({ applied: 0 }),
+  },
+  goalsBoard: {
+    listGoalTasks: async () => [{
+      id: 'task-energy',
+      title: 'Deep work',
+      description: null,
+      status: 'todo',
+      priority: 'high',
+      dueDate: '2026-09-01',
+      createdAt: '2026-09-01T12:00:00.000Z',
+      updatedAt: '2026-09-06T12:00:00.000Z',
+      connectorType: 'local',
+      tags: [{ id: 'tag-1', name: 'Goal', slug: 'goal', color: '#10b981', type: 'hub' }],
+      linkedProjects: [],
+    }],
+    countGoalTags: async () => ({ goal: 1, idea: 0, brainstorm: 0 }),
+    promoteGoal: async (input) => (
+      input.taskId === 'missing'
+        ? { kind: 'not-found' as const }
+        : { kind: 'promoted' as const, projectId: input.projectId, tasksCreated: ['mc-goal-1'] }
+    ),
+  },
+  ideation: {
+    convertDraft: async ({ project }) => ({ projectId: project.id }),
+  },
+  resets: {
+    get: async () => null,
+    list: async () => [],
+    upsert: async ({ type, periodStart, periodEnd, now }) => ({
+      id: 'reset-1',
+      type,
+      periodStart,
+      periodEnd,
+      wentWell: null,
+      needsAdjustment: null,
+      notes: null,
+      stats: null,
+      aiSummary: null,
+      staleActions: [],
+      carryForwardItems: [],
+      monthlyWin: null,
+      monthlyChange: null,
+      intentions: null,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    patch: async () => null,
+    aggregateStats: async () => ({
+      completedTasks: [],
+      createdTaskCount: 0,
+      carriedForwardCount: 0,
+      activeRoutines: [],
+      periodCompletions: [],
+      focusItems: [],
+      staleTasks: [],
+      energyData: [],
+      focusTaskStatuses: [],
+    }),
+  },
 };
 
 vi.mock('@/lib/persistence/worker-runtime', () => ({
@@ -761,5 +889,103 @@ describe('poisoned-SQLite AI workflow web surface', () => {
       }),
       { params: Promise.resolve({ id: 'task-energy' }) },
     )).status).toBe(200);
+  });
+
+  it('imports every PR2 application-workflow route without evaluating SQLite', async () => {
+    const modules = await Promise.all([
+      import('@/app/api/ai/dispatch/route'),
+      import('@/app/api/ai/route'),
+      import('@/app/api/goals/promote/route'),
+      import('@/app/api/goals/route'),
+      import('@/app/api/ideation/convert/route'),
+      import('@/app/api/resets/route'),
+      import('@/app/api/resets/stats/route'),
+    ]);
+
+    expect(modules).toHaveLength(7);
+    for (const route of modules as Array<{ GET?: unknown; POST?: unknown; PATCH?: unknown }>) {
+      expect(
+        typeof route.GET === 'function'
+        || typeof route.POST === 'function'
+        || typeof route.PATCH === 'function',
+      ).toBe(true);
+    }
+  });
+
+  it('executes the PR2 goals, ideation, and resets routes without reaching SQLite', async () => {
+    const [goalsList, goalsPromote, ideationConvert, resets, resetsStats] = await Promise.all([
+      import('@/app/api/goals/route'),
+      import('@/app/api/goals/promote/route'),
+      import('@/app/api/ideation/convert/route'),
+      import('@/app/api/resets/route'),
+      import('@/app/api/resets/stats/route'),
+    ]);
+
+    const goalsResponse = await goalsList.GET(
+      new Request('http://localhost/api/goals'),
+    );
+    expect(goalsResponse.status).toBe(200);
+    expect((await goalsResponse.json()).items).toEqual([
+      expect.objectContaining({ id: 'task-energy' }),
+    ]);
+
+    expect((await goalsPromote.POST(new Request('http://localhost/api/goals/promote', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: 'missing', projectName: 'Missing project' }),
+    }))).status).toBe(404);
+    const promoted = await goalsPromote.POST(new Request('http://localhost/api/goals/promote', {
+      method: 'POST',
+      body: JSON.stringify({ taskId: 'task-energy', projectName: 'Deep Work Project' }),
+    }));
+    expect(promoted.status).toBe(201);
+
+    const ideationResponse = await ideationConvert.POST(new Request(
+      'http://localhost/api/ideation/convert',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Graph project',
+          color: '#6366f1',
+          nodes: [{
+            id: 'root',
+            label: 'Graph project',
+            kind: 'idea',
+            parentId: null,
+            sortOrder: 0,
+            properties: {},
+          }],
+        }),
+      },
+    ));
+    expect(ideationResponse.status).toBe(201);
+
+    const resetPost = await resets.POST(new Request('http://localhost/api/resets', {
+      method: 'POST',
+      body: JSON.stringify({
+        type: 'weekly',
+        periodStart: '2026-09-01',
+        periodEnd: '2026-09-07',
+      }),
+    }));
+    expect(resetPost.status).toBe(201);
+
+    const resetsListResponse = await resets.GET(new Request('http://localhost/api/resets'));
+    expect(resetsListResponse.status).toBe(200);
+
+    const statsResponse = await resetsStats.GET(new Request(
+      'http://localhost/api/resets/stats?type=weekly&periodStart=2026-09-01',
+    ));
+    expect(statsResponse.status).toBe(200);
+  });
+
+  it('serializes maintenance-agent dispatch through the claim/scan/apply contract', async () => {
+    const dispatch = await import('@/app/api/ai/dispatch/route');
+    const response = await dispatch.POST(new Request('http://localhost/api/ai/dispatch', {
+      method: 'POST',
+      body: JSON.stringify({ agent: 'cleanup-done', dryRun: true }),
+    }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.status).toBe('success');
   });
 });

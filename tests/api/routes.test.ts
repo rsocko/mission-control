@@ -248,12 +248,19 @@ vi.mock('@/lib/triage/lifecycle', () => ({
   hardDeleteTriageItem: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getAIRouteOutcome: vi.fn(() => ({ route: 'ollama' })),
-}));
-
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: vi.fn(() => ({ configured: true })),
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIRouteOutcome: vi.fn(() => ({ route: 'ollama' })),
+  getAsyncAIProviderConfiguration: vi.fn(async () => ({ configured: true })),
+  getAsyncAIModel: vi.fn(async () => ({
+    model: 'mock-model',
+    context: {
+      featureId: 'houston-chat',
+      sensitivity: 'restricted',
+      allowedRoutes: ['ollama'],
+      correlationId: 'test-correlation',
+    },
+    configured: { provider: 'ollama', model: 'mock-model' },
+  })),
 }));
 
 vi.mock('@/lib/ai/features/chat', () => ({
@@ -267,6 +274,7 @@ vi.mock('@/lib/ai/features/chat', () => ({
       allowedRoutes: ['ollama'],
       correlationId: 'test-correlation',
     },
+    configured: { provider: 'ollama', model: 'mock-model' },
   })),
 }));
 
@@ -584,8 +592,8 @@ describe('POST /api/ai', () => {
   });
 
   it('should return 503 when AI provider is not configured', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-    vi.mocked(getResolvedAIConfig).mockReturnValueOnce({ configured: false } as ReturnType<typeof getResolvedAIConfig>);
+    const { getAsyncAIProviderConfiguration } = await import('@/lib/ai/provider-runtime');
+    vi.mocked(getAsyncAIProviderConfiguration).mockResolvedValueOnce({ configured: false } as Awaited<ReturnType<typeof getAsyncAIProviderConfiguration>>);
 
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {

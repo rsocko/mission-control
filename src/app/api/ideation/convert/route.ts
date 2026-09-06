@@ -1,16 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { runTransaction } from '@/db';
-import {
-  hubProjects,
-  projectPhaseItems,
-  projectPhases,
-  tags,
-  taskDependencies,
-  taskProjects,
-  tasks,
-  taskTags,
-} from '@/db/schema';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 import { ApiErrors } from '@/lib/api-error';
 import type {
   IdeationNode,
@@ -96,10 +86,6 @@ const convertSchema = z.object({
     revision: z.number().int().positive(),
   }).optional(),
 });
-
-function slugify(value: string): string {
-  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-}
 
 function validateHierarchy(nodes: IdeationNode[]): string | null {
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -273,125 +259,68 @@ export async function POST(request: Request) {
       return depth;
     };
 
-    runTransaction((tx) => {
-      tx.insert(hubProjects).values({
+    const persistence = await getAIWorkflowPersistence();
+    const { projectId: createdProjectId } = await persistence.ideation.convertDraft({
+      project: {
         id: projectId,
         name: parsed.data.name,
-        description: 'Created from the Graph ideation canvas.',
         color: parsed.data.color,
-        icon: 'Lightbulb',
-        iconColor: parsed.data.color,
-        sourceBindings: [],
-        autoIncludeRules: [],
-        kanbanColumns: [],
-        defaultView: 'list',
         metadata: {
           source: 'ideation',
           ...(parsed.data.sourceWorkspace
             ? { sourceWorkspace: parsed.data.sourceWorkspace }
             : {}),
         },
-        createdAt: now,
-        updatedAt: now,
-      }).run();
-
-      const phaseValues = nodes
+      },
+      phases: nodes
         .filter((node) => node.kind === 'phase')
         .map((node) => ({
           id: phaseIdByNode.get(node.id)!,
-          projectId,
           name: node.label,
           description: propertyValue<string>(node, 'notes') ?? null,
-          status: 'pending',
           color: parsed.data.color,
           sortOrder: node.sortOrder,
-          createdAt: now,
-          updatedAt: now,
-        }));
-      if (phaseValues.length) tx.insert(projectPhases).values(phaseValues).run();
-
-      const taskValues = nodes
+        })),
+      tasks: nodes
         .filter((node) => node.kind === 'task')
         .map((node) => {
           const taskId = taskIdByNode.get(node.id)!;
           const parentTask = nearestAncestor(node, 'task');
           return {
             id: taskId,
-            sourceId: taskId,
-            connectorType: 'local',
-            connectorInstanceId: 'local',
             title: node.label,
             description: propertyValue<string>(node, 'notes') ?? null,
             status: propertyValue<string>(node, 'status') ?? 'todo',
             priority: propertyValue<string>(node, 'priority') ?? 'none',
             assignee: propertyValue<string>(node, 'assignee') ?? null,
             dueDate: propertyValue<string>(node, 'due') ?? null,
-            createdAt: now,
-            updatedAt: now,
-            completedAt: null,
             parentId: parentTask ? taskIdByNode.get(parentTask.id) ?? null : null,
             depth: taskDepth(node),
-            isChecklistItem: false,
             metadata: { ideationNodeId: node.id },
-            syncStatus: 'synced',
-            lastSyncedAt: now,
-            pushRetryCount: 0,
             effort: propertyValue<number>(node, 'effort') ?? null,
-            isBulkImport: false,
+            tagNames: propertyValue<string[]>(node, 'tags') ?? [],
           };
-        });
-      if (taskValues.length) tx.insert(tasks).values(taskValues).run();
-
-      const memberships = [...taskIdByNode.values()].map((taskId) => ({ taskId, projectId }));
-      if (memberships.length) tx.insert(taskProjects).values(memberships).run();
-
-      const phaseItems = nodes
+        }),
+      phaseItems: nodes
         .filter((node) => node.kind === 'task')
         .flatMap((node) => {
           const phase = nearestAncestor(node, 'phase');
           if (!phase) return [];
           return [{
-            id: crypto.randomUUID(),
             phaseId: phaseIdByNode.get(phase.id)!,
             taskId: taskIdByNode.get(node.id)!,
             sortOrder: node.sortOrder,
-            createdAt: now,
           }];
-        });
-      if (phaseItems.length) tx.insert(projectPhaseItems).values(phaseItems).run();
-
-      const existingTags = tx.select().from(tags).all();
-      const tagBySlug = new Map(existingTags.map((tag) => [tag.slug, tag]));
-      const tagLinks: Array<{ taskId: string; tagId: string }> = [];
-      for (const node of nodes.filter((candidate) => candidate.kind === 'task')) {
-        for (const tagName of propertyValue<string[]>(node, 'tags') ?? []) {
-          const slug = slugify(tagName);
-          if (!slug) continue;
-          let tag = tagBySlug.get(slug);
-          if (!tag) {
-            tag = {
-              id: `tag-${crypto.randomUUID()}`,
-              name: tagName,
-              slug,
-              type: 'hub',
-              source: 'ideation',
-              color: '#34d399',
-              confirmed: true,
-              createdAt: now,
-              unifiedInto: null,
-            };
-            tx.insert(tags).values(tag).run();
-            tagBySlug.set(slug, tag);
-          }
-          tagLinks.push({ taskId: taskIdByNode.get(node.id)!, tagId: tag.id });
-        }
-      }
-      if (tagLinks.length) tx.insert(taskTags).values(tagLinks).run();
-
-      if (relationshipValues.length) tx.insert(taskDependencies).values(relationshipValues).run();
+        }),
+      dependencies: relationshipValues.map((relationship) => ({
+        taskId: relationship.taskId,
+        dependsOnTaskId: relationship.dependsOnTaskId,
+        type: relationship.type,
+      })),
+      now,
     });
 
-    return NextResponse.json({ projectId }, { status: 201 });
+    return NextResponse.json({ projectId: createdProjectId }, { status: 201 });
   } catch (error) {
     return ApiErrors.internal('Failed to convert ideation draft', error);
   }

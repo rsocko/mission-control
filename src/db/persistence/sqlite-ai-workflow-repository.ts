@@ -262,6 +262,92 @@ function applyEnergyTags(
   return transaction.immediate();
 }
 
+function loadDayPlanContext(
+  sqlite: Database.Database,
+  input: { date: string; openTaskLimit: number },
+) {
+  return sqlite.transaction(() => {
+    const myDayItems = sqlite.prepare(`
+      SELECT t.id, t.title, t.priority, t.due_date AS dueDate,
+             t.connector_type AS connectorType
+      FROM my_day_items m
+      INNER JOIN tasks t ON m.task_id = t.id
+      WHERE m.date = ?
+    `).all(input.date) as DayPlanTask[];
+    const schedules = sqlite.prepare(`
+      SELECT task_id AS taskId, scheduled_time AS scheduledTime,
+             estimated_duration AS estimatedDuration
+      FROM task_schedules
+      WHERE scheduled_date = ?
+    `).all(input.date) as DayPlanSchedule[];
+    const openTasks = sqlite.prepare(`
+      SELECT id, title, priority, due_date AS dueDate,
+             connector_type AS connectorType
+      FROM tasks WHERE status = 'todo'
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(input.openTaskLimit) as DayPlanTask[];
+    return { myDayItems, schedules, openTasks };
+  }).deferred();
+}
+
+function loadFocusSuggestionContext(
+  sqlite: Database.Database,
+  input: { scope: string; date: string; effectiveDate: string; taskLimit: number },
+) {
+  return sqlite.transaction(() => {
+    const focusTaskIds = (sqlite.prepare(`
+      SELECT task_id AS taskId FROM focus_items WHERE scope = ? AND date = ?
+    `).all(input.scope, input.effectiveDate) as Array<{ taskId: string }>)
+      .map((row) => row.taskId);
+    const tasks = sqlite.prepare(`
+      SELECT id, title, status, priority, due_date AS dueDate,
+             connector_type AS connectorType, source_list_name AS sourceListName,
+             created_at AS createdAt, updated_at AS updatedAt, depth
+      FROM tasks
+      WHERE status <> 'done' AND status <> 'cancelled' AND depth = 0
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(input.taskLimit) as FocusSuggestionTask[];
+    const myDayTaskIds = (sqlite.prepare(`
+      SELECT task_id AS taskId FROM my_day_items WHERE date = ?
+    `).all(input.date) as Array<{ taskId: string }>).map((row) => row.taskId);
+    return { focusTaskIds, tasks, myDayTaskIds };
+  }).deferred();
+}
+
+function loadGoalDevelopmentContext(
+  sqlite: Database.Database,
+  taskId: string,
+  existingProjectLimit: number,
+): GoalDevelopmentContext | null {
+  return sqlite.transaction(() => {
+    const task = (sqlite.prepare(`
+      SELECT id, title, description, connector_type AS connectorType
+      FROM tasks WHERE id = ? LIMIT 1
+    `).get(taskId) as GoalDevelopmentContext['task'] | undefined) ?? null;
+    if (!task) return null;
+    const tags = sqlite.prepare(`
+      SELECT t.name, t.slug
+      FROM task_tags tt
+      INNER JOIN tags t ON tt.tag_id = t.id
+      WHERE tt.task_id = ?
+    `).all(taskId) as GoalDevelopmentContext['tags'];
+    const linkedProjects = sqlite.prepare(`
+      SELECT p.name, p.description, p.category
+      FROM task_projects tp
+      INNER JOIN hub_projects p ON tp.project_id = p.id
+      WHERE tp.task_id = ?
+    `).all(taskId) as GoalDevelopmentContext['linkedProjects'];
+    const existingProjects = sqlite.prepare(`
+      SELECT name, category FROM hub_projects
+      ORDER BY id ASC
+      LIMIT ?
+    `).all(existingProjectLimit) as GoalDevelopmentContext['existingProjects'];
+    return { task, tags, linkedProjects, existingProjects };
+  }).deferred();
+}
+
 function createSqliteAIWorkflowBackend(
   sqlite: Database.Database,
 ): AIWorkflowBackend {
@@ -659,10 +745,7 @@ export function createSqliteAIDailyPlanningExtensions(
   return {
     dayPlan: {
       async getContext({ date, openTaskLimit }) {
-        const myDayItems = await backend.planning.listPlanDayItems(date);
-        const schedules = await backend.planning.listPlanDaySchedules(date);
-        const openTasks = await backend.planning.listPlanDayOpenTasks(openTaskLimit);
-        return { myDayItems, schedules, openTasks };
+        return loadDayPlanContext(sqlite, { date, openTaskLimit });
       },
     },
     energySuggestions: {
@@ -673,10 +756,10 @@ export function createSqliteAIDailyPlanningExtensions(
       apply: backend.recommendations.applyEnergyTagSuggestions,
     },
     async getFocusSuggestionContext({ scope, date, effectiveDate, taskLimit }) {
-      const focusTaskIds = await backend.planning.listFocusTaskIds(scope, effectiveDate);
-      const tasks = await backend.planning.listFocusCandidates(taskLimit);
-      const myDayTaskIds = await backend.planning.listMyDayTaskIds(date);
-      return { focusTaskIds, tasks, myDayTaskIds };
+      return loadFocusSuggestionContext(
+        sqlite,
+        { scope, date, effectiveDate, taskLimit },
+      );
     },
   };
 }
@@ -698,12 +781,7 @@ export function createSqliteAIProjectOrganizationExtensions(
     async getGoalDevelopmentContext(taskId, existingProjectLimit): Promise<
       GoalDevelopmentContext | null
     > {
-      const task = await backend.goals.getTask(taskId);
-      if (!task) return null;
-      const tags = await backend.goals.listTaskTags(taskId);
-      const linkedProjects = await backend.goals.listLinkedProjects(taskId);
-      const existingProjects = await backend.goals.listExistingProjects(existingProjectLimit);
-      return { task, tags, linkedProjects, existingProjects };
+      return loadGoalDevelopmentContext(sqlite, taskId, existingProjectLimit);
     },
   };
 }

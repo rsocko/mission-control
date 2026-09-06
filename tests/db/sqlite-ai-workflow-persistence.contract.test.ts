@@ -1,5 +1,8 @@
-import { afterAll, beforeAll, describe, vi } from 'vitest';
-import type Database from 'better-sqlite3';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import Database from 'better-sqlite3';
 import type { AIWorkflowPersistence } from '@/db/persistence/ai-workflows';
 import type { DailyPlanningPersistence } from '@/db/persistence/daily-planning';
 import type { ProjectAdministrationPersistence } from '@/db/persistence/project-organization';
@@ -235,4 +238,163 @@ describe('SQLite AI workflow adapter', () => {
   });
 
   describeAIWorkflowPersistenceContract('SQLite', () => harness);
+
+  it('keeps composite planning and goal reads on one SQLite snapshot', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'mc-ai-workflow-snapshot-'));
+    const path = join(directory, 'snapshot.db');
+    const reader = new Database(path);
+    const writer = new Database(path);
+    try {
+      reader.pragma('journal_mode = WAL');
+      writer.pragma('journal_mode = WAL');
+      reader.exec(`
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT NOT NULL,
+          priority TEXT NOT NULL,
+          due_date TEXT,
+          connector_type TEXT NOT NULL,
+          source_list_name TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          depth INTEGER NOT NULL
+        );
+        CREATE TABLE my_day_items (task_id TEXT NOT NULL, date TEXT NOT NULL);
+        CREATE TABLE task_schedules (
+          task_id TEXT NOT NULL,
+          scheduled_date TEXT NOT NULL,
+          scheduled_time TEXT,
+          estimated_duration INTEGER
+        );
+        CREATE TABLE focus_items (
+          task_id TEXT NOT NULL,
+          scope TEXT NOT NULL,
+          date TEXT NOT NULL
+        );
+        CREATE TABLE tags (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL);
+        CREATE TABLE task_tags (task_id TEXT NOT NULL, tag_id TEXT NOT NULL);
+        CREATE TABLE hub_projects (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          description TEXT,
+          category TEXT
+        );
+        CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
+
+        INSERT INTO tasks VALUES (
+          'task-a', 'Alpha', 'Initial task', 'todo', 'high', NULL, 'local', NULL,
+          '2026-09-01T00:00:00.000Z', '2026-09-06T00:00:00.000Z', 0
+        );
+        INSERT INTO my_day_items VALUES ('task-a', '${AI_WORKFLOW_TODAY}');
+        INSERT INTO task_schedules VALUES ('task-a', '${AI_WORKFLOW_TODAY}', '09:30', 30);
+        INSERT INTO focus_items VALUES ('task-a', 'today', '${AI_WORKFLOW_TODAY}');
+        INSERT INTO tags VALUES ('tag-a', 'Initial tag', 'initial-tag');
+        INSERT INTO task_tags VALUES ('task-a', 'tag-a');
+        INSERT INTO hub_projects VALUES (
+          'project-a', 'Initial project', 'Initial description', 'engineering'
+        );
+        INSERT INTO task_projects VALUES ('task-a', 'project-a');
+      `);
+
+      const {
+        createSqliteAIDailyPlanningExtensions,
+        createSqliteAIProjectOrganizationExtensions,
+      } = await import('@/db/persistence/sqlite-ai-workflow-repository');
+      const planning = createSqliteAIDailyPlanningExtensions(reader);
+      const organization = createSqliteAIProjectOrganizationExtensions(reader);
+      const originalPrepare = reader.prepare.bind(reader);
+
+      function interleaveWrite(
+        sqlFragment: string,
+        method: 'all' | 'get',
+        write: () => void,
+      ) {
+        let fired = false;
+        const spy = vi.spyOn(reader, 'prepare').mockImplementation((source) => {
+          const statement = originalPrepare(source);
+          if (fired || !source.includes(sqlFragment)) return statement;
+          return new Proxy(statement, {
+            get(target, property) {
+              const value = Reflect.get(target, property, target);
+              if (property === method) {
+                return (...args: unknown[]) => {
+                  const result = Reflect.apply(
+                    value as (...parameters: unknown[]) => unknown,
+                    target,
+                    args,
+                  );
+                  fired = true;
+                  write();
+                  return result;
+                };
+              }
+              return typeof value === 'function' ? value.bind(target) : value;
+            },
+          });
+        });
+        return { spy, fired: () => fired };
+      }
+
+      const dayWrite = interleaveWrite('FROM my_day_items m', 'all', () => {
+        writer.exec(`
+          UPDATE task_schedules SET scheduled_time = '11:00' WHERE task_id = 'task-a';
+          INSERT INTO tasks VALUES (
+            'task-b', 'Beta', NULL, 'todo', 'medium', NULL, 'local', NULL,
+            '2026-09-01T00:00:00.000Z', '2026-09-06T00:00:00.000Z', 0
+          );
+        `);
+      });
+      const dayContext = await planning.dayPlan.getContext({
+        date: AI_WORKFLOW_TODAY,
+        openTaskLimit: 20,
+      });
+      dayWrite.spy.mockRestore();
+      expect(dayWrite.fired()).toBe(true);
+      expect(dayContext.schedules).toEqual([
+        expect.objectContaining({ taskId: 'task-a', scheduledTime: '09:30' }),
+      ]);
+      expect(dayContext.openTasks.map((task) => task.id)).toEqual(['task-a']);
+
+      const focusWrite = interleaveWrite('FROM focus_items', 'all', () => {
+        writer.exec(`
+          INSERT INTO tasks VALUES (
+            'task-c', 'Gamma', NULL, 'todo', 'low', NULL, 'local', NULL,
+            '2026-09-01T00:00:00.000Z', '2026-09-06T00:00:00.000Z', 0
+          );
+          INSERT INTO my_day_items VALUES ('task-b', '${AI_WORKFLOW_TODAY}');
+        `);
+      });
+      const focusContext = await planning.getFocusSuggestionContext({
+        scope: 'today',
+        date: AI_WORKFLOW_TODAY,
+        effectiveDate: AI_WORKFLOW_TODAY,
+        taskLimit: 20,
+      });
+      focusWrite.spy.mockRestore();
+      expect(focusWrite.fired()).toBe(true);
+      expect(focusContext.tasks.map((task) => task.id)).toEqual(['task-a', 'task-b']);
+      expect(focusContext.myDayTaskIds).toEqual(['task-a']);
+
+      const goalWrite = interleaveWrite('FROM tasks WHERE id = ?', 'get', () => {
+        writer.exec(`
+          UPDATE tags SET name = 'Updated tag' WHERE id = 'tag-a';
+          UPDATE hub_projects SET name = 'Updated project' WHERE id = 'project-a';
+        `);
+      });
+      const goalContext = await organization.getGoalDevelopmentContext('task-a', 20);
+      goalWrite.spy.mockRestore();
+      expect(goalWrite.fired()).toBe(true);
+      expect(goalContext).toMatchObject({
+        tags: [{ name: 'Initial tag', slug: 'initial-tag' }],
+        linkedProjects: [{ name: 'Initial project' }],
+        existingProjects: [{ name: 'Initial project' }],
+      });
+    } finally {
+      reader.close();
+      writer.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
 });

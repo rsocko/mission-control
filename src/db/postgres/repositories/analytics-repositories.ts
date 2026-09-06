@@ -47,7 +47,9 @@ import type {
  *    raising) for unparsable text, and reads offsetless text as UTC.
  *    {@link instant} reproduces all three with a guarded `CASE`; a bare
  *    `col::timestamptz` would raise on bad text and resolve offsetless text
- *    against the session `TimeZone`.
+ *    against the session `TimeZone`. It and {@link withinInstantRange} are
+ *    exported so sibling adapters that compare the same stored timestamp text
+ *    share this one translation rather than re-deriving it.
  * 2. SQLite's default `BINARY` collation orders text by bytes, so every text
  *    `ORDER BY`, window `ORDER BY`, and `row_number()` partition order here is
  *    pinned with `COLLATE "C"`. The database's locale-aware default collation
@@ -103,7 +105,7 @@ const ZONE_MINUTE_CAPTURE = String.raw`[+-]\d{2}:(\d{2})\s*$`;
  * No writer in this codebase stores any of them in a timestamp column, and
  * honouring `'now'` would make a read nondeterministic.
  */
-function instant(column: string): string {
+export function instant(column: string): string {
   const year = `substr(${column}, 1, 4)::int`;
   const month = `substr(${column}, 6, 2)::int`;
   const day = `substr(${column}, 9, 2)::int`;
@@ -133,7 +135,7 @@ function instant(column: string): string {
 }
 
 /** `[start, end)` on a stored timestamp column, matching `julianday` bounds. */
-function withinInstantRange(column: string, startParam: number, endParam: number): string {
+export function withinInstantRange(column: string, startParam: number, endParam: number): string {
   return `${instant(column)} >= $${startParam}::timestamptz
     AND ${instant(column)} < $${endParam}::timestamptz`;
 }

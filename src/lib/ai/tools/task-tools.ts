@@ -1,10 +1,65 @@
 import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
-import db from '@/db';
-import { tasks, taskTags, tags } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
-import { countCriticalAndHighTasks } from '@/lib/ai/taskSummary';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import { getLocalToday } from '@/lib/utils/date';
+
+const MAX_MUTATION_ATTEMPTS = 3;
+
+interface SimpleTaskMutationResult {
+  taskId: string;
+  title: string;
+  status: string;
+  microStatus: string | null;
+  priority: string;
+  dueDate: string | null;
+  source: string;
+  sourceList: string | null;
+}
+
+/**
+ * Applies a single-field patch to a task via the clean task-core write seam,
+ * retrying a bounded number of times on optimistic-concurrency conflicts.
+ */
+async function applySimpleTaskPatch(
+  taskId: string,
+  patch: Record<string, unknown>,
+): Promise<{ success: true; result: SimpleTaskMutationResult } | { success: false; error: string }> {
+  const persistence = await getTaskCorePersistence();
+  for (let attempt = 0; attempt < MAX_MUTATION_ATTEMPTS; attempt += 1) {
+    const writeContext = await persistence.mutations.getTaskWriteContext(taskId);
+    if (!writeContext) return { success: false, error: 'Task not found.' };
+    const currentTask = writeContext.task;
+    const now = new Date().toISOString();
+    const outcome = await persistence.mutations.mutateTask({
+      taskId,
+      expectedUpdatedAt: currentTask.updatedAt,
+      expectedStatusForTerminalTransition:
+        patch.status === 'done' || patch.status === 'cancelled'
+          ? currentTask.status
+          : null,
+      now,
+      patch,
+    });
+    if (outcome.kind === 'not-found') return { success: false, error: 'Task not found.' };
+    if (outcome.kind === 'revision-conflict') continue;
+    const task = outcome.task;
+    return {
+      success: true,
+      result: {
+        taskId: task.id,
+        title: task.title,
+        status: task.status,
+        microStatus: task.microStatus,
+        priority: task.priority,
+        dueDate: task.dueDate,
+        source: task.connectorType,
+        sourceList: task.sourceListName,
+      },
+    };
+  }
+  return { success: false, error: 'Task changed while it was being updated. Please try again.' };
+}
 
 export const taskTools = {
   getTaskSummary: tool({
@@ -13,33 +68,19 @@ export const taskTools = {
       includeOverdueList: z.boolean().optional().describe('Whether to include list of overdue items'),
     })),
     execute: async ({ includeOverdueList }) => {
-      const allTasks = await db.select().from(tasks);
-      const today = getLocalToday();
-
-      const open = allTasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');
-      const overdue = open.filter(t => t.dueDate && t.dueDate < today);
-      const critical = countCriticalAndHighTasks(open);
-      const bySource = open.reduce((acc, t) => {
-        acc[t.connectorType] = (acc[t.connectorType] || 0) + 1;
-        return acc;
-      }, {} as Record<string, number>);
-
+      const persistence = await getAIWorkflowPersistence();
+      const summary = await persistence.taskTools.getSummary({
+        today: getLocalToday(),
+        overdueLimit: 10,
+      });
       return {
-        total: allTasks.length,
-        open: open.length,
-        overdue: overdue.length,
-        critical,
-        done: allTasks.filter(t => t.status === 'done').length,
-        bySource,
-        overdueItems: includeOverdueList !== false ? overdue.slice(0, 10).map(t => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-          microStatus: t.microStatus,
-          dueDate: t.dueDate,
-          priority: t.priority,
-          source: t.connectorType,
-        })) : undefined,
+        total: summary.total,
+        open: summary.open,
+        overdue: summary.overdue,
+        critical: summary.critical,
+        done: summary.done,
+        bySource: summary.bySource,
+        overdueItems: includeOverdueList !== false ? summary.overdueItems : undefined,
       };
     },
   }),
@@ -54,30 +95,14 @@ export const taskTools = {
       limit: z.number().optional().default(15),
     })),
     execute: async ({ query, status, priority, source, limit }) => {
-      let results = await db.select().from(tasks).orderBy(desc(tasks.updatedAt)).limit(50);
-
-      if (status) results = results.filter(t => t.status === status);
-      if (priority) results = results.filter(t => t.priority === priority);
-      if (source) results = results.filter(t => t.connectorType === source);
-      if (query) {
-        const q = query.toLowerCase();
-        results = results.filter(t =>
-          t.title.toLowerCase().includes(q) ||
-          (t.description && t.description.toLowerCase().includes(q))
-        );
-      }
-
-      return results.slice(0, limit || 15).map(t => ({
-        id: t.id,
-        title: t.title,
-        status: t.status,
-        microStatus: t.microStatus,
-        priority: t.priority,
-        dueDate: t.dueDate,
-        source: t.connectorType,
-        sourceList: t.sourceListName,
-        description: t.description?.slice(0, 100),
-      }));
+      const persistence = await getAIWorkflowPersistence();
+      return persistence.taskTools.search({
+        query,
+        status,
+        priority,
+        source,
+        limit: limit || 15,
+      });
     },
   }),
 
@@ -88,23 +113,13 @@ export const taskTools = {
     })),
     execute: async ({ taskId }) => {
       const now = new Date().toISOString();
-      const [updated] = await db.update(tasks).set({
+      const outcome = await applySimpleTaskPatch(taskId, {
         status: 'done',
         completedAt: now,
-        updatedAt: now,
         syncStatus: 'pending_push',
-      }).where(eq(tasks.id, taskId)).returning({
-        taskId: tasks.id,
-        title: tasks.title,
-        status: tasks.status,
-        microStatus: tasks.microStatus,
-        priority: tasks.priority,
-        dueDate: tasks.dueDate,
-        source: tasks.connectorType,
-        sourceList: tasks.sourceListName,
       });
-      if (!updated) return { success: false as const, taskId, error: 'Task not found.' };
-      return { success: true as const, ...updated, completedAt: now };
+      if (!outcome.success) return { success: false as const, taskId, error: outcome.error };
+      return { success: true as const, ...outcome.result, completedAt: now };
     },
   }),
 
@@ -115,22 +130,12 @@ export const taskTools = {
       priority: z.enum(['critical', 'high', 'medium', 'low', 'none']).describe('New priority level'),
     })),
     execute: async ({ taskId, priority }) => {
-      const [updated] = await db.update(tasks).set({
+      const outcome = await applySimpleTaskPatch(taskId, {
         priority,
-        updatedAt: new Date().toISOString(),
         syncStatus: 'pending_push',
-      }).where(eq(tasks.id, taskId)).returning({
-        taskId: tasks.id,
-        title: tasks.title,
-        status: tasks.status,
-        microStatus: tasks.microStatus,
-        priority: tasks.priority,
-        dueDate: tasks.dueDate,
-        source: tasks.connectorType,
-        sourceList: tasks.sourceListName,
       });
-      if (!updated) return { success: false as const, taskId, error: 'Task not found.' };
-      return { success: true as const, ...updated, newPriority: priority };
+      if (!outcome.success) return { success: false as const, taskId, error: outcome.error };
+      return { success: true as const, ...outcome.result, newPriority: priority };
     },
   }),
 
@@ -140,15 +145,11 @@ export const taskTools = {
       taskId: z.string().optional().describe('Get tags for a specific task'),
     })),
     execute: async ({ taskId }) => {
-      if (taskId) {
-        const result = await db.select({ tag: tags })
-          .from(taskTags)
-          .innerJoin(tags, eq(taskTags.tagId, tags.id))
-          .where(eq(taskTags.taskId, taskId));
-        return result.map(r => ({ id: r.tag.id, name: r.tag.name, type: r.tag.type, color: r.tag.color }));
-      }
-      const allTags = await db.select().from(tags);
-      return allTags.map(t => ({ id: t.id, name: t.name, type: t.type, color: t.color }));
+      const persistence = await getAIWorkflowPersistence();
+      const tags = taskId
+        ? await persistence.taskTools.listTaskTags(taskId)
+        : await persistence.taskTools.listAllTags();
+      return tags.map((t) => ({ id: t.id, name: t.name, type: t.type, color: t.color }));
     },
   }),
 
@@ -159,10 +160,8 @@ export const taskTools = {
       effort: z.number().min(1).max(5).nullable().describe('Effort level 1–5 (1=XS/Trivial, 5=XL/Epic), or null to clear'),
     })),
     execute: async ({ taskId, effort }) => {
-      await db.update(tasks).set({
-        effort,
-        updatedAt: new Date().toISOString(),
-      }).where(eq(tasks.id, taskId));
+      const outcome = await applySimpleTaskPatch(taskId, { effort });
+      if (!outcome.success) return { success: false, taskId, error: outcome.error };
       return { success: true, taskId, newEffort: effort };
     },
   }),

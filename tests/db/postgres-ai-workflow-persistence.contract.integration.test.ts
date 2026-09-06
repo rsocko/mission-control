@@ -211,6 +211,30 @@ describe.skipIf(!connectionString)('PostgreSQL AI workflow adapter', () => {
           ]);
         }
       },
+      async seedRawTasks(rows) {
+        for (const row of rows) {
+          await pool.query(`
+            INSERT INTO tasks (
+              id, source_id, connector_type, connector_instance_id, title, description,
+              status, priority, due_date, completed_at, created_at, updated_at,
+              last_synced_at, source_list_name, assignee, depth, parent_id
+            ) VALUES (
+              $1, $2, 'local', 'aiw-instance', $3, $4,
+              $5, 'none', NULL, $6, $7, $8,
+              $8, NULL, NULL, 0, NULL
+            )
+          `, [
+            row.id,
+            `source-${row.id}`,
+            row.title,
+            row.description,
+            row.status,
+            row.completedAt,
+            row.createdAt,
+            row.updatedAt,
+          ]);
+        }
+      },
       async inspectEnergyState(taskIds) {
         const tags = (await pool.query<{ id: string; slug: string }>(`
           SELECT id, slug FROM tags

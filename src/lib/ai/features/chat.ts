@@ -5,7 +5,10 @@ import {
   type GenerateTextOnStepFinishCallback,
   type ModelMessage,
 } from 'ai';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { SensitivityClass } from '../types';
 import { createHoustonTools } from '../tools';
 import { excludeFinanceMutations, restrictToolsAfterTriage } from '../tool-safety';
@@ -61,7 +64,7 @@ function createHoustonToolsContext(
 }
 
 export async function chat(messages: Array<{ role: 'user' | 'assistant'; content: string }>) {
-  const route = getAIModel('houston-chat');
+  const route = await getAsyncAIModel('houston-chat');
   const tools = createHoustonTools();
   const activeTools = excludeFinanceMutations(Object.keys(tools) as Array<keyof typeof tools>);
 
@@ -79,7 +82,7 @@ export async function chat(messages: Array<{ role: 'user' | 'assistant'; content
   return {
     text: result.text,
     toolCalls: result.steps?.flatMap(s => s.toolCalls || []) || [],
-    routing: getAIRouteOutcome(route.context, result.response),
+    routing: getAsyncAIRouteOutcome(route, result.response),
   };
 }
 
@@ -100,7 +103,7 @@ export async function streamChat(
     onStepFinish?: GenerateTextOnStepFinishCallback<ReturnType<typeof createHoustonTools>>;
   },
 ) {
-  const route = getAIModel('houston-chat', options);
+  const route = await getAsyncAIModel('houston-chat', options);
   const tools = createHoustonTools();
   const systemPrompt = options?.contextPrefix
     ? `${SYSTEM_PROMPT}\n\n${options.contextPrefix}`
@@ -127,5 +130,5 @@ export async function streamChat(
     onError: options?.onError,
     onStepFinish: options?.onStepFinish,
   });
-  return { result, context: route.context };
+  return { result, context: route.context, configured: route.configured };
 }

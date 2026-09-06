@@ -213,6 +213,22 @@ describe('SQLite AI workflow adapter', () => {
           });
         }
       },
+      async seedRawTasks(rows) {
+        const insert = sqlite.prepare(`
+          INSERT INTO tasks (
+            id, source_id, connector_type, connector_instance_id, title, description,
+            status, priority, due_date, completed_at, created_at, updated_at,
+            last_synced_at, source_list_name, assignee, depth, parent_id
+          ) VALUES (
+            @id, @sourceId, 'local', 'aiw-instance', @title, @description,
+            @status, 'none', NULL, @completedAt, @createdAt, @updatedAt,
+            @updatedAt, NULL, NULL, 0, NULL
+          )
+        `);
+        for (const row of rows) {
+          insert.run({ ...row, sourceId: `source-${row.id}` });
+        }
+      },
       async inspectEnergyState(taskIds) {
         const tags = sqlite.prepare(`
           SELECT id, slug FROM tags

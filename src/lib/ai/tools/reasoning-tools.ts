@@ -1,9 +1,10 @@
 import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
-import db from '@/db';
-import { tasks, hubProjects, projectPhases } from '@/db/schema';
-import { eq, desc } from 'drizzle-orm';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 import { getLocalToday } from '@/lib/utils/date';
+import { listHubProjects, listProjectPhases } from '@/lib/projects/organization-service';
+
+const DAY_PLAN_SUGGESTION_LIMIT = 8;
 
 export const reasoningTools = {
   suggestDayPlan: tool({
@@ -14,30 +15,31 @@ export const reasoningTools = {
     })),
     execute: async ({ availableMinutes, focusArea }) => {
       const today = getLocalToday();
-      const allOpen = await db.select().from(tasks)
-        .where(eq(tasks.status, 'todo'))
-        .orderBy(desc(tasks.priority));
-
-      const overdue = allOpen.filter(t => t.dueDate && t.dueDate < today);
-      const dueToday = allOpen.filter(t => t.dueDate === today);
-      const critical = allOpen.filter(t => t.priority === 'critical' && !overdue.includes(t));
-      const high = allOpen.filter(t => t.priority === 'high' && !overdue.includes(t) && !dueToday.includes(t));
-
-      const suggestions = [...overdue, ...dueToday, ...critical, ...high].slice(0, 8);
+      const persistence = await getAIWorkflowPersistence();
+      // The adapter selects the real overdue/due-today/critical/high
+      // candidates within a bounded row budget and returns exact totals, so
+      // no important task can be lost to a truncated prefix of open tasks.
+      const { suggestions, counts } = await persistence.dayPlan.listSuggestions({
+        today,
+        limit: DAY_PLAN_SUGGESTION_LIMIT,
+      });
 
       return {
-        suggestions: suggestions.map(t => ({
-          id: t.id,
-          title: t.title,
-          status: t.status,
-          microStatus: t.microStatus,
-          priority: t.priority,
-          dueDate: t.dueDate,
-          source: t.connectorType,
-          reason: overdue.includes(t) ? 'overdue' : dueToday.includes(t) ? 'due today' : `${t.priority} priority`,
+        suggestions: suggestions.map((task) => ({
+          id: task.id,
+          title: task.title,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          source: task.connectorType,
+          reason: task.reason === 'overdue'
+            ? 'overdue'
+            : task.reason === 'due-today'
+              ? 'due today'
+              : `${task.priority} priority`,
         })),
-        totalOverdue: overdue.length,
-        totalOpen: allOpen.length,
+        totalOverdue: counts.overdue,
+        totalDueToday: counts.dueToday,
+        totalOpen: counts.open,
         availableMinutes,
       };
     },
@@ -49,7 +51,7 @@ export const reasoningTools = {
       _placeholder: z.boolean().optional(),
     })),
     execute: async () => {
-      const projects = await db.select().from(hubProjects);
+      const projects = await listHubProjects({ includeHidden: true, includePhases: false });
       return projects.map(p => ({ id: p.id, name: p.name, description: p.description, color: p.color }));
     },
   }),
@@ -65,7 +67,7 @@ export const reasoningTools = {
       let projectId: string | null = null;
 
       if (projectName) {
-        const matchingProjects = await db.select().from(hubProjects);
+        const matchingProjects = await listHubProjects({ includeHidden: true, includePhases: false });
         const match = matchingProjects.find(p =>
           p.name.toLowerCase().includes(projectName.toLowerCase()),
         );
@@ -126,17 +128,22 @@ export const reasoningTools = {
       projectName: z.string().optional().describe('Project name to filter by'),
     })),
     execute: async ({ projectName }) => {
-      let allPhases = await db.select().from(projectPhases).orderBy(projectPhases.sortOrder);
-
+      let matchedProjectId: string | null = null;
       if (projectName) {
-        const matchingProjects = await db.select().from(hubProjects);
+        const matchingProjects = await listHubProjects({ includeHidden: true, includePhases: false });
         const match = matchingProjects.find(p =>
           p.name.toLowerCase().includes(projectName.toLowerCase()),
         );
         if (match) {
-          allPhases = allPhases.filter(p => p.projectId === match.id);
+          matchedProjectId = match.id;
         }
       }
+      // `crossProject: true` means "phases with no project" — the default here
+      // is every phase, narrowed to one project only when a name matched.
+      const allPhases = await listProjectPhases({
+        projectId: matchedProjectId,
+        crossProject: false,
+      });
 
       return allPhases.map(p => ({
         id: p.id,

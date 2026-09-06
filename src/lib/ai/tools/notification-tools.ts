@@ -1,9 +1,7 @@
 import { tool, zodSchema } from 'ai';
 import { z } from 'zod';
-import db from '@/db';
-import { notifications, notificationActions } from '@/db/schema';
-import { eq, desc, and, inArray, asc } from 'drizzle-orm';
-import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
+import { DEFAULT_NOTIFICATION_QUERY } from '@/lib/notifications/query';
 
 export const notificationTools = {
   getNotifications: tool({
@@ -14,28 +12,27 @@ export const notificationTools = {
       category: z.string().optional().describe('Filter by category like system, tasks, development, finance, home, social, ai_insights, packages'),
     })),
     execute: async ({ unreadOnly, level, category }) => {
-      const conditions = [];
-      if (unreadOnly) conditions.push(notificationNeedsAttention());
-      if (level) conditions.push(eq(notifications.level, level));
-      if (category) conditions.push(eq(notifications.category, category));
+      const web = await getNotificationWebPersistence();
+      const result = await web.queryNotifications({
+        query: {
+          ...DEFAULT_NOTIFICATION_QUERY,
+          state: unreadOnly ? 'unread' : null,
+          level: level ?? null,
+          category: category ?? null,
+          sort: 'newest',
+        },
+        limit: 15,
+        cursor: null,
+      });
 
-      const where = conditions.length > 0 ? and(...conditions) : undefined;
-      const items = await db.select().from(notifications).where(where).orderBy(desc(notifications.sortAt)).limit(15);
-
-      // Hydrate actions
-      const ids = items.map(n => n.id);
-      const actions = ids.length > 0
-        ? await db.select().from(notificationActions).where(inArray(notificationActions.notificationId, ids)).orderBy(asc(notificationActions.sortOrder))
-        : [];
-
-      const actionsByNotification = new Map<string, typeof actions>();
-      for (const action of actions) {
+      const actionsByNotification = new Map<string, typeof result.actions>();
+      for (const action of result.actions) {
         const existing = actionsByNotification.get(action.notificationId) || [];
         existing.push(action);
         actionsByNotification.set(action.notificationId, existing);
       }
 
-      return items.map(n => ({
+      return result.items.map((n) => ({
         id: n.id,
         title: n.title,
         body: n.body,
@@ -46,10 +43,10 @@ export const notificationTools = {
         disposition: n.disposition,
         sourceState: n.sourceState,
         syncState: n.syncState,
-        isActionable: n.isActionable,
+        isActionable: Boolean(n.isActionable),
         receivedAt: n.receivedAt,
         source: n.connectorType,
-        actions: (actionsByNotification.get(n.id) || []).map(a => ({
+        actions: (actionsByNotification.get(n.id) || []).map((a) => ({
           id: a.id,
           type: a.actionType,
           label: a.label,

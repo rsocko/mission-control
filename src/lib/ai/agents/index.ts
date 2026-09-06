@@ -1,14 +1,11 @@
 import { generateText } from 'ai';
-import { getAIModel } from '../provider-factory';
-import db from '@/db';
-import { tasks, notifications } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getAsyncAIModel } from '../provider-runtime';
+import { getAIWorkflowPersistence } from '../workflow-persistence';
 import { previewIntake, executeIntake, type IntakeResult } from '@/lib/intake';
 import {
   executeMaintenanceAgent,
   type MaintenanceAgentOptions,
 } from './maintenance';
-import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
 
 export {
   MAINTENANCE_AGENT_BUDGETS,
@@ -75,12 +72,15 @@ export async function dispatchAgent(
 
 async function customAgent(instruction: string, startedAt: string): Promise<AgentResult> {
   // Get context for the AI
-  const openTasks = await db.select().from(tasks).where(eq(tasks.status, 'todo')).limit(20);
-  const unreadNotifs = await db.select().from(notifications).where(notificationNeedsAttention()).limit(10);
-  const route = getAIModel('custom-agent', {
+  const persistence = await getAIWorkflowPersistence();
+  const { openTasks, unreadNotifications } = await persistence.dispatch.getCustomAgentContext({
+    taskLimit: 20,
+    notificationLimit: 10,
+  });
+  const route = await getAsyncAIModel('custom-agent', {
     sources: [
       ...openTasks.map((task) => task.connectorType),
-      ...unreadNotifs.map((notification) => notification.connectorType),
+      ...unreadNotifications.map((notification) => notification.connectorType),
     ],
   });
 
@@ -88,8 +88,8 @@ async function customAgent(instruction: string, startedAt: string): Promise<Agen
 OPEN TASKS (${openTasks.length}):
 ${openTasks.map(t => `- [${t.id}] "${t.title}" priority:${t.priority} due:${t.dueDate || 'none'} source:${t.connectorType}`).join('\n')}
 
-UNREAD NOTIFICATIONS (${unreadNotifs.length}):
-${unreadNotifs.map(a => `- [${a.id}] "${a.title}" level:${a.level}`).join('\n')}
+UNREAD NOTIFICATIONS (${unreadNotifications.length}):
+${unreadNotifications.map(a => `- [${a.id}] "${a.title}" level:${a.level}`).join('\n')}
 `;
 
   const result = await generateText({

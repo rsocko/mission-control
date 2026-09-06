@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
-import { getAIRouteOutcome } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import {
+  getAsyncAIProviderConfiguration,
+  getAsyncAIRouteOutcome,
+} from '@/lib/ai/provider-runtime';
 import { streamChat } from '@/lib/ai/features/chat';
 import { aiLogger } from '@/lib/logger';
 import { getLocalToday } from '@/lib/utils/date';
@@ -85,7 +87,7 @@ export async function POST(request: Request) {
     }
 
     // Check if any AI provider is configured
-    const resolvedConfig = getResolvedAIConfig();
+    const resolvedConfig = await getAsyncAIProviderConfiguration();
     if (!resolvedConfig.configured) {
       finishOperation();
       return new Response(JSON.stringify({
@@ -115,7 +117,7 @@ export async function POST(request: Request) {
         durationMs: 0,
       });
     }
-    const { result, context } = await streamChat(normalized.modelMessages, {
+    const { result, context, configured } = await streamChat(normalized.modelMessages, {
       contextPrefix: aiContext.contextPrefix,
       sources: aiContext.sources,
       abortSignal: operationSignal,
@@ -154,7 +156,7 @@ export async function POST(request: Request) {
         'x-mc-correlation-id': context.correlationId,
       },
       messageMetadata: ({ part }) => part.type === 'finish-step'
-        ? { routing: getAIRouteOutcome(context, part.response) }
+        ? { routing: getAsyncAIRouteOutcome({ context, configured }, part.response) }
         : undefined,
     });
   } catch (error) {

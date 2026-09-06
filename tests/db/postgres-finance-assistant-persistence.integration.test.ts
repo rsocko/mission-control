@@ -38,12 +38,12 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   },
 }));
 
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getAIRouteOutcome: () => ({ route: 'local' }),
-}));
-
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({ configured: true, provider: 'openai' }),
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIProviderConfiguration: async () => ({
+    configured: true,
+    provider: 'openai',
+  }),
+  getAsyncAIRouteOutcome: () => ({ route: 'local' }),
 }));
 
 vi.mock('@/lib/ai/features/chat', () => ({
@@ -408,8 +408,7 @@ if (connectionString) {
 }
 
 const EXCLUDED_L10_DEPENDENCIES = [
-  '@/lib/ai/provider-factory',
-  '@/lib/ai/config-resolver',
+  '@/lib/ai/provider-runtime',
   '@/lib/ai/features/chat',
   '@/lib/ai/context-budget',
   '@/lib/ai/admission-controller',

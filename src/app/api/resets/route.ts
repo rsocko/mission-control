@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { resets } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
+import type { ResetPatch } from '@/db/persistence/ai-workflows';
 import { ApiErrors } from '@/lib/api-error';
 
 /**
@@ -16,30 +15,44 @@ export async function GET(request: Request) {
   const periodStart = searchParams.get('periodStart');
 
   try {
+    const persistence = await getAIWorkflowPersistence();
+
     if (type && periodStart) {
       // Get specific reset
-      const result = await db.select()
-        .from(resets)
-        .where(and(eq(resets.type, type), eq(resets.periodStart, periodStart)))
-        .limit(1);
-      return NextResponse.json({ reset: result[0] || null });
+      const reset = await persistence.resets.get(type, periodStart);
+      return NextResponse.json({ reset });
     }
 
     // List recent resets
-    const conditions = type ? eq(resets.type, type) : undefined;
-    const result = await db.select()
-      .from(resets)
-      .where(conditions)
-      .orderBy(desc(resets.periodStart))
-      .limit(20);
-
-    return NextResponse.json({ resets: result });
+    const resets = await persistence.resets.list(type, 20);
+    return NextResponse.json({ resets });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to fetch resets' },
       { status: 500 },
     );
   }
+}
+
+/**
+ * Fields a client may write through POST/PATCH. `id`, `type`, `periodStart`,
+ * `periodEnd`, and `createdAt` are never taken from the body.
+ */
+const RESET_WRITABLE_FIELDS = [
+  'wentWell', 'needsAdjustment', 'notes', 'stats', 'aiSummary',
+  'staleActions', 'carryForwardItems', 'monthlyWin', 'monthlyChange',
+  'intentions', 'completedAt',
+] as const;
+
+/** Collects only the keys the request actually supplied, so an omitted field keeps its stored value and an explicit `null` clears it. */
+function readResetPatch(body: Record<string, unknown>): ResetPatch {
+  const patch: Record<string, unknown> = {};
+  for (const field of RESET_WRITABLE_FIELDS) {
+    if (field in body) {
+      patch[field] = body[field];
+    }
+  }
+  return patch as ResetPatch;
 }
 
 /**
@@ -67,59 +80,17 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
 
   try {
-    // Check if a reset already exists for this period
-    const existing = await db.select({ id: resets.id })
-      .from(resets)
-      .where(and(eq(resets.type, type), eq(resets.periodStart, periodStart)))
-      .limit(1);
-
-    if (existing.length > 0) {
-      // Update existing
-      await db.update(resets)
-        .set({
-          wentWell: body.wentWell,
-          needsAdjustment: body.needsAdjustment,
-          notes: body.notes,
-          stats: body.stats,
-          aiSummary: body.aiSummary,
-          staleActions: body.staleActions ?? [],
-          carryForwardItems: body.carryForwardItems ?? [],
-          monthlyWin: body.monthlyWin,
-          monthlyChange: body.monthlyChange,
-          intentions: body.intentions,
-          completedAt: body.completedAt,
-          updatedAt: now,
-        })
-        .where(eq(resets.id, existing[0].id));
-
-      const updated = await db.select().from(resets).where(eq(resets.id, existing[0].id)).limit(1);
-      return NextResponse.json({ reset: updated[0] });
-    }
-
-    // Create new
-    const id = `reset-${crypto.randomUUID().slice(0, 8)}`;
-    await db.insert(resets).values({
-      id,
+    const persistence = await getAIWorkflowPersistence();
+    const existing = await persistence.resets.get(type, periodStart);
+    const reset = await persistence.resets.upsert({
       type,
       periodStart,
       periodEnd,
-      wentWell: body.wentWell || null,
-      needsAdjustment: body.needsAdjustment || null,
-      notes: body.notes || null,
-      stats: body.stats || null,
-      aiSummary: body.aiSummary || null,
-      staleActions: body.staleActions ?? [],
-      carryForwardItems: body.carryForwardItems ?? [],
-      monthlyWin: body.monthlyWin || null,
-      monthlyChange: body.monthlyChange || null,
-      intentions: body.intentions || null,
-      completedAt: body.completedAt || null,
-      createdAt: now,
-      updatedAt: now,
+      now,
+      fields: readResetPatch(body),
     });
 
-    const created = await db.select().from(resets).where(eq(resets.id, id)).limit(1);
-    return NextResponse.json({ reset: created[0] }, { status: 201 });
+    return NextResponse.json({ reset }, { status: existing ? 200 : 201 });
   } catch (error) {
     return NextResponse.json(
       { error: 'Failed to save reset' },
@@ -141,32 +112,18 @@ export async function PATCH(request: Request) {
   }
 
   // Allowlist of updatable fields to prevent overwriting id, type, periodStart, createdAt
-  const allowedFields = [
-    'wentWell', 'needsAdjustment', 'notes', 'stats', 'aiSummary',
-    'staleActions', 'carryForwardItems', 'monthlyWin', 'monthlyChange',
-    'intentions', 'completedAt',
-  ] as const;
-
-  const updates: Record<string, unknown> = {};
-  for (const field of allowedFields) {
-    if (field in body) {
-      updates[field] = body[field];
-    }
-  }
+  const updates = readResetPatch(body);
 
   const now = new Date().toISOString();
 
   try {
-    await db.update(resets)
-      .set({ ...updates, updatedAt: now })
-      .where(eq(resets.id, id));
-
-    const updated = await db.select().from(resets).where(eq(resets.id, id)).limit(1);
-    if (!updated.length) {
+    const persistence = await getAIWorkflowPersistence();
+    const updated = await persistence.resets.patch(id, updates, now);
+    if (!updated) {
       return ApiErrors.notFound('Reset');
     }
 
-    return NextResponse.json({ reset: updated[0] });
+    return NextResponse.json({ reset: updated });
   } catch {
     return ApiErrors.internal('Failed to update reset');
   }

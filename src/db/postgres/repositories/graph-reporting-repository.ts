@@ -399,6 +399,51 @@ export function createPostgresGraphReportingRepository(
           .orderBy(asc(connectorConfigs.id));
         return rows.map(({ id }) => id);
       },
+      async listRelationshipTasks(taskIds) {
+        if (!taskIds.length) return [];
+        const ids = [...taskIds];
+        const [taskRows, membershipRows] = await Promise.all([
+          db.select({
+            id: tasks.id,
+            title: tasks.title,
+            status: tasks.status,
+            connectorType: tasks.connectorType,
+            sourceId: tasks.sourceId,
+            metadata: tasks.metadata,
+          }).from(tasks).where(inArray(tasks.id, ids))
+            .orderBy(asc(byteOrder(tasks.id))),
+          db.select({
+            taskId: taskProjects.taskId,
+            projectId: taskProjects.projectId,
+            projectName: hubProjects.name,
+          }).from(taskProjects)
+            .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+            .where(inArray(taskProjects.taskId, ids))
+            .orderBy(
+              asc(byteOrder(taskProjects.taskId)),
+              asc(byteOrder(taskProjects.projectId)),
+            ),
+        ]);
+        const membershipsByTask = new Map<string, Array<{ id: string; name: string }>>();
+        for (const membership of membershipRows) {
+          const entries = membershipsByTask.get(membership.taskId) ?? [];
+          entries.push({ id: membership.projectId, name: membership.projectName });
+          membershipsByTask.set(membership.taskId, entries);
+        }
+        return taskRows.map((task) => {
+          const memberships = membershipsByTask.get(task.id) ?? [];
+          return {
+            id: task.id,
+            title: task.title,
+            status: task.status,
+            connectorType: task.connectorType,
+            sourceId: task.sourceId,
+            metadata: parseJsonRecord(task.metadata) ?? {},
+            projectIds: memberships.map((project) => project.id),
+            projectNames: memberships.map((project) => project.name),
+          };
+        });
+      },
     },
     projects: {
       async read(projectId) {

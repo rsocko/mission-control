@@ -9,7 +9,11 @@ import {
   clearTaskCorePersistence,
   registerTaskCorePersistence,
 } from '@/lib/tasks/core/runtime';
-import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
+import type {
+  TaskCorePersistence,
+  TaskCoreTaskRow,
+  TaskMovePreviewSnapshot,
+} from '@/lib/tasks/core/contracts';
 
 // ─── Chainable mock helper ───────────────────────────────────────────────────
 
@@ -208,6 +212,148 @@ vi.mock('@/lib/persistence/runtime', () => {
   };
 });
 
+// ─── Move-preview organization doubles ───────────────────────────────────────
+//
+// `/api/tasks/move/preview` reads the selected task-core runtime's narrow
+// `organization.getTaskMovePreviewSnapshot` and the connector-management
+// persistence instead of assembling its own SQLite joins. These doubles stand
+// in for those two seams; the SQL each backend runs to build the same snapshot
+// is proven by `tests/contracts/task-organization-repository.contract.ts`.
+
+let previewSnapshot: TaskMovePreviewSnapshot | null = null;
+let previewConnector: PreviewConnectorRecord | null = null;
+let previewSourceLists: PreviewSourceList[] = [];
+
+interface PreviewConnectorRecord {
+  id: string;
+  type: string;
+  name: string;
+  capabilities: Record<string, unknown>;
+  settings: Record<string, unknown>;
+  syncedLists: string[];
+  deletedAt: string | null;
+}
+
+interface PreviewSourceList {
+  id: string;
+  name: string;
+  sourceId: string;
+  groupId: string | null;
+  hidden: boolean;
+}
+
+const previewGetConnector = vi.fn(async (id: string) =>
+  previewConnector && previewConnector.id === id ? previewConnector : null);
+const previewGetConnectorListSnapshot = vi.fn(async () => ({
+  connector: previewConnector,
+  sourceLists: previewSourceLists,
+  openTaskCounts: [],
+  groups: [],
+}));
+
+vi.mock('@/lib/connectors/management-service', () => ({
+  getConnectorManagementPersistence: async () => ({
+    getConnector: previewGetConnector,
+    getConnectorListSnapshot: previewGetConnectorListSnapshot,
+  }),
+}));
+
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn(async (id: string) =>
+    (id === 'local' ? null : mockConnector)),
+}));
+
+const organizationFake = {
+  getTaskMovePreviewSnapshot: vi.fn(
+    async (_taskId: string): Promise<TaskMovePreviewSnapshot | null> => previewSnapshot,
+  ),
+};
+
+/** Builds the snapshot the preview route consumes, with move-relevant fields. */
+function previewTask(
+  overrides: Partial<TaskCoreTaskRow> & Pick<TaskCoreTaskRow, 'id'>,
+): TaskCoreTaskRow {
+  return {
+    sourceId: `local:${overrides.id}`,
+    connectorType: 'local',
+    connectorInstanceId: 'local',
+    title: 'Test',
+    description: null,
+    status: 'todo',
+    localDisposition: 'active',
+    priority: 'medium',
+    planningHorizon: null,
+    dueDate: null,
+    pushCount: 0,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    completedAt: null,
+    recurrenceGeneratedFromTaskId: null,
+    parentId: null,
+    depth: 0,
+    isChecklistItem: false,
+    sourceListId: null,
+    sourceListName: null,
+    assignee: null,
+    microStatus: null,
+    statusReason: null,
+    metadata: {},
+    syncStatus: 'synced',
+    lastSyncedAt: '2026-01-01T00:00:00.000Z',
+    pushRetryCount: 0,
+    kanbanColumn: null,
+    kanbanOrder: null,
+    snoozedUntil: null,
+    reminderAt: null,
+    reminderRelative: null,
+    reminderDueTime: null,
+    effort: null,
+    isBulkImport: false,
+    ...overrides,
+  };
+}
+
+function seedPreview(input: {
+  task?: Partial<TaskCoreTaskRow> & Pick<TaskCoreTaskRow, 'id'>;
+  tags?: Array<{ name: string; slug: string }>;
+  subtaskCount?: number;
+  schedule?: TaskMovePreviewSnapshot['schedule'];
+  storedAttachmentCount?: number;
+  storedAttachmentSourceIds?: string[];
+  projectCount?: number;
+  connector?: Partial<PreviewConnectorRecord> & Pick<PreviewConnectorRecord, 'id' | 'type'>;
+  sourceLists?: Array<Partial<PreviewSourceList> & Pick<PreviewSourceList, 'sourceId'>>;
+}) {
+  previewSnapshot = input.task
+    ? {
+        task: previewTask(input.task),
+        tags: input.tags ?? [],
+        subtaskCount: input.subtaskCount ?? 0,
+        schedule: input.schedule ?? null,
+        storedAttachmentCount: input.storedAttachmentCount ?? 0,
+        storedAttachmentSourceIds: input.storedAttachmentSourceIds ?? [],
+        projectCount: input.projectCount ?? 0,
+      }
+    : null;
+  previewConnector = input.connector
+    ? {
+        name: input.connector.name ?? 'Target',
+        capabilities: input.connector.capabilities ?? { read: true, write: true },
+        settings: input.connector.settings ?? {},
+        syncedLists: input.connector.syncedLists ?? [],
+        deletedAt: input.connector.deletedAt ?? null,
+        ...input.connector,
+      }
+    : null;
+  previewSourceLists = (input.sourceLists ?? []).map((list) => ({
+    id: list.id ?? list.sourceId,
+    name: list.name ?? list.sourceId,
+    groupId: list.groupId ?? null,
+    hidden: list.hidden ?? false,
+    sourceId: list.sourceId,
+  }));
+}
+
 vi.mock('@/db/schema', () => ({
   tasks: { id: 'id', parentId: 'parent_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', sourceListId: 'source_list_id' },
   taskTags: { taskId: 'task_id', tagId: 'tag_id' },
@@ -368,7 +514,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   registerTaskCorePersistence({
     writeThroughMoves: writeThroughMovesFake,
+    organization: organizationFake,
   } as unknown as TaskCorePersistence);
+  previewSnapshot = null;
+  previewConnector = null;
+  previewSourceLists = [];
   claimGranted = true;
   finalizeOutcome = 'finalized';
   mockGetAttachmentContent.mockReset();
@@ -431,7 +581,7 @@ describe('POST /api/tasks/move/preview', () => {
   });
 
   it('returns 404 when task does not exist', async () => {
-    selectResults.push([]); // task not found
+    seedPreview({}); // no snapshot for the requested task
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const request = new Request(`${BASE}/api/tasks/move/preview`, {
       method: 'POST',
@@ -443,10 +593,15 @@ describe('POST /api/tasks/move/preview', () => {
   });
 
   it('returns 404 when target connector does not exist', async () => {
-    selectResults.push([{ id: 'task-1', title: 'Test', connectorType: 'microsoft-todo', connectorInstanceId: 'inst-1', status: 'todo' }]); // task
-    selectResults.push([]); // task tags
-    selectResults.push([{ count: 0 }]); // subtask count
-    selectResults.push([]); // target connector not found
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Test',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'inst-1',
+        sourceId: 'inst-1:task-1',
+      },
+    });
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const request = new Request(`${BASE}/api/tasks/move/preview`, {
       method: 'POST',
@@ -458,10 +613,20 @@ describe('POST /api/tasks/move/preview', () => {
   });
 
   it('returns 400 when target connector has no write capability', async () => {
-    selectResults.push([{ id: 'task-1', title: 'Test', connectorType: 'microsoft-todo', connectorInstanceId: 'inst-1', status: 'todo' }]); // task
-    selectResults.push([]); // task tags
-    selectResults.push([{ count: 0 }]); // subtask count
-    selectResults.push([{ id: 'inst-2', type: 'outlook-email', capabilities: { read: true, write: false } }]); // target connector (no write)
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Test',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'inst-1',
+        sourceId: 'inst-1:task-1',
+      },
+      connector: {
+        id: 'inst-2',
+        type: 'outlook-email',
+        capabilities: { read: true, write: false },
+      },
+    });
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const request = new Request(`${BASE}/api/tasks/move/preview`, {
       method: 'POST',
@@ -475,22 +640,22 @@ describe('POST /api/tasks/move/preview', () => {
   });
 
   it('rejects the task current source as the preview destination', async () => {
-    selectResults.push([{
-      id: 'task-1',
-      title: 'Already here',
-      connectorType: 'github-issues',
-      connectorInstanceId: 'github-1',
-      sourceListId: 'rsocko/mission-control',
-      status: 'todo',
-    }]);
-    selectResults.push([]);
-    selectResults.push([{ count: 0 }]);
-    selectResults.push([{
-      id: 'github-1',
-      type: 'github-issues',
-      name: 'GitHub',
-      capabilities: { write: true, taskCreate: true },
-    }]);
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Already here',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'github-1',
+        sourceId: 'rsocko/mission-control:1',
+        sourceListId: 'rsocko/mission-control',
+      },
+      connector: {
+        id: 'github-1',
+        type: 'github-issues',
+        name: 'GitHub',
+        capabilities: { write: true, taskCreate: true },
+      },
+    });
 
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const res = await POST(new Request(`${BASE}/api/tasks/move/preview`, {
@@ -517,19 +682,39 @@ describe('POST /api/tasks/move/preview', () => {
       contentType: 'text/plain',
       size: 14,
     }]);
-    selectResults.push([{
-      id: 'task-1', title: 'Fix login', description: 'Broken auth', connectorType: 'microsoft-todo',
-      connectorInstanceId: 'inst-1', sourceListId: 'list-a', status: 'todo', priority: 'high',
-      sourceId: 'list-a:task-1', dueDate: '2026-08-01', assignee: 'user@example.com',
-      planningHorizon: 'soon', effort: 3,
-    }]); // task
-    selectResults.push([{ name: 'bug', slug: 'bug' }]); // task tags
-    selectResults.push([{ count: 2 }]); // subtask count
-    selectResults.push([{ id: 'inst-2', type: 'github-issues', name: 'GitHub - Acme', capabilities: { read: true, write: true } }]); // target connector
-    selectResults.push([{ id: 'list-1', name: 'acme/repo', sourceId: 'acme/repo' }]); // target lists
-    selectResults.push([{ estimatedDuration: 60, recurrence: null }]); // task schedule
-    selectResults.push([]); // locally stored attachments
-    selectResults.push([{ count: 1 }]); // projects
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Fix login',
+        description: 'Broken auth',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'inst-1',
+        sourceListId: 'list-a',
+        priority: 'high',
+        sourceId: 'list-a:task-1',
+        dueDate: '2026-08-01',
+        assignee: 'user@example.com',
+        planningHorizon: 'soon',
+        effort: 3,
+      },
+      tags: [{ name: 'bug', slug: 'bug' }],
+      subtaskCount: 2,
+      schedule: {
+        estimatedDuration: 60,
+        recurrence: null,
+        scheduledDate: '2026-08-01',
+        scheduledTime: null,
+        isTimeBlocked: false,
+      },
+      projectCount: 1,
+      connector: {
+        id: 'inst-2',
+        type: 'github-issues',
+        name: 'GitHub - Acme',
+        capabilities: { read: true, write: true },
+      },
+      sourceLists: [{ id: 'list-1', name: 'acme/repo', sourceId: 'acme/repo' }],
+    });
 
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const request = new Request(`${BASE}/api/tasks/move/preview`, {
@@ -558,17 +743,23 @@ describe('POST /api/tasks/move/preview', () => {
   });
 
   it('detects GitHub native transfer when same owner and safety bindings are ready', async () => {
-    selectResults.push([{
-      id: 'task-1', title: 'Move me', connectorType: 'github-issues',
-      connectorInstanceId: 'inst-2', sourceListId: 'acme/repo-a', sourceId: 'acme/repo-a:1', status: 'todo',
-    }]); // task
-    selectResults.push([]); // task tags
-    selectResults.push([{ count: 0 }]); // subtask count
-    selectResults.push([{ id: 'inst-2', type: 'github-issues', name: 'GitHub - Acme B', capabilities: { read: true, write: true } }]); // target connector
-    selectResults.push([{ id: 'list-1', name: 'acme/repo-b', sourceId: 'acme/repo-b' }]); // target lists (same owner)
-    selectResults.push([]); // task schedule
-    selectResults.push([]); // attachments
-    selectResults.push([{ count: 0 }]); // projects
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Move me',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'inst-2',
+        sourceListId: 'acme/repo-a',
+        sourceId: 'acme/repo-a:1',
+      },
+      connector: {
+        id: 'inst-2',
+        type: 'github-issues',
+        name: 'GitHub - Acme B',
+        capabilities: { read: true, write: true },
+      },
+      sourceLists: [{ id: 'list-1', name: 'acme/repo-b', sourceId: 'acme/repo-b' }],
+    });
 
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const request = new Request(`${BASE}/api/tasks/move/preview`, {
@@ -585,21 +776,23 @@ describe('POST /api/tasks/move/preview', () => {
 
   it('does not advertise native transfer before safety bindings are ready', async () => {
     mockCanTransferTask.mockReturnValueOnce(false);
-    selectResults.push([{
-      id: 'task-1', title: 'Fresh issue', connectorType: 'github-issues',
-      connectorInstanceId: 'inst-2', sourceListId: 'acme/repo-a',
-      sourceId: 'acme/repo-a:1', status: 'todo',
-    }]);
-    selectResults.push([]);
-    selectResults.push([{ count: 0 }]);
-    selectResults.push([{
-      id: 'inst-2', type: 'github-issues', name: 'GitHub',
-      capabilities: { read: true, write: true },
-    }]);
-    selectResults.push([{ id: 'list-1', name: 'acme/repo-b', sourceId: 'acme/repo-b' }]);
-    selectResults.push([]);
-    selectResults.push([]);
-    selectResults.push([{ count: 0 }]);
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Fresh issue',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'inst-2',
+        sourceListId: 'acme/repo-a',
+        sourceId: 'acme/repo-a:1',
+      },
+      connector: {
+        id: 'inst-2',
+        type: 'github-issues',
+        name: 'GitHub',
+        capabilities: { read: true, write: true },
+      },
+      sourceLists: [{ id: 'list-1', name: 'acme/repo-b', sourceId: 'acme/repo-b' }],
+    });
 
     const { POST } = await import('@/app/api/tasks/move/preview/route');
     const res = await POST(new Request(`${BASE}/api/tasks/move/preview`, {

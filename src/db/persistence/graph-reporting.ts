@@ -135,6 +135,26 @@ export interface GraphNeighborRepository {
   }): Promise<TaskNeighborContext>;
   listTasks(taskIds: readonly string[]): Promise<GraphTaskRow[]>;
   listDeletedConnectorIds(): Promise<string[]>;
+  /**
+   * Presentation rows for the tasks on the far side of a task's explicit
+   * relationships, including their hub-project memberships. Unknown ids are
+   * omitted; results are ordered by task id.
+   */
+  listRelationshipTasks(
+    taskIds: readonly string[],
+  ): Promise<RelationshipTaskRow[]>;
+}
+
+/** A related task as the task-relationships surface presents it. */
+export interface RelationshipTaskRow {
+  id: string;
+  title: string;
+  status: string;
+  connectorType: string;
+  sourceId: string;
+  metadata: Record<string, unknown>;
+  projectIds: string[];
+  projectNames: string[];
 }
 
 export interface ProjectGraphRows {

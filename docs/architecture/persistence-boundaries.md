@@ -2437,6 +2437,48 @@ baseline and the fail-closed sentinel remain the sole exact-current graph
 owners; the layer test owns only route ownership, cleanliness, exclusion, and
 a monotonic 116-unit ceiling.
 
+## Web/API PostgreSQL parity: task organization
+
+The remaining task-organization web surface resolves through existing selected
+runtime compositions. `TaskCorePersistence.organization` owns endpoint-shaped
+tag, subtask-template, task-move, move-preview, and deterministic smart-score
+operations. Global kanban columns continue to use
+`CorePersistenceRepositories.settings`; connector and source-list validation
+continues to use connector-management persistence. Relationship presentation
+extends the existing graph-reporting neighbor repository, while
+`src/lib/graph/service.ts` remains a backend-neutral compatibility facade over
+the selected graph-reporting composition.
+
+Tag merge and unification are atomic. SQLite uses an immediate transaction;
+PostgreSQL uses READ COMMITTED with a transaction-scoped advisory lock for the
+tag-consolidation namespace. Template application is atomic, and built-in
+template seeding is idempotent under concurrent requests. Existing dependency
+duplicate and cycle serialization remains graph-reporting-owned. Connector I/O
+never runs inside these database transactions: task moves retain
+read/validate, remote move, then local finalize ordering; tag push retains the
+GitHub source fence; source-tag removal remains sequential best effort with
+partial errors; dependency creation remains local-commit-first; and dependency
+deletion remains remote-first. Rule evaluation and semantic publication remain
+post-commit.
+
+The owned routes are kanban settings, subtask templates, the tags collection
+plus merge/push/remove/unify, smart score, move-to-list, both task relationship
+routes, and move preview. Task breakdown remains AI orchestration and OWL
+remains document-intelligence connector write-through, so neither belongs to
+this persistence layer. Notification delivery, Scout/triage, goals/resets,
+ideation, retained-list/export connector features, schema, migrations,
+deployment, and Homelab cutover also remain excluded.
+
+All twelve owned routes move from Tier A to clean, and the graph service becomes
+clean, changing the exact graph from
+`266/A57/B5/clean204/direct34/transitive23/directDB36/lib46/helpers0/units103`
+to
+`266/A45/B5/clean216/direct24/transitive21/directDB26/lib45/helpers0/units90`,
+with no Tier B reclassification. The canonical baseline and fail-closed
+sentinel remain the sole exact-current owners; the task-organization layer test
+owns only route cleanliness, boundary constraints, and the monotonic 90-unit
+ceiling.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

@@ -1,15 +1,21 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, taskTags, taskProjects, taskSchedules, taskAttachments, tags, connectorConfigs, sourceLists, listGroups } from '@/db/schema';
-import { eq, and, isNull, count } from 'drizzle-orm';
 import { apiError, ApiErrors } from '@/lib/api-error';
 import { computeFieldMappings, isGitHubNativeTransfer } from '@/lib/connectors/field-mapper';
 import { CAPABILITY_DEFAULTS } from '@/lib/connectors/capabilities';
-import { connectorRegistry } from '@/lib/connectors';
-import { syncScheduler } from '@/lib/sync';
+import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import type { ConnectorCapabilities } from '@/types';
 import { isPublicDemoMode } from '@/lib/public-demo';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+
+type CapabilityKey = 'write' | 'taskCreate' | 'attachments';
+
+/** Reads one field off a decoded JSON body without widening it to `any`. */
+function readField(body: unknown, key: string): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  return Object.getOwnPropertyDescriptor(body, key)?.value;
+}
 
 /**
  * POST /api/tasks/move/preview
@@ -21,12 +27,18 @@ import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
  */
 export async function POST(request: Request) {
   try {
-    const body = await request.json();
-    const { taskId, targetConnectorInstanceId, targetSourceListId } = body as {
-      taskId: string;
-      targetConnectorInstanceId: string;
-      targetSourceListId?: string;
-    };
+    const body: unknown = await request.json();
+    const rawTaskId = readField(body, 'taskId');
+    const rawTargetConnectorInstanceId = readField(body, 'targetConnectorInstanceId');
+    const rawTargetSourceListId = readField(body, 'targetSourceListId');
+
+    const taskId = typeof rawTaskId === 'string' ? rawTaskId : '';
+    const targetConnectorInstanceId = typeof rawTargetConnectorInstanceId === 'string'
+      ? rawTargetConnectorInstanceId
+      : '';
+    const targetSourceListId = typeof rawTargetSourceListId === 'string'
+      ? rawTargetSourceListId
+      : undefined;
 
     if (!taskId || !targetConnectorInstanceId) {
       return NextResponse.json(
@@ -35,47 +47,37 @@ export async function POST(request: Request) {
       );
     }
 
-    // ── Fetch the source task ────────────────────────────────────────────────
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
-    if (!task) {
+    // ── Fetch the source task, its tags, schedule, attachments and counts ────
+    const persistence = await getTaskCorePersistence();
+    const snapshot = await persistence.organization.getTaskMovePreviewSnapshot(taskId);
+    if (!snapshot) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
-
-    // ── Fetch source task tags ───────────────────────────────────────────────
-    const taskTagRows = await db
-      .select({ name: tags.name, slug: tags.slug })
-      .from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(eq(taskTags.taskId, taskId));
-
-    // ── Count direct subtasks ────────────────────────────────────────────────
-    const [subtaskCountRow] = await db
-      .select({ count: count() })
-      .from(tasks)
-      .where(and(eq(tasks.parentId, taskId)));
-    const subtaskCount = subtaskCountRow?.count ?? 0;
+    const { task, tags: taskTagRows, subtaskCount, schedule, projectCount } = snapshot;
 
     // ── Fetch target connector config ────────────────────────────────────────
-    const [targetConnector] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.id, targetConnectorInstanceId), isNull(connectorConfigs.deletedAt)))
-      .limit(1);
+    const management = await getConnectorManagementPersistence();
+    const targetConnector = await management.getConnector(targetConnectorInstanceId);
 
-    if (!targetConnector) {
+    if (!targetConnector || targetConnector.deletedAt !== null) {
       return NextResponse.json({ error: 'Target connector not found' }, { status: 404 });
     }
 
-    const storedCaps = targetConnector.capabilities as ConnectorCapabilities;
-    const capDefaults = CAPABILITY_DEFAULTS[targetConnector.type] ?? {};
-    const targetCaps = { ...capDefaults, ...storedCaps } as ConnectorCapabilities;
-    if (!targetCaps?.write) {
+    const storedCaps = targetConnector.capabilities;
+    const capDefaults: Partial<ConnectorCapabilities> = CAPABILITY_DEFAULTS[targetConnector.type] ?? {};
+    // Reproduces `{ ...capDefaults, ...storedCaps }` without asserting the
+    // persisted record into `ConnectorCapabilities`.
+    const targetCapability = (key: CapabilityKey): unknown => {
+      const stored = Object.getOwnPropertyDescriptor(storedCaps, key);
+      return stored ? stored.value : capDefaults[key];
+    };
+    if (!targetCapability('write')) {
       return NextResponse.json(
         { error: 'Target connector does not support write operations' },
         { status: 400 },
       );
     }
-    if (!targetCaps?.taskCreate) {
+    if (!targetCapability('taskCreate')) {
       return NextResponse.json(
         { error: 'Target connector does not support task creation' },
         { status: 400 },
@@ -94,76 +96,35 @@ export async function POST(request: Request) {
     }
 
     // ── Fetch available target lists ─────────────────────────────────────────
-    const targetListRows = await db
-      .select({
-        id: sourceLists.id,
-        name: sourceLists.name,
-        sourceId: sourceLists.sourceId,
-        groupId: sourceLists.groupId,
-        groupName: listGroups.name,
-      })
-      .from(sourceLists)
-      .leftJoin(listGroups, eq(sourceLists.groupId, listGroups.id))
-      .where(
-        and(
-          eq(sourceLists.connectorInstanceId, targetConnectorInstanceId),
-          eq(sourceLists.hidden, false),
-        ),
-      )
-      .orderBy(sourceLists.sortOrder, sourceLists.name);
+    const listSnapshot = await management.getConnectorListSnapshot(targetConnectorInstanceId);
+    const groupNames = new Map(listSnapshot.groups.map((group) => [group.id, group.name]));
 
-    const targetLists = targetListRows
-      .filter(row => isSourceListSelected(targetConnector, row))
+    const targetLists = listSnapshot.sourceLists
+      .filter(row => !row.hidden && isSourceListSelected(targetConnector, row))
       .map((row) => ({
         id: row.id,
         name: row.name,
         sourceId: row.sourceId,
         groupId: row.groupId,
-        groupName: row.groupName,
+        groupName: row.groupId === null ? null : groupNames.get(row.groupId) ?? null,
       }));
     if (targetSourceListId && !targetLists.some(list => list.sourceId === targetSourceListId)) {
       return ApiErrors.badRequest('Target list is not selected for sync');
     }
 
-    const [schedule] = await db
-      .select({
-        estimatedDuration: taskSchedules.estimatedDuration,
-        recurrence: taskSchedules.recurrence,
-        scheduledDate: taskSchedules.scheduledDate,
-        scheduledTime: taskSchedules.scheduledTime,
-        isTimeBlocked: taskSchedules.isTimeBlocked,
-      })
-      .from(taskSchedules)
-      .where(eq(taskSchedules.taskId, taskId))
-      .limit(1);
-
-    const metadata = parseMetadata(task.metadata);
-    const storedAttachmentRows = await db
-      .select({ sourceAttachmentId: taskAttachments.sourceAttachmentId })
-      .from(taskAttachments)
-      .where(eq(taskAttachments.taskId, taskId));
-    let attachmentCount = storedAttachmentRows.length;
+    const metadata = task.metadata;
+    let attachmentCount = snapshot.storedAttachmentCount;
     const isLocalSource = task.connectorType === 'local' || task.sourceId.startsWith('local:');
     if (!isPublicDemoMode() && !isLocalSource) {
-      const sourceConnector = connectorRegistry.getConnector(task.connectorInstanceId)
-        ?? await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
+      const sourceConnector = await getOrInitializeConnector(task.connectorInstanceId);
       if (sourceConnector?.listAttachments) {
-        const storedSourceIds = new Set(
-          storedAttachmentRows
-            .map((attachment) => attachment.sourceAttachmentId)
-            .filter((id): id is string => !!id),
-        );
+        const storedSourceIds = new Set(snapshot.storedAttachmentSourceIds);
         const remoteAttachments = await sourceConnector.listAttachments(task.sourceId);
         attachmentCount += remoteAttachments.filter(
           (attachment) => !storedSourceIds.has(attachment.id),
         ).length;
       }
     }
-    const [projectCountRow] = await db
-      .select({ count: count() })
-      .from(taskProjects)
-      .where(eq(taskProjects.taskId, taskId));
-    const projectCount = projectCountRow?.count ?? 0;
 
     // ── Compute field mappings ───────────────────────────────────────────────
     const fieldMappingResult = computeFieldMappings(
@@ -195,7 +156,7 @@ export async function POST(request: Request) {
       },
       subtaskCount,
       attachmentCount,
-      targetCaps.attachments === true,
+      targetCapability('attachments') === true,
     );
 
     // ── Detect GitHub native transfer ────────────────────────────────────────
@@ -213,8 +174,7 @@ export async function POST(request: Request) {
         resolvedTargetListId,
       );
     const sourceConnector = nativeTransferCandidate && !isPublicDemoMode()
-      ? connectorRegistry.getConnector(task.connectorInstanceId)
-        ?? await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId)
+      ? await getOrInitializeConnector(task.connectorInstanceId)
       : null;
     const isNativeTransfer =
       nativeTransferCandidate
@@ -278,15 +238,5 @@ export async function POST(request: Request) {
     });
   } catch (error) {
     return ApiErrors.internal('Failed to compute move preview', error);
-  }
-}
-
-function parseMetadata(raw: unknown): Record<string, unknown> {
-  if (!raw) return {};
-  if (typeof raw === 'object' && !Array.isArray(raw)) return raw as Record<string, unknown>;
-  try {
-    return JSON.parse(String(raw)) as Record<string, unknown>;
-  } catch {
-    return {};
   }
 }

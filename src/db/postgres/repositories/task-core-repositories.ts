@@ -37,6 +37,7 @@ import {
   scoutReconciliationTaskState,
   sourceLists,
   sourceRankings,
+  subtaskTemplates,
   syncDeletionCandidates,
   syncDeletionSnapshots,
   tags,
@@ -68,7 +69,7 @@ import {
   reconcilePostgresTaskTransferIdentityRefreshInTransaction,
   resolvePostgresTaskTransferIdentityTargets,
 } from './task-transfer-identity';
-import { decodeLenientJsonObject } from '@/db/persistence/value-codecs';
+import { decodeLenientJsonArray, decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { eventSubscriptionMatches, parseEventTypes } from '@/db/persistence/event-outbox';
 import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
@@ -98,6 +99,23 @@ import {
   type ScoutTaskHardDeleteRepository,
   type SourceListDisplayNameRow,
   type SourceListNameRepository,
+  type SubtaskTemplateApplicationPlan,
+  type SubtaskTemplateDeleteOutcome,
+  type SubtaskTemplateItem,
+  type SubtaskTemplatePatch,
+  type SubtaskTemplateRow,
+  type SubtaskTemplateSeed,
+  type SubtaskTemplateWorkflowTask,
+  type SubtaskTemplateWrite,
+  type TagConsolidationCandidates,
+  type TagCreateOutcome,
+  type TagDeleteOutcome,
+  type TagIdentityRow,
+  type TagListUsageRow,
+  type TagMergeOutcome,
+  type TagOverviewResult,
+  type TagSourceRemovalContext,
+  type TagUnifyOutcome,
   type TaskAttachmentContentRow,
   type TaskAttachmentInsert,
   type TaskAttachmentInsertOutcome,
@@ -133,17 +151,20 @@ import {
   type TaskMoveFinalizationOutcome,
   type TaskMoveFinalizationRequest,
   type TaskMoveListRow,
+  type TaskMovePreviewSnapshot,
   type TaskMoveRepository,
   type TaskMoveSourceCopyProvenance,
   type TaskMoveSourceRow,
   type TaskMoveSourceSyncIntent,
   type TaskMoveTagRef,
   type TaskMoveTargetList,
+  type TaskMoveToListTaskRow,
   type TaskMutationOutcome,
   type TaskMutationRepository,
   type TaskMutationRequest,
   type TaskMoveTaskInsert,
   type TaskMoveTaskRow,
+  type TaskOrganizationRepository,
   type TaskPolicyIdentityRepository,
   type TaskQueryRepository,
   type TaskQueryScope,
@@ -163,6 +184,7 @@ import {
   type TaskRelationshipCandidateRow,
   type TaskPromoteOutcome,
   type TaskScheduleRow,
+  type TaskSmartScoreSnapshot,
   type TaskSourceCounts,
   type TaskSourceIdentityRow,
   type TaskStatsResult,
@@ -172,6 +194,9 @@ import {
   type TaskSubtaskProposalSnapshot,
   type TaskTagMutationContext,
   type TaskTagMutationResult,
+  type TemplateSubtaskApplicationOutcome,
+  type TemplateSubtaskInsert,
+  type TemplateWorkflowTaskInsert,
   type WriteThroughTaskMoveRepository,
 } from '@/lib/tasks/core/contracts';
 
@@ -1231,6 +1256,7 @@ async function deleteSingleTaskWithinTransaction(
   tx: PostgresTransaction,
   taskId: string,
 ): Promise<void> {
+  await lockTaskTagMutation(tx);
   await tx.delete(taskTags).where(eq(taskTags.taskId, taskId));
   await tx.delete(projectAutoIncludeExclusions)
     .where(eq(projectAutoIncludeExclusions.taskId, taskId));
@@ -1256,11 +1282,24 @@ async function deleteSingleTaskWithinTransaction(
   await tx.delete(tasks).where(eq(tasks.id, taskId));
 }
 
+async function lockTaskTagMutation(tx: PostgresTransaction): Promise<void> {
+  await tx.execute(
+    sql`SELECT pg_advisory_xact_lock_shared(hashtext('tag-consolidation'))`,
+  );
+}
+
 async function deleteTaskWithinTransaction(
   tx: PostgresTransaction,
   taskId: string,
   recursive: boolean,
 ): Promise<void> {
+  const [current] = await tx.select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.id, taskId))
+    .limit(1)
+    .for('update');
+  if (!current) return;
+
   if (recursive) {
     const children = await tx.select({ id: tasks.id })
       .from(tasks)
@@ -1406,6 +1445,7 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
    */
   async hardDeleteScoutTask(taskId: string): Promise<ScoutHardDeleteOutcome> {
     return this.db.transaction(async (tx): Promise<ScoutHardDeleteOutcome> => {
+      await lockTaskTagMutation(tx);
       const [task] = await tx.select({
         id: tasks.id,
         sourceId: tasks.sourceId,
@@ -1689,6 +1729,7 @@ class PostgresTaskMoveRepository implements TaskMoveRepository {
   ): Promise<PendingSyncTaskMoveOutcome> {
     try {
       await this.db.transaction(async (tx) => {
+        await lockTaskTagMutation(tx);
         const [source] = await tx.select(MOVE_SOURCE_COLUMNS)
           .from(tasks).where(eq(tasks.id, request.sourceTaskId)).limit(1);
         if (!source) throw new PendingTaskMoveSourceChangedError();
@@ -1972,6 +2013,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     readonly now: string;
   }): Promise<TaskCopyOutcome> {
     return this.db.transaction(async (tx) => {
+      if (input.keepTags) await lockTaskTagMutation(tx);
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`task-copy:${input.newTaskId}`}))`);
       const [replay] = await tx.select({
         connectorType: tasks.connectorType,
@@ -2242,6 +2284,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     readonly now: string;
   }): Promise<TaskTagMutationResult> {
     return this.db.transaction(async (tx) => {
+      await lockTaskTagMutation(tx);
       const ordered = [...input.candidates].sort((a, b) => a.slug.localeCompare(b.slug));
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.taskId}`}))`);
       for (const candidate of ordered) {
@@ -2292,6 +2335,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     readonly tagId: string;
   }): Promise<{ readonly removed: boolean; readonly tagName: string | null }> {
     return this.db.transaction(async (tx) => {
+      await lockTaskTagMutation(tx);
       await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.taskId}`}))`);
       const [tag] = await tx.select({ name: tags.name }).from(tags)
         .where(eq(tags.id, input.tagId)).limit(1);
@@ -2774,6 +2818,9 @@ class PostgresTaskCreateRepository implements TaskCreateRepository {
           .where(eq(hubProjects.id, projectId)).limit(1).for('update');
         if (!project) return reject({ kind: 'project-not-found', projectId } as const);
       }
+      if (input.tagIds.length > 0 || input.tagSlugs.length > 0) {
+        await lockTaskTagMutation(tx);
+      }
       for (const tagId of [...new Set(input.tagIds)]) {
         const [tag] = await tx.select({ id: tags.id }).from(tags)
           .where(eq(tags.id, tagId)).limit(1).for('update');
@@ -2897,6 +2944,9 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
 
   async mutateTask(request: TaskMutationRequest): Promise<TaskMutationOutcome> {
     return this.db.transaction(async (tx) => {
+      if (request.replaceTagIds || request.recurrenceSuccessor) {
+        await lockTaskTagMutation(tx);
+      }
       const [current] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
         .where(eq(tasks.id, request.taskId)).limit(1).for('update');
       if (!current) return { kind: 'not-found' } as const;
@@ -3384,6 +3434,7 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
 
   async discardMaterializedDestination(taskId: string): Promise<void> {
     await this.db.transaction(async (tx) => {
+      await lockTaskTagMutation(tx);
       await tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId));
       await tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId));
       await tx.delete(taskTags).where(eq(taskTags.taskId, taskId));
@@ -3396,6 +3447,9 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
     request: TaskMoveDestinationMaterialization,
   ): Promise<void> {
     await this.db.transaction(async (tx) => {
+      if (request.tagIds.length > 0 || request.subtaskCopies.length > 0) {
+        await lockTaskTagMutation(tx);
+      }
       await tx.insert(tasks).values(moveTaskInsertValues(request.task));
 
       if (request.tagIds.length > 0) {
@@ -3466,6 +3520,9 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
   ): Promise<TaskMoveFinalizationOutcome> {
     try {
       await this.db.transaction(async (tx) => {
+        if (request.sourceDisposition.kind === 'delete') {
+          await lockTaskTagMutation(tx);
+        }
         const sourceUnchanged = await tx.update(tasks)
           .set({ updatedAt: sql`${tasks.updatedAt}` })
           .where(and(
@@ -4052,6 +4109,968 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
   }
 }
 
+/** Walks `unified_into` chains and returns the tags that resolve into a root. */
+function collectAliasTagIds(
+  aliases: ReadonlyArray<{ id: string; unifiedInto: string | null }>,
+  consolidationRoots: ReadonlySet<string>,
+  targetTagId: string,
+): string[] {
+  const aliasesById = new Map(aliases.map((tag) => [tag.id, tag]));
+  return aliases.flatMap((tag) => {
+    if (tag.id === targetTagId || !tag.unifiedInto) return [];
+    const visited = new Set<string>([tag.id]);
+    let currentId: string | null = tag.unifiedInto;
+    while (currentId && !visited.has(currentId)) {
+      if (consolidationRoots.has(currentId)) return [tag.id];
+      visited.add(currentId);
+      currentId = aliasesById.get(currentId)?.unifiedInto ?? null;
+    }
+    return [];
+  });
+}
+
+/** The rename/recolor patch a tag consolidation optionally applies. */
+function tagConsolidationRename(input: {
+  readonly newName: string | null;
+  readonly newSlug: string | null;
+  readonly newColor: string | null;
+}): { name?: string; slug?: string; color?: string } {
+  const updates: { name?: string; slug?: string; color?: string } = {};
+  if (input.newName) {
+    updates.name = input.newName;
+    if (input.newSlug) updates.slug = input.newSlug;
+  }
+  if (input.newColor) updates.color = input.newColor;
+  return updates;
+}
+
+function decodeTemplateSubtasks(value: unknown): SubtaskTemplateItem[] {
+  return decodeLenientJsonArray(value).flatMap((entry): SubtaskTemplateItem[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const record: Record<string, unknown> = entry as Record<string, unknown>;
+    if (typeof record.title !== 'string') return [];
+    return [{
+      title: record.title,
+      priority: typeof record.priority === 'string' ? record.priority : null,
+      estimatedMinutes: typeof record.estimatedMinutes === 'number'
+        ? record.estimatedMinutes
+        : null,
+    }];
+  });
+}
+
+function decodeTemplateWorkflowTasks(value: unknown): SubtaskTemplateWorkflowTask[] {
+  return decodeLenientJsonArray(value).flatMap((entry): SubtaskTemplateWorkflowTask[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const record: Record<string, unknown> = entry as Record<string, unknown>;
+    if (typeof record.title !== 'string') return [];
+    return [{
+      title: record.title,
+      description: typeof record.description === 'string' ? record.description : null,
+      priority: typeof record.priority === 'string' ? record.priority : null,
+      subtasks: decodeLenientJsonArray(record.subtasks)
+        .filter((title): title is string => typeof title === 'string'),
+    }];
+  });
+}
+
+const SUBTASK_TEMPLATE_COLUMNS = {
+  id: subtaskTemplates.id,
+  name: subtaskTemplates.name,
+  description: subtaskTemplates.description,
+  category: subtaskTemplates.category,
+  type: subtaskTemplates.type,
+  subtasks: subtaskTemplates.subtasks,
+  workflowTasks: subtaskTemplates.workflowTasks,
+  icon: subtaskTemplates.icon,
+  isBuiltIn: subtaskTemplates.isBuiltIn,
+  createdAt: subtaskTemplates.createdAt,
+  updatedAt: subtaskTemplates.updatedAt,
+};
+
+/** Sorted, de-duplicated projection matching the SQLite backend's output. */
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+/**
+ * PostgreSQL task-organization repository. Consolidation and template
+ * application run under READ COMMITTED with a transaction-scoped advisory lock
+ * so concurrent requests on the same tag or template serialize instead of
+ * interleaving partial rewrites.
+ */
+class PostgresTaskOrganizationRepository implements TaskOrganizationRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async readTagOverview(input: {
+    readonly type: string | null;
+    readonly source: string | null;
+    readonly listId: string | null;
+    readonly includeUsageBreakdown: boolean;
+  }): Promise<TagOverviewResult> {
+    const conditions: SQL[] = [];
+    if (input.type) conditions.push(eq(tags.type, input.type));
+    if (input.source) {
+      const linkedToConnectorType = this.db
+        .select({ tagId: taskTags.tagId })
+        .from(taskTags)
+        .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+        .where(eq(tasks.connectorType, input.source));
+      conditions.push(
+        or(eq(tags.source, input.source), inArray(tags.id, linkedToConnectorType))!,
+      );
+    }
+    if (input.listId) {
+      const linkedToList = this.db
+        .select({ tagId: taskTags.tagId })
+        .from(taskTags)
+        .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+        .where(eq(tasks.sourceListId, input.listId));
+      conditions.push(inArray(tags.id, linkedToList));
+    }
+
+    const tagRows = await this.db.select({
+      id: tags.id,
+      name: tags.name,
+      slug: tags.slug,
+      type: tags.type,
+      source: tags.source,
+      color: tags.color,
+      confirmed: tags.confirmed,
+      createdAt: tags.createdAt,
+      unifiedInto: tags.unifiedInto,
+    }).from(tags)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(
+        asc(sql`${tags.type} COLLATE "C"`),
+        asc(sql`${tags.name} COLLATE "C"`),
+        asc(sql`${tags.id} COLLATE "C"`),
+      );
+
+    const tagIds = tagRows.map((tag) => tag.id);
+    if (!tagIds.length) {
+      return { tags: [], sourceTagSlugs: await this.readSourceTagSlugs() };
+    }
+
+    const linkageRows = await this.db.select({
+      tagId: taskTags.tagId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
+      sourceListName: tasks.sourceListName,
+    }).from(taskTags)
+      .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+      .where(inArray(taskTags.tagId, tagIds));
+
+    const usageCounts = new Map<string, number>();
+    const connectorTypesByTag = new Map<string, string[]>();
+    const listNamesByTag = new Map<string, string[]>();
+    const sourceUsageByTag = new Map<string, Map<string, number>>();
+    const listUsageByTag = new Map<string, Map<string, TagListUsageRow>>();
+    for (const row of linkageRows) {
+      usageCounts.set(row.tagId, (usageCounts.get(row.tagId) ?? 0) + 1);
+      connectorTypesByTag.set(row.tagId, [
+        ...(connectorTypesByTag.get(row.tagId) ?? []),
+        row.connectorType,
+      ]);
+      if (row.sourceListName !== null) {
+        listNamesByTag.set(row.tagId, [
+          ...(listNamesByTag.get(row.tagId) ?? []),
+          row.sourceListName,
+        ]);
+      }
+      if (!input.includeUsageBreakdown) continue;
+
+      const bySource = sourceUsageByTag.get(row.tagId) ?? new Map<string, number>();
+      bySource.set(row.connectorType, (bySource.get(row.connectorType) ?? 0) + 1);
+      sourceUsageByTag.set(row.tagId, bySource);
+
+      if (row.sourceListId === null) continue;
+      const byList = listUsageByTag.get(row.tagId) ?? new Map<string, TagListUsageRow>();
+      const key = `${row.connectorInstanceId}\u0000${row.sourceListId}`;
+      const existing = byList.get(key);
+      byList.set(key, {
+        tagId: row.tagId,
+        connectorInstanceId: row.connectorInstanceId,
+        sourceListId: row.sourceListId,
+        usageCount: (existing?.usageCount ?? 0) + 1,
+      });
+      listUsageByTag.set(row.tagId, byList);
+    }
+
+    return {
+      tags: tagRows.map((tag) => {
+        const connectorTypes = sortedUnique(connectorTypesByTag.get(tag.id) ?? []);
+        return {
+          ...tag,
+          usageCount: usageCounts.get(tag.id) ?? 0,
+          sources: connectorTypes.length
+            ? connectorTypes
+            : tag.source ? [tag.source] : [],
+          sourceNames: sortedUnique(listNamesByTag.get(tag.id) ?? []),
+          listUsage: [...(listUsageByTag.get(tag.id)?.values() ?? [])]
+            .sort((left, right) => (
+              left.connectorInstanceId.localeCompare(right.connectorInstanceId)
+              || (left.sourceListId ?? '').localeCompare(right.sourceListId ?? '')
+            )),
+          sourceUsage: [...(sourceUsageByTag.get(tag.id)?.entries() ?? [])]
+            .map(([connectorType, usageCount]) => ({
+              tagId: tag.id,
+              connectorType,
+              usageCount,
+            }))
+            .sort((left, right) => left.connectorType.localeCompare(right.connectorType)),
+        };
+      }),
+      sourceTagSlugs: await this.readSourceTagSlugs(),
+    };
+  }
+
+  private async readSourceTagSlugs(): Promise<string[]> {
+    const rows = await this.db.select({ slug: tags.slug })
+      .from(tags)
+      .where(eq(tags.type, 'source'))
+      .orderBy(asc(sql`${tags.slug} COLLATE "C"`), asc(sql`${tags.id} COLLATE "C"`));
+    return rows.map((row) => row.slug);
+  }
+
+  async createHubTag(input: {
+    readonly id: string;
+    readonly name: string;
+    readonly slug: string;
+    readonly color: string;
+    readonly createdAt: string;
+  }): Promise<TagCreateOutcome> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${`tag-slug:${input.slug}`}))`);
+      const [existing] = await tx.select({
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        type: tags.type,
+        color: tags.color,
+      }).from(tags).where(eq(tags.slug, input.slug)).limit(1);
+      if (existing) return { kind: 'existing' as const, tag: existing };
+
+      await tx.insert(tags).values({
+        id: input.id,
+        name: input.name,
+        slug: input.slug,
+        type: 'hub',
+        source: null,
+        color: input.color,
+        confirmed: true,
+        createdAt: input.createdAt,
+      });
+      return {
+        kind: 'created' as const,
+        tag: {
+          id: input.id,
+          name: input.name,
+          slug: input.slug,
+          type: 'hub',
+          color: input.color,
+        },
+      };
+    });
+  }
+
+  async updateTag(input: {
+    readonly tagId: string;
+    readonly name?: string;
+    readonly slug?: string;
+    readonly color?: string;
+    readonly confirmed?: boolean;
+  }): Promise<{ affectedTaskIds: string[] }> {
+    return this.db.transaction(async (tx) => {
+      const updates: { name?: string; slug?: string; color?: string; confirmed?: boolean } = {};
+      if (input.name !== undefined) updates.name = input.name;
+      if (input.slug !== undefined) updates.slug = input.slug;
+      if (input.color !== undefined) updates.color = input.color;
+      if (input.confirmed !== undefined) updates.confirmed = input.confirmed;
+      if (Object.keys(updates).length > 0) {
+        await tx.update(tags).set(updates).where(eq(tags.id, input.tagId));
+      }
+      const affected = await tx.select({ taskId: taskTags.taskId })
+        .from(taskTags)
+        .where(eq(taskTags.tagId, input.tagId));
+      return { affectedTaskIds: affected.map((row) => row.taskId) };
+    });
+  }
+
+  async deleteHubTag(tagId: string): Promise<TagDeleteOutcome> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('tag-consolidation'))`,
+      );
+      const [tag] = await tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(eq(tags.id, tagId)).limit(1).for('update');
+      if (!tag) return { kind: 'missing' as const };
+      if (tag.type === 'source') return { kind: 'source-managed' as const };
+
+      const affected = await tx.select({ taskId: taskTags.taskId })
+        .from(taskTags)
+        .where(eq(taskTags.tagId, tagId));
+      await tx.delete(taskTags).where(eq(taskTags.tagId, tagId));
+      await tx.delete(tags).where(eq(tags.id, tagId));
+      return { kind: 'deleted' as const, affectedTaskIds: affected.map((row) => row.taskId) };
+    });
+  }
+
+  async getTagConsolidationCandidates(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+  }): Promise<TagConsolidationCandidates> {
+    const [target] = await this.db.select({
+      id: tags.id,
+      name: tags.name,
+      type: tags.type,
+    }).from(tags).where(eq(tags.id, input.targetTagId)).limit(1);
+    const sources = input.sourceTagIds.length
+      ? await this.db.select({
+          id: tags.id,
+          name: tags.name,
+          type: tags.type,
+        }).from(tags)
+          .where(inArray(tags.id, [...input.sourceTagIds]))
+          .orderBy(asc(sql`${tags.id} COLLATE "C"`))
+      : [];
+    return { target: target ?? null, sources };
+  }
+
+  async mergeTags(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+    readonly newName: string | null;
+    readonly newSlug: string | null;
+    readonly newColor: string | null;
+  }): Promise<TagMergeOutcome> {
+    const tagsToRemove = [...input.sourceTagIds];
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('tag-consolidation'))`,
+      );
+      const [currentTarget] = await tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(eq(tags.id, input.targetTagId)).limit(1).for('update');
+      const currentSourceTags = await tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(inArray(tags.id, tagsToRemove)).for('update');
+      if (!currentTarget || currentSourceTags.length !== tagsToRemove.length) {
+        return { kind: 'stale' as const };
+      }
+      if (
+        currentTarget.type === 'source'
+        || currentSourceTags.some((tag) => tag.type === 'source')
+      ) {
+        return { kind: 'source-backed' as const };
+      }
+
+      const aliasTagIds = collectAliasTagIds(
+        await tx.select({ id: tags.id, unifiedInto: tags.unifiedInto }).from(tags),
+        new Set([...tagsToRemove, input.targetTagId]),
+        input.targetTagId,
+      );
+      await tx.update(tags).set({ unifiedInto: null })
+        .where(eq(tags.id, input.targetTagId));
+      if (aliasTagIds.length > 0) {
+        await tx.update(tags).set({ unifiedInto: input.targetTagId })
+          .where(inArray(tags.id, aliasTagIds));
+      }
+
+      const sourceTaskTags = await tx.select({ taskId: taskTags.taskId })
+        .from(taskTags)
+        .where(inArray(taskTags.tagId, [...new Set([...tagsToRemove, ...aliasTagIds])]));
+      const existingTargetLinks = new Set(
+        (await tx.select({ taskId: taskTags.taskId })
+          .from(taskTags)
+          .where(eq(taskTags.tagId, input.targetTagId)))
+          .map((row) => row.taskId),
+      );
+      const uniqueTaskIds = [...new Set(
+        sourceTaskTags
+          .filter((row) => !existingTargetLinks.has(row.taskId))
+          .map((row) => row.taskId),
+      )];
+      if (uniqueTaskIds.length > 0) {
+        await tx.insert(taskTags)
+          .values(uniqueTaskIds.map((taskId) => ({ taskId, tagId: input.targetTagId })));
+      }
+
+      await tx.delete(taskTags).where(inArray(taskTags.tagId, tagsToRemove));
+      await tx.delete(tags).where(inArray(tags.id, tagsToRemove));
+
+      const updates = tagConsolidationRename(input);
+      if (Object.keys(updates).length > 0) {
+        await tx.update(tags).set(updates).where(eq(tags.id, input.targetTagId));
+      }
+      return { kind: 'merged' as const, reassigned: uniqueTaskIds.length };
+    }, { isolationLevel: 'read committed' });
+  }
+
+  async unifyTags(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+    readonly newName: string | null;
+    readonly newSlug: string | null;
+    readonly newColor: string | null;
+  }): Promise<TagUnifyOutcome> {
+    const tagsToUnify = [...input.sourceTagIds];
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('tag-consolidation'))`,
+      );
+      const [currentTarget] = await tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(eq(tags.id, input.targetTagId)).limit(1).for('update');
+      const currentSourceTags = await tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(inArray(tags.id, tagsToUnify)).for('update');
+      if (!currentTarget || currentSourceTags.length !== tagsToUnify.length) {
+        return { kind: 'stale' as const };
+      }
+
+      const targetIsSourceBacked = currentTarget.type === 'source';
+      const sourceBackedTagIds = currentSourceTags
+        .filter((tag) => tag.type === 'source')
+        .map((tag) => tag.id);
+      const localTagIds = currentSourceTags
+        .filter((tag) => tag.type !== 'source')
+        .map((tag) => tag.id);
+      const globallyConsolidatedTagIds = targetIsSourceBacked
+        ? sourceBackedTagIds
+        : tagsToUnify;
+
+      const allTagAliases = await tx.select({
+        id: tags.id,
+        type: tags.type,
+        unifiedInto: tags.unifiedInto,
+      }).from(tags);
+      const aliasTypeById = new Map(allTagAliases.map((tag) => [tag.id, tag.type]));
+      const aliasTagIds = collectAliasTagIds(
+        allTagAliases,
+        new Set([...globallyConsolidatedTagIds, input.targetTagId]),
+        input.targetTagId,
+      );
+      const tagsToCanonicalize = [...new Set([
+        ...globallyConsolidatedTagIds,
+        ...aliasTagIds,
+      ].filter((id) => id !== input.targetTagId))];
+      const selectedSourceTagIds = new Set([
+        input.targetTagId,
+        ...tagsToCanonicalize.filter((id) => aliasTypeById.get(id) === 'source'),
+      ]);
+      const selectedSourceScopeKeys = new Set(
+        (await tx.select({
+          connectorInstanceId: tasks.connectorInstanceId,
+          sourceListId: tasks.sourceListId,
+        }).from(taskTags)
+          .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+          .where(inArray(taskTags.tagId, [...selectedSourceTagIds])))
+          .map((row) => `${row.connectorInstanceId}\u0000${row.sourceListId ?? ''}`),
+      );
+      if (
+        targetIsSourceBacked
+        && localTagIds.length > 0
+        && selectedSourceScopeKeys.size === 0
+      ) {
+        return { kind: 'missing-source-scope' as const };
+      }
+
+      await tx.update(tags).set({ unifiedInto: null })
+        .where(eq(tags.id, input.targetTagId));
+      if (tagsToCanonicalize.length > 0) {
+        await tx.update(tags).set({ unifiedInto: input.targetTagId })
+          .where(inArray(tags.id, tagsToCanonicalize));
+      }
+
+      // A source winner represents only its own connector/list scopes. Shared
+      // local tags must remain available to every other source.
+      const sourceTaskTags = await tx.select({
+        taskId: taskTags.taskId,
+        tagId: taskTags.tagId,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+      }).from(taskTags)
+        .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+        .where(inArray(taskTags.tagId, [...new Set([...tagsToUnify, ...aliasTagIds])]));
+      const existingTargetLinks = new Set(
+        (await tx.select({ taskId: taskTags.taskId })
+          .from(taskTags)
+          .where(eq(taskTags.tagId, input.targetTagId)))
+          .map((row) => row.taskId),
+      );
+
+      const uniqueTaskIds = [...new Set(
+        sourceTaskTags
+          .filter((row) => !targetIsSourceBacked || tagsToCanonicalize.includes(row.tagId))
+          .map((row) => row.taskId)
+          .filter((taskId) => !existingTargetLinks.has(taskId)),
+      )];
+      if (uniqueTaskIds.length > 0) {
+        await tx.insert(taskTags)
+          .values(uniqueTaskIds.map((taskId) => ({ taskId, tagId: input.targetTagId })));
+      }
+
+      let detached = 0;
+      let detachedTaskIds: string[] = [];
+      if (localTagIds.length > 0) {
+        if (targetIsSourceBacked) {
+          const sourceBackedTaskIds = new Set(
+            sourceTaskTags
+              .filter((row) => selectedSourceTagIds.has(row.tagId))
+              .map((row) => row.taskId),
+          );
+          const scopedTaskIds = [...new Set(
+            sourceTaskTags
+              .filter((row) =>
+                localTagIds.includes(row.tagId)
+                && selectedSourceScopeKeys.has(
+                  `${row.connectorInstanceId}\u0000${row.sourceListId ?? ''}`,
+                )
+                && (existingTargetLinks.has(row.taskId)
+                  || sourceBackedTaskIds.has(row.taskId)))
+              .map((row) => row.taskId),
+          )];
+          if (scopedTaskIds.length > 0) {
+            const removed = await tx.delete(taskTags).where(and(
+              inArray(taskTags.tagId, localTagIds),
+              inArray(taskTags.taskId, scopedTaskIds),
+            )).returning({ taskId: taskTags.taskId });
+            detached = removed.length;
+            detachedTaskIds = scopedTaskIds;
+          }
+        } else {
+          await tx.delete(taskTags).where(inArray(taskTags.tagId, localTagIds));
+          await tx.delete(tags).where(inArray(tags.id, localTagIds));
+        }
+      }
+
+      const updates = tagConsolidationRename(input);
+      if (Object.keys(updates).length > 0) {
+        await tx.update(tags).set(updates).where(eq(tags.id, input.targetTagId));
+      }
+
+      return {
+        kind: 'unified' as const,
+        linked: uniqueTaskIds.length,
+        detached,
+        detachedTaskIds,
+        localTagIds,
+        targetIsSourceBacked,
+      };
+    }, { isolationLevel: 'read committed' });
+  }
+
+  async listTaskIdsForTag(tagId: string): Promise<string[]> {
+    const rows = await this.db.select({ taskId: taskTags.taskId })
+      .from(taskTags)
+      .where(eq(taskTags.tagId, tagId));
+    return rows.map((row) => row.taskId);
+  }
+
+  async getTagPushSubject(tagId: string): Promise<TagIdentityRow | null> {
+    const [row] = await this.db.select({
+      id: tags.id,
+      name: tags.name,
+      slug: tags.slug,
+      type: tags.type,
+      color: tags.color,
+    }).from(tags).where(eq(tags.id, tagId)).limit(1);
+    return row ?? null;
+  }
+
+  async getTagSourceRemovalContext(tagId: string): Promise<TagSourceRemovalContext> {
+    const [tag] = await this.db.select({ id: tags.id, name: tags.name })
+      .from(tags).where(eq(tags.id, tagId)).limit(1);
+    if (!tag) return { tag: null, tasks: [] };
+
+    const linkedTaskIds = await this.db.select({ taskId: taskTags.taskId })
+      .from(taskTags).where(eq(taskTags.tagId, tagId));
+    if (!linkedTaskIds.length) return { tag, tasks: [] };
+
+    const linkedTasks = await this.db.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorInstanceId: tasks.connectorInstanceId,
+    }).from(tasks)
+      .where(inArray(tasks.id, linkedTaskIds.map((row) => row.taskId)))
+      .orderBy(asc(sql`${tasks.id} COLLATE "C"`));
+    return { tag, tasks: linkedTasks };
+  }
+
+  async ensureBuiltInSubtaskTemplates(
+    seeds: readonly SubtaskTemplateSeed[],
+    now: string,
+  ): Promise<void> {
+    if (!seeds.length) return;
+    await this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext('mission-control:subtask-template-seed'))`,
+      );
+      const existing = new Set(
+        (await tx.select({ id: subtaskTemplates.id })
+          .from(subtaskTemplates)
+          .where(inArray(subtaskTemplates.id, seeds.map((seed) => seed.id))))
+          .map((row) => row.id),
+      );
+      const missing = seeds.filter((seed) => !existing.has(seed.id));
+      if (!missing.length) return;
+      await tx.insert(subtaskTemplates).values(missing.map((seed) => ({
+        id: seed.id,
+        name: seed.name,
+        description: seed.description,
+        category: seed.category,
+        type: seed.type,
+        icon: seed.icon,
+        subtasks: seed.subtasks,
+        workflowTasks: seed.workflowTasks,
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now,
+      }))).onConflictDoNothing();
+    }, { isolationLevel: 'read committed' });
+  }
+
+  async listSubtaskTemplates(input: {
+    readonly category: string | null;
+    readonly type: string | null;
+  }): Promise<SubtaskTemplateRow[]> {
+    const conditions: SQL[] = [];
+    if (input.category) conditions.push(eq(subtaskTemplates.category, input.category));
+    if (input.type) conditions.push(eq(subtaskTemplates.type, input.type));
+    return this.db.select(SUBTASK_TEMPLATE_COLUMNS)
+      .from(subtaskTemplates)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(asc(sql`${subtaskTemplates.id} COLLATE "C"`));
+  }
+
+  async getSubtaskTemplate(templateId: string): Promise<SubtaskTemplateRow | null> {
+    const [row] = await this.db.select(SUBTASK_TEMPLATE_COLUMNS)
+      .from(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).limit(1);
+    return row ?? null;
+  }
+
+  async getSubtaskTemplateApplicationPlan(
+    templateId: string,
+  ): Promise<SubtaskTemplateApplicationPlan | null> {
+    const [row] = await this.db.select({
+      id: subtaskTemplates.id,
+      type: subtaskTemplates.type,
+      subtasks: subtaskTemplates.subtasks,
+      workflowTasks: subtaskTemplates.workflowTasks,
+    }).from(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).limit(1);
+    if (!row) return null;
+    return {
+      id: row.id,
+      type: row.type,
+      subtasks: decodeTemplateSubtasks(row.subtasks),
+      workflowTasks: decodeTemplateWorkflowTasks(row.workflowTasks),
+    };
+  }
+
+  async createSubtaskTemplate(input: {
+    readonly id: string;
+    readonly template: SubtaskTemplateWrite;
+    readonly now: string;
+  }): Promise<SubtaskTemplateRow> {
+    const [row] = await this.db.insert(subtaskTemplates).values({
+      id: input.id,
+      name: input.template.name,
+      description: input.template.description,
+      category: input.template.category,
+      type: input.template.type,
+      icon: input.template.icon,
+      subtasks: input.template.subtasks,
+      workflowTasks: input.template.workflowTasks,
+      isBuiltIn: false,
+      createdAt: input.now,
+      updatedAt: input.now,
+    }).returning(SUBTASK_TEMPLATE_COLUMNS);
+    return row;
+  }
+
+  async updateSubtaskTemplate(input: {
+    readonly id: string;
+    readonly patch: SubtaskTemplatePatch;
+    readonly now: string;
+  }): Promise<SubtaskTemplateRow | null> {
+    const patch = input.patch;
+    const [row] = await this.db.update(subtaskTemplates).set({
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.category !== undefined ? { category: patch.category } : {}),
+      ...(patch.type !== undefined ? { type: patch.type } : {}),
+      ...(patch.icon !== undefined ? { icon: patch.icon } : {}),
+      ...(patch.subtasks !== undefined ? { subtasks: patch.subtasks } : {}),
+      ...(patch.workflowTasks !== undefined ? { workflowTasks: patch.workflowTasks } : {}),
+      updatedAt: input.now,
+    }).where(eq(subtaskTemplates.id, input.id)).returning(SUBTASK_TEMPLATE_COLUMNS);
+    return row ?? null;
+  }
+
+  async deleteSubtaskTemplate(templateId: string): Promise<SubtaskTemplateDeleteOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [existing] = await tx.select({
+        id: subtaskTemplates.id,
+        isBuiltIn: subtaskTemplates.isBuiltIn,
+      }).from(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).limit(1);
+      if (!existing) return { kind: 'missing' as const };
+      if (existing.isBuiltIn) return { kind: 'built-in' as const };
+      await tx.delete(subtaskTemplates).where(eq(subtaskTemplates.id, templateId));
+      return { kind: 'deleted' as const };
+    });
+  }
+
+  async applyWorkflowTemplate(input: {
+    readonly templateId: string;
+    readonly parentTaskId: string | null;
+    readonly connectorType: string;
+    readonly connectorInstanceId: string;
+    readonly isLocalOnly: boolean;
+    readonly sourceListId: string | null;
+    readonly sourceListName: string | null;
+    readonly now: string;
+    readonly tasks: readonly TemplateWorkflowTaskInsert[];
+  }): Promise<void> {
+    if (!input.tasks.length) return;
+    const syncStatus = input.isLocalOnly ? 'synced' : 'pending_push';
+    const rootDepth = input.parentTaskId ? 1 : 0;
+    await this.db.transaction(async (tx) => {
+      if (input.parentTaskId) {
+        await tx.select({ id: tasks.id })
+          .from(tasks)
+          .where(eq(tasks.id, input.parentTaskId))
+          .limit(1)
+          .for('key share');
+      }
+      for (const workflowTask of input.tasks) {
+        await tx.insert(tasks).values({
+          id: workflowTask.id,
+          sourceId: `template:${workflowTask.id}`,
+          connectorType: input.connectorType,
+          connectorInstanceId: input.connectorInstanceId,
+          title: workflowTask.title,
+          description: workflowTask.description,
+          status: 'todo',
+          priority: workflowTask.priority,
+          parentId: input.parentTaskId,
+          depth: rootDepth,
+          isChecklistItem: false,
+          syncStatus,
+          createdAt: input.now,
+          updatedAt: input.now,
+          metadata: {
+            fromTemplate: input.templateId,
+            sourceListId: input.sourceListId,
+            sourceListName: input.sourceListName,
+          },
+          lastSyncedAt: input.now,
+        });
+
+        for (const subtask of workflowTask.subtasks) {
+          await tx.insert(tasks).values({
+            id: subtask.id,
+            sourceId: `template:${subtask.id}`,
+            connectorType: input.connectorType,
+            connectorInstanceId: input.connectorInstanceId,
+            title: subtask.title,
+            status: 'todo',
+            priority: 'none',
+            parentId: workflowTask.id,
+            depth: rootDepth + 1,
+            isChecklistItem: true,
+            syncStatus,
+            createdAt: input.now,
+            updatedAt: input.now,
+            metadata: { fromTemplate: input.templateId },
+            lastSyncedAt: input.now,
+          });
+        }
+      }
+    });
+  }
+
+  async applySingleTemplate(input: {
+    readonly templateId: string;
+    readonly parentTaskId: string;
+    readonly now: string;
+    readonly subtasks: readonly TemplateSubtaskInsert[];
+  }): Promise<TemplateSubtaskApplicationOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [parent] = await tx.select({
+        sourceId: tasks.sourceId,
+        connectorType: tasks.connectorType,
+        connectorInstanceId: tasks.connectorInstanceId,
+        depth: tasks.depth,
+      }).from(tasks).where(eq(tasks.id, input.parentTaskId)).limit(1).for('key share');
+      if (!parent) return { kind: 'missing-parent' as const };
+
+      const parentIsLocalOnly = parent.connectorType === 'local'
+        || parent.sourceId.startsWith('local:');
+      for (const subtask of input.subtasks) {
+        await tx.insert(tasks).values({
+          id: subtask.id,
+          sourceId: `template:${subtask.id}`,
+          connectorType: parent.connectorType,
+          connectorInstanceId: parent.connectorInstanceId,
+          title: subtask.title,
+          status: 'todo',
+          priority: subtask.priority,
+          parentId: input.parentTaskId,
+          depth: (parent.depth || 0) + 1,
+          isChecklistItem: true,
+          syncStatus: parentIsLocalOnly ? 'synced' : 'pending_push',
+          createdAt: input.now,
+          updatedAt: input.now,
+          metadata: subtask.estimatedMinutes === null
+            ? { fromTemplate: input.templateId }
+            : {
+                fromTemplate: input.templateId,
+                estimatedMinutes: subtask.estimatedMinutes,
+              },
+          lastSyncedAt: input.now,
+        });
+      }
+      return { kind: 'applied' as const };
+    });
+  }
+
+  async getTaskMoveToListContext(taskId: string): Promise<TaskMoveToListTaskRow | null> {
+    const [row] = await this.db.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ?? null;
+  }
+
+  async finalizeTaskMoveToList(input: {
+    readonly taskId: string;
+    readonly sourceListId: string;
+    readonly sourceId: string | null;
+    readonly updatedAt: string;
+  }): Promise<void> {
+    await this.db.update(tasks).set({
+      sourceListId: input.sourceListId,
+      ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+      updatedAt: input.updatedAt,
+    }).where(eq(tasks.id, input.taskId));
+  }
+
+  async getTaskMovePreviewSnapshot(taskId: string): Promise<TaskMovePreviewSnapshot | null> {
+    const [task] = await this.db.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return null;
+
+    const [tagRows, subtaskRows, schedules, attachments, projectRows] = await Promise.all([
+      this.db.select({ name: tags.name, slug: tags.slug })
+        .from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(eq(taskTags.taskId, taskId))
+        .orderBy(asc(sql`${tags.id} COLLATE "C"`)),
+      this.db.select({ count: sql<number>`count(*)` })
+        .from(tasks).where(eq(tasks.parentId, taskId)),
+      this.db.select({
+        estimatedDuration: taskSchedules.estimatedDuration,
+        recurrence: taskSchedules.recurrence,
+        scheduledDate: taskSchedules.scheduledDate,
+        scheduledTime: taskSchedules.scheduledTime,
+        isTimeBlocked: taskSchedules.isTimeBlocked,
+      }).from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
+      this.db.select({ sourceAttachmentId: taskAttachments.sourceAttachmentId })
+        .from(taskAttachments).where(eq(taskAttachments.taskId, taskId)),
+      this.db.select({ count: sql<number>`count(*)` })
+        .from(taskProjects).where(eq(taskProjects.taskId, taskId)),
+    ]);
+
+    return {
+      task: toMoveTaskRow(task),
+      tags: tagRows,
+      subtaskCount: Number(subtaskRows[0]?.count ?? 0),
+      schedule: schedules[0] ?? null,
+      storedAttachmentCount: attachments.length,
+      storedAttachmentSourceIds: attachments
+        .map((attachment) => attachment.sourceAttachmentId)
+        .filter((id): id is string => id !== null),
+      projectCount: Number(projectRows[0]?.count ?? 0),
+    };
+  }
+
+  async readSmartScoreInputs(input: {
+    readonly statuses: readonly string[];
+  }): Promise<TaskSmartScoreSnapshot> {
+    const [rankingRows, taskRows] = await Promise.all([
+      this.db.select({
+        id: sourceRankings.id,
+        connectorType: sourceRankings.connectorType,
+        name: sourceRankings.name,
+        rank: sourceRankings.rank,
+        updatedAt: sourceRankings.updatedAt,
+      }).from(sourceRankings)
+        .orderBy(asc(sourceRankings.rank), asc(sql`${sourceRankings.id} COLLATE "C"`)),
+      input.statuses.length
+        ? this.db.select(MOVE_TASK_COLUMNS).from(tasks)
+            .where(inArray(tasks.status, [...input.statuses]))
+            .orderBy(asc(sql`${tasks.id} COLLATE "C"`))
+        : [],
+    ]);
+
+    const taskIds = taskRows.map((task) => task.id);
+    if (!taskIds.length) {
+      return {
+        tasks: [],
+        sourceRankings: rankingRows,
+        taskTags: [],
+        taskProjects: [],
+        estimatedDurations: [],
+      };
+    }
+
+    const [tagRows, projectRows, scheduleRows] = await Promise.all([
+      this.db.select({
+        taskId: taskTags.taskId,
+        tagId: tags.id,
+        unifiedInto: tags.unifiedInto,
+        tagName: tags.name,
+      }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(inArray(taskTags.taskId, taskIds))
+        .orderBy(
+          asc(sql`${taskTags.taskId} COLLATE "C"`),
+          asc(sql`${tags.id} COLLATE "C"`),
+        ),
+      this.db.select({
+        taskId: taskProjects.taskId,
+        projectId: hubProjects.id,
+        projectName: hubProjects.name,
+      }).from(taskProjects)
+        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+        .where(inArray(taskProjects.taskId, taskIds))
+        .orderBy(
+          asc(sql`${taskProjects.taskId} COLLATE "C"`),
+          asc(sql`${hubProjects.id} COLLATE "C"`),
+        ),
+      this.db.select({
+        taskId: taskSchedules.taskId,
+        estimatedDuration: taskSchedules.estimatedDuration,
+      }).from(taskSchedules)
+        .where(inArray(taskSchedules.taskId, taskIds))
+        .orderBy(asc(sql`${taskSchedules.taskId} COLLATE "C"`)),
+    ]);
+
+    return {
+      tasks: taskRows.map(toMoveTaskRow),
+      sourceRankings: rankingRows,
+      taskTags: tagRows.map((row) => ({
+        taskId: row.taskId,
+        tagId: row.unifiedInto || row.tagId,
+        tagName: row.tagName,
+      })),
+      taskProjects: projectRows,
+      estimatedDurations: scheduleRows,
+    };
+  }
+}
+
 /**
  * Builds the whole PostgreSQL task-core composition atomically: either every
  * member resolves or nothing is registered, so there is never a
@@ -4081,5 +5100,6 @@ export function createPostgresTaskCorePersistence(
     transferIdentity: new PostgresTaskTransferIdentityRepository(db),
     quickSort: new PostgresTaskQuickSortRepository(db),
     ancillary: new PostgresTaskAncillaryRepository(db),
+    organization: new PostgresTaskOrganizationRepository(db),
   };
 }

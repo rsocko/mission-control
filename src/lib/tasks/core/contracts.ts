@@ -1653,6 +1653,415 @@ export interface TaskTransferIdentityRepository {
   }): Promise<boolean>;
 }
 
+/* ------------------------------------------------------------------ *
+ * Task organization (tags, subtask templates, list moves, smart score)
+ * ------------------------------------------------------------------ */
+
+/** Per-connector-type usage of one tag, derived from task linkage. */
+export interface TagSourceUsageRow {
+  readonly tagId: string;
+  readonly connectorType: string;
+  readonly usageCount: number;
+}
+
+/** Per-source-list usage of one tag, derived from task linkage. */
+export interface TagListUsageRow {
+  readonly tagId: string;
+  readonly connectorInstanceId: string;
+  readonly sourceListId: string | null;
+  readonly usageCount: number;
+}
+
+export interface TagOverviewRow {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly type: string;
+  readonly source: string | null;
+  readonly color: string | null;
+  readonly confirmed: boolean;
+  readonly createdAt: string;
+  readonly unifiedInto: string | null;
+  readonly usageCount: number;
+  /**
+   * Distinct connector types that contributed the tag through task linkage,
+   * sorted for deterministic output. Falls back to the tag's own `source`
+   * when no task links it.
+   */
+  readonly sources: string[];
+  /** Distinct non-null source-list names using the tag, sorted. */
+  readonly sourceNames: string[];
+  readonly listUsage: TagListUsageRow[];
+  readonly sourceUsage: TagSourceUsageRow[];
+}
+
+export interface TagOverviewResult {
+  readonly tags: TagOverviewRow[];
+  /** Slugs of every `source` tag, deliberately unaffected by the filters. */
+  readonly sourceTagSlugs: string[];
+}
+
+export interface TagIdentityRow {
+  readonly id: string;
+  readonly name: string;
+  readonly slug: string;
+  readonly type: string;
+  readonly color: string | null;
+}
+
+export type TagCreateOutcome =
+  | { readonly kind: 'created'; readonly tag: TagIdentityRow }
+  | { readonly kind: 'existing'; readonly tag: TagIdentityRow };
+
+export type TagDeleteOutcome =
+  | { readonly kind: 'deleted'; readonly affectedTaskIds: string[] }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'source-managed' };
+
+/** The three tag fields tag consolidation validates before it runs. */
+export interface TagConsolidationTagRow {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+}
+
+export interface TagConsolidationCandidates {
+  readonly target: TagConsolidationTagRow | null;
+  /** Only the source tags that still exist, ordered by id. */
+  readonly sources: TagConsolidationTagRow[];
+}
+
+export type TagMergeOutcome =
+  | { readonly kind: 'merged'; readonly reassigned: number }
+  /** The selected tags changed between validation and the merge. */
+  | { readonly kind: 'stale' }
+  /** A source-backed tag reached the source-unsafe merge. */
+  | { readonly kind: 'source-backed' };
+
+export type TagUnifyOutcome =
+  | {
+      readonly kind: 'unified';
+      readonly linked: number;
+      readonly detached: number;
+      readonly detachedTaskIds: string[];
+      readonly localTagIds: string[];
+      readonly targetIsSourceBacked: boolean;
+    }
+  | { readonly kind: 'stale' }
+  /** A source-backed target has local tags but no task scope to detach from. */
+  | { readonly kind: 'missing-source-scope' };
+
+export interface TagLinkedTaskRow {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly connectorInstanceId: string;
+}
+
+export interface TagSourceRemovalContext {
+  readonly tag: { readonly id: string; readonly name: string } | null;
+  readonly tasks: TagLinkedTaskRow[];
+}
+
+export interface SubtaskTemplateRow {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string | null;
+  readonly type: string;
+  readonly subtasks: unknown;
+  readonly workflowTasks: unknown;
+  readonly icon: string | null;
+  readonly isBuiltIn: boolean;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+export interface SubtaskTemplateItem {
+  readonly title: string;
+  readonly priority: string | null;
+  readonly estimatedMinutes: number | null;
+}
+
+export interface SubtaskTemplateWorkflowTask {
+  readonly title: string;
+  readonly description: string | null;
+  readonly priority: string | null;
+  readonly subtasks: string[];
+}
+
+/** A template's stored payload, decoded into the shapes application needs. */
+export interface SubtaskTemplateApplicationPlan {
+  readonly id: string;
+  readonly type: string;
+  readonly subtasks: SubtaskTemplateItem[];
+  readonly workflowTasks: SubtaskTemplateWorkflowTask[];
+}
+
+export interface SubtaskTemplateSeed {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly category: string | null;
+  readonly type: string;
+  readonly icon: string | null;
+  readonly subtasks: unknown;
+  readonly workflowTasks: unknown;
+}
+
+export interface SubtaskTemplateWrite {
+  readonly name: string;
+  readonly description: string;
+  readonly category: string | null;
+  readonly type: string;
+  readonly icon: string | null;
+  readonly subtasks: unknown;
+  readonly workflowTasks: unknown;
+}
+
+export interface SubtaskTemplatePatch {
+  readonly name?: string;
+  readonly description?: string;
+  readonly category?: string | null;
+  readonly type?: string;
+  readonly icon?: string | null;
+  readonly subtasks?: unknown;
+  readonly workflowTasks?: unknown;
+}
+
+export type SubtaskTemplateDeleteOutcome =
+  | { readonly kind: 'deleted' }
+  | { readonly kind: 'missing' }
+  | { readonly kind: 'built-in' };
+
+export interface TemplateWorkflowTaskInsert {
+  readonly id: string;
+  readonly title: string;
+  readonly description: string | null;
+  readonly priority: string;
+  readonly subtasks: ReadonlyArray<{ readonly id: string; readonly title: string }>;
+}
+
+export interface TemplateSubtaskInsert {
+  readonly id: string;
+  readonly title: string;
+  readonly priority: string;
+  readonly estimatedMinutes: number | null;
+}
+
+export type TemplateSubtaskApplicationOutcome =
+  | { readonly kind: 'applied' }
+  | { readonly kind: 'missing-parent' };
+
+export interface TaskMoveToListTaskRow {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly connectorType: string;
+  readonly connectorInstanceId: string;
+  readonly sourceListId: string | null;
+}
+
+export interface TaskMovePreviewSchedule {
+  readonly estimatedDuration: number | null;
+  readonly recurrence: string | null;
+  readonly scheduledDate: string;
+  readonly scheduledTime: string | null;
+  readonly isTimeBlocked: boolean;
+}
+
+export interface TaskMovePreviewSnapshot {
+  readonly task: TaskCoreTaskRow;
+  readonly tags: Array<{ readonly name: string; readonly slug: string }>;
+  readonly subtaskCount: number;
+  readonly schedule: TaskMovePreviewSchedule | null;
+  readonly storedAttachmentCount: number;
+  /** Non-null `sourceAttachmentId`s, used to dedupe remote attachments. */
+  readonly storedAttachmentSourceIds: string[];
+  readonly projectCount: number;
+}
+
+export interface SmartScoreTaskTagRow {
+  readonly taskId: string;
+  /** Already collapsed onto the tag's unification target when present. */
+  readonly tagId: string;
+  readonly tagName: string;
+}
+
+export interface SmartScoreTaskProjectRow {
+  readonly taskId: string;
+  readonly projectId: string;
+  readonly projectName: string;
+}
+
+export interface TaskSmartScoreSnapshot {
+  readonly tasks: TaskCoreTaskRow[];
+  readonly sourceRankings: TaskSmartScoreInputs['sourceRankings'];
+  readonly taskTags: SmartScoreTaskTagRow[];
+  readonly taskProjects: SmartScoreTaskProjectRow[];
+  readonly estimatedDurations: Array<{
+    readonly taskId: string;
+    readonly estimatedDuration: number | null;
+  }>;
+}
+
+/**
+ * Narrow L04 repository backing the task-organization endpoints: tag
+ * presentation and consolidation, subtask templates, within-source list moves
+ * and the smart-score input snapshot. Every method is shaped by exactly one
+ * endpoint step. No SQL, generic CRUD, transaction handle or backend handle
+ * crosses this boundary, and no connector or network I/O happens behind it —
+ * callers keep every remote call outside these methods.
+ */
+export interface TaskOrganizationRepository {
+  /* Tags ---------------------------------------------------------- */
+  /**
+   * Reads the tag overview for `GET /api/tags`. `source` matches either the
+   * tag's own source or a linked task's connector type; `listId` matches a
+   * linked task's source list. Usage breakdowns are computed only when
+   * `includeUsageBreakdown` is set.
+   */
+  readTagOverview(input: {
+    readonly type: string | null;
+    readonly source: string | null;
+    readonly listId: string | null;
+    readonly includeUsageBreakdown: boolean;
+  }): Promise<TagOverviewResult>;
+  /**
+   * Creates a hub tag, or resolves the tag that already owns `slug`. The
+   * check and the insert are one atomic step, so concurrent creates converge
+   * on a single tag instead of racing.
+   */
+  createHubTag(input: {
+    readonly id: string;
+    readonly name: string;
+    readonly slug: string;
+    readonly color: string;
+    readonly createdAt: string;
+  }): Promise<TagCreateOutcome>;
+  /**
+   * Applies the supplied tag fields (absent fields are left untouched) and
+   * returns the ids of every task linked to the tag afterwards.
+   */
+  updateTag(input: {
+    readonly tagId: string;
+    readonly name?: string;
+    readonly slug?: string;
+    readonly color?: string;
+    readonly confirmed?: boolean;
+  }): Promise<{ readonly affectedTaskIds: string[] }>;
+  /** Deletes a non-source tag together with its task links. */
+  deleteHubTag(tagId: string): Promise<TagDeleteOutcome>;
+  /** Reads the tags a merge/unify request names, for pre-flight validation. */
+  getTagConsolidationCandidates(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+  }): Promise<TagConsolidationCandidates>;
+  /**
+   * Merges `sourceTagIds` into `targetTagId` atomically: alias chains are
+   * repointed, task links are reassigned without duplicates, and the source
+   * tags are removed. Re-validates its inputs inside the transaction.
+   */
+  mergeTags(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+    readonly newName: string | null;
+    readonly newSlug: string | null;
+    readonly newColor: string | null;
+  }): Promise<TagMergeOutcome>;
+  /**
+   * Unifies `sourceTagIds` under `targetTagId` atomically, preserving
+   * source-backed tags. Re-validates its inputs inside the transaction.
+   */
+  unifyTags(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+    readonly newName: string | null;
+    readonly newSlug: string | null;
+    readonly newColor: string | null;
+  }): Promise<TagUnifyOutcome>;
+  /** Task ids currently linked to a tag, used for post-commit evaluation. */
+  listTaskIdsForTag(tagId: string): Promise<string[]>;
+  /** The tag fields a source push needs. */
+  getTagPushSubject(tagId: string): Promise<TagIdentityRow | null>;
+  /** The tag plus every linked task a source removal writes back to. */
+  getTagSourceRemovalContext(tagId: string): Promise<TagSourceRemovalContext>;
+
+  /* Subtask templates --------------------------------------------- */
+  /**
+   * Inserts any missing built-in template. Safe to run concurrently: seeding
+   * is serialized and already-present ids are left untouched.
+   */
+  ensureBuiltInSubtaskTemplates(
+    seeds: readonly SubtaskTemplateSeed[],
+    now: string,
+  ): Promise<void>;
+  listSubtaskTemplates(input: {
+    readonly category: string | null;
+    readonly type: string | null;
+  }): Promise<SubtaskTemplateRow[]>;
+  getSubtaskTemplate(templateId: string): Promise<SubtaskTemplateRow | null>;
+  getSubtaskTemplateApplicationPlan(
+    templateId: string,
+  ): Promise<SubtaskTemplateApplicationPlan | null>;
+  createSubtaskTemplate(input: {
+    readonly id: string;
+    readonly template: SubtaskTemplateWrite;
+    readonly now: string;
+  }): Promise<SubtaskTemplateRow>;
+  updateSubtaskTemplate(input: {
+    readonly id: string;
+    readonly patch: SubtaskTemplatePatch;
+    readonly now: string;
+  }): Promise<SubtaskTemplateRow | null>;
+  deleteSubtaskTemplate(templateId: string): Promise<SubtaskTemplateDeleteOutcome>;
+  /**
+   * Stamps out a workflow template's top-level tasks and their checklist
+   * children in one transaction, so a partially applied workflow is never
+   * durable.
+   */
+  applyWorkflowTemplate(input: {
+    readonly templateId: string;
+    readonly parentTaskId: string | null;
+    readonly connectorType: string;
+    readonly connectorInstanceId: string;
+    readonly isLocalOnly: boolean;
+    readonly sourceListId: string | null;
+    readonly sourceListName: string | null;
+    readonly now: string;
+    readonly tasks: readonly TemplateWorkflowTaskInsert[];
+  }): Promise<void>;
+  /**
+   * Creates a single template's checklist subtasks under an existing parent
+   * in one transaction, deriving source identity and depth from the parent
+   * that is read inside the same transaction.
+   */
+  applySingleTemplate(input: {
+    readonly templateId: string;
+    readonly parentTaskId: string;
+    readonly now: string;
+    readonly subtasks: readonly TemplateSubtaskInsert[];
+  }): Promise<TemplateSubtaskApplicationOutcome>;
+
+  /* Within-source list moves -------------------------------------- */
+  getTaskMoveToListContext(taskId: string): Promise<TaskMoveToListTaskRow | null>;
+  /**
+   * Applies the local side of a completed within-source move. The connector
+   * call, if any, has already happened by the time this runs.
+   */
+  finalizeTaskMoveToList(input: {
+    readonly taskId: string;
+    readonly sourceListId: string;
+    readonly sourceId: string | null;
+    readonly updatedAt: string;
+  }): Promise<void>;
+  /** Everything the cross-connector move preview reads from task storage. */
+  getTaskMovePreviewSnapshot(taskId: string): Promise<TaskMovePreviewSnapshot | null>;
+
+  /* Smart score ---------------------------------------------------- */
+  readSmartScoreInputs(input: {
+    readonly statuses: readonly string[];
+  }): Promise<TaskSmartScoreSnapshot>;
+}
+
 /**
  * The task-core composition (L04 core plus L05 endpoint reads). Adapters build this atomically:
  * either every member resolves for a backend or the backend registers
@@ -1677,6 +2086,7 @@ export interface TaskCorePersistence {
   readonly transferIdentity: TaskTransferIdentityRepository;
   readonly quickSort: TaskQuickSortPersistenceRepository;
   readonly ancillary: TaskAncillaryRepository;
+  readonly organization: TaskOrganizationRepository;
 }
 
 /* ------------------------------------------------------------------ *

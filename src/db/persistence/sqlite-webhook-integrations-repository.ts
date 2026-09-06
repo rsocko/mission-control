@@ -1,14 +1,18 @@
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { and, desc, eq, isNull, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, notInArray, sql } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import * as schema from '@/db/schema';
 import {
   connectorConfigs,
+  alertmanagerIntegrationEvents,
+  appSettings,
   externalAgents,
+  homelabAlertReceipts,
   inboundWebhooks,
   integrationConfigs,
   notificationActions,
+  notificationDeliveryEvents,
   notificationPushRules,
   notifications,
   outboundWebhooks,
@@ -16,11 +20,16 @@ import {
   tasks,
 } from '@/db/schema';
 import {
-  createNotificationsInTransaction,
-  type CreateNotificationInput,
-} from '@/lib/notifications/service';
+  createSqliteNotificationsInTransaction,
+} from './sqlite-notification-creation';
+import type { CreateNotificationInput } from './notification-delivery';
 import { decodeLenientJsonObject } from './value-codecs';
 import type {
+  AlertmanagerIntegrationEventInput,
+  AlertmanagerIntegrationEventRecord,
+  AlertmanagerStatusSnapshot,
+  AlertmanagerSyntheticIdentity,
+  AlertmanagerSyntheticInspection,
   AppendInboundWebhookLogInput,
   ClaimInboundWebhookDeliveryInput,
   ConnectorWebhookConfig,
@@ -60,6 +69,7 @@ import type {
 
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
 type SqliteTransaction = Parameters<Parameters<SqliteDrizzle['transaction']>[0]>[0];
+const ALERTMANAGER_CONTROL_KEY = 'alertmanager-integration-control';
 
 function actionValues(notificationId: string, action: WebhookNotificationAction) {
   return {
@@ -218,6 +228,85 @@ export function createSqliteWebhookIntegrationsRepository(
       opensExternal: true,
       createdBy: 'connector',
     }).run();
+  }
+
+  function alertmanagerEventValues(event: AlertmanagerIntegrationEventRecord) {
+    return {
+      id: event.id,
+      integration: event.integration,
+      kind: event.kind,
+      outcome: event.outcome,
+      authenticated: event.authenticated,
+      httpStatus: event.httpStatus,
+      accepted: event.accepted,
+      applied: event.applied,
+      created: event.created,
+      updated: event.updated,
+      stale: event.stale,
+      duplicateReceipts: event.duplicateReceipts,
+      detail: event.detail,
+      occurredAt: event.occurredAt,
+    };
+  }
+
+  async function pruneAlertmanagerEvents(
+    input: Pick<AlertmanagerIntegrationEventInput, 'retainLatest' | 'pruneBatchSize'>,
+    integration: string,
+  ): Promise<void> {
+    const protectedRows = await Promise.all([
+      db.select({ id: alertmanagerIntegrationEvents.id })
+        .from(alertmanagerIntegrationEvents)
+        .where(and(
+          eq(alertmanagerIntegrationEvents.integration, integration),
+          eq(alertmanagerIntegrationEvents.kind, 'webhook_request'),
+          eq(alertmanagerIntegrationEvents.outcome, 'projected'),
+        ))
+        .orderBy(desc(alertmanagerIntegrationEvents.occurredAt), desc(alertmanagerIntegrationEvents.id))
+        .limit(1),
+      db.select({ id: alertmanagerIntegrationEvents.id })
+        .from(alertmanagerIntegrationEvents)
+        .where(and(
+          eq(alertmanagerIntegrationEvents.integration, integration),
+          eq(alertmanagerIntegrationEvents.kind, 'synthetic_test'),
+        ))
+        .orderBy(desc(alertmanagerIntegrationEvents.occurredAt), desc(alertmanagerIntegrationEvents.id))
+        .limit(1),
+      db.select({ id: alertmanagerIntegrationEvents.id })
+        .from(alertmanagerIntegrationEvents)
+        .where(and(
+          eq(alertmanagerIntegrationEvents.integration, integration),
+          eq(alertmanagerIntegrationEvents.kind, 'webhook_request'),
+          eq(alertmanagerIntegrationEvents.authenticated, true),
+          notInArray(alertmanagerIntegrationEvents.outcome, ['projected', 'paused']),
+        ))
+        .orderBy(desc(alertmanagerIntegrationEvents.occurredAt), desc(alertmanagerIntegrationEvents.id))
+        .limit(1),
+    ]);
+    const protectedIds = new Set(protectedRows.flat().map(row => row.id));
+    const expired = await db.select({ id: alertmanagerIntegrationEvents.id })
+      .from(alertmanagerIntegrationEvents)
+      .where(eq(alertmanagerIntegrationEvents.integration, integration))
+      .orderBy(desc(alertmanagerIntegrationEvents.occurredAt), desc(alertmanagerIntegrationEvents.id))
+      .limit(input.pruneBatchSize)
+      .offset(input.retainLatest);
+    const expiredIds = expired.map(row => row.id).filter(id => !protectedIds.has(id));
+    if (expiredIds.length > 0) {
+      await db.delete(alertmanagerIntegrationEvents)
+        .where(inArray(alertmanagerIntegrationEvents.id, expiredIds));
+    }
+  }
+
+  function alertmanagerEventPrecedesProjection(
+    event: { occurredAt: string; status: 'firing' | 'resolved' },
+    current: typeof notifications.$inferSelect | undefined,
+  ): boolean {
+    if (!current?.lastSourceActivityAt) return false;
+    const incomingTime = Date.parse(event.occurredAt);
+    const currentTime = Date.parse(current.lastSourceActivityAt);
+    if (incomingTime < currentTime) return true;
+    return incomingTime === currentTime
+      && current.sourceState === 'resolved'
+      && event.status === 'firing';
   }
 
   return {
@@ -422,7 +511,7 @@ export function createSqliteWebhookIntegrationsRepository(
       ): Promise<CreateInboundWebhookAlertResult> {
         const { notification, action } = input;
         return db.transaction((transaction) => {
-          const [result] = createNotificationsInTransaction(transaction, [{
+          const [result] = createSqliteNotificationsInTransaction(transaction, [{
             id: notification.id,
             sourceId: notification.sourceId,
             connectorType: notification.connectorType,
@@ -700,6 +789,314 @@ export function createSqliteWebhookIntegrationsRepository(
           errors: entry.errors,
           syncedAt: entry.syncedAt,
         });
+      },
+    },
+
+    alertmanager: {
+      async getControl() {
+        const [row] = await db
+          .select({ value: appSettings.value, updatedAt: appSettings.updatedAt })
+          .from(appSettings)
+          .where(eq(appSettings.key, ALERTMANAGER_CONTROL_KEY))
+          .limit(1);
+        const value = row?.value;
+        return {
+          paused: Boolean(
+            value && typeof value === 'object' && 'paused' in value && value.paused === true,
+          ),
+          updatedAt: row?.updatedAt ?? null,
+        };
+      },
+
+      async setPaused(input) {
+        db.transaction((transaction) => {
+          transaction.insert(appSettings).values({
+            key: ALERTMANAGER_CONTROL_KEY,
+            value: { paused: input.paused },
+            updatedAt: input.updatedAt,
+          }).onConflictDoUpdate({
+            target: appSettings.key,
+            set: { value: { paused: input.paused }, updatedAt: input.updatedAt },
+          }).run();
+          transaction.insert(alertmanagerIntegrationEvents)
+            .values(alertmanagerEventValues(input.auditEvent))
+            .run();
+        }, { behavior: 'immediate' });
+        await pruneAlertmanagerEvents(input, input.integration);
+        return { paused: input.paused, updatedAt: input.updatedAt };
+      },
+
+      async recordEvent(input) {
+        await db.insert(alertmanagerIntegrationEvents)
+          .values(alertmanagerEventValues(input.event));
+        await pruneAlertmanagerEvents(input, input.event.integration);
+      },
+
+      async getStatus(integration): Promise<AlertmanagerStatusSnapshot> {
+        const eventWhere = eq(alertmanagerIntegrationEvents.integration, integration);
+        const [
+          controlRow,
+          [lastRequest = null],
+          [lastAuthenticatedReceipt = null],
+          [lastSuccessfulProjection = null],
+          [lastSyntheticTest = null],
+          recentFailures,
+          [counts],
+        ] = await Promise.all([
+          db.select({ value: appSettings.value, updatedAt: appSettings.updatedAt })
+            .from(appSettings)
+            .where(eq(appSettings.key, ALERTMANAGER_CONTROL_KEY))
+            .limit(1),
+          db.select().from(alertmanagerIntegrationEvents)
+            .where(and(
+              eventWhere,
+              eq(alertmanagerIntegrationEvents.kind, 'webhook_request'),
+            ))
+            .orderBy(
+              desc(alertmanagerIntegrationEvents.occurredAt),
+              desc(alertmanagerIntegrationEvents.id),
+            )
+            .limit(1),
+          db.select().from(alertmanagerIntegrationEvents)
+            .where(and(
+              eventWhere,
+              eq(alertmanagerIntegrationEvents.kind, 'webhook_request'),
+              eq(alertmanagerIntegrationEvents.authenticated, true),
+            ))
+            .orderBy(
+              desc(alertmanagerIntegrationEvents.occurredAt),
+              desc(alertmanagerIntegrationEvents.id),
+            )
+            .limit(1),
+          db.select().from(alertmanagerIntegrationEvents)
+            .where(and(
+              eventWhere,
+              eq(alertmanagerIntegrationEvents.kind, 'webhook_request'),
+              eq(alertmanagerIntegrationEvents.outcome, 'projected'),
+            ))
+            .orderBy(
+              desc(alertmanagerIntegrationEvents.occurredAt),
+              desc(alertmanagerIntegrationEvents.id),
+            )
+            .limit(1),
+          db.select().from(alertmanagerIntegrationEvents)
+            .where(and(
+              eventWhere,
+              eq(alertmanagerIntegrationEvents.kind, 'synthetic_test'),
+            ))
+            .orderBy(
+              desc(alertmanagerIntegrationEvents.occurredAt),
+              desc(alertmanagerIntegrationEvents.id),
+            )
+            .limit(1),
+          db.select().from(alertmanagerIntegrationEvents)
+            .where(and(
+              eventWhere,
+              eq(alertmanagerIntegrationEvents.kind, 'webhook_request'),
+              eq(alertmanagerIntegrationEvents.authenticated, true),
+              notInArray(alertmanagerIntegrationEvents.outcome, ['projected', 'paused']),
+            ))
+            .orderBy(
+              desc(alertmanagerIntegrationEvents.occurredAt),
+              desc(alertmanagerIntegrationEvents.id),
+            )
+            .limit(5),
+          db.select({
+            requests: sql<number>`coalesce(sum(case when ${alertmanagerIntegrationEvents.kind} = 'webhook_request' then 1 else 0 end), 0)`,
+            failures: sql<number>`coalesce(sum(case when ${alertmanagerIntegrationEvents.kind} = 'webhook_request' and ${alertmanagerIntegrationEvents.authenticated} = true and ${alertmanagerIntegrationEvents.outcome} not in ('projected', 'paused') then 1 else 0 end), 0)`,
+            intentionalDrops: sql<number>`coalesce(sum(case when ${alertmanagerIntegrationEvents.outcome} = 'paused' and ${alertmanagerIntegrationEvents.kind} = 'webhook_request' then 1 else 0 end), 0)`,
+            accepted: sql<number>`coalesce(sum(${alertmanagerIntegrationEvents.accepted}), 0)`,
+            applied: sql<number>`coalesce(sum(${alertmanagerIntegrationEvents.applied}), 0)`,
+            created: sql<number>`coalesce(sum(${alertmanagerIntegrationEvents.created}), 0)`,
+            updated: sql<number>`coalesce(sum(${alertmanagerIntegrationEvents.updated}), 0)`,
+            stale: sql<number>`coalesce(sum(${alertmanagerIntegrationEvents.stale}), 0)`,
+            duplicateReceipts: sql<number>`coalesce(sum(${alertmanagerIntegrationEvents.duplicateReceipts}), 0)`,
+          }).from(alertmanagerIntegrationEvents).where(eventWhere),
+        ]);
+        const value = controlRow[0]?.value;
+        return {
+          control: {
+            paused: Boolean(
+              value && typeof value === 'object' && 'paused' in value && value.paused === true,
+            ),
+            updatedAt: controlRow[0]?.updatedAt ?? null,
+          },
+          lastRequest,
+          lastAuthenticatedReceipt,
+          lastSuccessfulProjection,
+          lastSyntheticTest,
+          recentFailures,
+          counts: Object.fromEntries(
+            Object.entries(counts ?? {}).map(([key, value]) => [key, Number(value)]),
+          ) as AlertmanagerStatusSnapshot['counts'],
+        };
+      },
+
+      async ingestBatch(input) {
+        return db.transaction((transaction) => {
+          const totals = {
+            accepted: input.events.length,
+            applied: 0,
+            stale: 0,
+            created: 0,
+            updated: 0,
+            duplicateReceipts: 0,
+            pendingDelivery: false,
+          };
+
+          for (const event of input.events) {
+            const current = transaction.select().from(notifications)
+              .where(eq(notifications.sourceId, event.projection.sourceId))
+              .get();
+            const stale = alertmanagerEventPrecedesProjection(event, current);
+            const existingReceipt = transaction.select({ id: homelabAlertReceipts.id })
+              .from(homelabAlertReceipts)
+              .where(and(
+                eq(homelabAlertReceipts.integration, input.integration),
+                eq(homelabAlertReceipts.source, event.source),
+                eq(homelabAlertReceipts.eventId, event.eventId),
+              ))
+              .get();
+            if (existingReceipt) {
+              transaction.update(homelabAlertReceipts).set({
+                lastReceivedAt: input.receivedAt,
+                deliveryCount: sql`${homelabAlertReceipts.deliveryCount} + 1`,
+                applied: !stale,
+              }).where(eq(homelabAlertReceipts.id, existingReceipt.id)).run();
+              totals.duplicateReceipts++;
+            } else {
+              transaction.insert(homelabAlertReceipts).values({
+                id: randomUUID(),
+                integration: input.integration,
+                source: event.source,
+                eventId: event.eventId,
+                fingerprint: event.fingerprint,
+                status: event.status,
+                occurredAt: event.occurredAt,
+                notificationId: current?.id ?? event.projection.sourceId,
+                firstReceivedAt: input.receivedAt,
+                lastReceivedAt: input.receivedAt,
+                deliveryCount: 1,
+                applied: !stale,
+              }).run();
+            }
+            if (stale) {
+              totals.stale++;
+              continue;
+            }
+
+            const projection = event.projection;
+            const [creation] = createSqliteNotificationsInTransaction(transaction, [{
+              id: current?.id ?? projection.newNotificationId,
+              sourceId: projection.sourceId,
+              connectorType: 'homelab',
+              connectorInstanceId: input.integration,
+              title: projection.title,
+              body: projection.body,
+              level: projection.level,
+              category: projection.category,
+              templateKey: projection.templateKey,
+              readState: projection.readState,
+              sourceState: projection.sourceState,
+              sourceActivityAt: projection.sourceActivityAt,
+              sourceActivityKey: projection.sourceActivityKey,
+              reopenPolicy: 'handled',
+              receivedAt: projection.receivedAt,
+              sortAt: projection.sortAt,
+              dedupeKey: projection.dedupeKey,
+              metadata: projection.metadata,
+              presentation: projection.presentation,
+              isActionable: projection.isActionable,
+              occurrenceKey: projection.occurrenceKey,
+            }], {
+              now: new Date(input.receivedAt),
+              wakeDispatcher: false,
+            });
+            const notificationId = creation.notification.id;
+            transaction.delete(notificationActions).where(and(
+              eq(notificationActions.notificationId, notificationId),
+              eq(notificationActions.createdBy, 'connector'),
+              eq(notificationActions.actionType, 'open_url'),
+            )).run();
+            for (const action of projection.actions) {
+              transaction.insert(notificationActions)
+                .values(actionValues(notificationId, action))
+                .run();
+            }
+            transaction.update(notifications).set({
+              primaryActionId: projection.actions[0]?.id ?? null,
+              isActionable: projection.sourceState === 'active' && projection.actions.length > 0,
+            }).where(eq(notifications.id, notificationId)).run();
+            if (input.suppressDeliveries) {
+              transaction.delete(notificationDeliveryEvents)
+                .where(eq(notificationDeliveryEvents.notificationId, notificationId))
+                .run();
+            }
+            transaction.update(homelabAlertReceipts).set({ notificationId }).where(and(
+              eq(homelabAlertReceipts.integration, input.integration),
+              eq(homelabAlertReceipts.source, event.source),
+              eq(homelabAlertReceipts.eventId, event.eventId),
+            )).run();
+            totals.applied++;
+            if (creation.created) totals.created++;
+            else totals.updated++;
+            totals.pendingDelivery ||= !input.suppressDeliveries
+              && creation.deliveryEvents.some(delivery => delivery.status === 'pending');
+          }
+          return totals;
+        }, { behavior: 'immediate' });
+      },
+
+      async inspectSyntheticLifecycle(
+        identity: AlertmanagerSyntheticIdentity,
+      ): Promise<AlertmanagerSyntheticInspection> {
+        const [projections, receipts] = await Promise.all([
+          db.select({ sourceState: notifications.sourceState })
+            .from(notifications)
+            .where(eq(notifications.sourceId, identity.sourceId)),
+          db.select({
+            status: homelabAlertReceipts.status,
+            deliveryCount: homelabAlertReceipts.deliveryCount,
+          })
+            .from(homelabAlertReceipts)
+            .where(and(
+              eq(homelabAlertReceipts.integration, identity.integration),
+              eq(homelabAlertReceipts.source, identity.source),
+              eq(homelabAlertReceipts.fingerprint, identity.fingerprint),
+            )),
+        ]);
+        return {
+          projectionCount: projections.length,
+          sourceState: projections[0]?.sourceState ?? null,
+          receiptCount: receipts.length,
+          firingDeliveryCount: receipts.find(receipt => receipt.status === 'firing')
+            ?.deliveryCount ?? null,
+        };
+      },
+
+      async cleanupSyntheticLifecycle(identity) {
+        db.transaction((transaction) => {
+          const projection = transaction.select({ id: notifications.id })
+            .from(notifications)
+            .where(eq(notifications.sourceId, identity.sourceId))
+            .get();
+          if (projection) {
+            transaction.delete(notificationActions)
+              .where(eq(notificationActions.notificationId, projection.id))
+              .run();
+            transaction.delete(notificationDeliveryEvents)
+              .where(eq(notificationDeliveryEvents.notificationId, projection.id))
+              .run();
+          }
+          transaction.delete(homelabAlertReceipts).where(and(
+            eq(homelabAlertReceipts.integration, identity.integration),
+            eq(homelabAlertReceipts.source, identity.source),
+            eq(homelabAlertReceipts.fingerprint, identity.fingerprint),
+          )).run();
+          transaction.delete(notifications)
+            .where(eq(notifications.sourceId, identity.sourceId))
+            .run();
+        }, { behavior: 'immediate' });
       },
     },
   };

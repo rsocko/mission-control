@@ -138,6 +138,26 @@ const mockWebPersistence = {
   })),
   dismissNotificationsAndEnqueueWritebacks: vi.fn(() => ({ updatedCount: 1, queuedCount: 0 })),
   wakeWritebackDispatcher: vi.fn(),
+  findNotificationForAction: vi.fn(async () => {
+    const rows = await mockDb.select();
+    return rows[0] ?? null;
+  }),
+  findNotificationAction: vi.fn(async () => {
+    const rows = await mockDb.select();
+    return rows[0] ?? null;
+  }),
+  updateNotificationFromAction: vi.fn(async () => {
+    await mockDb.update();
+  }),
+  claimWorkflowAction: vi.fn(async () => {
+    const result = await mockDb.update();
+    return result.changes === 1;
+  }),
+  finalizeWorkflowAction: vi.fn(async () => {
+    await mockDb.insert({ id: 'id' });
+    await mockDb.insert({ id: 'id' });
+    return true;
+  }),
 };
 
 vi.mock('@/lib/notifications/notification-web-service', () => ({
@@ -779,6 +799,7 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
         connectorType: 'github',
         idempotencyKey: 'notification-action:retry',
       }),
+      mockWebPersistence,
     );
   });
 });

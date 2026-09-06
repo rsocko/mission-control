@@ -11,8 +11,8 @@ import {
   tasks,
 } from '@/db/schema';
 import {
-  createNotificationsInTransaction,
-} from '@/lib/notifications/service';
+  createSqliteNotificationsInTransaction,
+} from './sqlite-notification-creation';
 import { syncFinanceProviderPresentation } from './sqlite-finance-insight-notification-lifecycle';
 import { formatDateInLocalTimezone } from '@/lib/utils/date';
 import { financeConnectorConfigFromRow } from '@/lib/connectors/monarch-money/config';
@@ -38,7 +38,7 @@ import {
 
 type SqliteDatabase = Database.Database;
 type DrizzleDatabase = BetterSQLite3Database<typeof schema>;
-type Transaction = Parameters<typeof createNotificationsInTransaction>[0];
+type Transaction = Parameters<typeof createSqliteNotificationsInTransaction>[0];
 
 function readOutage(
   database: Transaction,
@@ -56,7 +56,7 @@ function createOrUpdateNotification(
 ): { created: boolean; pendingDelivery: boolean } {
   const copy = financeConnectionNotificationCopy(row.status);
   const sourceId = financeConnectionSourceId(row);
-  const [result] = createNotificationsInTransaction(transaction, [{
+  const [result] = createSqliteNotificationsInTransaction(transaction, [{
     id: financeConnectionNotificationId(row),
     sourceId,
     connectorType: 'finance-manager',

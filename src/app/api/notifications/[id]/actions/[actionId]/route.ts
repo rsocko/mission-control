@@ -1,21 +1,9 @@
 import { NextResponse } from 'next/server';
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
-import db, { runTransaction } from '@/db';
-import {
-  notifications,
-  notificationActions,
-  pushPreferences,
-  tasks,
-} from '@/db/schema';
-import { eq, and, isNull, lt, notInArray, or } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { getTimezone, isDemoMode } from '@/lib/mode';
-import {
-  dismissNotificationsAndEnqueueWritebacks,
-  wakeNotificationWritebackDispatcher,
-} from '@/lib/notifications/notification-writeback';
+import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 import { executeWorkflow } from '@/lib/notifications/workflow-executor';
-import { legacyStateMutationPatch } from '@/lib/notifications/lifecycle';
 import {
   executeNotificationProviderAction,
   normalizeInternalNavigationTarget,
@@ -23,11 +11,8 @@ import {
   registerDefaultNotificationProviders,
 } from '@/lib/notifications/providers';
 
-const TERMINAL_TASK_STATUSES = ['done', 'cancelled'] as const;
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
 type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];
-
-class ReminderActionConflictError extends Error {}
 
 function isRemindLaterDuration(value: unknown): value is RemindLaterDuration {
   return REMIND_LATER_DURATIONS.includes(value as RemindLaterDuration);
@@ -64,14 +49,6 @@ function parseActionPayload(value: unknown): Record<string, unknown> {
   return asRecord(JSON.parse(value));
 }
 
-async function findNotification(id: string) {
-  const [notification] = await db.select()
-    .from(notifications)
-    .where(eq(notifications.id, id))
-    .limit(1);
-  return notification;
-}
-
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string; actionId: string }> }
@@ -79,22 +56,15 @@ export async function POST(
   try {
     const { id, actionId } = await params;
     const body = asRecord(await request.json().catch(() => ({})));
+    const persistence = await getNotificationWebPersistence();
 
-    // Find the notification
-    const notification = await findNotification(id);
+    const notification = await persistence.findNotificationForAction(id);
 
     if (!notification) {
       return ApiErrors.notFound('Notification');
     }
 
-    // Find the action
-    const [action] = await db.select()
-      .from(notificationActions)
-      .where(and(
-        eq(notificationActions.id, actionId),
-        eq(notificationActions.notificationId, id)
-      ))
-      .limit(1);
+    const action = await persistence.findNotificationAction(id, actionId);
 
     if (!action) {
       return ApiErrors.notFound('Action');
@@ -119,22 +89,21 @@ export async function POST(
         }, { status: providerResult.error.status });
       }
       if (providerResult.state) {
-        const lifecycleUpdate = providerResult.state === 'resolved'
-          ? {
-              ...legacyStateMutationPatch(notification, 'archived', now),
-              archivedAt: now,
-            }
+        const state = providerResult.state === 'resolved'
+          ? 'archived'
           : providerResult.state === 'dismissed'
-            ? legacyStateMutationPatch(notification, 'dismissed', now)
-            : legacyStateMutationPatch(notification, 'read', now);
-        await db.update(notifications)
-          .set(lifecycleUpdate)
-          .where(eq(notifications.id, id));
+            ? 'dismissed'
+            : 'read';
+        await persistence.updateNotificationFromAction({
+          notificationId: id,
+          state,
+          now,
+        });
       }
       return NextResponse.json({ success: true, result: providerResult.result });
     }
 
-    // Built-in handlers are explicit fallbacks. Source-specific actions must be
+    // Built-in handlers are used only when a source-specific provider declines.
     // claimed by their registered notification provider above.
     switch (action.actionType) {
       case 'open_url': {
@@ -143,9 +112,11 @@ export async function POST(
           return ApiErrors.badRequest('Action URL must use http or https');
         }
         // Mark as read, return URL for client to open
-        await db.update(notifications)
-          .set(legacyStateMutationPatch(notification, 'read', now))
-          .where(eq(notifications.id, id));
+        await persistence.updateNotificationFromAction({
+          notificationId: id,
+          state: 'read',
+          now,
+        });
         return NextResponse.json({
           success: true,
           result: { type: 'open_url', url },
@@ -154,12 +125,11 @@ export async function POST(
 
       case 'create_task': {
         // Mark as resolved, return task creation payload
-        await db.update(notifications)
-          .set({
-            ...legacyStateMutationPatch(notification, 'archived', now),
-            archivedAt: now,
-          })
-          .where(eq(notifications.id, id));
+        await persistence.updateNotificationFromAction({
+          notificationId: id,
+          state: 'archived',
+          now,
+        });
         return NextResponse.json({
           success: true,
           result: {
@@ -182,9 +152,11 @@ export async function POST(
         if (!target) {
           return ApiErrors.badRequest('Navigation target must be an internal path');
         }
-        await db.update(notifications)
-          .set(legacyStateMutationPatch(notification, 'read', now))
-          .where(eq(notifications.id, id));
+        await persistence.updateNotificationFromAction({
+          notificationId: id,
+          state: 'read',
+          now,
+        });
         return NextResponse.json({
           success: true,
           result: { type: 'navigate', target },
@@ -224,104 +196,30 @@ export async function POST(
         const actionNow = new Date();
         const actionNowIso = actionNow.toISOString();
         const timezone = getTimezone();
-        const morningHour = db.select({ morningHour: pushPreferences.morningHour })
-          .from(pushPreferences)
-          .where(eq(pushPreferences.id, 'default'))
-          .get()?.morningHour ?? 8;
+        const morningHour = await persistence.getReminderMorningHour();
         const reminderAt = action.actionType === 'remind_later'
           ? getRemindLaterTarget(duration as RemindLaterDuration, actionNow, timezone, morningHour)
           : null;
-        try {
-          runTransaction((tx) => {
-            const liveNotification = tx.select().from(notifications)
-              .where(eq(notifications.id, id))
-              .get();
-            const task = tx.select().from(tasks)
-              .where(eq(tasks.id, notification.relatedTaskId!))
-              .get();
-            if (!liveNotification || !task) {
-              throw new ReminderActionConflictError('The reminder task no longer exists');
-            }
-            if (
-              liveNotification.disposition !== 'inbox'
-              || liveNotification.sourceState !== 'active'
-            ) {
-              throw new ReminderActionConflictError('This reminder has already been handled');
-            }
-            if (
-              TERMINAL_TASK_STATUSES.includes(
-                task.status as typeof TERMINAL_TASK_STATUSES[number],
-              )
-              && !(action.actionType === 'complete_task' && task.status === 'done')
-            ) {
-              throw new ReminderActionConflictError('This task is already complete or cancelled');
-            }
-
-            const claimed = tx.update(notificationActions).set({
-              executionState: 'running',
-              claimedAt: actionNowIso,
-              lastError: null,
-            }).where(and(
-              eq(notificationActions.id, actionId),
-              eq(notificationActions.notificationId, id),
-              eq(notificationActions.executionState, 'pending'),
-            )).run();
-            if (claimed.changes !== 1) {
-              throw new ReminderActionConflictError('This reminder action has already been handled');
-            }
-
-            if (action.actionType === 'remind_later') {
-              const scheduled = tx.update(tasks).set({
-                reminderAt,
-                updatedAt: actionNowIso,
-              }).where(and(
-                eq(tasks.id, task.id),
-                isNull(tasks.reminderAt),
-                notInArray(tasks.status, [...TERMINAL_TASK_STATUSES]),
-              )).run();
-              if (scheduled.changes !== 1) {
-                throw new ReminderActionConflictError(
-                  'The task reminder changed before it could be rescheduled',
-                );
-              }
-            } else if (action.actionType === 'dismiss_reminder') {
-              tx.update(tasks).set({
-                reminderAt: null,
-                reminderRelative: null,
-                reminderDueTime: null,
-                updatedAt: actionNowIso,
-              }).where(eq(tasks.id, task.id)).run();
-            }
-
-            const metadata = parseActionPayload(liveNotification.metadata);
-            const notificationPatch = action.actionType === 'dismiss_reminder'
-              ? legacyStateMutationPatch(liveNotification, 'dismissed', actionNowIso)
-              : {
-                  ...legacyStateMutationPatch(liveNotification, 'archived', actionNowIso),
-                  archivedAt: actionNowIso,
-                };
-            tx.update(notifications).set({
-              ...notificationPatch,
-              isActionable: false,
-              primaryActionId: null,
-              metadata: {
-                ...metadata,
-                reminderAction: action.actionType,
-                reminderActionAt: actionNowIso,
-                ...(reminderAt ? { rescheduledFor: reminderAt } : {}),
-              },
-            }).where(eq(notifications.id, id)).run();
-            tx.update(notificationActions).set({
-              executionState: 'completed',
-              completedAt: actionNowIso,
-              lastError: null,
-            }).where(eq(notificationActions.notificationId, id)).run();
-          });
-        } catch (error) {
-          if (error instanceof ReminderActionConflictError) {
-            return NextResponse.json({ success: false, error: error.message }, { status: 409 });
-          }
-          throw error;
+        const reminderResult = await persistence.applyReminderAction({
+          notificationId: id,
+          actionId,
+          taskId: notification.relatedTaskId,
+          actionType: action.actionType,
+          now: actionNowIso,
+          reminderAt,
+        });
+        if (!reminderResult.applied) {
+          const messages = {
+            missing: 'The reminder task no longer exists',
+            handled: 'This reminder has already been handled',
+            task_terminal: 'This task is already complete or cancelled',
+            action_claimed: 'This reminder action has already been handled',
+            reminder_changed: 'The task reminder changed before it could be rescheduled',
+          } as const;
+          return NextResponse.json(
+            { success: false, error: messages[reminderResult.conflict] },
+            { status: 409 },
+          );
         }
 
         return NextResponse.json({
@@ -336,30 +234,25 @@ export async function POST(
 
       case 'dismiss': {
         if (isDemoMode()) {
-          await db.update(notifications)
-            .set({
-              state: 'dismissed',
-              readState: 'read',
-              disposition: 'dismissed',
-              readAt: now,
-              dismissedAt: now,
-            })
-            .where(eq(notifications.id, id));
+          await persistence.updateNotificationFromAction({
+            notificationId: id,
+            state: 'dismissed',
+            now,
+          });
         } else {
-          const result = dismissNotificationsAndEnqueueWritebacks([id], now);
-          if (result.queuedCount > 0) wakeNotificationWritebackDispatcher();
+          const result = await persistence.dismissNotificationsAndEnqueueWritebacks([id], now);
+          if (result.queuedCount > 0) persistence.wakeWritebackDispatcher();
         }
         return NextResponse.json({ success: true, result: { type: 'dismissed' } });
       }
 
       case 'approve':
       case 'reject': {
-        await db.update(notifications)
-          .set({
-            ...legacyStateMutationPatch(notification, 'archived', now),
-            archivedAt: now,
-          })
-          .where(eq(notifications.id, id));
+        await persistence.updateNotificationFromAction({
+          notificationId: id,
+          state: 'archived',
+          now,
+        });
         return NextResponse.json({
           success: true,
           result: { type: action.actionType, payload },
@@ -389,37 +282,15 @@ export async function POST(
           : notification.id;
         const executionNotification = parentNotificationId === notification.id
           ? notification
-          : await findNotification(parentNotificationId) || notification;
+          : await persistence.findNotificationForAction(parentNotificationId) || notification;
         const rootNotificationId = executionNotification.id;
 
         const recoveryCutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-        const claimed = db.transaction((tx) => {
-          const result = tx.update(notificationActions)
-            .set({
-              executionState: 'running',
-              claimedAt: now,
-              completedAt: null,
-              lastError: null,
-            })
-            .where(and(
-              eq(notificationActions.id, actionId),
-              eq(notificationActions.notificationId, id),
-              or(
-                eq(notificationActions.executionState, 'pending'),
-                and(
-                  eq(notificationActions.executionState, 'running'),
-                  lt(notificationActions.claimedAt, recoveryCutoff),
-                ),
-              ),
-            ))
-            .run();
-          if (result.changes === 0) return false;
-
-          tx.update(notifications)
-            .set({ isActionable: false, primaryActionId: null })
-            .where(eq(notifications.id, id))
-            .run();
-          return true;
+        const claimed = await persistence.claimWorkflowAction({
+          notificationId: id,
+          actionId,
+          claimedAt: now,
+          recoveryCutoff,
         });
         if (!claimed) {
           return NextResponse.json(
@@ -439,7 +310,8 @@ export async function POST(
             category: executionNotification.category || 'general',
             metadata: parseActionPayload(executionNotification.metadata),
             idempotencyKey: `notification-action:${actionId}`,
-          }
+          },
+          persistence,
         );
 
         const resultNotificationId = crypto.randomUUID();
@@ -452,56 +324,24 @@ export async function POST(
         const resultBody = workflowResult.success
           ? 'The workflow completed successfully.'
           : workflowResult.error || 'The workflow did not complete successfully.';
-        const completionPatch = workflowResult.success
-          ? {
-              ...legacyStateMutationPatch(notification, 'archived', now),
-              archivedAt: now,
-            }
-          : legacyStateMutationPatch(notification, 'read', now);
-
-        db.transaction((tx) => {
-          tx.update(notificationActions)
-            .set({
-              executionState: workflowResult.success ? 'completed' : 'failed',
-              completedAt: now,
-              lastError: workflowResult.success ? null : resultBody,
-            })
-            .where(eq(notificationActions.id, actionId))
-            .run();
-
-          tx.update(notifications)
-            .set({
-              ...completionPatch,
-              isActionable: false,
-              primaryActionId: null,
-              groupKey,
-            })
-            .where(eq(notifications.id, id))
-            .run();
-
-          tx.insert(notifications).values({
+        const finalized = await persistence.finalizeWorkflowAction({
+          notificationId: id,
+          actionId,
+          claimedAt: now,
+          now,
+          success: workflowResult.success,
+          error: workflowResult.success ? null : resultBody,
+          groupKey,
+          followUp: {
             id: resultNotificationId,
             sourceId: `workflow-result:${id}:${resultNotificationId}`,
-            connectorType: 'mission-control',
-            connectorInstanceId: 'mission-control:workflow',
             title: resultTitle,
             body: resultBody,
             level: workflowResult.success ? 'heads_up' : 'action_needed',
             levelRank: workflowResult.success ? 2 : 1,
-            category: 'automation',
-            templateKey: 'workflow_result',
-            state: 'unread',
-            readState: 'unread',
-            disposition: 'inbox',
-            sourceState: 'active',
-            syncState: 'synced',
-            isActionable: !workflowResult.success,
-            receivedAt: now,
-            sortAt: now,
             groupKey,
             relatedTaskId: executionNotification.relatedTaskId,
             relatedProjectId: executionNotification.relatedProjectId,
-            relatedEntityType: 'notification',
             relatedEntityId: rootNotificationId,
             metadata: {
               parentNotificationId: rootNotificationId,
@@ -512,28 +352,21 @@ export async function POST(
               sourceName: 'Workflow',
               subtitle: workflowResult.success ? 'Completed successfully' : 'Needs attention',
             },
-          }).run();
-
-          if (!workflowResult.success) {
-            tx.insert(notificationActions).values({
+            retryAction: workflowResult.success ? null : {
               id: crypto.randomUUID(),
-              notificationId: resultNotificationId,
-              actionType: 'run_workflow',
-              label: 'Retry workflow',
-              icon: 'zap',
-              variant: 'primary',
-              isPrimary: true,
-              sortOrder: 0,
               payload: {
                 ...payload,
                 params: workflowParams,
               },
-              opensExternal: false,
-              requiresConfirmation: false,
-              createdBy: 'system',
-            }).run();
-          }
+            },
+          },
         });
+        if (!finalized) {
+          return NextResponse.json(
+            { success: false, error: 'This workflow action was superseded' },
+            { status: 409 },
+          );
+        }
 
         return NextResponse.json({
           success: workflowResult.success,

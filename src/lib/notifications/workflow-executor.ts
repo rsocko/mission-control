@@ -4,10 +4,13 @@
  * Triggers outbound webhooks or n8n workflows based on the action payload.
  */
 
-import db from '@/db';
-import { outboundWebhooks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import logger from '@/lib/logger';
+
+interface WorkflowEndpointPersistence {
+  findWorkflowEndpoint(
+    workflowId: string,
+  ): Promise<{ found: boolean; url: string | null }>;
+}
 
 export interface WorkflowExecutionResult {
   success: boolean;
@@ -51,16 +54,13 @@ export async function executeWorkflow(
     category: string;
     metadata: Record<string, unknown>;
     idempotencyKey: string;
-  }
+  },
+  persistence: WorkflowEndpointPersistence,
 ): Promise<WorkflowExecutionResult> {
   try {
-    // Look up the webhook/workflow endpoint
-    const [webhook] = await db.select()
-      .from(outboundWebhooks)
-      .where(eq(outboundWebhooks.id, workflowId))
-      .limit(1);
+    const webhook = await persistence.findWorkflowEndpoint(workflowId);
 
-    if (!webhook) {
+    if (!webhook.found) {
       // Try treating workflowId as a direct URL (for n8n webhook URLs)
       if (workflowId.startsWith('http')) {
         if (isInternalUrl(workflowId)) {

@@ -1,30 +1,20 @@
 import 'server-only';
 
-import { and, eq, inArray } from 'drizzle-orm';
-import db from '@/db';
-import { notificationPushRules } from '@/db/schema';
-import type { NotificationLevel } from '@/types';
 import { isNotificationLevel } from '@/lib/notifications/levels';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type {
   ConnectorNotificationTypeDefinition,
-  PushPreview,
 } from './catalog';
 import { isPreviewSafeForType, isPushPreview } from './catalog';
 import { MAX_NOTIFICATION_PUSHES_PER_HOUR } from './constants';
+import type {
+  NotificationPushRule,
+  SaveNotificationPushRuleInput,
+} from '@/db/persistence/notification-delivery';
 
 export { MAX_NOTIFICATION_PUSHES_PER_HOUR } from './constants';
 
-export type NotificationPushRule = typeof notificationPushRules.$inferSelect;
-
-export interface SaveNotificationPushRuleInput {
-  id?: string;
-  connectorInstanceId: string;
-  templateKey: string;
-  enabled: boolean;
-  minLevel: NotificationLevel;
-  preview: PushPreview;
-  maxPerHour?: number | null;
-}
+export type { NotificationPushRule, SaveNotificationPushRuleInput };
 
 export function validateNotificationPushRule(
   input: SaveNotificationPushRuleInput,
@@ -76,49 +66,16 @@ export async function saveNotificationPushRule(
   definition?: ConnectorNotificationTypeDefinition,
 ): Promise<NotificationPushRule> {
   validateNotificationPushRule(input, definition);
-  const now = new Date().toISOString();
-  const row = {
-    id: input.id ?? crypto.randomUUID(),
-    connectorInstanceId: input.connectorInstanceId,
-    templateKey: input.templateKey,
-    enabled: input.enabled,
-    minLevel: input.minLevel,
-    preview: input.preview,
-    maxPerHour: input.maxPerHour ?? null,
-    createdAt: now,
-    updatedAt: now,
-  };
-
-  const [saved] = await db.insert(notificationPushRules).values(row).onConflictDoUpdate({
-    target: [
-      notificationPushRules.connectorInstanceId,
-      notificationPushRules.templateKey,
-    ],
-    set: {
-      enabled: row.enabled,
-      minLevel: row.minLevel,
-      preview: row.preview,
-      maxPerHour: row.maxPerHour,
-      updatedAt: row.updatedAt,
-    },
-  }).returning();
-  if (!saved) throw new Error('Notification push rule was not persisted');
-  return saved;
+  return (await getWorkerPersistenceRepositories()).notificationDelivery.pushRules
+    .save(input, definition);
 }
 
 export async function getNotificationPushRuleOverrides(
   connectorInstanceId: string,
   templateKey?: string,
 ): Promise<NotificationPushRule[]> {
-  const keys = templateKey ? [templateKey, '*'] : null;
-  return db.select().from(notificationPushRules).where(
-    keys
-      ? and(
-          eq(notificationPushRules.connectorInstanceId, connectorInstanceId),
-          inArray(notificationPushRules.templateKey, keys),
-        )
-      : eq(notificationPushRules.connectorInstanceId, connectorInstanceId),
-  ).all();
+  return (await getWorkerPersistenceRepositories()).notificationDelivery.pushRules
+    .listOverrides(connectorInstanceId, templateKey);
 }
 
 export async function resetNotificationPushRule(
@@ -127,8 +84,6 @@ export async function resetNotificationPushRule(
 ): Promise<void> {
   if (!connectorInstanceId.trim()) throw new Error('connectorInstanceId is required');
   if (!templateKey.trim()) throw new Error('templateKey is required');
-  db.delete(notificationPushRules).where(and(
-    eq(notificationPushRules.connectorInstanceId, connectorInstanceId),
-    eq(notificationPushRules.templateKey, templateKey),
-  )).run();
+  await (await getWorkerPersistenceRepositories()).notificationDelivery.pushRules
+    .reset(connectorInstanceId, templateKey);
 }

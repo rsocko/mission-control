@@ -187,3 +187,26 @@ Resolved source state cannot be regressed by an older firing delivery.
 Operational request outcomes are stored separately from incident receipts.
 Successful projection acknowledgements require that operational receipt to be
 durable; if it cannot be recorded, Mission Control returns a retryable `503`.
+
+## Persistence portability
+
+Alertmanager control, audit history, incident receipts, notification
+projections, actions, and durable push intents use the backend selected during
+application startup. SQLite and PostgreSQL implement the same typed
+`webhookIntegrations.alertmanager` contract; the route never selects a backend
+and cannot fall back to SQLite.
+
+Each lifecycle batch is atomic. Replayed event IDs increment receipt delivery
+counts without duplicating projections, older events cannot regress newer
+source state, and firing/resolved action replacement remains part of the same
+transaction. PostgreSQL serializes the stable
+`{integration}:{source}:{fingerprint}` incident identity so concurrent retries
+produce the same result as SQLite's immediate transaction. Synthetic lifecycle
+cleanup and bounded audit retention are implemented by both adapters.
+
+The HTTP ordering is unchanged: token configuration and authentication,
+rate-limit checks, bounded JSON parsing and validation, pause-state lookup,
+lifecycle ingestion, then the required operational audit. Provider or network
+I/O is not introduced into these transactions. A projected batch whose required
+audit cannot be persisted still returns `503` with `Retry-After: 5`, allowing
+Alertmanager to retry safely through the receipt idempotency contract.

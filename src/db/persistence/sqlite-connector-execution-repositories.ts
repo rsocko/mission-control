@@ -5,9 +5,9 @@ import type { ConnectorConfig } from '@/types';
 import * as schema from '@/db/schema';
 import { notificationActions } from '@/db/schema';
 import {
-  createNotificationsInTransaction,
-  type CreateNotificationInput,
-} from '@/lib/notifications/service';
+  createSqliteNotificationsInTransaction,
+} from './sqlite-notification-creation';
+import type { CreateNotificationInput } from './notification-delivery';
 import {
   archiveAndDeleteTask as archiveAndDeleteTaskSqlite,
   restoreDeletionSnapshot as restoreDeletionSnapshotSqlite,
@@ -1107,7 +1107,7 @@ export function createSqliteConnectorExecutionRepositories(
             FROM notifications
             WHERE source_id = ?
             `).get(command.input.sourceId) as { primaryActionId: string | null } | undefined;
-            const [result] = createNotificationsInTransaction(
+            const [result] = createSqliteNotificationsInTransaction(
             transaction,
             [{
             ...command.input,

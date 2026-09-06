@@ -3,17 +3,12 @@ import type {
   NotificationWebPersistence,
   NotificationRow,
   NotificationActionRow,
-  NotificationStats,
-  NotificationQueryResult,
-  RestoreSnapshot,
   BulkSelectedRow,
   SavedViewRow,
-  WritebackStatusResult,
   WritebackJob,
   WritebackClaimRow,
-  WebSubscriptionInput,
   NotificationMutationAction,
-  NotificationMutationResult,
+  NotificationActionNotification,
 } from '@/db/persistence/notification-web';
 import type { NotificationQuery } from '@/lib/notifications/query';
 import type { NotificationState } from '@/types';
@@ -664,6 +659,482 @@ export function createPostgresNotificationWebRepository(
       } catch (e) { await client.query('ROLLBACK'); throw e; } finally { client.release(); }
     },
 
+    async findNotificationForAction(id) {
+      const result = await pool.query(`
+        SELECT
+          id, source_id AS "sourceId", connector_type AS "connectorType",
+          connector_instance_id AS "connectorInstanceId", title, body, level,
+          category, template_key AS "templateKey", state,
+          read_state AS "readState", disposition, source_state AS "sourceState",
+          navigation_target AS "navigationTarget", related_task_id AS "relatedTaskId",
+          related_project_id AS "relatedProjectId", group_key AS "groupKey",
+          metadata, presentation,
+          last_source_activity_at AS "lastSourceActivityAt",
+          last_source_activity_key AS "lastSourceActivityKey"
+        FROM notifications
+        WHERE id = $1
+      `, [id]);
+      return (result.rows[0] as NotificationActionNotification | undefined) ?? null;
+    },
+
+    async findNotificationAction(notificationId, actionId) {
+      const result = await pool.query(`
+        SELECT id, notification_id AS "notificationId",
+               action_type AS "actionType", payload
+        FROM notification_actions
+        WHERE id = $1 AND notification_id = $2
+      `, [actionId, notificationId]);
+      return result.rows[0] ?? null;
+    },
+
+    async updateNotificationFromAction(input) {
+      if (input.state === 'read') {
+        await pool.query(`
+          UPDATE notifications
+          SET read_state = 'read', read_at = $1,
+              state = CASE
+                WHEN disposition = 'dismissed' THEN 'dismissed'
+                WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                WHEN disposition = 'handled' THEN 'archived'
+                ELSE 'read'
+              END
+          WHERE id = $2
+        `, [input.now, input.notificationId]);
+        return;
+      }
+      if (input.state === 'dismissed') {
+        await pool.query(`
+          UPDATE notifications
+          SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
+              read_at = $1, dismissed_at = $1
+          WHERE id = $2
+        `, [input.now, input.notificationId]);
+        return;
+      }
+      await pool.query(`
+        UPDATE notifications
+        SET disposition = 'handled', handled_at = $1, archived_at = $1,
+            handled_source_activity_at = last_source_activity_at,
+            handled_source_activity_key = last_source_activity_key,
+            state = CASE
+              WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+              ELSE 'archived'
+            END
+        WHERE id = $2
+      `, [input.now, input.notificationId]);
+    },
+
+    async getReminderMorningHour() {
+      const result = await pool.query(`
+        SELECT morning_hour AS "morningHour"
+        FROM push_preferences
+        WHERE id = 'default'
+      `);
+      return Number(result.rows[0]?.morningHour ?? 8);
+    },
+
+    async applyReminderAction(input) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const notificationResult = await client.query(`
+          SELECT read_state AS "readState", disposition, source_state AS "sourceState",
+                 last_source_activity_at AS "lastSourceActivityAt",
+                 last_source_activity_key AS "lastSourceActivityKey", metadata
+          FROM notifications
+          WHERE id = $1
+          FOR UPDATE
+        `, [input.notificationId]);
+        const taskResult = await client.query(`
+          SELECT id, status, reminder_at AS "reminderAt"
+          FROM tasks
+          WHERE id = $1
+          FOR UPDATE
+        `, [input.taskId]);
+        const notification = notificationResult.rows[0];
+        const task = taskResult.rows[0];
+        if (!notification || !task) {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'missing' };
+        }
+        if (notification.disposition !== 'inbox' || notification.sourceState !== 'active') {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'handled' };
+        }
+        if (
+          (task.status === 'done' || task.status === 'cancelled')
+          && !(input.actionType === 'complete_task' && task.status === 'done')
+        ) {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'task_terminal' };
+        }
+        if (input.actionType === 'remind_later' && task.reminderAt !== null) {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'reminder_changed' };
+        }
+
+        const claimed = await client.query(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = $1, last_error = NULL
+          WHERE id = $2 AND notification_id = $3 AND execution_state = 'pending'
+        `, [input.now, input.actionId, input.notificationId]);
+        if (claimed.rowCount !== 1) {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'action_claimed' };
+        }
+
+        if (input.actionType === 'remind_later') {
+          const scheduled = await client.query(`
+            UPDATE tasks
+            SET reminder_at = $1, updated_at = $2
+            WHERE id = $3 AND reminder_at IS NULL AND status NOT IN ('done', 'cancelled')
+          `, [input.reminderAt, input.now, input.taskId]);
+          if (scheduled.rowCount !== 1) {
+            await client.query('ROLLBACK');
+            return { applied: false, conflict: 'reminder_changed' };
+          }
+        } else if (input.actionType === 'dismiss_reminder') {
+          await client.query(`
+            UPDATE tasks
+            SET reminder_at = NULL, reminder_relative = NULL,
+                reminder_due_time = NULL, updated_at = $1
+            WHERE id = $2
+          `, [input.now, input.taskId]);
+        }
+
+        const patch = legacyStateMutationPatch(
+          notification,
+          input.actionType === 'dismiss_reminder' ? 'dismissed' : 'archived',
+          input.now,
+        );
+        const metadata = notification.metadata !== null
+          && typeof notification.metadata === 'object'
+          && !Array.isArray(notification.metadata)
+          ? notification.metadata as Record<string, unknown>
+          : {};
+        await client.query(`
+          UPDATE notifications
+          SET state = $1, read_state = COALESCE($2, read_state),
+              disposition = COALESCE($3, disposition),
+              read_at = COALESCE($4, read_at),
+              handled_at = COALESCE($5, handled_at),
+              dismissed_at = COALESCE($6, dismissed_at),
+              archived_at = $7,
+              handled_source_activity_at = COALESCE($8, handled_source_activity_at),
+              handled_source_activity_key = COALESCE($9, handled_source_activity_key),
+              is_actionable = false, primary_action_id = NULL, metadata = $10
+          WHERE id = $11
+        `, [
+          patch.state,
+          patch.readState ?? null,
+          patch.disposition ?? null,
+          patch.readAt ?? null,
+          patch.handledAt ?? null,
+          patch.dismissedAt ?? null,
+          input.actionType === 'dismiss_reminder' ? null : input.now,
+          patch.handledSourceActivityAt ?? null,
+          patch.handledSourceActivityKey ?? null,
+          JSON.stringify({
+            ...metadata,
+            reminderAction: input.actionType,
+            reminderActionAt: input.now,
+            ...(input.reminderAt ? { rescheduledFor: input.reminderAt } : {}),
+          }),
+          input.notificationId,
+        ]);
+        await client.query(`
+          UPDATE notification_actions
+          SET execution_state = 'completed', completed_at = $1, last_error = NULL
+          WHERE notification_id = $2
+        `, [input.now, input.notificationId]);
+        await client.query('COMMIT');
+        return { applied: true };
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async findWorkflowEndpoint(workflowId) {
+      const result = await pool.query(
+        'SELECT url FROM outbound_webhooks WHERE id = $1',
+        [workflowId],
+      );
+      return result.rows[0]
+        ? { found: true, url: result.rows[0].url ?? null }
+        : { found: false, url: null };
+    },
+
+    async claimWorkflowAction(input) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const claimed = await client.query(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = $1,
+              completed_at = NULL, last_error = NULL
+          WHERE id = $2 AND notification_id = $3
+            AND (
+              execution_state = 'pending'
+              OR (execution_state = 'running' AND claimed_at < $4)
+            )
+        `, [
+          input.claimedAt,
+          input.actionId,
+          input.notificationId,
+          input.recoveryCutoff,
+        ]);
+        if (claimed.rowCount !== 1) {
+          await client.query('ROLLBACK');
+          return false;
+        }
+        await client.query(`
+          UPDATE notifications
+          SET is_actionable = false, primary_action_id = NULL
+          WHERE id = $1
+        `, [input.notificationId]);
+        await client.query('COMMIT');
+        return true;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async finalizeWorkflowAction(input) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const claimed = await client.query(`
+          UPDATE notification_actions
+          SET execution_state = $1, completed_at = $2, last_error = $3
+          WHERE id = $4 AND notification_id = $5
+            AND execution_state = 'running' AND claimed_at = $6
+        `, [
+          input.success ? 'completed' : 'failed',
+          input.now,
+          input.error,
+          input.actionId,
+          input.notificationId,
+          input.claimedAt,
+        ]);
+        if (claimed.rowCount !== 1) {
+          await client.query('ROLLBACK');
+          return false;
+        }
+
+        if (input.success) {
+          await client.query(`
+            UPDATE notifications
+            SET disposition = 'handled', handled_at = $1, archived_at = $1,
+                handled_source_activity_at = last_source_activity_at,
+                handled_source_activity_key = last_source_activity_key,
+                state = CASE
+                  WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                  ELSE 'archived'
+                END,
+                is_actionable = false, primary_action_id = NULL, group_key = $2
+            WHERE id = $3
+          `, [input.now, input.groupKey, input.notificationId]);
+        } else {
+          await client.query(`
+            UPDATE notifications
+            SET read_state = 'read', read_at = $1,
+                state = CASE
+                  WHEN disposition = 'dismissed' THEN 'dismissed'
+                  WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                  WHEN disposition = 'handled' THEN 'archived'
+                  ELSE 'read'
+                END,
+                is_actionable = false, primary_action_id = NULL, group_key = $2
+            WHERE id = $3
+          `, [input.now, input.groupKey, input.notificationId]);
+        }
+
+        const followUp = input.followUp;
+        await client.query(`
+          INSERT INTO notifications (
+            id, source_id, connector_type, connector_instance_id, title, body,
+            level, level_rank, category, template_key, state, read_state,
+            disposition, source_state, sync_state, is_actionable, received_at,
+            sort_at, group_key, related_task_id, related_project_id,
+            related_entity_type, related_entity_id, metadata, presentation
+          ) VALUES (
+            $1, $2, 'mission-control', 'mission-control:workflow', $3, $4,
+            $5, $6, 'automation', 'workflow_result', 'unread', 'unread',
+            'inbox', 'active', 'synced', $7, $8, $8, $9, $10, $11,
+            'notification', $12, $13, $14
+          )
+        `, [
+          followUp.id,
+          followUp.sourceId,
+          followUp.title,
+          followUp.body,
+          followUp.level,
+          followUp.levelRank,
+          !input.success,
+          input.now,
+          followUp.groupKey,
+          followUp.relatedTaskId,
+          followUp.relatedProjectId,
+          followUp.relatedEntityId,
+          JSON.stringify(followUp.metadata),
+          JSON.stringify(followUp.presentation),
+        ]);
+        if (followUp.retryAction) {
+          await client.query(`
+            INSERT INTO notification_actions (
+              id, notification_id, action_type, label, icon, variant, is_primary,
+              sort_order, payload, opens_external, requires_confirmation, created_by
+            ) VALUES (
+              $1, $2, 'run_workflow', 'Retry workflow', 'zap', 'primary',
+              true, 0, $3, false, false, 'system'
+            )
+          `, [
+            followUp.retryAction.id,
+            followUp.id,
+            JSON.stringify(followUp.retryAction.payload),
+          ]);
+        }
+        await client.query('COMMIT');
+        return true;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async listNotificationsForReEnrichment(input) {
+      const columns = `
+        id, source_id AS "sourceId", connector_type AS "connectorType",
+        connector_instance_id AS "connectorInstanceId", title, body, level,
+        category, state, read_state AS "readState",
+        is_actionable AS "isActionable", metadata
+      `;
+      let result;
+      switch (input.scope) {
+        case 'all':
+          result = await pool.query(`
+            SELECT ${columns} FROM notifications
+            ORDER BY received_at DESC LIMIT $1
+          `, [input.limit]);
+          break;
+        case 'unenriched':
+          result = await pool.query(`
+            SELECT ${columns} FROM notifications
+            WHERE NOT (metadata ? 'enrichment')
+               OR metadata->'enrichment' = 'null'::jsonb
+            ORDER BY received_at DESC LIMIT $1
+          `, [input.limit]);
+          break;
+        case 'connector':
+          result = await pool.query(`
+            SELECT ${columns} FROM notifications
+            WHERE connector_type = $1
+            ORDER BY received_at DESC LIMIT $2
+          `, [input.connectorType, input.limit]);
+          break;
+        case 'ids':
+          if (input.ids.length === 0) return [];
+          result = await pool.query(`
+            SELECT ${columns} FROM notifications WHERE id = ANY($1::text[])
+          `, [input.ids]);
+          break;
+      }
+      return result.rows;
+    },
+
+    async saveReEnrichedNotification(input) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        await client.query(`
+          UPDATE notifications
+          SET title = $1, body = $2, category = $3, template_key = $4,
+              related_task_id = $5, related_project_id = $6,
+              related_entity_type = $7, related_entity_id = $8,
+              navigation_target = $9, metadata = $10, presentation = $11,
+              is_actionable = CASE WHEN $12 THEN $13 ELSE is_actionable END,
+              primary_action_id = CASE WHEN $12 THEN $14 ELSE primary_action_id END
+          WHERE id = $15
+        `, [
+          input.title,
+          input.body,
+          input.category,
+          input.templateKey,
+          input.relatedTaskId,
+          input.relatedProjectId,
+          input.relatedEntityType,
+          input.relatedEntityId,
+          input.navigationTarget,
+          JSON.stringify(input.metadata),
+          JSON.stringify(input.presentation),
+          input.providerSignature,
+          input.isActionable,
+          input.primaryActionId,
+          input.id,
+        ]);
+        if (input.providerSignature) {
+          await client.query(`
+            DELETE FROM notification_actions
+            WHERE notification_id = $1 AND created_by = 'connector'
+              AND execution_state = 'pending'
+          `, [input.id]);
+          for (const action of input.actions) {
+            await client.query(`
+              INSERT INTO notification_actions (
+                id, notification_id, action_type, label, icon, variant, is_primary,
+                sort_order, payload, opens_external, requires_confirmation, created_by
+              ) VALUES (
+                $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+              )
+            `, [
+              action.id,
+              action.notificationId,
+              action.actionType,
+              action.label,
+              action.icon ?? null,
+              action.variant,
+              action.isPrimary,
+              action.sortOrder,
+              JSON.stringify(action.payload),
+              action.opensExternal,
+              action.requiresConfirmation,
+              action.createdBy,
+            ]);
+          }
+        }
+        await client.query('COMMIT');
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async listNotificationsForClassification(limit) {
+      const result = await pool.query(`
+        SELECT id, title, level, category, is_actionable AS "isActionable",
+               connector_type AS "connectorType", received_at AS "receivedAt"
+        FROM notifications
+        WHERE disposition = 'inbox'
+          AND source_state IN ('active', 'unknown')
+          AND (snoozed_until IS NULL OR snoozed_until <= $1)
+          AND read_state = 'unread'
+          AND (level IS NULL OR level IN ('urgent', 'action_needed', 'heads_up', 'fyi'))
+        ORDER BY received_at DESC
+        LIMIT $2
+      `, [new Date().toISOString(), limit]);
+      return result.rows;
+    },
+
     async restoreSnapshots(snapshots) {
       const ids = [...new Set(snapshots.map(s => s.id))];
       const ph = ids.map((_, i) => `$${i + 1}`).join(',');
@@ -701,7 +1172,7 @@ export function createPostgresNotificationWebRepository(
           lastSourceActivityAt: row.last_source_activity_at, lastSourceActivityKey: row.last_source_activity_key,
         }, state as NotificationState, now);
         const entries = Object.entries(patch);
-        const sets = entries.map(([key, _], i) => `${key.replace(/([A-Z])/g, '_$1').toLowerCase()} = $${i + 1}`).join(', ');
+        const sets = entries.map(([key], i) => `${key.replace(/([A-Z])/g, '_$1').toLowerCase()} = $${i + 1}`).join(', ');
         const values = entries.map(([, v]) => v ?? null);
         values.push(row.id);
         await pool.query(`UPDATE notifications SET ${sets} WHERE id = $${values.length}`, values);
@@ -770,7 +1241,8 @@ export function createPostgresNotificationWebRepository(
       return { label: result.rows[0].label, count: Number(result.rows[0].count) };
     },
 
-    async bulkMarkUnread(ids, _now) {
+    async bulkMarkUnread(ids, now) {
+      void now;
       const ph = ids.map((_, i) => `$${i + 1}`).join(',');
       const result = await pool.query(`
         UPDATE notifications SET read_state = 'unread', read_at = NULL,

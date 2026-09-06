@@ -4,17 +4,12 @@ import type {
   NotificationRow,
   NotificationActionRow,
   NotificationStats,
-  NotificationFacets,
-  NotificationQueryResult,
-  RestoreSnapshot,
   BulkSelectedRow,
   SavedViewRow,
-  WritebackStatusResult,
   WritebackJob,
   WritebackClaimRow,
-  WebSubscriptionInput,
   NotificationMutationAction,
-  NotificationMutationResult,
+  NotificationActionNotification,
 } from './notification-web';
 import type { NotificationQuery } from '@/lib/notifications/query';
 import type { NotificationState } from '@/types';
@@ -810,6 +805,7 @@ export function createSqliteNotificationWebRepository(
     },
 
     bulkMarkUnread: async (ids, now) => {
+      void now;
       const ph = ids.map(() => '?').join(',');
       return sqlite.prepare(`
         UPDATE notifications SET
@@ -1101,6 +1097,456 @@ export function createSqliteNotificationWebRepository(
         }
       });
       transaction.immediate();
+    },
+
+    async findNotificationForAction(id) {
+      const row = sqlite.prepare(`
+        SELECT
+          id, source_id AS sourceId, connector_type AS connectorType,
+          connector_instance_id AS connectorInstanceId, title, body, level,
+          category, template_key AS templateKey, state,
+          read_state AS readState, disposition, source_state AS sourceState,
+          navigation_target AS navigationTarget, related_task_id AS relatedTaskId,
+          related_project_id AS relatedProjectId, group_key AS groupKey,
+          metadata, presentation,
+          last_source_activity_at AS lastSourceActivityAt,
+          last_source_activity_key AS lastSourceActivityKey
+        FROM notifications
+        WHERE id = ?
+      `).get(id) as (NotificationActionNotification & {
+        metadata: unknown;
+        presentation: unknown;
+      }) | undefined;
+      if (!row) return null;
+      return {
+        ...row,
+        metadata: parseJson(row.metadata),
+        presentation: parseJson(row.presentation),
+      };
+    },
+
+    async findNotificationAction(notificationId, actionId) {
+      const row = sqlite.prepare(`
+        SELECT id, notification_id AS notificationId, action_type AS actionType, payload
+        FROM notification_actions
+        WHERE id = ? AND notification_id = ?
+      `).get(actionId, notificationId) as {
+        id: string;
+        notificationId: string;
+        actionType: string;
+        payload: unknown;
+      } | undefined;
+      return row ? { ...row, payload: parseJson(row.payload) } : null;
+    },
+
+    async updateNotificationFromAction(input) {
+      if (input.state === 'read') {
+        sqlite.prepare(`
+          UPDATE notifications
+          SET read_state = 'read', read_at = ?,
+              state = CASE
+                WHEN disposition = 'dismissed' THEN 'dismissed'
+                WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                WHEN disposition = 'handled' THEN 'archived'
+                ELSE 'read'
+              END
+          WHERE id = ?
+        `).run(input.now, input.notificationId);
+        return;
+      }
+      if (input.state === 'dismissed') {
+        sqlite.prepare(`
+          UPDATE notifications
+          SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
+              read_at = ?, dismissed_at = ?
+          WHERE id = ?
+        `).run(input.now, input.now, input.notificationId);
+        return;
+      }
+      sqlite.prepare(`
+        UPDATE notifications
+        SET disposition = 'handled', handled_at = ?, archived_at = ?,
+            handled_source_activity_at = last_source_activity_at,
+            handled_source_activity_key = last_source_activity_key,
+            state = CASE
+              WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+              ELSE 'archived'
+            END
+        WHERE id = ?
+      `).run(input.now, input.now, input.notificationId);
+    },
+
+    async getReminderMorningHour() {
+      const row = sqlite.prepare(`
+        SELECT morning_hour AS morningHour
+        FROM push_preferences
+        WHERE id = 'default'
+      `).get() as { morningHour: number } | undefined;
+      return row?.morningHour ?? 8;
+    },
+
+    async applyReminderAction(input) {
+      const transaction = sqlite.transaction(() => {
+        const notification = sqlite.prepare(`
+          SELECT read_state AS readState, disposition, source_state AS sourceState,
+                 last_source_activity_at AS lastSourceActivityAt,
+                 last_source_activity_key AS lastSourceActivityKey, metadata
+          FROM notifications
+          WHERE id = ?
+        `).get(input.notificationId) as {
+          readState: string;
+          disposition: string;
+          sourceState: string;
+          lastSourceActivityAt: string | null;
+          lastSourceActivityKey: string | null;
+          metadata: unknown;
+        } | undefined;
+        const task = sqlite.prepare(`
+          SELECT id, status, reminder_at AS reminderAt FROM tasks WHERE id = ?
+        `).get(input.taskId) as {
+          id: string;
+          status: string;
+          reminderAt: string | null;
+        } | undefined;
+        if (!notification || !task) return { applied: false, conflict: 'missing' } as const;
+        if (notification.disposition !== 'inbox' || notification.sourceState !== 'active') {
+          return { applied: false, conflict: 'handled' } as const;
+        }
+        if (
+          (task.status === 'done' || task.status === 'cancelled')
+          && !(input.actionType === 'complete_task' && task.status === 'done')
+        ) {
+          return { applied: false, conflict: 'task_terminal' } as const;
+        }
+        if (input.actionType === 'remind_later' && task.reminderAt !== null) {
+          return { applied: false, conflict: 'reminder_changed' } as const;
+        }
+
+        const claimed = sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = ?, last_error = NULL
+          WHERE id = ? AND notification_id = ? AND execution_state = 'pending'
+        `).run(input.now, input.actionId, input.notificationId);
+        if (claimed.changes !== 1) {
+          return { applied: false, conflict: 'action_claimed' } as const;
+        }
+
+        if (input.actionType === 'remind_later') {
+          const scheduled = sqlite.prepare(`
+            UPDATE tasks
+            SET reminder_at = ?, updated_at = ?
+            WHERE id = ? AND reminder_at IS NULL AND status NOT IN ('done', 'cancelled')
+          `).run(input.reminderAt, input.now, input.taskId);
+          if (scheduled.changes !== 1) {
+            return { applied: false, conflict: 'reminder_changed' } as const;
+          }
+        } else if (input.actionType === 'dismiss_reminder') {
+          sqlite.prepare(`
+            UPDATE tasks
+            SET reminder_at = NULL, reminder_relative = NULL,
+                reminder_due_time = NULL, updated_at = ?
+            WHERE id = ?
+          `).run(input.now, input.taskId);
+        }
+
+        const metadata = parseJson(notification.metadata);
+        const patch = legacyStateMutationPatch(
+          notification,
+          input.actionType === 'dismiss_reminder' ? 'dismissed' : 'archived',
+          input.now,
+        );
+        sqlite.prepare(`
+          UPDATE notifications
+          SET state = ?, read_state = COALESCE(?, read_state),
+              disposition = COALESCE(?, disposition),
+              read_at = COALESCE(?, read_at),
+              handled_at = COALESCE(?, handled_at),
+              dismissed_at = COALESCE(?, dismissed_at),
+              archived_at = ?,
+              handled_source_activity_at = COALESCE(?, handled_source_activity_at),
+              handled_source_activity_key = COALESCE(?, handled_source_activity_key),
+              is_actionable = 0, primary_action_id = NULL, metadata = ?
+          WHERE id = ?
+        `).run(
+          patch.state,
+          patch.readState ?? null,
+          patch.disposition ?? null,
+          patch.readAt ?? null,
+          patch.handledAt ?? null,
+          patch.dismissedAt ?? null,
+          input.actionType === 'dismiss_reminder' ? null : input.now,
+          patch.handledSourceActivityAt ?? null,
+          patch.handledSourceActivityKey ?? null,
+          JSON.stringify({
+            ...(metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {}),
+            reminderAction: input.actionType,
+            reminderActionAt: input.now,
+            ...(input.reminderAt ? { rescheduledFor: input.reminderAt } : {}),
+          }),
+          input.notificationId,
+        );
+        sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = 'completed', completed_at = ?, last_error = NULL
+          WHERE notification_id = ?
+        `).run(input.now, input.notificationId);
+        return { applied: true } as const;
+      });
+      return transaction.immediate();
+    },
+
+    async findWorkflowEndpoint(workflowId) {
+      const row = sqlite.prepare(`
+        SELECT url FROM outbound_webhooks WHERE id = ?
+      `).get(workflowId) as { url: string | null } | undefined;
+      return row ? { found: true, url: row.url } : { found: false, url: null };
+    },
+
+    async claimWorkflowAction(input) {
+      const transaction = sqlite.transaction(() => {
+        const result = sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = ?, completed_at = NULL,
+              last_error = NULL
+          WHERE id = ? AND notification_id = ?
+            AND (
+              execution_state = 'pending'
+              OR (execution_state = 'running' AND claimed_at < ?)
+            )
+        `).run(
+          input.claimedAt,
+          input.actionId,
+          input.notificationId,
+          input.recoveryCutoff,
+        );
+        if (result.changes !== 1) return false;
+        sqlite.prepare(`
+          UPDATE notifications
+          SET is_actionable = 0, primary_action_id = NULL
+          WHERE id = ?
+        `).run(input.notificationId);
+        return true;
+      });
+      return transaction.immediate();
+    },
+
+    async finalizeWorkflowAction(input) {
+      const transaction = sqlite.transaction(() => {
+        const claimed = sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = ?, completed_at = ?, last_error = ?
+          WHERE id = ? AND notification_id = ?
+            AND execution_state = 'running' AND claimed_at = ?
+        `).run(
+          input.success ? 'completed' : 'failed',
+          input.now,
+          input.error,
+          input.actionId,
+          input.notificationId,
+          input.claimedAt,
+        );
+        if (claimed.changes !== 1) return false;
+
+        if (input.success) {
+          sqlite.prepare(`
+            UPDATE notifications
+            SET disposition = 'handled', handled_at = ?, archived_at = ?,
+                handled_source_activity_at = last_source_activity_at,
+                handled_source_activity_key = last_source_activity_key,
+                state = CASE
+                  WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                  ELSE 'archived'
+                END,
+                is_actionable = 0, primary_action_id = NULL, group_key = ?
+            WHERE id = ?
+          `).run(input.now, input.now, input.groupKey, input.notificationId);
+        } else {
+          sqlite.prepare(`
+            UPDATE notifications
+            SET read_state = 'read', read_at = ?,
+                state = CASE
+                  WHEN disposition = 'dismissed' THEN 'dismissed'
+                  WHEN source_state IN ('resolved', 'deleted') THEN 'resolved'
+                  WHEN disposition = 'handled' THEN 'archived'
+                  ELSE 'read'
+                END,
+                is_actionable = 0, primary_action_id = NULL, group_key = ?
+            WHERE id = ?
+          `).run(input.now, input.groupKey, input.notificationId);
+        }
+
+        const followUp = input.followUp;
+        sqlite.prepare(`
+          INSERT INTO notifications (
+            id, source_id, connector_type, connector_instance_id, title, body,
+            level, level_rank, category, template_key, state, read_state,
+            disposition, source_state, sync_state, is_actionable, received_at,
+            sort_at, group_key, related_task_id, related_project_id,
+            related_entity_type, related_entity_id, metadata, presentation
+          ) VALUES (
+            ?, ?, 'mission-control', 'mission-control:workflow', ?, ?,
+            ?, ?, 'automation', 'workflow_result', 'unread', 'unread',
+            'inbox', 'active', 'synced', ?, ?, ?, ?, ?, ?,
+            'notification', ?, ?, ?
+          )
+        `).run(
+          followUp.id,
+          followUp.sourceId,
+          followUp.title,
+          followUp.body,
+          followUp.level,
+          followUp.levelRank,
+          input.success ? 0 : 1,
+          input.now,
+          input.now,
+          followUp.groupKey,
+          followUp.relatedTaskId,
+          followUp.relatedProjectId,
+          followUp.relatedEntityId,
+          JSON.stringify(followUp.metadata),
+          JSON.stringify(followUp.presentation),
+        );
+        if (followUp.retryAction) {
+          sqlite.prepare(`
+            INSERT INTO notification_actions (
+              id, notification_id, action_type, label, icon, variant, is_primary,
+              sort_order, payload, opens_external, requires_confirmation, created_by
+            ) VALUES (?, ?, 'run_workflow', 'Retry workflow', 'zap', 'primary',
+                      1, 0, ?, 0, 0, 'system')
+          `).run(
+            followUp.retryAction.id,
+            followUp.id,
+            JSON.stringify(followUp.retryAction.payload),
+          );
+        }
+        return true;
+      });
+      return transaction.immediate();
+    },
+
+    async listNotificationsForReEnrichment(input) {
+      const columns = `
+        id, source_id AS sourceId, connector_type AS connectorType,
+        connector_instance_id AS connectorInstanceId, title, body, level,
+        category, state, read_state AS readState,
+        is_actionable AS isActionable, metadata
+      `;
+      let rows: Array<Record<string, unknown>>;
+      switch (input.scope) {
+        case 'all':
+          rows = sqlite.prepare(`
+            SELECT ${columns} FROM notifications
+            ORDER BY received_at DESC LIMIT ?
+          `).all(input.limit) as Array<Record<string, unknown>>;
+          break;
+        case 'unenriched':
+          rows = sqlite.prepare(`
+            SELECT ${columns} FROM notifications
+            WHERE json_extract(metadata, '$.enrichment') IS NULL
+            ORDER BY received_at DESC LIMIT ?
+          `).all(input.limit) as Array<Record<string, unknown>>;
+          break;
+        case 'connector':
+          rows = sqlite.prepare(`
+            SELECT ${columns} FROM notifications
+            WHERE connector_type = ?
+            ORDER BY received_at DESC LIMIT ?
+          `).all(input.connectorType, input.limit) as Array<Record<string, unknown>>;
+          break;
+        case 'ids': {
+          if (input.ids.length === 0) return [];
+          const placeholders = input.ids.map(() => '?').join(',');
+          rows = sqlite.prepare(`
+            SELECT ${columns} FROM notifications
+            WHERE id IN (${placeholders})
+          `).all(...input.ids) as Array<Record<string, unknown>>;
+          break;
+        }
+      }
+      return rows.map(row => ({
+        ...row,
+        isActionable: Boolean(row.isActionable),
+        metadata: parseJson(row.metadata),
+      })) as Awaited<ReturnType<NotificationWebPersistence['listNotificationsForReEnrichment']>>;
+    },
+
+    async saveReEnrichedNotification(input) {
+      const transaction = sqlite.transaction(() => {
+        sqlite.prepare(`
+          UPDATE notifications
+          SET title = ?, body = ?, category = ?, template_key = ?,
+              related_task_id = ?, related_project_id = ?,
+              related_entity_type = ?, related_entity_id = ?,
+              navigation_target = ?, metadata = ?, presentation = ?,
+              is_actionable = CASE WHEN ? THEN ? ELSE is_actionable END,
+              primary_action_id = CASE WHEN ? THEN ? ELSE primary_action_id END
+          WHERE id = ?
+        `).run(
+          input.title,
+          input.body,
+          input.category,
+          input.templateKey,
+          input.relatedTaskId,
+          input.relatedProjectId,
+          input.relatedEntityType,
+          input.relatedEntityId,
+          input.navigationTarget,
+          JSON.stringify(input.metadata),
+          JSON.stringify(input.presentation),
+          input.providerSignature ? 1 : 0,
+          input.isActionable ? 1 : 0,
+          input.providerSignature ? 1 : 0,
+          input.primaryActionId,
+          input.id,
+        );
+        if (!input.providerSignature) return;
+        sqlite.prepare(`
+          DELETE FROM notification_actions
+          WHERE notification_id = ? AND created_by = 'connector'
+            AND execution_state = 'pending'
+        `).run(input.id);
+        const insert = sqlite.prepare(`
+          INSERT INTO notification_actions (
+            id, notification_id, action_type, label, icon, variant, is_primary,
+            sort_order, payload, opens_external, requires_confirmation, created_by
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const action of input.actions) {
+          insert.run(
+            action.id,
+            action.notificationId,
+            action.actionType,
+            action.label,
+            action.icon ?? null,
+            action.variant,
+            action.isPrimary ? 1 : 0,
+            action.sortOrder,
+            JSON.stringify(action.payload),
+            action.opensExternal ? 1 : 0,
+            action.requiresConfirmation ? 1 : 0,
+            action.createdBy,
+          );
+        }
+      });
+      transaction.immediate();
+    },
+
+    async listNotificationsForClassification(limit) {
+      const now = new Date().toISOString();
+      const rows = sqlite.prepare(`
+        SELECT id, title, level, category, is_actionable AS isActionable,
+               connector_type AS connectorType, received_at AS receivedAt
+        FROM notifications
+        WHERE ${NOTIFICATION_IS_INBOX_SQL}
+          AND read_state = 'unread'
+          AND (level IS NULL OR level IN ('urgent', 'action_needed', 'heads_up', 'fyi'))
+        ORDER BY received_at DESC
+        LIMIT ?
+      `).all(now, limit) as Array<Record<string, unknown>>;
+      return rows.map(row => ({
+        ...row,
+        isActionable: Boolean(row.isActionable),
+      })) as Awaited<ReturnType<NotificationWebPersistence['listNotificationsForClassification']>>;
     },
 
     async failWritebackJobs(jobs, error, maxRetryMs, retryBaseMs) {

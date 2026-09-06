@@ -3,6 +3,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 describe('Alertmanager integration operations', () => {
   let db: typeof import('@/db').default;
   let sqlite: typeof import('@/db').sqlite;
+  let database: typeof import('@/db');
   let schema: typeof import('@/db/schema');
   let operations: typeof import('@/lib/alertmanager/operations');
 
@@ -14,12 +15,14 @@ describe('Alertmanager integration operations', () => {
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
-    [db, { sqlite }, schema, operations] = await Promise.all([
+    [db, database, schema, operations] = await Promise.all([
       import('@/db').then(module => module.default),
       import('@/db'),
       import('@/db/schema'),
       import('@/lib/alertmanager/operations'),
     ]);
+    sqlite = database.sqlite;
+    await database.initializeSqlitePersistenceComposition();
   }, 30_000);
 
   beforeEach(async () => {

@@ -9,6 +9,7 @@ import {
   describeTriagePersistenceContract,
 } from '../contracts/triage-persistence.contract';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+import './scout-ingestion-reconciliation-postgres.integration-harness';
 
 vi.unmock('drizzle-orm');
 

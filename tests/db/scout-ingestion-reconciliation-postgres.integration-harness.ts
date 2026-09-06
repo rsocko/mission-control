@@ -17,7 +17,7 @@ vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 
-describe.skipIf(!connectionString)('PostgreSQL Scout ingestion/reconciliation adapter', () => {
+describe.skipIf(!connectionString)('PostgreSQL Scout ingestion/reconciliation persistence adapter', () => {
   let pool: Pool;
   let harness: ScoutPersistenceContractHarness;
 

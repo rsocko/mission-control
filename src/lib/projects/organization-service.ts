@@ -37,6 +37,27 @@ export async function getHubProject(projectId: string) {
   return (await repository()).getProject(projectId);
 }
 
+export async function listPhasePlanningTaskIds(projectId: string | null) {
+  const method = (await repository()).listPhasePlanningTaskIds;
+  if (!method) throw new Error('Phase-planning persistence is unavailable');
+  return method(projectId);
+}
+
+export async function listPhasePlanningTasks(taskIds: readonly string[]) {
+  const method = (await repository()).listPhasePlanningTasks;
+  if (!method) throw new Error('Phase-planning persistence is unavailable');
+  return method(taskIds);
+}
+
+export async function getGoalDevelopmentContext(
+  taskId: string,
+  existingProjectLimit: number,
+) {
+  const method = (await repository()).getGoalDevelopmentContext;
+  if (!method) throw new Error('Goal-development persistence is unavailable');
+  return method(taskId, existingProjectLimit);
+}
+
 export async function createHubProject(input: {
   name: string;
   description?: unknown;

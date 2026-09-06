@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   calls: [] as string[],
   load: vi.fn(),
   createContext: vi.fn(),
+  getOutcome: vi.fn(),
   createProvider: vi.fn(),
   selectModel: vi.fn(),
 }));
@@ -13,6 +14,7 @@ vi.mock('@/lib/ai/provider-configuration-service', () => ({
 }));
 vi.mock('@/lib/ai/provider-routing-core', () => ({
   createConfiguredAIRequestContext: mocks.createContext,
+  getConfiguredAIRouteOutcome: mocks.getOutcome,
 }));
 vi.mock('@/lib/ai/provider-client', () => ({
   createConfiguredAIProvider: mocks.createProvider,
@@ -52,6 +54,7 @@ describe('async AI provider runtime', () => {
     })).resolves.toEqual({
       model: { model: 'configured-model' },
       context: { featureId: 'document-intake' },
+      configured: { provider: 'openai', model: 'configured-model' },
     });
     expect(mocks.calls).toEqual([
       'load-configuration',
@@ -78,5 +81,24 @@ describe('async AI provider runtime', () => {
     );
     expect(mocks.createContext).not.toHaveBeenCalled();
     expect(mocks.createProvider).not.toHaveBeenCalled();
+  });
+
+  it('computes route outcomes from the configuration captured with the model', async () => {
+    const outcome = { provider: 'openai', model: 'response-model' };
+    mocks.getOutcome.mockReturnValue(outcome);
+    const {
+      getAsyncAIModel,
+      getAsyncAIRouteOutcome,
+    } = await import('@/lib/ai/provider-runtime');
+
+    const route = await getAsyncAIModel('smart-priority');
+    expect(getAsyncAIRouteOutcome(route, { modelId: 'response-model' })).toBe(outcome);
+    expect(mocks.getOutcome).toHaveBeenCalledWith(
+      { featureId: 'document-intake' },
+      { modelId: 'response-model' },
+      { provider: 'openai', model: 'configured-model' },
+      undefined,
+    );
+    expect(mocks.load).toHaveBeenCalledTimes(1);
   });
 });

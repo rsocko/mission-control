@@ -2,13 +2,16 @@ import { generateText } from 'ai';
 import { getLocalToday } from '@/lib/utils/date';
 import { aiLogger } from '@/lib/logger';
 import { applyAIContextCharacterBudget, loadAIContextSnapshot } from '../context-budget';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
 
 export async function generateDailyDigest(): Promise<{ digest: string; routing: AIRouteOutcome }> {
   const today = getLocalToday();
   const snapshot = await loadAIContextSnapshot(today);
-  const route = getAIModel('daily-digest', { sources: snapshot.sources });
+  const route = await getAsyncAIModel('daily-digest', { sources: snapshot.sources });
   const context = applyAIContextCharacterBudget(`
 Today: ${today} (${new Date().toLocaleDateString('en-US', { weekday: 'long' })})
 
@@ -37,6 +40,6 @@ Sources represented: ${snapshot.sources.join(', ')}
 
   return {
     digest: result.text,
-    routing: getAIRouteOutcome(route.context, result.response),
+    routing: getAsyncAIRouteOutcome(route, result.response),
   };
 }

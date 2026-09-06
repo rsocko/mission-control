@@ -12,6 +12,7 @@ import type {
 } from './project-organization';
 import { decodeLenientJsonArray } from './value-codecs';
 import type { ProjectPhase, ProjectPhaseItem } from '@/types';
+import { createSqliteAIProjectOrganizationExtensions } from './sqlite-ai-workflow-repository';
 
 interface ProjectRow extends Omit<
   ProjectOrganizationProject,
@@ -195,6 +196,7 @@ function loadPhase(sqlite: Database.Database, phaseId: string): ProjectPhase | n
 export function createSqliteProjectAdministrationRepository(
   sqlite: Database.Database,
 ): ProjectAdministrationPersistence {
+  const aiPlanning = createSqliteAIProjectOrganizationExtensions(sqlite);
   return {
     async listProjects({ includeHidden, includePhases }) {
       return sqlite.transaction(() => {
@@ -355,6 +357,7 @@ export function createSqliteProjectAdministrationRepository(
         sqlite.prepare('DELETE FROM project_phases WHERE id = ?').run(phaseId);
       }).immediate();
     },
+    ...aiPlanning,
   };
 }
 

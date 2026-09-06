@@ -1,12 +1,12 @@
 import { generateText } from 'ai';
-import db from '@/db';
-import { notifications, tasks } from '@/db/schema';
-import { desc, eq } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
-import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
 import { getEnergyTagsForTasks } from './energy-tag-queries';
+import { getAIWorkflowPersistence } from '../workflow-persistence';
 
 export async function whatsNext(context?: {
   timeAvailable?: number;
@@ -14,18 +14,16 @@ export async function whatsNext(context?: {
   focus?: string;
 }): Promise<{ recommendation: string; routing: AIRouteOutcome }> {
   const today = getLocalToday();
-  const openTasks = await db.select().from(tasks).where(eq(tasks.status, 'todo')).limit(20);
-  const unreadNotifications = await db.select()
-    .from(notifications)
-    .where(notificationNeedsAttention())
-    .orderBy(desc(notifications.receivedAt))
-    .limit(5);
+  const persistence = await getAIWorkflowPersistence();
+  const openTasks = await persistence.recommendations.listWhatsNextTasks(20);
+  const unreadNotifications = await persistence.recommendations
+    .listWhatsNextNotifications(new Date().toISOString(), 5);
   const overdue = openTasks.filter(task => task.dueDate && task.dueDate < today);
   const critical = openTasks.filter(task => (
     task.priority === 'critical' || task.priority === 'high'
   ));
   const energyMap = await getEnergyTagsForTasks(openTasks.map(task => task.id));
-  const route = getAIModel('whats-next', {
+  const route = await getAsyncAIModel('whats-next', {
     sources: [
       ...openTasks.map(task => task.connectorType),
       ...unreadNotifications.map(notification => notification.connectorType),
@@ -53,6 +51,6 @@ ${openTasks.slice(0, 10).map(task => `- "${task.title}" [${task.priority}] via $
 
   return {
     recommendation: result.text,
-    routing: getAIRouteOutcome(route.context, result.response),
+    routing: getAsyncAIRouteOutcome(route, result.response),
   };
 }

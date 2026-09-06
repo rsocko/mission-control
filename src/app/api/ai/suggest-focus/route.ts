@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, focusItems, myDayItems, energyCheckins } from '@/db/schema';
-import { eq, and, ne } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
 import { getEnergyTagsForTasks } from '@/lib/ai/features/energy-tag-queries';
 import { ApiErrors } from '@/lib/api-error';
 import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
+import { getAIDailyPlanningPersistence } from '@/lib/ai/workflow-persistence';
 
 /**
  * Get the Monday of the week for a given YYYY-MM-DD date.
@@ -35,16 +33,14 @@ export async function POST(request: Request) {
     const body = await request.json().catch(() => ({}));
     const scope = body.scope || 'today';
     const date = body.date || getLocalToday();
+    const persistence = await getAIDailyPlanningPersistence();
 
     // Resolve user's current energy level: explicit param > today's check-in > default
     let userEnergy: 'high' | 'medium' | 'low' = body.energy || 'medium';
     if (!body.energy) {
-      const checkins = await db.select({ level: energyCheckins.level })
-        .from(energyCheckins)
-        .where(eq(energyCheckins.date, date))
-        .limit(1);
-      if (checkins.length > 0) {
-        userEnergy = checkins[0].level as 'high' | 'medium' | 'low';
+      const checkin = await persistence.energy.getForDate(date);
+      if (checkin) {
+        userEnergy = checkin.level as 'high' | 'medium' | 'low';
       }
     }
 
@@ -52,39 +48,15 @@ export async function POST(request: Request) {
     const effectiveDate = scope === 'week' ? getWeekMonday(date) : date;
 
     // Get tasks already in focus for this scope
-    const existing = await db.select({ taskId: focusItems.taskId })
-      .from(focusItems)
-      .where(and(eq(focusItems.scope, scope), eq(focusItems.date, effectiveDate)));
-    const focusTaskIds = new Set(existing.map(e => e.taskId));
-
-    // Get all open, non-cancelled tasks
-    const openTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      connectorType: tasks.connectorType,
-      sourceListName: tasks.sourceListName,
-      createdAt: tasks.createdAt,
-      updatedAt: tasks.updatedAt,
-      depth: tasks.depth,
-    })
-      .from(tasks)
-      .where(
-        and(
-          ne(tasks.status, 'done'),
-          ne(tasks.status, 'cancelled'),
-          eq(tasks.depth, 0), // top-level tasks only
-        )
-      )
-      .limit(200);
-
-    // Get My Day task IDs (tasks already planned for today get a boost)
-    const myDayRows = await db.select({ taskId: myDayItems.taskId })
-      .from(myDayItems)
-      .where(eq(myDayItems.date, date));
-    const myDayTaskIds = new Set(myDayRows.map(r => r.taskId));
+    const suggestionContext = await persistence.focus.getSuggestionContext({
+      scope,
+      date,
+      effectiveDate,
+      taskLimit: 200,
+    });
+    const focusTaskIds = new Set(suggestionContext.focusTaskIds);
+    const openTasks = suggestionContext.tasks;
+    const myDayTaskIds = new Set(suggestionContext.myDayTaskIds);
 
     // Get energy demand tags for candidate tasks
     const candidateIds = openTasks.filter(t => !focusTaskIds.has(t.id)).map(t => t.id);

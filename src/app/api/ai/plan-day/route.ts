@@ -1,11 +1,12 @@
-import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '@/lib/ai/provider-runtime';
 import { generateText } from 'ai';
-import db from '@/db';
-import { tasks, myDayItems, taskSchedules } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { getAIDailyPlanningPersistence } from '@/lib/ai/workflow-persistence';
 
 /**
  * POST /api/ai/plan-day
@@ -18,25 +19,12 @@ export async function POST(request: Request) {
     const date = body.date || getLocalToday();
 
     // Gather context
-    const myDayItemsData = await db
-      .select({
-        taskId: myDayItems.taskId,
-        title: tasks.title,
-        priority: tasks.priority,
-        dueDate: tasks.dueDate,
-        connectorType: tasks.connectorType,
-      })
-      .from(myDayItems)
-      .innerJoin(tasks, eq(myDayItems.taskId, tasks.id))
-      .where(eq(myDayItems.date, date));
-
-    const existingSchedule = await db
-      .select()
-      .from(taskSchedules)
-      .where(eq(taskSchedules.scheduledDate, date));
-
-    // Get high-priority tasks not yet in My Day
-    const openTasks = await db.select().from(tasks).where(eq(tasks.status, 'todo')).limit(20);
+    const persistence = await getAIDailyPlanningPersistence();
+    const {
+      myDayItems: myDayItemsData,
+      schedules: existingSchedule,
+      openTasks,
+    } = await persistence.dayPlan.getContext({ date, openTaskLimit: 20 });
     const highPriTasks = openTasks.filter(t => t.priority === 'critical' || t.priority === 'high');
 
     const calendarEvents = body.calendarEvents || [];
@@ -68,7 +56,7 @@ Other high-priority tasks (not in My Day):
 ${highPriTasks.slice(0, 5).map(t => `- "${t.title}" [${t.priority}]${t.dueDate ? ` due ${t.dueDate}` : ''}`).join('\n') || '- None'}
 `;
 
-    const route = getAIModel('day-planning', {
+    const route = await getAsyncAIModel('day-planning', {
       sources: [
         ...openTasks.map((task) => task.connectorType),
         ...myDayItemsData.map((task) => task.connectorType),
@@ -115,7 +103,7 @@ Only include tasks that are in the My Day list or high-priority tasks you're rec
       ...plan,
       generatedAt: new Date().toISOString(),
       date,
-      routing: getAIRouteOutcome(route.context, result.response),
+      routing: getAsyncAIRouteOutcome(route, result.response),
     });
   } catch (error) {
     aiLogger.error({ err: error }, 'Plan day request failed');

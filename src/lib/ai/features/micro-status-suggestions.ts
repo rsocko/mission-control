@@ -1,11 +1,12 @@
 import { generateText } from 'ai';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { sql } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
 import { normalizeMicroStatusSuggestions } from './normalization';
+import { getAIWorkflowPersistence } from '../workflow-persistence';
 
 export { normalizeMicroStatusSuggestions } from './normalization';
 
@@ -21,22 +22,8 @@ export async function suggestMicroStatuses(): Promise<{
 }> {
   const today = getLocalToday();
   const now = new Date();
-  const openTasks = await db
-    .select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      microStatus: tasks.microStatus,
-      priority: tasks.priority,
-      createdAt: tasks.createdAt,
-      updatedAt: tasks.updatedAt,
-      dueDate: tasks.dueDate,
-      connectorType: tasks.connectorType,
-      assignee: tasks.assignee,
-    })
-    .from(tasks)
-    .where(sql`${tasks.status} NOT IN ('done', 'cancelled')`)
-    .limit(30);
+  const openTasks = await (await getAIWorkflowPersistence())
+    .recommendations.listMicroStatusTasks(30);
 
   if (openTasks.length === 0) return { suggestions: [] };
 
@@ -45,7 +32,7 @@ export async function suggestMicroStatuses(): Promise<{
     const staleDays = Math.floor((now.getTime() - new Date(task.updatedAt).getTime()) / 86400000);
     return `- "${task.title}" | status: ${task.status} | micro: ${task.microStatus || 'none'} | priority: ${task.priority} | age: ${ageDays}d | stale: ${staleDays}d | due: ${task.dueDate || 'none'} | assignee: ${task.assignee || 'none'} | source: ${task.connectorType} | id: ${task.id}`;
   }).join('\n');
-  const route = getAIModel('micro-status-suggestion', {
+  const route = await getAsyncAIModel('micro-status-suggestion', {
     sources: openTasks.map(task => task.connectorType),
   });
   const result = await generateText({
@@ -75,6 +62,6 @@ Return empty array [] if no confident suggestions.`,
 
   return {
     suggestions: normalizeMicroStatusSuggestions(result.text, openTasks),
-    routing: getAIRouteOutcome(route.context, result.response),
+    routing: getAsyncAIRouteOutcome(route, result.response),
   };
 }

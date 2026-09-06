@@ -80,6 +80,9 @@ import {
 import {
   createSqliteOperationalUtilityRepository,
 } from './sqlite-operational-utility-repository';
+import {
+  createSqliteAIWorkflowPersistence,
+} from './sqlite-ai-workflow-repository';
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
@@ -174,6 +177,7 @@ export function createSqliteWorkerPersistenceRepositories(
     operator: createSqliteFinanceOperatorPersistence({ sqlite, db }),
     web: createSqliteFinanceWebPersistence(sqlite),
   };
+  const aiWorkflows = createSqliteAIWorkflowPersistence(sqlite);
   repositories = {
     connectors: coreRepositories.connectors,
     syncRuns: new SqliteSyncRunRepository(sqlite),
@@ -210,6 +214,7 @@ export function createSqliteWorkerPersistenceRepositories(
     scoutIngestionReconciliation:
       createSqliteScoutIngestionReconciliationRepository(sqlite),
     operationalUtility: createSqliteOperationalUtilityRepository(sqlite, db),
+    aiWorkflows,
   };
   return repositories;
 }

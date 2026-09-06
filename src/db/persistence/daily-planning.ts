@@ -6,10 +6,12 @@ import type { PersistenceJson } from './contracts';
  * This capability owns every database read and write behind the energy,
  * Focus 3, My Day (including its Microsoft To Do reconciliation), schedule,
  * weekly one-thing, recent-win, mobile-dashboard and navigation-count web
- * surfaces. It deliberately owns nothing else: request parsing, scoring,
- * rotation, response shaping, Microsoft To Do network calls, the route-level
- * single-flight map, edit-policy resolution, and source-list display-name
- * resolution all remain route-owned and are already backend-neutral.
+ * surfaces, plus the exact day-plan, focus-suggestion, and energy-tag context
+ * used by AI planning. It deliberately owns nothing else: request parsing,
+ * scoring, model calls, rotation, response shaping, Microsoft To Do network
+ * calls, the route-level single-flight map, edit-policy resolution, and
+ * source-list display-name resolution all remain route-owned and are already
+ * backend-neutral.
  *
  * Every operation is promise-based and carries only opaque IDs, local
  * `YYYY-MM-DD` dates, ISO instants, booleans, numeric counts, explicit nulls
@@ -46,6 +48,45 @@ export interface EnergyPlanningRepository {
   getForDate(date: string): Promise<EnergyCheckinRecord | null>;
   /** Atomic date-keyed replace: at most one check-in survives per date. */
   replaceForDate(record: EnergyCheckinRecord): Promise<void>;
+}
+
+export type EnergyDemandLevel = 'high' | 'medium' | 'low';
+
+export interface EnergySuggestionTask {
+  id: string;
+  title: string;
+  description: string | null;
+  priority: string;
+  connectorType: string;
+}
+
+export interface EnergyTagDefinition {
+  slug: `energy-${EnergyDemandLevel}`;
+  name: string;
+  color: string;
+}
+
+export interface EnergySuggestionPersistence {
+  listTasksByIds(
+    taskIds: readonly string[],
+    limit: number,
+  ): Promise<EnergySuggestionTask[]>;
+  listOpenTopLevelTasks(limit: number): Promise<EnergySuggestionTask[]>;
+  listLevels(taskIds: readonly string[]): Promise<Array<{
+    taskId: string;
+    energyLevel: EnergyDemandLevel;
+  }>>;
+  apply(input: {
+    definitions: readonly EnergyTagDefinition[];
+    suggestions: ReadonlyArray<{
+      taskId: string;
+      energyLevel: EnergyDemandLevel;
+    }>;
+    createdAt: string;
+  }): Promise<{
+    canonicalTagIds: Partial<Record<EnergyTagDefinition['slug'], string>>;
+    appliedTaskIds: string[];
+  }>;
 }
 
 // ─── Focus 3 ────────────────────────────────────────────────────────────────
@@ -116,6 +157,29 @@ export interface FocusPlanningRepository {
   removeByTask(command: RemoveFocusItemByTaskCommand): Promise<{ removed: boolean }>;
   /** Serialized slot move; an occupied target slot is swapped, never rejected. */
   moveToSlot(command: { id: string; slot: number }): Promise<{ outcome: 'moved' | 'not-found' }>;
+  getSuggestionContext(input: {
+    scope: FocusScope;
+    date: string;
+    effectiveDate: string;
+    taskLimit: number;
+  }): Promise<{
+    focusTaskIds: string[];
+    myDayTaskIds: string[];
+    tasks: FocusSuggestionTask[];
+  }>;
+}
+
+export interface FocusSuggestionTask {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  dueDate: string | null;
+  connectorType: string;
+  sourceListName: string | null;
+  createdAt: string;
+  updatedAt: string;
+  depth: number;
 }
 
 // ─── Mobile dashboard ───────────────────────────────────────────────────────
@@ -555,6 +619,31 @@ export interface TaskSchedulePlanningRepository {
   remove(taskId: string): Promise<void>;
 }
 
+export interface DayPlanTask {
+  id: string;
+  title: string;
+  priority: string;
+  dueDate: string | null;
+  connectorType: string;
+}
+
+export interface DayPlanSchedule {
+  taskId: string;
+  scheduledTime: string | null;
+  estimatedDuration: number | null;
+}
+
+export interface DayPlanContextRepository {
+  getContext(input: {
+    date: string;
+    openTaskLimit: number;
+  }): Promise<{
+    myDayItems: DayPlanTask[];
+    schedules: DayPlanSchedule[];
+    openTasks: DayPlanTask[];
+  }>;
+}
+
 // ─── Recent wins ────────────────────────────────────────────────────────────
 
 export interface RecentWinRecord {
@@ -580,6 +669,7 @@ export interface RecentWinsRepository {
 
 export interface DailyPlanningPersistence {
   energy: EnergyPlanningRepository;
+  energySuggestions: EnergySuggestionPersistence;
   focus: FocusPlanningRepository;
   dashboard: MobileDashboardRepository;
   navigation: NavigationCountsRepository;
@@ -587,6 +677,7 @@ export interface DailyPlanningPersistence {
   myDaySync: MyDaySyncRepository;
   oneThing: WeeklyOneThingRepository;
   schedule: TaskSchedulePlanningRepository;
+  dayPlan: DayPlanContextRepository;
   recentWins: RecentWinsRepository;
 }
 

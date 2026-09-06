@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server';
-import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import {
+  getAsyncAIModel,
+  getAsyncAIProviderConfiguration,
+  getAsyncAIRouteOutcome,
+} from '@/lib/ai/provider-runtime';
 import { aiLogger } from '@/lib/logger';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { inArray } from 'drizzle-orm';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 
 /**
  * POST /api/resets/ai-summary — Generate an AI weekly/monthly narrative
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'stats object is required' }, { status: 400 });
   }
 
-  const config = getResolvedAIConfig();
+  const config = await getAsyncAIProviderConfiguration();
   if (!config.configured) {
     return NextResponse.json(
       { error: 'AI provider not configured. Set up in Settings → AI.' },
@@ -40,10 +41,7 @@ export async function POST(request: Request) {
     .map((task: { id?: string }) => task.id)
     .filter((id: unknown): id is string => typeof id === 'string' && id.length > 0);
   const staleTaskSources = staleTaskIds.length > 0
-    ? await db
-        .select({ connectorType: tasks.connectorType })
-        .from(tasks)
-        .where(inArray(tasks.id, staleTaskIds))
+    ? await (await getAIWorkflowPersistence()).listTaskConnectorTypes(staleTaskIds)
     : [];
 
   const weeklyBreakdownText = isMonthly && stats.weeklyBreakdown
@@ -90,8 +88,8 @@ Return only valid JSON, no markdown fences.`;
 
   try {
     const { generateText } = await import('ai');
-    const route = getAIModel('reset-summary', {
-      sources: staleTaskSources.map((task) => task.connectorType),
+    const route = await getAsyncAIModel('reset-summary', {
+      sources: staleTaskSources,
     });
 
     const result = await generateText({
@@ -118,7 +116,7 @@ Return only valid JSON, no markdown fences.`;
 
     return NextResponse.json({
       summary: parsed,
-      routing: getAIRouteOutcome(route.context, result.response),
+      routing: getAsyncAIRouteOutcome(route, result.response),
     });
   } catch (error) {
     aiLogger.error({ err: error }, 'AI summary error');

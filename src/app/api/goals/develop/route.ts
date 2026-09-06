@@ -1,12 +1,13 @@
 import { NextResponse } from 'next/server';
 import { generateText } from 'ai';
-import { getAIModel, getAIRouteOutcome } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
-import db from '@/db';
-import { tasks, tags, taskTags, hubProjects, taskProjects } from '@/db/schema';
-import { eq, inArray } from 'drizzle-orm';
+import {
+  getAsyncAIModel,
+  getAsyncAIProviderConfiguration,
+  getAsyncAIRouteOutcome,
+} from '@/lib/ai/provider-runtime';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { getGoalDevelopmentContext } from '@/lib/projects/organization-service';
 
 /**
  * POST /api/goals/develop — AI-powered idea expansion
@@ -17,7 +18,7 @@ import { ApiErrors } from '@/lib/api-error';
  */
 export async function POST(request: Request) {
   try {
-    if (!getResolvedAIConfig().configured) {
+    if (!(await getAsyncAIProviderConfiguration()).configured) {
       return NextResponse.json(
         { error: 'AI provider not configured. Add settings in /settings or set AI_PROVIDER + API key in .env.local' },
         { status: 503 }
@@ -32,37 +33,18 @@ export async function POST(request: Request) {
     }
 
     // Fetch the task
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
-    if (!task) {
+    const context = await getGoalDevelopmentContext(taskId, 20);
+    if (!context) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
+    const {
+      task,
+      tags: taskTagList,
+      linkedProjects,
+      existingProjects,
+    } = context;
 
-    // Fetch task's tags
-    const taskTagList = await db.select({
-      name: tags.name,
-      slug: tags.slug,
-    })
-      .from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(eq(taskTags.taskId, taskId));
-
-    // Fetch linked projects for context
-    const linkedProjects = await db.select({
-      name: hubProjects.name,
-      description: hubProjects.description,
-      category: hubProjects.category,
-    })
-      .from(taskProjects)
-      .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-      .where(eq(taskProjects.taskId, taskId));
-
-    // Get existing projects for context
-    const existingProjects = await db.select({
-      name: hubProjects.name,
-      category: hubProjects.category,
-    }).from(hubProjects).limit(20);
-
-    const route = getAIModel('goal-development', {
+    const route = await getAsyncAIModel('goal-development', {
       sources: [task.connectorType],
     });
 
@@ -128,7 +110,7 @@ Generate 3-6 concrete, actionable tasks and organize them into 2-3 phases. Be sp
 
     return NextResponse.json({
       proposal,
-      routing: getAIRouteOutcome(route.context, result.response),
+      routing: getAsyncAIRouteOutcome(route, result.response),
     });
   } catch (error) {
     logger.error({ err: error }, 'Goal development failed');

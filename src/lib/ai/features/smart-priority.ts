@@ -1,10 +1,11 @@
 import { generateText } from 'ai';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { desc, eq } from 'drizzle-orm';
 import { getLocalToday } from '@/lib/utils/date';
-import { getAIModel, getAIRouteOutcome } from '../provider-factory';
+import {
+  getAsyncAIModel,
+  getAsyncAIRouteOutcome,
+} from '../provider-runtime';
 import type { AIRouteOutcome } from '../types';
+import { getAIWorkflowPersistence } from '../workflow-persistence';
 import { normalizeSmartPriorityRankings } from './normalization';
 
 export { normalizeSmartPriorityRankings } from './normalization';
@@ -14,14 +15,12 @@ export async function computeSmartPriority(): Promise<{
   routing?: AIRouteOutcome;
 }> {
   const today = getLocalToday();
-  const openTasks = await db.select().from(tasks)
-    .where(eq(tasks.status, 'todo'))
-    .orderBy(desc(tasks.updatedAt))
-    .limit(30);
+  const openTasks = await (await getAIWorkflowPersistence())
+    .recommendations.listSmartPriorityTasks(30);
 
   if (openTasks.length === 0) return { rankings: [] };
 
-  const route = getAIModel('smart-priority', {
+  const route = await getAsyncAIModel('smart-priority', {
     sources: openTasks.map(task => task.connectorType),
   });
   const taskList = openTasks.map((t, i) => (
@@ -35,6 +34,6 @@ export async function computeSmartPriority(): Promise<{
 
   return {
     rankings: normalizeSmartPriorityRankings(result.text, openTasks, today),
-    routing: getAIRouteOutcome(route.context, result.response),
+    routing: getAsyncAIRouteOutcome(route, result.response),
   };
 }

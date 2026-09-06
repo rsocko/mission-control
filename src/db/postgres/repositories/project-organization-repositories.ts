@@ -11,6 +11,7 @@ import type {
   ProjectPhaseUpdate,
 } from '@/db/persistence/project-organization';
 import type { ProjectPhase, ProjectPhaseItem } from '@/types';
+import { createPostgresAIProjectOrganizationExtensions } from './ai-workflow-repository';
 
 const MAX_TRANSACTION_ATTEMPTS = 3;
 const LIST_ORGANIZATION_LOCK = 'list-organization';
@@ -270,6 +271,7 @@ async function updateRow(
 export function createPostgresProjectAdministrationRepository(
   pool: Pool,
 ): ProjectAdministrationPersistence {
+  const aiPlanning = createPostgresAIProjectOrganizationExtensions(pool);
   return {
     async listProjects({ includeHidden, includePhases }) {
       return withReadTransaction(pool, async (client) => {
@@ -487,6 +489,7 @@ export function createPostgresProjectAdministrationRepository(
         await client.query('DELETE FROM project_phases WHERE id = $1', [phaseId]);
       });
     },
+    ...aiPlanning,
   };
 }
 

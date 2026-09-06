@@ -77,6 +77,7 @@ function hasMethods(
 
 export function composePostgresPackagedWorkflowCapability(input: {
   persistence: WorkerPersistenceRepositories;
+  durableExecutionEnabled: boolean;
   durableExecutorRoutes: readonly string[];
   semanticEntityTypes: readonly string[];
   semanticIntentKinds: readonly string[];
@@ -115,7 +116,10 @@ export function composePostgresPackagedWorkflowCapability(input: {
   if (!completeRepositories) {
     throw new Error('PostgreSQL packaged workflow repositories are incomplete');
   }
-  if (!sameMembers(input.durableExecutorRoutes, DURABLE_AI_ENQUEUEABLE_ROUTES)) {
+  const expectedDurableExecutorRoutes = input.durableExecutionEnabled
+    ? DURABLE_AI_ENQUEUEABLE_ROUTES
+    : [];
+  if (!sameMembers(input.durableExecutorRoutes, expectedDurableExecutorRoutes)) {
     throw new Error('PostgreSQL durable AI executor route coverage is incomplete');
   }
   if (!sameMembers(input.semanticEntityTypes, SEMANTIC_SOURCE_ENTITY_TYPES)) {

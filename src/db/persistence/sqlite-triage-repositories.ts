@@ -38,6 +38,14 @@ import {
   type NativeShareCaptureClaim,
   type NativeShareCaptureClaimInput,
   type NativeShareCaptureRepository,
+  type DocumentActionTaskRepository,
+  type DocumentActionTaskSnapshot,
+  type DocumentActionTaskWrite,
+  type TriageActionAppendInput,
+  type TriageActionClaimRecord,
+  type TriageActionClaimReservation,
+  type TriageActionRepository,
+  type TriageActionSetInput,
   type TriagePersistenceRepositories,
   type TriageQueueFacetStats,
   type TriageQueueHealthPendingSnapshotEntry,
@@ -168,6 +176,16 @@ function parseObjectOrEmpty(value: unknown): Record<string, unknown> {
       : {};
   } catch {
     return {};
+  }
+}
+
+/** Parses a nullable stored JSON column without throwing on legacy garbage. */
+function parseJsonOrNull(value: unknown): unknown {
+  if (value === null || value === undefined) return null;
+  try {
+    return parseJson(value, 'triage JSON column');
+  } catch {
+    return null;
   }
 }
 
@@ -1671,6 +1689,282 @@ class SqliteNativeApnsRepository implements NativeApnsRepository {
   }
 }
 
+class SqliteTriageActionRepository implements TriageActionRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  private readItem(id: string): TriageItem | null {
+    const row = this.db.prepare(`
+      SELECT ${TRIAGE_ITEM_COLUMNS} FROM triage_items WHERE id = ?
+    `).get(id) as TriageItemRow | undefined;
+    return row ? mapTriageItem(row) : null;
+  }
+
+  async getActionSnapshot(triageItemId: string): Promise<TriageItem | null> {
+    return this.readItem(triageItemId);
+  }
+
+  async readClaim(input: {
+    readonly triageItemId: string;
+    readonly actionType: string;
+  }): Promise<TriageActionClaimRecord | null> {
+    const row = this.db.prepare(`
+      SELECT id, triage_item_id, action_type, state, claimed_at, completed_at, result
+      FROM triage_action_claims
+      WHERE triage_item_id = ? AND action_type = ?
+    `).get(input.triageItemId, input.actionType) as {
+      id: string;
+      triage_item_id: string;
+      action_type: string;
+      state: 'pending' | 'completed';
+      claimed_at: string;
+      completed_at: string | null;
+      result: unknown;
+    } | undefined;
+    if (!row) return null;
+    return {
+      id: row.id,
+      triageItemId: row.triage_item_id,
+      actionType: row.action_type,
+      state: row.state,
+      claimedAt: row.claimed_at,
+      completedAt: row.completed_at,
+      result: parseJsonOrNull(row.result),
+    };
+  }
+
+  async reserveClaim(
+    reservation: TriageActionClaimReservation,
+  ): Promise<{ readonly acquired: boolean }> {
+    const inserted = this.db.prepare(`
+      INSERT INTO triage_action_claims (
+        id, triage_item_id, action_type, state, claimed_at
+      ) VALUES (?, ?, ?, 'pending', ?)
+      ON CONFLICT (triage_item_id, action_type) DO NOTHING
+    `).run(
+      reservation.claimId,
+      reservation.triageItemId,
+      reservation.actionType,
+      reservation.claimedAt,
+    );
+    return { acquired: inserted.changes === 1 };
+  }
+
+  async heartbeatClaim(input: {
+    readonly claimId: string;
+    readonly claimedAt: string;
+  }): Promise<boolean> {
+    const updated = this.db.prepare(`
+      UPDATE triage_action_claims SET claimed_at = ?
+      WHERE id = ? AND state = 'pending'
+    `).run(input.claimedAt, input.claimId);
+    return updated.changes === 1;
+  }
+
+  async recordClaimTarget(input: {
+    readonly claimId: string;
+    readonly claimedAt: string;
+    readonly target: Record<string, unknown>;
+  }): Promise<boolean> {
+    const updated = this.db.prepare(`
+      UPDATE triage_action_claims SET claimed_at = ?, result = ?
+      WHERE id = ? AND state = 'pending'
+    `).run(input.claimedAt, JSON.stringify(input.target), input.claimId);
+    return updated.changes === 1;
+  }
+
+  async releaseClaim(input: {
+    readonly claimId: string;
+    readonly expectedClaimedAt?: string;
+  }): Promise<boolean> {
+    const released = this.db.prepare(`
+      DELETE FROM triage_action_claims
+      WHERE id = ? AND state = 'pending'
+        ${input.expectedClaimedAt ? 'AND claimed_at = ?' : ''}
+    `).run(
+      ...(input.expectedClaimedAt
+        ? [input.claimId, input.expectedClaimedAt]
+        : [input.claimId]),
+    );
+    return released.changes === 1;
+  }
+
+  async completeClaim(input: {
+    readonly claimId: string;
+    readonly triageItemId: string;
+    readonly record: TriageActionRecord;
+    readonly completedAt: string;
+  }): Promise<{ readonly completed: boolean; readonly item: TriageItem | null }> {
+    const transaction = this.db.transaction(() => {
+      const settled = this.db.prepare(`
+        UPDATE triage_action_claims
+        SET state = 'completed', completed_at = ?, result = ?
+        WHERE id = ? AND state = 'pending'
+      `).run(input.completedAt, JSON.stringify(input.record), input.claimId);
+      if (settled.changes === 0) {
+        return { completed: false, item: this.readItem(input.triageItemId) };
+      }
+      this.db.prepare(`
+        UPDATE triage_items
+        SET status = 'actioned', snoozed_until = NULL,
+            actions_taken = json_insert(actions_taken, '$[#]', json(?))
+        WHERE id = ?
+      `).run(JSON.stringify(input.record), input.triageItemId);
+      return { completed: true, item: this.readItem(input.triageItemId) };
+    });
+    return transaction.immediate();
+  }
+
+  async appendAction(input: TriageActionAppendInput): Promise<TriageItem | null> {
+    const transaction = this.db.transaction((): TriageItem | null => {
+      const fenceSql = input.fence
+        ? `AND json(actions_taken) = json(?)
+           AND status = ?
+           AND snoozed_until IS ?`
+        : '';
+      const params: unknown[] = [
+        JSON.stringify(input.record),
+        input.status,
+        input.snoozedUntil,
+        input.triageItemId,
+      ];
+      if (input.fence) {
+        params.push(
+          JSON.stringify(input.fence.actionsTaken),
+          input.fence.status,
+          input.fence.snoozedUntil,
+        );
+      }
+      const updated = this.db.prepare(`
+        UPDATE triage_items
+        SET actions_taken = json_insert(actions_taken, '$[#]', json(?)),
+            status = ?, snoozed_until = ?
+        WHERE id = ? ${fenceSql}
+      `).run(...params);
+      if (updated.changes === 0) return null;
+      return this.readItem(input.triageItemId);
+    });
+    return transaction.immediate();
+  }
+
+  async casActions(input: TriageActionSetInput): Promise<TriageItem | null> {
+    const transaction = this.db.transaction((): TriageItem | null => {
+      const assignments = ['actions_taken = json(?)'];
+      const params: unknown[] = [JSON.stringify(input.actions)];
+      if (input.status !== undefined) {
+        assignments.push('status = ?');
+        params.push(input.status);
+      }
+      if (input.snoozedUntil !== undefined) {
+        assignments.push('snoozed_until = ?');
+        params.push(input.snoozedUntil);
+      }
+      params.push(input.triageItemId, JSON.stringify(input.expectedActions));
+      const updated = this.db.prepare(`
+        UPDATE triage_items SET ${assignments.join(', ')}
+        WHERE id = ? AND json(actions_taken) = json(?)
+      `).run(...params);
+      if (updated.changes === 0) return null;
+      return this.readItem(input.triageItemId);
+    });
+    return transaction.immediate();
+  }
+}
+
+const DOCUMENT_ACTION_TASK_COLUMNS = `
+  id, connector_type, connector_instance_id, source_id, title, description,
+  status, status_reason, snoozed_until, priority, due_date, completed_at, metadata
+`;
+
+interface DocumentActionTaskRow {
+  id: string;
+  connector_type: string;
+  connector_instance_id: string;
+  source_id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  status_reason: string | null;
+  snoozed_until: string | null;
+  priority: string;
+  due_date: string | null;
+  completed_at: string | null;
+  metadata: unknown;
+}
+
+function mapDocumentActionTask(row: DocumentActionTaskRow): DocumentActionTaskSnapshot {
+  return {
+    id: row.id,
+    connectorType: row.connector_type,
+    connectorInstanceId: row.connector_instance_id,
+    sourceId: row.source_id,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    statusReason: row.status_reason,
+    snoozedUntil: row.snoozed_until,
+    priority: row.priority,
+    dueDate: row.due_date,
+    completedAt: row.completed_at,
+    metadata: row.metadata,
+  };
+}
+
+class SqliteDocumentActionTaskRepository implements DocumentActionTaskRepository {
+  constructor(private readonly db: SqliteDatabase) {}
+
+  async getTask(taskId: string): Promise<DocumentActionTaskSnapshot | null> {
+    const row = this.db.prepare(`
+      SELECT ${DOCUMENT_ACTION_TASK_COLUMNS} FROM tasks WHERE id = ? LIMIT 1
+    `).get(taskId) as DocumentActionTaskRow | undefined;
+    return row ? mapDocumentActionTask(row) : null;
+  }
+
+  async applyTaskWrite(input: DocumentActionTaskWrite): Promise<
+    | { readonly kind: 'applied'; readonly task: DocumentActionTaskSnapshot }
+    | { readonly kind: 'identity-changed' }
+  > {
+    const transaction = this.db.transaction(() => {
+      const latest = this.db.prepare(`
+        SELECT ${DOCUMENT_ACTION_TASK_COLUMNS} FROM tasks WHERE id = ? LIMIT 1
+      `).get(input.taskId) as DocumentActionTaskRow | undefined;
+      if (
+        !latest
+        || latest.connector_type !== input.expectedIdentity.connectorType
+        || latest.connector_instance_id !== input.expectedIdentity.connectorInstanceId
+        || latest.source_id !== input.expectedIdentity.sourceId
+      ) {
+        return { kind: 'identity-changed' } as const;
+      }
+
+      const entries = Object.entries(input.columns);
+      const assignments = [
+        'metadata = ?',
+        'updated_at = ?',
+        'last_synced_at = ?',
+        'sync_status = ?',
+        ...entries.map(([column]) => `${column} = ?`),
+      ];
+      const params: unknown[] = [
+        input.metadata,
+        input.updatedAt,
+        input.lastSyncedAt,
+        input.syncStatus,
+        ...entries.map(([, value]) => value),
+        input.taskId,
+      ];
+      this.db.prepare(`
+        UPDATE tasks SET ${assignments.join(', ')} WHERE id = ?
+      `).run(...params);
+
+      const stored = this.db.prepare(`
+        SELECT ${DOCUMENT_ACTION_TASK_COLUMNS} FROM tasks WHERE id = ? LIMIT 1
+      `).get(input.taskId) as DocumentActionTaskRow;
+      return { kind: 'applied', task: mapDocumentActionTask(stored) } as const;
+    });
+    return transaction.immediate();
+  }
+}
+
 export function createSqliteTriagePersistenceRepositories(
   db: SqliteDatabase,
 ): TriagePersistenceRepositories {
@@ -1687,5 +1981,7 @@ export function createSqliteTriagePersistenceRepositories(
       shareCapture: new SqliteNativeShareCaptureRepository(db),
       apns: new SqliteNativeApnsRepository(db),
     },
+    actions: new SqliteTriageActionRepository(db),
+    documentTaskActions: new SqliteDocumentActionTaskRepository(db),
   };
 }

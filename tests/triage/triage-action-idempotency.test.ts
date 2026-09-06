@@ -1,6 +1,15 @@
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import BetterSqlite3 from 'better-sqlite3';
 import { eq } from 'drizzle-orm';
 import type { TriageActionRecord } from '@/types';
+import {
+  createSqliteTriagePersistenceRepositories,
+} from '@/db/persistence/sqlite-triage-repositories';
+import {
+  describeTriageActionPersistenceContract,
+  TRIAGE_ACTION_NOW,
+  type TriageActionContractHarness,
+} from '../contracts/scout-ingestion-reconciliation-persistence.contract';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
@@ -570,4 +579,127 @@ describe('triage task action idempotency', () => {
       }),
     ]);
   });
+});
+
+// ─── Shared SQLite/PostgreSQL contract ───────────────────────────────────────
+
+function createSqliteTriageActionContractHarness(): TriageActionContractHarness {
+  const contractSqlite = new BetterSqlite3(':memory:');
+  contractSqlite.exec(`
+    CREATE TABLE triage_items (
+      id TEXT PRIMARY KEY, source_platform TEXT NOT NULL, source_id TEXT NOT NULL,
+      source_url TEXT NOT NULL, canonical_url TEXT, title TEXT NOT NULL,
+      description TEXT, thumbnail_url TEXT, content_type TEXT NOT NULL DEFAULT 'link',
+      captured_at TEXT NOT NULL, ingested_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending', snoozed_until TEXT, ai_summary TEXT,
+      ai_categories TEXT NOT NULL DEFAULT '[]',
+      ai_suggested_actions TEXT NOT NULL DEFAULT '[]',
+      ai_relevance_score INTEGER NOT NULL DEFAULT 0,
+      ai_urgency TEXT NOT NULL DEFAULT 'evergreen',
+      raw_metadata TEXT NOT NULL DEFAULT '{}',
+      actions_taken TEXT NOT NULL DEFAULT '[]', source_order INTEGER
+    );
+    CREATE UNIQUE INDEX idx_triage_items_source ON triage_items(source_platform, source_id);
+    CREATE TABLE triage_action_claims (
+      id TEXT PRIMARY KEY, triage_item_id TEXT NOT NULL, action_type TEXT NOT NULL,
+      state TEXT NOT NULL DEFAULT 'pending', claimed_at TEXT NOT NULL,
+      completed_at TEXT, result TEXT
+    );
+    CREATE UNIQUE INDEX idx_triage_action_claims_item_action
+      ON triage_action_claims(triage_item_id, action_type);
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, source_id TEXT NOT NULL, connector_type TEXT NOT NULL,
+      connector_instance_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+      status TEXT NOT NULL DEFAULT 'todo', priority TEXT NOT NULL DEFAULT 'none',
+      due_date TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      completed_at TEXT, status_reason TEXT, snoozed_until TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}', sync_status TEXT NOT NULL DEFAULT 'synced',
+      last_synced_at TEXT NOT NULL
+    );
+  `);
+  contractDatabase = contractSqlite;
+  const repositories = createSqliteTriagePersistenceRepositories(contractSqlite);
+
+  return {
+    actions: repositories.actions,
+    documentTaskActions: repositories.documentTaskActions,
+    async reset() {
+      contractSqlite.exec(`
+        DELETE FROM triage_action_claims;
+        DELETE FROM triage_items;
+        DELETE FROM tasks;
+      `);
+    },
+    async seedItem(item) {
+      contractSqlite.prepare(`
+        INSERT INTO triage_items (
+          id, source_platform, source_id, source_url, canonical_url, title,
+          description, thumbnail_url, content_type, captured_at, ingested_at,
+          status, snoozed_until, ai_summary, ai_categories, ai_suggested_actions,
+          ai_relevance_score, ai_urgency, raw_metadata, actions_taken, source_order
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        item.id,
+        item.sourcePlatform,
+        item.sourceId,
+        item.sourceUrl,
+        item.canonicalUrl ?? null,
+        item.title,
+        item.description ?? null,
+        item.thumbnailUrl ?? null,
+        item.contentType,
+        item.capturedAt,
+        item.ingestedAt,
+        item.status,
+        item.snoozedUntil ?? null,
+        item.aiSummary ?? null,
+        JSON.stringify(item.aiCategories),
+        JSON.stringify(item.aiSuggestedActions),
+        item.aiRelevanceScore,
+        item.aiUrgency,
+        JSON.stringify(item.rawMetadata),
+        JSON.stringify(item.actionsTaken),
+        item.sourceOrder ?? null,
+      );
+    },
+    async seedTask(task) {
+      contractSqlite.prepare(`
+        INSERT INTO tasks (
+          id, source_id, connector_type, connector_instance_id, title, status,
+          created_at, updated_at, last_synced_at, metadata
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        task.id,
+        task.sourceId,
+        task.connectorType,
+        task.connectorInstanceId,
+        task.title,
+        task.status,
+        TRIAGE_ACTION_NOW,
+        TRIAGE_ACTION_NOW,
+        TRIAGE_ACTION_NOW,
+        JSON.stringify(task.metadata),
+      );
+    },
+    async readItem(id) {
+      return repositories.actions.getActionSnapshot(id);
+    },
+    async countClaims() {
+      return (contractSqlite.prepare('SELECT COUNT(*) AS count FROM triage_action_claims')
+        .get() as { count: number }).count;
+    },
+  };
+}
+
+let contractDatabase: BetterSqlite3.Database | null = null;
+let triageActionHarness: TriageActionContractHarness | null = null;
+
+afterAll(() => {
+  contractDatabase?.close();
+  contractDatabase = null;
+});
+
+describeTriageActionPersistenceContract('SQLite', () => {
+  triageActionHarness ??= createSqliteTriageActionContractHarness();
+  return triageActionHarness;
 });

@@ -1,8 +1,27 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, taskLinkedSources } from '@/db/schema';
-import { eq, and, gte, sql } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { ScoutComparisonTask } from '@/db/persistence/scout-ingestion-reconciliation';
 import { computeSimilarity } from '@/lib/dedup';
+
+const SCOUT_CONNECTOR_TYPE = 'scout';
+const COMPARISON_CONNECTOR_TYPE = 'outlook-email';
+
+function isEmailSourced(task: ScoutComparisonTask): boolean {
+  const metadata = task.metadata;
+  const parsed = typeof metadata === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(metadata) as unknown;
+        } catch {
+          return null;
+        }
+      })()
+    : metadata;
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return (parsed as Record<string, unknown>).sourceType === 'email';
+  }
+  return task.sourceId?.startsWith('scout:email:') ?? false;
+}
 
 /**
  * GET /api/scout/parallel-comparison
@@ -20,62 +39,25 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const since = searchParams.get('since') || new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
 
-  // Fetch Scout email tasks created since the comparison window
-  const scoutEmailTasks = await db
-    .select({
-      id: tasks.id,
-      title: tasks.title,
-      sourceId: tasks.sourceId,
-      createdAt: tasks.createdAt,
-      priority: tasks.priority,
-      status: tasks.status,
-      metadata: tasks.metadata,
-    })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.connectorType, 'scout'),
-        gte(tasks.createdAt, since),
-      )
+  const repositories = await getWorkerPersistenceRepositories();
+  const scout = repositories.scoutIngestionReconciliation;
+  if (!scout) {
+    return NextResponse.json(
+      { error: 'Scout comparison persistence is not available in the selected backend' },
+      { status: 503 },
     );
+  }
 
-  // Filter to email-sourced Scout tasks only
-  const scoutEmails = scoutEmailTasks.filter(t => {
-    try {
-      const meta = JSON.parse(t.metadata as string || '{}');
-      return meta.sourceType === 'email';
-    } catch {
-      return t.sourceId?.startsWith('scout:email:');
-    }
+  const window = await scout.comparison.readWindow({
+    since,
+    scoutConnectorType: SCOUT_CONNECTOR_TYPE,
+    comparisonConnectorType: COMPARISON_CONNECTOR_TYPE,
   });
 
-  // Fetch outlook-email connector tasks created in the same window
-  const outlookEmailTasks = await db
-    .select({
-      id: tasks.id,
-      title: tasks.title,
-      sourceId: tasks.sourceId,
-      createdAt: tasks.createdAt,
-      priority: tasks.priority,
-      status: tasks.status,
-      metadata: tasks.metadata,
-    })
-    .from(tasks)
-    .where(
-      and(
-        eq(tasks.connectorType, 'outlook-email'),
-        gte(tasks.createdAt, since),
-      )
-    );
-
-  // Fetch linked sources to find already-linked pairs
-  const linkedPairs = await db
-    .select({
-      taskId: taskLinkedSources.taskId,
-      sourceId: taskLinkedSources.sourceId,
-      connectorType: taskLinkedSources.connectorType,
-    })
-    .from(taskLinkedSources);
+  // Filter to email-sourced Scout tasks only
+  const scoutEmails = window.scoutTasks.filter(isEmailSourced);
+  const outlookEmailTasks = window.comparisonTasks;
+  const linkedPairs = window.linkedPairs;
 
   // Build overlap analysis via fuzzy matching
   const overlapping: Array<{
@@ -103,7 +85,7 @@ export async function GET(request: Request) {
     if (bestMatch) {
       const alreadyLinked = linkedPairs.some(
         lp => (lp.taskId === bestMatch!.outlookId && lp.sourceId === scout.sourceId) ||
-              (lp.taskId === scout.id && lp.connectorType === 'outlook-email')
+              (lp.taskId === scout.id && lp.connectorType === COMPARISON_CONNECTOR_TYPE)
       );
 
       overlapping.push({

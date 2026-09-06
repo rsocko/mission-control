@@ -38,6 +38,14 @@ import {
   type NativeShareCaptureClaim,
   type NativeShareCaptureClaimInput,
   type NativeShareCaptureRepository,
+  type DocumentActionTaskRepository,
+  type DocumentActionTaskSnapshot,
+  type DocumentActionTaskWrite,
+  type TriageActionAppendInput,
+  type TriageActionClaimRecord,
+  type TriageActionClaimReservation,
+  type TriageActionRepository,
+  type TriageActionSetInput,
   type TriagePersistenceRepositories,
   type TriageQueueFacetStats,
   type TriageQueueHealthPendingSnapshotEntry,
@@ -62,6 +70,8 @@ import {
   triageContentTypes,
   triageItems,
   triageSyncState,
+  triageActionClaims,
+  tasks,
 } from '../schema';
 
 type TriageItemRow = typeof triageItems.$inferSelect;
@@ -1430,6 +1440,288 @@ class PostgresNativeApnsRepository implements NativeApnsRepository {
   }
 }
 
+class PostgresTriageActionRepository implements TriageActionRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  private async readItem(
+    executor: PostgresDatabase | PostgresTransaction,
+    id: string,
+  ): Promise<TriageItem | null> {
+    const [row] = await executor
+      .select()
+      .from(triageItems)
+      .where(eq(triageItems.id, id))
+      .limit(1);
+    return row ? mapTriageItem(row) : null;
+  }
+
+  async getActionSnapshot(triageItemId: string): Promise<TriageItem | null> {
+    return this.readItem(this.db, triageItemId);
+  }
+
+  async readClaim(input: {
+    readonly triageItemId: string;
+    readonly actionType: string;
+  }): Promise<TriageActionClaimRecord | null> {
+    const [row] = await this.db
+      .select()
+      .from(triageActionClaims)
+      .where(and(
+        eq(triageActionClaims.triageItemId, input.triageItemId),
+        eq(triageActionClaims.actionType, input.actionType),
+      ))
+      .limit(1);
+    if (!row) return null;
+    return {
+      id: row.id,
+      triageItemId: row.triageItemId,
+      actionType: row.actionType,
+      state: row.state as 'pending' | 'completed',
+      claimedAt: row.claimedAt,
+      completedAt: row.completedAt,
+      result: row.result ?? null,
+    };
+  }
+
+  async reserveClaim(
+    reservation: TriageActionClaimReservation,
+  ): Promise<{ readonly acquired: boolean }> {
+    const inserted = await this.db
+      .insert(triageActionClaims)
+      .values({
+        id: reservation.claimId,
+        triageItemId: reservation.triageItemId,
+        actionType: reservation.actionType,
+        state: 'pending',
+        claimedAt: reservation.claimedAt,
+      })
+      .onConflictDoNothing({
+        target: [triageActionClaims.triageItemId, triageActionClaims.actionType],
+      })
+      .returning({ id: triageActionClaims.id });
+    return { acquired: inserted.length === 1 };
+  }
+
+  async heartbeatClaim(input: {
+    readonly claimId: string;
+    readonly claimedAt: string;
+  }): Promise<boolean> {
+    const updated = await this.db
+      .update(triageActionClaims)
+      .set({ claimedAt: input.claimedAt })
+      .where(and(
+        eq(triageActionClaims.id, input.claimId),
+        eq(triageActionClaims.state, 'pending'),
+      ))
+      .returning({ id: triageActionClaims.id });
+    return updated.length === 1;
+  }
+
+  async recordClaimTarget(input: {
+    readonly claimId: string;
+    readonly claimedAt: string;
+    readonly target: Record<string, unknown>;
+  }): Promise<boolean> {
+    const updated = await this.db
+      .update(triageActionClaims)
+      .set({ claimedAt: input.claimedAt, result: input.target })
+      .where(and(
+        eq(triageActionClaims.id, input.claimId),
+        eq(triageActionClaims.state, 'pending'),
+      ))
+      .returning({ id: triageActionClaims.id });
+    return updated.length === 1;
+  }
+
+  async releaseClaim(input: {
+    readonly claimId: string;
+    readonly expectedClaimedAt?: string;
+  }): Promise<boolean> {
+    const released = await this.db
+      .delete(triageActionClaims)
+      .where(and(
+        eq(triageActionClaims.id, input.claimId),
+        eq(triageActionClaims.state, 'pending'),
+        ...(input.expectedClaimedAt
+          ? [eq(triageActionClaims.claimedAt, input.expectedClaimedAt)]
+          : []),
+      ))
+      .returning({ id: triageActionClaims.id });
+    return released.length === 1;
+  }
+
+  async completeClaim(input: {
+    readonly claimId: string;
+    readonly triageItemId: string;
+    readonly record: TriageActionRecord;
+    readonly completedAt: string;
+  }): Promise<{ readonly completed: boolean; readonly item: TriageItem | null }> {
+    return this.db.transaction(async (tx) => {
+      const settled = await tx
+        .update(triageActionClaims)
+        .set({
+          state: 'completed',
+          completedAt: input.completedAt,
+          result: input.record as unknown as Record<string, unknown>,
+        })
+        .where(and(
+          eq(triageActionClaims.id, input.claimId),
+          eq(triageActionClaims.state, 'pending'),
+        ))
+        .returning({ id: triageActionClaims.id });
+      if (settled.length === 0) {
+        return { completed: false, item: await this.readItem(tx, input.triageItemId) };
+      }
+      await tx
+        .update(triageItems)
+        .set({
+          status: 'actioned',
+          snoozedUntil: null,
+          actionsTaken: sql`${triageItems.actionsTaken} || ${
+            JSON.stringify([input.record])
+          }::jsonb`,
+        })
+        .where(eq(triageItems.id, input.triageItemId));
+      return { completed: true, item: await this.readItem(tx, input.triageItemId) };
+    });
+  }
+
+  async appendAction(input: TriageActionAppendInput): Promise<TriageItem | null> {
+    const fence = input.fence;
+    const updated = await this.db
+      .update(triageItems)
+      .set({
+        status: input.status,
+        snoozedUntil: input.snoozedUntil,
+        actionsTaken: sql`${triageItems.actionsTaken} || ${
+          JSON.stringify([input.record])
+        }::jsonb`,
+      })
+      .where(and(
+        eq(triageItems.id, input.triageItemId),
+        ...(fence
+          ? [
+              sql`${triageItems.actionsTaken} = ${JSON.stringify(fence.actionsTaken)}::jsonb`,
+              eq(triageItems.status, fence.status),
+              fence.snoozedUntil === null
+                ? isNull(triageItems.snoozedUntil)
+                : eq(triageItems.snoozedUntil, fence.snoozedUntil),
+            ]
+          : []),
+      ))
+      .returning();
+    return updated[0] ? mapTriageItem(updated[0]) : null;
+  }
+
+  async casActions(input: TriageActionSetInput): Promise<TriageItem | null> {
+    const updated = await this.db
+      .update(triageItems)
+      .set({
+        actionsTaken: input.actions as unknown as TriageActionRecord[],
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.snoozedUntil !== undefined
+          ? { snoozedUntil: input.snoozedUntil }
+          : {}),
+      })
+      .where(and(
+        eq(triageItems.id, input.triageItemId),
+        sql`${triageItems.actionsTaken} = ${
+          JSON.stringify(input.expectedActions)
+        }::jsonb`,
+      ))
+      .returning();
+    return updated[0] ? mapTriageItem(updated[0]) : null;
+  }
+}
+
+function mapDocumentActionTask(
+  row: typeof tasks.$inferSelect,
+): DocumentActionTaskSnapshot {
+  return {
+    id: row.id,
+    connectorType: row.connectorType,
+    connectorInstanceId: row.connectorInstanceId,
+    sourceId: row.sourceId,
+    title: row.title,
+    description: row.description,
+    status: row.status,
+    statusReason: row.statusReason,
+    snoozedUntil: row.snoozedUntil,
+    priority: row.priority,
+    dueDate: row.dueDate,
+    completedAt: row.completedAt,
+    metadata: row.metadata,
+  };
+}
+
+class PostgresDocumentActionTaskRepository implements DocumentActionTaskRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async getTask(taskId: string): Promise<DocumentActionTaskSnapshot | null> {
+    const [row] = await this.db
+      .select()
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1);
+    return row ? mapDocumentActionTask(row) : null;
+  }
+
+  async applyTaskWrite(input: DocumentActionTaskWrite): Promise<
+    | { readonly kind: 'applied'; readonly task: DocumentActionTaskSnapshot }
+    | { readonly kind: 'identity-changed' }
+  > {
+    return this.db.transaction(async (tx) => {
+      const [latest] = await tx
+        .select()
+        .from(tasks)
+        .where(eq(tasks.id, input.taskId))
+        .limit(1);
+      if (
+        !latest
+        || latest.connectorType !== input.expectedIdentity.connectorType
+        || latest.connectorInstanceId !== input.expectedIdentity.connectorInstanceId
+        || latest.sourceId !== input.expectedIdentity.sourceId
+      ) {
+        return { kind: 'identity-changed' } as const;
+      }
+
+      const [stored] = await tx
+        .update(tasks)
+        .set({
+          metadata: sql`${input.metadata}::jsonb`,
+          updatedAt: input.updatedAt,
+          lastSyncedAt: input.lastSyncedAt,
+          syncStatus: input.syncStatus,
+          ...Object.fromEntries(
+            Object.entries(input.columns).map(([column, value]) => [
+              DOCUMENT_ACTION_TASK_COLUMN_KEYS[column] ?? column,
+              value,
+            ]),
+          ),
+        })
+        .where(eq(tasks.id, input.taskId))
+        .returning();
+      return { kind: 'applied', task: mapDocumentActionTask(stored) } as const;
+    });
+  }
+}
+
+/**
+ * Maps the backend-neutral column names used by the document-action write onto
+ * this adapter's Drizzle model keys. The SQLite adapter uses the same neutral
+ * names directly because they already are its physical column names.
+ */
+const DOCUMENT_ACTION_TASK_COLUMN_KEYS: Record<string, string> = {
+  status: 'status',
+  status_reason: 'statusReason',
+  snoozed_until: 'snoozedUntil',
+  completed_at: 'completedAt',
+  priority: 'priority',
+  title: 'title',
+  description: 'description',
+  due_date: 'dueDate',
+};
+
 export function createPostgresTriagePersistenceRepositories(
   db: PostgresDatabase,
 ): TriagePersistenceRepositories {
@@ -1446,5 +1738,7 @@ export function createPostgresTriagePersistenceRepositories(
       shareCapture: new PostgresNativeShareCaptureRepository(db),
       apns: new PostgresNativeApnsRepository(db),
     },
+    actions: new PostgresTriageActionRepository(db),
+    documentTaskActions: new PostgresDocumentActionTaskRepository(db),
   };
 }

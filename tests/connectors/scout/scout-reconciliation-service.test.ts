@@ -3,7 +3,7 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { resolve } from 'node:path';
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '@/db/schema';
 import {
   connectorConfigs,
@@ -23,16 +23,24 @@ import {
   listReconciliationSuggestions,
   reconcileScoutTasks,
   ScoutReconciliationError,
-  suppressAutoCompletionAfterReopen,
   wasTaskAutoCompletedByReconciliation,
 } from '@/lib/connectors/scout/reconciliation-service';
 import { DEFAULT_SCOUT_SETTINGS } from '@/lib/connectors/scout/settings';
+import {
+  createSqliteScoutIngestionReconciliationRepository,
+} from '@/db/persistence/sqlite-scout-ingestion-reconciliation-repository';
+import {
+  describeScoutIngestionReconciliationContract,
+  SCOUT_NOW,
+  type ScoutPersistenceContractHarness,
+} from '../../contracts/scout-ingestion-reconciliation-persistence.contract';
 
 vi.unmock('drizzle-orm');
 vi.mock('@/lib/events', () => ({ emitEvent: vi.fn().mockResolvedValue(undefined) }));
 
 const openDatabases: Database.Database[] = [];
 const now = new Date('2026-08-05T12:00:00.000Z');
+let persistence: ReturnType<typeof createSqliteScoutIngestionReconciliationRepository>;
 
 function testDatabase() {
   const sqlite = new Database(':memory:');
@@ -128,6 +136,7 @@ function testDatabase() {
     if (statement.trim()) sqlite.exec(statement);
   }
   openDatabases.push(sqlite);
+  persistence = createSqliteScoutIngestionReconciliationRepository(sqlite);
   return drizzle(sqlite, { schema });
 }
 
@@ -213,7 +222,7 @@ describe('Scout reconciliation service', () => {
       dryRun: true,
       sourceIdentity: 'dry-run-1',
       signals: [plannerSignal()],
-    }, { database, now });
+    }, { persistence, now });
 
     expect(result.reconciled[0]).toMatchObject({
       candidateAction: 'auto-complete',
@@ -266,7 +275,7 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'authorized-run-1',
       signals: [plannerSignal()],
     }, {
-      database,
+      persistence,
       now,
       verifiedSourceRefHashes: new Set([plannerSignal().sourceRefHash]),
     });
@@ -279,7 +288,7 @@ describe('Scout reconciliation service', () => {
     expect((await database.select().from(tasks).where(eq(tasks.id, 'task-1')))[0].status).toBe('done');
     expect(await database.select().from(taskHistoryEvents).where(eq(taskHistoryEvents.eventType, 'status_changed')))
       .toEqual([expect.objectContaining({ taskId: 'task-1', previousValue: 'todo', newValue: 'done' })]);
-    expect(await wasTaskAutoCompletedByReconciliation('task-1', database)).toBe(true);
+    expect(await wasTaskAutoCompletedByReconciliation('task-1', { persistence })).toBe(true);
   });
 
   it('replays duplicate runs idempotently without duplicate evaluations', async () => {
@@ -293,8 +302,8 @@ describe('Scout reconciliation service', () => {
       signals: [plannerSignal()],
     };
 
-    const first = await reconcileScoutTasks(request, { database, now });
-    const replay = await reconcileScoutTasks(request, { database, now });
+    const first = await reconcileScoutTasks(request, { persistence, now });
+    const replay = await reconcileScoutTasks(request, { persistence, now });
 
     expect(replay).toMatchObject({ runId: first.runId, idempotentReplay: true });
     expect(await database.select().from(scoutReconciliationRuns)).toHaveLength(1);
@@ -302,7 +311,7 @@ describe('Scout reconciliation service', () => {
     await expect(reconcileScoutTasks({
       ...request,
       signals: [{ ...plannerSignal(), summary: 'Changed evidence under the same key' }],
-    }, { database, now })).rejects.toMatchObject({ status: 409 });
+    }, { persistence, now })).rejects.toMatchObject({ status: 409 });
   });
 
   it('recovers an exact stale idempotent run without changing its run identity', async () => {
@@ -338,7 +347,7 @@ describe('Scout reconciliation service', () => {
       startedAt: '2026-08-05T11:00:00.000Z',
     });
 
-    const result = await reconcileScoutTasks(request, { database, now });
+    const result = await reconcileScoutTasks(request, { persistence, now });
     const staleFailure = database.update(scoutReconciliationRuns).set({
       status: 'failed',
       error: 'late original worker',
@@ -399,7 +408,7 @@ describe('Scout reconciliation service', () => {
         plannerSignal('task-2', 'signal-2'),
       ],
     }, {
-      database,
+      persistence,
       now,
       verifiedSourceRefHashes: new Set([sourceRefHash]),
     })).rejects.toThrow('synthetic evaluation failure');
@@ -434,7 +443,7 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'locked-run',
       idempotencyKey: 'locked-run-key',
       signals: [],
-    }, { database, now })).rejects.toMatchObject({ status: 409 });
+    }, { persistence, now })).rejects.toMatchObject({ status: 409 });
 
     await database.update(scoutReconciliationRuns).set({
       status: 'failed',
@@ -445,13 +454,13 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'full-run-1',
       idempotencyKey: 'full-run-key-1',
       signals: [],
-    }, { database, now });
+    }, { persistence, now });
     await expect(reconcileScoutTasks({
       scope: 'all',
       sourceIdentity: 'full-run-2',
       idempotencyKey: 'full-run-key-2',
       signals: [],
-    }, { database, now })).rejects.toMatchObject({ status: 429 });
+    }, { persistence, now })).rejects.toMatchObject({ status: 429 });
   });
 
   it('honors project and task scopes while reporting ignored signals', async () => {
@@ -476,7 +485,7 @@ describe('Scout reconciliation service', () => {
       dryRun: true,
       sourceIdentity: 'project-run',
       signals: [plannerSignal('task-1', 'signal-1'), plannerSignal('task-2', 'signal-2')],
-    }, { database, now });
+    }, { persistence, now });
 
     expect(result.reconciled.map((item) => item.taskId)).toEqual(['task-1']);
     expect(result.summary.ignoredSignals).toBe(1);
@@ -490,24 +499,24 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'suggestion-run',
       idempotencyKey: 'suggestion-run-key',
       signals: [plannerSignal()],
-    }, { database, now });
-    const [suggestion] = await listReconciliationSuggestions({ database, now });
+    }, { persistence, now });
+    const [suggestion] = await listReconciliationSuggestions({ persistence, now });
 
     await expect(actOnReconciliationSuggestion(suggestion.id, {
       action: 'accept',
       payloadHash: 'f'.repeat(64),
       actor: 'test-user',
-    }, { database, now })).rejects.toMatchObject({ status: 409 });
+    }, { persistence, now })).rejects.toMatchObject({ status: 409 });
     const accepted = await actOnReconciliationSuggestion(suggestion.id, {
       action: 'accept',
       payloadHash: suggestion.payloadHash,
       actor: 'test-user',
-    }, { database, now });
+    }, { persistence, now });
     const replay = await actOnReconciliationSuggestion(suggestion.id, {
       action: 'accept',
       payloadHash: suggestion.payloadHash,
       actor: 'test-user',
-    }, { database, now });
+    }, { persistence, now });
 
     expect(accepted).toMatchObject({ status: 'accepted', idempotentReplay: false });
     expect(replay).toMatchObject({ status: 'accepted', idempotentReplay: true });
@@ -526,20 +535,20 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'dismiss-run-1',
       idempotencyKey: 'dismiss-run-key-1',
       signals: [plannerSignal()],
-    }, { database, now });
-    const [suggestion] = await listReconciliationSuggestions({ database, now });
+    }, { persistence, now });
+    const [suggestion] = await listReconciliationSuggestions({ persistence, now });
     await actOnReconciliationSuggestion(suggestion.id, {
       action: 'never-auto-complete',
       payloadHash: suggestion.payloadHash,
       actor: 'test-user',
-    }, { database, now });
+    }, { persistence, now });
 
     const repeated = await reconcileScoutTasks({
       scope: 'task:task-1',
       sourceIdentity: 'dismiss-run-2',
       idempotencyKey: 'dismiss-run-key-2',
       signals: [plannerSignal()],
-    }, { database, now: new Date('2026-08-05T12:01:00.000Z') });
+    }, { persistence, now: new Date('2026-08-05T12:01:00.000Z') });
 
     expect(repeated.reconciled[0]).toMatchObject({
       candidateAction: 'auto-complete',
@@ -562,14 +571,14 @@ describe('Scout reconciliation service', () => {
       scope: 'task:task-1',
       sourceIdentity: 'terminal-suggestion',
       signals: [plannerSignal()],
-    }, { database, now });
+    }, { persistence, now });
     await database.update(tasks).set({
       status: 'done',
       completedAt: now.toISOString(),
       updatedAt: now.toISOString(),
     }).where(eq(tasks.id, 'task-1'));
 
-    expect(await listReconciliationSuggestions({ database, now })).toHaveLength(0);
+    expect(await listReconciliationSuggestions({ persistence, now })).toHaveLength(0);
     expect((await database.select().from(scoutReconciliationSuggestions))[0].status).toBe('superseded');
   });
 
@@ -594,18 +603,44 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'auto-run',
       signals: [plannerSignal()],
     }, {
-      database,
+      persistence,
       now,
       verifiedSourceRefHashes: new Set([plannerSignal().sourceRefHash]),
     });
 
+    // Reopen suppression is written by the task-core reopen path (already
+    // backend-neutral); this reproduces exactly the rows it writes so the
+    // post-reopen reconciliation decision stays under test here.
     database.transaction((tx) => {
       tx.update(tasks).set({
         status: 'todo',
         completedAt: null,
         updatedAt: '2026-08-05T12:05:00.000Z',
       }).where(eq(tasks.id, 'task-1')).run();
-      suppressAutoCompletionAfterReopen(tx, 'task-1', '2026-08-05T12:05:00.000Z');
+      tx.insert(scoutReconciliationTaskState).values({
+        taskId: 'task-1',
+        neverAutoComplete: true,
+        reason: 'reopened_after_auto_completion',
+        updatedAt: '2026-08-05T12:05:00.000Z',
+        updatedBy: 'task-reopen',
+      }).onConflictDoUpdate({
+        target: scoutReconciliationTaskState.taskId,
+        set: {
+          neverAutoComplete: true,
+          reason: 'reopened_after_auto_completion',
+          updatedAt: '2026-08-05T12:05:00.000Z',
+          updatedBy: 'task-reopen',
+        },
+      }).run();
+      tx.update(scoutReconciliationSuggestions).set({
+        status: 'dismissed',
+        updatedAt: '2026-08-05T12:05:00.000Z',
+        actedAt: '2026-08-05T12:05:00.000Z',
+        actedBy: 'task-reopen',
+      }).where(and(
+        eq(scoutReconciliationSuggestions.taskId, 'task-1'),
+        eq(scoutReconciliationSuggestions.status, 'pending'),
+      )).run();
     });
 
     expect((await database.select().from(scoutReconciliationTaskState))[0]).toMatchObject({
@@ -617,7 +652,7 @@ describe('Scout reconciliation service', () => {
       sourceIdentity: 'post-reopen-run',
       idempotencyKey: 'post-reopen-run-key',
       signals: [plannerSignal('task-1', 'planner-after-reopen')],
-    }, { database, now: new Date('2026-08-05T12:06:00.000Z') });
+    }, { persistence, now: new Date('2026-08-05T12:06:00.000Z') });
     expect(result.reconciled[0]).toMatchObject({
       action: 'suggest-complete',
       policyDecision: 'deny',
@@ -631,12 +666,12 @@ describe('Scout reconciliation service', () => {
       scope: 'task:task-1',
       sourceIdentity: 'malformed-run',
       signals: [{ ...plannerSignal(), summary: 'raw\ncontent' }],
-    }, { database, now })).rejects.toBeInstanceOf(ScoutReconciliationError);
+    }, { persistence, now })).rejects.toBeInstanceOf(ScoutReconciliationError);
     await expect(reconcileScoutTasks({
       scope: 'task:task-1',
       sourceIdentity: 'duplicate-signals',
       signals: [plannerSignal(), plannerSignal()],
-    }, { database, now })).rejects.toMatchObject({ status: 400 });
+    }, { persistence, now })).rejects.toMatchObject({ status: 400 });
     await expect(reconcileScoutTasks({
       scope: 'task:task-1',
       sourceIdentity: 'duplicate-artifacts',
@@ -644,6 +679,327 @@ describe('Scout reconciliation service', () => {
         plannerSignal('task-1', 'planner-1'),
         plannerSignal('task-1', 'planner-2'),
       ],
-    }, { database, now })).rejects.toMatchObject({ status: 400 });
+    }, { persistence, now })).rejects.toMatchObject({ status: 400 });
   });
+});
+
+// ─── Shared SQLite/PostgreSQL contract ───────────────────────────────────────
+
+let contractDatabase: Database.Database | null = null;
+
+afterAll(() => {
+  contractDatabase?.close();
+  contractDatabase = null;
+});
+
+function createSqliteScoutContractHarness(): ScoutPersistenceContractHarness {
+  const sqlite = new Database(':memory:');
+  sqlite.exec(`
+    CREATE TABLE connector_configs (
+      id TEXT PRIMARY KEY, type TEXT NOT NULL, name TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1, sync_mode TEXT NOT NULL DEFAULT 'poll',
+      poll_interval_minutes INTEGER, capabilities TEXT NOT NULL DEFAULT '{}',
+      credentials TEXT NOT NULL DEFAULT '{}', settings TEXT NOT NULL DEFAULT '{}',
+      synced_lists TEXT NOT NULL DEFAULT '[]', created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL, deleted_at TEXT
+    );
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY, source_id TEXT NOT NULL, connector_type TEXT NOT NULL,
+      connector_instance_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
+      status TEXT NOT NULL DEFAULT 'todo', priority TEXT NOT NULL DEFAULT 'none',
+      due_date TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+      completed_at TEXT, depth INTEGER NOT NULL DEFAULT 0,
+      is_checklist_item INTEGER NOT NULL DEFAULT 0, source_list_id TEXT,
+      source_list_name TEXT, micro_status TEXT, status_reason TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}', sync_status TEXT NOT NULL DEFAULT 'synced',
+      last_synced_at TEXT NOT NULL, snoozed_until TEXT, reminder_at TEXT,
+      reminder_relative TEXT, reminder_due_time TEXT
+    );
+    CREATE UNIQUE INDEX idx_tasks_source_connector ON tasks(source_id, connector_instance_id);
+    CREATE TABLE task_field_states (
+      task_id TEXT NOT NULL, field_name TEXT NOT NULL, source_value TEXT NOT NULL,
+      locally_overridden INTEGER NOT NULL DEFAULT 0, source_observed_at TEXT,
+      local_edited_at TEXT, updated_at TEXT NOT NULL,
+      PRIMARY KEY (task_id, field_name)
+    );
+    CREATE TABLE task_ingest_suppressions (
+      connector_instance_id TEXT NOT NULL, source_id TEXT NOT NULL,
+      reason TEXT NOT NULL, created_at TEXT NOT NULL,
+      PRIMARY KEY (connector_instance_id, source_id)
+    );
+    CREATE TABLE task_linked_sources (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, connector_type TEXT NOT NULL,
+      connector_instance_id TEXT NOT NULL, source_id TEXT NOT NULL,
+      title TEXT NOT NULL, linked_at TEXT NOT NULL, match_confidence REAL,
+      metadata TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE UNIQUE INDEX idx_task_linked_sources_unique
+      ON task_linked_sources(task_id, connector_type, source_id);
+    CREATE UNIQUE INDEX idx_task_linked_sources_source_identity
+      ON task_linked_sources(connector_instance_id, source_id);
+    CREATE TABLE source_lists (
+      id TEXT PRIMARY KEY, connector_instance_id TEXT NOT NULL, source_id TEXT NOT NULL,
+      name TEXT NOT NULL, type TEXT NOT NULL, task_count INTEGER NOT NULL DEFAULT 0,
+      last_synced_at TEXT, sort_order INTEGER NOT NULL DEFAULT 0,
+      hidden INTEGER NOT NULL DEFAULT 0, icon TEXT, icon_color TEXT
+    );
+    CREATE TABLE tags (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL, type TEXT NOT NULL,
+      source TEXT, color TEXT, confirmed INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL, unified_into TEXT
+    );
+    CREATE TABLE task_tags (task_id TEXT NOT NULL, tag_id TEXT NOT NULL);
+    CREATE TABLE task_projects (task_id TEXT NOT NULL, project_id TEXT NOT NULL);
+    CREATE UNIQUE INDEX idx_task_projects_task_project ON task_projects(task_id, project_id);
+    CREATE TABLE hub_projects (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'active',
+      color TEXT NOT NULL DEFAULT '#3b82f6', created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE triage_items (
+      id TEXT PRIMARY KEY, source_platform TEXT NOT NULL, source_id TEXT NOT NULL,
+      source_url TEXT NOT NULL, canonical_url TEXT, title TEXT NOT NULL,
+      description TEXT, thumbnail_url TEXT, content_type TEXT NOT NULL DEFAULT 'link',
+      captured_at TEXT NOT NULL, ingested_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending', snoozed_until TEXT, ai_summary TEXT,
+      ai_categories TEXT NOT NULL DEFAULT '[]',
+      ai_suggested_actions TEXT NOT NULL DEFAULT '[]',
+      ai_relevance_score INTEGER NOT NULL DEFAULT 0,
+      ai_urgency TEXT NOT NULL DEFAULT 'evergreen',
+      raw_metadata TEXT NOT NULL DEFAULT '{}',
+      actions_taken TEXT NOT NULL DEFAULT '[]', source_order INTEGER
+    );
+    CREATE UNIQUE INDEX idx_triage_items_source ON triage_items(source_platform, source_id);
+    CREATE TABLE notifications (
+      id TEXT PRIMARY KEY, source_id TEXT NOT NULL UNIQUE, connector_type TEXT NOT NULL,
+      connector_instance_id TEXT NOT NULL, title TEXT NOT NULL, body TEXT,
+      level TEXT NOT NULL DEFAULT 'fyi', level_rank INTEGER NOT NULL DEFAULT 3,
+      category TEXT NOT NULL DEFAULT 'system', template_key TEXT,
+      state TEXT NOT NULL DEFAULT 'unread', is_actionable INTEGER NOT NULL DEFAULT 0,
+      received_at TEXT NOT NULL, sort_at TEXT NOT NULL, group_key TEXT,
+      dedupe_key TEXT, navigation_target TEXT,
+      metadata TEXT NOT NULL DEFAULT '{}', presentation TEXT NOT NULL DEFAULT '{}'
+    );
+    CREATE TABLE scout_reconciliation_runs (
+      id TEXT PRIMARY KEY, scope_key TEXT NOT NULL, scope_type TEXT NOT NULL,
+      scope_id TEXT, lookback_hours INTEGER NOT NULL,
+      dry_run INTEGER NOT NULL DEFAULT 0, source TEXT NOT NULL,
+      source_identity TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+      request_hash TEXT NOT NULL, lease_token TEXT NOT NULL, status TEXT NOT NULL,
+      summary TEXT, error TEXT, started_at TEXT NOT NULL, completed_at TEXT
+    );
+    CREATE UNIQUE INDEX idx_scout_reconciliation_run_idempotency
+      ON scout_reconciliation_runs(idempotency_key);
+    CREATE UNIQUE INDEX idx_scout_reconciliation_active_scope
+      ON scout_reconciliation_runs(scope_key) WHERE status = 'running';
+    CREATE TABLE scout_reconciliation_evaluations (
+      id TEXT PRIMARY KEY, run_id TEXT NOT NULL, task_id TEXT NOT NULL,
+      candidate_action TEXT NOT NULL, action TEXT NOT NULL, confidence REAL NOT NULL,
+      evidence_hash TEXT NOT NULL, evidence TEXT NOT NULL, policy_decision TEXT NOT NULL,
+      policy_reason TEXT NOT NULL, payload_hash TEXT NOT NULL,
+      applied INTEGER NOT NULL DEFAULT 0, applied_result TEXT, created_at TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_scout_reconciliation_evaluation_run_task
+      ON scout_reconciliation_evaluations(run_id, task_id);
+    CREATE TABLE scout_reconciliation_suggestions (
+      id TEXT PRIMARY KEY, task_id TEXT NOT NULL, run_id TEXT NOT NULL,
+      evaluation_id TEXT NOT NULL, action TEXT NOT NULL, status TEXT NOT NULL,
+      confidence REAL NOT NULL, evidence_hash TEXT NOT NULL, evidence TEXT NOT NULL,
+      policy_decision TEXT NOT NULL, policy_reason TEXT NOT NULL,
+      payload_hash TEXT NOT NULL, proposed_effect TEXT NOT NULL,
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL,
+      acted_at TEXT, acted_by TEXT
+    );
+    CREATE UNIQUE INDEX idx_scout_reconciliation_pending_task
+      ON scout_reconciliation_suggestions(task_id) WHERE status = 'pending';
+    CREATE TABLE scout_reconciliation_task_state (
+      task_id TEXT PRIMARY KEY, never_auto_complete INTEGER NOT NULL DEFAULT 0,
+      reason TEXT NOT NULL, source_run_id TEXT, updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL
+    );
+  `);
+  contractDatabase = sqlite;
+  const contractPersistence = createSqliteScoutIngestionReconciliationRepository(sqlite);
+
+  return {
+    persistence: contractPersistence,
+    async reset() {
+      sqlite.exec(`
+        DELETE FROM scout_reconciliation_suggestions;
+        DELETE FROM scout_reconciliation_evaluations;
+        DELETE FROM scout_reconciliation_task_state;
+        DELETE FROM scout_reconciliation_runs;
+        DELETE FROM notifications;
+        DELETE FROM task_field_states;
+        DELETE FROM task_linked_sources;
+        DELETE FROM task_ingest_suppressions;
+        DELETE FROM task_tags;
+        DELETE FROM task_projects;
+        DELETE FROM triage_items;
+        DELETE FROM tasks;
+        DELETE FROM tags;
+        DELETE FROM source_lists;
+        DELETE FROM hub_projects;
+        DELETE FROM connector_configs;
+      `);
+    },
+    async seedConnector(input) {
+      sqlite.prepare(`
+        INSERT INTO connector_configs (
+          id, type, name, enabled, sync_mode, capabilities, credentials, settings,
+          synced_lists, created_at, updated_at, deleted_at
+        ) VALUES (?, ?, 'Scout', ?, 'push', '{}', '{}', ?, '[]', ?, ?, ?)
+      `).run(
+        input.id,
+        input.type,
+        input.enabled ? 1 : 0,
+        JSON.stringify(input.settings),
+        SCOUT_NOW,
+        SCOUT_NOW,
+        input.deletedAt ?? null,
+      );
+    },
+    async seedTask(task) {
+      sqlite.prepare(`
+        INSERT INTO tasks (
+          id, source_id, connector_type, connector_instance_id, title, status,
+          priority, due_date, created_at, updated_at, last_synced_at, metadata,
+          source_list_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        task.id,
+        task.sourceId,
+        task.connectorType,
+        task.connectorInstanceId,
+        task.title,
+        task.status,
+        task.priority ?? 'none',
+        task.dueDate ?? null,
+        task.createdAt ?? SCOUT_NOW,
+        task.createdAt ?? SCOUT_NOW,
+        task.createdAt ?? SCOUT_NOW,
+        JSON.stringify(task.metadata ?? {}),
+        task.sourceListId ?? null,
+      );
+    },
+    async seedProject(id) {
+      sqlite.prepare(`
+        INSERT INTO hub_projects (id, name, status, color, created_at, updated_at)
+        VALUES (?, ?, 'active', '#3b82f6', ?, ?)
+      `).run(id, id, SCOUT_NOW, SCOUT_NOW);
+    },
+    async seedSuppression(input) {
+      sqlite.prepare(`
+        INSERT INTO task_ingest_suppressions (
+          connector_instance_id, source_id, reason, created_at
+        ) VALUES (?, ?, 'hard-deleted', ?)
+      `).run(input.connectorInstanceId, input.sourceId, SCOUT_NOW);
+    },
+    async seedTriageItem(item) {
+      sqlite.prepare(`
+        INSERT INTO triage_items (
+          id, source_platform, source_id, source_url, title, content_type,
+          captured_at, ingested_at, status, ai_categories, ai_suggested_actions,
+          ai_relevance_score, ai_urgency, raw_metadata, actions_taken
+        ) VALUES (?, ?, ?, 'https://example.com', ?, 'text_post', ?, ?, ?, '[]', '[]', 0, 'evergreen', '{}', '[]')
+      `).run(
+        item.id,
+        item.sourcePlatform,
+        item.sourceId,
+        item.title,
+        SCOUT_NOW,
+        SCOUT_NOW,
+        item.status,
+      );
+    },
+    async seedTaskProject(input) {
+      sqlite.prepare('INSERT INTO task_projects (task_id, project_id) VALUES (?, ?)')
+        .run(input.taskId, input.projectId);
+    },
+    async readTask(id) {
+      const row = sqlite.prepare(`
+        SELECT id, title, description, status, status_reason, priority, due_date,
+               completed_at, metadata
+        FROM tasks WHERE id = ?
+      `).get(id) as Record<string, unknown> | undefined;
+      return row
+        ? {
+            id: row.id as string,
+            title: row.title as string,
+            description: (row.description ?? null) as string | null,
+            status: row.status as string,
+            statusReason: (row.status_reason ?? null) as string | null,
+            priority: row.priority as string,
+            dueDate: (row.due_date ?? null) as string | null,
+            completedAt: (row.completed_at ?? null) as string | null,
+            metadata: row.metadata,
+          }
+        : null;
+    },
+    async readFieldStates(taskId) {
+      return (sqlite.prepare(`
+        SELECT field_name, source_value, locally_overridden
+        FROM task_field_states WHERE task_id = ? ORDER BY field_name
+      `).all(taskId) as { field_name: string; source_value: string; locally_overridden: number }[])
+        .map((row) => ({
+          fieldName: row.field_name,
+          sourceValue: row.source_value,
+          locallyOverridden: row.locally_overridden === 1,
+        }));
+    },
+    async readSourceList(sourceId) {
+      const row = sqlite.prepare(
+        'SELECT name, task_count FROM source_lists WHERE source_id = ?',
+      ).get(sourceId) as { name: string; task_count: number } | undefined;
+      return row ? { name: row.name, taskCount: row.task_count } : null;
+    },
+    async readTriageItem(input) {
+      const row = sqlite.prepare(`
+        SELECT id, status, title FROM triage_items
+        WHERE source_platform = ? AND source_id = ?
+      `).get(input.sourcePlatform, input.sourceId) as
+        { id: string; status: string; title: string } | undefined;
+      return row ?? null;
+    },
+    async countTaskTags(taskId) {
+      return (sqlite.prepare('SELECT COUNT(*) AS count FROM task_tags WHERE task_id = ?')
+        .get(taskId) as { count: number }).count;
+    },
+    async countLinkedSources() {
+      return (sqlite.prepare('SELECT COUNT(*) AS count FROM task_linked_sources')
+        .get() as { count: number }).count;
+    },
+    async countEvaluations() {
+      return (sqlite.prepare('SELECT COUNT(*) AS count FROM scout_reconciliation_evaluations')
+        .get() as { count: number }).count;
+    },
+    async countNotifications() {
+      return (sqlite.prepare('SELECT COUNT(*) AS count FROM notifications')
+        .get() as { count: number }).count;
+    },
+    async listSuggestions() {
+      return (sqlite.prepare(`
+        SELECT id, task_id, status, evidence_hash
+        FROM scout_reconciliation_suggestions ORDER BY id
+      `).all() as { id: string; task_id: string; status: string; evidence_hash: string }[])
+        .map((row) => ({
+          id: row.id,
+          taskId: row.task_id,
+          status: row.status,
+          evidenceHash: row.evidence_hash,
+        }));
+    },
+    async readRunStatus(runId) {
+      const row = sqlite.prepare('SELECT status FROM scout_reconciliation_runs WHERE id = ?')
+        .get(runId) as { status: string } | undefined;
+      return row?.status ?? null;
+    },
+  };
+}
+
+let scoutContractHarness: ScoutPersistenceContractHarness | null = null;
+
+describeScoutIngestionReconciliationContract('SQLite', () => {
+  scoutContractHarness ??= createSqliteScoutContractHarness();
+  return scoutContractHarness;
 });

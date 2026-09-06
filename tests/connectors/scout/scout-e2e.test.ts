@@ -12,81 +12,48 @@
  * - Event emission for real-time UI updates
  *
  * Issue: #1391 [F-10]
+ *
+ * The route now owns no SQLite: `@/db` and `@/db/schema` are poisoned here so
+ * the suite fails loudly if the handler ever reaches back into them, and every
+ * write is observed through the backend-neutral ingestion port.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { FakeScoutIngestion } from '../../contracts/scout-ingestion-reconciliation-persistence.contract';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const insertValuesFn = vi.fn((_values: unknown) => ({
-  run: vi.fn(),
-  onConflictDoNothing: vi.fn(() => ({ run: vi.fn(() => ({ changes: 1 })) })),
-  onConflictDoUpdate: vi.fn(() => ({ run: vi.fn() })),
-}));
-const mockInsert = vi.fn(() => ({ values: insertValuesFn }));
-const updateSetFn = vi.fn((_values: unknown) => ({ where: vi.fn(() => ({ run: vi.fn() })) }));
-const mockUpdate = vi.fn(() => ({ set: updateSetFn }));
-
-function mockSelectChain(results: unknown[]) {
-  const whereResult = Object.assign(results, {
-    all: vi.fn(() => results),
-    get: vi.fn(() => results[0]),
-  });
-  return {
-    from: vi.fn(() => ({
-      where: vi.fn(() => whereResult),
-      all: vi.fn(() => results),
-    })),
-  };
-}
-
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => mockSelectChain([])),
-    insert: mockInsert,
-    update: mockUpdate,
-  },
-  runTransaction: vi.fn((fn: (tx: unknown) => unknown) => fn({
-    select: vi.fn(() => mockSelectChain([])),
-    insert: mockInsert,
-    update: mockUpdate,
-  })),
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: { id: 'id', sourceId: 'source_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', title: 'title', description: 'description', status: 'status', priority: 'priority', dueDate: 'due_date', sourceListId: 'source_list_id', sourceListName: 'source_list_name', metadata: 'metadata', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', createdAt: 'created_at', updatedAt: 'updated_at', depth: 'depth', isChecklistItem: 'is_checklist_item', snoozedUntil: 'snoozed_until' },
-  tags: { id: 'id', name: 'name', slug: 'slug', type: 'type', source: 'source', color: 'color', confirmed: 'confirmed', createdAt: 'created_at' },
-  taskTags: { taskId: 'task_id', tagId: 'tag_id' },
-  taskProjects: { taskId: 'task_id', projectId: 'project_id' },
-  taskFieldStates: { taskId: 'task_id', fieldName: 'field_name' },
-  taskIngestSuppressions: { connectorInstanceId: 'suppression_connector_instance_id', sourceId: 'suppression_source_id' },
-  sourceLists: { id: 'id', connectorInstanceId: 'connector_instance_id', sourceId: 'source_id', name: 'name', type: 'type', taskCount: 'task_count', lastSyncedAt: 'last_synced_at', sortOrder: 'sort_order', hidden: 'hidden' },
-  taskLinkedSources: { id: 'id', taskId: 'task_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', sourceId: 'source_id', title: 'title', linkedAt: 'linked_at', matchConfidence: 'match_confidence', metadata: 'metadata' },
-  connectorConfigs: { id: 'id', enabled: 'enabled', settings: 'settings' },
-  triageItems: { id: 'id', sourcePlatform: 'source_platform', sourceId: 'source_id', status: 'status' },
-  hubProjects: { id: 'id' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((...args: unknown[]) => ({ op: 'eq', args })),
-  and: vi.fn((...args: unknown[]) => ({ op: 'and', args })),
-  ne: vi.fn((...args: unknown[]) => ({ op: 'ne', args })),
-  inArray: vi.fn((...args: unknown[]) => ({ op: 'inArray', args })),
-  notInArray: vi.fn((...args: unknown[]) => ({ op: 'notInArray', args })),
-}));
+vi.mock('@/db', () => {
+  throw new Error('SQLite database module must not be evaluated');
+});
+vi.mock('@/db/schema', () => {
+  throw new Error('SQLite schema module must not be evaluated');
+});
 
 vi.mock('@/lib/dedup', () => ({
   findFuzzyMatches: vi.fn(() => []),
   isAutoLinkMatch: vi.fn(() => false),
 }));
 
-const mockEmitEvent = vi.fn();
+const mockEmitEvent = vi.fn(async () => undefined);
 vi.mock('@/lib/events', () => ({
   emitEvent: mockEmitEvent,
 }));
 
+vi.mock('@/lib/semantic-index/publication', () => ({
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
+}));
+
 vi.mock('@/lib/logger', () => ({
   default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+const workerRepositories = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => workerRepositories.current,
 }));
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────
@@ -169,33 +136,18 @@ function meetingActionItem(overrides: Record<string, unknown> = {}) {
   };
 }
 
-const directConnectorConfig = {
-  id: 'scout-primary',
-  enabled: true,
-  settings: {
-    landingMode: 'direct',
-    allowedSourceTypes: ['email', 'teams', 'meeting', 'planner', 'cross-source'],
-    hybridConfidenceThreshold: 0.8,
-    autoProjectId: null,
-  },
-};
-
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('Scout E2E: Full push flow', () => {
   let POST: (request: Request) => Promise<Response>;
-  let db: { select: ReturnType<typeof vi.fn> };
+  let ingestion: FakeScoutIngestion;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-
-    const dbMod = await import('@/db');
-    db = dbMod.default as unknown as { select: ReturnType<typeof vi.fn> };
-    let selectCall = 0;
-    db.select.mockImplementation(() => {
-      selectCall++;
-      return mockSelectChain(selectCall === 1 ? [directConnectorConfig] : []);
-    });
+    ingestion = new FakeScoutIngestion();
+    workerRepositories.current = {
+      scoutIngestionReconciliation: { ingestion },
+    };
 
     const mod = await import('@/app/api/scout/ingest/route');
     POST = mod.POST;
@@ -222,33 +174,19 @@ describe('Scout E2E: Full push flow', () => {
     it('creates tasks with correct connector provenance', async () => {
       await POST(makeRequest({ items: [emailActionItem()] }));
 
-      // Find the task insert call
-      const taskInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown>;
-        return val.connectorType === 'scout';
-      });
-
-      expect(taskInsert).toBeTruthy();
-      const taskData = taskInsert![0] as Record<string, unknown>;
+      expect(ingestion.creations).toHaveLength(1);
+      const taskData = ingestion.creations[0];
       expect(taskData.connectorType).toBe('scout');
       expect(taskData.connectorInstanceId).toBe('scout-primary');
       expect(taskData.sourceId).toBe('scout:email:AAMkAGNiY2I3ZjRiLTZjNzgtNGFkMi1hMDQ3');
       expect(taskData.status).toBe('todo');
-      expect(taskData.syncStatus).toBe('synced');
     });
 
     it('preserves Scout context in task metadata', async () => {
       await POST(makeRequest({ items: [emailActionItem()] }));
 
-      const taskInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown>;
-        return val.connectorType === 'scout' && typeof val.metadata === 'string';
-      });
-
-      expect(taskInsert).toBeTruthy();
-      const metadata = JSON.parse(
-        (taskInsert![0] as Record<string, unknown>).metadata as string,
-      );
+      expect(ingestion.creations).toHaveLength(1);
+      const metadata = JSON.parse(ingestion.creations[0].metadata);
       expect(metadata.sourceType).toBe('email');
       expect(metadata.scoutContext).toBeDefined();
       expect(metadata.scoutContext.confidence).toBe(0.92);
@@ -260,13 +198,8 @@ describe('Scout E2E: Full push flow', () => {
     it('assigns source list based on sourceType', async () => {
       await POST(makeRequest({ items: [emailActionItem()] }));
 
-      const taskInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown>;
-        return val.connectorType === 'scout';
-      });
-
-      expect(taskInsert).toBeTruthy();
-      const taskData = taskInsert![0] as Record<string, unknown>;
+      expect(ingestion.creations).toHaveLength(1);
+      const taskData = ingestion.creations[0];
       expect(taskData.sourceListId).toBe('scout:email-actions');
       expect(taskData.sourceListName).toBe('Email Actions');
     });
@@ -274,34 +207,21 @@ describe('Scout E2E: Full push flow', () => {
     it('resolves and assigns suggested tags', async () => {
       await POST(makeRequest({ items: [emailActionItem()] }));
 
-      // Should have insert calls for tags and taskTags
-      const tagInserts = insertValuesFn.mock.calls.filter((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown> | Record<string, unknown>[];
-        return Array.isArray(val)
-          ? val.some((entry) => entry.slug !== undefined)
-          : val.slug !== undefined;
-      });
-      expect(tagInserts.length).toBeGreaterThan(0);
+      expect(ingestion.creations).toHaveLength(1);
+      expect(ingestion.creations[0].tags.length).toBeGreaterThan(0);
+      expect(ingestion.creations[0].tags.map((tag) => tag.slug)).toEqual(
+        expect.arrayContaining(['work', 'urgent-reply', 'q3-planning']),
+      );
     });
 
     it('assigns suggested project when provided', async () => {
-      let selectCall = 0;
-      db.select.mockImplementation(() => {
-        selectCall++;
-        if (selectCall === 1) return mockSelectChain([directConnectorConfig]);
-        if (selectCall === 6) return mockSelectChain([{ id: 'proj-scout-integration' }]);
-        return mockSelectChain([]);
-      });
+      ingestion.projects.add('proj-scout-integration');
 
       await POST(makeRequest({ items: [meetingActionItem()] }));
 
-      // Should have a taskProjects insert
-      const projectInserts = insertValuesFn.mock.calls.filter((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown>;
-        return val.projectId !== undefined;
-      });
       // meetingActionItem has suggestedProjectId
-      expect(projectInserts.length).toBeGreaterThanOrEqual(1);
+      expect(ingestion.creations).toHaveLength(1);
+      expect(ingestion.creations[0].projectId).toBe('proj-scout-integration');
     });
 
     it('emits task.created events for real-time UI updates', async () => {
@@ -322,11 +242,10 @@ describe('Scout E2E: Full push flow', () => {
       const priorities = ['critical', 'high', 'medium', 'low', 'none'] as const;
       for (const priority of priorities) {
         vi.clearAllMocks();
-        let selectCall = 0;
-        db.select.mockImplementation(() => {
-          selectCall++;
-          return mockSelectChain(selectCall === 1 ? [directConnectorConfig] : []);
-        });
+        ingestion = new FakeScoutIngestion();
+        workerRepositories.current = {
+          scoutIngestionReconciliation: { ingestion },
+        };
 
         const res = await POST(makeRequest({
           items: [emailActionItem({ sourceId: `scout:email:priority-${priority}`, priority })],
@@ -403,12 +322,10 @@ describe('Scout E2E: Full push flow', () => {
       const json = await res.json();
       expect(json.created).toBe(1);
 
-      const taskInsert = insertValuesFn.mock.calls.find((call: unknown[]) => {
-        const val = call[0] as Record<string, unknown>;
-        return val.connectorType === 'scout' && val.sourceId === 'scout:planner:task-abc-123';
-      });
-      expect(taskInsert).toBeTruthy();
-      expect((taskInsert![0] as Record<string, unknown>).sourceListId).toBe('scout:planner-sync');
+      expect(ingestion.creations).toHaveLength(1);
+      const taskData = ingestion.creations[0];
+      expect(taskData.sourceId).toBe('scout:planner:task-abc-123');
+      expect(taskData.sourceListId).toBe('scout:planner-sync');
     });
   });
 

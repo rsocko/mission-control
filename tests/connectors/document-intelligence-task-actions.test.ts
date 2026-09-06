@@ -9,16 +9,19 @@ const {
   fetchActionTask,
   snoozeAction,
   submitActionFeedback,
-  updateSet,
+  applyTaskWrite,
 } = vi.hoisted(() => ({
   currentTask: {
     id: 'task-1',
     sourceId: 'owl-action-1',
     connectorType: 'document-intelligence',
     connectorInstanceId: 'owl-1',
+    title: 'Pay: Acme',
+    description: null as string | null,
     status: 'todo',
     statusReason: null as string | null,
     priority: 'high',
+    dueDate: null as string | null,
     snoozedUntil: null as string | null,
     completedAt: null as string | null,
     metadata: { actionType: 'pay', urgency: 'high', amount: 50 } as Record<string, unknown>,
@@ -30,26 +33,23 @@ const {
   fetchActionTask: vi.fn(),
   snoozeAction: vi.fn(),
   submitActionFeedback: vi.fn(),
-  updateSet: vi.fn(),
+  applyTaskWrite: vi.fn(),
 }));
 
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => [currentTask]),
-        })),
-      })),
-    })),
-    update: vi.fn(() => ({
-      set: updateSet.mockImplementation(() => ({ where: vi.fn(async () => undefined) })),
-    })),
-  },
+vi.mock('@/db', () => {
+  throw new Error('SQLite database module must not be evaluated');
+});
+vi.mock('@/db/schema', () => {
+  throw new Error('SQLite schema module must not be evaluated');
+});
+vi.mock('@/lib/triage/persistence', () => ({
+  getTriagePersistenceRepositories: () => ({
+    documentTaskActions: {
+      getTask: async () => ({ ...currentTask }),
+      applyTaskWrite,
+    },
+  }),
 }));
-
-vi.mock('@/db/schema', () => ({ tasks: { id: 'id' } }));
-vi.mock('drizzle-orm', () => ({ eq: vi.fn((...args: unknown[]) => args) }));
 vi.mock('@/lib/connectors', () => ({
   connectorRegistry: { getConnector },
 }));
@@ -62,6 +62,34 @@ import {
   performOwlTaskAction,
 } from '@/lib/connectors/document-intelligence/task-actions';
 
+/**
+ * The persistence port speaks physical column names; this projects one write
+ * back into the model-shaped object the behavioural assertions read.
+ */
+const COLUMN_KEYS: Record<string, string> = {
+  status: 'status',
+  status_reason: 'statusReason',
+  snoozed_until: 'snoozedUntil',
+  completed_at: 'completedAt',
+  priority: 'priority',
+  title: 'title',
+  description: 'description',
+  due_date: 'dueDate',
+};
+
+function writes(): Record<string, unknown>[] {
+  return applyTaskWrite.mock.calls.map(([input]) => ({
+    ...Object.fromEntries(
+      Object.entries(input.columns as Record<string, unknown>)
+        .map(([column, value]) => [COLUMN_KEYS[column] ?? column, value]),
+    ),
+    metadata: JSON.parse(input.metadata as string) as Record<string, unknown>,
+    syncStatus: input.syncStatus,
+    updatedAt: input.updatedAt,
+    expectedIdentity: input.expectedIdentity,
+  }));
+}
+
 describe('OWL task action service', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -72,6 +100,10 @@ describe('OWL task action service', () => {
     currentTask.snoozedUntil = null;
     currentTask.completedAt = null;
     currentTask.metadata = { actionType: 'pay', urgency: 'high', amount: 50 };
+    applyTaskWrite.mockImplementation(async () => ({
+      kind: 'applied',
+      task: { ...currentTask },
+    }));
     getConnector.mockReturnValue({
       type: 'document-intelligence',
       completeTask,
@@ -126,8 +158,9 @@ describe('OWL task action service', () => {
     const result = await performOwlTaskAction('task-1', { action: 'snooze', until });
 
     expect(snoozeAction).toHaveBeenCalledWith('owl-action-1', until);
-    expect(snoozeAction.mock.invocationCallOrder[0]).toBeLessThan(updateSet.mock.invocationCallOrder[0]);
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
+    expect(snoozeAction.mock.invocationCallOrder[0])
+      .toBeLessThan(applyTaskWrite.mock.invocationCallOrder[0]);
+    expect(writes()[0]).toEqual(expect.objectContaining({
       status: 'todo',
       snoozedUntil: until,
       syncStatus: 'synced',
@@ -139,6 +172,26 @@ describe('OWL task action service', () => {
     expect(result.snoozedUntil).toBe(until);
   });
 
+  it('fences the local write on the task identity observed before the remote call', async () => {
+    const until = new Date(Date.now() + 86_400_000).toISOString();
+
+    await performOwlTaskAction('task-1', { action: 'snooze', until });
+
+    expect(writes()[0].expectedIdentity).toEqual({
+      connectorType: 'document-intelligence',
+      connectorInstanceId: 'owl-1',
+      sourceId: 'owl-action-1',
+    });
+  });
+
+  it('reports task-identity drift as a conflict instead of writing local state', async () => {
+    applyTaskWrite.mockResolvedValueOnce({ kind: 'identity-changed' });
+
+    await expect(performOwlTaskAction('task-1', { action: 'complete' }))
+      .rejects.toMatchObject({ code: 'TASK_CHANGED', status: 409 });
+    expect(completeTask).toHaveBeenCalledWith('owl-action-1');
+  });
+
   it('does not record success locally when OWL rejects the action', async () => {
     submitActionFeedback.mockRejectedValue(new Error('Paperless mutation failed'));
 
@@ -148,7 +201,7 @@ describe('OWL task action service', () => {
         status: 502,
         message: 'Paperless mutation failed',
       });
-    expect(updateSet).not.toHaveBeenCalled();
+    expect(applyTaskWrite).not.toHaveBeenCalled();
   });
 
   it('maps no-action and extraction corrections to OWL feedback', async () => {
@@ -179,14 +232,14 @@ describe('OWL task action service', () => {
       'owl-action-1',
       { feedback_type: 'wrong_amount', corrected_amount: 125.5 },
     );
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
+    const recorded = writes();
+    expect(recorded[0]).toEqual(expect.objectContaining({
       status: 'cancelled',
       statusReason: 'not_planned',
     }));
-    const noActionUpdate = updateSet.mock.calls[0]?.[0];
-    expect(noActionUpdate.metadata).not.toHaveProperty('actionType');
-    expect(noActionUpdate.metadata).not.toHaveProperty('amount');
-    expect(updateSet.mock.calls.at(-1)?.[0]).toEqual(expect.objectContaining({
+    expect(recorded[0].metadata).not.toHaveProperty('actionType');
+    expect(recorded[0].metadata).not.toHaveProperty('amount');
+    expect(recorded.at(-1)).toEqual(expect.objectContaining({
       title: 'Pay: Acme',
       dueDate: '2026-08-30',
       metadata: expect.objectContaining({
@@ -201,7 +254,7 @@ describe('OWL task action service', () => {
 
     expect(completeTask).toHaveBeenCalledWith('owl-action-1');
     expect(result.status).toBe('done');
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
+    expect(writes()[0]).toEqual(expect.objectContaining({
       status: 'done',
       statusReason: 'completed',
     }));
@@ -247,7 +300,7 @@ describe('OWL task action service', () => {
       description: 'Filed',
       dueDate: null,
     });
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
+    expect(writes()[0]).toEqual(expect.objectContaining({
       status: 'done',
       title: 'File: Invoice',
       metadata: expect.objectContaining({ sourceActions: [] }),
@@ -267,7 +320,7 @@ describe('OWL task action service', () => {
       value: 75,
     });
 
-    const update = updateSet.mock.calls.at(-1)?.[0];
+    const update = writes().at(-1)!;
     expect(update).toEqual(expect.objectContaining({
       metadata: expect.objectContaining({ amount: 75 }),
       syncStatus: 'synced',
@@ -309,6 +362,6 @@ describe('OWL task action service', () => {
     await expect(performOwlTaskAction('task-1', { action: 'not_an_action' }))
       .rejects.toMatchObject({ code: 'NOT_OWL', status: 400 });
     expect(getConnector).not.toHaveBeenCalled();
-    expect(updateSet).not.toHaveBeenCalled();
+    expect(applyTaskWrite).not.toHaveBeenCalled();
   });
 });

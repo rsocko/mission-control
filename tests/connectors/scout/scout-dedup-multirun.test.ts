@@ -10,85 +10,29 @@
  * - Mixed batches (new + existing + changed) produce correct counts
  *
  * Issue: #1394 [F-11]
+ *
+ * The route now owns no SQLite: `@/db` and `@/db/schema` are poisoned here so
+ * the suite fails loudly if the handler ever reaches back into them, and every
+ * write is observed through the backend-neutral ingestion port. Because the
+ * fake ingestion port is genuinely stateful (unlike the old ad-hoc drizzle
+ * mocks), sequential pushes within a test naturally observe each other's
+ * writes — matching how a real SQLite/PostgreSQL backend behaves.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import {
+  FakeScoutIngestion,
+  type FakeTask,
+} from '../../contracts/scout-ingestion-reconciliation-persistence.contract';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const insertValuesFn = vi.fn(() => ({
-  run: vi.fn(),
-  onConflictDoNothing: vi.fn(() => ({ run: vi.fn(() => ({ changes: 1 })) })),
-  onConflictDoUpdate: vi.fn(() => ({ run: vi.fn() })),
-}));
-const mockInsert = vi.fn(() => ({ values: insertValuesFn }));
-const updateSetFn = vi.fn(() => ({ where: vi.fn(() => ({ run: vi.fn() })) }));
-const mockUpdate = vi.fn(() => ({ set: updateSetFn }));
-let mockTransactionTask: Record<string, unknown> | null = null;
-
-function mockSelectChain(results: unknown[]) {
-  const candidate = results[0];
-  if (
-    typeof candidate === 'object'
-    && candidate !== null
-    && 'title' in candidate
-    && 'status' in candidate
-    && 'metadata' in candidate
-  ) {
-    mockTransactionTask = candidate as Record<string, unknown>;
-  }
-  const whereResult = Object.assign(results, {
-    all: vi.fn(() => results),
-    get: vi.fn(() => results[0]),
-  });
-  return {
-    from: vi.fn(() => ({
-      where: vi.fn(() => whereResult),
-      all: vi.fn(() => results),
-    })),
-  };
-}
-
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => mockSelectChain([])),
-    insert: mockInsert,
-    update: mockUpdate,
-  },
-  runTransaction: vi.fn((fn: (tx: unknown) => unknown) => {
-    return fn({
-      select: vi.fn((selection?: Record<string, unknown>) => (
-        selection?.status && mockTransactionTask
-          ? mockSelectChain([mockTransactionTask])
-          : mockSelectChain([])
-      )),
-      insert: mockInsert,
-      update: mockUpdate,
-    });
-  }),
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: { id: 'id', sourceId: 'source_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', title: 'title', description: 'description', status: 'status', priority: 'priority', dueDate: 'due_date', sourceListId: 'source_list_id', sourceListName: 'source_list_name', metadata: 'metadata', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', createdAt: 'created_at', updatedAt: 'updated_at', depth: 'depth', isChecklistItem: 'is_checklist_item', snoozedUntil: 'snoozed_until' },
-  tags: { id: 'id', name: 'name', slug: 'slug', type: 'type', source: 'source', color: 'color', confirmed: 'confirmed', createdAt: 'created_at' },
-  taskTags: { taskId: 'task_id', tagId: 'tag_id' },
-  taskProjects: { taskId: 'task_id', projectId: 'project_id' },
-  taskFieldStates: { taskId: 'task_id', fieldName: 'field_name' },
-  taskIngestSuppressions: { connectorInstanceId: 'suppression_connector_instance_id', sourceId: 'suppression_source_id' },
-  sourceLists: { id: 'id', connectorInstanceId: 'connector_instance_id', sourceId: 'source_id', name: 'name', type: 'type', taskCount: 'task_count', lastSyncedAt: 'last_synced_at', sortOrder: 'sort_order', hidden: 'hidden' },
-  taskLinkedSources: { id: 'id', taskId: 'task_id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', sourceId: 'source_id', title: 'title', linkedAt: 'linked_at', matchConfidence: 'match_confidence', metadata: 'metadata' },
-  connectorConfigs: { id: 'id', enabled: 'enabled', settings: 'settings' },
-  triageItems: { id: 'id', sourcePlatform: 'source_platform', sourceId: 'source_id', status: 'status' },
-  hubProjects: { id: 'id' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((...args: unknown[]) => ({ op: 'eq', args })),
-  and: vi.fn((...args: unknown[]) => ({ op: 'and', args })),
-  ne: vi.fn((...args: unknown[]) => ({ op: 'ne', args })),
-  inArray: vi.fn((...args: unknown[]) => ({ op: 'inArray', args })),
-  notInArray: vi.fn((...args: unknown[]) => ({ op: 'notInArray', args })),
-}));
+vi.mock('@/db', () => {
+  throw new Error('SQLite database module must not be evaluated');
+});
+vi.mock('@/db/schema', () => {
+  throw new Error('SQLite schema module must not be evaluated');
+});
 
 vi.mock('@/lib/dedup', () => ({
   findFuzzyMatches: vi.fn(() => []),
@@ -96,11 +40,23 @@ vi.mock('@/lib/dedup', () => ({
 }));
 
 vi.mock('@/lib/events', () => ({
-  emitEvent: vi.fn(),
+  emitEvent: vi.fn(async () => undefined),
+}));
+
+vi.mock('@/lib/semantic-index/publication', () => ({
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
 }));
 
 vi.mock('@/lib/logger', () => ({
   default: { info: vi.fn(), error: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+}));
+
+const workerRepositories = vi.hoisted(() => ({
+  current: null as unknown,
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => workerRepositories.current,
 }));
 
 // ─── Test Helpers ───────────────────────────────────────────────────────────
@@ -131,16 +87,16 @@ function baseItem(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function expectedMetadata() {
-  const item = baseItem();
+function expectedMetadata(item = baseItem()) {
+  const context = item.context as Record<string, unknown>;
   return JSON.stringify({
     sourceType: item.sourceType,
     scoutContext: {
       confidence: item.confidence,
-      reasoning: item.context.reasoning,
-      from: item.context.from,
-      sourceSubject: item.context.sourceSubject,
-      extractedAt: item.context.extractedAt,
+      reasoning: context.reasoning,
+      from: context.from,
+      sourceSubject: context.sourceSubject,
+      extractedAt: context.extractedAt,
       originalSource: null,
       relatedSourceIds: [],
     },
@@ -148,19 +104,36 @@ function expectedMetadata() {
   });
 }
 
+/** Seeds a pre-existing task as if created by an earlier Scout run. */
+function seedExistingTask(
+  ingestion: FakeScoutIngestion,
+  overrides: Partial<FakeTask> & { id: string; sourceId: string },
+): void {
+  ingestion.tasks.set(overrides.id, {
+    connectorType: 'scout',
+    title: 'Follow up on Q3 budget review',
+    description: 'Finance team needs updated numbers by Thursday',
+    priority: 'medium',
+    dueDate: null,
+    metadata: expectedMetadata(),
+    status: 'todo',
+    snoozedUntil: null,
+    ...overrides,
+  });
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('Scout Multi-Run Deduplication', () => {
   let POST: (request: Request) => Promise<Response>;
-  let db: { select: ReturnType<typeof vi.fn> };
+  let ingestion: FakeScoutIngestion;
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    mockTransactionTask = null;
-
-    const dbMod = await import('@/db');
-    db = dbMod.default as unknown as { select: ReturnType<typeof vi.fn> };
-    db.select.mockImplementation(() => mockSelectChain([]));
+    ingestion = new FakeScoutIngestion();
+    workerRepositories.current = {
+      scoutIngestionReconciliation: { ingestion },
+    };
 
     const mod = await import('@/app/api/scout/ingest/route');
     POST = mod.POST;
@@ -173,32 +146,10 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(res1.status).toBe(200);
       const json1 = await res1.json();
       expect(json1.created).toBe(1);
+      const taskId = json1.items[0].mcTaskId as string;
 
-      // Run 2: same item exists in DB, unchanged
-      db.select.mockImplementation(() => {
-        return mockSelectChain([]);
-      });
-
-      // For Run 2, simulate the task existing by mocking the select to
-      // return the existing task on the dedup check
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        // Third select call: task dedup check (after candidates fetch + source list)
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing-001',
-            title: 'Follow up on Q3 budget review',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
-
+      // Run 2: same item, unchanged — the fake ingestion port persists the
+      // task created in Run 1, so the dedup lookup finds it for real.
       const res2 = await POST(makeRequest({ items: [baseItem()] }));
       expect(res2.status).toBe(200);
       const json2 = await res2.json();
@@ -208,27 +159,16 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(json2.updated).toBe(0);
       expect(json2.items[0].action).toBe('skipped');
       expect(json2.items[0].reason).toBe('unchanged');
-      expect(json2.items[0].mcTaskId).toBe('tsk-existing-001');
+      expect(json2.items[0].mcTaskId).toBe(taskId);
     });
   });
 
   describe('Run 1 → Run 2: changed content triggers update', () => {
     it('updates when title changes between runs', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing-002',
-            title: 'Follow up on Q3 budget review',  // original title
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-existing-002',
+        sourceId: 'scout:email:dedup-test-001',
+        title: 'Follow up on Q3 budget review', // original title
       });
 
       // Push with changed title
@@ -244,25 +184,17 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(json.skipped).toBe(0);
       expect(json.items[0].action).toBe('updated');
       expect(json.items[0].mcTaskId).toBe('tsk-existing-002');
-      expect(mockUpdate).toHaveBeenCalled();
+      expect(ingestion.mergeWrites).toHaveLength(1);
+      expect(ingestion.mergeWrites[0].taskWrite).toMatchObject({
+        rendered: { title: 'URGENT: Follow up on Q3 budget review — CFO escalated' },
+      });
     });
 
     it('updates when priority changes between runs', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing-003',
-            title: 'Follow up on Q3 budget review',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',  // original priority
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-existing-003',
+        sourceId: 'scout:email:dedup-test-001',
+        priority: 'medium', // original priority
       });
 
       // Push with escalated priority
@@ -272,24 +204,15 @@ describe('Scout Multi-Run Deduplication', () => {
 
       expect(json.updated).toBe(1);
       expect(json.items[0].action).toBe('updated');
+      expect(ingestion.mergeWrites[0].taskWrite).toMatchObject({
+        rendered: { priority: 'critical' },
+      });
     });
 
     it('updates when description changes between runs', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing-004',
-            title: 'Follow up on Q3 budget review',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-existing-004',
+        sourceId: 'scout:email:dedup-test-001',
       });
 
       const res = await POST(makeRequest({
@@ -302,24 +225,18 @@ describe('Scout Multi-Run Deduplication', () => {
 
       expect(json.updated).toBe(1);
       expect(json.items[0].action).toBe('updated');
+      expect(ingestion.mergeWrites[0].taskWrite).toMatchObject({
+        rendered: {
+          description: 'Finance team needs updated numbers by Thursday. CFO sent a follow-up asking for breakdown by department.',
+        },
+      });
     });
 
     it('updates when dueDate is added on subsequent run', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-existing-005',
-            title: 'Follow up on Q3 budget review',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,  // no due date originally
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-existing-005',
+        sourceId: 'scout:email:dedup-test-001',
+        dueDate: null, // no due date originally
       });
 
       const res = await POST(makeRequest({
@@ -330,26 +247,18 @@ describe('Scout Multi-Run Deduplication', () => {
 
       expect(json.updated).toBe(1);
       expect(json.items[0].action).toBe('updated');
+      expect(ingestion.mergeWrites[0].taskWrite).toMatchObject({
+        rendered: { dueDate: '2026-07-31' },
+      });
     });
   });
 
   describe('closed tasks are protected', () => {
     it('skips update for tasks with status "done"', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-done-001',
-            title: 'Follow up on Q3 budget review',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'done',
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-done-001',
+        sourceId: 'scout:email:dedup-test-001',
+        status: 'done',
       });
 
       const res = await POST(makeRequest({
@@ -362,32 +271,18 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(json.updated).toBe(0);
       expect(json.items[0].action).toBe('suppressed');
       expect(json.items[0].reason).toBe('task_closed');
-      // but the task itself should NOT be updated — verify via updateSetFn
-      // not being called with task fields (title, description, etc.)
-      const taskUpdateCalls = updateSetFn.mock.calls.filter((call: unknown[]) => {
-        const setObj = call[0] as Record<string, unknown>;
-        return setObj.title !== undefined;
-      });
-      expect(taskUpdateCalls).toHaveLength(0);
+      // the task itself should NOT be updated
+      expect(ingestion.mergeWrites).toEqual([]);
+      expect(ingestion.tasks.get('tsk-done-001')?.title).toBe('Follow up on Q3 budget review');
     });
 
     it('skips update for tasks with status "cancelled"', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-cancelled-001',
-            title: 'Follow up on Q3 budget review',
-            description: null,
-            priority: 'none',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'cancelled',
-            snoozedUntil: null,
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-cancelled-001',
+        sourceId: 'scout:email:dedup-test-001',
+        description: null,
+        priority: 'none',
+        status: 'cancelled',
       });
 
       const res = await POST(makeRequest({ items: [baseItem()] }));
@@ -397,26 +292,15 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(json.skipped).toBe(1);
       expect(json.items[0].action).toBe('suppressed');
       expect(json.items[0].reason).toBe('task_closed');
+      expect(ingestion.mergeWrites).toEqual([]);
     });
 
     it('skips update for snoozed tasks (snooze not yet expired)', async () => {
       const futureDate = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-snoozed-001',
-            title: 'Follow up on Q3 budget review',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-            snoozedUntil: futureDate,
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-snoozed-001',
+        sourceId: 'scout:email:dedup-test-001',
+        snoozedUntil: futureDate,
       });
 
       const res = await POST(makeRequest({
@@ -430,26 +314,18 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(json.updated).toBe(0);
       expect(json.items[0].action).toBe('suppressed');
       expect(json.items[0].reason).toBe('snoozed');
+      expect(ingestion.mergeWrites).toEqual([]);
     });
 
     it('allows update for tasks with expired snooze', async () => {
       const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-expired-snooze-001',
-            title: 'Old title',
-            description: 'Old description',
-            priority: 'low',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-            snoozedUntil: pastDate,
-          }]);
-        }
-        return mockSelectChain([]);
+      seedExistingTask(ingestion, {
+        id: 'tsk-expired-snooze-001',
+        sourceId: 'scout:email:dedup-test-001',
+        title: 'Old title',
+        description: 'Old description',
+        priority: 'low',
+        snoozedUntil: pastDate,
       });
 
       const res = await POST(makeRequest({ items: [baseItem()] }));
@@ -463,50 +339,33 @@ describe('Scout Multi-Run Deduplication', () => {
 
   describe('mixed batches across runs', () => {
     it('handles a batch with new, unchanged, changed, and closed items', async () => {
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-
-        // Call 1: connector settings, call 2: batch-level candidates.
-
-        // Item 1: task check (3), triage check (4), then source-list check (5).
-
-        if (selectCallCount === 5) return mockSelectChain([{ id: 'sl-scout-email' }]);
-
-        // Item 2: task check (6) returns existing, unchanged.
-        if (selectCallCount === 6) return mockSelectChain([{
-          id: 'tsk-unchanged',
+      seedExistingTask(ingestion, {
+        id: 'tsk-unchanged',
+        sourceId: 'scout:email:unchanged-001',
+        title: 'Existing unchanged task',
+        description: 'Same description',
+        priority: 'low',
+        metadata: expectedMetadata(baseItem({
+          sourceId: 'scout:email:unchanged-001',
           title: 'Existing unchanged task',
           description: 'Same description',
           priority: 'low',
-          dueDate: null,
-          metadata: expectedMetadata(),
-          status: 'todo',
-        }]);
-
-        // Item 3: task check (7) returns existing, changed.
-        if (selectCallCount === 7) return mockSelectChain([{
-          id: 'tsk-changed',
-          title: 'Old title',
-          description: 'Old description',
-          priority: 'low',
-          dueDate: null,
-          metadata: expectedMetadata(),
-          status: 'todo',
-        }]);
-
-        // Item 4: task check (8) returns existing, done.
-        if (selectCallCount === 8) return mockSelectChain([{
-          id: 'tsk-closed',
-          title: 'Closed task',
-          description: null,
-          priority: 'none',
-          dueDate: null,
-          metadata: expectedMetadata(),
-          status: 'done',
-        }]);
-
-        return mockSelectChain([]);
+        })),
+      });
+      seedExistingTask(ingestion, {
+        id: 'tsk-changed',
+        sourceId: 'scout:email:changed-001',
+        title: 'Old title',
+        description: 'Old description',
+        priority: 'low',
+      });
+      seedExistingTask(ingestion, {
+        id: 'tsk-closed',
+        sourceId: 'scout:email:closed-001',
+        title: 'Closed task',
+        description: null,
+        priority: 'none',
+        status: 'done',
       });
 
       const items = [
@@ -542,11 +401,13 @@ describe('Scout Multi-Run Deduplication', () => {
   });
 
   describe('duplicate sourceIds within same batch', () => {
-    it('processes both items since intra-batch dedup is not enforced (server-side)', async () => {
+    it('has the second item observe the first item\'s write since intra-batch dedup is not client-tracked', async () => {
       // Intra-batch dedup is handled by Scout's pre-push logic (mc_search_tasks),
-      // not by the ingest endpoint. The endpoint processes items sequentially and
-      // each item's DB lookup runs independently. With no stateful in-memory tracking,
-      // both items will be created. This test documents that behavior.
+      // not by the ingest endpoint. The endpoint processes items sequentially,
+      // and each item's dedup lookup runs against the shared, stateful
+      // ingestion port — just like a real SQLite/PostgreSQL backend, the
+      // second item's lookup observes the first item's just-committed write
+      // and is merged into it rather than creating a duplicate.
       const items = [
         baseItem({ sourceId: 'scout:email:dup-within-batch', title: 'First push' }),
         baseItem({ sourceId: 'scout:email:dup-within-batch', title: 'Second push same ID' }),
@@ -556,9 +417,11 @@ describe('Scout Multi-Run Deduplication', () => {
       expect(res.status).toBe(200);
       const json = await res.json();
       expect(json.total).toBe(2);
-      // Both are created since DB mock returns empty for both dedup checks.
-      // In production, the DB unique constraint on sourceId would prevent true duplicates.
-      expect(json.created).toBe(2);
+      expect(json.created).toBe(1);
+      expect(json.updated).toBe(1);
+      expect(json.items[0].action).toBe('created');
+      expect(json.items[1].action).toBe('updated');
+      expect(json.items[1].mcTaskId).toBe(json.items[0].mcTaskId);
     });
   });
 
@@ -575,25 +438,7 @@ describe('Scout Multi-Run Deduplication', () => {
       const json1 = await res1.json();
       expect(json1.created).toBe(2);
 
-      // Push 2: items B (exists), C (new)
-      let selectCallCount = 0;
-      db.select.mockImplementation(() => {
-        selectCallCount++;
-        // Item B: task check returns existing
-        if (selectCallCount === 3) {
-          return mockSelectChain([{
-            id: 'tsk-rapid-B',
-            title: 'Task B',
-            description: 'Finance team needs updated numbers by Thursday',
-            priority: 'medium',
-            dueDate: null,
-            metadata: expectedMetadata(),
-            status: 'todo',
-          }]);
-        }
-        return mockSelectChain([]);
-      });
-
+      // Push 2: items B (exists, unchanged), C (new)
       const res2 = await POST(makeRequest({
         items: [
           baseItem({ sourceId: 'scout:email:rapid-B', title: 'Task B' }),

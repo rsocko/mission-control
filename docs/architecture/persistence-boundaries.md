@@ -2520,13 +2520,13 @@ The adapters preserve these workflow boundaries:
   route and its SQLite-backed historical query remain outside this layer.
 
 The exact graph moves from
-`266/A57/B5/clean204/direct34/transitive23/directDB36/lib46/helpers0/units103`
+`266/A45/B5/clean216/direct24/transitive21/directDB26/lib45/helpers0/units90`
 to
-`266/A50/B5/clean211/direct32/transitive18/directDB34/lib38/helpers0/units88`.
+`266/A38/B5/clean223/direct22/transitive16/directDB24/lib37/helpers0/units75`.
 All seven routes move from Tier A to clean, all eight libraries leave
 `taintedLibA`, and no route moves to Tier B. The canonical baseline and
 fail-closed sentinel remain the only exact-current graph owners; the layer
-ratchet owns only the path cap, exclusions, cleanliness, and monotonic 88-unit
+ratchet owns only the path cap, exclusions, cleanliness, and monotonic 75-unit
 ceiling.
 
 ## Backend-specific exceptions

@@ -1,8 +1,8 @@
 {
   "schema": "mission-control/tests/architecture/web-persistence-baseline@1",
-  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through task-organization parity, graph/reporting/project-dependency parity, daily-planning/focus web parity, taxonomy/prioritization parity, Scout status-change/ack control-plane parity, daily-completions read-model parity, connector transfer/sync control-plane parity, personal-planning routines parity, settings preference parity, AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
-  "generatedAt": "2026-09-05",
-  "generatedFromCommit": "d88ce11378aa07f7782b165e8612c7f9453e0616+task-organization-parity",
+  "description": "Machine-derived ratchet baseline for the web/API PostgreSQL application-parity migration through notification delivery, Alertmanager, notification actions, re-enrichment, notification triage, and scheduled push parity; task-organization parity, graph/reporting/project-dependency parity, daily-planning/focus web parity, taxonomy/prioritization parity, Scout status-change/ack control-plane parity, daily-completions read-model parity, connector transfer/sync control-plane parity, personal-planning routines parity, settings preference parity, AI search visibility parity, notification push preferences and scheduler parity, task ancillary lifecycle parity, task quick-sort workflow parity, L18 AI execution and memory control-plane persistence, L19 project-organization parity and L20 webhook configuration/delivery/log parity, L12c finance end-user web/API parity, runtime observability parity, merged L09 finance parity, L05 task-read parity, L07 task-write parity, L13 notification-web parity, L14 external-agent parity, L15 project-hierarchy parity, L16 ideation-workspace parity, L17 derived-analytics parity, L11 connector-management parity, L12a connector-domain parity, L12b finance connector/operator parity, L08a triage web persistence, and L08b triage native persistence. Recomputed by computeWebPersistenceGraph (tests/architecture/web-persistence-graph.ts) and consumed as the single authoritative exact-current graph/path allowlist by scripts/postgres-route-sentinel.mjs. Historical decrement metadata is archival evidence only; layer tests own monotonic route, library, and layer-bound invariants and do not reread this file. tierARoutes and tierBRoutes are explicit allowlists for known remaining PostgreSQL gaps, not a claim of complete parity. Later parity layers tighten the sentinel by deliberately updating this canonical baseline to their smaller graph. LEGACY_RAW_SQLITE_IMPORTS and other documented fail-closed exceptions are migration targets counted as taint here, not grandfathered exclusions.",
+  "generatedAt": "2026-09-06",
+  "generatedFromCommit": "e266a8deca21a3c75ff09e610bc05893d9388f04+notification-delivery-web-parity",
   "provenance": {
     "tierAAlgorithm": "Ported line-for-line from the approved planning session file files/tiers.mjs (staticSources/dynamicSources seeded strictly from static-vs-dynamic import kind; Tier A = static-only backward reachability). This is the canonical source for tierARoutes/tierBRoutes/cleanRoutes/taintedLibA/taintedApiHelpers/totalMigrationUnits; it reproduced the plan's committed 266/221/39/6/123/6/350 baseline at introduction and now records only verified ratchet reductions.",
     "directDbNamespaceAlgorithm": "Faithfully ported from the planning session file files/reach2.mjs's directDb check (route file's own resolved, static import edge has an original specifier matching /^@\\/db(\\/|$)/). Reproduces the plan's committed 144 exactly against this commit. This is a structural/namespace metric, independent of Tier A/B membership -- see knownArchivedGeneratorDefect.",
@@ -41,15 +41,15 @@
   },
   "counts": {
     "apiRoutes": 266,
-    "tierARoutes": 45,
+    "tierARoutes": 38,
     "tierBRoutes": 5,
-    "cleanRoutes": 216,
-    "directTaintSourceRoutes": 24,
-    "transitiveOnlyTaintSourceRoutes": 21,
-    "directDbNamespaceRoutes": 26,
-    "taintedLibA": 45,
+    "cleanRoutes": 223,
+    "directTaintSourceRoutes": 22,
+    "transitiveOnlyTaintSourceRoutes": 16,
+    "directDbNamespaceRoutes": 24,
+    "taintedLibA": 37,
     "taintedApiHelpers": 0,
-    "totalMigrationUnits": 90
+    "totalMigrationUnits": 75
   },
   "invariants": [
     "directTaintSourceRoutes.length + transitiveOnlyTaintSourceRoutes.length === tierARoutes.length",
@@ -58,7 +58,8 @@
   ],
   "staticSources": [
     "src/db/bootstrap/connection.ts",
-    "src/db/index.ts"
+    "src/db/index.ts",
+    "src/db/persistence/sqlite-notification-delivery-repository.ts"
   ],
   "dynamicSources": [
     "src/lib/connectors/github-issues/backup-verifier.ts",
@@ -357,15 +358,8 @@
     "src/app/api/goals/route.ts",
     "src/app/api/ideation/convert/route.ts",
     "src/app/api/ideation/expand/route.ts",
-    "src/app/api/integrations/alertmanager/route.ts",
-    "src/app/api/integrations/alertmanager/test/route.ts",
-    "src/app/api/integrations/alertmanager/webhook/route.ts",
-    "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
-    "src/app/api/notifications/re-enrich/route.ts",
-    "src/app/api/notifications/triage/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
-    "src/app/api/push/trigger/route.ts",
     "src/app/api/resets/ai-summary/route.ts",
     "src/app/api/resets/route.ts",
     "src/app/api/resets/stats/route.ts",
@@ -467,6 +461,9 @@
     "src/app/api/inbound-webhooks/[id]/route.ts",
     "src/app/api/inbound-webhooks/route.ts",
     "src/app/api/insights/route.ts",
+    "src/app/api/integrations/alertmanager/route.ts",
+    "src/app/api/integrations/alertmanager/test/route.ts",
+    "src/app/api/integrations/alertmanager/webhook/route.ts",
     "src/app/api/integrations/n8n/route.ts",
     "src/app/api/integrations/n8n/webhook/route.ts",
     "src/app/api/integrations/rymessage/route.ts",
@@ -488,9 +485,12 @@
     "src/app/api/native/push/registrations/[registrationId]/route.ts",
     "src/app/api/native/push/registrations/route.ts",
     "src/app/api/navigation/counts/route.ts",
+    "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
     "src/app/api/notifications/[id]/snooze/route.ts",
     "src/app/api/notifications/bulk/route.ts",
+    "src/app/api/notifications/re-enrich/route.ts",
     "src/app/api/notifications/route.ts",
+    "src/app/api/notifications/triage/route.ts",
     "src/app/api/notifications/views/[id]/route.ts",
     "src/app/api/notifications/views/route.ts",
     "src/app/api/notifications/writebacks/route.ts",
@@ -511,6 +511,7 @@
     "src/app/api/push/preferences/route.ts",
     "src/app/api/push/scheduler/route.ts",
     "src/app/api/push/subscribe/route.ts",
+    "src/app/api/push/trigger/route.ts",
     "src/app/api/push/vapid-key/route.ts",
     "src/app/api/recent-wins/dismiss/route.ts",
     "src/app/api/recent-wins/route.ts",
@@ -619,8 +620,6 @@
     "src/app/api/goals/promote/route.ts",
     "src/app/api/goals/route.ts",
     "src/app/api/ideation/convert/route.ts",
-    "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
-    "src/app/api/notifications/re-enrich/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
     "src/app/api/resets/ai-summary/route.ts",
@@ -642,11 +641,6 @@
     "src/app/api/ai/triage-alerts/route.ts",
     "src/app/api/ai/whats-next/route.ts",
     "src/app/api/ideation/expand/route.ts",
-    "src/app/api/integrations/alertmanager/route.ts",
-    "src/app/api/integrations/alertmanager/test/route.ts",
-    "src/app/api/integrations/alertmanager/webhook/route.ts",
-    "src/app/api/notifications/triage/route.ts",
-    "src/app/api/push/trigger/route.ts",
     "src/app/api/scout/reconcile/route.ts",
     "src/app/api/scout/reconciliation/suggestions/[id]/route.ts",
     "src/app/api/scout/reconciliation/suggestions/route.ts",
@@ -669,8 +663,6 @@
     "src/app/api/goals/promote/route.ts",
     "src/app/api/goals/route.ts",
     "src/app/api/ideation/convert/route.ts",
-    "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
-    "src/app/api/notifications/re-enrich/route.ts",
     "src/app/api/project-phases/ai-refine/route.ts",
     "src/app/api/project-phases/ai-suggest/route.ts",
     "src/app/api/resets/ai-summary/route.ts",
@@ -707,19 +699,11 @@
     "src/lib/ai/tools/reasoning-tools.ts",
     "src/lib/ai/tools/task-tools.ts",
     "src/lib/ai/tools/triage-tools.ts",
-    "src/lib/alertmanager/operations.ts",
-    "src/lib/alertmanager/service.ts",
     "src/lib/connectors/document-intelligence/task-actions.ts",
     "src/lib/connectors/monarch-money/identity-sqlite.ts",
     "src/lib/connectors/scout/reconciliation-service.ts",
     "src/lib/houston-memory/retrieval.ts",
-    "src/lib/notifications/index.ts",
-    "src/lib/notifications/push-policy/resolver.ts",
-    "src/lib/notifications/push-policy/rules.ts",
-    "src/lib/notifications/service.ts",
-    "src/lib/notifications/workflow-executor.ts",
     "src/lib/public-demo-runtime.ts",
-    "src/lib/push/triggers.ts",
     "src/lib/semantic-index/config.ts",
     "src/lib/semantic-index/index.ts",
     "src/lib/semantic-index/runtime.ts",
@@ -731,6 +715,62 @@
   ],
   "taintedApiHelpers": [],
   "decrementHistory": [
+    {
+      "layer": "notification-delivery-web",
+      "title": "notification delivery and Alertmanager PostgreSQL web parity",
+      "totalMigrationUnits": {
+        "from": 90,
+        "to": 75,
+        "delta": -15
+      },
+      "removedTaintedApiHelpers": [],
+      "removedTaintedLibA": [
+        "src/lib/alertmanager/operations.ts",
+        "src/lib/alertmanager/service.ts",
+        "src/lib/notifications/index.ts",
+        "src/lib/notifications/push-policy/resolver.ts",
+        "src/lib/notifications/push-policy/rules.ts",
+        "src/lib/notifications/service.ts",
+        "src/lib/notifications/workflow-executor.ts",
+        "src/lib/push/triggers.ts"
+      ],
+      "removedTierARoutes": [
+        "src/app/api/integrations/alertmanager/route.ts",
+        "src/app/api/integrations/alertmanager/test/route.ts",
+        "src/app/api/integrations/alertmanager/webhook/route.ts",
+        "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
+        "src/app/api/notifications/re-enrich/route.ts",
+        "src/app/api/notifications/triage/route.ts",
+        "src/app/api/push/trigger/route.ts"
+      ],
+      "newlyCleanRoutes": [
+        "src/app/api/integrations/alertmanager/route.ts",
+        "src/app/api/integrations/alertmanager/test/route.ts",
+        "src/app/api/integrations/alertmanager/webhook/route.ts",
+        "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
+        "src/app/api/notifications/re-enrich/route.ts",
+        "src/app/api/notifications/triage/route.ts",
+        "src/app/api/push/trigger/route.ts"
+      ],
+      "removedDirectTaintSourceRoutes": [
+        "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
+        "src/app/api/notifications/re-enrich/route.ts"
+      ],
+      "removedDirectDbNamespaceRoutes": [
+        "src/app/api/notifications/[id]/actions/[actionId]/route.ts",
+        "src/app/api/notifications/re-enrich/route.ts"
+      ],
+      "removedTransitiveOnlyTaintSourceRoutes": [
+        "src/app/api/integrations/alertmanager/route.ts",
+        "src/app/api/integrations/alertmanager/test/route.ts",
+        "src/app/api/integrations/alertmanager/webhook/route.ts",
+        "src/app/api/notifications/triage/route.ts",
+        "src/app/api/push/trigger/route.ts"
+      ],
+      "tierBReclassifications": [],
+      "notMigratedFromTheOwnedFileSet": [],
+      "verification": "Exact computeWebPersistenceGraph recomputation on main e266a8deca21a3c75ff09e610bc05893d9388f04 plus notification-delivery parity moves all seven owned routes from Tier A to clean, removes eight owned libraries from taintedLibA, leaves Tier B unchanged, and produces 266 routes, 38 Tier A, 5 Tier B, 223 clean, 22 direct, 16 transitive-only, 24 direct @/db, 37 tainted libraries, 0 tainted API helpers, and 75 total migration units."
+    },
     {
       "layer": "task-organization",
       "title": "task organization PostgreSQL web parity",
@@ -2019,6 +2059,16 @@
     }
   ],
   "layerUpdates": [
+    {
+      "layer": "notification-delivery-web",
+      "summary": "Web/API PostgreSQL parity: notification delivery, Alertmanager lifecycle/control/audit, notification actions and re-enrichment, notification triage classification, push policy, and scheduled triggers use the selected worker persistence composition.",
+      "changes": [
+        "Seven routes and eight supporting libraries leave Tier A through typed SQLite/PostgreSQL notification-delivery, notification-web, and Alertmanager persistence ports, with no Tier B reclassification or runtime fallback.",
+        "Alertmanager receipt dedupe, stale ordering, action replacement, required audit retry behavior, full push policy suppression, and PostgreSQL rate-limit concurrency serialization are preserved transactionally.",
+        "Workflow claimedAt fencing and downstream idempotency, provider/network I/O ordering, re-enrichment partial results, and scheduled-trigger local-date/high-water dedupe remain behavior-compatible.",
+        "The canonical baseline and fail-closed sentinel remain the sole exact-current graph owners; this layer owns only bounded paths, route/library cleanliness, exclusions, and a monotonic 75-unit ceiling."
+      ]
+    },
     {
       "layer": "connector-transfer-sync-control-plane",
       "summary": "Web/API PostgreSQL parity: cross-account task transfer and sync task-identity resolution use the canonical task-core move and identity repositories.",

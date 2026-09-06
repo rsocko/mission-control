@@ -130,7 +130,7 @@ describe('notification delivery web taint decrement', () => {
     const self = source('tests/architecture/notification-delivery-web-taint-decrement.test.ts');
     expect(self).not.toContain(['web-persistence', 'baseline.json'].join('-'));
     expect(self).not.toContain(['postgres', 'route', 'sentinel'].join('-'));
-    expect(graph.totalMigrationUnits).toBeLessThanOrEqual(88);
+    expect(graph.totalMigrationUnits).toBeLessThanOrEqual(75);
     expect(graph.taintedApiHelpers).toEqual([]);
   });
 });

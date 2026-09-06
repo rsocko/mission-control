@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe } from 'vitest';
+import { afterAll, beforeAll, describe, vi } from 'vitest';
 import type { Pool } from 'pg';
 import type {
   ScoutIngestionReconciliationPersistence,
@@ -12,6 +12,8 @@ import {
   type TriageActionContractHarness,
 } from '../contracts/scout-ingestion-reconciliation-persistence.contract';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
+
+vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 
@@ -34,22 +36,50 @@ describe.skipIf(!connectionString)('PostgreSQL Scout ingestion/reconciliation ad
       persistence,
       async reset() {
         await pool.query(`
-          DELETE FROM scout_reconciliation_suggestions;
-          DELETE FROM scout_reconciliation_evaluations;
-          DELETE FROM scout_reconciliation_task_state;
-          DELETE FROM scout_reconciliation_runs;
-          DELETE FROM notifications;
-          DELETE FROM task_field_states;
-          DELETE FROM task_linked_sources;
-          DELETE FROM task_ingest_suppressions;
-          DELETE FROM task_tags;
-          DELETE FROM task_projects;
-          DELETE FROM triage_items;
-          DELETE FROM tasks;
-          DELETE FROM tags;
-          DELETE FROM source_lists;
-          DELETE FROM hub_projects;
-          DELETE FROM connector_configs;
+          DELETE FROM scout_reconciliation_suggestions
+          WHERE run_id IN ('run-1', 'run-2', 'run-3');
+          DELETE FROM scout_reconciliation_evaluations
+          WHERE run_id IN ('run-1', 'run-2', 'run-3');
+          DELETE FROM scout_reconciliation_task_state
+          WHERE task_id IN (
+            'task-1', 'task-2', 'task-done', 'task-terminal',
+            'scout-open', 'scout-old', 'scout-new'
+          );
+          DELETE FROM scout_reconciliation_runs
+          WHERE id IN ('run-1', 'run-2', 'run-3');
+          DELETE FROM notifications
+          WHERE id = 'notification-1'
+             OR source_id = 'scout-reconciliation:run-1';
+          DELETE FROM task_field_states
+          WHERE task_id IN (
+            'task-1', 'task-2', 'task-done', 'task-terminal',
+            'other-task', 'scout-task-1', 'scout-task-loser',
+            'scout-task-tombstoned', 'scout-open', 'scout-old', 'scout-new'
+          );
+          DELETE FROM task_linked_sources
+          WHERE id IN ('link-1', 'link-2')
+             OR source_id LIKE 'scout:%';
+          DELETE FROM task_ingest_suppressions
+          WHERE connector_instance_id = 'scout-primary';
+          DELETE FROM task_tags
+          WHERE task_id IN ('scout-task-1', 'scout-task-loser');
+          DELETE FROM task_projects
+          WHERE task_id IN (
+            'task-1', 'task-2', 'task-done', 'task-terminal',
+            'scout-task-1', 'scout-task-loser'
+          );
+          DELETE FROM triage_items
+          WHERE id IN ('triage-1', 'triage-open', 'triage-closed');
+          DELETE FROM tasks
+          WHERE id IN (
+            'task-1', 'task-2', 'task-done', 'task-terminal', 'other-task',
+            'scout-task-1', 'scout-task-loser', 'scout-task-tombstoned',
+            'scout-open', 'scout-old', 'scout-new'
+          );
+          DELETE FROM tags WHERE id = 'tag-work';
+          DELETE FROM source_lists WHERE id = 'sl-scout-email';
+          DELETE FROM hub_projects WHERE id = 'project-1';
+          DELETE FROM connector_configs WHERE id = 'scout-primary';
         `);
       },
       async seedConnector(input) {
@@ -160,23 +190,32 @@ describe.skipIf(!connectionString)('PostgreSQL Scout ingestion/reconciliation ad
         return Number(rows[0].count);
       },
       async countLinkedSources() {
-        const { rows } = await pool.query('SELECT COUNT(*) AS count FROM task_linked_sources');
+        const { rows } = await pool.query(`
+          SELECT COUNT(*) AS count FROM task_linked_sources
+          WHERE id IN ('link-1', 'link-2') OR source_id LIKE 'scout:%'
+        `);
         return Number(rows[0].count);
       },
       async countEvaluations() {
         const { rows } = await pool.query(
-          'SELECT COUNT(*) AS count FROM scout_reconciliation_evaluations',
+          `SELECT COUNT(*) AS count FROM scout_reconciliation_evaluations
+           WHERE run_id IN ('run-1', 'run-2', 'run-3')`,
         );
         return Number(rows[0].count);
       },
       async countNotifications() {
-        const { rows } = await pool.query('SELECT COUNT(*) AS count FROM notifications');
+        const { rows } = await pool.query(`
+          SELECT COUNT(*) AS count FROM notifications
+          WHERE id = 'notification-1' OR source_id = 'scout-reconciliation:run-1'
+        `);
         return Number(rows[0].count);
       },
       async listSuggestions() {
         const { rows } = await pool.query(`
           SELECT id, task_id AS "taskId", status, evidence_hash AS "evidenceHash"
-          FROM scout_reconciliation_suggestions ORDER BY id COLLATE "C"
+          FROM scout_reconciliation_suggestions
+          WHERE run_id IN ('run-1', 'run-2', 'run-3')
+          ORDER BY id COLLATE "C"
         `);
         return rows;
       },
@@ -221,9 +260,9 @@ describe.skipIf(!connectionString)('PostgreSQL triage action adapter', () => {
       documentTaskActions: repositories.documentTaskActions,
       async reset() {
         await pool.query(`
-          DELETE FROM triage_action_claims;
-          DELETE FROM triage_items;
-          DELETE FROM tasks;
+          DELETE FROM triage_action_claims WHERE triage_item_id = 'triage-1';
+          DELETE FROM triage_items WHERE id = 'triage-1';
+          DELETE FROM tasks WHERE id = 'owl-task-1';
         `);
       },
       async seedItem(item) {
@@ -282,7 +321,10 @@ describe.skipIf(!connectionString)('PostgreSQL triage action adapter', () => {
         return repositories.actions.getActionSnapshot(id);
       },
       async countClaims() {
-        const { rows } = await pool.query('SELECT COUNT(*) AS count FROM triage_action_claims');
+        const { rows } = await pool.query(`
+          SELECT COUNT(*) AS count FROM triage_action_claims
+          WHERE triage_item_id = 'triage-1'
+        `);
         return Number(rows[0].count);
       },
     };

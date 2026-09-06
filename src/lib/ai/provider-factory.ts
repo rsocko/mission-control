@@ -1,19 +1,24 @@
-import { getAIRoutingPolicy, getResolvedAIConfig } from './config-resolver';
-import { createConfiguredAIProvider } from './provider-client';
 import {
-  createConfiguredAIRequestContext,
   getConfiguredAIRouteOutcome,
   getConfiguredAIRoutingHeaders,
 } from './provider-routing-core';
+import { createConfiguredAIProvider } from './provider-client';
+import {
+  getAsyncAIModel,
+  getAsyncAIProviderConfiguration,
+} from './provider-runtime';
 import type { BifrostRoutingMetadata } from './sensitivity-policy';
 import type {
   AIFeatureId,
   AIRequestContext,
+  ResolvedAIConfig,
   SensitivityClass,
 } from './types';
 import type { AIAdmission } from './admission-controller';
 
 export { AIRoutingDeniedError, resolveAIRouteOutcome } from './sensitivity-policy';
+
+type LegacyAIModelRoute = Awaited<ReturnType<typeof getAsyncAIModel>>;
 
 export function getAIRequestContext(
   featureId: AIFeatureId,
@@ -22,8 +27,11 @@ export function getAIRequestContext(
     sensitivityOverride?: SensitivityClass;
     correlationId?: string;
   } = {},
-) {
-  return createConfiguredAIRequestContext(getAIRoutingPolicy(), featureId, options);
+): AIRequestContext {
+  throw new Error(
+    `Synchronous AI model resolution is unavailable for ${featureId}; `
+    + `use getAsyncAIModel (${Object.keys(options).length} options supplied)`,
+  );
 }
 
 export function getAIRoutingHeaders(
@@ -48,33 +56,36 @@ export function getAIRouteOutcome(
   metadata?: BifrostRoutingMetadata,
   configured?: { provider: string; model: string },
 ) {
-  const config = getResolvedAIConfig();
+  if (!configured) {
+    throw new Error('Configured AI route is required for synchronous outcome resolution');
+  }
   return getConfiguredAIRouteOutcome(
     context,
     response,
-    configured ?? config,
+    configured,
     metadata,
   );
 }
 
-export function getAIProvider(context?: AIRequestContext, admission?: AIAdmission) {
-  const config = getResolvedAIConfig();
-  return createConfiguredAIProvider(config, context, admission);
+export function getAIProvider(
+  context?: AIRequestContext,
+  admission?: AIAdmission,
+): ReturnType<typeof createConfiguredAIProvider> {
+  throw new Error(
+    'Synchronous AI provider resolution is unavailable; use getAsyncAIModel'
+    + ` (context=${Boolean(context)}, admission=${Boolean(admission)})`,
+  );
 }
 
 export function getModelId(): string {
-  return getResolvedAIConfig().model;
+  throw new Error('Synchronous AI configuration access is unavailable');
 }
 
-export function getProviderInfo() {
-  const config = getResolvedAIConfig();
-
-  return {
-    provider: config.provider,
-    model: config.model,
-    baseUrl: config.baseUrl || 'default',
-    configured: config.configured,
-  };
+export function getProviderInfo(): Pick<
+  ResolvedAIConfig,
+  'provider' | 'model' | 'configured'
+> & { baseUrl: string } {
+  throw new Error('Synchronous AI configuration access is unavailable');
 }
 
 export function getAIModel(
@@ -85,12 +96,11 @@ export function getAIModel(
     correlationId?: string;
     admission?: AIAdmission;
   } = {},
-) {
-  const config = getResolvedAIConfig();
-  const context = getAIRequestContext(featureId, options);
-  const provider = getAIProvider(context, options.admission);
-  return {
-    model: provider(config.model),
-    context,
-  };
+): LegacyAIModelRoute {
+  throw new Error(
+    `Synchronous AI model resolution is unavailable for ${featureId}; `
+    + `use getAsyncAIModel (${Object.keys(options).length} options supplied)`,
+  );
 }
+
+export { getAsyncAIModel, getAsyncAIProviderConfiguration };

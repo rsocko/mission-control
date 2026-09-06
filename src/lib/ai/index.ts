@@ -1,20 +1,11 @@
 export {
+  getAsyncAIModel,
+  getAsyncAIProviderConfiguration,
+  getAsyncAIRouteOutcome,
+} from './provider-runtime';
+export { loadAIProviderConfiguration } from './provider-configuration-service';
+export {
   AIRoutingDeniedError,
-  getAIModel,
-  getAIProvider,
-  getAIRequestContext,
-  getAIRouteOutcome,
-  getAIRoutingHeaders,
-  getModelId,
-  getProviderInfo,
-  resolveAIRouteOutcome,
-} from './provider-factory';
-export {
-  getAIRoutingPolicy,
-  getResolvedAIConfig,
-  invalidateAIConfigCache,
-} from './config-resolver';
-export {
   AI_FEATURE_DEFAULTS,
   AIProviderEndpointValidationError,
   AIRoutingPolicyValidationError,
@@ -24,6 +15,7 @@ export {
   extractBifrostRoutingMetadata,
   parseBifrostModelId,
   resolveSensitivity,
+  resolveAIRouteOutcome,
   validateProviderEndpoint,
   validateAIRoutingPolicy,
 } from './sensitivity-policy';

@@ -439,21 +439,19 @@ describe('AI provider routing settings', () => {
     expect(state.writes).toHaveLength(0);
   });
 
-  it('invalidates isolated legacy caches only after a committed pair', async () => {
+  it('invalidates isolated async caches only after a committed pair', async () => {
     state.saved = {
       provider: 'openai',
       model: 'gpt-4o-mini',
       baseUrl: 'https://api.openai.com/v1',
       apiKey: 'old-secret',
     };
-    const firstResolver = await import('@/lib/ai/config-resolver');
     const firstService = await import('@/lib/ai/provider-configuration-service');
-    expect(firstResolver.getResolvedAIConfig().model).toBe('gpt-4o-mini');
     expect((await firstService.loadAIProviderConfiguration()).resolved.model).toBe('gpt-4o-mini');
 
     vi.resetModules();
-    const secondResolver = await import('@/lib/ai/config-resolver');
-    expect(secondResolver.getResolvedAIConfig().model).toBe('gpt-4o-mini');
+    const secondService = await import('@/lib/ai/provider-configuration-service');
+    expect((await secondService.loadAIProviderConfiguration()).resolved.model).toBe('gpt-4o-mini');
     const epoch = await import('@/lib/ai/provider-routing-core');
     const beforeCommit = epoch.getAIConfigInvalidationEpoch();
     const service = await import('@/lib/ai/provider-configuration-service');
@@ -466,9 +464,8 @@ describe('AI provider routing settings', () => {
     }, routingPolicy);
 
     expect(epoch.getAIConfigInvalidationEpoch()).toBe(beforeCommit + 1);
-    expect(firstResolver.getResolvedAIConfig().model).toBe('gpt-4.1');
-    expect(secondResolver.getResolvedAIConfig().model).toBe('gpt-4.1');
     expect((await firstService.loadAIProviderConfiguration()).resolved.model).toBe('gpt-4.1');
+    expect((await secondService.loadAIProviderConfiguration()).resolved.model).toBe('gpt-4.1');
 
     state.failWrites = true;
     await expect(service.saveAIProviderConfiguration({

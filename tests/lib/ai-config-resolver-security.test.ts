@@ -1,27 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveAIConfig } from '@/lib/ai/config-values';
 
 const state = vi.hoisted(() => ({
   saved: {} as Record<string, string | boolean>,
 }));
 
-vi.mock('@/db', () => ({
-  sqlite: {
-    prepare: () => ({
-      get: () => ({ value: state.saved }),
-    }),
-  },
-}));
-
-vi.mock('@/lib/logger', () => ({
-  aiLogger: { warn: vi.fn() },
-}));
-
 describe('AI provider credential resolution', () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.unstubAllEnvs();
     state.saved = {};
-    const { invalidateAIConfigCache } = await import('@/lib/ai/config-resolver');
-    invalidateAIConfigCache();
   });
 
   it('does not send an environment credential to a saved endpoint override', async () => {
@@ -33,8 +20,7 @@ describe('AI provider credential resolution', () => {
       baseUrl: 'https://attacker.example/v1',
     };
 
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-    expect(getResolvedAIConfig().apiKey).toBe('');
+    expect(resolveAIConfig(state.saved).apiKey).toBe('');
   });
 
   it('keeps an environment credential bound to its environment endpoint', async () => {
@@ -47,8 +33,7 @@ describe('AI provider credential resolution', () => {
       baseUrl: 'https://trusted-bifrost.example/v1/',
     };
 
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-    expect(getResolvedAIConfig().apiKey).toBe('environment-secret');
+    expect(resolveAIConfig(state.saved).apiKey).toBe('environment-secret');
   });
 
   it('keeps semantic search off by default and resolves its model separately', async () => {
@@ -56,8 +41,7 @@ describe('AI provider credential resolution', () => {
     vi.stubEnv('AI_MODEL', 'azure/gpt-4o-mini');
     vi.stubEnv('AI_EMBEDDING_MODEL', 'ollama/snowflake-arctic-embed');
 
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-    expect(getResolvedAIConfig()).toMatchObject({
+    expect(resolveAIConfig(state.saved)).toMatchObject({
       model: 'azure/gpt-4o-mini',
       embeddingProvider: 'bifrost',
       embeddingModel: 'ollama/snowflake-arctic-embed',
@@ -68,9 +52,7 @@ describe('AI provider credential resolution', () => {
   });
 
   it('recommends Bifrost to Azure embeddings without changing completion defaults', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-
-    expect(getResolvedAIConfig()).toMatchObject({
+    expect(resolveAIConfig(state.saved)).toMatchObject({
       provider: 'openai',
       model: 'gpt-4o-mini',
       embeddingProvider: 'bifrost',
@@ -85,9 +67,7 @@ describe('AI provider credential resolution', () => {
     vi.stubEnv('AI_EMBEDDING_BASE_URL', 'https://bifrost.example/v1');
     vi.stubEnv('AI_EMBEDDING_API_KEY', 'embedding-secret');
 
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-
-    expect(getResolvedAIConfig()).toMatchObject({
+    expect(resolveAIConfig(state.saved)).toMatchObject({
       provider: 'ollama',
       embeddingProvider: 'bifrost',
       embeddingModel: 'azure/embedding-deployment',
@@ -103,9 +83,7 @@ describe('AI provider credential resolution', () => {
     vi.stubEnv('AI_EMBEDDING_PROVIDER', 'bifrost');
     vi.stubEnv('BIFROST_BASE_URL', '');
 
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-
-    expect(getResolvedAIConfig()).toMatchObject({
+    expect(resolveAIConfig(state.saved)).toMatchObject({
       baseUrl: 'http://localhost:11434/v1',
       embeddingProvider: 'bifrost',
       embeddingBaseUrl: undefined,
@@ -122,8 +100,7 @@ describe('AI provider credential resolution', () => {
       semanticSearchEnabled: true,
     };
 
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
-    expect(getResolvedAIConfig()).toMatchObject({
+    expect(resolveAIConfig(state.saved)).toMatchObject({
       embeddingModel: 'mxbai-embed-large',
       semanticSearchEnabled: true,
     });

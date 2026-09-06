@@ -13,7 +13,6 @@
 
 import {
   buildEnrichmentPrompt,
-  NotificationEnrichmentPermanentError,
   parseAIEnrichmentResult,
   shouldEnrichWithAI,
   type AIEnrichmentInput,
@@ -52,10 +51,10 @@ export async function enrichWithAI(
 
   // Dynamic import to avoid circular dependencies with AI module
   const { generateText } = await import('ai');
-  const { getAIModel } = await import('@/lib/ai/provider-factory');
+  const { getAsyncAIModel } = await import('@/lib/ai/provider-runtime');
 
   const prompt = buildEnrichmentPrompt(input);
-  const route = getAIModel('notification-enrichment', {
+  const route = await getAsyncAIModel('notification-enrichment', {
     sources: [input.connectorType],
   });
 

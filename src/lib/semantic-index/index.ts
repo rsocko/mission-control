@@ -99,24 +99,10 @@ export {
   supersededRunIdempotencyKey,
 } from './validation';
 
-export { SqliteSemanticIndexRepository } from './sqlite-repository';
-
 export {
   getSemanticIndexRepository,
   resetSemanticIndexRepositoryForTests,
 } from './repository-facade';
-
-export {
-  assessLegacyCohorts,
-  classifyLegacyRow,
-  iterateLegacyAdoptionCandidates,
-  legacyEmbeddingsTableExists,
-  type LegacyAdoptionCandidate,
-  type LegacyAdoptionTarget,
-  type LegacyCohort,
-  type LegacyCohortAssessment,
-  type LegacyIneligibilityReason,
-} from './sqlite-legacy-adoption';
 
 // ─── Projections ────────────────────────────────────────────────────────────
 

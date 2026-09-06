@@ -59,8 +59,8 @@ export async function extractMultipleActions(item: TriageItem): Promise<MultiAct
   const contentStr = buildContentString(item);
 
   try {
-    const { getAIModel } = await import('@/lib/ai/provider-factory');
-    const route = getAIModel('triage-action-extraction', {
+    const { getAsyncAIModel } = await import('@/lib/ai/provider-runtime');
+    const route = await getAsyncAIModel('triage-action-extraction', {
       sources: item.sourcePlatform ? [item.sourcePlatform] : [],
     });
 

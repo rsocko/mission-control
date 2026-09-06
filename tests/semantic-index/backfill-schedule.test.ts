@@ -3,15 +3,26 @@ import { createSemanticHarness, type SemanticHarness } from './harness';
 
 const mocks = vi.hoisted(() => ({ semanticSearchEnabled: true }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
-    provider: 'openai',
-    configured: true,
-    baseUrl: 'https://api.openai.test/v1',
-    apiKey: 'test',
-    model: 'gpt-4o-mini',
-    embeddingModel: 'text-embedding-3-small',
-    semanticSearchEnabled: mocks.semanticSearchEnabled,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'openai',
+      configured: true,
+      baseUrl: 'https://api.openai.test/v1',
+      apiKey: 'test',
+      model: 'gpt-4o-mini',
+      embeddingProvider: 'openai',
+      embeddingModel: 'text-embedding-3-small',
+      embeddingConfigured: true,
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+      houstonMemoryEnabled: false,
+      houstonMemoryRetentionDays: 90,
+    },
+    routingPolicy: {
+      policies: {},
+      featureDefaults: {},
+      sourceDefaults: {},
+    },
   }),
 }));
 
@@ -76,6 +87,8 @@ describe('scheduleSemanticBackfill', () => {
 
   it('skips when semantic search is switched off', async () => {
     mocks.semanticSearchEnabled = false;
+    const { advanceAIConfigInvalidationEpoch } = await import('@/lib/ai/provider-routing-core');
+    advanceAIConfigInvalidationEpoch();
 
     await expect(runtime.scheduleSemanticBackfill()).resolves.toEqual({
       status: 'skipped',

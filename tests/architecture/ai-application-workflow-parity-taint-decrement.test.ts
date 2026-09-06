@@ -48,10 +48,10 @@ const OWNED_TESTS = [
   'tests/architecture/ai-application-workflow-parity-taint-decrement.test.ts',
 ] as const;
 
-// This layer decrements the temporary ceiling by exactly the 7 routes and 8
-// libraries it owns (40 -> 33 Tier A routes, 35 -> 27 tainted libs). It never
-// reads the PR1 ceiling constant directly so the two ratchets stay independent.
-const MIGRATION_UNIT_CEILING = 60;
+// The merged parent now owns the canonical exact-current baseline. This layer
+// only ratchets the remaining migration-unit ceiling after cleaning its seven
+// routes and eight libraries.
+const MIGRATION_UNIT_CEILING = 9;
 
 function source(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8');
@@ -221,14 +221,6 @@ describe('AI application workflow parity taint decrement', () => {
     expect(self).not.toContain(['web-persistence', 'baseline.json'].join('-'));
     expect(self).not.toContain(['postgres', 'route', 'sentinel'].join('-'));
     expect(current.totalMigrationUnits).toBeLessThanOrEqual(MIGRATION_UNIT_CEILING);
-    expect(current.tierARoutes).toHaveLength(33);
-    expect(current.tierBRoutes).toHaveLength(5);
-    expect(current.cleanRoutes).toHaveLength(228);
-    expect(current.directTaintSourceRoutes).toHaveLength(19);
-    expect(current.transitiveOnlyTaintSourceRoutes).toHaveLength(14);
-    expect(current.directDbNamespaceRoutes).toHaveLength(21);
-    expect(current.taintedLibA).toHaveLength(27);
     expect(current.taintedApiHelpers).toHaveLength(0);
-    expect(current.totalMigrationUnits).toBe(60);
   });
 });

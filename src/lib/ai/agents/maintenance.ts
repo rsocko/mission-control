@@ -150,9 +150,9 @@ export async function executeMaintenanceAgent(
     // Mutating and recording the run's terminal checkpoint happen in one
     // atomic commit: `guard` runs after the mutation but before the commit,
     // so a deadline/cancellation detected there rolls the mutation back too.
-    // The adapter re-checks eligibility inside the mutation and reports how
-    // many rows it actually changed.
-    const { applied } = await persistence.commitBatch({
+    // The adapter re-checks eligibility inside the mutation and reports both
+    // how many rows it actually changed and exactly which ones.
+    const { applied, appliedIds } = await persistence.commitBatch({
       runId,
       agentType,
       ids: !dryRun && candidates.length > 0 ? candidates.map((candidate) => candidate.id) : [],
@@ -166,14 +166,22 @@ export async function executeMaintenanceAgent(
     });
 
     const count = dryRun ? candidates.length : applied;
+    // A dry run reports every candidate it would have touched; a real run
+    // reports only the rows the commit actually mutated, so a candidate that
+    // stopped being eligible between the scan and the commit is never named.
+    // Filtering the scan window keeps the details in scan order.
+    const mutated = new Set(appliedIds);
+    const reported = dryRun
+      ? candidates
+      : candidates.filter((candidate) => mutated.has(candidate.id));
     const verb = dryRun ? `Would ${descriptor.summaryVerb}` : descriptor.completedVerb;
     return {
       agent: agentType,
       status: hasMore ? 'partial' : 'success',
       summary: `${verb} ${count} ${descriptor.objectDescription}${hasMore ? '; more work remains' : ''}`,
       actionsPerformed: count,
-      details: candidates
-        .slice(0, Math.min(count, MAINTENANCE_AGENT_BUDGETS.detailLimit))
+      details: reported
+        .slice(0, MAINTENANCE_AGENT_BUDGETS.detailLimit)
         .map((candidate) => ({
           action: dryRun ? descriptor.dryRunAction : descriptor.action,
           target: candidate.title,

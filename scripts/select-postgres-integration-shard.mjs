@@ -9,6 +9,8 @@ const POSTGRES_TEST_PATTERN = /^postgres-.*\.integration\.test\.ts$/u;
 // Runtime observations from successful CI runs. Unknown files still participate
 // automatically and receive a conservative startup-weight estimate.
 export const POSTGRES_TEST_RUNTIME_MS = Object.freeze({
+  'postgres-ai-provider-routes.integration.test.ts': 0,
+  'postgres-ai-workflow-persistence.contract.integration.test.ts': 0,
   'postgres-connection.integration.test.ts': 30,
   'postgres-connector-execution.integration.test.ts': 306,
   'postgres-connector-operation-lease-repository.contract.integration.test.ts': 109,

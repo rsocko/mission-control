@@ -9,18 +9,12 @@ const mocks = vi.hoisted(() => ({
   streamChat: vi.fn(),
 }));
 
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getAIRouteOutcome: vi.fn(),
-}));
-
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIProviderConfiguration: async () => ({
     provider: 'ollama',
-    model: 'llama3.1:8b',
-    baseUrl: 'http://localhost:11434/v1',
-    apiKey: '',
     configured: true,
   }),
+  getAsyncAIRouteOutcome: vi.fn(),
 }));
 
 vi.mock('@/lib/ai/features/chat', () => ({

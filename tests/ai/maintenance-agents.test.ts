@@ -309,14 +309,16 @@ describe('bounded maintenance agents', () => {
       .toEqual({ priority: 'none' });
   });
 
-  it('never mutates or counts rows that stopped being eligible after the scan', async () => {
+  it('never mutates, counts, or names rows that stopped being eligible after the scan', async () => {
     insertNotifications(2);
     const racing: AIMaintenancePersistence = {
       claimRun: (input) => persistence.claimRun(input),
       scanBatch: (input) => persistence.scanBatch(input),
       async commitBatch(input) {
-        // A concurrent writer reads one scanned notification before the
-        // batch commits, so it must no longer be dismissed by this run.
+        // A concurrent writer reads the FIRST scanned notification before the
+        // batch commits, so it must no longer be dismissed by this run — and
+        // must not appear in the result details, even though it still leads
+        // the scan order.
         database.prepare(
           "UPDATE notifications SET read_state = 'read' WHERE id = 'notification-000'",
         ).run();
@@ -330,7 +332,9 @@ describe('bounded maintenance agents', () => {
     );
 
     expect(result.actionsPerformed).toBe(1);
-    expect(result.details).toHaveLength(1);
+    expect(result.details).toEqual([
+      { action: 'dismiss', target: 'Notification 1', result: 'completed' },
+    ]);
     expect(database.prepare(
       "SELECT state FROM notifications WHERE id = 'notification-000'",
     ).get()).toEqual({ state: 'unread' });
@@ -340,6 +344,56 @@ describe('bounded maintenance agents', () => {
     expect(database.prepare(
       'SELECT mutation_count AS mutationCount FROM maintenance_agent_runs',
     ).get()).toEqual({ mutationCount: 1 });
+  });
+
+  it('keeps non-dry-run details in scan order and bounded by the detail budget', async () => {
+    insertNotifications(MAINTENANCE_AGENT_BUDGETS.mutationLimit);
+    // Make every other scanned row ineligible between the scan and the commit.
+    const racing: AIMaintenancePersistence = {
+      claimRun: (input) => persistence.claimRun(input),
+      scanBatch: (input) => persistence.scanBatch(input),
+      async commitBatch(input) {
+        database.prepare(`
+          UPDATE notifications SET read_state = 'read'
+          WHERE CAST(substr(id, 14) AS INTEGER) % 2 = 0
+        `).run();
+        return persistence.commitBatch(input);
+      },
+    };
+
+    const result = await executeMaintenanceAgent(
+      'dismiss-old-notifications',
+      options({ persistence: racing }),
+    );
+
+    expect(result.actionsPerformed).toBe(MAINTENANCE_AGENT_BUDGETS.mutationLimit / 2);
+    expect(result.details).toHaveLength(MAINTENANCE_AGENT_BUDGETS.detailLimit);
+    expect(result.details.map((detail) => detail.target)).toEqual(
+      Array.from(
+        { length: MAINTENANCE_AGENT_BUDGETS.detailLimit },
+        (_, index) => `Notification ${index * 2 + 1}`,
+      ),
+    );
+  });
+
+  it('reports every candidate on a dry run without mutating anything', async () => {
+    insertNotifications(3);
+
+    const result = await executeMaintenanceAgent(
+      'dismiss-old-notifications',
+      options({ dryRun: true }),
+    );
+
+    expect(result.actionsPerformed).toBe(3);
+    expect(result.details.map((detail) => detail.target)).toEqual([
+      'Notification 0',
+      'Notification 1',
+      'Notification 2',
+    ]);
+    expect(result.details.every((detail) => detail.action === 'would_dismiss')).toBe(true);
+    expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM notifications WHERE state = 'dismissed'",
+    ).get()).toEqual({ count: 0 });
   });
 
   it('stamps completion after the scan rather than at run start', async () => {

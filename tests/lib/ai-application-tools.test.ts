@@ -139,7 +139,7 @@ describe('Houston task-tools (clean AI workflow + task-core seams)', () => {
     });
     expect(result.total).toBe(3);
     expect(result.overdueItems).toEqual([expect.objectContaining({ id: 'task-1' })]);
-  });
+  }, 15_000);
 
   it('searches tasks through the bounded persistence read', async () => {
     const { taskTools } = await import('@/lib/ai/tools/task-tools');

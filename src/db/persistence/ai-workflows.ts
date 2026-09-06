@@ -296,6 +296,13 @@ export interface MaintenanceCommitResult {
    * performed.
    */
   applied: number;
+  /**
+   * The exact ids of those rows, so callers can report per-row detail without
+   * naming a candidate the mutation skipped. Always a subset of the requested
+   * `ids`, and always empty when `applied` is `0`. Order is unspecified —
+   * callers that need a stable order must impose their own.
+   */
+  appliedIds: string[];
 }
 
 export interface AIMaintenancePersistence {
@@ -330,8 +337,8 @@ export interface AIMaintenancePersistence {
    *
    * The adapter re-applies the agent's eligibility predicate inside the
    * mutating statement, so rows that stopped being eligible between the scan
-   * and the commit are left untouched, and records/returns the number of rows
-   * it actually changed.
+   * and the commit are left untouched, and records/returns both the number of
+   * rows it actually changed and their exact ids.
    */
   commitBatch(input: {
     runId: string;

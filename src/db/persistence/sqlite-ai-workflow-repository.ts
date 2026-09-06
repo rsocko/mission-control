@@ -683,34 +683,41 @@ function maintenanceApplyMutations(
   ids: readonly string[],
   now: string,
   completedAt: string,
-): number {
-  if (ids.length === 0) return 0;
+): string[] {
+  if (ids.length === 0) return [];
   const nowDate = new Date(now);
   const eligibility = maintenanceEligibility(agentType, now);
+  // `RETURNING id` names the rows the eligibility re-check actually mutated,
+  // so a caller can never attribute work to a row it skipped.
+  const mutated = (text: string, ...values: unknown[]): string[] =>
+    (sqlite.prepare(text).all(...values) as Array<{ id: string }>).map((row) => row.id);
   switch (agentType) {
     case 'dismiss-old-notifications':
-      return sqlite.prepare(`
+      return mutated(`
         UPDATE notifications
         SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
             read_at = COALESCE(read_at, ?), dismissed_at = ?
         WHERE id IN (${placeholders(ids)}) AND (${eligibility.text})
-      `).run(completedAt, completedAt, ...ids, ...eligibility.values).changes;
+        RETURNING id
+      `, completedAt, completedAt, ...ids, ...eligibility.values);
     case 'cleanup-done':
-      return sqlite.prepare(`
+      return mutated(`
         UPDATE tasks SET status = 'cancelled', updated_at = ?
         WHERE id IN (${placeholders(ids)}) AND (${eligibility.text})
-      `).run(completedAt, ...ids, ...eligibility.values).changes;
+        RETURNING id
+      `, completedAt, ...ids, ...eligibility.values);
     case 'snooze-low-priority': {
       const newDate = formatDateInLocalTimezone(new Date(nowDate.getTime() + 7 * 24 * 60 * 60 * 1_000));
-      return sqlite.prepare(`
+      return mutated(`
         UPDATE tasks SET due_date = ?, updated_at = ?
         WHERE id IN (${placeholders(ids)}) AND (${eligibility.text})
-      `).run(newDate, completedAt, ...ids, ...eligibility.values).changes;
+        RETURNING id
+      `, newDate, completedAt, ...ids, ...eligibility.values);
     }
     case 'bulk-prioritize': {
       const today = formatDateInLocalTimezone(nowDate);
       const tomorrow = formatDateInLocalTimezone(new Date(nowDate.getTime() + 24 * 60 * 60 * 1_000));
-      return sqlite.prepare(`
+      return mutated(`
         UPDATE tasks
         SET priority = CASE
           WHEN due_date <= ? THEN 'critical'
@@ -719,7 +726,8 @@ function maintenanceApplyMutations(
         END,
         updated_at = ?
         WHERE id IN (${placeholders(ids)}) AND (${eligibility.text})
-      `).run(today, tomorrow, completedAt, ...ids, ...eligibility.values).changes;
+        RETURNING id
+      `, today, tomorrow, completedAt, ...ids, ...eligibility.values);
     }
   }
 }
@@ -775,15 +783,18 @@ function createSqliteMaintenancePersistence(
       runId, agentType, ids, now, completedAt, status, checkpoint, scanned, hasMore, error, guard,
     }) {
       const transaction = sqlite.transaction(() => {
-        const applied = maintenanceApplyMutations(sqlite, agentType, ids, now, completedAt);
+        const appliedIds = maintenanceApplyMutations(sqlite, agentType, ids, now, completedAt);
         guard?.();
         sqlite.prepare(`
           UPDATE maintenance_agent_runs
           SET status = ?, checkpoint_end = ?, scanned_count = ?, mutation_count = ?,
               has_more = ?, error_message = ?, completed_at = ?
           WHERE id = ?
-        `).run(status, checkpoint, scanned, applied, hasMore ? 1 : 0, error ?? null, completedAt, runId);
-        return { applied };
+        `).run(
+          status, checkpoint, scanned, appliedIds.length,
+          hasMore ? 1 : 0, error ?? null, completedAt, runId,
+        );
+        return { applied: appliedIds.length, appliedIds };
       });
       return transaction.immediate();
     },

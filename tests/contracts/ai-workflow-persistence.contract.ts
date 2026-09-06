@@ -11,12 +11,42 @@ export const AI_WORKFLOW_ENERGY_DEFINITIONS = [
   { slug: 'energy-low', name: 'Energy: Low', color: '#ef4444' },
 ] as const;
 
+export interface AIWorkflowContractRawTask {
+  id: string;
+  title: string;
+  description: string | null;
+  status: string;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Fills the columns a raw-task proof does not care about. */
+export function aiWorkflowRawTask(
+  overrides: Partial<AIWorkflowContractRawTask> & Pick<AIWorkflowContractRawTask, 'id' | 'title'>,
+): AIWorkflowContractRawTask {
+  return {
+    description: null,
+    status: 'todo',
+    completedAt: null,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-06T10:00:00.000Z',
+    ...overrides,
+  };
+}
+
 export interface AIWorkflowContractHarness {
   persistence: AIWorkflowPersistence;
   dailyPlanning: DailyPlanningPersistence;
   projects: ProjectAdministrationPersistence;
   reset(): Promise<void>;
   seed(): Promise<void>;
+  /**
+   * Inserts task rows verbatim — including timestamp text no writer would
+   * normally produce — so the contract can pin how each backend *compares*
+   * stored text rather than only how it round-trips well-formed values.
+   */
+  seedRawTasks(rows: readonly AIWorkflowContractRawTask[]): Promise<void>;
   inspectEnergyState(taskIds: readonly string[]): Promise<{
     tags: Array<{ id: string; slug: string }>;
     links: Array<{ taskId: string; tagId: string; slug: string }>;
@@ -329,6 +359,32 @@ export function describeAIWorkflowPersistenceContract(
       expect(taskTags.map((tag) => tag.name)).toEqual(['Alpha']);
     });
 
+    it('treats a task-tools search query as a literal case-insensitive substring', async () => {
+      const { persistence } = harness();
+      await harness().seedRawTasks([
+        aiWorkflowRawTask({
+          id: 'aiw-search-literal',
+          title: 'Ship 100% done_now',
+          description: 'path\\to\\file',
+        }),
+      ]);
+      const ids = async (query: string) => (
+        await persistence.taskTools.search({ query, limit: 10 })
+      ).map((task) => task.id);
+
+      // `%`, `_`, and `\` are ordinary characters, so they match only where
+      // they literally occur. Under `LIKE`/`ILIKE` wildcard semantics `%` and
+      // `_` would match every row and a trailing `\` is not even a legal
+      // pattern.
+      await expect(ids('%')).resolves.toEqual(['aiw-search-literal']);
+      await expect(ids('_')).resolves.toEqual(['aiw-search-literal']);
+      await expect(ids('\\')).resolves.toEqual(['aiw-search-literal']);
+      await expect(ids('0% DONE_now')).resolves.toEqual(['aiw-search-literal']);
+      // A wildcard interpretation would match this against the seeded title.
+      await expect(ids('Ship%done')).resolves.toEqual([]);
+      await expect(ids('Ship_100')).resolves.toEqual([]);
+    });
+
     it('bounds the dispatch custom-agent context to open tasks and unread notifications', async () => {
       const { persistence } = harness();
       const context = await persistence.dispatch.getCustomAgentContext({
@@ -461,9 +517,26 @@ export function describeAIWorkflowPersistenceContract(
         scanned: rows.length,
         hasMore: false,
       });
-      expect(committed).toEqual({ applied: 0 });
+      expect(committed).toEqual({ applied: 0, appliedIds: [] });
       const afterCommit = await persistence.context.listTaskContext();
       expect(afterCommit.find((task) => task.id === 'aiw-task-d')?.status).toBe('done');
+
+      // A mixed batch must name exactly the rows the mutation changed, so a
+      // caller cannot attribute per-row detail to a skipped candidate.
+      // `aiw-task-a` is overdue and not critical, so it is reprioritized;
+      // `aiw-task-b` is already critical and therefore ineligible.
+      const mixed = await persistence.maintenance.commitBatch({
+        runId: 'aiw-run-unrelated',
+        agentType: 'bulk-prioritize',
+        ids: ['aiw-task-a', 'aiw-task-b'],
+        now: AI_WORKFLOW_NOW,
+        completedAt: AI_WORKFLOW_NOW,
+        status: 'succeeded',
+        checkpoint: null,
+        scanned: 2,
+        hasMore: false,
+      });
+      expect(mixed).toEqual({ applied: 1, appliedIds: ['aiw-task-a'] });
 
       const resumed = await persistence.maintenance.claimRun({
         runId: 'aiw-run-3',
@@ -510,6 +583,84 @@ export function describeAIWorkflowPersistenceContract(
       expect(Array.isArray(stats.completedTasks)).toBe(true);
       expect(Array.isArray(stats.staleTasks)).toBe(true);
       expect(Array.isArray(stats.activeRoutines)).toBe(true);
+    });
+
+    it('compares reset-stats timestamps as instants rather than as text', async () => {
+      const { persistence } = harness();
+      const window = {
+        periodStart: '2026-09-01',
+        periodEnd: '2026-09-06',
+        periodStartIso: '2026-09-01T00:00:00.000Z',
+        periodEndExclusiveIso: '2026-09-07T00:00:00.000Z',
+        staleThresholdExclusiveIso: '2026-08-23T00:00:00.000Z',
+        staleLimit: 50,
+      };
+      const before = await persistence.resets.aggregateStats(window);
+
+      await harness().seedRawTasks([
+        // 2026-09-01T01:00Z — inside the window, though the text sorts before
+        // `periodStartIso`.
+        aiWorkflowRawTask({
+          id: 'aiw-instant-early', title: 'Early offset', status: 'done',
+          completedAt: '2026-08-31T23:00:00-02:00',
+          createdAt: '2026-08-31T20:00:00-05:00',
+        }),
+        // 2026-09-06T22:00Z — inside the window, though the text sorts at or
+        // after `periodEndExclusiveIso`.
+        aiWorkflowRawTask({
+          id: 'aiw-instant-late', title: 'Late offset', status: 'done',
+          completedAt: '2026-09-07T01:00:00+03:00',
+          createdAt: '2026-09-07T01:00:00+03:00',
+        }),
+        // 2026-09-07T04:00Z — outside the window, though the text sorts before
+        // `periodEndExclusiveIso`.
+        aiWorkflowRawTask({
+          id: 'aiw-instant-after', title: 'After window', status: 'done',
+          completedAt: '2026-09-06T23:00:00-05:00',
+          createdAt: '2026-09-06T23:00:00-05:00',
+        }),
+        // Unparsable text is excluded rather than raising.
+        aiWorkflowRawTask({
+          id: 'aiw-instant-unparsable-done', title: 'Unparsable done', status: 'done',
+          completedAt: 'sometime last week',
+          createdAt: 'sometime last week',
+        }),
+        aiWorkflowRawTask({
+          id: 'aiw-instant-unparsable-open', title: 'Unparsable open',
+          createdAt: 'sometime last week',
+          updatedAt: 'sometime last week',
+        }),
+        // 2026-08-23T01:00Z — not stale, though the text sorts before the
+        // threshold.
+        aiWorkflowRawTask({
+          id: 'aiw-instant-fresh', title: 'Fresh',
+          updatedAt: '2026-08-22T20:00:00-05:00',
+        }),
+        // 2026-08-22T21:00Z — stale, though the text sorts after it.
+        aiWorkflowRawTask({
+          id: 'aiw-instant-stale', title: 'Stale',
+          updatedAt: '2026-08-23T02:00:00+05:00',
+        }),
+      ]);
+
+      const after = await persistence.resets.aggregateStats(window);
+      const completed = after.completedTasks.map((task) => task.id);
+      expect(completed).toEqual(expect.arrayContaining([
+        'aiw-instant-early',
+        'aiw-instant-late',
+      ]));
+      expect(completed).not.toContain('aiw-instant-after');
+      expect(completed).not.toContain('aiw-instant-unparsable-done');
+
+      // The two in-window offset rows plus the two well-formed open rows.
+      expect(after.createdTaskCount - before.createdTaskCount).toBe(4);
+      // Carried forward counts open rows created before the window's end.
+      expect(after.carriedForwardCount - before.carriedForwardCount).toBe(2);
+
+      const stale = after.staleTasks.map((task) => task.id);
+      expect(stale).toContain('aiw-instant-stale');
+      expect(stale).not.toContain('aiw-instant-fresh');
+      expect(stale).not.toContain('aiw-instant-unparsable-open');
     });
 
     it('preserves omitted reset fields on upsert while honouring an explicit null', async () => {

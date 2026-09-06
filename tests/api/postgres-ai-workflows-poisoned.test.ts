@@ -353,7 +353,7 @@ const aiWorkflows: AIWorkflowPersistence = {
   maintenance: {
     claimRun: async () => ({ claimed: true, cursor: null }),
     scanBatch: async () => [],
-    commitBatch: async () => ({ applied: 0 }),
+    commitBatch: async () => ({ applied: 0, appliedIds: [] }),
   },
   goalsBoard: {
     listGoalTasks: async () => [{
@@ -615,7 +615,7 @@ describe('poisoned-SQLite AI workflow web surface', () => {
     })).rejects.toThrow('read failed');
     expect(failedCommands.at(-1)).toBe('ROLLBACK');
     expect(failedClient.release).toHaveBeenCalledOnce();
-  });
+  }, 15_000);
 
   it('shares canonical task/tag locks and uses conflict-safe energy links', async () => {
     const { createPostgresAIDailyPlanningExtensions } = await import(

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient, QueryResultRow } from 'pg';
 import { formatDateInLocalTimezone } from '@/lib/utils/date';
+import { instant, withinInstantRange } from './analytics-repositories';
 import type {
   AIDigestSnapshot,
   AIWorkflowPersistence,
@@ -428,10 +429,14 @@ function createPostgresTaskToolsPersistence(pool: Pool): AITaskToolsPersistence 
       if (filters.priority) { params.push(filters.priority); conditions.push(`priority = $${params.length}`); }
       if (filters.source) { params.push(filters.source); conditions.push(`connector_type = $${params.length}`); }
       if (filters.query) {
-        params.push(`%${filters.query}%`);
+        // Literal substring, matching SQLite's `instr(lower(col), lower(?))`.
+        // `ILIKE` would treat `%`, `_`, and `\` in the caller's query as
+        // pattern syntax rather than as the characters they are.
+        params.push(filters.query);
         const queryParamIndex = params.length;
         conditions.push(`(
-          title ILIKE $${queryParamIndex} OR COALESCE(description, '') ILIKE $${queryParamIndex}
+          position(lower($${queryParamIndex}::text) in lower(title)) > 0
+          OR position(lower($${queryParamIndex}::text) in lower(COALESCE(description, ''))) > 0
         )`);
       }
       params.push(filters.limit);
@@ -676,42 +681,47 @@ async function maintenanceApplyMutations(
   ids: readonly string[],
   now: string,
   completedAt: string,
-): Promise<number> {
-  if (ids.length === 0) return 0;
+): Promise<string[]> {
+  if (ids.length === 0) return [];
   const nowDate = new Date(now);
+  // `RETURNING id` names the rows the eligibility re-check actually mutated,
+  // so a caller can never attribute work to a row it skipped.
+  const mutated = async (text: string, values: unknown[]): Promise<string[]> => (
+    (await client.query<{ id: string }>(text, values)).rows.map((row) => row.id)
+  );
   switch (agentType) {
     case 'dismiss-old-notifications': {
       const eligibility = maintenanceEligibility(agentType, now, 3);
-      const result = await client.query(`
+      return mutated(`
         UPDATE notifications
         SET state = 'dismissed', read_state = 'read', disposition = 'dismissed',
             read_at = COALESCE(read_at, $1), dismissed_at = $1
         WHERE id = ANY($2::text[]) AND (${eligibility.text})
+        RETURNING id
       `, [completedAt, ids, ...eligibility.values]);
-      return result.rowCount ?? 0;
     }
     case 'cleanup-done': {
       const eligibility = maintenanceEligibility(agentType, now, 3);
-      const result = await client.query(`
+      return mutated(`
         UPDATE tasks SET status = 'cancelled', updated_at = $1
         WHERE id = ANY($2::text[]) AND (${eligibility.text})
+        RETURNING id
       `, [completedAt, ids, ...eligibility.values]);
-      return result.rowCount ?? 0;
     }
     case 'snooze-low-priority': {
       const newDate = formatDateInLocalTimezone(new Date(nowDate.getTime() + 7 * 24 * 60 * 60 * 1_000));
       const eligibility = maintenanceEligibility(agentType, now, 4);
-      const result = await client.query(`
+      return mutated(`
         UPDATE tasks SET due_date = $1, updated_at = $2
         WHERE id = ANY($3::text[]) AND (${eligibility.text})
+        RETURNING id
       `, [newDate, completedAt, ids, ...eligibility.values]);
-      return result.rowCount ?? 0;
     }
     case 'bulk-prioritize': {
       const today = formatDateInLocalTimezone(nowDate);
       const tomorrow = formatDateInLocalTimezone(new Date(nowDate.getTime() + 24 * 60 * 60 * 1_000));
       const eligibility = maintenanceEligibility(agentType, now, 5);
-      const result = await client.query(`
+      return mutated(`
         UPDATE tasks
         SET priority = CASE
           WHEN due_date <= $1 THEN 'critical'
@@ -720,8 +730,8 @@ async function maintenanceApplyMutations(
         END,
         updated_at = $3
         WHERE id = ANY($4::text[]) AND (${eligibility.text})
+        RETURNING id
       `, [today, tomorrow, completedAt, ids, ...eligibility.values]);
-      return result.rowCount ?? 0;
     }
   }
 }
@@ -782,16 +792,19 @@ function createPostgresMaintenancePersistence(pool: Pool): AIMaintenancePersiste
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
-        const applied = await maintenanceApplyMutations(client, agentType, ids, now, completedAt);
+        const appliedIds = await maintenanceApplyMutations(client, agentType, ids, now, completedAt);
         guard?.();
         await client.query(`
           UPDATE maintenance_agent_runs
           SET status = $1, checkpoint_end = $2, scanned_count = $3, mutation_count = $4,
               has_more = $5, error_message = $6, completed_at = $7
           WHERE id = $8
-        `, [status, checkpoint, scanned, applied, hasMore, error ?? null, completedAt, runId]);
+        `, [
+          status, checkpoint, scanned, appliedIds.length,
+          hasMore, error ?? null, completedAt, runId,
+        ]);
         await client.query('COMMIT');
-        return { applied };
+        return { applied: appliedIds.length, appliedIds };
       } catch (err) {
         await client.query('ROLLBACK').catch(() => undefined);
         throw err;
@@ -1307,14 +1320,16 @@ function createPostgresResetsPersistence(pool: Pool): AIResetsPersistence {
         query<{ id: string; title: string; completedAt: string | null }>(pool, `
           SELECT id, title, completed_at AS "completedAt"
           FROM tasks
-          WHERE status = 'done' AND completed_at >= $1 AND completed_at < $2
-        `, [periodStartIso, periodEndExclusiveIso]),
-        query<{ count: number }>(pool, `
-          SELECT COUNT(*)::int AS count FROM tasks WHERE created_at >= $1 AND created_at < $2
+          WHERE status = 'done' AND ${withinInstantRange('completed_at', 1, 2)}
         `, [periodStartIso, periodEndExclusiveIso]),
         query<{ count: number }>(pool, `
           SELECT COUNT(*)::int AS count FROM tasks
-          WHERE status NOT IN ('done', 'cancelled') AND created_at < $1
+          WHERE ${withinInstantRange('created_at', 1, 2)}
+        `, [periodStartIso, periodEndExclusiveIso]),
+        query<{ count: number }>(pool, `
+          SELECT COUNT(*)::int AS count FROM tasks
+          WHERE status NOT IN ('done', 'cancelled')
+            AND ${instant('created_at')} < $1::timestamptz
         `, [periodEndExclusiveIso]),
         query<{ id: string; cadenceType: string }>(pool, `
           SELECT id, cadence_type AS "cadenceType" FROM routines
@@ -1332,7 +1347,8 @@ function createPostgresResetsPersistence(pool: Pool): AIResetsPersistence {
           SELECT id, title, updated_at AS "updatedAt", status, priority, source_id AS "sourceId",
                  connector_type AS "connectorType", connector_instance_id AS "connectorInstanceId"
           FROM tasks
-          WHERE status NOT IN ('done', 'cancelled') AND updated_at < $1
+          WHERE status NOT IN ('done', 'cancelled')
+            AND ${instant('updated_at')} < $1::timestamptz
           LIMIT $2
         `, [staleThresholdExclusiveIso, staleLimit]),
         query<{ date: string; level: string }>(pool, `

@@ -1,9 +1,11 @@
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { drizzle } from 'drizzle-orm/node-postgres';
 import * as schema from '@/db/postgres/schema';
 import { assertSafeIntegrationTestTarget } from '../contracts/postgres-safety';
 import { describeGraphReportingRepositoryContract } from '../contracts/graph-reporting-repository.contract';
+
+vi.unmock('drizzle-orm');
 
 const connectionString = process.env.MC_TEST_POSTGRES_URL;
 const TABLES = [

@@ -958,6 +958,7 @@ export function createSqliteDailyPlanningPersistence(
             WHERE connector_instance_id = ?
               ${connectorType ? 'AND connector_type = ?' : ''}
               AND source_id IN (${placeholders(batch.length)})
+            ORDER BY id
           `).all(
             ...(connectorType
               ? [connectorInstanceId, connectorType, ...batch]

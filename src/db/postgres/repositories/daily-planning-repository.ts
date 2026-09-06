@@ -1121,7 +1121,8 @@ export function createPostgresDailyPlanningPersistence(
              FROM tasks
              WHERE connector_instance_id = $1
                ${connectorType ? 'AND connector_type = $3' : ''}
-               AND source_id = ANY($2::text[])`,
+               AND source_id = ANY($2::text[])
+             ORDER BY id`,
             connectorType ? [connectorInstanceId, batch, connectorType] : [
               connectorInstanceId,
               batch,

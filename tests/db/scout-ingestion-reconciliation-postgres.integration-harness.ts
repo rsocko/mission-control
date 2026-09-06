@@ -69,7 +69,7 @@ describe.skipIf(!connectionString)('PostgreSQL Scout ingestion/reconciliation pe
             'scout-task-1', 'scout-task-loser'
           );
           DELETE FROM triage_items
-          WHERE id IN ('triage-1', 'triage-open', 'triage-closed');
+          WHERE id IN ('triage-1', 'triage-open', 'triage-closed', 'triage-new-3');
           DELETE FROM tasks
           WHERE id IN (
             'task-1', 'task-2', 'task-done', 'task-terminal', 'other-task',

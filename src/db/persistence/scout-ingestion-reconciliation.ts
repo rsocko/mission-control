@@ -640,12 +640,16 @@ export interface ScoutReconciliationRepository {
   createRun(
     record: ScoutReconciliationRunInsert,
   ): Promise<{ readonly kind: 'created' } | { readonly kind: 'conflict' }>;
-  /** Claims a previously failed run for retry. Returns false when it was not claimable. */
+  /** Claims a previously failed run for retry under the active-scope uniqueness fence. */
   resumeFailedRun(input: {
     readonly runId: string;
     readonly leaseToken: string;
     readonly startedAt: string;
-  }): Promise<boolean>;
+  }): Promise<
+    | { readonly kind: 'resumed' }
+    | { readonly kind: 'not-claimable' }
+    | { readonly kind: 'conflict' }
+  >;
   failRun(input: {
     readonly runId: string;
     readonly leaseToken: string;

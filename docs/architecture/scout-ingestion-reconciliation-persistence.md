@@ -120,15 +120,31 @@ not own:
 The remaining four routes (`scout/parallel-comparison`, `scout/reconcile`, and
 both reconciliation-suggestion routes) are fully clean.
 
+## Canonical graph decrement
+
+Recomputed from the post-notification-delivery and task-organization canonical
+baseline, this boundary reduces the PostgreSQL migration graph from 75 to 60
+units:
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| Tier A routes | 38 | 30 |
+| Tier B routes | 5 | 9 |
+| Clean routes | 223 | 227 |
+| Direct taint routes | 22 | 20 |
+| Transitive-only Tier A routes | 16 | 10 |
+| Direct `@/db` routes | 24 | 22 |
+| Tainted libraries | 37 | 30 |
+| Total migration units | 75 | 60 |
+
 ## Proof
 
-- Shared SQLite/PostgreSQL contract suites in
-  `tests/contracts/scout-ingestion-reconciliation-persistence.contract.ts` and
-  `tests/contracts/triage-action-persistence.contract.ts`.
-- PostgreSQL integration runs in
-  `tests/db/postgres-scout-ingestion-reconciliation.integration.test.ts` and
-  `tests/db/postgres-triage-action-persistence.integration.test.ts` (skipped
-  unless `MC_TEST_POSTGRES_URL` is set).
+- Shared SQLite/PostgreSQL Scout and triage-action contract suites are
+  consolidated in
+  `tests/contracts/scout-ingestion-reconciliation-persistence.contract.ts`.
+- PostgreSQL integration for both contracts is consolidated in
+  `tests/db/postgres-scout-ingestion-reconciliation.integration.test.ts`
+  (skipped unless `MC_TEST_POSTGRES_URL` is set).
 - One poisoned-SQLite route suite,
   `tests/api/scout-triage-actions-postgres-poisoned.test.ts`, imports and calls
   all eight affected route modules with `@/db` and `@/db/schema` poisoned.

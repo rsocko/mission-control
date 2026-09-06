@@ -810,14 +810,25 @@ class PostgresScoutReconciliationRepository implements ScoutReconciliationReposi
     readonly runId: string;
     readonly leaseToken: string;
     readonly startedAt: string;
-  }): Promise<boolean> {
-    const resumed = await run(this.pool, `
-      UPDATE scout_reconciliation_runs
-      SET lease_token = $1, status = 'running', error = NULL, summary = NULL,
-          started_at = $2, completed_at = NULL
-      WHERE id = $3 AND status = 'failed'
-    `, [input.leaseToken, input.startedAt, input.runId]);
-    return resumed === 1;
+  }): Promise<
+    | { readonly kind: 'resumed' }
+    | { readonly kind: 'not-claimable' }
+    | { readonly kind: 'conflict' }
+  > {
+    try {
+      const resumed = await run(this.pool, `
+        UPDATE scout_reconciliation_runs
+        SET lease_token = $1, status = 'running', error = NULL, summary = NULL,
+            started_at = $2, completed_at = NULL
+        WHERE id = $3 AND status = 'failed'
+      `, [input.leaseToken, input.startedAt, input.runId]);
+      return resumed === 1
+        ? { kind: 'resumed' }
+        : { kind: 'not-claimable' };
+    } catch (error) {
+      if (!isUniqueViolation(error)) throw error;
+      return { kind: 'conflict' };
+    }
   }
 
   async failRun(input: {

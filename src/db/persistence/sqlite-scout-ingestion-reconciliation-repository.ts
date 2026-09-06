@@ -862,14 +862,26 @@ class SqliteScoutReconciliationRepository implements ScoutReconciliationReposito
     readonly runId: string;
     readonly leaseToken: string;
     readonly startedAt: string;
-  }): Promise<boolean> {
-    const resumed = this.db.prepare(`
-      UPDATE scout_reconciliation_runs
-      SET lease_token = ?, status = 'running', error = NULL, summary = NULL,
-          started_at = ?, completed_at = NULL
-      WHERE id = ? AND status = 'failed'
-    `).run(input.leaseToken, input.startedAt, input.runId);
-    return resumed.changes === 1;
+  }): Promise<
+    | { readonly kind: 'resumed' }
+    | { readonly kind: 'not-claimable' }
+    | { readonly kind: 'conflict' }
+  > {
+    try {
+      const resumed = this.db.prepare(`
+        UPDATE scout_reconciliation_runs
+        SET lease_token = ?, status = 'running', error = NULL, summary = NULL,
+            started_at = ?, completed_at = NULL
+        WHERE id = ? AND status = 'failed'
+      `).run(input.leaseToken, input.startedAt, input.runId);
+      return resumed.changes === 1
+        ? { kind: 'resumed' }
+        : { kind: 'not-claimable' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!message.includes('UNIQUE constraint failed')) throw error;
+      return { kind: 'conflict' };
+    }
   }
 
   async failRun(input: {

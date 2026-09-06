@@ -900,12 +900,38 @@ export function describeScoutIngestionReconciliationContract(
         runId: 'run-1',
         leaseToken: 'lease-2',
         startedAt: SCOUT_NOW,
-      })).toBe(true);
+      })).toEqual({ kind: 'resumed' });
       expect(await repository.resumeFailedRun({
         runId: 'run-1',
         leaseToken: 'lease-3',
         startedAt: SCOUT_NOW,
-      })).toBe(false);
+      })).toEqual({ kind: 'not-claimable' });
+    });
+
+    it('reports a conflict when another run owns the scope during failed-run resume', async () => {
+      const harness = getHarness();
+      await harness.reset();
+      await seedOpenScoutTask(harness);
+      const repository = harness.persistence.reconciliation;
+      await repository.createRun(runRecord());
+      await repository.expireStaleRuns({
+        scopeKey: 'task:task-1',
+        startedBefore: '2026-09-08T13:00:00.000Z',
+        completedAt: SCOUT_NOW,
+        error: 'Run lock expired before completion',
+      });
+      await repository.createRun(runRecord({
+        id: 'run-2',
+        idempotencyKey: 'key-2',
+        requestHash: 'hash-2',
+        leaseToken: 'lease-2',
+      }));
+
+      expect(await repository.resumeFailedRun({
+        runId: 'run-1',
+        leaseToken: 'lease-3',
+        startedAt: SCOUT_NOW,
+      })).toEqual({ kind: 'conflict' });
     });
 
     it('commits every evaluation, suggestion, digest, and summary atomically', async () => {

@@ -325,7 +325,13 @@ async function createRun(
       leaseToken,
       startedAt: nowIso,
     });
-    if (!resumed) {
+    if (resumed.kind === 'conflict') {
+      throw new ScoutReconciliationError(
+        'Another reconciliation is already running for this scope',
+        409,
+      );
+    }
+    if (resumed.kind === 'not-claimable') {
       throw new ScoutReconciliationError(
         'The failed reconciliation could not be claimed for retry',
         409,

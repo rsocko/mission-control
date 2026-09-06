@@ -3,8 +3,13 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '@/db/schema';
 import { getBurnReport } from '@/lib/reports/burn';
+import { createSqliteGraphReportingRepository } from '@/db/persistence/sqlite-graph-reporting-repository';
+import {
+  describeSqliteGraphReportingRepositoryContract,
+} from '../contracts/graph-reporting-repository.contract';
 
 vi.unmock('drizzle-orm');
+describeSqliteGraphReportingRepositoryContract();
 
 const openDatabases: Database.Database[] = [];
 
@@ -47,7 +52,11 @@ function createDatabase() {
       metadata TEXT
     );
   `);
-  return { sqlite, database: drizzle(sqlite, { schema }) };
+  const database = drizzle(sqlite, { schema });
+  return {
+    sqlite,
+    repository: createSqliteGraphReportingRepository(sqlite, database).burn,
+  };
 }
 
 function insertEvent(
@@ -85,7 +94,7 @@ afterEach(() => {
 
 describe('getBurnReport', () => {
   it('queries historical project and phase members rather than only current junction rows', async () => {
-    const { sqlite, database } = createDatabase();
+    const { sqlite, repository } = createDatabase();
     sqlite.exec(`
       INSERT INTO hub_projects VALUES (
         'project-1', 'Reporting', '2026-07-01', '2026-07-31'
@@ -139,7 +148,7 @@ describe('getBurnReport', () => {
       startDate: '2026-07-01',
       endDate: '2026-07-03',
       today: '2026-07-03',
-    }, database);
+    }, repository);
     const phaseReport = await getBurnReport({
       projectId: 'project-1',
       phaseId: 'phase-1',
@@ -147,7 +156,7 @@ describe('getBurnReport', () => {
       startDate: '2026-07-01',
       endDate: '2026-07-03',
       today: '2026-07-03',
-    }, database);
+    }, repository);
 
     expect(projectReport?.points.at(-1)).toMatchObject({
       total: 2,
@@ -166,7 +175,7 @@ describe('getBurnReport', () => {
   });
 
   it('loads migration baselines after the requested range to reconstruct earlier lifecycle dates', async () => {
-    const { sqlite, database } = createDatabase();
+    const { sqlite, repository } = createDatabase();
     sqlite.exec(`
       INSERT INTO hub_projects VALUES (
         'project-1', 'Reporting', '2026-06-01', '2026-08-31'
@@ -197,7 +206,7 @@ describe('getBurnReport', () => {
       startDate: '2026-06-01',
       endDate: '2026-06-30',
       today: '2026-08-07',
-    }, database);
+    }, repository);
 
     expect(report?.points.find((point) => point.date === '2026-06-09')).toMatchObject({
       total: 0,
@@ -214,7 +223,7 @@ describe('getBurnReport', () => {
   });
 
   it('loads later project additions to reconstruct scope in an earlier requested range', async () => {
-    const { sqlite, database } = createDatabase();
+    const { sqlite, repository } = createDatabase();
     sqlite.exec(`
       INSERT INTO hub_projects VALUES (
         'project-1', 'Reporting', '2025-03-01', '2026-08-31'
@@ -250,7 +259,7 @@ describe('getBurnReport', () => {
       startDate: '2025-03-24',
       endDate: '2025-03-31',
       today: '2026-08-08',
-    }, database);
+    }, repository);
 
     expect(report?.points.find((point) => point.date === '2025-03-24')).toMatchObject({
       total: 0,

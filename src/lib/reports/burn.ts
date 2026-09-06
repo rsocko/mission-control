@@ -1,19 +1,11 @@
 import 'server-only';
 
-import db from '@/db';
-import {
-  hubProjects,
-  projectPhases,
-  taskHistoryEvents,
-  tasks,
-} from '@/db/schema';
-import {
-  getTaskTransitionsInRange,
-  type TaskHistoryDatabase,
-  type TaskHistoryEvent,
-  type TaskHistoryEventType,
-} from '@/db/task-history';
-import { and, eq, inArray, or, sql } from 'drizzle-orm';
+import type {
+  BurnHistoryEvent as TaskHistoryEvent,
+  BurnReportRepository,
+} from '@/db/persistence/graph-reporting';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
 import type {
   BurnReport,
   BurnReportMode,
@@ -243,7 +235,7 @@ function applyEvent(states: Map<string, MutableTaskState>, event: TaskHistoryEve
   const state = states.get(event.taskId);
   if (!state) return;
 
-  switch (event.eventType as TaskHistoryEventType) {
+  switch (event.eventType) {
     case 'status_changed':
       if (event.newValue !== null) state.status = event.newValue;
       break;
@@ -532,130 +524,23 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
 
 export async function getBurnReport(
   input: GetBurnReportInput,
-  database: TaskHistoryDatabase = db,
+  repository?: BurnReportRepository,
 ): Promise<BurnReport | null> {
-  const [project] = await database
-    .select({
-      id: hubProjects.id,
-      name: hubProjects.name,
-      startedAt: hubProjects.startedAt,
-      targetDate: hubProjects.targetDate,
-    })
-    .from(hubProjects)
-    .where(eq(hubProjects.id, input.projectId))
-    .limit(1);
-  if (!project) return null;
-
-  let scope: BurnReportScope = 'project';
-  let scopeId = project.id;
-  let scopeName = project.name;
-  let scheduleStart = project.startedAt;
-  let scheduleEnd = project.targetDate;
-
-  if (input.phaseId) {
-    const [phase] = await database
-      .select({
-        id: projectPhases.id,
-        name: projectPhases.name,
-        targetStart: projectPhases.targetStart,
-        targetEnd: projectPhases.targetEnd,
-      })
-      .from(projectPhases)
-      .where(and(
-        eq(projectPhases.id, input.phaseId),
-        eq(projectPhases.projectId, input.projectId),
-      ))
-      .limit(1);
-    if (!phase) return null;
-    scope = 'phase';
-    scopeId = phase.id;
-    scopeName = phase.name;
-    scheduleStart = phase.targetStart;
-    scheduleEnd = phase.targetEnd;
-  }
-
-  const membershipColumn = scope === 'project'
-    ? taskHistoryEvents.projectId
-    : taskHistoryEvents.phaseId;
-  const baselineMembershipPath = scope === 'project' ? '$.projectIds' : '$.phaseIds';
-  const candidateRows = await database
-    .select({
-      taskId: taskHistoryEvents.taskId,
-      eventType: taskHistoryEvents.eventType,
-      newValue: taskHistoryEvents.newValue,
-      occurredAt: taskHistoryEvents.occurredAt,
-      provenance: taskHistoryEvents.provenance,
-    })
-    .from(taskHistoryEvents)
-    .where(or(
-      eq(membershipColumn, scopeId),
-      and(
-        eq(taskHistoryEvents.eventType, 'baseline'),
-        sql`EXISTS (
-          SELECT 1
-          FROM json_each(
-            CASE
-              WHEN json_valid(${taskHistoryEvents.newValue})
-                THEN json_extract(${taskHistoryEvents.newValue}, ${baselineMembershipPath})
-              ELSE '[]'
-            END
-          ) AS membership
-          WHERE membership.value = ${scopeId}
-        )`,
-      ),
-    ));
-  const taskIds = [...new Set(
-    candidateRows
-      .filter((row) => (
-        row.eventType !== 'baseline'
-        || baselineContainsScope(row, scope, scopeId)
-      ))
-      .map((row) => row.taskId),
-  )];
-
   const endExclusive = `${addUtcDays(input.endDate, 1)}T00:00:00.000Z`;
-  const latestReconstructionEvent = candidateRows
-    .filter((row) => (
-      (
-        row.eventType === 'baseline'
-        && row.provenance === 'migration_baseline'
-        && baselineContainsScope(row, scope, scopeId)
-      )
-      || (scope === 'project' && row.eventType === 'project_added')
-    ))
-    .map((row) => row.occurredAt)
-    .sort()
-    .at(-1);
-  const eventEndExclusive = latestReconstructionEvent && latestReconstructionEvent >= endExclusive
-    ? new Date(new Date(latestReconstructionEvent).getTime() + 1).toISOString()
-    : endExclusive;
-  const events = taskIds.length === 0
-    ? []
-    : await getTaskTransitionsInRange({
-        start: '0000-01-01T00:00:00.000Z',
-        end: eventEndExclusive,
-        taskIds,
-      }, database);
-  const taskRows = taskIds.length === 0
-    ? []
-    : await database
-        .select({
-          id: tasks.id,
-          title: tasks.title,
-          createdAt: tasks.createdAt,
-          completedAt: tasks.completedAt,
-        })
-        .from(tasks)
-        .where(inArray(tasks.id, taskIds));
+  const selected = repository ?? requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).burn;
+  const rows = await selected.read({
+    projectId: input.projectId,
+    phaseId: input.phaseId,
+    endExclusive,
+  });
+  if (!rows.scope) return null;
 
   return buildBurnReport({
     ...input,
-    scope,
-    scopeId,
-    scopeName,
-    scheduleStart,
-    scheduleEnd,
-    events,
-    tasks: taskRows,
+    ...rows.scope,
+    events: rows.candidateEvents,
+    tasks: rows.tasks,
   });
 }

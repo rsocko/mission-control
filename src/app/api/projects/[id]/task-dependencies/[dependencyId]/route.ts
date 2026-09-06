@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import {
   deleteTaskDependency,
-  GraphServiceError,
-} from '@/lib/graph/service';
+  ProjectGraphServiceError,
+} from '@/lib/graph/project-service';
 
 export async function DELETE(
   _request: Request,
@@ -14,7 +14,7 @@ export async function DELETE(
     await deleteTaskDependency({ projectId, dependencyId });
     return NextResponse.json({ success: true });
   } catch (error) {
-    if (error instanceof GraphServiceError) {
+    if (error instanceof ProjectGraphServiceError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return ApiErrors.internal('Failed to delete task dependency', error);

@@ -18,6 +18,7 @@ import type { AnalyticsPersistence } from './analytics';
 import type { RoutinesRepository } from './routines';
 import type { WebhookIntegrationsPersistence } from './webhook-integrations';
 import type { IdeationWorkspaceRepository } from '@/lib/graph-workspace/repository';
+import type { GraphReportingPersistence } from './graph-reporting';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -105,4 +106,15 @@ export interface WorkerPersistenceRepositories {
    * a backend either supports the whole webhook contract or none of it.
    */
   webhookIntegrations: WebhookIntegrationsPersistence;
+  /** Backend-neutral graph, project dependency, portfolio, and burn-report persistence. */
+  graphReporting?: GraphReportingPersistence;
+}
+
+export function requireGraphReportingPersistence(
+  repositories: WorkerPersistenceRepositories,
+): GraphReportingPersistence {
+  if (!repositories.graphReporting) {
+    throw new Error('Graph reporting persistence is not available in the selected backend');
+  }
+  return repositories.graphReporting;
 }

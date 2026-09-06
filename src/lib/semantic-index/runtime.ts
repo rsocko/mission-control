@@ -16,11 +16,15 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import { getAIConfigInvalidationEpoch } from '@/lib/ai/provider-routing-core';
 import { semanticIndexLogger } from '@/lib/logger';
+import { getSemanticSearchRuntime } from '@/lib/search/semantic';
 import {
   getSemanticWorkerConfig,
-  isSemanticEntityTypeEnabled,
+  getSemanticRoutingPolicy,
   isSemanticIndexEnabled,
+  loadSemanticIndexConfiguration,
   type SemanticWorkerConfig,
 } from './config';
 import type {
@@ -58,41 +62,89 @@ export interface SemanticIndexRuntimeOverrides {
 
 let runtime: SemanticIndexRuntime | null = null;
 let runtimePromise: Promise<SemanticIndexRuntime> | null = null;
+let runtimeEpoch = -1;
+let runtimePromiseEpoch = -1;
 let worker: SemanticIndexWorker | null = null;
+
+async function semanticIndexEnabled(
+  entityType?: SemanticSourceEntityType,
+): Promise<boolean> {
+  if (/^(1|true|yes|on)$/i.test(process.env.MC_SEMANTIC_INDEX_WORKER_DISABLED?.trim() ?? '')) {
+    return false;
+  }
+  try {
+    const { ai } = await loadSemanticIndexConfiguration();
+    if (!entityType) {
+      return Boolean(ai.semanticSearchEnabled || ai.houstonMemoryEnabled);
+    }
+    return entityType === 'houston-summary'
+      ? ai.houstonMemoryEnabled
+      : ai.semanticSearchEnabled;
+  } catch {
+    return false;
+  }
+}
 
 export async function createSemanticIndexRuntime(
   overrides: SemanticIndexRuntimeOverrides = {},
 ): Promise<SemanticIndexRuntime> {
+  const composed = (
+    (!overrides.repository || !overrides.embeddings)
+    && resolveDatabaseBackend() === 'postgres'
+  )
+    ? await getSemanticSearchRuntime().resolve()
+    : null;
   const [repository, source] = await Promise.all([
-    overrides.repository ? Promise.resolve(overrides.repository) : getSemanticIndexRepository(),
+    overrides.repository
+      ? Promise.resolve(overrides.repository)
+      : composed
+        ? Promise.resolve(composed.repository)
+        : getSemanticIndexRepository(),
     overrides.source ? Promise.resolve(overrides.source) : getSemanticSourcePort(),
   ]);
-  const embeddings = overrides.embeddings ?? getSemanticEmbeddingProvider();
-  const config = overrides.config ?? getSemanticWorkerConfig();
+  const semanticConfiguration = await loadSemanticIndexConfiguration();
+  const embeddings = overrides.embeddings
+    ?? composed?.embeddings
+    ?? getSemanticEmbeddingProvider();
+  const config = overrides.config ?? semanticConfiguration.worker;
   const service = new SemanticIndexService({
     repository,
     source,
     embeddings,
-    resolveSensitivity: createPolicySensitivityResolver(),
+    resolveSensitivity: createPolicySensitivityResolver(getSemanticRoutingPolicy),
     embeddingTimeoutMs: config.embeddingTimeoutMs,
   });
   return { repository, source, embeddings, service, config };
 }
 
 async function ensureRuntime(): Promise<SemanticIndexRuntime> {
-  if (runtime) return runtime;
-  if (!runtimePromise) {
-    runtimePromise = createSemanticIndexRuntime()
-      .then((created) => {
-        runtime = created;
-        return created;
-      })
-      .catch((error) => {
+  for (;;) {
+    const epoch = getAIConfigInvalidationEpoch();
+    if (runtime && runtimeEpoch === epoch) return runtime;
+    if (!runtimePromise || runtimePromiseEpoch !== epoch) {
+      const pending = createSemanticIndexRuntime();
+      runtimePromise = pending;
+      runtimePromiseEpoch = epoch;
+      pending.catch(() => undefined);
+    }
+    const pending = runtimePromise;
+    try {
+      const created = await pending;
+      if (epoch !== getAIConfigInvalidationEpoch()) {
+        if (runtimePromise === pending) runtimePromise = null;
+        continue;
+      }
+      runtime = created;
+      runtimeEpoch = epoch;
+      return created;
+    } catch (error) {
+      if (runtimePromise === pending) {
         runtimePromise = null;
-        throw error;
-      });
+        runtimePromiseEpoch = -1;
+      }
+      throw error;
+    }
   }
-  return runtimePromise;
 }
 
 /**
@@ -112,7 +164,7 @@ export async function getSemanticIndexRuntime(): Promise<SemanticIndexRuntime> {
 }
 
 export async function getSemanticIndexReadiness(): Promise<SemanticIndexReadiness | null> {
-  if (!isSemanticIndexEnabled()) return null;
+  if (!await semanticIndexEnabled()) return null;
   const { repository } = await ensureRuntime();
   return repository.getReadiness();
 }
@@ -121,7 +173,7 @@ export async function getSemanticIndexReadiness(): Promise<SemanticIndexReadines
 export async function getSemanticIndexMetrics(
   indexId: string,
 ): Promise<SemanticIndexMetrics | null> {
-  if (!isSemanticIndexEnabled()) return null;
+  if (!await semanticIndexEnabled()) return null;
   const { repository } = await ensureRuntime();
   return repository.getMetrics(indexId);
 }
@@ -152,7 +204,7 @@ export interface SemanticBackfillSchedule {
  * backfill on the next maintenance tick.
  */
 export async function scheduleSemanticBackfill(): Promise<SemanticBackfillSchedule> {
-  if (!isSemanticIndexEnabled()) {
+  if (!await semanticIndexEnabled()) {
     return { status: 'skipped', reason: 'semantic-search-disabled' };
   }
   try {
@@ -214,7 +266,7 @@ async function withRepository<T>(
   operation: string,
   work: (repository: SemanticIndexRepository) => Promise<T>,
 ): Promise<T | { status: 'skipped'; reason: string }> {
-  if (!isSemanticIndexEnabled()) {
+  if (!await semanticIndexEnabled()) {
     return { status: 'skipped', reason: 'semantic-search-disabled' };
   }
   try {
@@ -296,7 +348,7 @@ async function publishSafely(
   entityType: SemanticSourceEntityType,
   entityId: string,
 ): Promise<SemanticPublishResult> {
-  if (!isSemanticIndexEnabled() || !isSemanticEntityTypeEnabled(entityType)) {
+  if (!await semanticIndexEnabled(entityType)) {
     return { status: 'skipped', reason: 'semantic-search-disabled' };
   }
   try {
@@ -402,6 +454,8 @@ export function getSemanticIndexWorker(): SemanticIndexWorker | null {
 export function resetSemanticIndexRuntimeForTests(): void {
   runtime = null;
   runtimePromise = null;
+  runtimeEpoch = -1;
+  runtimePromiseEpoch = -1;
   worker = null;
 }
 
@@ -413,4 +467,6 @@ export function resetSemanticIndexRuntimeForTests(): void {
 export function setSemanticIndexRuntimeForTests(next: SemanticIndexRuntime | null): void {
   runtime = next;
   runtimePromise = next ? Promise.resolve(next) : null;
+  runtimeEpoch = next ? getAIConfigInvalidationEpoch() : -1;
+  runtimePromiseEpoch = runtimeEpoch;
 }

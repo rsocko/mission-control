@@ -7,8 +7,9 @@ const embed = vi.fn();
 
 vi.mock('@/lib/houston-memory/settings', () => ({ getHoustonMemorySettings }));
 vi.mock('@/lib/houston-memory/service', () => ({ listHoustonMemories }));
-vi.mock('@/lib/semantic-index/runtime', () => ({
-  getSemanticIndexRuntime: async () => ({
+vi.mock('@/lib/search/semantic', () => ({
+  getSemanticSearchRuntime: () => ({
+    resolve: async () => ({
     repository: {
       getActiveIdentity: async () => ({
         id: 'index-1',
@@ -19,7 +20,7 @@ vi.mock('@/lib/semantic-index/runtime', () => ({
       queryVectors,
     },
     embeddings: { embed },
-    config: { embeddingTimeoutMs: 100 },
+    }),
   }),
 }));
 

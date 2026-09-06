@@ -344,14 +344,16 @@ function isValidLLMObservation(obj: unknown): obj is LLMObservation {
  */
 export async function generateLLMObservations(snapshot: InsightsSnapshot): Promise<AIObservation[]> {
   try {
-    const { getAIModel } = await import('@/lib/ai/provider-factory');
-    const { getResolvedAIConfig } = await import('@/lib/ai/config-resolver');
+    const {
+      getAsyncAIModel,
+      getAsyncAIProviderConfiguration,
+    } = await import('@/lib/ai/provider-runtime');
     const { generateText } = await import('ai');
 
-    const config = getResolvedAIConfig();
+    const config = await getAsyncAIProviderConfiguration();
     if (!config.configured) return [];
 
-    const route = getAIModel('stats-observations');
+    const route = await getAsyncAIModel('stats-observations');
 
     const result = await generateText({
       model: route.model,

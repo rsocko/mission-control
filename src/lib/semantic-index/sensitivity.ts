@@ -6,8 +6,8 @@
  * policy would label a request carrying that document's text.
  */
 
-import { getAIRoutingPolicy } from '@/lib/ai/config-resolver';
 import { resolveSensitivity } from '@/lib/ai/sensitivity-policy';
+import type { AIRoutingPolicyConfig } from '@/lib/ai/types';
 import type { SemanticSensitivityResolver } from './projections';
 
 /**
@@ -17,13 +17,12 @@ import type { SemanticSensitivityResolver } from './projections';
  * the connector kind is passed as a routing "source" so per-connector overrides
  * (finance, email, and the rest) apply unchanged.
  */
-export function createPolicySensitivityResolver(): SemanticSensitivityResolver {
+export function createPolicySensitivityResolver(
+  getRoutingPolicy: () => AIRoutingPolicyConfig,
+): SemanticSensitivityResolver {
   return ({ connectorType }) => {
     const key = connectorType.trim().toLowerCase();
-    // The policy read is itself cached by the config resolver, so this stays
-    // cheap while still picking up a policy edit rather than pinning the tier
-    // that was in force when the worker started.
-    return resolveSensitivity('semantic-embedding', getAIRoutingPolicy(), {
+    return resolveSensitivity('semantic-embedding', getRoutingPolicy(), {
       sources: key ? [key] : [],
     });
   };

@@ -111,8 +111,8 @@ async function generateNoteContent(item: TriageItem, category: string, titleOver
 
   // Try AI extraction if available
   try {
-    const { getAIModel } = await import('@/lib/ai/provider-factory');
-    const route = getAIModel('knowledge-base-extraction', {
+    const { getAsyncAIModel } = await import('@/lib/ai/provider-runtime');
+    const route = await getAsyncAIModel('knowledge-base-extraction', {
       sources: item.sourcePlatform ? [item.sourcePlatform] : [],
     });
 

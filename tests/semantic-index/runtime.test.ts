@@ -33,16 +33,18 @@ vi.mock('@/lib/logger', () => ({
   dbLogger: mocks.logger,
 }));
 
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => mocks.resolved,
-  getAIRoutingPolicy: () => ({
-    policies: {
-      'local-only': { allowedRoutes: ['ollama'] },
-      restricted: { allowedRoutes: ['ollama', 'azure-private'] },
-      standard: { allowedRoutes: ['bifrost-copilot', 'ollama', 'azure-private', 'openai'] },
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: mocks.resolved,
+    routingPolicy: {
+      policies: {
+        'local-only': { allowedRoutes: ['ollama'] },
+        restricted: { allowedRoutes: ['ollama', 'azure-private'] },
+        standard: { allowedRoutes: ['bifrost-copilot', 'ollama', 'azure-private', 'openai'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: {},
     },
-    featureDefaults: {},
-    sourceDefaults: {},
   }),
 }));
 
@@ -76,18 +78,29 @@ afterEach(() => {
 describe('semantic index feature gate', () => {
   it('is off when semantic search enrichment is off', async () => {
     const { isSemanticIndexEnabled } = await import('@/lib/semantic-index/config');
+    const { loadSemanticIndexConfiguration } = await import('@/lib/semantic-index/config');
+    await loadSemanticIndexConfiguration();
     expect(isSemanticIndexEnabled()).toBe(false);
   });
 
   it('is on when semantic search enrichment is on', async () => {
     mocks.resolved.semanticSearchEnabled = true;
-    const { isSemanticIndexEnabled } = await import('@/lib/semantic-index/config');
+    const {
+      isSemanticIndexEnabled,
+      loadSemanticIndexConfiguration,
+    } = await import('@/lib/semantic-index/config');
+    await loadSemanticIndexConfiguration();
     expect(isSemanticIndexEnabled()).toBe(true);
   });
 
   it('is on when only Houston memory is on and restricts maintenance to Houston summaries', async () => {
     mocks.resolved.houstonMemoryEnabled = true;
-    const { getSemanticWorkerConfig, isSemanticIndexEnabled } = await import('@/lib/semantic-index/config');
+    const {
+      getSemanticWorkerConfig,
+      isSemanticIndexEnabled,
+      loadSemanticIndexConfiguration,
+    } = await import('@/lib/semantic-index/config');
+    await loadSemanticIndexConfiguration();
     expect(isSemanticIndexEnabled()).toBe(true);
     expect(getSemanticWorkerConfig().entityTypes).toEqual(['houston-summary']);
   });
@@ -95,7 +108,11 @@ describe('semantic index feature gate', () => {
   it('honours an explicit worker kill switch even when the feature is on', async () => {
     mocks.resolved.semanticSearchEnabled = true;
     process.env.MC_SEMANTIC_INDEX_WORKER_DISABLED = 'true';
-    const { isSemanticIndexEnabled } = await import('@/lib/semantic-index/config');
+    const {
+      isSemanticIndexEnabled,
+      loadSemanticIndexConfiguration,
+    } = await import('@/lib/semantic-index/config');
+    await loadSemanticIndexConfiguration();
     expect(isSemanticIndexEnabled()).toBe(false);
   });
 });

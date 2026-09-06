@@ -6,7 +6,10 @@
  * the whole event loop, hold a lease past its heartbeat, or run forever.
  */
 
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
+import { getAIConfigInvalidationEpoch } from '@/lib/ai/provider-routing-core';
+import type { AIRoutingPolicyConfig, ResolvedAIConfig } from '@/lib/ai/types';
+import { semanticIndexLogger } from '@/lib/logger';
 import {
   SEMANTIC_SOURCE_ENTITY_TYPES,
   type SemanticSourceEntityType,
@@ -18,14 +21,86 @@ import {
 
 export type { SemanticWorkerConfig } from './worker-config';
 
-export function getSemanticWorkerConfig(): SemanticWorkerConfig {
-  const ai = getResolvedAIConfig();
+const CONFIG_CACHE_TTL_MS = 60_000;
+
+interface SemanticIndexConfiguration {
+  ai: ResolvedAIConfig;
+  routingPolicy: AIRoutingPolicyConfig;
+  worker: SemanticWorkerConfig;
+}
+
+let cachedConfiguration: SemanticIndexConfiguration | null = null;
+let cacheTime = 0;
+let cachedEpoch = getAIConfigInvalidationEpoch();
+let refreshPromise: Promise<SemanticIndexConfiguration> | null = null;
+
+function workerConfigFor(ai: ResolvedAIConfig): SemanticWorkerConfig {
   const entityTypes = SEMANTIC_SOURCE_ENTITY_TYPES.filter((entityType) =>
     entityType === 'houston-summary'
       ? ai.houstonMemoryEnabled
       : ai.semanticSearchEnabled
   );
   return resolveSemanticWorkerConfig(entityTypes);
+}
+
+function observeInvalidation(): void {
+  const epoch = getAIConfigInvalidationEpoch();
+  if (epoch === cachedEpoch) return;
+  cachedEpoch = epoch;
+  cachedConfiguration = null;
+  cacheTime = 0;
+}
+
+export async function loadSemanticIndexConfiguration(): Promise<SemanticIndexConfiguration> {
+  observeInvalidation();
+  if (cachedConfiguration && Date.now() - cacheTime < CONFIG_CACHE_TTL_MS) {
+    return cachedConfiguration;
+  }
+  if (!refreshPromise) {
+    const refresh = (async () => {
+      for (;;) {
+        const epoch = getAIConfigInvalidationEpoch();
+        const { resolved, routingPolicy } = await loadAIProviderConfiguration();
+        if (epoch !== getAIConfigInvalidationEpoch()) {
+          observeInvalidation();
+          continue;
+        }
+        cachedEpoch = epoch;
+        cachedConfiguration = {
+          ai: resolved,
+          routingPolicy,
+          worker: workerConfigFor(resolved),
+        };
+        cacheTime = Date.now();
+        return cachedConfiguration;
+      }
+    })();
+    const trackedRefresh = refresh.finally(() => {
+      if (refreshPromise === trackedRefresh) refreshPromise = null;
+    });
+    refreshPromise = trackedRefresh;
+  }
+  return refreshPromise;
+}
+
+function refreshAfterInvalidation(): void {
+  void loadSemanticIndexConfiguration().catch((error) => {
+    semanticIndexLogger.warn({
+      event: 'semantic_configuration_refresh_failed',
+      err: error,
+    }, 'Semantic index configuration refresh failed');
+  });
+}
+
+export function getSemanticWorkerConfig(): SemanticWorkerConfig {
+  observeInvalidation();
+  if (!cachedConfiguration || Date.now() - cacheTime >= CONFIG_CACHE_TTL_MS) {
+    refreshAfterInvalidation();
+  }
+  if (!cachedConfiguration) {
+    return resolveSemanticWorkerConfig([]);
+  }
+  return cachedConfiguration.worker;
 }
 
 /**
@@ -37,23 +112,35 @@ export function isSemanticIndexEnabled(): boolean {
   if (/^(1|true|yes|on)$/i.test(process.env.MC_SEMANTIC_INDEX_WORKER_DISABLED?.trim() ?? '')) {
     return false;
   }
-  try {
-    const config = getResolvedAIConfig();
-    return Boolean(config.semanticSearchEnabled || config.houstonMemoryEnabled);
-  } catch {
-    // A settings read can fail before the database exists; treat that as "not
-    // enabled yet" rather than crashing the host worker process.
-    return false;
+  observeInvalidation();
+  if (!cachedConfiguration || Date.now() - cacheTime >= CONFIG_CACHE_TTL_MS) {
+    refreshAfterInvalidation();
   }
+  // This synchronous function is only a cheap publication/worker preflight.
+  // The async runtime rechecks persisted settings before provider or storage I/O.
+  if (!cachedConfiguration) return true;
+  return Boolean(
+    cachedConfiguration.ai.semanticSearchEnabled
+    || cachedConfiguration.ai.houstonMemoryEnabled
+  );
 }
 
 export function isSemanticEntityTypeEnabled(entityType: SemanticSourceEntityType): boolean {
-  try {
-    const config = getResolvedAIConfig();
-    return entityType === 'houston-summary'
-      ? config.houstonMemoryEnabled
-      : config.semanticSearchEnabled;
-  } catch {
-    return false;
+  observeInvalidation();
+  if (!cachedConfiguration || Date.now() - cacheTime >= CONFIG_CACHE_TTL_MS) {
+    refreshAfterInvalidation();
   }
+  if (!cachedConfiguration) return true;
+  return entityType === 'houston-summary'
+    ? cachedConfiguration.ai.houstonMemoryEnabled
+    : cachedConfiguration.ai.semanticSearchEnabled;
+}
+
+export function getSemanticRoutingPolicy(): AIRoutingPolicyConfig {
+  observeInvalidation();
+  if (!cachedConfiguration || Date.now() - cacheTime >= CONFIG_CACHE_TTL_MS) {
+    refreshAfterInvalidation();
+    throw new Error('Semantic routing policy is refreshing');
+  }
+  return cachedConfiguration.routingPolicy;
 }

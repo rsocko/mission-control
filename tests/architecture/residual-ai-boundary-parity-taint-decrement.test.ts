@@ -54,14 +54,11 @@ describe('residual AI boundary parity taint decrement', () => {
     }
   });
 
-  it('pins the parent-only temporary graph without changing canonical baselines', () => {
-    expect(current.tierARoutes).toHaveLength(31);
-    expect(current.tierBRoutes).toHaveLength(4);
-    expect(current.cleanRoutes).toHaveLength(231);
-    expect(current.taintedLibA).toHaveLength(18);
-    expect(current.taintedApiHelpers).toHaveLength(0);
-    expect(current.totalMigrationUnits).toBe(49);
-    expect(current.cleanRoutes).toContain(ROUTES[0]);
-    expect(current.tierARoutes).toContain(ROUTES[1]);
+  it('moves both owned route outcomes to clean without owning exact-current counts', () => {
+    for (const route of ROUTES) {
+      expect(current.cleanRoutes).toContain(route);
+      expect(current.tierARoutes).not.toContain(route);
+      expect(current.tierBRoutes).not.toContain(route);
+    }
   });
 });

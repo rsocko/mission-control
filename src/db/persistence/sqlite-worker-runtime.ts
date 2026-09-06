@@ -73,6 +73,7 @@ import {
 import {
   createSqliteWebhookIntegrationsRepository,
 } from './sqlite-webhook-integrations-repository';
+import { createSqliteGraphReportingRepository } from './sqlite-graph-reporting-repository';
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
@@ -199,6 +200,7 @@ export function createSqliteWorkerPersistenceRepositories(
     routines: createSqliteRoutinesRepository(sqlite),
     dailyPlanning: createSqliteDailyPlanningPersistence(sqlite),
     webhookIntegrations: createSqliteWebhookIntegrationsRepository(sqlite, db),
+    graphReporting: createSqliteGraphReportingRepository(sqlite, db),
   };
   return repositories;
 }

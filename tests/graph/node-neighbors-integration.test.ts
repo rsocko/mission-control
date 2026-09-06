@@ -1,4 +1,4 @@
-import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const findSimilarTaskEmbeddings = vi.fn();
 
@@ -7,17 +7,21 @@ vi.mock('@/lib/search/semantic', () => ({ findSimilarTaskEmbeddings }));
 describe('getNodeNeighbors', () => {
   let getNodeNeighbors: typeof import('@/lib/graph/neighbors-service').getNodeNeighbors;
   let GraphAuthorizationError: typeof import('@/lib/graph/neighbors-service').GraphAuthorizationError;
+  let shutdownSqlitePersistenceComposition: () => Promise<void>;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
-    const [{ default: db }, schema, service] = await Promise.all([
+    const [database, schema, service] = await Promise.all([
       import('@/db'),
       import('@/db/schema'),
       import('@/lib/graph/neighbors-service'),
     ]);
+    const { default: db, initializeSqlitePersistenceComposition } = database;
+    shutdownSqlitePersistenceComposition = database.shutdownSqlitePersistenceComposition;
+    await initializeSqlitePersistenceComposition();
     getNodeNeighbors = service.getNodeNeighbors;
     GraphAuthorizationError = service.GraphAuthorizationError;
     const now = '2030-01-01T00:00:00.000Z';
@@ -128,6 +132,10 @@ describe('getNodeNeighbors', () => {
       { taskId: 'center', tagId: 'tag-1' },
       { taskId: 'blocker', tagId: 'tag-1' },
     ]);
+  });
+
+  afterAll(async () => {
+    await shutdownSqlitePersistenceComposition();
   });
 
   beforeEach(() => {

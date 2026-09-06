@@ -51,7 +51,7 @@ growing without an explicit exception.
 | Search | FTS5 virtual tables, `MATCH`, `bm25`, `sqlite_master` | `src/lib/search/fts.ts` | High. Keyword search/indexing uses a backend-specific repository. |
 | Health and telemetry | `PRAGMA page_count`, page size, WAL checkpoints and SQLite observation | `src/lib/telemetry/**`, readiness route | High. Runtime health consumes a database-health probe result. |
 | Graph workspace | raw row mapping, JSON text, compare-and-swap writes and checkpoints | `src/lib/graph-workspace/sqlite-repository.ts` | Migrated (L16). Both backends implement `IdeationWorkspaceRepository`; the SQLite adapter is one of two composed behind the `ideationWorkspaces` worker slot. |
-| Tasks and projects | Drizzle queries plus shared `runTransaction` | task APIs and project services | Medium. Migrate by canonical workflow, not table-by-table. |
+| Tasks and projects | Drizzle queries plus shared `runTransaction` | task APIs and project services | Medium. Migrate by canonical workflow, not table-by-table. The bounded graph/reporting/project-dependency slice now uses `WorkerPersistenceRepositories.graphReporting`; task relationships and other task/project routes remain separately scoped. |
 | Notifications and connectors | mixed Drizzle and raw SQLite write paths | notification writeback, connector stores and sync services | High. Move correctness-sensitive commands behind focused services first. L13 migrated seven notification web routes and the writeback dispatcher behind `NotificationWebPersistence` (attached as `notificationDelivery.web`). |
 | Finance, external identity, AI runs and agents | concentrated raw SQL and synchronous transactions | corresponding `src/lib` domains | High, but outside the representative migration. Preserve as documented legacy exceptions until each workflow moves. |
 | Daily planning read models | task completion aggregate with SQLite timestamp predicates | `src/app/api/daily-completions/route.ts` | Migrated. The route resolves configured local-day bounds before calling `AnalyticsPersistence.kpis.countTasksCompletedIn`; the half-open instant range is shared by SQLite and PostgreSQL without loading SQLite helpers in the PostgreSQL web graph. |
@@ -130,6 +130,15 @@ loading worker schedulers. That composition now carries five members —
 `connectors`/`syncRuns`, `execution` (Layer 2), `github` (Layers 3A/3B),
 `connectorState` (Layer 4), and `finance` (Layers 5A-5C) — and is registered
 atomically.
+
+The worker composition also includes the atomic `graphReporting` capability.
+Its SQLite and PostgreSQL adapters own Universe and neighbor reads, project
+graphs and dependency validation, portfolio overview, burn history, and the
+narrow cluster-save tag/audit operations. Read models intentionally remain
+non-snapshot. PostgreSQL serializes global dependency validation with an
+advisory transaction lock; connector I/O and cluster-save compensation stay
+outside repository transactions. See
+[Graph and Reporting Persistence](./graph-reporting-persistence.md).
 
 Layer 2 adds the complete `ConnectorExecutionRepositories` composition to that
 worker registration. Its phase-oriented ports own:

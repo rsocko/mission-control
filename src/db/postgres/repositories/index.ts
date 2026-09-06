@@ -50,6 +50,7 @@ import {
 import {
   createPostgresWebhookIntegrationsRepository,
 } from './webhook-integrations-repository';
+import { createPostgresGraphReportingRepository } from './graph-reporting-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -106,6 +107,7 @@ export {
 export {
   createPostgresWebhookIntegrationsRepository,
 } from './webhook-integrations-repository';
+export { createPostgresGraphReportingRepository } from './graph-reporting-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -173,6 +175,7 @@ export function createPostgresWorkerPersistenceRepositories(
   core: CorePersistenceRepositories,
 ): WorkerPersistenceRepositories {
   const financeCore = createPostgresFinanceWorkerPersistence(pool);
+  const graphReporting = createPostgresGraphReportingRepository(db, pool);
   return {
     connectors: core.connectors,
     syncRuns: new PostgresSyncRunRepository(db),
@@ -207,5 +210,6 @@ export function createPostgresWorkerPersistenceRepositories(
     routines: createPostgresRoutinesRepository(pool),
     dailyPlanning: createPostgresDailyPlanningPersistence(pool),
     webhookIntegrations: createPostgresWebhookIntegrationsRepository(pool),
+    graphReporting,
   };
 }

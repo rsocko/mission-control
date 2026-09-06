@@ -1,8 +1,5 @@
 import { randomUUID } from 'crypto';
-import { and, eq, inArray } from 'drizzle-orm';
 import { z } from 'zod';
-import db from '@/db';
-import { hubProjects, tags, taskHistoryEvents, tasks } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 import {
@@ -17,16 +14,20 @@ import {
   getProjectHierarchySnapshot,
   ProjectHierarchyServiceError,
 } from '@/lib/projects/hierarchy-service';
-import { getCanonicalTaskFilterWhere } from '@/app/api/tasks/canonical-filter';
 import {
-  DELETE as deleteHubProject,
-  POST as createHubProject,
-} from '@/app/api/hub-projects/route';
-import {
-  DELETE as deleteHubTag,
-  POST as createHubTag,
-} from '@/app/api/tags/route';
+  createHubProject,
+} from '@/lib/projects/organization-service';
 import { POST as addTaskTags } from '@/app/api/tasks/[id]/tags/route';
+import { getGraphReportingPersistence } from '@/lib/graph/universe-service';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { buildTaskFilterSpec } from '@/lib/tasks/core/filter-spec';
+import { normalizedCsv } from '@/app/api/tasks/query-input';
+import { getLocalDaysFromNow, getLocalToday } from '@/lib/utils/date';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication-service';
 
 const saveRequestSchema = z.object({
   destination: z.enum(['project', 'tag']),
@@ -62,32 +63,6 @@ function internalRequest(origin: string, path: string, body: unknown): Request {
   });
 }
 
-async function removeIncompleteDestination(
-  origin: string,
-  destination: 'project' | 'tag',
-  destinationId: string,
-): Promise<boolean> {
-  const deleteHandler = destination === 'project' ? deleteHubProject : deleteHubTag;
-  await deleteHandler(new Request(
-    `${origin}/api/${destination === 'project' ? 'hub-projects' : 'tags'}?id=${
-      encodeURIComponent(destinationId)
-    }`,
-    { method: 'DELETE' },
-  ));
-  if (destination === 'project') {
-    const [remaining] = await db.select({ id: hubProjects.id })
-      .from(hubProjects)
-      .where(eq(hubProjects.id, destinationId))
-      .limit(1);
-    return !remaining;
-  }
-  const [remaining] = await db.select({ id: tags.id })
-    .from(tags)
-    .where(eq(tags.id, destinationId))
-    .limit(1);
-  return !remaining;
-}
-
 export async function POST(request: Request) {
   if (!isTrustedMutationRequest(request)) {
     return ApiErrors.forbidden('Cluster save requires a trusted same-origin request');
@@ -103,60 +78,87 @@ export async function POST(request: Request) {
     }
     const input = parsed.data;
     const origin = new URL(request.url).origin;
+    const graphReporting = await getGraphReportingPersistence();
+    let createdProject: { id: string; creationToken: string } | null = null;
+    const rollbackCreatedProject = async (projectId: string, creationToken: string) => {
+      const rollback = await graphReporting.clusterSave.deleteProjectIfCreationToken({
+        projectId,
+        creationToken,
+      });
+      if (!rollback.deleted) return false;
+      await Promise.all([
+        publishSemanticEntityDelete('project', projectId),
+        ...rollback.affectedTaskIds.map((taskId) => publishSemanticEntityUpsert('task', taskId)),
+      ]);
+      return true;
+    };
     const result = await saveUniverseCluster(input, {
       authorizeTaskIds: async (taskIds) => {
-        const { taskWhere } = await getCanonicalTaskFilterWhere(
-          new URLSearchParams(),
-        );
-        const rows = await db.select({ id: tasks.id })
-          .from(tasks)
-          .where(and(taskWhere, inArray(tasks.id, taskIds)));
-        return rows.map((row) => row.id);
+        const today = getLocalToday();
+        const spec = buildTaskFilterSpec(new URLSearchParams(), {
+          readCsv: normalizedCsv,
+          clock: {
+            today,
+            weekFromNow: getLocalDaysFromNow(NEXT_7_DAYS),
+            recentCutoff: getLocalDaysFromNow(-7),
+          },
+        });
+        const { filterInputs } = await getTaskCorePersistence();
+        return graphReporting.universe.listEligibleTaskIds({
+          spec,
+          filterInputs: {
+            myDayTaskIds: await filterInputs.listMyDayTaskIds(spec.myDayDate),
+            assignedGitHubUsernames: await filterInputs.listAssignedGitHubUsernames(),
+            inboxListEntries: await filterInputs.listInboxListEntries(),
+          },
+          taskIds,
+        });
       },
       createProject: async (name) => {
         const projectId = `proj-${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-        const [existing] = await db.select({ id: hubProjects.id })
-          .from(hubProjects)
-          .where(eq(hubProjects.id, projectId))
-          .limit(1);
-        if (existing) {
+        const creationToken = randomUUID();
+        if (await graphReporting.clusterSave.findProject(projectId)) {
           throw new UniverseClusterSaveError(
             'A project with this name already exists',
             'DESTINATION_CONFLICT',
             409,
           );
         }
-        const response = await createHubProject(internalRequest(
-          origin,
-          '/api/hub-projects',
-          {
+        try {
+          const created = await createHubProject({
             name,
             description: `Reviewed from transient Universe cluster ${input.clusterId}.`,
             metadata: {
               source: 'universe-cluster-review',
               projectionFingerprint: input.projectionFingerprint,
+              universeClusterCreationToken: creationToken,
             },
-          },
-        ));
-        const payload = await responseJson(response);
-        if (!response.ok || typeof payload.id !== 'string') {
-          const [created] = await db.select({ id: hubProjects.id })
-            .from(hubProjects)
-            .where(eq(hubProjects.id, projectId))
-            .limit(1);
-          if (
-            created
-            && !await removeIncompleteDestination(origin, 'project', projectId)
-          ) {
+          });
+          createdProject = { id: created.id, creationToken };
+          return created.id;
+        } catch (error) {
+          let rolledBack = false;
+          try {
+            rolledBack = await rollbackCreatedProject(projectId, creationToken);
+          } catch {
             throw new UniverseClusterSaveError(
               'Project creation failed and the incomplete project could not be removed',
               'PROJECT_CREATION_ROLLBACK_FAILED',
               500,
             );
           }
-          throw domainError(response, payload, 'Project could not be created');
+          if (rolledBack) {
+            throw error;
+          }
+          if (await graphReporting.clusterSave.findProject(projectId)) {
+            throw new UniverseClusterSaveError(
+              'A project with this name already exists',
+              'DESTINATION_CONFLICT',
+              409,
+            );
+          }
+          throw error;
         }
-        return payload.id;
       },
       assignProjectTasks: async (projectId, taskIds) => {
         const hierarchy = await getProjectHierarchySnapshot(projectId);
@@ -181,50 +183,38 @@ export async function POST(request: Request) {
         }
       },
       rollbackProject: async (projectId) => {
-        const response = await deleteHubProject(new Request(
-          `${origin}/api/hub-projects?id=${encodeURIComponent(projectId)}`,
-          { method: 'DELETE' },
-        ));
-        if (!response.ok) {
-          throw domainError(
-            response,
-            await responseJson(response),
-            'The incomplete project could not be removed',
-          );
+        if (
+          createdProject?.id !== projectId
+          || !await rollbackCreatedProject(projectId, createdProject.creationToken)
+        ) {
+          throw new Error('The created project is no longer owned by this cluster save request');
         }
       },
       createTag: async (name) => {
         const tagSlug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-        const [existing] = await db.select({ id: tags.id })
-          .from(tags)
-          .where(eq(tags.slug, tagSlug))
-          .limit(1);
-        const response = await createHubTag(internalRequest(
-          origin,
-          '/api/tags',
-          { name, color: UNIVERSE_DIMENSION_COLORS.tags },
-        ));
-        const payload = await responseJson(response);
-        if (!response.ok || typeof payload.id !== 'string') {
-          const tagId = `tag-${tagSlug}`;
-          const [created] = await db.select({ id: tags.id })
-            .from(tags)
-            .where(eq(tags.id, tagId))
-            .limit(1);
-          if (
-            !existing
-            && created
-            && !await removeIncompleteDestination(origin, 'tag', tagId)
-          ) {
+        const existing = await graphReporting.clusterSave.findTagBySlug(tagSlug);
+        if (existing) return existing.id;
+        const created = await graphReporting.clusterSave.createTag({
+          id: `tag-${tagSlug}`,
+          name,
+          slug: tagSlug,
+          color: UNIVERSE_DIMENSION_COLORS.tags,
+          createdAt: new Date().toISOString(),
+        });
+        if (!created.created) return created.id;
+        try {
+          await publishSemanticEntityUpsert('tag', created.id);
+        } catch (error) {
+          if (!await graphReporting.clusterSave.deleteTagIfUnused(created.id)) {
             throw new UniverseClusterSaveError(
               'Tag creation failed and the incomplete tag could not be removed',
               'TAG_CREATION_ROLLBACK_FAILED',
               500,
             );
           }
-          throw domainError(response, payload, 'Tag could not be created');
+          throw error;
         }
-        return payload.id;
+        return created.id;
       },
       addTagToTask: async (taskId, tagName) => {
         const response = await addTaskTags(
@@ -242,22 +232,13 @@ export async function POST(request: Request) {
         }
       },
       recordTagAudit: async (saveInput, tagId, taskIds) => {
-        const now = new Date().toISOString();
-        await db.insert(taskHistoryEvents).values(taskIds.map((taskId) => ({
-          taskId,
-          eventType: 'universe_cluster_saved',
-          fieldName: 'tags',
-          previousValue: null,
-          newValue: tagId,
-          occurredAt: now,
-          recordedAt: now,
-          provenance: 'user',
-          provenanceRef: {
-            clusterId: saveInput.clusterId,
-            projectionFingerprint: saveInput.projectionFingerprint,
-          },
-          metadata: { reviewed: true },
-        })));
+        await graphReporting.clusterSave.recordTagAudit({
+          tagId,
+          taskIds,
+          clusterId: saveInput.clusterId,
+          projectionFingerprint: saveInput.projectionFingerprint,
+          now: new Date().toISOString(),
+        });
       },
     });
     return Response.json(result, { status: result.status === 'partial' ? 207 : 201 });

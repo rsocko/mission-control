@@ -1,14 +1,5 @@
 import 'server-only';
 
-import { and, count, desc, eq, inArray } from 'drizzle-orm';
-import db from '@/db';
-import {
-  hubProjects,
-  tags,
-  taskProjects,
-  tasks,
-  taskTags,
-} from '@/db/schema';
 import { buildUniverseSubgraph } from './universe-subgraph';
 import type {
   UniverseGraphFilters,
@@ -18,78 +9,66 @@ import type {
   UniverseTaskRecord,
 } from './universe-types';
 import { normalizeGraphBudgets } from './query';
-import { getCanonicalTaskFilterWhere } from '@/app/api/tasks/canonical-filter';
 import {
   isUniverseClustersEnabled,
   isUniverseSemanticNeighborsEnabled,
 } from './universe-semantic-config';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { buildTaskFilterSpec } from '@/lib/tasks/core/filter-spec';
+import { normalizedCsv } from '@/app/api/tasks/query-input';
+import { getLocalDaysFromNow, getLocalToday } from '@/lib/utils/date';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
+
+export async function getGraphReportingPersistence() {
+  return requireGraphReportingPersistence(await getWorkerPersistenceRepositories());
+}
+
+async function universeFilterInput(taskQuery: URLSearchParams) {
+  const today = getLocalToday();
+  const spec = buildTaskFilterSpec(taskQuery, {
+    readCsv: normalizedCsv,
+    clock: {
+      today,
+      weekFromNow: getLocalDaysFromNow(NEXT_7_DAYS),
+      recentCutoff: getLocalDaysFromNow(-7),
+    },
+  });
+  const { filterInputs } = await getTaskCorePersistence();
+  return {
+    spec,
+    filterInputs: {
+      myDayTaskIds: await filterInputs.listMyDayTaskIds(spec.myDayDate),
+      assignedGitHubUsernames: await filterInputs.listAssignedGitHubUsernames(),
+      inboxListEntries: await filterInputs.listInboxListEntries(),
+    },
+  };
+}
 
 export async function getUniverseSubgraph(
   filters: UniverseGraphFilters,
 ): Promise<UniverseSubgraph> {
   const { maxNodes, maxEdges } = normalizeGraphBudgets(filters);
-  const { taskWhere } = await getCanonicalTaskFilterWhere(filters.taskQuery);
+  const filter = await universeFilterInput(filters.taskQuery);
   const boundedSeedIds = filters.seedTaskIds?.slice(0, 10);
-  const universeWhere = boundedSeedIds
-    ? and(taskWhere, inArray(tasks.id, boundedSeedIds))
-    : taskWhere;
-
-  const [selectedTasks, totalRows] = await Promise.all([
-    db.select({
-      id: tasks.id,
-      title: tasks.title,
-      priority: tasks.priority,
-      status: tasks.status,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-      sourceListId: tasks.sourceListId,
-      sourceListName: tasks.sourceListName,
-      effort: tasks.effort,
-    }).from(tasks)
-      .where(universeWhere)
-      .orderBy(desc(tasks.updatedAt))
-      .limit(maxNodes + 1) as Promise<UniverseTaskRecord[]>,
-    db.select({ value: count() }).from(tasks).where(universeWhere),
-  ]);
-  const filteredTaskCount = Number(totalRows[0]?.value ?? 0);
-
-  const hasMoreTasks = selectedTasks.length > maxNodes;
-  const boundedTasks = selectedTasks.slice(0, maxNodes);
-  const taskIds = boundedTasks.map((task) => task.id);
-  let selectedTags: UniverseTagRecord[] = [];
-  let selectedProjects: UniverseProjectRecord[] = [];
-
-  if (taskIds.length && filters.dimensions.includes('tags')) {
-    selectedTags = await db.select({
-      taskId: taskTags.taskId,
-      id: tags.id,
-      name: tags.name,
-      color: tags.color,
-    }).from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(inArray(taskTags.taskId, taskIds));
-  }
-
-  if (taskIds.length && filters.dimensions.includes('project')) {
-    selectedProjects = await db.select({
-      taskId: taskProjects.taskId,
-      id: hubProjects.id,
-      name: hubProjects.name,
-      color: hubProjects.color,
-      status: hubProjects.status,
-    }).from(taskProjects)
-      .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-      .where(inArray(taskProjects.taskId, taskIds));
-  }
+  const repository = (await getGraphReportingPersistence()).universe;
+  const rows = await repository.read({
+    ...filter,
+    seedTaskIds: boundedSeedIds,
+    maxNodes,
+    includeTags: filters.dimensions.includes('tags'),
+    includeProjects: filters.dimensions.includes('project'),
+  });
 
   const graph = buildUniverseSubgraph({
-    tasks: boundedTasks,
-    tags: selectedTags,
-    projects: selectedProjects,
+    tasks: rows.tasks as UniverseTaskRecord[],
+    tags: rows.tags as UniverseTagRecord[],
+    projects: rows.projects as UniverseProjectRecord[],
     dimensions: filters.dimensions,
     maxNodes,
     maxEdges,
-    hasMoreTasks,
+    hasMoreTasks: rows.hasMoreTasks,
   });
   return {
     ...graph,
@@ -99,7 +78,7 @@ export async function getUniverseSubgraph(
     },
     stats: {
       ...graph.stats,
-      filteredTaskCount,
+      filteredTaskCount: rows.filteredTaskCount,
     },
   };
 }

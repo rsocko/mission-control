@@ -1,6 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
-import type { WorkerPersistenceRepositories } from './persistence/worker-repositories';
+import {
+  requireGraphReportingPersistence,
+  type WorkerPersistenceRepositories,
+} from './persistence/worker-repositories';
 import type { ConnectorOperationLeaseRepository } from '@/lib/sync/connector-operation-lease-repository';
 import type { SyncControlStateRepository } from '@/lib/sync/control-state';
 import type { ConnectorMaintenanceLockRepository } from '@/lib/sync/maintenance-lock';
@@ -660,6 +663,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
       get: (_target, property) => (
         requirePostgresWorkerRepositories().webhookIntegrations[
           property as keyof WorkerPersistenceRepositories['webhookIntegrations']
+        ]
+      ),
+    },
+  ),
+  graphReporting: new Proxy(
+    {} as NonNullable<WorkerPersistenceRepositories['graphReporting']>,
+    {
+      get: (_target, property) => (
+        requireGraphReportingPersistence(requirePostgresWorkerRepositories())[
+          property as keyof NonNullable<WorkerPersistenceRepositories['graphReporting']>
         ]
       ),
     },

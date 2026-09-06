@@ -1,7 +1,6 @@
-import db from '@/db';
-import { hubProjects, tasks, taskProjects, projectTags, tags } from '@/db/schema';
-import { eq, inArray } from 'drizzle-orm';
 import type { ProjectStatus, ProjectHealth, ProjectProgress, HubProject, Tag } from '@/types';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
 
 // ─── STATUS INFERENCE ───────────────────────────────────────────────────────
 
@@ -39,20 +38,12 @@ export function inferHealth(
 // ─── PROGRESS COMPUTATION ───────────────────────────────────────────────────
 
 export async function computeProjectProgress(projectId: string): Promise<ProjectProgress> {
-  const projectTaskIds = await db
-    .select({ taskId: taskProjects.taskId })
-    .from(taskProjects)
-    .where(eq(taskProjects.projectId, projectId));
-
-  if (projectTaskIds.length === 0) {
+  const projectTasks = await requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).overview.listProjectTaskStatuses(projectId);
+  if (projectTasks.length === 0) {
     return { totalTasks: 0, completedTasks: 0, inProgressTasks: 0, percentComplete: 0, health: 'on_track' };
   }
-
-  const ids = projectTaskIds.map(t => t.taskId);
-  const projectTasks = await db
-    .select({ status: tasks.status, updatedAt: tasks.updatedAt, parentId: tasks.parentId })
-    .from(tasks)
-    .where(inArray(tasks.id, ids));
 
   const topLevelTasks = topLevelProjectTasks(projectTasks);
   const totalTasks = topLevelTasks.length;
@@ -72,27 +63,19 @@ export async function computeProjectProgress(projectId: string): Promise<Project
 
 // ─── FETCH TAGS FOR PROJECTS ──────────────────────────────────────────────
 
-async function getProjectTagsMap(projectIds: string[]): Promise<Record<string, Tag[]>> {
-  if (projectIds.length === 0) return {};
-
-  const rows = await db
-    .select({ projectId: projectTags.projectId, tag: tags })
-    .from(projectTags)
-    .innerJoin(tags, eq(projectTags.tagId, tags.id))
-    .where(inArray(projectTags.projectId, projectIds));
-
+function getProjectTagsMap(rows: Array<Tag & { projectId: string }>): Record<string, Tag[]> {
   const map: Record<string, Tag[]> = {};
   for (const row of rows) {
     if (!map[row.projectId]) map[row.projectId] = [];
     map[row.projectId].push({
-      id: row.tag.id,
-      name: row.tag.name,
-      slug: row.tag.slug,
-      type: row.tag.type as Tag['type'],
-      source: row.tag.source || undefined,
-      color: row.tag.color || undefined,
-      confirmed: row.tag.confirmed,
-      createdAt: row.tag.createdAt,
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      type: row.type as Tag['type'],
+      source: row.source || undefined,
+      color: row.color || undefined,
+      confirmed: row.confirmed,
+      createdAt: row.createdAt,
     });
   }
   return map;
@@ -262,9 +245,10 @@ export function buildPortfolioPulse(
 }
 
 export async function getProjectsOverview(): Promise<ProjectsOverview> {
-  // Fetch all visible projects (exclude hidden)
-  const allProjects = (await db.select().from(hubProjects).orderBy(hubProjects.name))
-    .filter(p => !p.hidden);
+  const rows = await requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).overview.read();
+  const allProjects = rows.projects;
 
   if (allProjects.length === 0) {
     return {
@@ -286,30 +270,8 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
     };
   }
 
-  const projectIds = allProjects.map(p => p.id);
-
-  // Batch: fetch all task-project mappings in one query
-  const allProjectTaskRows = await db
-    .select({ projectId: taskProjects.projectId, taskId: taskProjects.taskId })
-    .from(taskProjects)
-    .where(inArray(taskProjects.projectId, projectIds));
-
-  // Collect all unique task IDs and batch-fetch task data
-  const allTaskIds = [...new Set(allProjectTaskRows.map(r => r.taskId))];
-  const allTaskData = allTaskIds.length > 0
-    ? await db
-        .select({
-          id: tasks.id,
-          title: tasks.title,
-          status: tasks.status,
-          parentId: tasks.parentId,
-          dueDate: tasks.dueDate,
-          updatedAt: tasks.updatedAt,
-          completedAt: tasks.completedAt,
-        })
-        .from(tasks)
-        .where(inArray(tasks.id, allTaskIds))
-    : [];
+  const allProjectTaskRows = rows.memberships;
+  const allTaskData = rows.tasks;
 
   // Build lookup maps
   const taskMap = new Map(topLevelProjectTasks(allTaskData).map(t => [t.id, t]));
@@ -353,7 +315,7 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
   });
 
   // Get tags (already batched)
-  const projectTagsMap = await getProjectTagsMap(projectIds);
+  const projectTagsMap = getProjectTagsMap(rows.tags as Array<Tag & { projectId: string }>);
 
   // Enrich with tags
   const enrichedProjects = projectsWithProgress.map(p => ({

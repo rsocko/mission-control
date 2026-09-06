@@ -2,21 +2,29 @@ import type Database from 'better-sqlite3';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.unmock('drizzle-orm');
 
 let sqlite: Database.Database;
 let resetDemoDatabase: () => Promise<void>;
+let shutdownSqlitePersistenceComposition: () => Promise<void>;
 
 beforeAll(async () => {
   const directory = mkdtempSync(join(tmpdir(), 'mc-demo-seed-'));
   process.env.MC_DB_PATH = join(directory, 'demo.db');
 
-  ({ sqlite } = await import('@/db'));
+  const database = await import('@/db');
+  ({ sqlite } = database);
+  shutdownSqlitePersistenceComposition = database.shutdownSqlitePersistenceComposition;
   sqlite.prepare('SELECT 1').get();
+  await database.initializeSqlitePersistenceComposition();
   ({ resetDemoDatabase } = await import('@/lib/seed-api'));
   await resetDemoDatabase();
+});
+
+afterAll(async () => {
+  await shutdownSqlitePersistenceComposition();
 });
 
 function count(table: string): number {

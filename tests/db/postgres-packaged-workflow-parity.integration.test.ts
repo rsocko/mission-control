@@ -468,6 +468,7 @@ integration('packaged PostgreSQL all-six workflow parity', () => {
           MC_WORKER_INSTANCE_FILE: readyFile,
           MC_PACKAGED_WORKER_INTEGRATION: 'postgres-whole-worker',
           MC_COPILOT_TEST_CONTROLLER_URL: `${baseUrl}/`,
+          MC_COPILOT_DURABLE_EXECUTION_ENABLED: 'true',
           MC_AI_PROVIDER_SESSION_KEY: Buffer.alloc(32, 9).toString('base64'),
           MC_AI_RUN_WORKER_POLL_MS: '100',
           MC_AI_RUN_LEASE_MS: '50000',

@@ -118,6 +118,9 @@ private key and token-encryption key in the deployment secret store.
 | `AZURE_OPENAI_API_KEY` | — | API key for direct Azure OpenAI |
 | `BIFROST_BASE_URL` | — | Bifrost OpenAI-compatible endpoint, including `/v1` |
 | `BIFROST_API_KEY` | — | Bifrost virtual key when gateway authentication is enabled |
+| `MC_COPILOT_DURABLE_EXECUTION_ENABLED` | `false` | Opt in to direct, resumable Copilot SDK execution in the packaged worker |
+| `MC_AI_PROVIDER_SESSION_KEY` | — | Dedicated 32-byte base64 or 64-character hex encryption key required only for direct durable Copilot execution |
+| `MC_AI_PROVIDER_SESSION_KEY_VERSION` | `v1` | Version label stored with encrypted direct Copilot provider-session references |
 | `AI_APPROVED_AZURE_HOSTS` | — | Additional trusted Azure endpoint hostnames |
 | `AI_APPROVED_BIFROST_HOSTS` | — | Additional trusted Bifrost endpoint hostnames |
 | `AI_APPROVED_OPENAI_HOSTS` | — | Additional trusted OpenAI-compatible endpoint hostnames |
@@ -134,6 +137,12 @@ Set `AI_PROVIDER=bifrost`, `BIFROST_BASE_URL=https://gateway.example.com/v1`,
 and use a provider-qualified model such as `azure/gpt-4o-mini`. Mission Control
 loads the gateway's model catalog from `/v1/models` and enforces sensitivity
 routing from the model's provider prefix.
+
+Bifrost inference is independent from direct, resumable Copilot SDK sessions.
+`BIFROST_API_KEY` authenticates gateway inference only and must never be reused
+as provider-session encryption material. Direct Copilot execution is disabled
+unless `MC_COPILOT_DURABLE_EXECUTION_ENABLED=true`; when enabled, the packaged
+worker requires a separate valid `MC_AI_PROVIDER_SESSION_KEY`.
 
 Semantic search is a separate, off-by-default feature under **Settings → AI
 Provider**. Its embedding route, endpoint, credential, and model are independent

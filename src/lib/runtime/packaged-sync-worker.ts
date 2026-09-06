@@ -158,6 +158,7 @@ export async function runPackagedSyncWorker(
 
     let aiRunWorker: { start(): void; stop(): Promise<void>; wake(): void };
     let stopAiRunRuntime: () => Promise<void>;
+    let durableExecutionEnabled = false;
     let durableExecutorRoutes: readonly string[] = [];
     if (isPostgres) {
       const durableRuntime = createPackagedDurableAiRuntime(
@@ -168,6 +169,7 @@ export async function runPackagedSyncWorker(
       );
       aiRunWorker = durableRuntime.worker;
       stopAiRunRuntime = durableRuntime.stop;
+      durableExecutionEnabled = durableRuntime.executionEnabled;
       durableExecutorRoutes = durableRuntime.executorRoutes;
       disposePrepared = durableRuntime.stop;
     } else {
@@ -368,6 +370,7 @@ export async function runPackagedSyncWorker(
     const capability = isPostgres
       ? composePostgresPackagedWorkflowCapability({
           persistence: workerPersistence,
+          durableExecutionEnabled,
           durableExecutorRoutes,
           semanticEntityTypes: SEMANTIC_SOURCE_ENTITY_TYPES,
           semanticIntentKinds: ['upsert', 'delete'],

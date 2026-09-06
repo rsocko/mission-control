@@ -69,6 +69,7 @@ function compose(
 ): PostgresPackagedWorkflowCapability {
   return composePostgresPackagedWorkflowCapability({
     persistence: persistence(),
+    durableExecutionEnabled: true,
     durableExecutorRoutes: DURABLE_AI_ENQUEUEABLE_ROUTES,
     semanticEntityTypes: SEMANTIC_SOURCE_ENTITY_TYPES,
     semanticIntentKinds: ['upsert', 'delete'],
@@ -118,6 +119,13 @@ describe('PostgreSQL packaged workflow capability', () => {
     }
   });
 
+  it('accepts explicitly disabled direct durable execution with no owned routes', () => {
+    expect(() => compose({
+      durableExecutionEnabled: false,
+      durableExecutorRoutes: [],
+    })).not.toThrow();
+  });
+
   it.each([
     ['repository methods', {
       persistence: {
@@ -131,7 +139,11 @@ describe('PostgreSQL packaged workflow capability', () => {
         notificationEntityLinking: {},
       } as WorkerPersistenceRepositories,
     }],
-    ['executor routes', { durableExecutorRoutes: [] }],
+    ['enabled executor routes', { durableExecutorRoutes: [] }],
+    ['disabled executor routes', {
+      durableExecutionEnabled: false,
+      durableExecutorRoutes: DURABLE_AI_ENQUEUEABLE_ROUTES,
+    }],
     ['semantic entities', { semanticEntityTypes: ['task'] }],
     ['semantic intents', { semanticIntentKinds: ['upsert'] }],
     ['lifecycle stops', {

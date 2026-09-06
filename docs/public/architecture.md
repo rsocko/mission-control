@@ -25,6 +25,10 @@ flowchart LR
 - Connectors receive least-privilege upstream permissions and own their
   read/write behavior.
 - The worker claims durable jobs and records results in the configured backend.
+- Bifrost inference and direct Copilot SDK execution are separate trust
+  boundaries. Bifrost credentials authenticate gateway requests only. The
+  packaged worker owns the `direct-copilot-sdk` durable route only when
+  explicitly enabled, using a dedicated key for resumable session references.
 - Public CI uses GitHub-hosted infrastructure and must not receive protected
   secrets from untrusted pull requests.
 

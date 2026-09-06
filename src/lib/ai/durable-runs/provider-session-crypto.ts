@@ -15,15 +15,14 @@ export interface EncryptedProviderSessionReference {
 
 function decodeKey(value: string): Buffer {
   const trimmed = value.trim();
-  const key = /^[0-9a-f]{64}$/i.test(trimmed)
-    ? Buffer.from(trimmed, 'hex')
-    : Buffer.from(trimmed, 'base64');
-  if (key.length !== 32) {
+  const isHex = /^[0-9a-f]{64}$/i.test(trimmed);
+  const isBase64 = /^[A-Za-z0-9+/]{43}=$/.test(trimmed);
+  if (!isHex && !isBase64) {
     throw new Error(
       'MC_AI_PROVIDER_SESSION_KEY must be a 32-byte base64 or 64-character hex key.',
     );
   }
-  return key;
+  return Buffer.from(trimmed, isHex ? 'hex' : 'base64');
 }
 
 export class ProviderSessionProtector {

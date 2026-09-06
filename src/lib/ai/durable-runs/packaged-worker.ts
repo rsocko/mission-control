@@ -30,12 +30,20 @@ function boundedInteger(
 
 export interface PackagedDurableAiRuntime {
   worker: DurableAiRunWorker;
+  executionEnabled: boolean;
   executorRoutes: readonly string[];
   stop(): Promise<void>;
 }
 
 export interface PackagedDurableAiRuntimeDependencies {
   createCopilotClient?: (options: CopilotClientOptions) => CopilotLifecycleClient;
+}
+
+export function isCopilotDurableExecutionEnabled(
+  environment: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return environment.MC_COPILOT_DURABLE_EXECUTION_ENABLED?.trim().toLowerCase()
+    === 'true';
 }
 
 const REQUIRED_DURABLE_REPOSITORY_METHODS: readonly (
@@ -96,6 +104,24 @@ export function createPackagedDurableAiRuntime(
   dependencies: PackagedDurableAiRuntimeDependencies = {},
 ): PackagedDurableAiRuntime {
   assertDurableRepositoryComplete(repository);
+  if (!isCopilotDurableExecutionEnabled()) {
+    const worker = new DurableAiRunWorker(repository, new Map(), {
+      isEnabled,
+      reportError: (error, operation, runId) => {
+        logger.error(
+          { err: error, operation, runId },
+          'Durable AI worker maintenance operation failed',
+        );
+      },
+    });
+    return {
+      worker,
+      executionEnabled: false,
+      executorRoutes: [],
+      stop: () => worker.stop(),
+    };
+  }
+
   // Validate required encryption configuration before any worker starts.
   ProviderSessionProtector.fromEnvironment();
   const ownerId = `packaged-ai:${process.pid}:${randomUUID()}`;
@@ -181,6 +207,7 @@ export function createPackagedDurableAiRuntime(
   let stopPromise: Promise<void> | null = null;
   return {
     worker,
+    executionEnabled: true,
     executorRoutes: DURABLE_AI_ENQUEUEABLE_ROUTES,
     stop() {
       stopPromise ??= (async () => {

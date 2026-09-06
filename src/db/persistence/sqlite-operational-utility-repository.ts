@@ -179,7 +179,7 @@ export function createSqliteOperationalUtilityRepository(
     },
     maintenance: {
       async runDuplicateCleanup() {
-        return runCleanup();
+        return runCleanup.immediate();
       },
     },
     exports: {

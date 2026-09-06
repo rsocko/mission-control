@@ -1,8 +1,8 @@
 ---
 title: "Operational Utility Persistence"
 status: active
-created: 2026-09-14
-last_reviewed: 2026-09-14
+created: 2026-09-06
+last_reviewed: 2026-09-06
 category: architecture
 related:
   - "[Portable Persistence Boundaries](./persistence-boundaries.md)"
@@ -144,3 +144,28 @@ the latest `seededAt`.
 - `tests/api/operational-utility-postgres-poisoned.test.ts` makes `@/db` and
   `@/db/schema` throw on evaluation and then imports and calls all five routes
   plus `initializePublicDemoData`, proving none of them reach back into SQLite.
+
+## Canonical graph transition
+
+Recomputed against merged Scout main
+`17763b5bb3aa397cd714c6fe3b85b5fe6b3a00ae`, this layer moves all five owned
+routes from direct Tier A to clean and removes
+`src/lib/connectors/monarch-money/identity-sqlite.ts` and
+`src/lib/public-demo-runtime.ts` from `taintedLibA`. Tier B and transitive-only
+Tier A remain unchanged.
+
+| Metric | Before | After |
+| --- | ---: | ---: |
+| API routes | 266 | 266 |
+| Tier A | 30 | 25 |
+| Tier B | 9 | 9 |
+| Clean | 227 | 232 |
+| Direct Tier A | 20 | 15 |
+| Transitive-only Tier A | 10 | 10 |
+| Direct `@/db` | 22 | 17 |
+| Tainted libraries | 30 | 28 |
+| Tainted API helpers | 0 | 0 |
+| Migration units | 60 | 53 |
+
+`tests/architecture/web-persistence-baseline.json` and the fail-closed
+PostgreSQL route sentinel remain the sole exact-current graph owners.

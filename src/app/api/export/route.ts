@@ -1,14 +1,3 @@
-import { and, asc, eq, gt, isNull, or } from 'drizzle-orm';
-import db from '@/db';
-import {
-  connectorConfigs,
-  hubProjects,
-  notifications,
-  syncLog,
-  tags,
-  tasks,
-  taskTags,
-} from '@/db/schema';
 import {
   createExportStream,
   ExportAdmissionController,
@@ -18,6 +7,12 @@ import {
   type ExportResult,
   type ExportSource,
 } from '@/lib/export-stream';
+import type {
+  ExportTaskTagCursor,
+  OperationalExportRecord,
+  OperationalExportRepository,
+} from '@/db/persistence/operational-utility';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 import { exportLogger } from '@/lib/logger';
 import { startRuntimeOperation } from '@/lib/runtime/lifecycle';
@@ -60,14 +55,14 @@ const exportAdmission = new ExportAdmissionController(
   boundedEnvironmentInteger('MC_EXPORT_MAX_CONCURRENCY', 2, 8),
 );
 
-async function page<T extends Record<string, unknown>>(
-  query: PromiseLike<T[]>,
+async function page(
+  read: () => Promise<OperationalExportRecord[]>,
   signal: AbortSignal,
   limit: number,
-  cursorFor: (record: T) => unknown,
+  cursorFor: (record: OperationalExportRecord) => unknown,
 ): Promise<ExportPage> {
   if (signal.aborted) throw signal.reason;
-  const records = await query;
+  const records = await read();
   if (signal.aborted) throw signal.reason;
   return {
     records,
@@ -79,34 +74,38 @@ function textCursor(cursor: unknown): string | undefined {
   return typeof cursor === 'string' ? cursor : undefined;
 }
 
-function taskTagCursor(cursor: unknown): { tagId: string; taskId: string } | undefined {
+function recordId(record: OperationalExportRecord): unknown {
+  return record.id;
+}
+
+/**
+ * Task-tag pages are ordered by `(taskId, tagId)`, so the cursor is emitted and
+ * parsed in that same declared order.
+ */
+function taskTagCursor(cursor: unknown): ExportTaskTagCursor | undefined {
   if (
     typeof cursor !== 'object'
     || cursor === null
-    || !('tagId' in cursor)
     || !('taskId' in cursor)
-    || typeof cursor.tagId !== 'string'
+    || !('tagId' in cursor)
     || typeof cursor.taskId !== 'string'
+    || typeof cursor.tagId !== 'string'
   ) {
     return undefined;
   }
-  return { tagId: cursor.tagId, taskId: cursor.taskId };
+  return { taskId: cursor.taskId, tagId: cursor.tagId };
 }
 
-function createSources(type: string): ExportSource[] {
+function createSources(type: string, exports: OperationalExportRepository): ExportSource[] {
   const sources: ExportSource[] = [];
   if (type === 'all' || type === 'tasks') {
     sources.push({
       name: 'tasks',
       readPage: (cursor, limit, signal) => page(
-        db.select()
-          .from(tasks)
-          .where(textCursor(cursor) === undefined ? undefined : gt(tasks.id, textCursor(cursor)!))
-          .orderBy(asc(tasks.id))
-          .limit(limit),
+        () => exports.listTasksPage({ afterId: textCursor(cursor), limit }),
         signal,
         limit,
-        (record) => record.id,
+        recordId,
       ),
     });
   }
@@ -114,14 +113,10 @@ function createSources(type: string): ExportSource[] {
     sources.push({
       name: 'notifications',
       readPage: (cursor, limit, signal) => page(
-        db.select()
-          .from(notifications)
-          .where(textCursor(cursor) === undefined ? undefined : gt(notifications.id, textCursor(cursor)!))
-          .orderBy(asc(notifications.id))
-          .limit(limit),
+        () => exports.listNotificationsPage({ afterId: textCursor(cursor), limit }),
         signal,
         limit,
-        (record) => record.id,
+        recordId,
       ),
     });
   }
@@ -130,33 +125,20 @@ function createSources(type: string): ExportSource[] {
       {
         name: 'tags',
         readPage: (cursor, limit, signal) => page(
-          db.select()
-            .from(tags)
-            .where(textCursor(cursor) === undefined ? undefined : gt(tags.id, textCursor(cursor)!))
-            .orderBy(asc(tags.id))
-            .limit(limit),
+          () => exports.listTagsPage({ afterId: textCursor(cursor), limit }),
           signal,
           limit,
-          (record) => record.id,
+          recordId,
         ),
       },
       {
         name: 'taskTags',
-        readPage: (cursor, limit, signal) => {
-          const key = taskTagCursor(cursor);
-          return page(
-            db.select().from(taskTags)
-              .where(key === undefined ? undefined : or(
-                gt(taskTags.taskId, key.taskId),
-                and(eq(taskTags.taskId, key.taskId), gt(taskTags.tagId, key.tagId)),
-              ))
-              .orderBy(asc(taskTags.taskId), asc(taskTags.tagId))
-              .limit(limit),
-            signal,
-            limit,
-            (record) => ({ tagId: record.tagId, taskId: record.taskId }),
-          );
-        },
+        readPage: (cursor, limit, signal) => page(
+          () => exports.listTaskTagsPage({ after: taskTagCursor(cursor), limit }),
+          signal,
+          limit,
+          (record) => ({ taskId: record.taskId, tagId: record.tagId }),
+        ),
       },
     );
   }
@@ -164,14 +146,10 @@ function createSources(type: string): ExportSource[] {
     sources.push({
       name: 'hubProjects',
       readPage: (cursor, limit, signal) => page(
-        db.select()
-          .from(hubProjects)
-          .where(textCursor(cursor) === undefined ? undefined : gt(hubProjects.id, textCursor(cursor)!))
-          .orderBy(asc(hubProjects.id))
-          .limit(limit),
+        () => exports.listHubProjectsPage({ afterId: textCursor(cursor), limit }),
         signal,
         limit,
-        (record) => record.id,
+        recordId,
       ),
     });
   }
@@ -180,22 +158,10 @@ function createSources(type: string): ExportSource[] {
       {
         name: 'connectors',
         readPage: (cursor, limit, signal) => page(
-          db.select({
-            id: connectorConfigs.id,
-            type: connectorConfigs.type,
-            name: connectorConfigs.name,
-            enabled: connectorConfigs.enabled,
-          })
-            .from(connectorConfigs)
-            .where(and(
-              isNull(connectorConfigs.deletedAt),
-              textCursor(cursor) === undefined ? undefined : gt(connectorConfigs.id, textCursor(cursor)!),
-            ))
-            .orderBy(asc(connectorConfigs.id))
-            .limit(limit),
+          () => exports.listConnectorsPage({ afterId: textCursor(cursor), limit }),
           signal,
           limit,
-          (record) => record.id,
+          recordId,
         ),
       },
       {
@@ -206,14 +172,10 @@ function createSources(type: string): ExportSource[] {
             if (exported >= 100) return { records: [] };
             const pageLimit = Math.min(limit, 100 - exported);
             const result = await page(
-              db.select()
-                .from(syncLog)
-                .where(textCursor(cursor) === undefined ? undefined : gt(syncLog.id, textCursor(cursor)!))
-                .orderBy(asc(syncLog.id))
-                .limit(pageLimit),
+              () => exports.listSyncLogPage({ afterId: textCursor(cursor), limit: pageLimit }),
               signal,
               pageLimit,
-              (record) => record.id,
+              recordId,
             );
             exported += result.records.length;
             return result;
@@ -239,7 +201,7 @@ function isAuthorizedExportRequest(request: Request): boolean {
 
 /**
  * Streams a bounded export. Browser callers must be same-origin; automation
- * callers must provide MC_API_KEY via Bearer or X-MC-API-Key authentication.
+ * callers must provide MC_API_KEY via ****** X-MC-API-Key authentication.
  */
 export async function GET(request: Request) {
   if (!isAuthorizedExportRequest(request)) {
@@ -257,6 +219,15 @@ export async function GET(request: Request) {
   if (!VALID_TYPES.has(type)) {
     exportLogger.warn({ format: formatValue, reason: 'invalid_type', type }, 'Export rejected');
     return errorResponse(400, 'Unsupported export type');
+  }
+
+  const { operationalUtility } = await getWorkerPersistenceRepositories();
+  if (!operationalUtility) {
+    exportLogger.warn({ format: formatValue, reason: 'persistence_unavailable', type }, 'Export rejected');
+    return errorResponse(
+      503,
+      'Operational utility persistence is not available in the selected backend',
+    );
   }
 
   const format = formatValue as ExportFormat;
@@ -285,7 +256,10 @@ export async function GET(request: Request) {
   }
 
   const limits = getExportLimits();
-  const sources = createSources(format === 'csv' && type !== 'all' && type !== 'tasks' ? 'none' : type);
+  const sources = createSources(
+    format === 'csv' && type !== 'all' && type !== 'tasks' ? 'none' : type,
+    operationalUtility.exports,
+  );
   const finishTelemetry = beginRuntimeOperation({
     kind: 'export',
     name: `${format}:${type}`,

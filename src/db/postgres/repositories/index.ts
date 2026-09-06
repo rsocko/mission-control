@@ -54,6 +54,9 @@ import { createPostgresGraphReportingRepository } from './graph-reporting-reposi
 import {
   createPostgresScoutIngestionReconciliationRepository,
 } from './scout-ingestion-reconciliation-repository';
+import {
+  createPostgresOperationalUtilityRepository,
+} from './operational-utility-repository';
 import type { Pool } from 'pg';
 
 export { PostgresConnectorRepository } from './connector-repository';
@@ -114,6 +117,9 @@ export { createPostgresGraphReportingRepository } from './graph-reporting-reposi
 export {
   createPostgresScoutIngestionReconciliationRepository,
 } from './scout-ingestion-reconciliation-repository';
+export {
+  createPostgresOperationalUtilityRepository,
+} from './operational-utility-repository';
 
 /**
  * Builds the full set of PostgreSQL-backed `CorePersistenceRepositories`
@@ -219,5 +225,6 @@ export function createPostgresWorkerPersistenceRepositories(
     graphReporting,
     scoutIngestionReconciliation:
       createPostgresScoutIngestionReconciliationRepository(pool),
+    operationalUtility: createPostgresOperationalUtilityRepository(db, pool),
   };
 }

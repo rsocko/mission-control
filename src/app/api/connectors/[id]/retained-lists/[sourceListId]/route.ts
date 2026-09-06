@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import { and, eq } from 'drizzle-orm';
-import db from '@/db';
-import { connectorConfigs, sourceLists, tasks } from '@/db/schema';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { ApiErrors } from '@/lib/api-error';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import { deleteTaskLocally } from '@/lib/tasks/local-task-lifecycle';
@@ -17,34 +15,38 @@ export async function DELETE(
   const { id, sourceListId } = await params;
 
   try {
+    const { operationalUtility } = await getWorkerPersistenceRepositories();
+    if (!operationalUtility) {
+      return NextResponse.json(
+        { error: 'Operational utility persistence is not available in the selected backend' },
+        { status: 503 },
+      );
+    }
+    const retained = operationalUtility.retainedSourceLists;
+
     const result = await runWithConnectorOperationLease(id, 'retention', async () => {
-      const [connector] = await db.select().from(connectorConfigs)
-        .where(eq(connectorConfigs.id, id))
-        .limit(1);
+      const { connector, sourceList } = await retained.loadSnapshot({
+        connectorId: id,
+        sourceListId,
+      });
       if (!connector) return { kind: 'connector-not-found' } as const;
       if (connector.type !== 'github-issues') return { kind: 'unsupported' } as const;
-
-      const [sourceList] = await db.select().from(sourceLists)
-        .where(and(
-          eq(sourceLists.id, sourceListId),
-          eq(sourceLists.connectorInstanceId, id),
-        ))
-        .limit(1);
       if (!sourceList) return { kind: 'source-list-not-found' } as const;
       if (isSourceListSelected(connector, sourceList)) return { kind: 'selected' } as const;
 
-      const taskRows = await db.select({ id: tasks.id }).from(tasks)
-        .where(and(
-          eq(tasks.connectorInstanceId, id),
-          eq(tasks.sourceListId, sourceList.sourceId),
-        ));
+      const taskIds = await retained.listRetainedTaskIds({
+        connectorId: id,
+        sourceListSourceId: sourceList.sourceId,
+      });
 
-      for (const task of taskRows) await deleteTaskLocally(task.id);
-      await db.delete(sourceLists).where(eq(sourceLists.id, sourceList.id));
+      // The source-list row is removed only after every local task delete
+      // succeeded, so a failure leaves the list visible and retryable.
+      for (const taskId of taskIds) await deleteTaskLocally(taskId);
+      await retained.deleteSourceList({ connectorId: id, sourceListId: sourceList.id });
       return {
         kind: 'deleted',
         sourceListId: sourceList.id,
-        deletedTasks: taskRows.length,
+        deletedTasks: taskIds.length,
       } as const;
     });
 

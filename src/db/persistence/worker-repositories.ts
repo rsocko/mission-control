@@ -22,6 +22,7 @@ import type { GraphReportingPersistence } from './graph-reporting';
 import type {
   ScoutIngestionReconciliationPersistence,
 } from './scout-ingestion-reconciliation';
+import type { OperationalUtilityPersistence } from './operational-utility';
 
 export interface SyncRunSummary {
   connectorId: string;
@@ -119,6 +120,27 @@ export interface WorkerPersistenceRepositories {
    * supports the whole Scout ingestion/reconciliation contract or none of it.
    */
   scoutIngestionReconciliation?: ScoutIngestionReconciliationPersistence;
+  /**
+   * Operational utility surfaces: the GitHub retained-list purge, the
+   * duplicate/recurring maintenance cleanup, the streaming export readers, the
+   * connector feature snapshot, external bug-report intake, and the
+   * public-demo initialization marker. Published as its own top-level slot
+   * because these commands share no serialization namespace with any other
+   * worker surface, and grouped into one slot because a backend either
+   * supports the whole operational-utility contract or none of it.
+   */
+  operationalUtility?: OperationalUtilityPersistence;
+}
+
+export function requireOperationalUtilityPersistence(
+  repositories: WorkerPersistenceRepositories,
+): OperationalUtilityPersistence {
+  if (!repositories.operationalUtility) {
+    throw new Error(
+      'Operational utility persistence is not available in the selected backend',
+    );
+  }
+  return repositories.operationalUtility;
 }
 
 export function requireScoutIngestionReconciliationPersistence(

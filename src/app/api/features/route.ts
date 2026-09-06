@@ -1,9 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { isNull } from 'drizzle-orm';
-import { getProviderInfo } from '@/lib/ai/provider-factory';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { loadAIProviderConfiguration } from '@/lib/ai/provider-configuration-service';
 import { CAPABILITY_DEFAULTS } from '@/lib/connectors/capabilities';
 import { resolveConnectorCapabilities } from '@/lib/connectors/task-source-profiles';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
@@ -68,32 +65,42 @@ const SOURCE_ICONS: Record<string, string> = {
   'custom-rest': '🔗',
 };
 
+function parseJsonish(value: unknown): Record<string, unknown> {
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {};
+    } catch {
+      return {};
+    }
+  }
+  return value && typeof value === 'object' ? value as Record<string, unknown> : {};
+}
+
 export async function GET() {
   try {
-    const configs = await db.select().from(connectorConfigs).where(isNull(connectorConfigs.deletedAt));
-    const enabledConfigs = configs
-      .filter(c => c.enabled)
-      .map(c => {
-        const storedCapabilities = (
-          typeof c.capabilities === 'string'
-            ? JSON.parse(c.capabilities)
-            : c.capabilities
-        ) as ConnectorCapabilities;
-        const settings = (
-          typeof c.settings === 'string'
-            ? JSON.parse(c.settings)
-            : c.settings
-        ) as Record<string, unknown>;
-        return {
-          config: c,
-          capabilities: resolveConnectorCapabilities(
-            c.type,
-            { ...CAPABILITY_DEFAULTS[c.type], ...storedCapabilities } as ConnectorCapabilities,
-            settings,
-          ),
+    const { operationalUtility } = await getWorkerPersistenceRepositories();
+    if (!operationalUtility) {
+      return NextResponse.json(
+        { error: 'Operational utility persistence is not available in the selected backend' },
+        { status: 503 },
+      );
+    }
+
+    const configs = await operationalUtility.features.listActiveConnectors();
+    const enabledConfigs = configs.map(c => {
+      const storedCapabilities = parseJsonish(c.capabilities) as unknown as ConnectorCapabilities;
+      const settings = parseJsonish(c.settings);
+      return {
+        config: c,
+        capabilities: resolveConnectorCapabilities(
+          c.type,
+          { ...CAPABILITY_DEFAULTS[c.type], ...storedCapabilities } as ConnectorCapabilities,
           settings,
-        };
-      });
+        ),
+        settings,
+      };
+    });
 
     // Notification-only connectors must never become task mutation destinations.
     const taskDestinations = enabledConfigs
@@ -118,8 +125,8 @@ export async function GET() {
         };
       });
 
-    const aiInfo = getProviderInfo();
-    const aiConfigured = getResolvedAIConfig().configured;
+    const { resolved } = await loadAIProviderConfiguration();
+    const aiConfigured = resolved.configured;
 
     // Enabled sources for sidebar filtering (include notificationOnly flag and tagScope)
     const enabledSources = [
@@ -147,9 +154,9 @@ export async function GET() {
       taskDestinations,
       aiEnabled: aiConfigured,
       aiProvider: aiConfigured ? {
-        provider: aiInfo.provider,
-        model: aiInfo.model,
-        baseUrl: aiInfo.baseUrl,
+        provider: resolved.provider,
+        model: resolved.model,
+        baseUrl: resolved.baseUrl || 'default',
       } : undefined,
       enabledSources,
       messagingEnabled,

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { CorePersistenceRepositories } from './persistence/core-repositories';
 import {
   requireGraphReportingPersistence,
+  requireOperationalUtilityPersistence,
   requireScoutIngestionReconciliationPersistence,
   type WorkerPersistenceRepositories,
 } from './persistence/worker-repositories';
@@ -688,6 +689,16 @@ const postgresWorkerPersistenceRepositories: WorkerPersistenceRepositories = {
           property as keyof NonNullable<
             WorkerPersistenceRepositories['scoutIngestionReconciliation']
           >
+        ]
+      ),
+    },
+  ),
+  operationalUtility: new Proxy(
+    {} as NonNullable<WorkerPersistenceRepositories['operationalUtility']>,
+    {
+      get: (_target, property) => (
+        requireOperationalUtilityPersistence(requirePostgresWorkerRepositories())[
+          property as keyof NonNullable<WorkerPersistenceRepositories['operationalUtility']>
         ]
       ),
     },

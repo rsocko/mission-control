@@ -77,6 +77,9 @@ import { createSqliteGraphReportingRepository } from './sqlite-graph-reporting-r
 import {
   createSqliteScoutIngestionReconciliationRepository,
 } from './sqlite-scout-ingestion-reconciliation-repository';
+import {
+  createSqliteOperationalUtilityRepository,
+} from './sqlite-operational-utility-repository';
 
 let repositories: WorkerPersistenceRepositories | null = null;
 
@@ -206,6 +209,7 @@ export function createSqliteWorkerPersistenceRepositories(
     graphReporting: createSqliteGraphReportingRepository(sqlite, db),
     scoutIngestionReconciliation:
       createSqliteScoutIngestionReconciliationRepository(sqlite),
+    operationalUtility: createSqliteOperationalUtilityRepository(sqlite, db),
   };
   return repositories;
 }

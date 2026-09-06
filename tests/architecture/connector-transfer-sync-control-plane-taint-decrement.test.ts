@@ -39,10 +39,10 @@ describe('connector transfer/sync control-plane taint decrement', () => {
     );
   });
 
-  it('keeps the excluded candidate routes in their prior graph tiers', () => {
-    expect(graph.tierARoutes).toContain(EXCLUDED_ROUTES[0]);
+  it('keeps only the still-unmigrated candidates in their prior graph tiers', () => {
+    expect(graph.cleanRoutes).toContain(EXCLUDED_ROUTES[0]);
     expect(graph.tierBRoutes).toContain(EXCLUDED_ROUTES[1]);
-    expect(graph.tierARoutes).toContain(EXCLUDED_ROUTES[2]);
+    expect(graph.cleanRoutes).toContain(EXCLUDED_ROUTES[2]);
     expect(graph.tierBRoutes).toContain(EXCLUDED_ROUTES[3]);
   });
 

@@ -117,13 +117,13 @@ describe('notification delivery web taint decrement', () => {
     expect(graph.taintedLibA).not.toContain(path);
   });
 
-  it('does not absorb excluded routes or migrate the broader AI triage route', () => {
+  it('keeps excluded routes outside its owned boundary without constraining later cleanup', () => {
     for (const route of OWNED_ROUTES) {
       for (const prefix of EXCLUDED_ROUTE_PREFIXES) {
         expect(route.startsWith(prefix), route).toBe(false);
       }
     }
-    expect(graph.tierARoutes).toContain('src/app/api/ai/triage-alerts/route.ts');
+    expect(PRODUCTION_PATHS).not.toContain('src/app/api/ai/triage-alerts/route.ts');
   });
 
   it('only ratchets the migration graph downward', () => {

@@ -3,57 +3,38 @@
  *
  * Verifies that source classification comes from the connector profile catalog
  * and notification-only connectors never become task mutation destinations.
+ *
+ * The route reads connectors through the operational-utility feature subport
+ * and AI status through the async provider-configuration service, so this suite
+ * doubles those seams and never imports `@/db`.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { ConnectorFeatureSnapshot } from '@/db/persistence/operational-utility';
 
-// ─── Mock DB rows ────────────────────────────────────────────────────────────
+// ─── Mock connector snapshots ────────────────────────────────────────────────
 
-let mockConfigs: Array<{
-  id: string;
-  type: string;
-  name: string;
-  enabled: boolean;
-  capabilities: string;
-  settings: string;
-  deletedAt: null;
-}> = [];
+let mockConfigs: ConnectorFeatureSnapshot[] = [];
+let operationalUtilityAvailable = true;
+let aiConfigured = false;
 
-type ChainableProxy = Record<PropertyKey, unknown>;
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    operationalUtility: operationalUtilityAvailable
+      ? { features: { listActiveConnectors: async () => mockConfigs } }
+      : undefined,
+  }),
+}));
 
-function chainable<T>(terminal: T) {
-  const chain: ChainableProxy = new Proxy({}, {
-    get(_, prop: string | symbol) {
-      if (prop === 'then') return (resolve: (value: T) => unknown) => resolve(terminal);
-      if (prop === Symbol.iterator) {
-        return () => (Array.isArray(terminal) ? terminal : [])[Symbol.iterator]();
-      }
-      return vi.fn(() => chain);
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      configured: aiConfigured,
+      provider: 'test',
+      model: 'test-model',
+      baseUrl: 'http://test',
     },
-  });
-  return chain;
-}
-
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => chainable(mockConfigs)),
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  connectorConfigs: { deletedAt: 'deletedAt' },
-}));
-
-vi.mock('@/lib/ai/provider-factory', () => ({
-  getProviderInfo: () => ({ provider: 'test', model: 'test', baseUrl: 'http://test' }),
-}));
-
-vi.mock('@/lib/ai/config-resolver', () => ({
-  getResolvedAIConfig: () => ({ configured: false }),
-}));
-
-vi.mock('drizzle-orm', () => ({
-  isNull: vi.fn(() => null),
+  }),
 }));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -62,15 +43,13 @@ function makeConfig(
   type: string,
   caps: Record<string, unknown> = {},
   settings: Record<string, unknown> = {},
-) {
+): ConnectorFeatureSnapshot {
   return {
     id: `${type}-1`,
     type,
     name: type,
-    enabled: true,
     capabilities: JSON.stringify({ read: true, write: false, ...caps }),
     settings: JSON.stringify(settings),
-    deletedAt: null,
   };
 }
 
@@ -86,6 +65,8 @@ async function fetchFeatures() {
 describe('GET /api/features — notificationOnly', () => {
   beforeEach(() => {
     mockConfigs = [];
+    operationalUtilityAvailable = true;
+    aiConfigured = false;
     vi.resetModules();
   });
 
@@ -172,5 +153,41 @@ describe('GET /api/features — notificationOnly', () => {
     const cr = json.enabledSources.find((s: { type: string }) => s.type === 'custom-rest');
     expect(cr).toBeDefined();
     expect(cr.notificationOnly).toBe(false);
+  });
+
+  it('accepts already-decoded capability and settings documents', async () => {
+    mockConfigs = [{
+      id: 'github-1',
+      type: 'github-issues',
+      name: 'github-issues',
+      capabilities: { read: true, write: true, taskCreate: true },
+      settings: { accountType: 'work' },
+    }];
+    const json = await fetchFeatures();
+    expect(json.taskDestinations).toEqual([
+      expect.objectContaining({ type: 'github-issues', account: 'work' }),
+    ]);
+  });
+
+  it('reports AI status from the provider configuration service', async () => {
+    aiConfigured = true;
+    const json = await fetchFeatures();
+    expect(json.aiEnabled).toBe(true);
+    expect(json.aiProvider).toEqual({
+      provider: 'test',
+      model: 'test-model',
+      baseUrl: 'http://test',
+    });
+  });
+
+  it('reports 503 when the backend does not provide operational utility persistence', async () => {
+    operationalUtilityAvailable = false;
+    const mod = await import('@/app/api/features/route');
+    const response = await mod.GET();
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Operational utility persistence is not available in the selected backend',
+    });
   });
 });

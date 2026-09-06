@@ -3,13 +3,21 @@ import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-d
 import type { GitHubWriteAuthorization } from '@/lib/external-identities';
 import type { ConnectorConfig } from '@/types';
 
+process.env.MC_DB_PATH = ':memory:';
+process.env.MC_MODE = 'live';
+vi.doUnmock('drizzle-orm');
+vi.doUnmock('crypto');
+const legacyRouteFixture = await setupFixture();
+const legacyRouteTestName =
+  'dispatches only an agreeing legacy route and quarantines a stale mode lease';
+
 describe('GitHub write fence', () => {
-  beforeEach(() => {
+  beforeEach(({ task }) => {
     process.env.MC_DB_PATH = ':memory:';
     process.env.MC_MODE = 'live';
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
-    vi.resetModules();
+    if (task.name !== legacyRouteTestName) vi.resetModules();
   });
 
   afterEach(() => {
@@ -17,68 +25,8 @@ describe('GitHub write fence', () => {
     delete process.env.MC_MODE;
   });
 
-  it('explains how to recover from blocked stable identity evidence', async () => {
-    const { GitHubWriteFenceError } = await import('@/lib/external-identities');
-    const error = new GitHubWriteFenceError('stable_identity_evidence_blocked');
-
-    expect(error).toMatchObject({
-      code: 'stable_identity_evidence_blocked',
-      message:
-        'GitHub sync is paused because this task identity needs reconciliation. Run a full GitHub sync, then retry.',
-    });
-  });
-
-  it('dispatches only an agreeing legacy route and quarantines a stale mode lease', async () => {
-    const [{ default: db, sqlite }, schema, identity] = await Promise.all([
-      importInitializedSqliteDatabase(),
-      import('@/db/schema'),
-      import('@/lib/external-identities'),
-    ]);
-    const now = '2026-08-10T12:00:00.000Z';
-    db.insert(schema.connectorConfigs).values({
-      id: 'github-fence',
-      type: 'github-issues',
-      name: 'GitHub',
-      capabilities: {},
-      credentials: {},
-      settings: {},
-      syncedLists: [],
-      createdAt: now,
-      updatedAt: now,
-    }).run();
-    db.insert(schema.githubIdentityMigrations).values({
-      connectorInstanceId: 'github-fence',
-      phase: 'complete',
-      updatedAt: now,
-    }).run();
-    db.insert(schema.githubIdentityControls).values({
-      connectorInstanceId: 'github-fence',
-      modeRevision: 4,
-      updatedAt: now,
-    }).run();
-    db.insert(schema.sourceLists).values({
-      id: 'repo-list',
-      connectorInstanceId: 'github-fence',
-      sourceId: 'owner/repo',
-      name: 'owner/repo',
-      type: 'repo',
-    }).run();
-    db.insert(schema.tasks).values({
-      id: 'task-1',
-      connectorType: 'github-issues',
-      connectorInstanceId: 'github-fence',
-      sourceId: 'owner/repo:7',
-      sourceListId: 'repo-list',
-      title: 'Fence me',
-      status: 'todo',
-      priority: 'normal',
-      metadata: {},
-      syncStatus: 'pending_push',
-      createdAt: now,
-      updatedAt: now,
-      lastSyncedAt: now,
-    }).run();
-    seedIdentity(db, schema, now);
+  it(legacyRouteTestName, async () => {
+    const { db, sqlite, schema, identity, now } = legacyRouteFixture;
 
     const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-fence',
@@ -171,6 +119,17 @@ describe('GitHub write fence', () => {
         && cycle.observedRouteCount === 1
         && cycle.appliedCount === 1
         && cycle.state === 'completed')).toBe(true);
+  });
+
+  it('explains how to recover from blocked stable identity evidence', async () => {
+    const { GitHubWriteFenceError } = await import('@/lib/external-identities');
+    const error = new GitHubWriteFenceError('stable_identity_evidence_blocked');
+
+    expect(error).toMatchObject({
+      code: 'stable_identity_evidence_blocked',
+      message:
+        'GitHub sync is paused because this task identity needs reconciliation. Run a full GitHub sync, then retry.',
+    });
   });
 
   it('preserves the primary fence error when runtime and cycle cleanup fail', async () => {

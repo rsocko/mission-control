@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
@@ -30,8 +31,6 @@ let replaceFinanceInsightOccurrenceCache:
   typeof import('@/lib/finance-insights/occurrence-cache')['replaceFinanceInsightOccurrenceCache'];
 let readFinanceInsightOccurrenceCache:
   typeof import('@/lib/finance-insights/occurrence-cache')['readFinanceInsightOccurrenceCache'];
-let ensureFinanceIdentityNamespace:
-  typeof import('@/lib/connectors/monarch-money/identity-sqlite')['ensureFinanceIdentityNamespace'];
 let financeConnectorScopedReference:
   typeof import('@/lib/connectors/monarch-money/identity')['financeConnectorScopedReference'];
 
@@ -170,7 +169,24 @@ function insertHistoryFact(
   fact: TransactionSourceFactV1,
   generationId?: string,
 ): void {
-  const namespace = ensureFinanceIdentityNamespace(connectorId);
+  const row = sqlite.prepare(`
+    SELECT credentials FROM connector_configs WHERE id = ?
+  `).get(connectorId) as { credentials: string | null } | undefined;
+  if (!row) throw new Error('Finance connector identity state is unavailable');
+  const credentials = JSON.parse(row.credentials ?? '{}') as Record<string, unknown>;
+  const existingNamespace = credentials.identityNamespace;
+  const namespace = typeof existingNamespace === 'string'
+    ? existingNamespace
+    : randomBytes(32).toString('hex');
+  if (existingNamespace === undefined) {
+    sqlite.prepare(`
+      UPDATE connector_configs SET credentials = ?, updated_at = ? WHERE id = ?
+    `).run(
+      JSON.stringify({ ...credentials, identityNamespace: namespace }),
+      new Date().toISOString(),
+      connectorId,
+    );
+  }
   const scoped = (kind: string, value: string | null): string | null => (
     value === null ? null : financeConnectorScopedReference(namespace, kind, value)
   );
@@ -449,9 +465,6 @@ beforeAll(async () => {
     replaceFinanceInsightOccurrenceCache,
     readFinanceInsightOccurrenceCache,
   } = await import('@/lib/finance-insights/occurrence-cache'));
-  ({ ensureFinanceIdentityNamespace } = await import(
-    '@/lib/connectors/monarch-money/identity-sqlite'
-  ));
   ({ financeConnectorScopedReference } = await import(
     '@/lib/connectors/monarch-money/identity'
   ));

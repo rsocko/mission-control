@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, describe, vi } from 'vitest';
 import {
   describeRelativeReminderTimezoneContract,
@@ -63,13 +64,28 @@ describePostgres('PostgreSQL relative reminder timezone repository integration',
       '@/db/postgres/repositories/relative-reminder-timezone-repository'
     );
 
+    const repository = createPostgresRelativeReminderTimezoneRepository(db);
+    const idPrefix = `relative-reminder-${randomUUID()}-`;
+    const scopeId = (id: string) => `${idPrefix}${id}`;
+    const unscopedId = (id: string) => (
+      id.startsWith(idPrefix) ? id.slice(idPrefix.length) : id
+    );
     const taskIds = new Set<string>();
     const timestamp = '2026-01-01T00:00:00.000Z';
 
     return {
-      repository: createPostgresRelativeReminderTimezoneRepository(db),
+      repository: {
+        applyTimezoneRecompute: (input) => repository.applyTimezoneRecompute({
+          ...input,
+          recompute: (task) => input.recompute({
+            ...task,
+            id: unscopedId(task.id),
+          }),
+        }),
+      },
       seedTask: async (input) => {
-        taskIds.add(input.id);
+        const id = scopeId(input.id);
+        taskIds.add(id);
         await pool.query(
           `INSERT INTO tasks (
              id, source_id, connector_type, connector_instance_id, title, status,
@@ -80,7 +96,7 @@ describePostgres('PostgreSQL relative reminder timezone repository integration',
              $3, $4, $5, $6, $7, $7, $7
            )`,
           [
-            input.id,
+             id,
             input.status ?? 'todo',
             input.dueDate ?? null,
             input.reminderAt ?? null,
@@ -103,7 +119,7 @@ describePostgres('PostgreSQL relative reminder timezone repository integration',
                   reminder_relative AS "reminderRelative", reminder_due_time AS "reminderDueTime",
                   updated_at AS "updatedAt"
            FROM tasks WHERE id = $1`,
-          [id],
+          [scopeId(id)],
         );
         return result.rows[0] ?? null;
       },

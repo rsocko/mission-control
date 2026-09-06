@@ -68,6 +68,9 @@ import { createSqliteAnalyticsPersistence } from './sqlite-analytics-repositorie
 import { createSqliteFinanceWebPersistence } from './sqlite-finance-web-repository';
 import { createSqliteRoutinesRepository } from './sqlite-routines-repository';
 import {
+  createSqliteDailyPlanningPersistence,
+} from './sqlite-daily-planning-repository';
+import {
   createSqliteWebhookIntegrationsRepository,
 } from './sqlite-webhook-integrations-repository';
 
@@ -194,6 +197,7 @@ export function createSqliteWorkerPersistenceRepositories(
     ideationWorkspaces: new SqliteIdeationWorkspaceRepository(sqlite),
     analytics: createSqliteAnalyticsPersistence(db),
     routines: createSqliteRoutinesRepository(sqlite),
+    dailyPlanning: createSqliteDailyPlanningPersistence(sqlite),
     webhookIntegrations: createSqliteWebhookIntegrationsRepository(sqlite, db),
   };
   return repositories;

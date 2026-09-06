@@ -13,8 +13,9 @@ describe('PATCH /api/my-day ordering', () => {
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
 
-    const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
+    const helper = await import('../helpers/initialized-sqlite-database');
+    const dbModule = await helper.importInitializedSqliteDatabase();
+    const [schemaModule, routeModule] = await Promise.all([
       import('@/db/schema'),
       import('@/app/api/my-day/route'),
     ]);

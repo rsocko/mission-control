@@ -2390,6 +2390,44 @@ to
 `266/A80/B5/clean181/direct50/transitive30/directDB51/lib51/helpers0/units131`,
 with no Tier B reclassification.
 
+## Web/API PostgreSQL parity: daily planning and focus web surface
+
+Energy check-ins, Focus 3, My Day (including its Microsoft To Do
+reconciliation), the schedule, the weekly one thing, recent-win projections,
+the mobile dashboard, and the full navigation-count projection resolve one
+backend-neutral `WorkerPersistenceRepositories.dailyPlanning` capability. The
+scope is exactly eleven routes. Recent-win snooze and deprioritized-list values
+stay on the existing `CorePersistenceRepositories.settings` repository, and
+after-the-fact planning-signal observation stays on the landed
+`planningSignals` repository; only the mutations that genuinely must be atomic
+with their My Day/Focus row write their signal inside the adapter transaction.
+
+SQLite uses immediate transactions. PostgreSQL uses explicit READ COMMITTED
+transactions with transaction-scoped advisory locks for exactly the focus
+`(scope, date)`, My Day date, and weekly one-thing week namespaces, so capacity,
+duplicate detection, slot and order allocation, and weekly selection cannot
+race. Energy replacement uses a table write lock within its transaction rather
+than adding a fourth advisory namespace. Best-effort My Day auto-inclusion still resolves
+a `skipped-write-contention` outcome instead of failing the read when SQLite is
+write-contended. Microsoft To Do network calls, the route-level per-date
+single-flight map, scoring, rotation, response shaping, edit-policy resolution,
+and source-list display-name resolution all remain route-owned. See
+[daily-planning-persistence.md](./daily-planning-persistence.md) for the
+complete contract.
+
+The slice excludes AI, graph/reporting, project-domain, notification,
+Alertmanager, push-trigger, Scout, triage, tag, task-move, and relationship
+surfaces, as well as schema, migrations, dependencies, deployment, cutover, and
+Homelab. All eleven owned routes move directly from Tier A to clean, changing
+the graph from
+`266/A76/B5/clean185/direct46/transitive30/directDB48/lib51/helpers0/units127`
+to
+`266/A65/B5/clean196/direct35/transitive30/directDB37/lib51/helpers0/units116`,
+with no Tier B reclassification and no newly tainted library. The canonical
+baseline and the fail-closed sentinel remain the sole exact-current graph
+owners; the layer test owns only route ownership, cleanliness, exclusion, and
+a monotonic 116-unit ceiling.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

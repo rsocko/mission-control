@@ -4,55 +4,31 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ─── Shared DB mock (chainable) ─────────────────────────────────────────────
+vi.mock('@/db', () => {
+  throw new Error('SQLite database module must not be evaluated');
+});
+vi.mock('@/db/schema', () => {
+  throw new Error('SQLite schema module must not be evaluated');
+});
 
-type ChainableProxy = Record<PropertyKey, unknown>;
+const settings = vi.hoisted(() => ({
+  get: vi.fn<(key: string) => Promise<unknown>>().mockResolvedValue(null),
+  set: vi.fn(async () => undefined),
+  delete: vi.fn(async () => true),
+}));
 
-function chainable<T>(terminal: T) {
-  const chain: ChainableProxy = new Proxy(
-    {},
-    {
-      get(_, prop: string | symbol) {
-        if (prop === 'then')
-          return (resolve: (value: T) => unknown) => resolve(terminal);
-        if (prop === Symbol.iterator) {
-          return () =>
-            (Array.isArray(terminal) ? terminal : [])[Symbol.iterator]();
-        }
-        return vi.fn(() => chain);
-      },
-    }
-  );
-  return chain;
-}
+const recentWins = vi.hoisted(() => ({
+  listRecentCompletions: vi.fn(async () => [] as unknown[]),
+}));
 
-// Store references so tests can swap return values
-let selectResult: unknown[] = [];
-const mockDb = {
-  select: vi.fn(() => chainable(selectResult)),
-  insert: vi.fn(() => chainable([])),
-  update: vi.fn(() => chainable(undefined)),
-  delete: vi.fn(() => chainable(undefined)),
-};
+vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositories: () => ({ settings }),
+}));
 
-vi.mock('@/db', () => ({ default: mockDb }));
-
-vi.mock('@/db/schema', () => ({
-  tasks: {
-    id: 'id',
-    title: 'title',
-    status: 'status',
-    priority: 'priority',
-    completedAt: 'completedAt',
-    connectorType: 'connectorType',
-    sourceListName: 'sourceListName',
-    dueDate: 'dueDate',
-  },
-  taskSchedules: {
-    taskId: 'taskId',
-    recurrence: 'recurrence',
-  },
-  appSettings: { key: 'key', value: 'value', updatedAt: 'updatedAt' },
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    dailyPlanning: { recentWins },
+  }),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -74,34 +50,27 @@ function makeWin(overrides: Record<string, unknown> = {}) {
   };
 }
 
-/** Configures mockDb.select so successive calls return different data.
- *  Each element in `results` is the array returned by one chained select call.
- */
-function setupSelectSequence(results: unknown[][]) {
-  let callIndex = 0;
-  mockDb.select.mockImplementation(() => {
-    const result = results[callIndex] ?? [];
-    callIndex++;
-    return chainable(result);
-  });
+const SNOOZE_KEY = 'recent-wins-snoozed';
+const DEPRIORITIZED_KEY = 'recent-wins-deprioritized-lists';
+
+function setupSettings(values: Record<string, unknown>) {
+  settings.get.mockImplementation(async (key: string) => values[key] ?? null);
+}
+
+function resetMocks() {
+  vi.clearAllMocks();
+  setupSettings({});
+  recentWins.listRecentCompletions.mockResolvedValue([]);
+  settings.set.mockResolvedValue(undefined);
+  settings.delete.mockResolvedValue(true);
 }
 
 // ─── GET /api/recent-wins ───────────────────────────────────────────────────
 
 describe('GET /api/recent-wins', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    selectResult = [];
-    mockDb.select.mockImplementation(() => chainable(selectResult));
-    mockDb.insert.mockImplementation(() => chainable([]));
-    mockDb.update.mockImplementation(() => chainable(undefined));
-    mockDb.delete.mockImplementation(() => chainable(undefined));
-  });
+  beforeEach(resetMocks);
 
   it('returns empty when no completed tasks exist', async () => {
-    // select 1: snooze row (none), select 2: deprioritized lists (none), select 3: tasks (none)
-    setupSelectSequence([[], [], []]);
-
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
     expect(response.status).toBe(200);
@@ -112,13 +81,11 @@ describe('GET /api/recent-wins', () => {
   });
 
   it('returns items and groups when completed tasks exist', async () => {
-    const wins = [
+    recentWins.listRecentCompletions.mockResolvedValue([
       makeWin({ id: 'w1', title: 'Ship feature', priority: 'high' }),
       makeWin({ id: 'w2', title: 'Fix bug', priority: 'medium' }),
       makeWin({ id: 'w3', title: 'Write docs', priority: 'low', sourceListName: 'Docs' }),
-    ];
-    // select 1: no snooze, select 2: no deprioritized lists, select 3: wins
-    setupSelectSequence([[], [], wins]);
+    ]);
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -151,10 +118,7 @@ describe('GET /api/recent-wins', () => {
   it('returns snoozed:true when day-snooze is active', async () => {
     const tomorrow = new Date();
     tomorrow.setDate(tomorrow.getDate() + 1);
-    const snoozeRow = {
-      value: { type: 'day', until: tomorrow.toISOString() },
-    };
-    setupSelectSequence([[snoozeRow]]);
+    setupSettings({ [SNOOZE_KEY]: { type: 'day', until: tomorrow.toISOString() } });
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -162,17 +126,14 @@ describe('GET /api/recent-wins', () => {
     const data = await response.json();
     expect(data.snoozed).toBe(true);
     expect(data.items).toEqual([]);
+    expect(recentWins.listRecentCompletions).not.toHaveBeenCalled();
   });
 
   it('clears expired day-snooze and returns wins normally', async () => {
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    const expiredSnooze = {
-      value: { type: 'day', until: yesterday.toISOString() },
-    };
-    const wins = [makeWin({ id: 'w1' })];
-    // select 1: expired snooze, select 2: no deprioritized lists, select 3: wins
-    setupSelectSequence([[expiredSnooze], [], wins]);
+    setupSettings({ [SNOOZE_KEY]: { type: 'day', until: yesterday.toISOString() } });
+    recentWins.listRecentCompletions.mockResolvedValue([makeWin({ id: 'w1' })]);
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -181,39 +142,55 @@ describe('GET /api/recent-wins', () => {
     expect(data.snoozed).toBeUndefined();
     expect(data.totalCount).toBe(1);
     // Snooze should have been deleted
-    expect(mockDb.delete).toHaveBeenCalled();
+    expect(settings.delete).toHaveBeenCalledWith(SNOOZE_KEY);
   });
 
   it('keeps until-noteworthy snooze when not enough new wins', async () => {
-    const snoozeRow = {
-      value: {
+    setupSettings({
+      [SNOOZE_KEY]: {
         type: 'until-noteworthy',
         minCount: 5,
-        snoozedAt: new Date().toISOString(),
+        snoozedAt: new Date(Date.now() - 60_000).toISOString(),
       },
-    };
+    });
     // Only 2 wins — below the threshold of 5
-    const wins = [makeWin({ id: 'w1' }), makeWin({ id: 'w2' })];
-    // select 1: snooze, select 2: no deprioritized, select 3: wins
-    // But the route re-reads snooze in the second check, so the first select
-    // returns the snooze, then deprioritized (empty), then tasks.
-    // Actually looking at the code: it reads snooze first, then if not day-snoozed
-    // it reads deprioritized, then tasks, then checks snoozeRow again.
-    setupSelectSequence([[snoozeRow], [], wins]);
+    recentWins.listRecentCompletions.mockResolvedValue([
+      makeWin({ id: 'w1' }),
+      makeWin({ id: 'w2' }),
+    ]);
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.snoozed).toBe(true);
+    expect(settings.delete).not.toHaveBeenCalled();
+  });
+
+  it('clears until-noteworthy snooze once enough new wins land', async () => {
+    setupSettings({
+      [SNOOZE_KEY]: {
+        type: 'until-noteworthy',
+        minCount: 2,
+        snoozedAt: new Date(Date.now() - 60_000).toISOString(),
+      },
+    });
+    recentWins.listRecentCompletions.mockResolvedValue([
+      makeWin({ id: 'w1', title: 'One' }),
+      makeWin({ id: 'w2', title: 'Two' }),
+    ]);
+
+    const { GET } = await import('@/app/api/recent-wins/route');
+    const data = await (await GET()).json();
+    expect(data.snoozed).toBeUndefined();
+    expect(settings.delete).toHaveBeenCalledWith(SNOOZE_KEY);
   });
 
   it('deprioritizes wins from grocery/shopping lists via built-in patterns', async () => {
-    const wins = [
+    recentWins.listRecentCompletions.mockResolvedValue([
       makeWin({ id: 'w1', title: 'Buy milk', priority: 'medium', sourceListName: 'Grocery List' }),
       makeWin({ id: 'w2', title: 'Ship v2', priority: 'high', sourceListName: 'Work' }),
-    ];
-    setupSelectSequence([[], [], wins]);
+    ]);
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -227,8 +204,22 @@ describe('GET /api/recent-wins', () => {
     }
   });
 
+  it('deprioritizes user-configured lists from the shared settings repository', async () => {
+    setupSettings({ [DEPRIORITIZED_KEY]: ['Chores'] });
+    recentWins.listRecentCompletions.mockResolvedValue([
+      makeWin({ id: 'w1', title: 'Sweep', priority: 'high', sourceListName: 'Chores' }),
+      makeWin({ id: 'w2', title: 'Ship v2', priority: 'high', sourceListName: 'Work' }),
+    ]);
+
+    const { GET } = await import('@/app/api/recent-wins/route');
+    const data = await (await GET()).json();
+    const chores = data.items.find((i: { id: string }) => i.id === 'w1');
+    const work = data.items.find((i: { id: string }) => i.id === 'w2');
+    expect(work.score).toBeGreaterThan(chores.score);
+  });
+
   it('assigns overdue-cleared badge when completedAt > dueDate', async () => {
-    const wins = [
+    recentWins.listRecentCompletions.mockResolvedValue([
       makeWin({
         id: 'w1',
         title: 'Late task',
@@ -236,8 +227,7 @@ describe('GET /api/recent-wins', () => {
         dueDate: '2026-07-10',
         completedAt: '2026-07-15T12:00:00.000Z',
       }),
-    ];
-    setupSelectSequence([[], [], wins]);
+    ]);
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -248,7 +238,7 @@ describe('GET /api/recent-wins', () => {
   });
 
   it('assigns done-early badge when completedAt is before dueDate', async () => {
-    const wins = [
+    recentWins.listRecentCompletions.mockResolvedValue([
       makeWin({
         id: 'w1',
         title: 'Early task',
@@ -256,8 +246,7 @@ describe('GET /api/recent-wins', () => {
         dueDate: '2026-07-25',
         completedAt: '2026-07-15T12:00:00.000Z',
       }),
-    ];
-    setupSelectSequence([[], [], wins]);
+    ]);
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -267,10 +256,8 @@ describe('GET /api/recent-wins', () => {
     expect(item.badge).toBe('done early');
   });
 
-  it('gracefully handles db errors and returns empty', async () => {
-    mockDb.select.mockImplementation(() => {
-      throw new Error('DB connection failed');
-    });
+  it('gracefully handles persistence errors and returns empty', async () => {
+    recentWins.listRecentCompletions.mockRejectedValue(new Error('DB connection failed'));
 
     const { GET } = await import('@/app/api/recent-wins/route');
     const response = await GET();
@@ -284,192 +271,134 @@ describe('GET /api/recent-wins', () => {
 // ─── POST /api/recent-wins/dismiss ──────────────────────────────────────────
 
 describe('POST /api/recent-wins/dismiss', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    selectResult = [];
-    mockDb.select.mockImplementation(() => chainable(selectResult));
-    mockDb.insert.mockImplementation(() => chainable([]));
-    mockDb.update.mockImplementation(() => chainable(undefined));
-    mockDb.delete.mockImplementation(() => chainable(undefined));
-  });
+  beforeEach(resetMocks);
 
-  it('saves day-snooze setting', async () => {
-    // No existing snooze row
-    setupSelectSequence([[]]);
-
-    const { POST } = await import('@/app/api/recent-wins/dismiss/route');
-    const request = new Request('http://localhost/api/recent-wins/dismiss', {
+  function dismiss(action: string) {
+    return new Request('http://localhost/api/recent-wins/dismiss', {
       method: 'POST',
-      body: JSON.stringify({ action: 'snooze-day' }),
+      body: JSON.stringify({ action }),
       headers: { 'Content-Type': 'application/json' },
     });
-    const response = await POST(request);
+  }
+
+  it('saves day-snooze setting', async () => {
+    const { POST } = await import('@/app/api/recent-wins/dismiss/route');
+    const response = await POST(dismiss('snooze-day'));
     expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.ok).toBe(true);
-    expect(mockDb.insert).toHaveBeenCalled();
+    expect((await response.json()).ok).toBe(true);
+    expect(settings.set).toHaveBeenCalledWith(
+      SNOOZE_KEY,
+      expect.objectContaining({ type: 'day' }),
+    );
   });
 
   it('saves until-noteworthy snooze setting', async () => {
-    setupSelectSequence([[]]);
-
     const { POST } = await import('@/app/api/recent-wins/dismiss/route');
-    const request = new Request('http://localhost/api/recent-wins/dismiss', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'snooze-until-noteworthy' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request);
+    const response = await POST(dismiss('snooze-until-noteworthy'));
     expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.ok).toBe(true);
-    expect(mockDb.insert).toHaveBeenCalled();
+    expect((await response.json()).ok).toBe(true);
+    expect(settings.set).toHaveBeenCalledWith(
+      SNOOZE_KEY,
+      expect.objectContaining({ type: 'until-noteworthy', minCount: 5 }),
+    );
   });
 
   it('clears snooze on clear action', async () => {
     const { POST } = await import('@/app/api/recent-wins/dismiss/route');
-    const request = new Request('http://localhost/api/recent-wins/dismiss', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'clear' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request);
+    const response = await POST(dismiss('clear'));
     expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.ok).toBe(true);
-    expect(mockDb.delete).toHaveBeenCalled();
+    expect((await response.json()).ok).toBe(true);
+    expect(settings.delete).toHaveBeenCalledWith(SNOOZE_KEY);
+    expect(settings.set).not.toHaveBeenCalled();
   });
 
-  it('updates existing snooze row instead of inserting', async () => {
-    setupSelectSequence([[{ key: 'recent-wins-snoozed', value: {} }]]);
+  it('replaces an existing snooze with one atomic upsert', async () => {
+    setupSettings({ [SNOOZE_KEY]: { type: 'until-noteworthy' } });
 
     const { POST } = await import('@/app/api/recent-wins/dismiss/route');
-    const request = new Request('http://localhost/api/recent-wins/dismiss', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'snooze-day' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request);
+    const response = await POST(dismiss('snooze-day'));
     expect(response.status).toBe(200);
-    expect(mockDb.update).toHaveBeenCalled();
+    expect(settings.set).toHaveBeenCalledTimes(1);
   });
 
   it('rejects invalid action', async () => {
     const { POST } = await import('@/app/api/recent-wins/dismiss/route');
-    const request = new Request('http://localhost/api/recent-wins/dismiss', {
-      method: 'POST',
-      body: JSON.stringify({ action: 'invalid-action' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request);
+    const response = await POST(dismiss('invalid-action'));
     expect(response.status).toBe(400);
-    const data = await response.json();
-    expect(data.error).toBe('Invalid action');
+    expect((await response.json()).error).toBe('Invalid action');
+    expect(settings.set).not.toHaveBeenCalled();
   });
 });
 
 // ─── GET/PUT /api/recent-wins/settings ──────────────────────────────────────
 
 describe('GET /api/recent-wins/settings', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    selectResult = [];
-    mockDb.select.mockImplementation(() => chainable(selectResult));
-  });
+  beforeEach(resetMocks);
 
   it('returns empty deprioritized lists by default', async () => {
-    setupSelectSequence([[]]);
-
     const { GET } = await import('@/app/api/recent-wins/settings/route');
     const response = await GET();
     expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.deprioritizedLists).toEqual([]);
+    expect((await response.json()).deprioritizedLists).toEqual([]);
   });
 
   it('returns stored deprioritized lists', async () => {
-    const lists = ['Groceries', 'Packing'];
-    setupSelectSequence([[{ value: lists }]]);
+    setupSettings({ [DEPRIORITIZED_KEY]: ['Groceries', 'Packing'] });
 
     const { GET } = await import('@/app/api/recent-wins/settings/route');
     const response = await GET();
     expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.deprioritizedLists).toEqual(['Groceries', 'Packing']);
+    expect((await response.json()).deprioritizedLists).toEqual(['Groceries', 'Packing']);
+  });
+
+  it('fails soft when the settings repository is unavailable', async () => {
+    settings.get.mockRejectedValue(new Error('unavailable'));
+
+    const { GET } = await import('@/app/api/recent-wins/settings/route');
+    const response = await GET();
+    expect(response.status).toBe(200);
+    expect((await response.json()).deprioritizedLists).toEqual([]);
   });
 });
 
 describe('PUT /api/recent-wins/settings', () => {
-  beforeEach(() => {
-    vi.resetModules();
-    selectResult = [];
-    mockDb.select.mockImplementation(() => chainable(selectResult));
-    mockDb.insert.mockImplementation(() => chainable([]));
-    mockDb.update.mockImplementation(() => chainable(undefined));
-  });
+  beforeEach(resetMocks);
 
-  it('saves new deprioritized lists', async () => {
-    setupSelectSequence([[]]);
-
-    const { PUT } = await import('@/app/api/recent-wins/settings/route');
-    const request = new Request('http://localhost/api/recent-wins/settings', {
+  function put(body: unknown) {
+    return new Request('http://localhost/api/recent-wins/settings', {
       method: 'PUT',
-      body: JSON.stringify({ deprioritizedLists: ['Chores'] }),
+      body: JSON.stringify(body),
       headers: { 'Content-Type': 'application/json' },
     });
-    const response = await PUT(request);
+  }
+
+  it('saves new deprioritized lists', async () => {
+    const { PUT } = await import('@/app/api/recent-wins/settings/route');
+    const response = await PUT(put({ deprioritizedLists: ['Chores'] }));
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data.ok).toBe(true);
     expect(data.deprioritizedLists).toEqual(['Chores']);
-    expect(mockDb.insert).toHaveBeenCalled();
+    expect(settings.set).toHaveBeenCalledWith(DEPRIORITIZED_KEY, ['Chores']);
   });
 
-  it('updates existing deprioritized lists', async () => {
-    setupSelectSequence([[{ key: 'recent-wins-deprioritized-lists', value: ['Old'] }]]);
+  it('updates existing deprioritized lists with one atomic upsert', async () => {
+    setupSettings({ [DEPRIORITIZED_KEY]: ['Old'] });
 
     const { PUT } = await import('@/app/api/recent-wins/settings/route');
-    const request = new Request('http://localhost/api/recent-wins/settings', {
-      method: 'PUT',
-      body: JSON.stringify({ deprioritizedLists: ['New'] }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await PUT(request);
+    const response = await PUT(put({ deprioritizedLists: ['New'] }));
     expect(response.status).toBe(200);
-    expect(mockDb.update).toHaveBeenCalled();
+    expect(settings.set).toHaveBeenCalledTimes(1);
+    expect(settings.set).toHaveBeenCalledWith(DEPRIORITIZED_KEY, ['New']);
   });
 
-  it('rejects non-array body', async () => {
+  it('rejects non-array, oversized, and invalid entries', async () => {
     const { PUT } = await import('@/app/api/recent-wins/settings/route');
-    const request = new Request('http://localhost/api/recent-wins/settings', {
-      method: 'PUT',
-      body: JSON.stringify({ deprioritizedLists: 'not-an-array' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await PUT(request);
-    expect(response.status).toBe(400);
-  });
-
-  it('rejects too many entries', async () => {
-    const { PUT } = await import('@/app/api/recent-wins/settings/route');
-    const bigList = Array.from({ length: 101 }, (_, i) => `List ${i}`);
-    const request = new Request('http://localhost/api/recent-wins/settings', {
-      method: 'PUT',
-      body: JSON.stringify({ deprioritizedLists: bigList }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await PUT(request);
-    expect(response.status).toBe(400);
-  });
-
-  it('rejects entries with strings over 200 chars', async () => {
-    const { PUT } = await import('@/app/api/recent-wins/settings/route');
-    const request = new Request('http://localhost/api/recent-wins/settings', {
-      method: 'PUT',
-      body: JSON.stringify({ deprioritizedLists: ['x'.repeat(201)] }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await PUT(request);
-    expect(response.status).toBe(400);
+    expect((await PUT(put({ deprioritizedLists: 'nope' }))).status).toBe(400);
+    expect((await PUT(put({
+      deprioritizedLists: Array.from({ length: 101 }, (_, i) => `list-${i}`),
+    }))).status).toBe(400);
+    expect((await PUT(put({ deprioritizedLists: ['x'.repeat(201)] }))).status).toBe(400);
+    expect(settings.set).not.toHaveBeenCalled();
   });
 });

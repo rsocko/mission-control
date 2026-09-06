@@ -1,9 +1,13 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { taskSchedules, tasks } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { getLocalToday } from '@/lib/utils/date';
 import { ApiErrors } from '@/lib/api-error';
+
+async function scheduleRepository() {
+  const { dailyPlanning } = await getWorkerPersistenceRepositories();
+  if (!dailyPlanning) throw new Error('Daily planning persistence is unavailable');
+  return dailyPlanning.schedule;
+}
 
 /**
  * GET /api/schedule — Get scheduled tasks for a date range
@@ -12,32 +16,9 @@ import { ApiErrors } from '@/lib/api-error';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const date = searchParams.get('date') || getLocalToday();
-  const endDate = searchParams.get('endDate') || date;
 
   try {
-    const scheduled = await db.select({
-      taskId: taskSchedules.taskId,
-      scheduledDate: taskSchedules.scheduledDate,
-      scheduledTime: taskSchedules.scheduledTime,
-      estimatedDuration: taskSchedules.estimatedDuration,
-      isTimeBlocked: taskSchedules.isTimeBlocked,
-      recurrence: taskSchedules.recurrence,
-      // Task details
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      connectorType: tasks.connectorType,
-      sourceListName: tasks.sourceListName,
-    })
-      .from(taskSchedules)
-      .innerJoin(tasks, eq(taskSchedules.taskId, tasks.id))
-      .where(
-        and(
-          eq(taskSchedules.scheduledDate, date),
-        )
-      )
-      .orderBy(taskSchedules.scheduledTime);
+    const scheduled = await (await scheduleRepository()).listForDate(date);
 
     // Group into time-blocked vs unscheduled-time
     const timeBlocked = scheduled.filter(s => s.isTimeBlocked && s.scheduledTime);
@@ -75,27 +56,14 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest('taskId and date are required');
     }
 
-    // Upsert schedule
-    const existing = await db.select().from(taskSchedules).where(eq(taskSchedules.taskId, taskId));
-
-    if (existing.length > 0) {
-      await db.update(taskSchedules).set({
-        scheduledDate: date,
-        scheduledTime: time || null,
-        estimatedDuration: duration || null,
-        isTimeBlocked: isTimeBlocked || false,
-        recurrence: recurrence || null,
-      }).where(eq(taskSchedules.taskId, taskId));
-    } else {
-      await db.insert(taskSchedules).values({
-        taskId,
-        scheduledDate: date,
-        scheduledTime: time || null,
-        estimatedDuration: duration || null,
-        isTimeBlocked: isTimeBlocked || false,
-        recurrence: recurrence || null,
-      });
-    }
+    await (await scheduleRepository()).upsert({
+      taskId,
+      scheduledDate: date,
+      scheduledTime: time || null,
+      estimatedDuration: duration || null,
+      isTimeBlocked: isTimeBlocked || false,
+      recurrence: recurrence || null,
+    });
 
     return NextResponse.json({ success: true, taskId, date, time });
   } catch (error) {
@@ -115,7 +83,7 @@ export async function DELETE(request: Request) {
   }
 
   try {
-    await db.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId));
+    await (await scheduleRepository()).remove(taskId);
     return NextResponse.json({ success: true });
   } catch (error) {
     return ApiErrors.internal('Failed to remove schedule', error);

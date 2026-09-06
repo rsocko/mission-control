@@ -1,17 +1,23 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { appSettings } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import logger from '@/lib/logger';
 
 const SNOOZE_KEY = 'recent-wins-snoozed';
+
+type SnoozeValue = {
+  type: 'day' | 'until-noteworthy';
+  until?: string;
+  minCount?: number;
+  snoozedAt?: string;
+};
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const { action } = body as { action: string };
 
-    let value: unknown;
+    const settings = getCorePersistenceRepositories().settings;
+    let value: SnoozeValue;
     const now = new Date().toISOString();
 
     switch (action) {
@@ -28,26 +34,15 @@ export async function POST(request: Request) {
         break;
       }
       case 'clear': {
-        await db.delete(appSettings).where(eq(appSettings.key, SNOOZE_KEY));
+        await settings.delete(SNOOZE_KEY);
         return NextResponse.json({ ok: true });
       }
       default:
         return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
-    const [existing] = await db
-      .select()
-      .from(appSettings)
-      .where(eq(appSettings.key, SNOOZE_KEY));
-
-    if (existing) {
-      await db
-        .update(appSettings)
-        .set({ value, updatedAt: now })
-        .where(eq(appSettings.key, SNOOZE_KEY));
-    } else {
-      await db.insert(appSettings).values({ key: SNOOZE_KEY, value, updatedAt: now });
-    }
+    // A single atomic key upsert replaces the previous read-then-write pair.
+    await settings.set(SNOOZE_KEY, value);
 
     return NextResponse.json({ ok: true });
   } catch (error) {

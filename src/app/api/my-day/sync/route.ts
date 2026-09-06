@@ -1,13 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import {
-  connectorConfigs,
-  myDayExclusions,
-  myDayItems,
-  syncDeletionSnapshots,
-  tasks,
-} from '@/db/schema';
-import { eq, and, like, isNull, inArray, ne } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { MicrosoftTodoConnector } from '@/lib/connectors/microsoft-todo';
 import type { ConnectorConfig } from '@/types';
 import {
@@ -32,11 +24,23 @@ import {
 const MAX_REMOTE_MY_DAY_TASKS = 2_000;
 const MY_DAY_QUERY_BATCH_SIZE = 400;
 const MY_DAY_SYNC_TIMEOUT_MS = 30_000;
+const ARCHIVED_DUPLICATE_REASON_PREFIX = 'Duplicate open Microsoft To Do recurrence';
 type MyDayFlightStats = { coalescedCallers: number };
 const myDaySyncFlights = new Map<string, {
   promise: Promise<NextResponse>;
   stats: MyDayFlightStats;
 }>();
+
+async function syncRepositories() {
+  const repositories = await getWorkerPersistenceRepositories();
+  const { connectors, dailyPlanning } = repositories;
+  if (!dailyPlanning) throw new Error('Daily planning persistence is unavailable');
+  return { connectors, myDaySync: dailyPlanning.myDaySync };
+}
+
+type MyDaySyncRepository = Awaited<ReturnType<typeof syncRepositories>>['myDaySync'];
+type MyDayRow =
+  Parameters<MyDaySyncRepository['applyReconciliation']>[0]['committedRows'][number];
 
 /**
  * POST /api/my-day/sync — Sync My Day from Microsoft Todo via Substrate API.
@@ -95,14 +99,11 @@ async function reconcileMyDay(
     } catch (error) {
       logger.warn({ err: error }, 'Planning signal finalization will retry later');
     }
-    // Find the Microsoft Todo connector config from DB
-    const [config] = await db.select()
-      .from(connectorConfigs)
-      .where(and(
-        eq(connectorConfigs.type, 'microsoft-todo'),
-        eq(connectorConfigs.enabled, true),
-        isNull(connectorConfigs.deletedAt)
-      ));
+    const { connectors, myDaySync } = await syncRepositories();
+
+    // Find the Microsoft Todo connector config through the selected backend
+    const [config] = (await connectors.listEnabled())
+      .filter((candidate) => candidate.type === 'microsoft-todo');
 
     if (!config) {
       return NextResponse.json(
@@ -113,7 +114,7 @@ async function reconcileMyDay(
 
     // Initialize connector
     const connector = new MicrosoftTodoConnector();
-    await connector.initialize(config as unknown as ConnectorConfig);
+    await connector.initialize(config as ConnectorConfig);
 
     // Fetch My Day tasks from substrate API
     let remoteTasks: Awaited<ReturnType<typeof connector.fetchMyDayTasks>> = [];
@@ -151,18 +152,13 @@ async function reconcileMyDay(
       logger.error({ err: subErr, date: today }, 'Failed to fetch My Day suggestions from Substrate');
     }
 
-    // Get our local My Day items for today
-    const localItems = await db.select({
-      id: myDayItems.id,
-      taskId: myDayItems.taskId,
-      sourceId: tasks.sourceId,
-      isAutoIncluded: myDayItems.isAutoIncluded,
-      status: tasks.status,
-      completedAt: tasks.completedAt,
-    })
-      .from(myDayItems)
-      .innerJoin(tasks, eq(myDayItems.taskId, tasks.id))
-      .where(eq(myDayItems.date, today));
+    // Bounded local reconciliation snapshot for today
+    const snapshot = await myDaySync.snapshot({
+      date: today,
+      connectorInstanceId: config.id,
+      archivedDuplicateReasonPrefix: ARCHIVED_DUPLICATE_REASON_PREFIX,
+    });
+    const localItems = snapshot.localItems;
 
     // Build lookup of local sourceIds that are already in My Day
     const localSourceIds = new Set(localItems.map(i => i.sourceId).filter(Boolean));
@@ -170,33 +166,11 @@ async function reconcileMyDay(
       localItems.flatMap(item => item.sourceId ? [[item.sourceId, item] as const] : []),
     );
 
-    // Load user-excluded task IDs for today (tasks the user explicitly removed)
-    const exclusionRows = await db.select({ taskId: myDayExclusions.taskId })
-      .from(myDayExclusions)
-      .where(eq(myDayExclusions.date, today));
-    const excludedTaskIds = new Set(exclusionRows.map(r => r.taskId));
+    // Task IDs the user explicitly removed from My Day today
+    const excludedTaskIds = new Set(snapshot.excludedTaskIds);
 
-    const recurringHistory = await db.select({
-      title: tasks.title,
-      sourceListId: tasks.sourceListId,
-      status: tasks.status,
-      dueDate: tasks.dueDate,
-      completedAt: tasks.completedAt,
-      metadata: tasks.metadata,
-    })
-      .from(tasks)
-      .where(and(
-        eq(tasks.connectorInstanceId, config.id),
-        eq(tasks.depth, 0),
-      ));
-    const knownRecurringTitleKeys = inferRecurringTitleKeys(recurringHistory);
-    const archivedDuplicateRows = await db.select({ sourceId: syncDeletionSnapshots.sourceId })
-      .from(syncDeletionSnapshots)
-      .where(and(
-        eq(syncDeletionSnapshots.connectorId, config.id),
-        like(syncDeletionSnapshots.reason, 'Duplicate open Microsoft To Do recurrence%'),
-      ));
-    const archivedDuplicateSourceIds = new Set(archivedDuplicateRows.map(row => row.sourceId));
+    const knownRecurringTitleKeys = inferRecurringTitleKeys(snapshot.recurringHistory);
+    const archivedDuplicateSourceIds = new Set(snapshot.archivedDuplicateSourceIds);
     const suppressedArchivedSourceIds = new Set(
       remoteTasks.flatMap((task) => {
         const sourceId = `${task.ParentFolderId}:${task.Id}`;
@@ -217,59 +191,23 @@ async function reconcileMyDay(
         .map(t => `${t.ParentFolderId}:${t.Id}`)
         .filter(sourceId => !suppressedArchivedSourceIds.has(sourceId))
     );
-    const localTasksBySourceId = new Map<string, {
-      id: string;
-      sourceId: string;
-      metadata: unknown;
-      status: string;
-    }>();
-    const remoteSourceIdList = [...remoteSourceIds];
-    for (let index = 0; index < remoteSourceIdList.length; index += MY_DAY_QUERY_BATCH_SIZE) {
-      const rows = await db.select({
-        id: tasks.id,
-        sourceId: tasks.sourceId,
-        metadata: tasks.metadata,
-        status: tasks.status,
-      })
-        .from(tasks)
-        .where(and(
-          eq(tasks.connectorType, 'microsoft-todo'),
-          eq(tasks.connectorInstanceId, config.id),
-          inArray(tasks.sourceId, remoteSourceIdList.slice(index, index + MY_DAY_QUERY_BATCH_SIZE)),
-        ));
-      for (const row of rows) {
-        if (row.sourceId) localTasksBySourceId.set(row.sourceId, {
-          id: row.id,
-          sourceId: row.sourceId,
-          metadata: row.metadata,
-          status: row.status,
-        });
-      }
-    }
-    const completedSiblingRows = await db.select({
-      sourceListId: tasks.sourceListId,
-      title: tasks.title,
-      completedAt: tasks.completedAt,
-      metadata: tasks.metadata,
-    })
-      .from(tasks)
-      .innerJoin(myDayItems, eq(myDayItems.taskId, tasks.id))
-      .where(and(
-        eq(tasks.connectorType, 'microsoft-todo'),
-        eq(tasks.connectorInstanceId, config.id),
-        eq(tasks.status, 'done'),
-        eq(myDayItems.date, today),
-      ));
+    const localTasksBySourceId = new Map(
+      (await myDaySync.findTasksBySourceIds({
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: config.id,
+        sourceIds: [...remoteSourceIds],
+      })).map((task) => [task.sourceId, task] as const),
+    );
     const completedSiblings = new Map(
-      completedSiblingRows.map((row) => [
-        recurringSiblingKey(row.sourceListId, row.title),
-        row,
-      ]),
+      (await myDaySync.listCompletedMyDaySiblings({
+        connectorInstanceId: config.id,
+        date: today,
+      })).map((row) => [recurringSiblingKey(row.sourceListId, row.title), row]),
     );
 
     let added = 0;
     let removed = 0;
-    const myDayRowsToInsert: Array<typeof myDayItems.$inferInsert> = [];
+    const myDayRowsToInsert: MyDayRow[] = [];
     const myDayIdsToRemove: string[] = [];
     const suppressedRecurringSourceIds = new Set<string>();
 
@@ -355,57 +293,30 @@ async function reconcileMyDay(
           logger.info({ title: remoteTask.Subject, remoteDueDate }, 'Skipping future My Day task not yet in the database');
           continue;
         }
-        const newTaskId = crypto.randomUUID();
         const now = new Date().toISOString();
         try {
-          const dueDateStr = remoteTask.DueDateTime?.DateTime
-            ? remoteTask.DueDateTime.DateTime.split('T')[0]
-            : null;
-          const insertResult = await db.insert(tasks).values({
-            id: newTaskId,
+          const result = await myDaySync.createTaskFromRemote({
+            id: crypto.randomUUID(),
             sourceId,
-            connectorType: 'microsoft-todo',
             connectorInstanceId: config.id,
             title: remoteTask.Subject,
-            description: null,
-            status: 'todo',
             priority: remoteTask.Importance === 'High' ? 'high' : 'none',
-            dueDate: dueDateStr,
+            dueDate: remoteTask.DueDateTime?.DateTime
+              ? remoteTask.DueDateTime.DateTime.split('T')[0]
+              : null,
             createdAt: remoteTask.CreatedDateTime || now,
             updatedAt: remoteTask.LastModifiedDateTime || now,
-            completedAt: null,
-            parentId: null,
-            depth: 0,
-            isChecklistItem: false,
-            sourceListId: remoteTask.ParentFolderId || null,
-            sourceListName: null,
-            assignee: null,
-            metadata: JSON.stringify({}),
-            syncStatus: 'synced' as const,
             lastSyncedAt: now,
-          }).onConflictDoNothing();
-          if (insertResult.changes > 0) {
-            localTask = { id: newTaskId, sourceId, metadata: {}, status: 'todo' };
+            sourceListId: remoteTask.ParentFolderId || null,
+          });
+          if (result.created) created++;
+          if (result.task) {
+            localTask = result.task;
             localTasksBySourceId.set(sourceId, localTask);
-            created++;
           }
         } catch (insertErr) {
           logger.error({ err: insertErr, title: remoteTask.Subject }, 'Failed to insert My Day task');
           continue; // Skip this task but keep syncing others
-        }
-        if (!localTask) {
-          [localTask] = await db.select({
-            id: tasks.id,
-            sourceId: tasks.sourceId,
-            metadata: tasks.metadata,
-            status: tasks.status,
-          })
-            .from(tasks)
-            .where(and(
-              eq(tasks.sourceId, sourceId),
-              eq(tasks.connectorInstanceId, config.id),
-            ))
-            .limit(1);
         }
         if (!localTask) {
           logger.error({ title: remoteTask.Subject, sourceId }, 'My Day task insert did not produce a local task');
@@ -413,34 +324,23 @@ async function reconcileMyDay(
         }
       }
 
-      if (localTask.status === 'cancelled') continue;
+      const resolvedTask = localTask;
+      if (resolvedTask.status === 'cancelled') continue;
 
       // Check if already in My Day (by taskId)
-      const existing = localItems.find(i => i.taskId === localTask.id);
+      const existing = localItems.find(i => i.taskId === resolvedTask.id);
       if (existing) continue;
 
       // Skip if user explicitly removed this task from My Day today
-      if (excludedTaskIds.has(localTask.id)) continue;
+      if (excludedTaskIds.has(resolvedTask.id)) continue;
 
       // Add to My Day
       myDayRowsToInsert.push({
         id: `md-sync-${crypto.randomUUID().slice(0, 8)}`,
-        taskId: localTask.id,
+        taskId: resolvedTask.id,
         date: today,
         addedAt: new Date().toISOString(),
         isAutoIncluded: true,
-        order: localItems.length + myDayRowsToInsert.length + 1,
-      });
-    }
-    added = await insertMyDayRows(myDayRowsToInsert);
-    for (const item of myDayRowsToInsert) {
-      await appendPlanningSignal({
-        taskId: item.taskId,
-        eventType: 'my_day_committed',
-        date: today,
-        occurredAt: item.addedAt,
-        provenance: 'microsoft-todo-substrate',
-        metadata: { origin: 'remote-observed' },
       });
     }
 
@@ -457,18 +357,10 @@ async function reconcileMyDay(
 
     if (remoteTasks.length > 0) {
       const { dayStart, nextDayStart } = getLocalDateBoundsISO(today);
-      const dueTodayTaskIds = new Set(
-        (await db.select({ id: tasks.id })
-          .from(tasks)
-          .where(
-            and(
-              eq(tasks.connectorType, 'microsoft-todo'),
-              like(tasks.dueDate, `${today}%`),
-              ne(tasks.status, 'done'),
-              ne(tasks.status, 'cancelled'),
-            )
-          )).map(t => t.id)
-      );
+      const dueTodayTaskIds = new Set(await myDaySync.listOpenDueTodayTaskIds({
+        connectorType: 'microsoft-todo',
+        date: today,
+      }));
 
       for (const localItem of localItems) {
         if (localItem.status === 'cancelled') continue;
@@ -488,49 +380,18 @@ async function reconcileMyDay(
         }
       }
     }
-    const localItemsById = new Map(localItems.map(item => [item.id, item]));
-    const withdrawnAt = new Date().toISOString();
-    for (const itemId of myDayIdsToRemove) {
-      const item = localItemsById.get(itemId);
-      if (!item) continue;
-      await appendPlanningSignal({
-        taskId: item.taskId,
-        eventType: 'my_day_withdrawn',
-        date: today,
-        occurredAt: withdrawnAt,
-        provenance: 'microsoft-todo-substrate',
-        metadata: { origin: 'remote-observed' },
-      });
-    }
-    for (let index = 0; index < myDayIdsToRemove.length; index += MY_DAY_QUERY_BATCH_SIZE) {
-      const result = await db.delete(myDayItems).where(
-        inArray(myDayItems.id, myDayIdsToRemove.slice(index, index + MY_DAY_QUERY_BATCH_SIZE)),
-      );
-      removed += result.changes;
-    }
-
     // Also auto-include tasks due today that aren't already in My Day
     // (mimics Microsoft Todo's behavior of showing due-today tasks in My Day)
     let dueTodayAdded = 0;
-    const dueTodayRows: Array<typeof myDayItems.$inferInsert> = [];
-    const dueTodayTasks = await db.select({ id: tasks.id, sourceId: tasks.sourceId, status: tasks.status })
-      .from(tasks)
-      .where(
-        and(
-          eq(tasks.connectorType, 'microsoft-todo'),
-          eq(tasks.connectorInstanceId, config.id),
-          like(tasks.dueDate, `${today}%`),
-          ne(tasks.status, 'done'),
-          ne(tasks.status, 'cancelled'),
-        )
-      );
+    const dueTodayRows: MyDayRow[] = [];
+    const dueTodayTasks = await myDaySync.listOpenDueTodayTasks({
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: config.id,
+      date: today,
+    });
 
-    const existingMyDayTaskIds = new Set(
-      (await db.select({ taskId: myDayItems.taskId })
-        .from(myDayItems)
-        .where(eq(myDayItems.date, today))
-      ).map(r => r.taskId)
-    );
+    const existingMyDayTaskIds = new Set(localItems.map((item) => item.taskId));
+    for (const row of myDayRowsToInsert) existingMyDayTaskIds.add(row.taskId);
 
     for (const dueTodayTask of dueTodayTasks) {
       if (dueTodayTask.sourceId && suppressedRecurringSourceIds.has(dueTodayTask.sourceId)) continue;
@@ -542,12 +403,23 @@ async function reconcileMyDay(
         date: today,
         addedAt: new Date().toISOString(),
         isAutoIncluded: true,
-        order: localItems.length + added + dueTodayRows.length + 1,
       });
     }
-    dueTodayAdded = await insertMyDayRows(dueTodayRows);
+    const reconciliation = await myDaySync.applyReconciliation({
+      date: today,
+      committedRows: myDayRowsToInsert,
+      autoIncludedRows: dueTodayRows,
+      removeItemIds: [...new Set(myDayIdsToRemove)],
+      removedAt: new Date().toISOString(),
+      signal: {
+        provenance: 'microsoft-todo-substrate',
+        metadata: { origin: 'remote-observed' },
+      },
+    });
+    ({ added, dueTodayAdded, removed } = reconciliation);
     const historicalObserved = await observeRecentRemoteMyDay(
       connector,
+      myDaySync,
       config.id,
       today,
     );
@@ -604,6 +476,7 @@ async function reconcileMyDay(
 
 async function observeRecentRemoteMyDay(
   connector: MicrosoftTodoConnector,
+  myDaySync: MyDaySyncRepository,
   connectorInstanceId: string,
   today: string,
 ): Promise<number> {
@@ -633,18 +506,10 @@ async function observeRecentRemoteMyDay(
       .filter(task => task.CommittedDay?.slice(0, 10) === date)
       .map(task => `${task.ParentFolderId}:${task.Id}`);
     if (sourceIds.length === 0) continue;
-    const localTasks: Array<{ id: string; sourceId: string }> = [];
-    for (let index = 0; index < sourceIds.length; index += MY_DAY_QUERY_BATCH_SIZE) {
-      localTasks.push(...await db.select({
-        id: tasks.id,
-        sourceId: tasks.sourceId,
-      })
-        .from(tasks)
-        .where(and(
-          eq(tasks.connectorInstanceId, connectorInstanceId),
-          inArray(tasks.sourceId, sourceIds.slice(index, index + MY_DAY_QUERY_BATCH_SIZE)),
-        )));
-    }
+    const localTasks = await myDaySync.resolveTaskIdsBySourceIds({
+      connectorInstanceId,
+      sourceIds,
+    });
 
     const { dayStart } = getLocalDateBoundsISO(date);
     for (const task of localTasks) {
@@ -682,15 +547,4 @@ async function withTimeout<T>(
   } finally {
     if (timeout) clearTimeout(timeout);
   }
-}
-
-async function insertMyDayRows(rows: Array<typeof myDayItems.$inferInsert>): Promise<number> {
-  let inserted = 0;
-  for (let index = 0; index < rows.length; index += MY_DAY_QUERY_BATCH_SIZE) {
-    const result = await db.insert(myDayItems)
-      .values(rows.slice(index, index + MY_DAY_QUERY_BATCH_SIZE))
-      .onConflictDoNothing();
-    inserted += result.changes;
-  }
-  return inserted;
 }

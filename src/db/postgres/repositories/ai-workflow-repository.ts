@@ -263,6 +263,9 @@ async function applyEnergyTags(
   try {
     await client.query('BEGIN ISOLATION LEVEL READ COMMITTED');
     try {
+      await client.query(
+        "SELECT pg_advisory_xact_lock_shared(hashtext('tag-consolidation'))",
+      );
       const taskLockKeys = [...new Set(input.suggestions.map(
         (suggestion) => `task-ancillary:${suggestion.taskId}`,
       ))].sort();

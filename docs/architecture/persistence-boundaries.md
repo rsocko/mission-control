@@ -2529,6 +2529,29 @@ fail-closed sentinel remain the only exact-current graph owners; the layer
 ratchet owns only the path cap, exclusions, cleanliness, and monotonic 75-unit
 ceiling.
 
+## AI planning workflow parity
+
+The 18 AI context, planning, suggestion, phase, goal-development, reset-summary,
+and task-breakdown routes use `AIWorkflowPersistence` plus the existing
+daily-planning, project-organization, and task-core ports. SQLite and PostgreSQL
+adapters return the same bounded DTOs and deterministic ordering; compound
+PostgreSQL reads use read-only repeatable-read snapshots. Model I/O occurs only
+after context reads and outside transactions. Energy-tag application is an
+atomic post-model command with deterministic locking.
+
+Notification alert triage loads its bounded candidate projection through
+`AIWorkflowPersistence` before calling the pure `classifyNotificationItems`
+seam. It does not use the notification-delivery persistence wrapper.
+
+The exact graph moves from
+`266/A25/B9/clean232/direct15/transitive10/directDB17/lib28/helpers0/units53`
+to
+`266/A7/B9/clean250/direct5/transitive2/directDB7/lib16/helpers0/units23`.
+All 18 routes are clean and all 12 owned libraries leave `taintedLibA`. The
+canonical baseline and fail-closed sentinel remain the only exact-current graph
+owners; the AI workflow layer ratchet owns only its paths and a monotonic
+23-unit ceiling.
+
 ## Backend-specific exceptions
 
 Direct backend access is justified only for a capability that cannot be

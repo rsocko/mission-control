@@ -24,14 +24,13 @@ const ROUTES = [
   'src/app/api/tasks/[id]/breakdown/route.ts',
 ] as const;
 
-const CLASSIFIER_RECONCILIATION_ROUTE = 'src/app/api/ai/triage-alerts/route.ts';
-const CLEAN_ROUTES = ROUTES.filter((route) => route !== CLASSIFIER_RECONCILIATION_ROUTE);
 const LIBRARIES = [
   'src/lib/ai/context-budget.ts',
   'src/lib/ai/features/daily-digest.ts',
   'src/lib/ai/features/energy-tag-queries.ts',
   'src/lib/ai/features/energy-tag-suggestions.ts',
   'src/lib/ai/features/micro-status-suggestions.ts',
+  'src/lib/ai/features/notification-classification.ts',
   'src/lib/ai/features/notification-queries.ts',
   'src/lib/ai/features/project-assignment.ts',
   'src/lib/ai/features/smart-priority.ts',
@@ -51,9 +50,7 @@ const OWNED_TESTS = [
   'tests/api/postgres-ai-workflows-poisoned.test.ts',
   'tests/architecture/ai-workflow-parity-taint-decrement.test.ts',
 ] as const;
-// The notification owner removes one route plus notification-classification.ts
-// during reconciliation, tightening this temporary 75 ceiling to the approved 73.
-const MIGRATION_UNIT_CEILING = 75;
+const MIGRATION_UNIT_CEILING = 23;
 
 function source(path: string): string {
   return readFileSync(join(process.cwd(), path), 'utf8');
@@ -70,7 +67,7 @@ const current = computeWebPersistenceGraph(process.cwd());
 describe('AI workflow parity taint decrement', () => {
   it('pins only the owned production and proof paths', () => {
     expect(ROUTES).toHaveLength(18);
-    expect(LIBRARIES).toHaveLength(11);
+    expect(LIBRARIES).toHaveLength(12);
     for (const path of [
       ...ROUTES,
       ...LIBRARIES,
@@ -85,20 +82,11 @@ describe('AI workflow parity taint decrement', () => {
     }
   });
 
-  it.each(CLEAN_ROUTES)('%s is clean', (route) => {
+  it.each(ROUTES)('%s is clean', (route) => {
     expect(current.cleanRoutes).toContain(route);
     expect(current.tierARoutes).not.toContain(route);
     expect(current.tierBRoutes).not.toContain(route);
     expect(current.directDbNamespaceRoutes).not.toContain(route);
-  });
-
-  it('leaves the notification-classifier reconciliation path to its owning branch', () => {
-    const route = source(CLASSIFIER_RECONCILIATION_ROUTE);
-    expect(route).toContain(
-      "from '@/lib/ai/features/notification-classification'",
-    );
-    expect(route).not.toMatch(/@\/db(?:['"/])|better-sqlite3|drizzle-orm/);
-    expect(current.directDbNamespaceRoutes).not.toContain(CLASSIFIER_RECONCILIATION_ROUTE);
   });
 
   it.each(LIBRARIES)('%s is clean and backend-neutral', (path) => {

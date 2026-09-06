@@ -58,6 +58,14 @@ const orchestration = vi.hoisted(() => ({
         attention: null,
         suggestion: 'Finish the next task',
       });
+    } else if (system.includes('triage notifications')) {
+      text = JSON.stringify({
+        actions: [{
+          index: 1,
+          recommendation: 'urgent',
+          reason: 'Action required',
+        }],
+      });
     }
     return {
       text,
@@ -213,15 +221,18 @@ const aiWorkflows: AIWorkflowPersistence = {
         }
   ),
   notifications: {
-    listForClassification: async () => [{
-      id: 'notice-1',
-      title: 'Review',
-      level: 'urgent',
-      category: 'work',
-      isActionable: true,
-      connectorType: 'local',
-      receivedAt: '2026-09-06T12:00:00.000Z',
-    }],
+    listForClassification: async () => {
+      orchestration.calls.push('read-notification-classification');
+      return [{
+        id: 'notice-1',
+        title: 'Review',
+        level: 'urgent',
+        category: 'work',
+        isActionable: true,
+        connectorType: 'local',
+        receivedAt: '2026-09-06T12:00:00.000Z',
+      }];
+    },
   },
   recommendations: {
     listAssignmentProjects: async () => [{
@@ -511,7 +522,7 @@ describe('poisoned-SQLite AI workflow web surface', () => {
       createdAt: '2026-09-06T12:00:00.000Z',
     });
 
-    expect(calls.filter((call) => call.text.includes('pg_advisory_xact_lock'))
+    expect(calls.filter((call) => call.text.includes('pg_advisory_xact_lock(hashtext($1))'))
       .map((call) => call.values?.[0])).toEqual([
       'task-ancillary:task-a',
       'task-ancillary:task-z',
@@ -522,6 +533,8 @@ describe('poisoned-SQLite AI workflow web surface', () => {
       .toBeLessThan(calls.findIndex((call) => (
         call.text.includes('SELECT id') && call.text.includes('FROM tasks')
       )));
+    expect(calls.findIndex((call) => call.text.includes('tag-consolidation')))
+      .toBeLessThan(calls.findIndex((call) => call.values?.[0] === 'task-ancillary:task-a'));
     expect(calls.find((call) => call.text.includes('INSERT INTO task_tags'))?.text)
       .toContain('ON CONFLICT DO NOTHING');
   });
@@ -538,6 +551,7 @@ describe('poisoned-SQLite AI workflow web surface', () => {
       import('@/app/api/ai/suggest-energy-tags/route'),
       import('@/app/api/ai/suggest-focus/route'),
       import('@/app/api/ai/suggest-micro-status/route'),
+      import('@/app/api/ai/triage-alerts/route'),
       import('@/app/api/ai/whats-next/route'),
       import('@/app/api/goals/develop/route'),
       import('@/app/api/ideation/expand/route'),
@@ -546,12 +560,13 @@ describe('poisoned-SQLite AI workflow web surface', () => {
       import('@/app/api/resets/ai-summary/route'),
       import('@/app/api/tasks/[id]/breakdown/route'),
       import('@/lib/ai/context-budget'),
+      import('@/lib/ai/features/notification-classification'),
       import('@/lib/ai/features/notification-queries'),
       import('@/lib/ai/provider-runtime'),
     ]);
 
-    expect(modules).toHaveLength(20);
-    const routes = modules.slice(0, 17) as Array<{
+    expect(modules).toHaveLength(22);
+    const routes = modules.slice(0, 18) as Array<{
       GET?: unknown;
       POST?: unknown;
     }>;
@@ -560,6 +575,21 @@ describe('poisoned-SQLite AI workflow web surface', () => {
         typeof route.GET === 'function' || typeof route.POST === 'function',
       ).toBe(true);
     }
+  });
+
+  it('loads notification candidates before invoking the pure classifier model', async () => {
+    orchestration.calls.length = 0;
+    const route = await import('@/app/api/ai/triage-alerts/route');
+
+    const response = await route.GET();
+
+    expect(response.status).toBe(200);
+    expect(orchestration.calls).toEqual([
+      'read-notification-classification',
+      'load-provider-configuration',
+      'model',
+      'load-provider-configuration',
+    ]);
   });
 
   it('serves deterministic non-model context and focus routes from the selected contract', async () => {

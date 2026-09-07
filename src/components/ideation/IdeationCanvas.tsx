@@ -49,6 +49,15 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
+  GraphCanvasRegion,
+  GraphInspectorRegion,
+  GraphOutlineRegion,
+} from '@rsocko/generic-graph-canvas-shared-workbench/react';
+import {
+  MAX_CANVAS_ZOOM,
+  MIN_CANVAS_ZOOM,
+} from '@rsocko/generic-graph-canvas-shared-workbench/layout';
+import {
   buildIdeationTree,
   IDEATION_KIND_ORDER,
   isIdeationDescendant,
@@ -66,6 +75,7 @@ import {
   serializeIdeationOutline,
 } from '@/lib/ideation/text-outline';
 import { useIdeationStore } from '@/lib/stores/ideationStore';
+import { IDEATION_WORKBENCH_CAPABILITIES } from '@/lib/graph-workbench/adapters';
 import { InlinePropertyEditor } from './InlinePropertyEditor';
 import { IdeationConvertDialog } from './IdeationConvertDialog';
 import { IdeationPropertyPanel } from './IdeationPropertyPanel';
@@ -1046,8 +1056,8 @@ function IdeationMindMap({ sourceNodes }: { sourceNodes: IdeationCanvasNode[] })
       onNodeDragStop={onNodeDragStop}
       fitView
       fitViewOptions={{ padding: 0.2 }}
-      minZoom={0.2}
-      maxZoom={2}
+      minZoom={MIN_CANVAS_ZOOM}
+      maxZoom={MAX_CANVAS_ZOOM}
       colorMode="dark"
       deleteKeyCode={null}
       proOptions={{ hideAttribution: true }}
@@ -1063,7 +1073,9 @@ export default function IdeationCanvas() {
   const selectedNodeId = useIdeationStore((state) => state.selectedNodeId);
   const addNode = useIdeationStore((state) => state.addNode);
   const undo = useIdeationStore((state) => state.undo);
-  const past = useIdeationStore((state) => state.past);
+  const redo = useIdeationStore((state) => state.redo);
+  const canUndo = useIdeationStore((state) => state.canUndo);
+  const canRedo = useIdeationStore((state) => state.canRedo);
   const [convertOpen, setConvertOpen] = useState(false);
   const [outlineMode, setOutlineMode] = useState<'visual' | 'text'>('visual');
   const root = nodes.find((node) => node.parentId === null);
@@ -1115,7 +1127,16 @@ export default function IdeationCanvas() {
         || target.isContentEditable
         || Boolean(target.closest('[contenteditable="true"]'))
       );
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+      const commandKey = event.ctrlKey || event.metaKey;
+      const redoKey = commandKey && (
+        event.key.toLowerCase() === 'y'
+        || (event.key.toLowerCase() === 'z' && event.shiftKey)
+      );
+      if (redoKey) {
+        if (event.defaultPrevented || isEditableTarget) return;
+        event.preventDefault();
+        redo();
+      } else if (commandKey && event.key.toLowerCase() === 'z') {
         if (event.defaultPrevented || isEditableTarget) return;
         event.preventDefault();
         undo();
@@ -1126,7 +1147,7 @@ export default function IdeationCanvas() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [clearExpansion, expansion.status, undo]);
+  }, [clearExpansion, expansion.status, redo, undo]);
 
   return (
     <div className="flex h-full min-h-[620px] flex-col overflow-hidden bg-[var(--surface-0)]">
@@ -1140,8 +1161,11 @@ export default function IdeationCanvas() {
         <Button size="sm" variant="secondary" onClick={() => addNode(selectedNodeId ?? root?.id ?? null)}>
           <Plus /> Add node
         </Button>
-        <Button size="sm" variant="ghost" onClick={undo} disabled={!past.length} title="Undo (Ctrl+Z)">
+        <Button size="sm" variant="ghost" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">
           <Redo2 className="-scale-x-100" /> Undo
+        </Button>
+        <Button size="sm" variant="ghost" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
+          <Redo2 /> Redo
         </Button>
         {expansion.status === 'loading' ? (
           <Button size="sm" variant="secondary" onClick={clearExpansion}>
@@ -1182,7 +1206,11 @@ export default function IdeationCanvas() {
         </div>
       </header>
       <div className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_18rem]">
-        <section className="hidden min-h-0 flex-col border-r border-[var(--border)] bg-[var(--surface-1)] md:flex" aria-label="Outline panel">
+        <GraphOutlineRegion
+          capabilities={IDEATION_WORKBENCH_CAPABILITIES}
+          className="hidden min-h-0 flex-col border-r border-[var(--border)] bg-[var(--surface-1)] md:flex"
+          label="Outline panel"
+        >
           <div className="flex items-start justify-between gap-2 border-b border-[var(--border)] px-3 py-2 text-[10px] text-[var(--text-tertiary)]">
             <div>
               <div className="font-semibold uppercase tracking-wide">Outline</div>
@@ -1211,11 +1239,21 @@ export default function IdeationCanvas() {
               ? <IdeationOutline nodes={canvasNodes} />
               : <TextIdeationOutline nodes={nodes} />}
           </div>
-        </section>
-        <section className="relative min-h-[500px]" aria-label="Mind map panel">
+        </GraphOutlineRegion>
+        <GraphCanvasRegion
+          capabilities={IDEATION_WORKBENCH_CAPABILITIES}
+          className="relative min-h-[500px]"
+          label="Mind map panel"
+        >
           <ReactFlowProvider><IdeationMindMap sourceNodes={canvasNodes} /></ReactFlowProvider>
-        </section>
-        <IdeationPropertyPanel />
+        </GraphCanvasRegion>
+        <GraphInspectorRegion
+          capabilities={IDEATION_WORKBENCH_CAPABILITIES}
+          className="contents"
+          label="Ideation inspector"
+        >
+          <IdeationPropertyPanel />
+        </GraphInspectorRegion>
       </div>
       {convertOpen ? <IdeationConvertDialog onClose={() => setConvertOpen(false)} /> : null}
     </div>

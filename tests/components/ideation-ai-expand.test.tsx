@@ -221,6 +221,9 @@ describe('IdeationCanvas AI expansion', () => {
     mockExpansionResponse();
 
     render(<IdeationCanvas />);
+    expect(document.querySelector('[data-workbench-capability="outline"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-workbench-capability="canvas"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-workbench-capability="select"]')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'AI Expand' }));
 
     await waitFor(() => {
@@ -249,7 +252,10 @@ describe('IdeationCanvas AI expansion', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Accept all (3)' }));
 
     expect(useIdeationStore.getState().nodes).toHaveLength(4);
-    expect(useIdeationStore.getState().past).toHaveLength(1);
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().nodes).toHaveLength(1);
+    useIdeationStore.getState().redo();
+    expect(useIdeationStore.getState().nodes).toHaveLength(4);
   });
 
   it('shows leaf-safe disclosure controls with continuous curved depth guides', () => {
@@ -496,14 +502,13 @@ describe('IdeationCanvas AI expansion', () => {
     useIdeationStore.getState().addNode(root.id, 'task', 'Second task');
     render(<IdeationCanvas />);
     const taskTitles = screen.getAllByRole('textbox', { name: 'Task title' });
-    const historyLength = useIdeationStore.getState().past.length;
-
     fireEvent.change(taskTitles[0], { target: { value: 'Edited task' } });
     fireEvent.keyDown(taskTitles[0], { key: 'ArrowDown' });
 
     await waitFor(() => expect(taskTitles[1]).toHaveFocus());
-    expect(useIdeationStore.getState().past).toHaveLength(historyLength + 1);
     expect(useIdeationStore.getState().nodes.find((node) => node.id === firstId)?.label).toBe('Edited task');
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().nodes.find((node) => node.id === firstId)?.label).toBe('First task');
   });
 
   it('deletes an empty line with Backspace and focuses the previous line', async () => {
@@ -709,11 +714,11 @@ describe('IdeationCanvas AI expansion', () => {
     const taskId = useIdeationStore.getState().addNode(root.id, 'task', 'Editable task');
     useIdeationStore.getState().selectNode(taskId);
     render(<IdeationCanvas />);
-    const pastLength = useIdeationStore.getState().past.length;
+    const nodesBefore = useIdeationStore.getState().nodes;
 
     fireEvent.keyDown(screen.getByLabelText('Inline property'), { key: 'z', ctrlKey: true });
 
-    expect(useIdeationStore.getState().past).toHaveLength(pastLength);
+    expect(useIdeationStore.getState().nodes).toEqual(nodesBefore);
     expect(useIdeationStore.getState().nodes.some((node) => node.id === taskId)).toBe(true);
   });
 

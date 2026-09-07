@@ -8,6 +8,7 @@ const withBundleAnalyzer = bundleAnalyzer({
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  transpilePackages: ["@rsocko/generic-graph-canvas-shared-workbench"],
   images: {
     remotePatterns: [
       {
@@ -23,6 +24,18 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["pino", "pino-pretty", "re2", "metascraper", "@metascraper/helpers", "metascraper-author", "metascraper-date", "metascraper-description", "metascraper-image", "metascraper-logo", "metascraper-publisher", "metascraper-title", "metascraper-url", "metascraper-iframe", "metascraper-video"],
   turbopack: {
     root: process.cwd(),
+    rules: {
+      '*': {
+        condition: {
+          all: [
+            { path: /^vendor\/generic-graph-workbench\// },
+            { any: [{ path: '*.ts' }, { path: '*.tsx' }] },
+          ],
+        },
+        loaders: ['./scripts/turbopack-node-next-source-loader.cjs'],
+        as: '*.js',
+      },
+    },
   },
   async redirects() {
     return [

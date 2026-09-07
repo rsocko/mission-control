@@ -1,0 +1,751 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.rsocko.dev/generic-graph/document-v1.schema.json",
+  "title": "Generic Graph Canvas Document v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "version", "document", "nodes", "relationships", "views"],
+  "properties": {
+    "format": {
+      "const": "generic-graph-document"
+    },
+    "version": {
+      "const": 1
+    },
+    "document": {
+      "$ref": "#/$defs/documentMetadata"
+    },
+    "resources": {
+      "type": "array",
+      "maxItems": 128,
+      "items": { "$ref": "#/$defs/resource" }
+    },
+    "nodes": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/node"
+      }
+    },
+    "relationships": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/relationship"
+      }
+    },
+    "views": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/view"
+      }
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+    }
+  },
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    },
+    "jsonValue": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "boolean" },
+        { "type": "number" },
+        { "type": "string" },
+        {
+          "type": "array",
+          "items": { "$ref": "#/$defs/jsonValue" }
+        },
+        {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      ]
+    },
+    "documentMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "title", "profile"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "title": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "profile": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "resource": {
+      "oneOf": [
+        { "$ref": "#/$defs/iconPickerResource" },
+        { "$ref": "#/$defs/mediaResource" }
+      ]
+    },
+    "iconPickerResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "contractVersion", "value", "fallbackText"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "const": "icon-picker" },
+        "contractVersion": { "type": "integer", "minimum": 1 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 96 },
+        "fallbackText": { "type": "string", "minLength": 1, "maxLength": 64 },
+        "label": { "type": "string", "maxLength": 160 }
+      }
+    },
+    "mediaResourceSource": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "path"],
+          "properties": {
+            "kind": { "const": "relative-file" },
+            "path": { "type": "string", "minLength": 1, "maxLength": 400 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "reference"],
+          "properties": {
+            "kind": { "const": "host" },
+            "reference": { "type": "string", "minLength": 1, "maxLength": 400 }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind", "data"],
+          "properties": {
+            "kind": { "const": "embedded" },
+            "data": { "type": "string", "minLength": 1, "maxLength": 400000 }
+          }
+        }
+      ]
+    },
+    "mediaResource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "contractVersion", "mediaType", "altText", "source"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "kind": { "const": "media" },
+        "contractVersion": { "type": "integer", "minimum": 1 },
+        "mediaType": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "altText": { "type": "string", "minLength": 1, "maxLength": 400 },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "checksum": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "source": { "$ref": "#/$defs/mediaResourceSource" }
+      }
+    },
+    "richCardRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "value"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "value": { "type": "string", "minLength": 1, "maxLength": 240 }
+      }
+    },
+    "richCardSection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "title", "rows"],
+      "properties": {
+        "kind": {
+          "enum": ["architecture", "network", "erd", "uml-overview", "journey"]
+        },
+        "title": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "rows": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 12,
+          "items": { "$ref": "#/$defs/richCardRow" }
+        }
+      }
+    },
+    "richCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sections"],
+      "properties": {
+        "iconResourceId": { "$ref": "#/$defs/identifier" },
+        "mediaResourceId": { "$ref": "#/$defs/identifier" },
+        "sections": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 6,
+          "items": { "$ref": "#/$defs/richCardSection" }
+        }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "label", "properties"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 1000 },
+        "body": { "type": "string", "maxLength": 20000 },
+        "card": { "$ref": "#/$defs/richCard" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        },
+        "externalReferences": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["system", "id"],
+            "properties": {
+              "system": { "$ref": "#/$defs/identifier" },
+              "id": { "type": "string", "minLength": 1 },
+              "url": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "source", "target", "properties"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "type": { "$ref": "#/$defs/identifier" },
+        "source": { "$ref": "#/$defs/identifier" },
+        "target": { "$ref": "#/$defs/identifier" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": {
+              "enum": ["user", "imported", "inferred", "ai-proposed"]
+            },
+            "source": { "type": "string" }
+          }
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      }
+    },
+    "placement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "width": { "type": "number", "exclusiveMinimum": 0 },
+        "height": { "type": "number", "exclusiveMinimum": 0 },
+        "collapsed": { "type": "boolean" },
+        "appearance": {
+          "$ref": "#/$defs/nodeAppearance"
+        },
+        "style": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      }
+    },
+    "nodeAppearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "accent": {
+          "enum": [
+            "blue",
+            "cyan",
+            "green",
+            "neutral",
+            "orange",
+            "purple",
+            "red",
+            "yellow"
+          ]
+        },
+        "fill": {
+          "enum": ["accent", "gradient", "solid", "tinted"]
+        },
+        "maxWidth": {
+          "type": "number",
+          "minimum": 112,
+          "maximum": 480
+        },
+        "shape": {
+          "enum": [
+            "capsule",
+            "circle",
+            "cut-corner",
+            "cylinder",
+            "diamond",
+            "document",
+            "fallback",
+            "oval",
+            "parallelogram",
+            "rectangle",
+            "rounded"
+          ]
+        },
+        "size": {
+          "enum": ["auto", "content", "large", "medium", "small", "tiny"]
+        },
+        "textScale": {
+          "enum": ["compact", "large", "regular"]
+        }
+      }
+    },
+    "viewAppearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "colorStrategy": {
+          "enum": ["branch-spectrum", "semantic"]
+        },
+        "theme": {
+          "enum": [
+            "cyberpunk",
+            "dracula",
+            "focus",
+            "forest",
+            "midnight",
+            "nord",
+            "paper",
+            "rainbow",
+            "rose-pine",
+            "solarized",
+            "synthwave"
+          ]
+        },
+        "showNodeIcon": { "type": "boolean" },
+        "showNodeType": { "type": "boolean" },
+        "showRelationshipIcon": { "type": "boolean" },
+        "showRelationshipLabel": { "type": "boolean" },
+        "nodeDefaults": { "$ref": "#/$defs/nodeAppearance" },
+        "nodeTypeStyles": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/nodeAppearance" }
+        },
+        "visualRules": {
+          "type": "array",
+          "maxItems": 64,
+          "items": { "$ref": "#/$defs/visualRule" }
+        },
+        "nodeVisualOverrides": {
+          "type": "object",
+          "maxProperties": 5000,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/visualRuleOutput" }
+        },
+        "relationshipVisualOverrides": {
+          "type": "object",
+          "maxProperties": 5000,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/visualRuleOutput" }
+        },
+        "relationshipTypeStyles": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/relationshipAppearance" }
+        }
+      }
+    },
+    "relationshipAppearance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "linePattern": {
+          "enum": ["solid", "dashed", "dotted"]
+        },
+        "sourceMarker": {
+          "enum": ["none", "arrow", "bar", "circle", "diamond"]
+        },
+        "targetMarker": {
+          "enum": ["none", "arrow", "bar", "circle", "diamond"]
+        }
+      }
+    },
+    "visualRule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "target", "when", "apply"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "target": { "enum": ["node", "relationship"] },
+        "entityTypes": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "when": { "$ref": "#/$defs/visualRuleCondition" },
+        "apply": { "$ref": "#/$defs/visualRuleOutput" }
+      }
+    },
+    "visualRuleCondition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["property", "operator"],
+      "properties": {
+        "property": { "$ref": "#/$defs/identifier" },
+        "operator": {
+          "enum": [
+            "equals",
+            "not-equals",
+            "greater-than",
+            "greater-than-or-equal",
+            "less-than",
+            "less-than-or-equal",
+            "exists"
+          ]
+        },
+        "value": {
+          "anyOf": [
+            { "type": "boolean" },
+            { "type": "number" },
+            { "type": "string" },
+            { "type": "null" }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "operator": { "const": "exists" } } },
+          "then": { "properties": { "value": false } },
+          "else": { "properties": { "value": true }, "required": ["value"] }
+        }
+      ]
+    },
+    "visualRuleOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "accent": {
+          "enum": ["blue", "cyan", "green", "neutral", "orange", "purple", "red", "yellow"]
+        },
+        "icon": { "$ref": "#/$defs/supplementaryIcon" },
+        "text": { "$ref": "#/$defs/supplementaryText" },
+        "bar": { "$ref": "#/$defs/supplementaryBar" },
+        "badge": { "$ref": "#/$defs/supplementaryBadge" }
+      },
+      "if": { "properties": { "accent": true }, "required": ["accent"] },
+      "then": {
+        "anyOf": [
+          { "properties": { "icon": true }, "required": ["icon"] },
+          { "properties": { "text": true }, "required": ["text"] },
+          { "properties": { "bar": true }, "required": ["bar"] },
+          { "properties": { "badge": true }, "required": ["badge"] }
+        ]
+      }
+    },
+    "supplementaryIcon": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "label"],
+      "properties": {
+        "name": { "enum": ["alert", "blocked", "check", "clock", "progress", "trend-up"] },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "supplementaryText": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["property", "label"],
+      "properties": {
+        "property": { "$ref": "#/$defs/identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 }
+      }
+    },
+    "supplementaryBar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["property", "label", "minimum", "maximum"],
+      "properties": {
+        "property": { "$ref": "#/$defs/identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" }
+      }
+    },
+    "supplementaryBadge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label"],
+      "properties": {
+        "label": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "property": { "$ref": "#/$defs/identifier" },
+        "text": { "type": "string", "minLength": 1, "maxLength": 80 }
+      },
+      "oneOf": [
+        {
+          "properties": { "property": true, "text": false },
+          "required": ["property"]
+        },
+        {
+          "properties": { "text": true, "property": false },
+          "required": ["text"]
+        }
+      ]
+    },
+    "routePoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" }
+      }
+    },
+    "viewBounds": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "number", "minimum": -1000000, "maximum": 1000000 },
+        "y": { "type": "number", "minimum": -1000000, "maximum": 1000000 },
+        "width": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 },
+        "height": { "type": "number", "exclusiveMinimum": 0, "maximum": 100000 }
+      }
+    },
+    "axisValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value", "label"],
+      "properties": {
+        "value": {
+          "anyOf": [
+            { "type": "null" },
+            { "type": "boolean" },
+            { "type": "number" },
+            { "type": "string" }
+          ]
+        },
+        "label": { "type": "string", "minLength": 1, "maxLength": 300 }
+      }
+    },
+    "viewAxis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "orientation", "scale", "values"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "orientation": { "enum": ["horizontal", "vertical"] },
+        "scale": { "enum": ["categorical", "temporal"] },
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": { "$ref": "#/$defs/axisValue" }
+        },
+        "propertyKey": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    "viewRegion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "label", "kind", "bounds"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "label": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "kind": { "enum": ["container", "lane", "column", "cell"] },
+        "bounds": { "$ref": "#/$defs/viewBounds" },
+        "axisValues": {
+          "type": "object",
+          "maxProperties": 2,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "boolean" },
+              { "type": "number" },
+              { "type": "string" }
+            ]
+          }
+        },
+        "layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy"],
+          "properties": {
+            "strategy": {
+              "enum": ["tree", "timeline", "matrix", "fishbone"]
+            },
+            "direction": { "enum": ["horizontal", "vertical"] },
+            "axisIds": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/identifier" }
+            },
+            "rootId": { "$ref": "#/$defs/identifier" },
+            "spacing": {
+              "type": "number",
+              "minimum": 12,
+              "maximum": 160
+            }
+          }
+        }
+      }
+    },
+    "viewNodeMapping": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["regionIds"],
+      "properties": {
+        "regionIds": {
+          "type": "array",
+          "maxItems": 20,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/identifier" }
+        },
+        "axisValues": {
+          "type": "object",
+          "maxProperties": 2,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": {
+            "anyOf": [
+              { "type": "null" },
+              { "type": "boolean" },
+              { "type": "number" },
+              { "type": "string" }
+            ]
+          }
+        }
+      }
+    },
+    "viewStructure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["axes", "regions", "nodeMappings"],
+      "properties": {
+        "axes": {
+          "type": "array",
+          "maxItems": 16,
+          "items": { "$ref": "#/$defs/viewAxis" }
+        },
+        "regions": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/viewRegion" }
+        },
+        "nodeMappings": {
+          "type": "object",
+          "maxProperties": 5000,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/viewNodeMapping" }
+        }
+      }
+    },
+    "relationshipRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["straight", "curved", "elbow", "manual"]
+        },
+        "waypoints": {
+          "type": "array",
+          "maxItems": 500,
+          "items": { "$ref": "#/$defs/routePoint" }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "manual" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "required": ["waypoints"],
+            "properties": {
+              "waypoints": { "type": "array", "minItems": 1 }
+            }
+          },
+          "else": {
+            "not": { "required": ["waypoints"] }
+          }
+        }
+      ]
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "name", "placements", "visibleProperties"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "type": {
+          "enum": ["canvas", "outline", "source", "table"]
+        },
+        "name": { "type": "string", "minLength": 1, "maxLength": 300 },
+        "placements": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/placement" }
+        },
+        "routes": {
+          "type": "object",
+          "maxProperties": 5000,
+          "propertyNames": { "$ref": "#/$defs/identifier" },
+          "additionalProperties": { "$ref": "#/$defs/relationshipRoute" }
+        },
+        "visibleProperties": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "preferredLayout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy", "requiredCapabilities"],
+          "properties": {
+            "strategy": { "$ref": "#/$defs/identifier" },
+            "requiredCapabilities": {
+              "type": "array",
+              "maxItems": 24,
+              "items": { "$ref": "#/$defs/identifier" },
+              "uniqueItems": true
+            }
+          }
+        },
+        "requiredCapabilities": {
+          "type": "array",
+          "maxItems": 24,
+          "items": { "$ref": "#/$defs/identifier" },
+          "uniqueItems": true
+        },
+        "structure": {
+          "$ref": "#/$defs/viewStructure"
+        },
+        "appearance": {
+          "$ref": "#/$defs/viewAppearance"
+        },
+        "extensions": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/jsonValue" }
+        }
+      }
+    }
+  }
+}

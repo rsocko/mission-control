@@ -298,9 +298,10 @@ describe('ProjectStructureGraph focus interactions', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Collapse tasks under Phase one' }));
 
-    await screen.findByTestId('graph-node-phase:1');
-    expect(screen.getByRole('heading', { name: 'Phase one' })).toBeInTheDocument();
-    expect(screen.queryByTestId('graph-node-task:1')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Phase one' })).toBeInTheDocument();
+      expect(screen.queryByTestId('graph-node-task:1')).not.toBeInTheDocument();
+    });
     expect(onTaskSelect).toHaveBeenLastCalledWith(null);
     expect(screen.getByRole('button', { name: 'Next graph focus' })).toBeDisabled();
   });

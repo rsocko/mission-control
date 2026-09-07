@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "package": {
+    "name": "@rsocko/generic-graph-canvas-shared-workbench",
+    "version": "0.0.0"
+  },
+  "source": {
+    "repository": "https://github.com/rsocko/ideation",
+    "commit": "ed50b3b0313470540a58e1447e009c1620fe7f21"
+  },
+  "exports": [
+    {
+      "subpath": "./controllers",
+      "path": "src/controllers/index.ts"
+    },
+    {
+      "subpath": "./core",
+      "path": "src/core/index.ts"
+    },
+    {
+      "subpath": "./host",
+      "path": "src/host/index.ts"
+    },
+    {
+      "subpath": "./layout",
+      "path": "src/layout/index.ts"
+    },
+    {
+      "subpath": "./react",
+      "path": "src/react/index.ts"
+    }
+  ],
+  "generator": {
+    "name": "generic-graph-workbench-source-snapshot",
+    "version": 1
+  },
+  "files": [
+    {
+      "path": "package.json",
+      "sha256": "771b31232ccbfb58e47e9547119eb9ff73eec117aa3968da51a90348c1af579d"
+    },
+    {
+      "path": "src/controllers/collapse.ts",
+      "sha256": "71d3679a0146d24286fab533ffa18794521e56da1f9721ba0f07fbfd1806d5d0"
+    },
+    {
+      "path": "src/controllers/command-history.ts",
+      "sha256": "4cdf564daf7c40dc5e70ff11db1390d5381e11fd04b3faa8752c4e450de939ad"
+    },
+    {
+      "path": "src/controllers/document-controller.ts",
+      "sha256": "9ee287b3e018a6ce2cfa7ff2a68daa9cea6e153b0881ea268a9dcbab0af7f61c"
+    },
+    {
+      "path": "src/controllers/index.ts",
+      "sha256": "89c2fb504811f70040cc589178d3103e004faef023ed173a1224633d3e0cf10c"
+    },
+    {
+      "path": "src/controllers/mode.ts",
+      "sha256": "3a36909f293965dc1accd22f6904995587c8c5446a15261f710f7d5c2c49309b"
+    },
+    {
+      "path": "src/controllers/navigation.ts",
+      "sha256": "d2c0e4e53d03f932776531572f58da09a29e5303c3f21537d8a9a5a01b3e077b"
+    },
+    {
+      "path": "src/controllers/selection.ts",
+      "sha256": "f2631665bc45fc60332d120592a2276851a08d38770da9049d61b4c2776dd079"
+    },
+    {
+      "path": "src/core/commands.ts",
+      "sha256": "8bd38dc1895e71fed15a316f35f01d5dcaf4a3134b2966d551d71399a4796109"
+    },
+    {
+      "path": "src/core/history.ts",
+      "sha256": "d1ae39a6ed5d8c6f4864ece4e129c60c85f22a39226c73bdfc48abdd5f2acda0"
+    },
+    {
+      "path": "src/core/index.ts",
+      "sha256": "6b9b49bc1596ea2b85e4281bfa5cca6a1fbe15e420e6baa3b4f2346e91b67130"
+    },
+    {
+      "path": "src/core/profiles.ts",
+      "sha256": "b021a90b644b21875ace527243c1b057c87d1819975b83fbc62658ce0bb2c3af"
+    },
+    {
+      "path": "src/core/schema/graph-document-v1.schema.json",
+      "sha256": "44b64fb1c37d5950240afb83cee2225e0e45e8f4dce3038870956e0644bd6ea3"
+    },
+    {
+      "path": "src/core/types.ts",
+      "sha256": "81378fa0572d889c32d508f82b15f7ce962386fd195f0cb82632ef7cc5550e08"
+    },
+    {
+      "path": "src/core/validation.ts",
+      "sha256": "5ff49bf6a43dee6866c4581e10220cb13604dc81c0b0b4493506b7f2ce688a30"
+    },
+    {
+      "path": "src/host/host-contract.ts",
+      "sha256": "235811e02610279582856423f154361d43d53f034117e58611f3de4543d81f6d"
+    },
+    {
+      "path": "src/host/index.ts",
+      "sha256": "c9f1604368a6e559ae6e89e1474f01de4d517c33dd4beacf98f3480f7f59a118"
+    },
+    {
+      "path": "src/layout/arrangement.ts",
+      "sha256": "efeec57d54635ad42bbfe5501de98ee0c7080b07d7c09c95aa92e6d6b2683151"
+    },
+    {
+      "path": "src/layout/graph-layout.ts",
+      "sha256": "41e7257b9f4515c6656fb620b11ffb12c564034ac3052224b51bc47db8c91602"
+    },
+    {
+      "path": "src/layout/hierarchy-layout.ts",
+      "sha256": "b21687b6e1c96966c4f2490af53b68dab144009e0b88d8986d6e6d5b4c0b9a18"
+    },
+    {
+      "path": "src/layout/hierarchy.ts",
+      "sha256": "4d1b4451d93d12da21e77351881982cca365e60cf4a7070c6ac697f2366643c7"
+    },
+    {
+      "path": "src/layout/index.ts",
+      "sha256": "e10a1c29f7e47634849eb748adc0fb180b6848fd3630e862cd28fe47cd17b78d"
+    },
+    {
+      "path": "src/layout/layered-hierarchy-layout.ts",
+      "sha256": "4eea8d48829219609d56c4b08e7abe2e22e4dd67de5ce5bf62fd6a14f3256ed8"
+    },
+    {
+      "path": "src/layout/layout-presets.ts",
+      "sha256": "e9f9effb1682779ecb5cbb1c6580fa51c321684585a4153ae56a9d7c0154a42a"
+    },
+    {
+      "path": "src/layout/navigation.ts",
+      "sha256": "9a5cd2e25cac951d4aaf4c23e2f7bf981be3748e9b1171440fd7fa4cdb7be0ec"
+    },
+    {
+      "path": "src/layout/node-geometry.ts",
+      "sha256": "ea9ff7a09381f881c5586227129877c10af8f75e4aa709dae8a83dafbcefcee8"
+    },
+    {
+      "path": "src/layout/region-layout.ts",
+      "sha256": "14bb9837a1ce8c9caad0167dab227212217f205b57a2d5661fb91a557367395a"
+    },
+    {
+      "path": "src/layout/viewport.ts",
+      "sha256": "e87b4bf715cc86c559efac1684e69030d9f27b890c94fdf65d079389ba12437b"
+    },
+    {
+      "path": "src/react/capability-gate.tsx",
+      "sha256": "e0e484b030991f77f1faeba27979974c6e137caa823ea8a4e327aebb211ab4e8"
+    },
+    {
+      "path": "src/react/index.ts",
+      "sha256": "143dc520f67ce336416020fd23d178a92a935a0f12e7214e78d7c8da79a10eed"
+    },
+    {
+      "path": "src/react/region.tsx",
+      "sha256": "ff34c8b3fbc850d92f72ce2936d351d1a533d4e38b6e24ee069e6c8c641eb694"
+    }
+  ]
+}

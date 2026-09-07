@@ -146,6 +146,7 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
     const proposal = expansion.proposals.find((candidate) => candidate.id === proposalId);
     if (!proposal) return;
     const accepted = acceptProposals(expansion.parentId, [{ label: proposal.label }]);
+    if (accepted === null) return;
     if (!accepted.length) {
       setExpansion((state) => {
         const proposals = state.proposals.filter((candidate) => candidate.id !== proposalId);
@@ -187,6 +188,7 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
       expansion.parentId,
       expansion.proposals.map((proposal) => ({ label: proposal.label })),
     );
+    if (accepted === null) return;
     if (accepted.length !== expansion.proposals.length) {
       const rejected = expansion.proposals.filter(
         (proposal) => existingLabels.has(normalizeIdeationLabel(proposal.label)),

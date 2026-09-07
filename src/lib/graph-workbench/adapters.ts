@@ -4,6 +4,7 @@ import type {
   GraphRelationship,
   JsonValue,
 } from '@rsocko/generic-graph-canvas-shared-workbench/core';
+import { validateDocument } from '@rsocko/generic-graph-canvas-shared-workbench/core';
 import {
   defineGraphHostAdapter,
   type GraphDiagnosticSink,
@@ -15,6 +16,8 @@ import {
 } from '@rsocko/generic-graph-canvas-shared-workbench/host';
 import {
   createIdeationWorkspaceDocument,
+  ideationWorkspaceDocumentSchema,
+  IDEATION_WORKSPACE_MAX_NODES,
 } from '@/lib/graph-workspace/ideation-contract';
 import type {
   IdeationNode,
@@ -219,10 +222,38 @@ export function graphDocumentToIdeationNodes(document: GraphDocument): IdeationN
   return nodes;
 }
 
-export function validateIdeationNodes(nodes: readonly IdeationNode[]): IdeationNode[] {
-  const validated = createIdeationWorkspaceDocument([...nodes]).nodes;
-  ideationNodesToGraphDocument(validated);
-  return [...nodes];
+export type IdeationNodeValidationResult =
+  | { valid: true; nodes: IdeationNode[] }
+  | { valid: false; message: string };
+
+export function validateIdeationNodes(
+  nodes: readonly IdeationNode[],
+): IdeationNodeValidationResult {
+  if (nodes.length > IDEATION_WORKSPACE_MAX_NODES) {
+    return {
+      valid: false,
+      message: `Ideation is limited to ${IDEATION_WORKSPACE_MAX_NODES} nodes. Remove a node before adding another.`,
+    };
+  }
+  const domain = ideationWorkspaceDocumentSchema.safeParse({
+    schemaVersion: 1,
+    type: 'ideation',
+    nodes,
+  });
+  if (!domain.success) {
+    return {
+      valid: false,
+      message: `Unable to apply that graph change: ${domain.error.issues[0]?.message ?? 'Invalid ideation document'}`,
+    };
+  }
+  const shared = validateDocument(ideationNodesToGraphDocument(domain.data.nodes));
+  if (!shared.valid) {
+    return {
+      valid: false,
+      message: `Unable to apply that graph change: ${shared.diagnostics[0]?.message ?? 'Invalid shared graph document'}`,
+    };
+  }
+  return { valid: true, nodes: domain.data.nodes };
 }
 
 function projectNodeExtension(node: GraphNode): Record<string, JsonValue> {

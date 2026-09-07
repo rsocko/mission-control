@@ -3,9 +3,10 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useIdeationStore } from '@/lib/stores/ideationStore';
 
-const { closedTreeIds, flowNodes, treeProps, treeDragId } = vi.hoisted(() => ({
+const { closedTreeIds, flowNodes, toastError, treeProps, treeDragId } = vi.hoisted(() => ({
   closedTreeIds: new Set<string>(),
   flowNodes: { current: [] as Array<Record<string, unknown>> },
+  toastError: vi.fn(),
   treeProps: { current: null as Record<string, unknown> | null },
   treeDragId: { current: null as string | null },
 }));
@@ -176,7 +177,7 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }));
 vi.mock('@/components/ideation/IdeationWorkspaceBar', () => ({
   IdeationWorkspaceBar: () => null,
 }));
@@ -213,6 +214,7 @@ describe('IdeationCanvas AI expansion', () => {
     const root = useIdeationStore.getState().nodes[0];
     useIdeationStore.getState().selectNode(root.id);
     useIdeationStore.setState({ acceptProposals: realAcceptProposals });
+    toastError.mockClear();
     treeDragId.current = null;
     vi.restoreAllMocks();
   });
@@ -476,6 +478,7 @@ describe('IdeationCanvas AI expansion', () => {
       rawValue: 'Keep this note',
       value: 'Keep this note',
     });
+
     render(<IdeationCanvas />);
     fireEvent.click(screen.getByRole('button', { name: 'text' }));
     const editor = screen.getByRole('textbox', { name: 'Text outline' });
@@ -494,6 +497,23 @@ describe('IdeationCanvas AI expansion', () => {
         }),
       }),
     );
+  });
+
+  it('clears a valid no-op text draft so later graph changes synchronize', async () => {
+    const root = useIdeationStore.getState().nodes[0];
+    render(<IdeationCanvas />);
+    fireEvent.click(screen.getByRole('button', { name: 'text' }));
+    const editor = screen.getByRole('textbox', { name: 'Text outline' });
+
+    fireEvent.change(editor, { target: { value: `[idea] ${root.label}` } });
+    await new Promise((resolve) => window.setTimeout(resolve, 450));
+    act(() => {
+      useIdeationStore.getState().addNode(root.id, 'task', 'Synchronized task');
+    });
+
+    await waitFor(() => {
+      expect((editor as HTMLTextAreaElement).value).toContain('Synchronized task');
+    });
   });
 
   it('commits an edited title once when ArrowDown moves to the next line', async () => {
@@ -720,6 +740,124 @@ describe('IdeationCanvas AI expansion', () => {
 
     expect(useIdeationStore.getState().nodes).toEqual(nodesBefore);
     expect(useIdeationStore.getState().nodes.some((node) => node.id === taskId)).toBe(true);
+  });
+
+  it('rejects Shift+Tab on a depth-one node without corrupting history or selection', () => {
+    const root = useIdeationStore.getState().nodes[0];
+    const childId = useIdeationStore.getState().addNode(root.id, 'task', 'Depth one task');
+    useIdeationStore.getState().selectNode(childId);
+    render(<IdeationCanvas />);
+
+    expect(() => {
+      fireEvent.keyDown(screen.getByRole('textbox', { name: 'Task title' }), {
+        key: 'Tab',
+        shiftKey: true,
+      });
+    }).not.toThrow();
+
+    expect(useIdeationStore.getState().nodes.find((node) => node.id === childId)?.parentId)
+      .toBe(root.id);
+    expect(useIdeationStore.getState().selectedNodeId).toBe(childId);
+    expect(toastError).toHaveBeenCalledWith(
+      'Keep one project root. Top-level items cannot be outdented.',
+    );
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().nodes).toHaveLength(1);
+  });
+
+  it('rejects an outline drop at root level without adding history', () => {
+    const root = useIdeationStore.getState().nodes[0];
+    const childId = useIdeationStore.getState().addNode(root.id, 'task', 'Dragged task');
+    useIdeationStore.getState().selectNode(childId);
+    render(<IdeationCanvas />);
+    const onMove = treeProps.current?.onMove as (input: {
+      dragIds: string[];
+      parentId: string | null;
+      index: number;
+    }) => void;
+
+    expect(() => act(() => onMove({
+      dragIds: [childId],
+      parentId: null,
+      index: 1,
+    }))).not.toThrow();
+
+    expect(useIdeationStore.getState().nodes.find((node) => node.id === childId)?.parentId)
+      .toBe(root.id);
+    expect(useIdeationStore.getState().selectedNodeId).toBe(childId);
+    expect(toastError).toHaveBeenCalledWith(
+      'Keep one project root. Move items under the project instead.',
+    );
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().nodes).toHaveLength(1);
+  });
+
+  it('rejects Add at the node cap with feedback and an intact history boundary', () => {
+    const nodes = Array.from({ length: 500 }, (_, index) => ({
+      id: `node-${index}`,
+      label: `Node ${index}`,
+      kind: 'idea' as const,
+      parentId: index === 0 ? null : 'node-0',
+      sortOrder: index,
+      properties: {},
+    }));
+    useIdeationStore.getState().replaceNodes(nodes);
+    useIdeationStore.getState().selectNode('node-0');
+
+    let addedId = 'unexpected';
+    expect(() => {
+      addedId = useIdeationStore.getState().addNode('node-0');
+    }).not.toThrow();
+
+    expect(addedId).toBe('');
+    expect(useIdeationStore.getState().nodes).toHaveLength(500);
+    expect(useIdeationStore.getState().selectedNodeId).toBe('node-0');
+    expect(useIdeationStore.getState().canUndo).toBe(false);
+    expect(toastError).toHaveBeenCalledWith(
+      'Ideation is limited to 500 nodes. Remove a node before adding another.',
+    );
+  });
+
+  it('keeps AI proposals visible when capacity validation rejects acceptance', async () => {
+    mockExpansionResponse();
+    useIdeationStore.setState({ acceptProposals: vi.fn(() => null) });
+    render(<IdeationCanvas />);
+    fireEvent.click(screen.getByRole('button', { name: 'AI Expand' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', {
+        name: 'Accept suggestion Research users in outline',
+      })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', {
+      name: 'Accept suggestion Research users in outline',
+    }));
+
+    expect(screen.getByRole('button', {
+      name: 'Accept suggestion Research users in outline',
+    })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Accept all (3)' })).toBeInTheDocument();
+  });
+
+  it('rejects an over-budget text outline without throwing or changing state', async () => {
+    const before = useIdeationStore.getState().nodes;
+    render(<IdeationCanvas />);
+    fireEvent.click(screen.getByRole('button', { name: 'text' }));
+    const editor = screen.getByRole('textbox', { name: 'Text outline' });
+    const outline = [
+      before[0].label,
+      ...Array.from({ length: 500 }, (_, index) => `  Node ${index}`),
+    ].join('\n');
+
+    expect(() => fireEvent.change(editor, { target: { value: outline } })).not.toThrow();
+    await waitFor(() => {
+      expect(toastError).toHaveBeenCalledWith(
+        'Ideation is limited to 500 nodes. Remove a node before adding another.',
+      );
+    }, { timeout: 1_500 });
+
+    expect(useIdeationStore.getState().nodes).toEqual(before);
+    expect(useIdeationStore.getState().canUndo).toBe(false);
   });
 
   it('keeps remaining ghosts synchronized after accepting one proposal', async () => {

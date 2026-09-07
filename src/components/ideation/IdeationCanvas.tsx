@@ -364,7 +364,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
   const createNodeAndFocus = (parentId: string, kind: IdeationNodeKind, index?: number) => {
     commitTitle();
     const id = addNode(parentId, kind, 'Untitled', index);
-    focusTitle(id, 'all');
+    if (id) focusTitle(id, 'all');
   };
 
   if (node.data.proposal) {
@@ -837,8 +837,7 @@ function TextIdeationOutline({ nodes }: { nodes: IdeationNode[] }) {
 
   const commit = useCallback(() => {
     if (!dirty) return;
-    applyTextOutline(draft);
-    setDirty(false);
+    if (applyTextOutline(draft)) setDirty(false);
   }, [applyTextOutline, dirty, draft]);
 
   useEffect(() => {

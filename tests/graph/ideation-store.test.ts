@@ -180,7 +180,7 @@ describe('useIdeationStore', () => {
     }));
     useIdeationStore.getState().replaceNodes(nodes);
 
-    expect(() => useIdeationStore.getState().addNode('node-0')).toThrow();
+    expect(() => useIdeationStore.getState().addNode('node-0')).not.toThrow();
     expect(useIdeationStore.getState().nodes).toHaveLength(500);
     useIdeationStore.getState().updateLabel('node-0', 'Still editable');
     expect(useIdeationStore.getState().nodes[0].label).toBe('Still editable');

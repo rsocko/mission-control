@@ -214,6 +214,7 @@ for (const file of workflowFiles) {
       {
         docs_only: '${{ steps.classify.outputs.docs_only }}',
         impeccable_changed: '${{ steps.classify.outputs.impeccable_changed }}',
+        vendor_changed: '${{ steps.classify.outputs.vendor_changed }}',
         workflow_policy_changed: '${{ steps.classify.outputs.workflow_policy_changed }}',
       },
       'change classification must expose its fail-closed result',
@@ -228,8 +229,10 @@ for (const file of workflowFiles) {
       'git diff --no-renames --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}"',
       'docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md',
       '.github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx',
+      '.gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json',
       '.github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs',
       'echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"',
+      'echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"',
       'echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"',
       'if [[ "${found_change}" != "true" ]]',
     ]) {
@@ -277,6 +280,17 @@ for (const file of workflowFiles) {
       'Impeccable validation must not restore dependencies or npm caches',
     );
     assert.deepEqual(lintWorker.needs, ['changes'], 'lint worker must depend on change classification');
+    for (const [name, command] of [
+      ['Verify Generic Graph vendor snapshot', 'npm run vendor:verify'],
+      ['Test Generic Graph vendor tooling', 'npm run test:vendor'],
+    ]) {
+      const step = lintWorker.steps?.find((candidate) => candidate.name === name);
+      assert.equal(step?.run, command, `${name} must run the repository-owned command`);
+      assert.ok(
+        step?.if?.includes("needs.changes.outputs.vendor_changed != 'false'"),
+        `${name} must use the fail-closed vendor classification`,
+      );
+    }
     assert.deepEqual(
       productionBuildWorker.needs,
       ['changes'],

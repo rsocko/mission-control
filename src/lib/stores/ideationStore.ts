@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { toast } from 'sonner';
 import {
   GraphDocumentController,
 } from '@rsocko/generic-graph-canvas-shared-workbench/controllers';
@@ -83,10 +84,10 @@ interface IdeationState {
   acceptProposals: (
     parentId: string,
     proposals: Array<{ label: string; kind?: IdeationNodeKind }>,
-  ) => string[];
+  ) => string[] | null;
   updateLabel: (id: string, label: string) => void;
   applyTitleInput: (id: string, input: string) => void;
-  applyTextOutline: (input: string) => void;
+  applyTextOutline: (input: string) => boolean;
   updateKind: (id: string, kind: IdeationNodeKind) => void;
   setProperty: (id: string, property: IdeationProperty) => void;
   removeProperty: (id: string, key: IdeationProperty['key']) => void;
@@ -125,12 +126,22 @@ function commitNodes(
   const snapshot = controller.getSnapshot();
   const current = graphDocumentToIdeationNodes(snapshot.document);
   if (nodesEqual(current, nodes)) return false;
-  validateIdeationNodes(nodes);
+  const validation = validateIdeationNodes(nodes);
+  if (!validation.valid) {
+    toast.error(validation.message);
+    return false;
+  }
   const executed = controller.execute([{
     type: 'replace-document',
-    document: ideationNodesToGraphDocument(nodes),
+    document: ideationNodesToGraphDocument(validation.nodes),
   }]);
-  if (!executed) return false;
+  if (!executed) {
+    toast.error(
+      controller.getSnapshot().lastError
+      ?? 'Unable to apply that graph change. Review the selected nodes and try again.',
+    );
+    return false;
+  }
   undoStack.push(current);
   if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
   redoStack.length = 0;
@@ -140,9 +151,9 @@ function commitNodes(
   const nextSelectedNodeId = selectedNodeId === undefined
     ? previousSelectedNodeId
     : selectedNodeId;
-  controller = createController(nodes);
+  controller = createController(validation.nodes);
   controller.select(
-    nextSelectedNodeId && nodes.some((node) => node.id === nextSelectedNodeId)
+    nextSelectedNodeId && validation.nodes.some((node) => node.id === nextSelectedNodeId)
       ? { kind: 'node', id: nextSelectedNodeId }
       : undefined,
   );
@@ -174,8 +185,7 @@ export const useIdeationStore = create<IdeationState>()((set, get) => ({
       )),
       { id, label, kind, parentId, sortOrder, properties: {} },
     ];
-    commitNodes(nodes, set, id);
-    return id;
+    return commitNodes(nodes, set, id) ? id : '';
   },
   acceptProposals: (parentId, proposals) => {
     const state = get();
@@ -207,8 +217,7 @@ export const useIdeationStore = create<IdeationState>()((set, get) => ({
         sortOrder: sortOrder + proposalIndex,
       })),
     ];
-    commitNodes(nodes, set);
-    return accepted.map((node) => node.id);
+    return commitNodes(nodes, set) ? accepted.map((node) => node.id) : null;
   },
   updateLabel: (id, label) => {
     commitNodes(
@@ -239,7 +248,9 @@ export const useIdeationStore = create<IdeationState>()((set, get) => ({
     commitNodes(nodes, set);
   },
   applyTextOutline: (input) => {
-    commitNodes(reconcileIdeationOutline(get().nodes, input), set);
+    const current = get().nodes;
+    const reconciled = reconcileIdeationOutline(current, input);
+    return nodesEqual(current, reconciled) || commitNodes(reconciled, set);
   },
   updateKind: (id, kind) => {
     commitNodes(
@@ -269,6 +280,10 @@ export const useIdeationStore = create<IdeationState>()((set, get) => ({
   moveNode: (id, parentId, index) => {
     const state = get();
     const moving = state.nodes.find((node) => node.id === id);
+    if (moving?.parentId !== null && parentId === null) {
+      toast.error('Keep one project root. Move items under the project instead.');
+      return;
+    }
     if (
       !moving
       || id === parentId
@@ -313,7 +328,12 @@ export const useIdeationStore = create<IdeationState>()((set, get) => ({
     const node = state.nodes.find((candidate) => candidate.id === id);
     if (!node?.parentId) return;
     const parent = state.nodes.find((candidate) => candidate.id === node.parentId);
-    if (parent) get().moveNode(id, parent.parentId, parent.sortOrder + 1);
+    if (!parent) return;
+    if (parent.parentId === null) {
+      toast.error('Keep one project root. Top-level items cannot be outdented.');
+      return;
+    }
+    get().moveNode(id, parent.parentId, parent.sortOrder + 1);
   },
   deleteNode: (id) => {
     const state = get();
@@ -347,8 +367,9 @@ export const useIdeationStore = create<IdeationState>()((set, get) => ({
   }),
   setWorkspaceFlusher: (flushWorkspace) => set({ flushWorkspace }),
   replaceNodes: (nodes) => {
-    validateIdeationNodes(nodes);
-    controller = createController(nodes);
+    const validation = validateIdeationNodes(nodes);
+    if (!validation.valid) throw new Error(validation.message);
+    controller = createController(validation.nodes);
     undoStack.length = 0;
     redoStack.length = 0;
     set(controllerProjection());

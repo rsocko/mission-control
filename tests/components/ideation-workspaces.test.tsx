@@ -139,7 +139,7 @@ describe('IdeationWorkspaceBar', () => {
 
     expect(() => act(() => {
       useIdeationStore.getState().updateLabel('workspace-one-root', '');
-    })).toThrow();
+    })).not.toThrow();
 
     expect(useIdeationStore.getState().nodes[0].label).toBe('One');
     expect(screen.getByRole('status')).toHaveTextContent('Saved');

@@ -24,6 +24,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       impeccable_changed: ${{ steps.classify.outputs.impeccable_changed }}
+      vendor_changed: ${{ steps.classify.outputs.vendor_changed }}
       workflow_policy_changed: ${{ steps.classify.outputs.workflow_policy_changed }}
     steps:
       - name: Check out source history
@@ -43,6 +44,7 @@ jobs:
 
           docs_only=true
           impeccable_changed=false
+          vendor_changed=false
           workflow_policy_changed=false
           found_change=false
           if [[ -z "${BASE_SHA}" ||
@@ -50,6 +52,7 @@ jobs:
              ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
             docs_only=false
             impeccable_changed=true
+            vendor_changed=true
             workflow_policy_changed=true
           else
             while IFS= read -r -d '' path; do
@@ -67,6 +70,11 @@ jobs:
                   ;;
               esac
               case "${path}" in
+                .gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json)
+                  vendor_changed=true
+                  ;;
+              esac
+              case "${path}" in
                 .github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs)
                   workflow_policy_changed=true
                   ;;
@@ -77,10 +85,12 @@ jobs:
           if [[ "${found_change}" != "true" ]]; then
             docs_only=false
             impeccable_changed=true
+            vendor_changed=true
             workflow_policy_changed=true
           fi
           echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
           echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"
+          echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"
           echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"
 
   impeccable-worker:
@@ -171,6 +181,18 @@ jobs:
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
+
+      - name: Verify Generic Graph vendor snapshot
+        if: >-
+          (needs.changes.result != 'success' ||
+          needs.changes.outputs.vendor_changed != 'false')
+        run: npm run vendor:verify
+
+      - name: Test Generic Graph vendor tooling
+        if: >-
+          (needs.changes.result != 'success' ||
+          needs.changes.outputs.vendor_changed != 'false')
+        run: npm run test:vendor
 
       - name: Validate workflow policy
         if: >-

@@ -698,6 +698,7 @@ export function TaskDetailPanel({
       ) : null}
     </AnimatePresence>
   );
+  const moveDialogElement = portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog;
 
   const confirmDialogElement = (
     <ConfirmDialog
@@ -1141,7 +1142,7 @@ export function TaskDetailPanel({
       <>
         <div className="bg-[var(--surface-1)]">{panelContent}</div>
         {confirmDialogElement}
-        {moveDialog}
+        {moveDialogElement}
       </>
     );
   }
@@ -1184,7 +1185,7 @@ export function TaskDetailPanel({
         </div>
       </AnimatePresence>
       {confirmDialogElement}
-      {portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog}
+      {moveDialogElement}
       </>
     );
 
@@ -1220,7 +1221,7 @@ export function TaskDetailPanel({
       {panelContent}
     </motion.aside>
     {confirmDialogElement}
-    {portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog}
+    {moveDialogElement}
     </>
   );
 }

@@ -2016,8 +2016,12 @@ export class SyncExecutionPipeline {
       const relationshipHealth = health.get(config.id);
       const completedAt = relationshipHealth?.lastCompletedAt;
       if (completedAt && new Date(completedAt).getTime() > dueBefore) continue;
-      if (relationshipHealth?.collectionPhase === 'collecting'
-        || relationshipHealth?.reconciliationPhase === 'reconciling') {
+      const hasActiveGeneration = relationshipHealth?.status === 'running'
+        && (
+          relationshipHealth.collectionPhase === 'collecting'
+          || relationshipHealth.reconciliationPhase === 'reconciling'
+        );
+      if (hasActiveGeneration) {
         syncLogger.info(
           { connectorId: config.id, trigger, reason: 'active-generation' },
           'Dependency relationship poll deferred',

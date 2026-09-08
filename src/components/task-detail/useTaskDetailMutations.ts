@@ -21,6 +21,7 @@ import {
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
+import { removeMicrosoftTodoTitleTag } from '@/lib/connectors/microsoft-todo/title-tags';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 import {
   addTaskTags,
@@ -244,18 +245,37 @@ export function useTaskDetailMutations({
 
   const handleRemoveTag = useCallback(async (tagId: string) => {
     if (!ensureFieldsEditable('tags')) return;
+    const previousTagIds = task?.tagIds || [];
+    const nextTagIds = previousTagIds.filter((id) => id !== tagId);
+    const removedTag = [...availableTags, ...extraTags, ...pickerTags]
+      .find((tag) => tag.id === tagId);
+    const previousTitle = task?.title || '';
+    const nextTitle = task?.connectorType === 'microsoft-todo' && removedTag
+      ? removeMicrosoftTodoTitleTag(previousTitle, removedTag.name)
+      : previousTitle;
     const removed = await runOptimisticMutation({
       apply: () => setTask((prev) => (
-        prev ? { ...prev, tagIds: (prev.tagIds || []).filter((id) => id !== tagId) } : prev
+        prev ? { ...prev, tagIds: nextTagIds, title: nextTitle } : prev
       )),
       mutate: () => removeTaskTag(taskId, tagId),
       rollback: () => setTask((prev) => (
-        prev ? { ...prev, tagIds: [...(prev.tagIds || []), tagId] } : prev
+        prev ? { ...prev, tagIds: previousTagIds, title: previousTitle } : prev
       )),
       onError: () => toast.error('Failed to remove tag'),
     });
-    if (removed) onUpdate?.();
-  }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
+    if (removed) onUpdate?.({ tagIds: nextTagIds, title: nextTitle });
+  }, [
+    availableTags,
+    ensureFieldsEditable,
+    extraTags,
+    onUpdate,
+    pickerTags,
+    setTask,
+    task?.connectorType,
+    task?.tagIds,
+    task?.title,
+    taskId,
+  ]);
 
   const handleStatusChange = useCallback(async (status: string) => {
     // Handle "Close as Not Planned" / "Close as Duplicate" from dropdown

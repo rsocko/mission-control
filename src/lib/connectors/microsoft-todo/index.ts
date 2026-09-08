@@ -21,6 +21,7 @@ import { mergeConnectorSettings } from '../shared/connector-config-store';
 import { createGraphClient, GRAPH_BASE_URL, SUBSTRATE_BASE_URL } from './graph-client';
 import type { GraphClient } from './graph-client';
 import { mapGraphTask, mapSubstrateTask, mapChecklistItem, mapStatus, statusToGraph, priorityToImportance, parseSourceId } from './task-transformer';
+import { removeMicrosoftTodoTitleTag } from './title-tags';
 import type {
   GraphChecklistItem,
   GraphLinkedResource,
@@ -635,14 +636,11 @@ export class MicrosoftTodoConnector implements IConnector {
 
   async removeTagFromTask(sourceId: string, tagName: string): Promise<void> {
     const { listId, taskId } = parseSourceId(sourceId);
-    const hashtagSlug = tagName.replace(/\s+/g, '-');
     const res = await this.client.graphFetch(`/me/todo/lists/${listId}/tasks/${taskId}`);
     if (!res.ok) throw new Error(`Failed to fetch task for tag removal: ${res.status}`);
     const data = await res.json();
     const currentTitle: string = data.title || '';
-    const updatedTitle = currentTitle
-      .replace(new RegExp(`\\s*#${hashtagSlug.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi'), '')
-      .trim().replace(/\s{2,}/g, ' ');
+    const updatedTitle = removeMicrosoftTodoTitleTag(currentTitle, tagName);
     if (updatedTitle === currentTitle) return;
     const patchRes = await this.client.graphFetch(`/me/todo/lists/${listId}/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify({ title: updatedTitle }) });
     if (!patchRes.ok) throw new Error(`Failed to remove tag from task title: ${patchRes.status}`);

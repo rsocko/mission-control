@@ -5,11 +5,16 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SaveTemplateModal } from '@/components/add-task';
 import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
-import { TaskDetailPanel, type TaskNotesOpenRequest } from '@/components/task-detail/TaskDetailPanel';
+import {
+  TaskDetailPanel,
+  type TaskFieldUpdate,
+  type TaskNotesOpenRequest,
+} from '@/components/task-detail/TaskDetailPanel';
 import { TodayMainPanel } from '@/components/today/TodayMainPanel';
 import { TodayScheduleModal } from '@/components/today/TodayScheduleModal';
 import { TodaySidebar } from '@/components/today/TodaySidebar';
 import { MobileTodayList } from '@/components/today/MobileTodayList';
+import { applyMyDayTaskFieldUpdate } from '@/components/today/apply-task-field-update';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { useMyDayData } from '@/lib/hooks/useMyDayData';
@@ -117,6 +122,18 @@ export default function TodayPage() {
     [selectedSuggestionContext, selectedTaskId, suggestionTasks],
   );
   const selectedTask = useMemo(() => items.find((item) => item.taskId === selectedTaskId) || null, [items, selectedTaskId]);
+  const handleTaskDetailUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    if (selectedTaskId && fields) {
+      setItems((current) => current.map((item) => (
+        applyMyDayTaskFieldUpdate(item, selectedTaskId, fields)
+      )));
+    }
+
+    // An immediate source sync can race the Microsoft To Do title write-through.
+    if (typeof fields?.title !== 'string') {
+      void fetchData({ skipSync: true });
+    }
+  }, [fetchData, selectedTaskId, setItems]);
 
   const getSuggestionContextMenuActions = useCallback((task: SuggestionTask): TaskContextMenuActions => {
     const recurrence = extractRecurrenceFromMetadata(task.metadata);
@@ -326,7 +343,7 @@ export default function TodayPage() {
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
-            onUpdate={fetchData}
+            onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
               setItems((prev) => prev.map((item) =>
@@ -358,7 +375,7 @@ export default function TodayPage() {
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
-            onUpdate={fetchData}
+            onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
               setItems((prev) => prev.map((item) =>
@@ -394,7 +411,7 @@ export default function TodayPage() {
             taskId={selectedTaskId}
             mode="mobile"
             onClose={() => { setSelectedTaskId(null); setPendingMoveDialogTaskId(null); }}
-            onUpdate={() => fetchData()}
+            onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
               setItems((prev) => prev.map((item) =>

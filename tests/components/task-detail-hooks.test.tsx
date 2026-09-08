@@ -343,6 +343,38 @@ describe('useTaskDetailMutations', () => {
     expect(onUpdate).toHaveBeenCalled();
   });
 
+  it('removes a Microsoft To Do hashtag from the detail and host titles', async () => {
+    const onUpdate = vi.fn();
+    stubFetch(() => jsonResponse({}));
+    const task = {
+      ...baseTask,
+      title: 'Write the migration guide #NEEDS-TRIAGE',
+      connectorType: 'microsoft-todo',
+      sourceId: 'list-1:task-1',
+      taskSourceModel: 'remote-managed' as const,
+    };
+    const availableTags = [{
+      id: 'tag-1',
+      name: 'NEEDS TRIAGE',
+      slug: 'needs-triage',
+      color: null,
+    }];
+    const { result } = renderMutations({ task, availableTags, onUpdate });
+
+    await act(async () => {
+      await result.current.mutations.handleRemoveTag('tag-1');
+    });
+
+    expect(result.current.task).toMatchObject({
+      title: 'Write the migration guide',
+      tagIds: [],
+    });
+    expect(onUpdate).toHaveBeenCalledWith({
+      title: 'Write the migration guide',
+      tagIds: [],
+    });
+  });
+
   it('adds a known tag and records it for display', async () => {
     stubFetch((input) => {
       if (input === '/api/tasks/task-1/tags') return jsonResponse({ addedTagIds: ['tag-2'] });

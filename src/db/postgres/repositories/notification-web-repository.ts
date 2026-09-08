@@ -20,6 +20,7 @@ import {
 } from '@/lib/notifications/query';
 import { normalizeFinanceProviderFacets, financeProviderFilterValues } from '@/lib/finance-insights/provider';
 import { wakeNotificationWritebackDispatcher } from '@/lib/notifications/notification-writeback';
+import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
 
@@ -346,6 +347,7 @@ export function createPostgresNotificationWebRepository(
   ): Promise<number> {
     let queued = 0;
     for (const row of rows) {
+      if (!supportsNotificationDismissalWriteback(row.connectorType)) continue;
       const result = await executor.query(`
         INSERT INTO notification_writeback_jobs (
           id, notification_id, connector_instance_id, connector_type, source_id,

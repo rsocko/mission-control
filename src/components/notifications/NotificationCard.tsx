@@ -568,7 +568,7 @@ export function NotificationCard({
         </div>
       </div>
 
-      {/* Bottom toolbar: mark read, snooze, dismiss, pin — always visible */}
+      {/* Bottom toolbar: read state, snooze, source controls, and disposition */}
       {!compact && !panel && (
       <div className="pointer-events-auto relative z-10 flex items-center gap-1 mt-2.5 pt-2 border-t border-[var(--border)]/50">
         {isUnread ? (
@@ -604,10 +604,10 @@ export function NotificationCard({
             </button>
           </Tooltip>
         )}
-        <Tooltip content="Handle">
+        <Tooltip content="Done — clear until new activity">
           <button
             onClick={(e) => { e.stopPropagation(); onHandle?.(); }}
-            aria-label="Handle notification"
+            aria-label="Mark notification done"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-emerald-400 hover:bg-emerald-900/20 transition-colors"
           >
             <Archive size={15} />
@@ -838,16 +838,18 @@ export function NotificationDetail({
             <button
               type="button"
               onClick={() => void onArchive()}
+              title="Clear from the inbox; new source activity can bring it back"
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
             >
               <Archive size={13} />
-              Handle
+              Done
             </button>
           )}
           {onDismiss && (
             <button
               type="button"
               onClick={() => void onDismiss()}
+              title="Remove as irrelevant; future source activity will not bring it back"
               className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-red-900/20 hover:text-red-400"
             >
               <X size={13} />

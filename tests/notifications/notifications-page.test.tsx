@@ -58,7 +58,7 @@ vi.mock('@/components/notifications/NotificationCard', () => ({
   }) => (
     <div>
       <button onClick={onSelect}>{notification.title}</button>
-      <button onClick={onHandle} aria-label={`Handle ${notification.title}`}>Handle</button>
+      <button onClick={onHandle} aria-label={`Mark ${notification.title} done`}>Done</button>
     </div>
   ),
   NotificationDetail: ({
@@ -494,9 +494,9 @@ describe('NotificationsPage data states', () => {
     });
     render(<NotificationsPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Handle First review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark First review done' }));
     await waitFor(() => expect(setSelectedId).toHaveBeenCalledWith(second.id));
-    fireEvent.click(screen.getByRole('button', { name: 'Undo handle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Undo mark done' }));
 
     await waitFor(() => expect(restore).toHaveBeenCalledWith([
       expect.objectContaining({

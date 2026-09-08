@@ -1,6 +1,5 @@
 import {
   ConnectorWritebackError,
-  type NotificationWritebackAction,
 } from '@/lib/connectors/notification-writeback-contract';
 import logger from '@/lib/logger';
 import type { ConnectorConfig } from '@/types';
@@ -104,12 +103,6 @@ export async function dispatchNotificationWritebacks(): Promise<void> {
   }
 }
 
-function normalizeWritebackSourceId(sourceId: string): string {
-  const separator = sourceId.indexOf(':');
-  const connectorSourceId = separator === -1 ? sourceId : sourceId.slice(separator + 1);
-  return connectorSourceId.replace(/^docintel-/, '');
-}
-
 async function processWritebackBatch(jobs: WritebackRow[]): Promise<void> {
   const web = requireWeb();
   let connector: Awaited<ReturnType<typeof loadConnector>>;
@@ -124,17 +117,21 @@ async function processWritebackBatch(jobs: WritebackRow[]): Promise<void> {
   }
   jobs = await web.renewWritebackLeases(jobs, WRITEBACK_LEASE_MS);
   if (jobs.length === 0) return;
-  if (
-    !connector?.writeNotificationAction
-    && !connector?.dismissAlert
-    && !connector?.dismissAlerts
-  ) {
+  if (!connector) {
     await failJobs(jobs, new ConnectorWritebackError(
-      connector
-        ? 'Connector does not support notification writeback'
-        : 'Connector is unavailable or has been removed',
+      'Connector is unavailable or has been removed',
       false,
     ));
+    return;
+  }
+  if (
+    !connector.writeNotificationAction
+    && !connector.dismissAlert
+    && !connector.dismissAlerts
+  ) {
+    // Dismissal is always valid as a local disposition. Connectors without a
+    // matching source action settle the outbox without attempting write-back.
+    await web.completeWritebackJobs(jobs);
     return;
   }
 

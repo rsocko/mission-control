@@ -62,7 +62,7 @@ const PROJECT_TASK_DISPOSITIONS: readonly LocalDisposition[] = [
 
 function includesValue<T extends string>(
   values: readonly T[],
-  value: string | number | null | undefined,
+  value: unknown,
 ): value is T {
   return typeof value === 'string' && values.some((candidate) => candidate === value);
 }

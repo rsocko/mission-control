@@ -539,6 +539,8 @@ describe('dependency reconciliation resume scheduling', () => {
     mocks.getConnector.mockReturnValue(mocks.staleConnector);
     mocks.getResumeCandidates.mockResolvedValue([]);
     mocks.recordResumeOutcome.mockResolvedValue(undefined);
+    mocks.getDependencyHealth.mockResolvedValue(new Map());
+    mocks.dependencyPollConfigs.length = 0;
     mocks.runWithLease.mockImplementation(
       async (_connectorId: string, _operationType: string, operation: () => unknown) =>
         operation(),
@@ -583,7 +585,7 @@ describe('dependency reconciliation resume scheduling', () => {
     }
   });
 
-  it('collects a due relationship generation without upserting tasks and skips fresh or active state', async () => {
+  it('collects a due relationship generation, skips active state, and replaces interrupted partial state', async () => {
     const connectorId = 'github-due-poll';
     mocks.dependencyPollConfigs.push({
       ...persistedConfig,
@@ -659,6 +661,7 @@ describe('dependency reconciliation resume scheduling', () => {
     mocks.getDependencyHealth.mockResolvedValue(new Map([[
       connectorId,
       {
+        status: 'completed',
         lastCompletedAt: new Date().toISOString(),
         collectionPhase: 'complete',
         reconciliationPhase: 'complete',
@@ -668,6 +671,7 @@ describe('dependency reconciliation resume scheduling', () => {
     mocks.getDependencyHealth.mockResolvedValue(new Map([[
       connectorId,
       {
+        status: 'running',
         lastCompletedAt: null,
         collectionPhase: 'collecting',
         reconciliationPhase: 'pending',
@@ -676,6 +680,22 @@ describe('dependency reconciliation resume scheduling', () => {
     await scheduler.pollDueDependencyRelationships('manual');
 
     expect(mocks.beginDependencyGeneration).toHaveBeenCalledOnce();
+
+    mocks.getDependencyHealth.mockResolvedValue(new Map([[
+      connectorId,
+      {
+        status: 'partial',
+        lastCompletedAt: null,
+        collectionPhase: 'collecting',
+        reconciliationPhase: 'complete',
+      },
+    ]]));
+    const restartedScheduler = createScheduler();
+    Reflect.set(restartedScheduler, 'dependencyRelationshipPollEnabled', true);
+    await restartedScheduler.pollDueDependencyRelationships('startup');
+
+    expect(mocks.beginDependencyGeneration).toHaveBeenCalledTimes(2);
+    expect(fetchTasks).toHaveBeenCalledTimes(2);
   });
 
   it('cancels comparison evidence when a relationship generation is revision-fenced', async () => {

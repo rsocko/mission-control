@@ -1,5 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { InProgressPanel } from '@/components/today/TodayMainPanel';
+import { TooltipProvider } from '@/components/ui/Tooltip';
 import type { MyDayItem } from '@/components/today/types';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
@@ -31,18 +32,24 @@ function makeItem(): MyDayItem {
   };
 }
 
+function renderPanel(items: MyDayItem[], onSelectTask = vi.fn(), onStartFocus = vi.fn()) {
+  return render(
+    <TooltipProvider>
+      <InProgressPanel
+        items={items}
+        onSelectTask={onSelectTask}
+        onStartFocus={onStartFocus}
+      />
+    </TooltipProvider>,
+  );
+}
+
 describe('InProgressPanel', () => {
   it('selects an active task and starts focus independently', () => {
     const item = makeItem();
     const onSelectTask = vi.fn();
     const onStartFocus = vi.fn();
-    render(
-      <InProgressPanel
-        items={[item]}
-        onSelectTask={onSelectTask}
-        onStartFocus={onStartFocus}
-      />,
-    );
+    renderPanel([item], onSelectTask, onStartFocus);
 
     fireEvent.click(screen.getByText(item.title));
     expect(onSelectTask).toHaveBeenCalledWith(item.taskId);
@@ -53,14 +60,23 @@ describe('InProgressPanel', () => {
   });
 
   it('shows a useful empty state', () => {
-    render(
-      <InProgressPanel
-        items={[]}
-        onSelectTask={vi.fn()}
-        onStartFocus={vi.fn()}
-      />,
-    );
+    renderPanel([]);
 
     expect(screen.getByText('Nothing is in progress yet.')).toBeInTheDocument();
+  });
+
+  it('collapses and expands the task list', async () => {
+    const item = makeItem();
+    renderPanel([item]);
+
+    const collapseButton = screen.getByRole('button', { name: 'Collapse In Progress' });
+    expect(collapseButton).toHaveAttribute('aria-expanded', 'true');
+
+    fireEvent.click(collapseButton);
+    expect(screen.getByRole('button', { name: 'Expand In Progress' })).toHaveAttribute('aria-expanded', 'false');
+    await waitFor(() => expect(screen.queryByText(item.title)).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole('button', { name: 'Expand In Progress' }));
+    await waitFor(() => expect(screen.getByText(item.title)).toBeInTheDocument());
   });
 });

@@ -18,11 +18,8 @@ const nodes: IdeationNode[] = [
 describe('useIdeationExpansion', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    useIdeationStore.setState({
-      nodes,
-      selectedNodeId: 'root',
-      past: [],
-    });
+    useIdeationStore.getState().replaceNodes(nodes);
+    useIdeationStore.getState().selectNode('root');
   });
 
   it('loads suggestions independently from the canvas renderer', async () => {

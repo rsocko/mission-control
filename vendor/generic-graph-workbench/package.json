@@ -1,0 +1,25 @@
+{
+  "name": "@rsocko/generic-graph-canvas-shared-workbench",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Provisional, independently buildable Generic Graph Canvas shared workbench package. Not published; consumed only via a private local file: dependency. See README.md for the stop conditions and non-goals.",
+  "type": "module",
+  "exports": {
+    "./controllers": "./src/controllers/index.ts",
+    "./core": "./src/core/index.ts",
+    "./host": "./src/host/index.ts",
+    "./layout": "./src/layout/index.ts",
+    "./react": "./src/react/index.ts"
+  },
+  "dependencies": {
+    "ajv": "^8.17.1"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  }
+}

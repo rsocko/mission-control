@@ -137,6 +137,37 @@ afterEach(() => {
 });
 
 describe('TaskDetailPanel redesigned presentations', () => {
+  it('portals the move dialog outside its transformed task-detail container', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/connectors') {
+        return json({
+          connectors: [{
+            id: 'todo-1',
+            type: 'microsoft-todo',
+            name: 'Microsoft To Do',
+            capabilities: { taskCreate: true },
+          }],
+        });
+      }
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+
+    renderPanel({
+      taskId: 'task-1',
+      mode: 'dialog',
+      autoOpenMoveDialog: true,
+      onClose: vi.fn(),
+    });
+
+    const moveDialog = await screen.findByRole('dialog', { name: task.title });
+    expect(moveDialog.parentElement?.parentElement).toBe(document.body);
+  });
+
   it('renders dialog select menus above the task popout', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       if (String(input) === '/api/tasks/task-1') return json({ task });

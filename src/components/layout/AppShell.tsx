@@ -51,6 +51,40 @@ interface FeatureFlags {
   financeEnabled: boolean;
 }
 
+export function ConnectorHealthIssue({
+  connector,
+}: {
+  connector: HealthData['connectors'][number];
+}) {
+  return (
+    <div className="flex items-start gap-1.5">
+      <span
+        className={cn(
+          "mt-1.5 w-1.5 h-1.5 rounded-full shrink-0",
+          connector.status === 'error' ? 'bg-red-500' : 'bg-yellow-500',
+        )}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-xs font-medium text-[var(--text-primary)]">{connector.name}</span>
+          {connector.lastSyncAt && (
+            <span className="text-xs text-[var(--text-tertiary)] ml-auto shrink-0">
+              {new Date(connector.lastSyncAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs leading-4 text-[var(--text-secondary)]">
+          {connector.message}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ToolbarRow({
   health,
   showHealthTooltip,
@@ -122,7 +156,7 @@ function ToolbarRow({
             <motion.div
               id="health-tooltip"
               role="tooltip"
-              className="absolute right-0 top-full mt-1.5 w-64 bg-[var(--surface-2)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] z-50 p-3"
+              className="absolute right-0 top-full mt-1.5 w-80 max-w-[calc(100vw-1.5rem)] bg-[var(--surface-2)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] z-50 p-3"
               variants={dropdownVariants}
               initial="hidden"
               animate="show"
@@ -135,19 +169,11 @@ function ToolbarRow({
               {health.connectors.filter(c => c.status === 'error' || c.status === 'degraded').length > 0 && (
                 <div className="border-t border-[var(--border)] pt-2 mt-2">
                   <p className="text-xs font-medium text-[var(--warning)] uppercase mb-1">Connector Sync Issues</p>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-2">
                     {health.connectors
                       .filter(c => c.status === 'error' || c.status === 'degraded')
                       .map(c => (
-                        <div key={c.id} className="flex items-center gap-1.5">
-                          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", c.status === 'error' ? 'bg-red-500' : 'bg-yellow-500')} />
-                          <span className="text-xs text-[var(--text-primary)]">{c.name}</span>
-                          {c.lastSyncAt && (
-                            <span className="text-[11px] text-[var(--text-tertiary)] ml-auto">
-                              {new Date(c.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
+                        <ConnectorHealthIssue key={c.id} connector={c} />
                       ))}
                   </div>
                 </div>

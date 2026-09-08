@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleDot,
   GripVertical,
   Loader2,
@@ -63,6 +64,7 @@ import { InteractiveTimeline } from '@/components/today/InteractiveTimeline';
 import { MobileSuggestions } from '@/components/today/MobileSuggestions';
 import { ConnectorIcon, SortableTaskRow } from '@/components/today/SortableTaskRow';
 import { TimerPanel } from '@/components/today/TimerPanel';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { uiLogger } from '@/lib/client-logger';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useViewMode } from '@/lib/hooks/useViewMode';
@@ -1101,6 +1103,8 @@ export function InProgressPanel({
   onSelectTask: (taskId: string) => void;
   onStartFocus: (item: MyDayItem) => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
     <section className="overflow-hidden rounded-[var(--radius-lg)] border border-blue-500/35 bg-[var(--surface-1)]">
       <div className="flex items-center justify-between border-b border-blue-500/15 px-4 py-3">
@@ -1109,50 +1113,74 @@ export function InProgressPanel({
           In Progress
           <span className="text-blue-400">({items.length})</span>
         </h3>
+        <Tooltip content={collapsed ? 'Expand In Progress' : 'Collapse In Progress'}>
+          <button
+            type="button"
+            onClick={() => setCollapsed((current) => !current)}
+            aria-expanded={!collapsed}
+            aria-controls="my-day-in-progress-tasks"
+            aria-label={collapsed ? 'Expand In Progress' : 'Collapse In Progress'}
+            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-2)] rounded transition-colors"
+          >
+            {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+          </button>
+        </Tooltip>
       </div>
-      {items.length === 0 ? (
-        <div className="flex min-h-36 items-center justify-center px-5 text-center">
-          <div>
-            <p className="text-sm text-[var(--text-secondary)]">Nothing is in progress yet.</p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">Change a task&apos;s status to make active work visible here.</p>
-          </div>
-        </div>
-      ) : (
-        <div className="px-3 py-2">
-          {items.slice(0, 3).map((item) => (
-            <div
-              key={item.taskId}
-              className="group flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-blue-500/10"
-            >
-              <button
-                type="button"
-                onClick={() => onSelectTask(item.taskId)}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600/25 text-blue-300">
-                  <CircleDot size={12} />
-                </span>
-                <ConnectorIcon type={item.connectorType} size={13} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{item.title}</span>
-                  <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{item.sourceListName || item.connectorType}</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onStartFocus(item)}
-                aria-label={`Focus on ${item.title}`}
-                className="rounded-full border border-blue-500/35 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-300 opacity-70 transition-opacity group-hover:opacity-100"
-              >
-                Focus
-              </button>
-            </div>
-          ))}
-          {items.length > 3 && (
-            <p className="px-2 pb-1 pt-2 text-xs text-[var(--text-muted)]">+{items.length - 3} more in progress</p>
-          )}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            id="my-day-in-progress-tasks"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            {items.length === 0 ? (
+              <div className="flex min-h-36 items-center justify-center px-5 text-center">
+                <div>
+                  <p className="text-sm text-[var(--text-secondary)]">Nothing is in progress yet.</p>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">Change a task&apos;s status to make active work visible here.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="px-3 py-2">
+                {items.slice(0, 3).map((item) => (
+                  <div
+                    key={item.taskId}
+                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-blue-500/10"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectTask(item.taskId)}
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600/25 text-blue-300">
+                        <CircleDot size={12} />
+                      </span>
+                      <ConnectorIcon type={item.connectorType} size={13} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{item.title}</span>
+                        <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{item.sourceListName || item.connectorType}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onStartFocus(item)}
+                      aria-label={`Focus on ${item.title}`}
+                      className="rounded-full border border-blue-500/35 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-300 opacity-70 transition-opacity group-hover:opacity-100"
+                    >
+                      Focus
+                    </button>
+                  </div>
+                ))}
+                {items.length > 3 && (
+                  <p className="px-2 pb-1 pt-2 text-xs text-[var(--text-muted)]">+{items.length - 3} more in progress</p>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }

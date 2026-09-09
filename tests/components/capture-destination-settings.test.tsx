@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
@@ -32,9 +32,18 @@ describe('capture destination settings', () => {
   });
 
   it('is available from the mobile settings page', async () => {
-    render(<MobileSettings />);
+    render(<MobileSettings onAddConnector={() => {}} />);
 
     expect(await screen.findByRole('heading', { name: 'Default Capture Location' })).toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Destination' })).toBeInTheDocument();
+  });
+
+  it('opens connector setup from mobile settings', async () => {
+    const onAddConnector = vi.fn();
+    render(<MobileSettings onAddConnector={onAddConnector} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Add connector' }));
+
+    expect(onAddConnector).toHaveBeenCalledOnce();
   });
 });

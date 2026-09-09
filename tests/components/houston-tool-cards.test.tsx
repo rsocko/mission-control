@@ -181,7 +181,7 @@ describe('ToolCard native task results', () => {
       const { rerender } = render(<ToolCard part={toolPart('searchTriage', {
         output: { ...triageResult, total: 0, items: [] },
       })} />);
-      expect(screen.getByText('No triage items match this search.')).toBeDefined();
+      expect(screen.getByText('No inbox items match this search.')).toBeDefined();
 
       rerender(<ToolCard part={toolPart('searchTriage', {
         state: 'output-error',

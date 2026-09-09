@@ -328,18 +328,37 @@ export function getAssignedFilterCondition(
 export function getInboxFilterCondition(
   inboxLists: readonly InboxListEntry[],
 ): SQL | undefined {
-  const conditions: SQL[] = [eq(tasks.connectorType, 'local')];
+  const conditions: SQL[] = [
+    and(
+      eq(tasks.connectorType, 'local'),
+      isNull(tasks.planningHorizon),
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${taskProjects}
+        WHERE ${taskProjects.taskId} = ${tasks.id}
+      )`,
+    )!,
+  ];
 
   for (const entry of inboxLists) {
     if (entry.sourceListId) {
       conditions.push(and(
         eq(tasks.connectorType, entry.connectorType),
         eq(tasks.sourceListId, entry.sourceListId),
+        isNull(tasks.planningHorizon),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${taskProjects}
+          WHERE ${taskProjects.taskId} = ${tasks.id}
+        )`,
       )!);
     } else if (entry.sourceListName) {
       conditions.push(and(
         eq(tasks.connectorType, entry.connectorType),
         eq(tasks.sourceListName, entry.sourceListName),
+        isNull(tasks.planningHorizon),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${taskProjects}
+          WHERE ${taskProjects.taskId} = ${tasks.id}
+        )`,
       )!);
     }
   }

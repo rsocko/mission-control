@@ -42,6 +42,7 @@ import { toast } from 'sonner';
 import type { TriageActionRecord, TriageActionType, TriageItem } from '@/types';
 import { SOURCE_META } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
+import { isInboxTask } from '@/lib/inbox/items';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,7 @@ const SOURCE_BRAND: Record<string, { bg: string; ring: string; text: string }> =
   facebook: { bg: 'bg-blue-500/15', ring: 'ring-blue-400/30', text: 'text-blue-300' },
   tiktok: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-300' },
   pinterest: { bg: 'bg-rose-500/15', ring: 'ring-rose-400/30', text: 'text-rose-300' },
+  task: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-200' },
   web: { bg: 'bg-slate-500/15', ring: 'ring-slate-400/30', text: 'text-slate-300' },
 };
 
@@ -101,6 +103,12 @@ const ALL_ROUTING_ACTIONS: Array<{
   { type: 'trigger_workflow', label: 'Workflow', icon: Workflow, color: 'text-cyan-400' },
   { type: 'dismiss', label: 'Dismiss', icon: X, color: 'text-slate-400' },
   { type: 'snooze', label: 'Snooze', icon: Clock3, color: 'text-sky-400' },
+];
+
+const TASK_ROUTING_ACTIONS: typeof ALL_ROUTING_ACTIONS = [
+  { type: 'complete_action', label: 'Keep task', icon: Check, color: 'text-cyan-300' },
+  { type: 'snooze', label: 'Snooze', icon: Clock3, color: 'text-sky-400' },
+  { type: 'dismiss', label: 'Dismiss', icon: X, color: 'text-slate-400' },
 ];
 
 // ─── Source-type action relevance (F-42) ────────────────────────────────────
@@ -221,7 +229,7 @@ export default function MobileTriageFocus({
         }));
       }
 
-      toast.success(actionConfig.label, {
+      toast.success(isInboxTask(item) && actionType === 'complete_action' ? 'Task filed' : actionConfig.label, {
         action: {
           label: 'Undo',
           onClick: async () => {
@@ -308,7 +316,7 @@ export default function MobileTriageFocus({
           <Check size={28} className="text-emerald-400" />
         </div>
         <h2 className="text-lg font-semibold text-white">All caught up!</h2>
-        <p className="text-sm text-slate-400">No triage items to process right now.</p>
+        <p className="text-sm text-slate-400">No inbox items to process right now.</p>
       </div>
     );
   }
@@ -331,7 +339,7 @@ export default function MobileTriageFocus({
             <p className="text-xs font-medium uppercase tracking-wider text-[var(--text-muted)]">
               Focus Mode
             </p>
-            <h1 className="text-base font-bold text-white">Triage</h1>
+            <h1 className="text-base font-bold text-white">Inbox</h1>
           </div>
         </div>
         {onSwitchToStream && (
@@ -368,7 +376,7 @@ export default function MobileTriageFocus({
             <div className="flex items-center gap-2">
               <span
                 className={cn(
-                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[0.625rem] font-medium ring-1',
+                  'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1',
                   SOURCE_BRAND[nextItem.sourcePlatform]?.bg || 'bg-slate-500/15',
                   SOURCE_BRAND[nextItem.sourcePlatform]?.ring || 'ring-slate-400/30',
                   SOURCE_BRAND[nextItem.sourcePlatform]?.text || 'text-slate-300',
@@ -395,7 +403,7 @@ export default function MobileTriageFocus({
           className="relative z-10 w-full touch-none rounded-[28px] bg-white/[0.04] p-5 shadow-[0_20px_50px_rgba(2,6,23,0.5)] ring-1 ring-white/5 backdrop-blur-xl"
           role="article"
           tabIndex={0}
-          aria-label={`Triage item: ${item.title}. Right for Done, left for Dismiss, up for Snooze`}
+          aria-label={`Inbox item: ${item.title}. Right for ${isInboxTask(item) ? 'Keep task' : 'Done'}, left for Dismiss, up for Snooze`}
         >
           {/* Swipe overlays */}
           <motion.div
@@ -499,7 +507,7 @@ export default function MobileTriageFocus({
                 Snooze
               </span>
               <span className="flex items-center gap-0.5">
-                Done
+                {isInboxTask(item) ? 'Keep' : 'Done'}
                 <ChevronRight size={10} />
               </span>
             </div>
@@ -509,8 +517,10 @@ export default function MobileTriageFocus({
 
       {/* Routing actions grid (F-40, F-41, F-42: source-aware actions) */}
       {(() => {
-        const sourceActions = getActionsForSource(item.sourcePlatform);
-        const overflowActions = ALL_ROUTING_ACTIONS.filter(
+        const task = isInboxTask(item);
+        const availableActions = task ? TASK_ROUTING_ACTIONS : ALL_ROUTING_ACTIONS;
+        const sourceActions = task ? TASK_ROUTING_ACTIONS : getActionsForSource(item.sourcePlatform);
+        const overflowActions = availableActions.filter(
           (a) => !sourceActions.some((s) => s.type === a.type),
         );
         return (
@@ -543,7 +553,7 @@ export default function MobileTriageFocus({
                   className="flex flex-col items-center gap-1.5 rounded-[18px] bg-white/[0.04] px-2 py-3 ring-1 ring-white/5 backdrop-blur-sm transition-all active:scale-95 disabled:opacity-40"
                 >
                   <Icon size={16} className={color} />
-                  <span className="text-[0.625rem] font-medium text-slate-400">{label}</span>
+                  <span className="text-xs font-medium text-slate-400">{label}</span>
                 </button>
               ))}
             </div>
@@ -576,7 +586,7 @@ export default function MobileTriageFocus({
                     className="flex flex-col items-center gap-1.5 rounded-[18px] bg-white/[0.04] px-2 py-3 ring-1 ring-white/5 backdrop-blur-sm transition-all active:scale-95 disabled:opacity-40"
                   >
                     <Icon size={16} className={color} />
-                    <span className="text-[0.625rem] font-medium text-slate-400">{label}</span>
+                    <span className="text-xs font-medium text-slate-400">{label}</span>
                   </button>
                 ))}
               </div>

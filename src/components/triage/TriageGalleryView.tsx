@@ -39,6 +39,7 @@ import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import type { TriageActionRecord, TriageActionType, TriageContentType, TriageItem } from '@/types';
 import { TRIAGE_SOURCE_ICONS } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
+import { getInboxTaskMetadata, isInboxTask } from '@/lib/inbox/items';
 
 // ─── Source/content metadata ────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ const SOURCE_META: Record<string, { label: string; icon: ComponentType<{ classNa
 };
 
 const CONTENT_TYPE_ICON: Record<TriageContentType, ComponentType<{ className?: string; size?: number }>> = {
+  task: ListTodo,
   video: Play,
   image: Image,
   repo: Code2,
@@ -361,6 +363,68 @@ function GalleryCard({
 
   // Determine primary action based on content type
   const primaryAction = item.aiSuggestedActions[0]?.actionType || (isDocument ? 'complete_action' : 'save_karakeep');
+  const task = getInboxTaskMetadata(item);
+
+  if (task) {
+    const due = task.dueDate ? formatDueDate(task.dueDate) : null;
+    return (
+      <div
+        onClick={onSelect}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            onSelect();
+          }
+        }}
+        className={cn(
+          'group relative cursor-pointer overflow-hidden rounded-[12px] border bg-[var(--surface-1)] shadow-[0_1px_3px_rgba(0,0,0,0.3),0_1px_2px_rgba(0,0,0,0.2)] transition-[border-color,box-shadow,transform] duration-150',
+          isFocused
+            ? 'border-[var(--accent)] shadow-[0_0_0_1px_var(--accent),0_8px_24px_rgba(59,130,246,0.2)]'
+            : 'border-transparent hover:border-[var(--surface-3)] hover:shadow-[0_8px_24px_rgba(0,0,0,0.4),0_2px_8px_rgba(0,0,0,0.3)] hover:-translate-y-0.5',
+        )}
+      >
+        <div className="relative min-h-[126px] bg-[var(--surface-2)] p-4">
+          <div className="flex items-center justify-between gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-[6px] border border-cyan-500/20 bg-cyan-500/10 px-2 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-cyan-300">
+              <ListTodo size={12} />
+              Task
+            </span>
+            <span className={cn('rounded-full px-2 py-1 text-xs font-semibold capitalize text-white', task.priority === 'critical' ? 'bg-rose-500/20' : task.priority === 'high' ? 'bg-orange-500/20' : task.priority === 'medium' ? 'bg-amber-500/20' : 'bg-slate-500/20')}>
+              {task.priority === 'none' ? 'No priority' : task.priority}
+            </span>
+          </div>
+          <h3 className="mt-4 line-clamp-3 text-sm font-semibold text-[var(--text-primary)]">{item.title}</h3>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
+            <span>{task.sourceListName || task.connectorType}</span>
+            {due ? <span className={due.isOverdue ? 'text-red-400' : ''}>{due.label}</span> : null}
+          </div>
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent opacity-0 transition-opacity duration-150 group-hover:opacity-100" />
+          <QuickActions
+            primaryAction="complete_action"
+            onAction={onAction}
+            busyAction={busyAction}
+            actions={[
+              { type: 'complete_action', icon: CheckCircle2, label: 'Keep task' },
+              { type: 'snooze', icon: Clock3, label: 'Snooze' },
+              { type: 'dismiss', icon: X, label: 'Dismiss' },
+            ]}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-2 p-3 text-xs text-[var(--text-tertiary)]">
+          <span>{getTimeSince(item.capturedAt)}</span>
+          <span>
+            {task.projectIds.length
+              ? `${task.projectIds.length} project${task.projectIds.length === 1 ? '' : 's'}`
+              : task.planningHorizon
+                ? 'Planned'
+                : 'Needs filing'}
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div
@@ -548,7 +612,7 @@ function DocumentCardThumbnail({
 
       {/* Action type chip */}
       {actionType && (
-        <span className={cn('relative z-[2] mb-1 inline-flex w-fit items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide', ACTION_TYPE_STYLES[actionType] || 'border-slate-700 bg-slate-800/40 text-slate-300')}>
+        <span className={cn('relative z-[2] mb-1 inline-flex w-fit items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-bold uppercase tracking-wide', ACTION_TYPE_STYLES[actionType] || 'border-slate-700 bg-slate-800/40 text-slate-300')}>
           {actionType}
           {typeof amount === 'number' && ` · $${amount}`}
         </span>
@@ -556,7 +620,7 @@ function DocumentCardThumbnail({
 
       {/* Correspondent */}
       {correspondent && (
-        <span className="relative z-[2] text-[11px] font-medium text-[var(--text-secondary)]">
+        <span className="relative z-[2] text-xs font-medium text-[var(--text-secondary)]">
           {correspondent}
         </span>
       )}
@@ -627,7 +691,7 @@ function DocumentCardMeta({ item }: { item: TriageItem }) {
           target="_blank"
           rel="noopener noreferrer"
           onClick={(e) => e.stopPropagation()}
-          className="shrink-0 text-[11px] text-[var(--accent)] hover:underline"
+          className="shrink-0 text-xs text-[var(--accent)] hover:underline"
         >
           View in Paperless-ngx
         </a>
@@ -810,7 +874,7 @@ export default function TriageGalleryView({
         case 'k':
         case 'K': {
           const item = items[focusIndex];
-          if (item) onAction(item.id, 'save_karakeep');
+          if (item && !isInboxTask(item)) onAction(item.id, 'save_karakeep');
           return;
         }
         case 'm':
@@ -828,7 +892,7 @@ export default function TriageGalleryView({
         case 't':
         case 'T': {
           const item = items[focusIndex];
-          if (item) onAction(item.id, 'create_task_todo');
+          if (item) onAction(item.id, isInboxTask(item) ? 'complete_action' : 'create_task_todo');
           return;
         }
         case 'd':
@@ -869,8 +933,8 @@ export default function TriageGalleryView({
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-2 text-center">
         <Globe size={24} className="text-[var(--text-tertiary)]" />
-        <div className="text-sm font-medium text-[var(--text-primary)]">No triage items match these filters.</div>
-        <div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture a new URL above.</div>
+        <div className="text-sm font-medium text-[var(--text-primary)]">No inbox items match these filters.</div>
+        <div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture something new.</div>
       </div>
     );
   }

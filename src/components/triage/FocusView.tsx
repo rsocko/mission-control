@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { motion, useMotionValue, useTransform, type PanInfo } from 'motion/react';
-import { CheckCircle2, ChevronDown, Clock3, Inbox, Loader2, MoreHorizontal } from 'lucide-react';
+import { CheckCircle2, ChevronDown, Clock3, Inbox, ListChecks, Loader2, MoreHorizontal } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import type { TriageActionType, TriageItem } from '@/types';
 import { ACTION_META, SOURCE_META } from '@/components/triage/types';
@@ -10,6 +10,7 @@ import RichPreviewEmbed from '@/components/triage/RichPreviewEmbed';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { getInboxTaskMetadata } from '@/lib/inbox/items';
 
 // Primary actions shown as large buttons on mobile
 const PRIMARY_ACTIONS: Array<{ type: TriageActionType; label: string; icon: typeof CheckCircle2; classes: string }> = [
@@ -124,13 +125,14 @@ export default function FocusView({
     return (
       <div className="flex min-h-[400px] flex-col items-center justify-center gap-2 text-center">
         <Inbox size={24} className="text-[var(--text-tertiary)]" />
-        <div className="text-sm font-medium text-[var(--text-primary)]">No triage items match these filters.</div>
-        <div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture a new URL above.</div>
+        <div className="text-sm font-medium text-[var(--text-primary)]">No inbox items match these filters.</div>
+        <div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture something new.</div>
       </div>
     );
   }
 
   const source = SOURCE_META[item.sourcePlatform] || SOURCE_META.web;
+  const task = getInboxTaskMetadata(item);
 
   return (
     <div className="flex flex-col gap-4">
@@ -158,7 +160,7 @@ export default function FocusView({
 
       {/* Swipe hint on mobile */}
       {isMobile && (
-        <div className="flex items-center justify-center gap-4 text-[10px] text-[var(--text-tertiary)]">
+        <div className="flex items-center justify-center gap-4 text-xs text-[var(--text-tertiary)]">
           <span>← Dismiss</span>
           <span>↑ Snooze</span>
           <span>Done →</span>
@@ -166,7 +168,19 @@ export default function FocusView({
       )}
 
       {/* Card with optional swipe gesture */}
-      {isMobile ? (
+      {task ? (
+        <div className="rounded-[18px] border border-cyan-500/20 bg-gradient-to-br from-cyan-500/10 to-[var(--surface-1)] p-6">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-300">
+            <ListChecks size={14} />
+            Task
+          </div>
+          <h3 className="mt-4 text-xl font-semibold text-[var(--text-primary)]">{item.title}</h3>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+            {task.sourceListName || task.connectorType}
+            {task.dueDate ? ` · Due ${new Date(task.dueDate).toLocaleDateString()}` : ''}
+          </p>
+        </div>
+      ) : isMobile ? (
         <motion.div
           key={item.id}
           drag
@@ -221,7 +235,7 @@ export default function FocusView({
               )}
             >
               {isBusy ? <Loader2 size={20} className="animate-spin" /> : <Icon size={20} />}
-              {label}
+              {task && type === 'complete_action' ? 'Keep task' : label}
             </button>
           );
         })}
@@ -238,7 +252,7 @@ export default function FocusView({
       </button>
 
       {/* Secondary actions — collapsible on mobile */}
-      {showMore && (
+      {showMore && !task && (
         <div className="flex flex-wrap items-center gap-2">
           {SECONDARY_ACTION_TYPES.map((type) => {
             const meta = ACTION_META[type];

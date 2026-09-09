@@ -3,6 +3,8 @@ import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runti
 import { ApiErrors } from '@/lib/api-error';
 import { getNotificationBadgeState, type NavigationCounts } from '@/lib/navigation/badges';
 import { getLocalToday } from '@/lib/utils/date';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { buildTaskFilterSpec } from '@/lib/tasks/core/filter-spec';
 
 function isValidDateParameter(value: string): boolean {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
@@ -22,10 +24,26 @@ export async function GET(request: Request) {
   try {
     const now = new Date().toISOString();
     const today = requestedDate || getLocalToday();
-    const { dailyPlanning } = await getWorkerPersistenceRepositories();
+    const [{ dailyPlanning }, taskCore] = await Promise.all([
+      getWorkerPersistenceRepositories(),
+      getTaskCorePersistence(),
+    ]);
     if (!dailyPlanning) throw new Error('Daily planning persistence is unavailable');
     const repository = dailyPlanning.navigation;
-    const counts = await repository.counts({ date: today, now });
+    const inboxSpec = buildTaskFilterSpec(new URLSearchParams({
+      quickFilter: 'inbox',
+      openOnly: 'true',
+      parentOnly: 'true',
+    }), {
+      clock: { today, weekFromNow: today, recentCutoff: now },
+    });
+    const [counts, pendingInboxTasks] = await Promise.all([
+      repository.counts({ date: today, now }),
+      taskCore.queries.countTasks(
+        inboxSpec,
+        { includeQuickFilter: true, availableAt: now },
+      ),
+    ]);
 
     const notificationBadge = getNotificationBadgeState({
       attention: counts.notifications.attention,
@@ -37,7 +55,7 @@ export async function GET(request: Request) {
     const response: NavigationCounts = {
       myDay: counts.myDay,
       notifications: notificationBadge.count,
-      triage: counts.triage,
+      triage: counts.triage + pendingInboxTasks,
       quickSort: counts.quickSort,
       reconciliation: counts.reconciliation,
       overdue: counts.overdue,

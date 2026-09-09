@@ -13,7 +13,7 @@ import { getMobileTitle, getRouteMetadata } from '@/lib/navigation/route-metadat
 describe('Route → title mapping', () => {
   it('maps primary tab routes to correct titles', () => {
     expect(getMobileTitle('/today')).toBe('Today');
-    expect(getMobileTitle('/triage')).toBe('Triage');
+    expect(getMobileTitle('/triage')).toBe('Inbox');
     expect(getMobileTitle('/capture')).toBe('Capture');
     expect(getMobileTitle('/quick-sort')).toBe('Sort');
     expect(getMobileTitle('/ai')).toBe('Houston');

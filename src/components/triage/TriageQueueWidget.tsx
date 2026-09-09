@@ -42,7 +42,7 @@ export function TriageQueueWidget({ collapsed, onToggleCollapse }: TriageQueueWi
   if (loading) {
     return (
       <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)] p-4 flex items-center gap-2 text-[var(--text-muted)] text-sm">
-        <Loader2 size={14} className="animate-spin" /> Loading triage queue…
+        <Loader2 size={14} className="animate-spin" /> Loading inbox…
       </div>
     );
   }
@@ -172,7 +172,7 @@ export function TriageQueueWidget({ collapsed, onToggleCollapse }: TriageQueueWi
           )}
           <Inbox size={14} className={metrics.isStale ? 'text-amber-400' : 'text-[var(--accent-400)]'} />
           <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-muted)]">
-            Triage Queue
+            Inbox
           </span>
           {metrics.isStale && (
             <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />

@@ -24,6 +24,7 @@ describe('notification URL query', () => {
       merchant,
       source: 'github-issues',
       sourceAccount: 'github-work',
+      notificationType: 'pr_review_requested',
       state: 'unread',
       actionableOnly: 'true',
       dateRange: 'week',
@@ -71,6 +72,14 @@ describe('notification URL query', () => {
       ...DEFAULT_NOTIFICATION_QUERY,
       sort: 'oldest',
     })).toBe(false);
+  });
+
+  it('treats notification type as an active shareable filter', () => {
+    const query = parseNotificationQuery({ notificationType: 'ha_update_critical' });
+
+    expect(query.notificationType).toBe('ha_update_critical');
+    expect(serializeNotificationQuery(query).get('notificationType')).toBe('ha_update_critical');
+    expect(hasActiveNotificationFilters(query)).toBe(true);
   });
 
   it('normalizes every Finance source alias to one source family', () => {

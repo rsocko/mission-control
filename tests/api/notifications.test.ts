@@ -118,7 +118,10 @@ const mockWebPersistence = {
   queryNotifications: vi.fn().mockResolvedValue({
     items: [], actions: [], hasMore: false, cursor: null,
     stats: { total: 0, unread: 0, attention: 0, urgent: 0, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
-    facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+    facets: {
+      level: {}, category: {}, source: {}, sourceAccount: [],
+      notificationType: [], state: {}, merchant: [],
+    },
     matchingCount: 0,
   }),
   recoverStaleActions: vi.fn(),
@@ -185,7 +188,10 @@ describe('GET /api/notifications', () => {
       hasMore: false,
       cursor: null,
       stats: { total: 1, unread: 1, attention: 1, urgent: 1, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
-      facets: { level: { urgent: 1 }, category: { system: 1 }, source: {}, state: { unread: 1 }, merchant: [] },
+      facets: {
+        level: { urgent: 1 }, category: { system: 1 }, source: {},
+        sourceAccount: [], notificationType: [], state: { unread: 1 }, merchant: [],
+      },
       matchingCount: 1,
     });
 

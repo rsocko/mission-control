@@ -14,7 +14,10 @@ import {
   type MissionControlPushPayload,
 } from '@/lib/notifications';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
-import { getLocalToday } from '@/lib/utils/date';
+import { formatDateInLocalTimezone, getLocalToday } from '@/lib/utils/date';
+import { DEFAULT_NOTIFICATION_QUERY } from '@/lib/notifications/query';
+import { getTimezone } from '@/lib/mode';
+import { normalizeHomeAssistantSettings } from '@/lib/connectors/home-assistant/settings';
 import logger from '@/lib/logger';
 
 type ScheduledPushPayload = Omit<MissionControlPushPayload, 'notificationId' | 'body'> & {
@@ -250,6 +253,7 @@ export async function triggerCarryForwardReminder(): Promise<boolean> {
     if (incompleteCount > 3) {
       body += `\n…and ${incompleteCount - 3} more`;
     }
+
   }
   body += '\nCarry forward to tomorrow?';
 
@@ -283,4 +287,83 @@ export async function triggerCarryForwardReminder(): Promise<boolean> {
     'Carry-forward notification created',
   );
   return result.created && result.deliveryEvents.some(event => event.status === 'pending');
+}
+
+/**
+ * Sends one outbound-only summary for each Home Assistant instance configured
+ * for daily update summaries. The summary reuses an active update notification
+ * as its delivery anchor and does not create a grouped inbox record.
+ */
+export async function triggerHomeAssistantUpdateSummaries(now = new Date()): Promise<boolean> {
+  const repositories = await getWorkerPersistenceRepositories();
+  const enqueue = repositories.notificationDelivery.enqueueCustomDeliveries;
+  if (!enqueue) {
+    throw new Error('Notification delivery persistence does not support custom summary delivery');
+  }
+
+  const localTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: getTimezone(),
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(now);
+  const localDate = formatDateInLocalTimezone(now);
+  const connectors = (await repositories.connectors.listEnabled())
+    .filter(connector => connector.type === 'home-assistant');
+  if (connectors.length === 0) return false;
+
+  const result = await repositories.notificationDelivery.web.queryNotifications({
+    query: { ...DEFAULT_NOTIFICATION_QUERY, source: 'home-assistant', sort: 'oldest' },
+    limit: 500,
+    cursor: null,
+  });
+  let created = 0;
+
+  for (const connector of connectors) {
+    const settings = normalizeHomeAssistantSettings(connector.settings);
+    if (
+      settings.outboundDelivery.updatePush !== 'daily_summary'
+      || settings.outboundDelivery.dailySummaryTime !== localTime
+    ) {
+      continue;
+    }
+    const candidates = result.items.filter(item => {
+      if (
+        item.connectorInstanceId !== connector.id
+        || !['ha_update_available', 'ha_update_critical'].includes(item.templateKey || '')
+        || item.disposition !== 'inbox'
+        || item.sourceState !== 'active'
+        || item.readState !== 'unread'
+      ) {
+        return false;
+      }
+      const metadata = item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)
+        ? item.metadata as Record<string, unknown>
+        : {};
+      return metadata.pushDelivery === 'daily_summary';
+    });
+    if (candidates.length === 0) continue;
+
+    const names = candidates.slice(0, 3).map(item => item.title.replace(/\s+is available$/i, ''));
+    const remaining = candidates.length - names.length;
+    const body = `${names.join(', ')}${remaining > 0 ? ` and ${remaining} more` : ''}`;
+    const notificationId = candidates[0].id;
+    created += await enqueue({
+      notificationId,
+      dedupeKey: `home-assistant-update-summary:${connector.id}:${localDate}`,
+      nextAttemptAt: now.toISOString(),
+      payload: {
+        notificationId,
+        title: `${candidates.length} Home Assistant update${candidates.length === 1 ? '' : 's'} available`,
+        body,
+        tag: `ha-update-summary:${connector.id}:${localDate}`,
+        url: `/notifications?source=home-assistant&sourceAccount=${encodeURIComponent(connector.id)}`,
+      },
+    });
+  }
+
+  if (created > 0) {
+    logger.info({ deliveryEventsCreated: created }, 'Home Assistant update summaries queued');
+  }
+  return created > 0;
 }

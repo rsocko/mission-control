@@ -90,6 +90,13 @@ function recommendationFor(
         preview: definition.defaultPreview,
         maxPerHour: null,
       };
+    case 'heads_up_or_higher':
+      return {
+        enabled: true,
+        minLevel: 'heads_up',
+        preview: definition.defaultPreview,
+        maxPerHour: null,
+      };
     case 'off':
       return {
         enabled: false,

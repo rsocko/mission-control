@@ -10,8 +10,15 @@ import {
   normalizeNotificationUrl,
   registerDefaultNotificationProviders,
 } from '@/lib/notifications/providers';
+import { executeHomeAssistantProviderAction } from '@/lib/notifications/providers/home-assistant-action';
 
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
+const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
+  'install_update',
+  'skip_update',
+  'dismiss_persistent_notification',
+  'ignore_repair',
+]);
 type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];
 
 function isRemindLaterDuration(value: unknown): value is RemindLaterDuration {
@@ -72,17 +79,59 @@ export async function POST(
 
     const now = new Date().toISOString();
     const payload = parseActionPayload(action.payload);
+    const requiresProviderClaim = notification.connectorType === 'home-assistant'
+      && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType);
+    if (requiresProviderClaim) {
+      const claimed = await persistence.claimProviderAction({
+        notificationId: id,
+        actionId,
+        claimedAt: now,
+        recoveryCutoff: new Date(Date.now() - 5 * 60_000).toISOString(),
+      });
+      if (!claimed) {
+        return NextResponse.json(
+          { success: false, error: 'This Home Assistant action is already being processed' },
+          { status: 409 },
+        );
+      }
+    }
 
     registerDefaultNotificationProviders();
-    const providerResult = await executeNotificationProviderAction({
-      notification,
-      action,
-      payload,
-      input: body,
-    });
+    let providerResult;
+    try {
+      const context = {
+        notification,
+        action,
+        payload,
+        input: body,
+      };
+      providerResult = notification.connectorType === 'home-assistant'
+        ? await executeHomeAssistantProviderAction(context)
+        : await executeNotificationProviderAction(context);
+    } catch (error) {
+      if (requiresProviderClaim) {
+        await persistence.finalizeProviderAction({
+          notificationId: id,
+          claimedAt: now,
+          now: new Date().toISOString(),
+          success: false,
+          error: error instanceof Error ? error.message : 'Provider action failed',
+        });
+      }
+      throw error;
+    }
 
     if (providerResult) {
       if (providerResult.error) {
+        if (requiresProviderClaim) {
+          await persistence.finalizeProviderAction({
+            notificationId: id,
+            claimedAt: now,
+            now: new Date().toISOString(),
+            success: false,
+            error: providerResult.error.message,
+          });
+        }
         return NextResponse.json({
           success: false,
           error: providerResult.error.message,
@@ -100,7 +149,25 @@ export async function POST(
           now,
         });
       }
+      if (requiresProviderClaim) {
+        await persistence.finalizeProviderAction({
+          notificationId: id,
+          claimedAt: now,
+          now: new Date().toISOString(),
+          success: true,
+          error: null,
+        });
+      }
       return NextResponse.json({ success: true, result: providerResult.result });
+    }
+    if (requiresProviderClaim) {
+      await persistence.finalizeProviderAction({
+        notificationId: id,
+        claimedAt: now,
+        now: new Date().toISOString(),
+        success: false,
+        error: 'Home Assistant provider declined the action',
+      });
     }
 
     // Built-in handlers are used only when a source-specific provider declines.

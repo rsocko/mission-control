@@ -6,6 +6,7 @@ import { getConnectorRegistry } from './registry-runtime';
 
 export async function getOrInitializeConnector(
   connectorInstanceId: string,
+  options: { refresh?: boolean } = {},
 ): Promise<IConnector | null> {
   const repositories = await getCorePersistenceRepositoriesForBackend();
   const config = await repositories.connectors.get(connectorInstanceId);
@@ -13,7 +14,9 @@ export async function getOrInitializeConnector(
 
   const registry = getConnectorRegistry();
   const existing = registry.getConnector(connectorInstanceId);
-  if (existing) return existing;
+  if (existing && !options.refresh) return existing;
 
-  return registry.createConnector(config);
+  return existing
+    ? registry.replaceConnector(config)
+    : registry.createConnector(config);
 }

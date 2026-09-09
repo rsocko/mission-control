@@ -30,6 +30,25 @@ import { serializeConnectorForBrowser } from '@/lib/connectors/public-config';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import type { ManagedConnectorUpdate } from '@/db/persistence/connector-management';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import {
+  normalizeHomeAssistantSettings,
+  readHomeAssistantCredentials,
+} from '@/lib/connectors/home-assistant/settings';
+
+function configsNameMatch(
+  connectors: Array<{ id: string; type: string; name: string; deletedAt?: string | null }>,
+  name: unknown,
+  exceptId?: string,
+): boolean {
+  if (typeof name !== 'string' || !name.trim()) return false;
+  const normalized = name.trim().toLocaleLowerCase();
+  return connectors.some(connector => (
+    connector.id !== exceptId
+    && connector.type === 'home-assistant'
+    && !connector.deletedAt
+    && connector.name.trim().toLocaleLowerCase() === normalized
+  ));
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -157,6 +176,23 @@ export async function POST(request: Request) {
       connectorSettings = validateFinanceConnectorSettings(connectorSettings, {
         requireHouseholdCurrency: true,
       });
+    }
+    if (type === 'home-assistant') {
+      if (typeof name !== 'string' || !name.trim()) {
+        return ApiErrors.badRequest('A Home Assistant instance name is required');
+      }
+      connectorSettings = normalizeHomeAssistantSettings(connectorSettings);
+      const { accessToken } = readHomeAssistantCredentials(credentials || {}, connectorSettings);
+      if (!accessToken) {
+        return ApiErrors.badRequest('A Home Assistant long-lived access token is required');
+      }
+      const duplicate = configsNameMatch(
+        (await persistence.getOverview(false)).connectors,
+        name,
+      );
+      if (duplicate) {
+        return ApiErrors.conflict('A Home Assistant connector with this name already exists');
+      }
     }
     let workTodoSettings = null;
     if (type === 'scout') {
@@ -334,6 +370,25 @@ export async function PATCH(request: Request) {
         updates.settings = validation.data;
         updates.capabilities = capabilitiesForWorkTodo(validation.data);
       }
+      if (existing?.type === 'home-assistant') {
+        const existingSettings = typeof existing.settings === 'string'
+          ? JSON.parse(existing.settings) as Record<string, unknown>
+          : existing.settings;
+        updates.settings = normalizeHomeAssistantSettings({
+          ...existingSettings,
+          ...(updates.settings as Record<string, unknown>),
+        });
+      }
+    }
+    if (existing?.type === 'home-assistant' && updates.name !== undefined) {
+      const duplicate = configsNameMatch(
+        (await persistence.getOverview(false)).connectors,
+        updates.name,
+        id,
+      );
+      if (duplicate) {
+        return ApiErrors.conflict('A Home Assistant connector with this name already exists');
+      }
     }
 
     const now = new Date().toISOString();
@@ -344,6 +399,7 @@ export async function PATCH(request: Request) {
     if (updates.pollIntervalMinutes !== undefined) {
       connectorUpdates.pollIntervalMinutes = updates.pollIntervalMinutes;
     }
+
     if (updates.capabilities !== undefined) connectorUpdates.capabilities = updates.capabilities;
     if (updates.credentials !== undefined) connectorUpdates.credentials = updates.credentials;
     if (updates.settings !== undefined) connectorUpdates.settings = updates.settings;

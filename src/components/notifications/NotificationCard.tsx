@@ -27,6 +27,7 @@ import {
   NOTIFICATION_SOURCE_LABELS,
 } from '@/types/dashboard';
 import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 
 // ─── ICON MAPS ──────────────────────────────────────────────────────────────
 
@@ -66,7 +67,60 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   complete_task: CheckCircle,
   dismiss_reminder: X,
   remind_later: Clock,
+  install_update: RefreshCw,
+  skip_update: ArrowRight,
+  dismiss_persistent_notification: X,
+  ignore_repair: EyeOff,
 };
+
+function NotificationActionConfirmation({
+  action,
+  notification,
+  onCancel,
+  onConfirm,
+}: {
+  action: NotificationAction | null;
+  notification: NotificationItem;
+  onCancel: () => void;
+  onConfirm: (input?: Record<string, unknown>) => void;
+}) {
+  const metadata = notification.metadata ?? {};
+  const canBackup = action?.actionType === 'install_update' && metadata.supportsBackup === true;
+  const [createBackup, setCreateBackup] = useState(false);
+  const cancel = () => {
+    setCreateBackup(false);
+    onCancel();
+  };
+  const confirm = () => {
+    const input = canBackup ? { createBackup } : undefined;
+    setCreateBackup(false);
+    onConfirm(input);
+  };
+
+  return (
+    <ConfirmDialog
+      open={action !== null}
+      title={action ? `Confirm ${action.label.toLowerCase()}` : 'Confirm action'}
+      message={
+        action?.actionType === 'install_update'
+          ? `Install ${String(metadata.latestVersion || 'this update')} on ${String(metadata.instanceName || 'Home Assistant')}? Home Assistant acceptance will be confirmed on the next poll.`
+          : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
+      }
+      confirmLabel={action?.label || 'Confirm'}
+      confirmVariant="warning"
+      onCancel={cancel}
+      onConfirm={confirm}
+    >
+      {canBackup && (
+        <label className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-0)] p-2.5 text-xs text-[var(--text-secondary)]">
+          <input type="checkbox" checked={createBackup} onChange={event => setCreateBackup(event.target.checked)}
+            className="h-4 w-4 accent-blue-500" />
+          Create a backup first
+        </label>
+      )}
+    </ConfirmDialog>
+  );
+}
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -355,6 +409,9 @@ export function NotificationCard({
   onExecuteAction,
 }: NotificationCardProps) {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
+  const acceptedSourceAction = acceptedSourceActionFor === notification.id;
+  const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -381,18 +438,11 @@ export function NotificationCard({
 
   const aiSuggested = notification.aiSuggestedActionId;
 
-  const handleInlineAction = async (
+  const executeInlineAction = async (
     action: NotificationAction,
     params?: Record<string, unknown>,
   ) => {
     if (!onExecuteAction) return;
-    if (
-      action.requiresConfirmation
-      && !window.confirm(`Are you sure you want to ${action.label.toLowerCase()}?`)
-    ) {
-      return;
-    }
-
     setPendingActionId(action.id);
     try {
       const result = params
@@ -400,12 +450,28 @@ export function NotificationCard({
         : await onExecuteAction(action.id);
       if (result?.success === false) {
         toast.error(`${action.label} failed`);
+      } else if (
+        notification.connectorType === 'home-assistant'
+        && action.requiresConfirmation
+      ) {
+        setAcceptedSourceActionFor(notification.id);
       }
     } catch {
       toast.error(`${action.label} failed`);
     } finally {
       setPendingActionId(null);
     }
+  };
+
+  const handleInlineAction = (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
+    if (action.requiresConfirmation) {
+      setConfirmationAction(action);
+      return;
+    }
+    void executeInlineAction(action, params);
   };
 
   return (
@@ -533,7 +599,7 @@ export function NotificationCard({
                   levelConfig={levelConfig}
                   isAiSuggested={primaryAction.id === aiSuggested}
                   isLoading={pendingActionId === primaryAction.id}
-                  disabled={pendingActionId !== null}
+                  disabled={pendingActionId !== null || (acceptedSourceAction && primaryAction.requiresConfirmation)}
                   onClick={() => void handleInlineAction(primaryAction)}
                 />
               )}
@@ -542,7 +608,7 @@ export function NotificationCard({
                   <RemindLaterButton
                     key={action.id}
                     action={action}
-                    disabled={pendingActionId !== null}
+                    disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
                     isLoading={pendingActionId === action.id}
                     onSelect={(duration) => void handleInlineAction(action, { duration })}
                   />
@@ -553,7 +619,7 @@ export function NotificationCard({
                     levelConfig={levelConfig}
                     isAiSuggested={action.id === aiSuggested}
                     isLoading={pendingActionId === action.id}
-                    disabled={pendingActionId !== null}
+                    disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
                     onClick={() => void handleInlineAction(action)}
                   />
                 )
@@ -615,6 +681,16 @@ export function NotificationCard({
         </Tooltip>
       </div>
       )}
+      <NotificationActionConfirmation
+        action={confirmationAction}
+        notification={notification}
+        onCancel={() => setConfirmationAction(null)}
+        onConfirm={(input) => {
+          const action = confirmationAction;
+          setConfirmationAction(null);
+          if (action) void executeInlineAction(action, input);
+        }}
+      />
     </motion.div>
   );
 }
@@ -646,6 +722,9 @@ export function NotificationDetail({
   className = '',
 }: NotificationDetailProps) {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
+  const acceptedSourceAction = acceptedSourceActionFor === notification.id;
+  const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -660,24 +739,27 @@ export function NotificationDetail({
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
 
-  const handleAction = async (
+  const executeAction = async (
     action: NotificationAction,
     params?: Record<string, unknown>,
   ) => {
-    if (
-      action.requiresConfirmation
-      && !window.confirm(`Are you sure you want to ${action.label.toLowerCase()}?`)
-    ) {
-      return;
-    }
-
     setPendingActionId(action.id);
     try {
       const result = params
         ? await onExecuteAction(action.id, params)
         : await onExecuteAction(action.id);
       if (result.success) {
-        toast.success(`${action.label} completed`);
+        if (
+          notification.connectorType === 'home-assistant'
+          && action.requiresConfirmation
+        ) {
+          setAcceptedSourceActionFor(notification.id);
+        }
+        toast.success(
+          notification.connectorType === 'home-assistant'
+            ? `${action.label} request accepted`
+            : `${action.label} completed`,
+        );
       } else {
         toast.error(`${action.label} failed`);
       }
@@ -686,6 +768,17 @@ export function NotificationDetail({
     } finally {
       setPendingActionId(null);
     }
+  };
+
+  const handleAction = (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
+    if (action.requiresConfirmation) {
+      setConfirmationAction(action);
+      return;
+    }
+    void executeAction(action, params);
   };
 
   return (
@@ -783,7 +876,7 @@ export function NotificationDetail({
                 levelConfig={levelConfig}
                 isAiSuggested={primaryAction.id === notification.aiSuggestedActionId}
                 isLoading={pendingActionId === primaryAction.id}
-                disabled={pendingActionId !== null}
+                disabled={pendingActionId !== null || (acceptedSourceAction && primaryAction.requiresConfirmation)}
                 onClick={() => void handleAction(primaryAction)}
               />
             )}
@@ -792,7 +885,7 @@ export function NotificationDetail({
                 <RemindLaterButton
                   key={action.id}
                   action={action}
-                  disabled={pendingActionId !== null}
+                  disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
                   isLoading={pendingActionId === action.id}
                   onSelect={(duration) => void handleAction(action, { duration })}
                 />
@@ -803,7 +896,7 @@ export function NotificationDetail({
                   levelConfig={levelConfig}
                   isAiSuggested={action.id === notification.aiSuggestedActionId}
                   isLoading={pendingActionId === action.id}
-                  disabled={pendingActionId !== null}
+                  disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
                   onClick={() => void handleAction(action)}
                 />
               )
@@ -858,6 +951,16 @@ export function NotificationDetail({
           )}
         </div>
       )}
+      <NotificationActionConfirmation
+        action={confirmationAction}
+        notification={notification}
+        onCancel={() => setConfirmationAction(null)}
+        onConfirm={(input) => {
+          const action = confirmationAction;
+          setConfirmationAction(null);
+          if (action) void executeAction(action, input);
+        }}
+      />
     </div>
   );
 }

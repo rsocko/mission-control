@@ -36,11 +36,13 @@ export async function register() {
       triggerMorningNotification,
       triggerTriageNudge,
       triggerCarryForwardReminder,
+      triggerHomeAssistantUpdateSummaries,
     } = await import('@/lib/push/triggers');
     registerScheduledPushHandlers({
       triggerMorningNotification,
       triggerTriageNudge,
       triggerCarryForwardReminder,
+      triggerHomeAssistantUpdateSummaries,
     });
   }
   const { isPublicDemoMode } = await import('@/lib/public-demo');

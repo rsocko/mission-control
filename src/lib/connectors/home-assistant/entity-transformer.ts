@@ -21,7 +21,7 @@ const PACKAGE_LEVEL: NotificationLevel = 'digest';
 
 export function matchPattern(entityId: string, pattern: string): boolean {
   const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`^${escaped.replace(/\\\*/g, '.*').replace(/\\\?/g, '.')}$`, 'i');
+  const regex = new RegExp(`^${escaped.replace(/\*/g, '.*').replace(/\?/g, '.')}$`, 'i');
   return regex.test(entityId);
 }
 

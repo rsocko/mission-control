@@ -18,7 +18,7 @@ export type RouteMetadata = RouteMetadataBase & (
 
 const ROUTE_METADATA: readonly RouteMetadata[] = [
   { pathname: '/today', title: 'Today', mobileAccess: 'listed' },
-  { pathname: '/triage', title: 'Triage', mobileAccess: 'listed' },
+  { pathname: '/triage', title: 'Inbox', mobileAccess: 'listed' },
   { pathname: '/scout/reconciliation', title: 'Reconciliation', mobileAccess: 'listed' },
   { pathname: '/capture', title: 'Capture', mobileAccess: 'listed' },
   { pathname: '/quick-sort', title: 'Sort', mobileAccess: 'listed' },

@@ -45,7 +45,7 @@ function buildSuggestions(data: SuggestionData): Suggestion[] {
       id: 'triage',
       type: 'triage',
       title: `${data.triagePending} items need triage`,
-      description: 'Your triage queue is building up. I can help categorize and route them quickly.',
+      description: 'Your Inbox is building up. I can help categorize and route items quickly.',
       icon: <Layers size={16} className="text-amber-400" />,
       action: 'Start triage',
       actionPrompt: 'Help me triage my pending items. Categorize them and suggest actions for each.',
@@ -97,7 +97,7 @@ export function HoustonSuggestions({ onAction, disabled = false }: HoustonSugges
       try {
         const [tasksRes, triageRes] = await Promise.allSettled([
           fetch('/api/tasks?openOnly=true&parentOnly=true&countsOnly=true'),
-          fetch('/api/triage?status=pending&limit=0'),
+          fetch('/api/navigation/counts'),
         ]);
 
         let overdue = 0;
@@ -111,7 +111,7 @@ export function HoustonSuggestions({ onAction, disabled = false }: HoustonSugges
         let triagePending = 0;
         if (triageRes.status === 'fulfilled' && triageRes.value.ok) {
           const data = await triageRes.value.json();
-          triagePending = data?.stats?.pending ?? data?.totalFiltered ?? 0;
+          triagePending = data?.triage ?? 0;
         }
 
         const built = buildSuggestions({

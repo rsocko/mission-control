@@ -159,7 +159,7 @@ export default function SettingsPage() {
         <AboutSection />
       </div>
     ) : (
-      <MobileSettings />
+      <MobileSettings onAddConnector={() => setShowAddModal(true)} />
     )}
 
     {/* Desktop settings view */}
@@ -400,16 +400,16 @@ export default function SettingsPage() {
         </div>
       </main>
 
-      {/* Add Connector Modal */}
-      <AnimatePresence>
-        {showAddModal && (
-          <AddConnectorModal
-            onClose={() => setShowAddModal(false)}
-            onAdded={() => { setShowAddModal(false); fetchData(); }}
-          />
-        )}
-      </AnimatePresence>
     </div>
+
+    <AnimatePresence>
+      {showAddModal && (
+        <AddConnectorModal
+          onClose={() => setShowAddModal(false)}
+          onAdded={() => { setShowAddModal(false); fetchData(); }}
+        />
+      )}
+    </AnimatePresence>
     </>
   );
 }

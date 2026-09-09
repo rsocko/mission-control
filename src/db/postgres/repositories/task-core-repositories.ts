@@ -356,7 +356,10 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
 
   async countTasks(spec: TaskFilterSpec, scope: TaskQueryScope = {}): Promise<number> {
     const compiled = compileCanonicalTaskFilter(spec, await this.resolveInputs(spec));
-    return this.countWhere(scope.includeQuickFilter ? compiled.taskWhere : compiled.baseWhere);
+    const where = scope.includeQuickFilter ? compiled.taskWhere : compiled.baseWhere;
+    return this.countWhere(scope.availableAt
+      ? and(where, or(isNull(tasks.snoozedUntil), lte(tasks.snoozedUntil, scope.availableAt)))
+      : where);
   }
 
   async listTaskIds(spec: TaskFilterSpec, page: TaskListPage): Promise<string[]> {

@@ -1036,16 +1036,46 @@ export function createPostgresConnectorManagementRepository(
     },
 
     async listSyncHistory(input) {
+      const conditions: string[] = [];
+      const parameters: unknown[] = [];
+      const bind = (value: unknown) => {
+        parameters.push(value);
+        return `$${parameters.length}`;
+      };
+      if (input.before) {
+        conditions.push(`synced_at < ${bind(input.before)}`);
+      }
+      if (input.connectorIds?.length) {
+        conditions.push(`connector_id = ANY(${bind(input.connectorIds)}::text[])`);
+      }
+      if (input.results?.length) {
+        const resultConditions = input.results.map((result) => {
+          if (result === 'errors') {
+            return `(success = FALSE OR jsonb_array_length(errors) > 0)`;
+          }
+          const hasChanges = `(
+            tasks_added > 0 OR tasks_updated > 0 OR tasks_removed > 0
+            OR tasks_pushed > 0 OR local_only_protected > 0 OR alerts_added > 0
+          )`;
+          if (result === 'changes') return hasChanges;
+          return `(
+            success = TRUE AND NOT ${hasChanges}
+            AND jsonb_array_length(errors) = 0
+          )`;
+        });
+        conditions.push(`(${resultConditions.join(' OR ')})`);
+      }
+      const limitParameter = bind(input.limit + 1);
       const historyRows = await rows<SyncHistoryRecord>(
         pool,
         `
           SELECT ${SYNC_HISTORY_COLUMNS}
           FROM sync_log
-          ${input.before ? 'WHERE synced_at < $1' : ''}
+          ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
           ORDER BY synced_at DESC, id DESC
-          LIMIT $${input.before ? 2 : 1}
+          LIMIT ${limitParameter}
         `,
-        input.before ? [input.before, input.limit + 1] : [input.limit + 1],
+        parameters,
       );
       const hasMore = historyRows.length > input.limit;
       return { history: historyRows.slice(0, input.limit), hasMore };

@@ -28,6 +28,7 @@ describe('PostgreSQL NotificationWebPersistence integration', () => {
       expect(repo).toBeDefined();
       const views = await repo.listSavedViews();
       expect(Array.isArray(views)).toBe(true);
+      await expect(repo.recoverStaleActions(new Date().toISOString())).resolves.toBeUndefined();
     } finally {
       await pool.end();
     }

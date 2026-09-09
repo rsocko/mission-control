@@ -889,14 +889,42 @@ export function createSqliteConnectorManagementRepository(
     },
 
     async listSyncHistory(input) {
+      const conditions: string[] = [];
+      const parameters: unknown[] = [];
+      if (input.before) {
+        conditions.push('synced_at < ?');
+        parameters.push(input.before);
+      }
+      if (input.connectorIds?.length) {
+        conditions.push(`connector_id IN (${input.connectorIds.map(() => '?').join(', ')})`);
+        parameters.push(...input.connectorIds);
+      }
+      if (input.results?.length) {
+        const resultConditions = input.results.map((result) => {
+          if (result === 'errors') {
+            return `(success = 0 OR COALESCE(errors, '[]') <> '[]')`;
+          }
+          const hasChanges = `(
+            tasks_added > 0 OR tasks_updated > 0 OR tasks_removed > 0
+            OR tasks_pushed > 0 OR local_only_protected > 0 OR alerts_added > 0
+          )`;
+          if (result === 'changes') return hasChanges;
+          return `(
+            success = 1 AND NOT ${hasChanges}
+            AND COALESCE(errors, '[]') = '[]'
+          )`;
+        });
+        conditions.push(`(${resultConditions.join(' OR ')})`);
+      }
       const rows = database.prepare(`
         SELECT ${SYNC_HISTORY_COLUMNS}
         FROM sync_log
-        ${input.before ? 'WHERE synced_at < ?' : ''}
+        ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
         ORDER BY synced_at DESC, id DESC
         LIMIT ?
       `).all(
-        ...(input.before ? [input.before, input.limit + 1] : [input.limit + 1]),
+        ...parameters,
+        input.limit + 1,
       ) as SqliteSyncHistoryRow[];
       const hasMore = rows.length > input.limit;
       return {

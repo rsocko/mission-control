@@ -106,7 +106,7 @@ function ActionQueues({ queues }: { queues: QueueCounts }) {
       icon: Layers,
       iconColor: 'text-sky-400',
       iconBg: 'bg-sky-500/15',
-      label: 'Process Triage',
+      label: 'Review Inbox',
       description: 'Review incoming items',
       count: queues.triage,
       countLabel: 'pending',
@@ -191,7 +191,7 @@ function ActionQueues({ queues }: { queues: QueueCounts }) {
 function GoTo() {
   const destinations = [
     { href: '/today', icon: Sun, label: 'My Day', color: 'text-amber-400' },
-    { href: '/triage', icon: Layers, label: 'Triage', color: 'text-sky-400' },
+    { href: '/triage', icon: Layers, label: 'Inbox', color: 'text-sky-400' },
     { href: '/quick-sort', icon: Zap, label: 'Sort', color: 'text-amber-300' },
     { href: '/goals', icon: Target, label: 'Goals', color: 'text-rose-400' },
     { href: '/routines', icon: Repeat, label: 'Routines', color: 'text-emerald-400' },

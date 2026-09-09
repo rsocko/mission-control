@@ -93,7 +93,7 @@ interface ConnectedService {
  * - F-100: Toggle-based preferences
  * - F-101: Sync status and manual trigger
  */
-export function MobileSettings() {
+export function MobileSettings({ onAddConnector }: { onAddConnector: () => void }) {
   const router = useRouter();
   const { progress } = useSyncStream();
 
@@ -328,11 +328,11 @@ export function MobileSettings() {
             'flex items-center gap-3 w-full px-4 py-3.5 text-left active:bg-[var(--surface-2)] transition-colors',
             services.length > 0 && 'border-t border-[var(--border-subtle)]'
           )}
-          onClick={() => router.push('/settings/connectors')}
-          aria-label="Add integration"
+          onClick={onAddConnector}
+          aria-label="Add connector"
         >
           <CirclePlus size={14} className="text-[var(--accent-400)]" />
-          <span className="text-sm text-[var(--accent-400)]">Add integration...</span>
+          <span className="text-sm text-[var(--accent-400)]">Add connector</span>
         </button>
       </SectionCard>
 

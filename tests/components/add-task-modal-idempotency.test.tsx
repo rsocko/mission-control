@@ -121,4 +121,80 @@ describe('AddTaskModal submission guard', () => {
       );
     });
   });
+
+  it('retains batch organization and clears task-specific fields when adding another task', async () => {
+    const taskBodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/tasks') {
+        taskBodies.push(JSON.parse(String(init?.body)));
+        return Promise.resolve(new Response(JSON.stringify({ id: `task-${taskBodies.length}` })));
+      }
+      if (url === '/api/tags') {
+        return Promise.resolve(new Response(JSON.stringify({
+          tags: [{ id: 'tag-1', name: '3dprint', slug: '3dprint', color: null }],
+        })));
+      }
+      if (url === '/api/hub-projects') {
+        return Promise.resolve(new Response(JSON.stringify({
+          projects: [{ id: 'project-1', name: '3D Models', color: '#3b82f6' }],
+        })));
+      }
+      if (url === '/api/subtask-templates') {
+        return Promise.resolve(new Response(JSON.stringify({ templates: [] })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({})));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const destination: ComponentProps<typeof AddTaskModal>['initialDestination'] = {
+      id: 'local',
+      label: 'Local',
+      connectorType: 'local',
+      account: null,
+      color: '#3b82f6',
+    };
+
+    render(
+      <TooltipProvider>
+        <AddTaskModal
+          initialInput=""
+          initialParsed={null}
+          initialDestination={destination}
+          destinations={[destination]}
+          initialProjectId="project-1"
+          prefill={{
+            title: 'First task',
+            description: 'Only for the first task',
+            tags: ['3dprint', 'new-tag'],
+            dueDate: '2026-09-10',
+            priority: 'high',
+            planningHorizon: 'now',
+          }}
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    await screen.findByText('3dprint');
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Add another' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+
+    const titleInput = screen.getByPlaceholderText('What needs to be done?');
+    await waitFor(() => expect(titleInput).toHaveValue(''));
+    fireEvent.change(titleInput, { target: { value: 'Second task' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+
+    await waitFor(() => expect(taskBodies).toHaveLength(2));
+    expect(taskBodies[1]).toEqual(expect.objectContaining({
+      title: 'Second task',
+      priority: 'none',
+      planningHorizon: null,
+      tags: ['tag-1'],
+      tagSlugs: ['new-tag'],
+      projectIds: ['project-1'],
+    }));
+    expect(taskBodies[1]).not.toHaveProperty('description');
+    expect(taskBodies[1]).not.toHaveProperty('dueDate');
+  });
 });

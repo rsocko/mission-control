@@ -137,7 +137,7 @@ interface NotificationCardProps {
   onExecuteAction?: (
     actionId: string,
     params?: Record<string, unknown>,
-  ) => void | Promise<{ success: boolean }>;
+  ) => void | Promise<{ success: boolean; error?: string }>;
 }
 
 interface PresentationMetadataChip {
@@ -449,7 +449,7 @@ export function NotificationCard({
         ? await onExecuteAction(action.id, params)
         : await onExecuteAction(action.id);
       if (result?.success === false) {
-        toast.error(`${action.label} failed`);
+        toast.error(result.error || `${action.label} failed`);
       } else if (
         notification.connectorType === 'home-assistant'
         && action.requiresConfirmation
@@ -700,7 +700,7 @@ export interface NotificationDetailProps {
   onExecuteAction: (
     actionId: string,
     params?: Record<string, unknown>,
-  ) => Promise<{ success: boolean }>;
+  ) => Promise<{ success: boolean; error?: string }>;
   onMarkRead?: () => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
   onArchive?: () => void | Promise<void>;
@@ -761,7 +761,7 @@ export function NotificationDetail({
             : `${action.label} completed`,
         );
       } else {
-        toast.error(`${action.label} failed`);
+        toast.error(result.error || `${action.label} failed`);
       }
     } catch {
       toast.error(`${action.label} failed`);

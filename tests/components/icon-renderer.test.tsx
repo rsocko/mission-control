@@ -1,12 +1,17 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { IconPicker, IconRenderer } from '@/components/ui/icon-picker';
+import { POPULAR_DASHBOARD_ICONS } from '@/components/ui/icon-picker/types';
 
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('IconRenderer', () => {
+  it('includes the Home Assistant logo in the source icon picker', () => {
+    expect(POPULAR_DASHBOARD_ICONS).toContain('home-assistant');
+  });
+
   it('inherits the theme color for uncolored monochrome icons', () => {
     render(<IconRenderer value="pin" size={16} />);
 

@@ -238,6 +238,7 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   'monarch-money': '/icons/connectors/tyrion.svg',
   'custom-rest': '/icons/connectors/custom-rest.svg',
   'document-intelligence': '/icons/agents/owl.svg',
+  'home-assistant': '/icons/connectors/home-assistant.svg',
 };
 
 

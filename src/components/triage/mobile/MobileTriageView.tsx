@@ -11,6 +11,7 @@ import MobileTriageFocus from './MobileTriageFocus';
 import MobileTriageStream from './MobileTriageStream';
 import MobileTriageItemDetail from './MobileTriageItemDetail';
 import MobileTriageEmpty from './MobileTriageEmpty';
+import type { InboxGroup } from '@/lib/inbox/items';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -32,6 +33,9 @@ interface MobileTriageViewProps {
     streak: number;
     totalProcessed: number;
   };
+  group: InboxGroup;
+  onGroupChange: (group: InboxGroup) => void;
+  groupCounts: Record<InboxGroup, number>;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -44,6 +48,9 @@ export default function MobileTriageView({
   busyAction,
   onRefresh,
   stats,
+  group,
+  onGroupChange,
+  groupCounts,
 }: MobileTriageViewProps) {
   const [mode, setMode] = useState<MobileTriageMode>('stream');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
@@ -70,8 +77,14 @@ export default function MobileTriageView({
     setMode('stream');
   }, []);
 
+  const handleGroupChange = useCallback((nextGroup: InboxGroup) => {
+    setSourceFilter('all');
+    setTypeFilter(null);
+    onGroupChange(nextGroup);
+  }, [onGroupChange]);
+
   // Empty state: no items and not loading
-  if (!loading && items.length === 0) {
+  if (!loading && items.length === 0 && group === 'all' && groupCounts.all === 0) {
     return (
       <MobileTriageEmpty
         stats={stats ?? { processedToday: 0, streak: 0, totalProcessed: 0 }}
@@ -94,6 +107,9 @@ export default function MobileTriageView({
           onSourceFilterChange={setSourceFilter}
           activeTypeFilter={typeFilter}
           onTypeFilterChange={setTypeFilter}
+          group={group}
+          onGroupChange={handleGroupChange}
+          groupCounts={groupCounts}
         />
       ) : (
         <MobileTriageFocus

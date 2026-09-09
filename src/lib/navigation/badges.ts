@@ -23,7 +23,7 @@ export const NAV_BADGE_OPTIONS: Array<{
 }> = [
   { key: 'myDay', label: 'My Day', description: 'Incomplete tasks assigned to today' },
   { key: 'notifications', label: 'Notifications', description: 'Notifications that need attention' },
-  { key: 'triage', label: 'Triage', description: 'Pending triage items' },
+  { key: 'triage', label: 'Inbox', description: 'Incoming items waiting to be routed' },
   { key: 'quickSort', label: 'Quick Sort', description: 'Open tasks without a priority' },
   { key: 'reconciliation', label: 'Reconciliation', description: 'Pending reconciliation suggestions' },
 ];

@@ -7,6 +7,11 @@ import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import logger from '@/lib/logger';
 import { isDemoMode } from '@/lib/mode';
+import { createHAClient } from '@/lib/connectors/home-assistant/ha-client';
+import {
+  normalizeHomeAssistantSettings,
+  readHomeAssistantCredentials,
+} from '@/lib/connectors/home-assistant/settings';
 
 /**
  * POST /api/connectors/[id]/test
@@ -131,7 +136,13 @@ async function testConnector(
   type: string,
   credentials: Record<string, string>,
   settings: Record<string, unknown>
-): Promise<{ success: boolean; latencyMs: number; error?: string; details?: string }> {
+): Promise<{
+  success: boolean;
+  latencyMs: number;
+  error?: string;
+  details?: string;
+  sources?: Record<string, { available: boolean; error?: string }>;
+}> {
   const start = Date.now();
 
   try {
@@ -243,36 +254,26 @@ async function testConnector(
       }
 
       case 'home-assistant': {
-        const baseUrl = typeof settings.baseUrl === 'string'
-          ? settings.baseUrl.replace(/\/+$/, '')
-          : (process.env.HOME_ASSISTANT_URL || 'http://localhost:8123');
-        const token =
-          credentials.accessToken ||
-          credentials.token ||
-          (typeof settings.accessToken === 'string' ? settings.accessToken : '') ||
-          process.env.HOME_ASSISTANT_TOKEN ||
-          '';
-
-        if (!token) {
+        const normalized = normalizeHomeAssistantSettings(settings);
+        const { accessToken } = readHomeAssistantCredentials(credentials, settings);
+        if (!accessToken) {
           return { success: false, latencyMs: 0, error: 'No Home Assistant access token configured' };
         }
-
-        const res = await fetch(`${baseUrl}/api/services`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          signal: AbortSignal.timeout(10000),
-        });
+        const result = await createHAClient({
+          baseUrl: normalized.baseUrl,
+          accessToken,
+        }).testConnection();
         const latencyMs = Date.now() - start;
-        if (res.ok) {
-          const data = await res.json();
-          return { success: true, latencyMs, details: `${Array.isArray(data) ? data.length : 0} service domains accessible` };
+        if (!result.ok) {
+          return { success: false, latencyMs, error: result.error || 'Connection failed' };
         }
-        if (res.status === 401) {
-          return { success: false, latencyMs, error: 'Token expired or invalid' };
-        }
-        return { success: false, latencyMs, error: `HTTP ${res.status}: ${res.statusText}` };
+        const available = Object.values(result.sources || {}).filter(source => source.available).length;
+        return {
+          success: true,
+          latencyMs,
+          details: `Connected — ${available} of 3 notification sources available`,
+          sources: result.sources,
+        };
       }
 
       case 'document-intelligence': {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Calendar, Check, ChevronDown, ChevronUp, ClipboardPlus, Link2, Loader2, RefreshCw, Tag, Trash2 } from 'lucide-react';
+import { Calendar, Check, ChevronDown, ChevronUp, ClipboardPlus, Clock3, Link2, ListTodo, Loader2, RefreshCw, Tag, Trash2, X } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { ACTION_META } from '@/components/triage/types';
 import RichPreviewEmbed from '@/components/triage/RichPreviewEmbed';
@@ -9,6 +9,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { cn } from '@/lib/utils/cn';
 import { toast } from 'sonner';
 import type { TriageActionType, TriageItem } from '@/types';
+import { getInboxTaskMetadata } from '@/lib/inbox/items';
 
 interface DecisionPanelProps {
   selectedItem: TriageItem | null;
@@ -113,19 +114,75 @@ export default function DecisionPanel({
     return (
       <section className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-1)] p-4">
         <div className="flex h-full min-h-[320px] items-center justify-center text-center text-sm text-[var(--text-tertiary)]">
-          Select a triage item to review.
+          Select an inbox item to review.
         </div>
       </section>
     );
   }
 
-  const embed = selectedItem.rawMetadata?.embed as {
-    type?: string;
-    html?: string;
-    thumbnail_url?: string;
-    provider_name?: string;
-    resolved_title?: string;
-  } | undefined;
+  const task = getInboxTaskMetadata(selectedItem);
+  if (task) {
+    return (
+      <section className="rounded-[18px] border border-[var(--border)] bg-[var(--surface-1)] p-4">
+        <div className="flex items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-500/20 bg-cyan-500/10 px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-300">
+            <ListTodo size={13} />
+            Task
+          </span>
+          <span className="text-xs capitalize text-[var(--text-tertiary)]">{task.priority === 'none' ? 'No priority' : `${task.priority} priority`}</span>
+        </div>
+        <div className="mt-4 rounded-[16px] border border-[var(--border)] bg-[var(--surface-0)] p-4">
+          <h3 className="text-lg font-semibold text-[var(--text-primary)]">{selectedItem.title}</h3>
+          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+            {task.sourceListName || task.connectorType}
+            {task.dueDate ? ` · Due ${new Date(task.dueDate).toLocaleDateString()}` : ''}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span className="rounded-full border border-[var(--border)] px-2.5 py-1 text-xs text-[var(--text-tertiary)]">
+              {task.projectIds.length
+                ? `${task.projectIds.length} project${task.projectIds.length === 1 ? '' : 's'}`
+                : task.planningHorizon
+                  ? 'Planned'
+                  : 'Needs filing'}
+            </span>
+            {task.planningHorizon ? (
+              <span className="rounded-full border border-[var(--border)] px-2.5 py-1 text-xs capitalize text-[var(--text-tertiary)]">
+                {task.planningHorizon}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div className="mt-4">
+          <h4 className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">Route task</h4>
+          <p className="mt-1 text-sm text-[var(--text-secondary)]">Keep this as an active task, defer the decision, or remove it from your working system.</p>
+          <div className="mt-3 grid gap-2">
+            {[
+              { type: 'complete_action' as const, label: 'Keep task', description: 'Accept this task and remove it from Inbox.', icon: Check },
+              { type: 'snooze' as const, label: 'Snooze one day', description: 'Bring it back to Inbox tomorrow.', icon: Clock3 },
+              { type: 'dismiss' as const, label: 'Dismiss task', description: 'Hide it in Mission Control without deleting the source task.', icon: X },
+            ].map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.type}
+                  type="button"
+                  onClick={() => onAction(selectedItem.id, action.type)}
+                  disabled={!!busyAction}
+                  className="flex items-start gap-3 rounded-[14px] border border-[var(--border)] bg-[var(--surface-0)] p-3 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  {busyAction === action.type ? <Loader2 size={16} className="mt-0.5 animate-spin" /> : <Icon size={16} className="mt-0.5 text-[var(--accent-300)]" />}
+                  <span>
+                    <span className="block text-sm font-medium text-[var(--text-primary)]">{action.label}</span>
+                    <span className="mt-0.5 block text-xs text-[var(--text-secondary)]">{action.description}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    );
+  }
 
   const isMediaSource = selectedItem.sourcePlatform === 'instagram' || selectedItem.sourcePlatform === 'youtube';
   const descriptionText = selectedItem.description || selectedItem.aiSummary;

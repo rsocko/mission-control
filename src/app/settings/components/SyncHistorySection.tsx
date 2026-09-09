@@ -6,6 +6,7 @@ import {
   RefreshCw, ChevronRight, Shield, Loader2, ServerCrash,
   AlertTriangle, Clock, CheckCircle2, XCircle, RotateCcw, Activity,
   ChevronLeft, Archive, Trash2, Upload, Unplug, ExternalLink, Info, ArchiveRestore,
+  Check, ChevronDown, ListFilter, X,
 } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
 import { toast } from 'sonner';
@@ -18,6 +19,7 @@ import type {
 import { getConnectorDisplayName } from './types';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
+import { Dropdown } from '@/components/ui/Dropdown';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import {
   classifyRetainedReason,
@@ -31,6 +33,25 @@ import {
 
 const PAGE_SIZE = 10;
 const DETAIL_PAGE_SIZE = 10;
+type HistoryResultFilter = 'changes' | 'no-changes' | 'errors';
+
+const RESULT_FILTER_OPTIONS: Array<{ value: HistoryResultFilter; label: string }> = [
+  { value: 'changes', label: 'Has changes' },
+  { value: 'no-changes', label: 'No changes' },
+  { value: 'errors', label: 'Errors' },
+];
+
+function initialHistoryFilters(
+  param: string,
+  allowed: ReadonlySet<string>,
+): string[] {
+  if (typeof window === 'undefined') return [];
+  return [...new Set(
+    new URL(window.location.href).searchParams
+      .getAll(param)
+      .filter(value => allowed.has(value)),
+  )];
+}
 
 const triggerLabels: Record<NonNullable<SyncLogEntry['trigger']>, string> = {
   api: 'Manual',
@@ -851,6 +872,11 @@ function RemovedTaskDialog({ snapshotId, onClose, onOpenTask }: {
 
 function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
   const connectorNames = Object.fromEntries(connectors.map(c => [c.id, getConnectorDisplayName(c)]));
+  const connectorIds = useMemo(() => new Set(connectors.map(connector => connector.id)), [connectors]);
+  const resultFilterValues = useMemo(
+    () => new Set(RESULT_FILTER_OPTIONS.map(option => option.value)),
+    [],
+  );
   const [entries, setEntries] = useState<SyncLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -861,10 +887,31 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
   const [scheduleHealth, setScheduleHealth] = useState<SyncScheduleHealth | null>(null);
   const [syncingConnectors, setSyncingConnectors] = useState<Set<string>>(new Set());
   const [relativeTimeNow] = useState(() => Date.now());
+  const [selectedSources, setSelectedSources] = useState<string[]>(
+    () => initialHistoryFilters('source', connectorIds),
+  );
+  const [selectedResults, setSelectedResults] = useState<HistoryResultFilter[]>(
+    () => initialHistoryFilters('result', resultFilterValues) as HistoryResultFilter[],
+  );
+  const [sourceFilterOpen, setSourceFilterOpen] = useState(false);
+  const [resultFilterOpen, setResultFilterOpen] = useState(false);
+  const hasActiveFilters = selectedSources.length > 0 || selectedResults.length > 0;
+  const updateSourceFilters = (update: React.SetStateAction<string[]>) => {
+    setLoading(true);
+    setExpandedId(null);
+    setSelectedSources(update);
+  };
+  const updateResultFilters = (update: React.SetStateAction<HistoryResultFilter[]>) => {
+    setLoading(true);
+    setExpandedId(null);
+    setSelectedResults(update);
+  };
 
   const fetchPage = useCallback(async (before?: string) => {
     const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
     if (before) params.set('before', before);
+    selectedSources.forEach(source => params.append('source', source));
+    selectedResults.forEach(result => params.append('result', result));
     const res = await fetch(`/api/sync?${params}`);
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to load sync history');
@@ -873,7 +920,20 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
       hasMore: !!data.hasMore,
       scheduleHealth: (data.scheduleHealth || null) as SyncScheduleHealth | null,
     };
-  }, []);
+  }, [selectedResults, selectedSources]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    url.searchParams.delete('source');
+    url.searchParams.delete('result');
+    selectedSources.forEach(source => url.searchParams.append('source', source));
+    selectedResults.forEach(result => url.searchParams.append('result', result));
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    );
+  }, [selectedResults, selectedSources]);
 
   useEffect(() => {
     let refreshGeneration = 0;
@@ -1052,9 +1112,148 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
   return (
     <>
       <h2 className="text-xl font-semibold text-[var(--text-primary)] mb-2">Sync History</h2>
-      <p className="text-sm text-[var(--text-tertiary)] mb-6">
+      <p className="text-sm text-[var(--text-tertiary)] mb-4">
         Recent sync runs and automatic-scheduling health.
       </p>
+
+      <div className="mb-6 flex flex-wrap items-center gap-2" aria-label="Sync history filters">
+        <ListFilter size={15} className="mr-1 text-[var(--text-muted)]" aria-hidden="true" />
+        <Dropdown
+          isOpen={sourceFilterOpen}
+          onOpenChange={setSourceFilterOpen}
+          role="group"
+          ariaLabel="Filter by source"
+          width="w-64"
+          trigger={(
+            <button
+              type="button"
+              aria-expanded={sourceFilterOpen}
+              className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <span>
+                {selectedSources.length === 0
+                  ? 'All sources'
+                  : selectedSources.length === 1
+                    ? connectorNames[selectedSources[0]] || '1 source'
+                    : `${selectedSources.length} sources`}
+              </span>
+              <ChevronDown size={13} className={`transition-transform ${sourceFilterOpen ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => updateSourceFilters([])}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:bg-[var(--surface-2)]"
+          >
+            <span className="flex h-4 w-4 items-center justify-center">
+              {selectedSources.length === 0 && <Check size={13} />}
+            </span>
+            All sources
+          </button>
+          <div className="my-1 border-t border-[var(--border-subtle)]" />
+          {connectors.map(connector => {
+            const checked = selectedSources.includes(connector.id);
+            return (
+              <button
+                key={connector.id}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                onClick={() => updateSourceFilters(current => (
+                  checked
+                    ? current.filter(id => id !== connector.id)
+                    : [...current, connector.id]
+                ))}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:bg-[var(--surface-2)]"
+              >
+                <span className={`flex h-4 w-4 items-center justify-center rounded border ${
+                  checked ? 'border-blue-500 bg-blue-600 text-white' : 'border-[var(--border-strong)]'
+                }`}>
+                  {checked && <Check size={11} />}
+                </span>
+                <span className="truncate">{getConnectorDisplayName(connector)}</span>
+              </button>
+            );
+          })}
+        </Dropdown>
+
+        <Dropdown
+          isOpen={resultFilterOpen}
+          onOpenChange={setResultFilterOpen}
+          role="group"
+          ariaLabel="Filter by result"
+          width="w-52"
+          trigger={(
+            <button
+              type="button"
+              aria-expanded={resultFilterOpen}
+              className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+            >
+              <span>
+                {selectedResults.length === 0
+                  ? 'All results'
+                  : selectedResults.length === 1
+                    ? RESULT_FILTER_OPTIONS.find(option => option.value === selectedResults[0])?.label
+                    : `${selectedResults.length} results`}
+              </span>
+              <ChevronDown size={13} className={`transition-transform ${resultFilterOpen ? 'rotate-180' : ''}`} />
+            </button>
+          )}
+        >
+          <button
+            type="button"
+            onClick={() => updateResultFilters([])}
+            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:bg-[var(--surface-2)]"
+          >
+            <span className="flex h-4 w-4 items-center justify-center">
+              {selectedResults.length === 0 && <Check size={13} />}
+            </span>
+            All results
+          </button>
+          <div className="my-1 border-t border-[var(--border-subtle)]" />
+          {RESULT_FILTER_OPTIONS.map(option => {
+            const checked = selectedResults.includes(option.value);
+            return (
+              <button
+                key={option.value}
+                type="button"
+                role="checkbox"
+                aria-checked={checked}
+                onClick={() => updateResultFilters(current => (
+                  checked
+                    ? current.filter(value => value !== option.value)
+                    : [...current, option.value]
+                ))}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:bg-[var(--surface-2)]"
+              >
+                <span className={`flex h-4 w-4 items-center justify-center rounded border ${
+                  checked ? 'border-blue-500 bg-blue-600 text-white' : 'border-[var(--border-strong)]'
+                }`}>
+                  {checked && <Check size={11} />}
+                </span>
+                {option.label}
+              </button>
+            );
+          })}
+        </Dropdown>
+
+        {hasActiveFilters && (
+          <button
+            type="button"
+            onClick={() => {
+              setLoading(true);
+              setExpandedId(null);
+              setSelectedSources([]);
+              setSelectedResults([]);
+            }}
+            className="ml-1 flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs text-[var(--text-muted)] hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+          >
+            <X size={12} />
+            Clear filters
+          </button>
+        )}
+      </div>
 
       {scheduleHealth && (
         <ScheduleHealthPanel
@@ -1074,8 +1273,16 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
           className="flex flex-col items-center justify-center py-12 text-[var(--text-muted)]"
         >
           <RefreshCw size={28} className="mb-3 opacity-40" />
-          <p className="text-sm">Sync history will appear here once you run your first sync.</p>
-          <p className="text-xs mt-1">You&apos;re all set up — just hit sync when ready.</p>
+          <p className="text-sm">
+            {hasActiveFilters
+              ? 'No sync runs match these filters.'
+              : 'Sync history will appear here once you run your first sync.'}
+          </p>
+          <p className="text-xs mt-1">
+            {hasActiveFilters
+              ? 'Try removing a source or result filter.'
+              : 'You\u0027re all set up — just hit sync when ready.'}
+          </p>
         </motion.div>
       ) : (
         <>

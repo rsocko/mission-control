@@ -325,6 +325,22 @@ describe('GET /api/sync', () => {
     });
     expect(data).toHaveProperty('history');
   });
+
+  it('passes source and result filters to sync history persistence', async () => {
+    connectorManagement.listSyncHistory.mockClear();
+    const { GET } = await import('@/app/api/sync/route');
+    const response = await GET(new Request(
+      'http://localhost/api/sync?limit=10&source=github-1&source=todo-1&result=changes&result=errors&result=unknown',
+    ));
+
+    expect(response.status).toBe(200);
+    expect(connectorManagement.listSyncHistory).toHaveBeenCalledWith({
+      limit: 10,
+      before: null,
+      connectorIds: ['github-1', 'todo-1'],
+      results: ['changes', 'errors'],
+    });
+  });
 });
 
 describe('connector schedule lifecycle', () => {

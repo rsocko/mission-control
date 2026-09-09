@@ -1003,6 +1003,44 @@ export function createPostgresNotificationDeliveryRepository(
   pool: Pool,
 ): NotificationDeliveryRepository {
   return {
+    async enqueueCustomDeliveries(input) {
+      const now = new Date().toISOString();
+      let created = 0;
+      for (const channel of ['web_push', 'apns'] as const) {
+        const result = await pool.query(
+          `
+            INSERT INTO notification_delivery_events (
+              id, notification_id, channel, dedupe_key, status, suppression_reason,
+              policy_snapshot, payload_snapshot, attempt_count, next_attempt_at,
+              lease_expires_at, claim_token, subscriptions_attempted,
+              subscriptions_sent, subscriptions_failed, created_at, sent_at, last_error
+            ) VALUES ($1, $2, $3, $4, 'pending', NULL, $5, $6, 0, $7, NULL, NULL, 0, 0, 0, $8, NULL, NULL)
+            ON CONFLICT (dedupe_key) DO NOTHING
+          `,
+          [
+            randomUUID(),
+            input.notificationId,
+            channel,
+            `${channel}:${input.dedupeKey}`,
+            {
+              version: 1,
+              channel,
+              connectorType: 'home-assistant',
+              templateKey: 'home_assistant_update_summary',
+              source: 'connector',
+              sourceDetail: 'scheduled_summary',
+              decision: 'pending',
+            },
+            input.payload,
+            input.nextAttemptAt,
+            now,
+          ],
+        );
+        created += result.rowCount ?? 0;
+      }
+      return created;
+    },
+
     async claimNext(input) {
       const nowIso = input.now.toISOString();
       const leaseExpiresAt = new Date(input.now.getTime() + input.leaseMs).toISOString();

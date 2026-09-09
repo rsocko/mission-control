@@ -243,6 +243,12 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   }),
 }));
 
+vi.mock('@/lib/tasks/core/runtime', () => ({
+  getTaskCorePersistence: async () => ({
+    queries: { countTasks: async () => 0 },
+  }),
+}));
+
 vi.mock('@/lib/persistence/runtime', () => ({
   getCorePersistenceRepositories: () => ({
     settings: {

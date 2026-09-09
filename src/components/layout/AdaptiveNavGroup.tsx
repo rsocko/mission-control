@@ -147,7 +147,7 @@ export function AdaptiveNavGroup({
             }
           }}
           className={cn(
-            'relative mx-2 flex h-10 w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-colors duration-200 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)]',
+            'group relative mx-2 flex h-10 w-[calc(100%_-_1rem)] items-center gap-2.5 rounded-lg px-2.5 text-[13px] font-medium transition-[background-color,color,box-shadow] duration-200 focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-1 focus-visible:ring-offset-[var(--surface-1)] data-[state=open]:bg-[var(--surface-2)] data-[state=open]:text-[var(--text-primary)] data-[state=open]:shadow-[inset_0_0_0_1px_var(--border-strong)]',
             active
               ? 'bg-[var(--surface-2)] text-[var(--text-primary)]'
               : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]',
@@ -157,7 +157,10 @@ export function AdaptiveNavGroup({
               <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-sm bg-[var(--accent)]" />
             )}
             <span className="relative flex h-[22px] w-[22px] flex-shrink-0 items-center justify-center">
-              <GroupIcon size={20} className="flex-shrink-0 text-[var(--text-tertiary)]" />
+              <GroupIcon
+                size={20}
+                className="flex-shrink-0 text-[var(--text-tertiary)] transition-colors group-data-[state=open]:text-[var(--text-primary)]"
+              />
             </span>
             <span
               className={cn(
@@ -175,7 +178,7 @@ export function AdaptiveNavGroup({
               size={14}
               aria-hidden="true"
               className={cn(
-                'flex-shrink-0 text-[var(--text-muted)]',
+                'flex-shrink-0 text-[var(--text-muted)] transition-transform duration-150 group-data-[state=open]:rotate-90 group-data-[state=open]:text-[var(--text-primary)]',
                 expanded ? 'ml-auto' : 'absolute right-0.5',
               )}
             />
@@ -196,14 +199,19 @@ export function AdaptiveNavGroup({
         <DropdownMenu.Content
           side="right"
           align="start"
-          sideOffset={8}
+          sideOffset={7}
           collisionPadding={12}
           aria-label={`${label} navigation`}
           aria-labelledby={undefined}
           onMouseEnter={openOnHover}
           onMouseLeave={closeAfterHover}
-          className="z-50 w-60 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-1.5 shadow-2xl"
+          className="z-50 w-60 rounded-xl border border-[var(--border-strong)] bg-[var(--surface-1)] p-1.5 shadow-[var(--shadow-md)]"
         >
+          <DropdownMenu.Arrow
+            width={10}
+            height={6}
+            className="fill-[var(--surface-1)] stroke-[var(--border-strong)]"
+          />
           <DropdownMenu.Label className="px-2.5 pb-1.5 pt-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
             {label}
           </DropdownMenu.Label>

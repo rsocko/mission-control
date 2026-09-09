@@ -59,6 +59,12 @@
         ],
         "createdAt": "2026-08-27T00:48:27.226Z",
         "reason": "This comparison mockup intentionally uses the exact 12px, 13px, 14px, and 20px Mission Control type ramp documented in DESIGN.md."
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "9px",
+        "createdAt": "2026-09-09T04:26:22.994Z",
+        "reason": "DESIGN.md caption typography explicitly permits the 9-11px range"
       }
     ]
   },

@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plug, RefreshCw, ChevronRight, Trash2, Loader2, Shield, Circle,
   Plus, AlertTriangle, FolderOpen, Zap, Save, Activity,
   Clock, Check, CheckCircle2, X, XCircle, RotateCcw,
-  Eye, EyeOff,
+  Eye, EyeOff, History,
 } from 'lucide-react';
 import {
   Select,
@@ -204,6 +205,15 @@ function ConnectorsSection({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Link
+                      href={`/settings/sync-history?source=${encodeURIComponent(conn.id)}`}
+                      onClick={event => event.stopPropagation()}
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      title={`View ${getConnectorDisplayName(conn)} sync history`}
+                      aria-label={`View ${getConnectorDisplayName(conn)} sync history`}
+                    >
+                      <History size={12} />
+                    </Link>
                     {conn.enabled && conn.type !== 'scout' && (
                       <button onClick={(e) => { e.stopPropagation(); onSync(conn.id); }}
                         disabled={!!isSyncing}

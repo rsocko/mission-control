@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   ConnectorEditPanel,
+  ConnectorsSection,
   DefaultConnectorEditPanel,
 } from '@/app/settings/components/ConnectorsSection';
 import { ListGroupsSection } from '@/app/settings/components/ListGroupsSection';
@@ -43,6 +44,31 @@ describe('GitHub connector settings', () => {
       }
       return new Response(JSON.stringify({}), { status: 200 });
     }));
+  });
+
+  it('links each connector to pre-filtered sync history', () => {
+    render(
+      <ConnectorsSection
+        connectors={[connector]}
+        sourceLists={[]}
+        loading={false}
+        syncing={null}
+        onToggle={vi.fn()}
+        onSync={vi.fn()}
+        onDelete={vi.fn()}
+        onUpdate={vi.fn()}
+        onPurgeSourceList={vi.fn()}
+        onAdd={vi.fn()}
+        selectedConnector={null}
+        onSelect={vi.fn()}
+        deletedConnectors={[]}
+        onRestore={vi.fn()}
+        onPermanentDelete={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: 'View GitHub sync history' }))
+      .toHaveAttribute('href', '/settings/sync-history?source=github-1');
   });
 
   it('dispatches GitHub connectors to their type-specific editor', () => {

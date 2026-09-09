@@ -28,7 +28,7 @@ import { getNextRecurringDate } from '@/lib/utils/recurrence';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { cn } from '@/lib/utils';
 import { formatTaskDetailUpdatedAt } from '@/lib/utils/task-detail-date';
-import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { useResizablePanel } from '@/lib/hooks/useResizablePanel';
 import { modalContent, modalOverlay, panelSlideFromRight } from '@/lib/motion';
 import { TaskDetailHeader } from './TaskDetailHeader';
@@ -66,17 +66,6 @@ export type {
   TaskSubtasksOpenRequest,
   TaskTag,
 } from './task-detail-types';
-
-const CONNECTOR_ICON_PATHS: Record<string, string> = {
-  'local': LOCAL_CONNECTOR_ICON_PATH,
-  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
-  'github-issues': '/icons/connectors/github.svg',
-  'outlook-email': '/icons/connectors/outlook.svg',
-  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
-  'rymessage': '/icons/connectors/rymessage.svg',
-  'document-intelligence': '/icons/agents/owl.svg',
-  'custom-rest': '/icons/connectors/custom-rest.svg',
-};
 
 // Connectors that support recurrence
 const RECURRENCE_CONNECTORS = ['local', 'microsoft-todo', 'outlook-calendar'];

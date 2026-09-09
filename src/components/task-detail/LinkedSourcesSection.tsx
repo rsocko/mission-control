@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { ArrowLeftRight, Globe } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
-import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 
 const CONNECTOR_NAMES: Record<string, string> = {
   'local': 'Local',
@@ -17,18 +17,6 @@ const CONNECTOR_NAMES: Record<string, string> = {
   'rymessage': 'RyMessage',
   'document-intelligence': 'OWL',
   'custom-rest': 'Custom REST',
-};
-
-const CONNECTOR_ICON_PATHS: Record<string, string> = {
-  'local': LOCAL_CONNECTOR_ICON_PATH,
-  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
-  'github-issues': '/icons/connectors/github.svg',
-  'outlook-email': '/icons/connectors/outlook.svg',
-  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
-  'scout': 'dash:microsoft-copilot',
-  'rymessage': '/icons/connectors/rymessage.svg',
-  'document-intelligence': '/icons/agents/owl.svg',
-  'custom-rest': '/icons/connectors/custom-rest.svg',
 };
 
 interface LinkedSource {

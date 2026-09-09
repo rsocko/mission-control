@@ -195,7 +195,7 @@ export const NOTIFICATION_SOURCE_ICONS: Record<string, string> = {
   finance: '/icons/agents/tyrion.svg',
   'finance-manager': '/icons/agents/tyrion.svg',
   'custom-rest': '/icons/connectors/custom-rest.svg',
-  'home-assistant': '/icons/connectors/custom-rest.svg',
+  'home-assistant': '/icons/connectors/home-assistant.svg',
   'monarch-money': '/icons/agents/tyrion.svg',
   homelab: '/icons/connectors/custom-rest.svg',
 };

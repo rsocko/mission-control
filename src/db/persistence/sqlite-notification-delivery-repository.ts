@@ -170,6 +170,40 @@ export function createSqliteNotificationDeliveryRepository(
   `);
 
   return {
+    async enqueueCustomDeliveries(input) {
+      const now = new Date().toISOString();
+      let created = 0;
+      for (const channel of ['web_push', 'apns'] as const) {
+        const result = sqlite.prepare(`
+          INSERT OR IGNORE INTO notification_delivery_events (
+            id, notification_id, channel, dedupe_key, status, suppression_reason,
+            policy_snapshot, payload_snapshot, attempt_count, next_attempt_at,
+            lease_expires_at, claim_token, subscriptions_attempted,
+            subscriptions_sent, subscriptions_failed, created_at, sent_at, last_error
+          ) VALUES (?, ?, ?, ?, 'pending', NULL, ?, ?, 0, ?, NULL, NULL, 0, 0, 0, ?, NULL, NULL)
+        `).run(
+          randomUUID(),
+          input.notificationId,
+          channel,
+          `${channel}:${input.dedupeKey}`,
+          JSON.stringify({
+            version: 1,
+            channel,
+            connectorType: 'home-assistant',
+            templateKey: 'home_assistant_update_summary',
+            source: 'connector',
+            sourceDetail: 'scheduled_summary',
+            decision: 'pending',
+          }),
+          JSON.stringify(input.payload),
+          input.nextAttemptAt,
+          now,
+        );
+        created += result.changes;
+      }
+      return created;
+    },
+
     async claimNext(input) {
       const nowIso = input.now.toISOString();
       const leaseExpiresAt = new Date(input.now.getTime() + input.leaseMs).toISOString();

@@ -30,19 +30,18 @@ export async function register() {
     registerScheduledPushHandlers,
     scheduledSummariesEnabled,
   } = await import('@/lib/push/scheduler');
-  const { resolveDatabaseBackend } = await import('@/db/runtime-backend');
-  if (resolveDatabaseBackend() === 'sqlite') {
-    const {
-      triggerMorningNotification,
-      triggerTriageNudge,
-      triggerCarryForwardReminder,
-    } = await import('@/lib/push/triggers');
-    registerScheduledPushHandlers({
-      triggerMorningNotification,
-      triggerTriageNudge,
-      triggerCarryForwardReminder,
-    });
-  }
+  const {
+    triggerMorningNotification,
+    triggerTriageNudge,
+    triggerCarryForwardReminder,
+    triggerHomeAssistantUpdateSummaries,
+  } = await import('@/lib/push/triggers');
+  registerScheduledPushHandlers({
+    triggerMorningNotification,
+    triggerTriageNudge,
+    triggerCarryForwardReminder,
+    triggerHomeAssistantUpdateSummaries,
+  });
   const { isPublicDemoMode } = await import('@/lib/public-demo');
   if (isPublicDemoMode()) {
     try {

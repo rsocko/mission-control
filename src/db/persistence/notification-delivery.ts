@@ -308,6 +308,12 @@ export interface ScheduledNotificationTriggerPersistence {
 }
 
 export interface NotificationDeliveryRepository {
+  enqueueCustomDeliveries?(input: {
+    notificationId: string;
+    dedupeKey: string;
+    payload: MissionControlPushPayload;
+    nextAttemptAt: string;
+  }): Promise<number>;
   claimNext(input: {
     now: Date;
     leaseMs: number;

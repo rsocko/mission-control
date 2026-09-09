@@ -655,10 +655,22 @@ export function createSqliteNotificationWebRepository(
         const staleActions = sqlite.prepare(`
           SELECT id, notification_id AS notificationId, is_primary AS isPrimary
           FROM notification_actions
-          WHERE action_type = 'run_workflow'
-            AND execution_state = 'running'
-            AND claimed_at < ?
-        `).all(recoveryCutoff) as Array<{ id: string; notificationId: string; isPrimary: number }>;
+          WHERE execution_state = 'running'
+            AND (
+              (action_type = 'run_workflow' AND claimed_at < ?)
+              OR (
+                created_by = 'connector'
+                AND claimed_at < datetime(?, '-25 minutes')
+                AND EXISTS (
+                  SELECT 1 FROM notification_actions gate
+                  WHERE gate.notification_id = notification_actions.notification_id
+                    AND gate.claimed_at = notification_actions.claimed_at
+                    AND gate.created_by = 'connector'
+                    AND gate.requires_confirmation = 1
+                )
+              )
+            )
+        `).all(recoveryCutoff, recoveryCutoff) as Array<{ id: string; notificationId: string; isPrimary: number }>;
         if (staleActions.length === 0) return;
         const ph = staleActions.map(() => '?').join(',');
         sqlite.prepare(`
@@ -1325,6 +1337,79 @@ export function createSqliteNotificationWebRepository(
           SET is_actionable = 0, primary_action_id = NULL
           WHERE id = ?
         `).run(input.notificationId);
+        return true;
+      });
+      return transaction.immediate();
+    },
+
+    async claimProviderAction(input) {
+      const transaction = sqlite.transaction(() => {
+        const claimed = sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = ?, completed_at = NULL,
+              last_error = NULL
+          WHERE id = ? AND notification_id = ?
+            AND (
+              execution_state = 'pending'
+              OR (execution_state = 'running' AND claimed_at < ?)
+            )
+        `).run(
+          input.claimedAt,
+          input.actionId,
+          input.notificationId,
+          input.recoveryCutoff,
+        );
+        if (claimed.changes !== 1) return false;
+        sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = ?, completed_at = NULL,
+              last_error = NULL
+          WHERE notification_id = ? AND execution_state = 'pending'
+            AND created_by = 'connector' AND action_type <> 'open_url'
+        `).run(input.claimedAt, input.notificationId);
+        sqlite.prepare(`
+          UPDATE notifications
+          SET is_actionable = 0, primary_action_id = NULL
+          WHERE id = ?
+        `).run(input.notificationId);
+        return true;
+      });
+      return transaction.immediate();
+    },
+
+    async finalizeProviderAction(input) {
+      const transaction = sqlite.transaction(() => {
+        if (input.success) {
+          const row = sqlite.prepare(`
+            SELECT COUNT(*) AS count FROM notification_actions
+            WHERE notification_id = ? AND execution_state = 'running'
+              AND claimed_at = ? AND created_by = 'connector'
+          `).get(input.notificationId, input.claimedAt) as { count: number };
+          return row.count > 0;
+        }
+        const result = sqlite.prepare(`
+          UPDATE notification_actions
+          SET execution_state = 'pending', completed_at = NULL, claimed_at = NULL,
+              last_error = ?
+          WHERE notification_id = ? AND execution_state = 'running'
+            AND claimed_at = ? AND created_by = 'connector'
+        `).run(
+          input.error,
+          input.notificationId,
+          input.claimedAt,
+        );
+        if (result.changes === 0) return false;
+        const primary = sqlite.prepare(`
+          SELECT id FROM notification_actions
+          WHERE notification_id = ? AND execution_state = 'pending'
+            AND is_primary = 1
+          ORDER BY sort_order ASC LIMIT 1
+        `).get(input.notificationId) as { id: string } | undefined;
+        sqlite.prepare(`
+          UPDATE notifications
+          SET is_actionable = 1, primary_action_id = ?
+          WHERE id = ?
+        `).run(primary?.id ?? null, input.notificationId);
         return true;
       });
       return transaction.immediate();

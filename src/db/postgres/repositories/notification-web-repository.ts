@@ -645,7 +645,21 @@ export function createPostgresNotificationWebRepository(
         const staleActions = await client.query(`
           SELECT id, notification_id AS "notificationId", is_primary AS "isPrimary"
           FROM notification_actions
-          WHERE action_type = 'run_workflow' AND execution_state = 'running' AND claimed_at < $1
+          WHERE execution_state = 'running'
+            AND (
+              (action_type = 'run_workflow' AND claimed_at < $1)
+              OR (
+                created_by = 'connector'
+                AND claimed_at < ($1::timestamptz - INTERVAL '25 minutes')
+                AND EXISTS (
+                  SELECT 1 FROM notification_actions gate
+                  WHERE gate.notification_id = notification_actions.notification_id
+                    AND gate.claimed_at = notification_actions.claimed_at
+                    AND gate.created_by = 'connector'
+                    AND gate.requires_confirmation = true
+                )
+              )
+            )
         `, [recoveryCutoff]);
         if (staleActions.rows.length === 0) { await client.query('COMMIT'); return; }
         const ids = staleActions.rows.map((r: Record<string, unknown>) => r.id as string);
@@ -895,6 +909,100 @@ export function createPostgresNotificationWebRepository(
           SET is_actionable = false, primary_action_id = NULL
           WHERE id = $1
         `, [input.notificationId]);
+        await client.query('COMMIT');
+        return true;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async claimProviderAction(input) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        const claimed = await client.query(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = $1,
+              completed_at = NULL, last_error = NULL
+          WHERE id = $2 AND notification_id = $3
+            AND (
+              execution_state = 'pending'
+              OR (execution_state = 'running' AND claimed_at < $4)
+            )
+        `, [
+          input.claimedAt,
+          input.actionId,
+          input.notificationId,
+          input.recoveryCutoff,
+        ]);
+        if (claimed.rowCount !== 1) {
+          await client.query('ROLLBACK');
+          return false;
+        }
+        await client.query(`
+          UPDATE notification_actions
+          SET execution_state = 'running', claimed_at = $1,
+              completed_at = NULL, last_error = NULL
+          WHERE notification_id = $2 AND execution_state = 'pending'
+            AND created_by = 'connector' AND action_type <> 'open_url'
+        `, [input.claimedAt, input.notificationId]);
+        await client.query(`
+          UPDATE notifications
+          SET is_actionable = false, primary_action_id = NULL
+          WHERE id = $1
+        `, [input.notificationId]);
+        await client.query('COMMIT');
+        return true;
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async finalizeProviderAction(input) {
+      const client = await pool.connect();
+      try {
+        await client.query('BEGIN');
+        if (input.success) {
+          const retained = await client.query(`
+            SELECT COUNT(*)::integer AS count FROM notification_actions
+            WHERE notification_id = $1 AND execution_state = 'running'
+              AND claimed_at = $2 AND created_by = 'connector'
+          `, [input.notificationId, input.claimedAt]);
+          await client.query('COMMIT');
+          return Number(retained.rows[0]?.count ?? 0) > 0;
+        }
+        const result = await client.query(`
+          UPDATE notification_actions
+          SET execution_state = 'pending', completed_at = NULL, claimed_at = NULL,
+              last_error = $1
+          WHERE notification_id = $2 AND execution_state = 'running'
+            AND claimed_at = $3 AND created_by = 'connector'
+        `, [
+          input.error,
+          input.notificationId,
+          input.claimedAt,
+        ]);
+        if (result.rowCount === 0) {
+          await client.query('ROLLBACK');
+          return false;
+        }
+        const primary = await client.query(`
+          SELECT id FROM notification_actions
+          WHERE notification_id = $1 AND execution_state = 'pending'
+            AND is_primary = true
+          ORDER BY sort_order ASC LIMIT 1
+        `, [input.notificationId]);
+        await client.query(`
+          UPDATE notifications
+          SET is_actionable = true, primary_action_id = $1
+          WHERE id = $2
+        `, [primary.rows[0]?.id ?? null, input.notificationId]);
         await client.query('COMMIT');
         return true;
       } catch (error) {

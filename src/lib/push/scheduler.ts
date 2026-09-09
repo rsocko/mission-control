@@ -31,6 +31,7 @@ export interface ScheduledPushHandlers {
   triggerMorningNotification(): Promise<boolean>;
   triggerTriageNudge(): Promise<boolean>;
   triggerCarryForwardReminder(): Promise<boolean>;
+  triggerHomeAssistantUpdateSummaries?(): Promise<boolean>;
 }
 
 interface PushSchedulerRuntime {
@@ -214,6 +215,12 @@ export class PushNotificationScheduler {
       this.registerJob('carry-forward', carryForwardCron, tz, async () => {
         return await handlers.triggerCarryForwardReminder();
       });
+
+      if (handlers.triggerHomeAssistantUpdateSummaries) {
+        this.registerJob('home-assistant-update-summaries', '* * * * *', tz, async () => {
+          return await handlers.triggerHomeAssistantUpdateSummaries!();
+        });
+      }
 
       this.running = true;
       logger.info(

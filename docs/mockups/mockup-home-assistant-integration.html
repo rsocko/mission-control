@@ -1606,15 +1606,15 @@
                 </div>
 
                 <div class="editor-block">
-                  <h5>Update delivery</h5>
-                  <div class="segmented" role="radiogroup" aria-label="Update delivery" style="width:100%">
-                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="every"><span>Every update</span></label>
-                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="daily" checked><span>Daily digest</span></label>
-                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="weekly"><span>Weekly digest</span></label>
+                  <h5>Update push delivery</h5>
+                  <div class="segmented" role="radiogroup" aria-label="Update push delivery" style="width:100%">
+                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="every"><span>Immediate</span></label>
+                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="daily" checked><span>Daily summary</span></label>
+                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="off"><span>No push</span></label>
                   </div>
 
                   <div class="field" id="digest-time-field" style="margin-top:12px">
-                    <label class="field-label" for="f-digest-time">Digest arrives at</label>
+                    <label class="field-label" for="f-digest-time">Summary push arrives at</label>
                     <input class="control tabular" id="f-digest-time" type="time" value="08:00" style="width:100%;height:36px">
                   </div>
 
@@ -1623,12 +1623,19 @@
                     <span id="digest-preview-copy"></span>
                   </div>
 
-                  <p class="field-hint" style="margin-top:14px">Always deliver immediately, even inside a digest:</p>
+                  <p class="field-hint" style="margin-top:14px">Always push immediately:</p>
                   <div class="override-list" id="override-list">
                     <span class="override-chip">
                       <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
-                      Security updates
-                      <button type="button" aria-label="Remove security updates override"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
+                      Action-needed repairs
+                    </span>
+                    <span class="override-chip">
+                      <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
+                      Urgent device alerts
+                    </span>
+                    <span class="override-chip">
+                      <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
+                      Critical persistent notifications
                     </span>
                     <span class="override-chip">
                       <code>update.home_assistant_core</code>
@@ -1779,7 +1786,7 @@
               <td>Install stopped at 62%. Frigate is still on 0.13.2.</td>
               <td>Not applicable &mdash; the install was started elsewhere</td>
               <td>Progress last updated 14 min ago.</td>
-              <td>Install finished &middot; card collapses into the daily digest</td>
+              <td>Install finished &middot; this card resolves after the next authoritative poll</td>
             </tr>
             <tr>
               <th scope="row">Repair &mdash; warning<small>issue_registry severity: warning</small></th>
@@ -1845,7 +1852,7 @@
       <div class="decision">
         <h3><span class="decision-num">01</span>One connector row per home, never one connector with many URLs</h3>
         <div>
-          <p>Two homes have different tokens, different admin rights, different network reachability, and different urgency. Folding them into a single connector would force every setting to be either global or per-home-with-exceptions. Each instance gets its own row, health badge, sources, digest rule, and polling interval.</p>
+          <p>Two homes have different tokens, different admin rights, different network reachability, and different urgency. Folding them into a single connector would force every setting to be either global or per-home-with-exceptions. Each instance gets its own row, health badge, sources, push-delivery rule, and polling interval.</p>
           <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Connector storage keys on instance ID, not connector type. The Settings list can show <em>n</em> Home Assistant rows, and health is computed per row.</p>
         </div>
       </div>
@@ -1883,10 +1890,10 @@
       </div>
 
       <div class="decision">
-        <h3><span class="decision-num">06</span>Digest is the default for updates; critical overrides pierce it</h3>
+        <h3><span class="decision-num">06</span>Every update stays independent; push summaries reduce interruptions</h3>
         <div>
-          <p>Six add-on updates a week is a notification problem, not an information problem. Daily digest is the default and the live preview states the trade in numbers &mdash; one notification instead of six. Security updates and the two named Core/OS entities always arrive immediately, so batching never delays the one update that mattered.</p>
-          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Digest scheduling is per instance and needs the household's timezone, not the server's. Overrides are matched by entity ID or by a security flag on the update payload, so both matchers must exist.</p>
+          <p>Each update is always its own Mission Control notification, with its own action and reconciliation lifecycle. Daily summary is only an outbound push preference: one device interruption can open the filtered list of six individual updates. Security updates and the named Core/OS entities still push immediately, so batching never delays the one update that mattered.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Summary scheduling is per instance and needs the household's timezone, not the server's. The summary is a delivery event, never a grouped inbox record. Overrides are matched by entity ID, and installing directly in Home Assistant resolves only that entity's notification on the next poll.</p>
         </div>
       </div>
 
@@ -2104,7 +2111,7 @@
       token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo3", interval: "30",
       enabled: false, health: "off", admin: true, testState: "untested", entities: 3, updateCount: 2,
       sources: { device: true, updates: false, persistent: false, repairs: false },
-      digest: "weekly", digestTime: "09:00", color: "var(--text-3)", draft: false
+      digest: "off", digestTime: "09:00", color: "var(--text-3)", draft: false
     }
   };
   var BASELINE = JSON.parse(JSON.stringify(INSTANCES));
@@ -2310,22 +2317,21 @@
     var inst = INSTANCES[current];
     var mode = ($$('input[name="digest"]').filter(function (r) { return r.checked; })[0] || {}).value || "daily";
     inst.digest = mode;
-    $("#digest-time-field").hidden = mode === "every";
+    $("#digest-time-field").hidden = mode !== "daily";
 
     var n = inst.updateCount;
     var copy;
     if (!inst.sources.updates) {
       copy = $("#src-updates").disabled
-        ? "Updates are locked for " + inst.name + " while its token isn't an administrator, so nothing in this section applies yet. Connect an administrator token above to use a digest here."
-        : "Updates are off for " + inst.name + ", so nothing in this section applies yet. Turn Updates on above to batch them.";
+        ? "Updates are locked for " + inst.name + " while its token isn't an administrator, so nothing in this section applies yet. Connect an administrator token above to configure update pushes."
+        : "Updates are off for " + inst.name + ", so nothing in this section applies yet. Turn Updates on above to configure update pushes.";
     } else if (mode === "every") {
-      copy = "You'd receive <strong>" + n + " separate notifications</strong> this week &mdash; one per release, whenever each one lands.";
+      copy = "All <strong>" + n + " update items remain separate</strong> in Mission Control, and each may send its own push when detected.";
     } else if (mode === "daily") {
-      copy = "You'd receive <strong>1 notification instead of " + n + "</strong> this week, at " + $("#f-digest-time").value +
-        " each day. Security updates and the overrides below still arrive the moment they appear.";
+      copy = "All <strong>" + n + " update items remain separate</strong> in Mission Control. At " + $("#f-digest-time").value +
+        ", one summary push opens the filtered list. Critical overrides still push immediately.";
     } else {
-      copy = "You'd receive <strong>1 notification instead of " + n + "</strong> this week, on Mondays at " + $("#f-digest-time").value +
-        ". Anything urgent waits up to seven days unless it matches an override below.";
+      copy = "All <strong>" + n + " update items remain visible</strong> in Mission Control, but routine updates do not send a push. Critical overrides below still push immediately.";
     }
     $("#digest-preview-copy").innerHTML = copy;
   }
@@ -2661,9 +2667,9 @@
       id: "n1", instance: "lake", kind: "update", level: "heads_up",
       tile: "i-download", title: "Home Assistant Core 2025.8.2 available",
       entity: "update.home_assistant_core", version: "2025.8.2", currentVersion: "2025.8.1", backupSupported: true,
-      copy: "Release notes call out a fix for recorder purge failures on SQLite. Marked as a security release, so it arrives immediately even though this home is on a daily digest.",
+      copy: "Release notes call out a fix for recorder purge failures on SQLite. This entity matches a configured critical pattern, so it pushes immediately even though this home uses a daily summary.",
       time: "14:29", unread: true, actions: ["install", "skip", "task", "open"],
-      detail: { heading: "Why this arrived immediately", body: "Daily digest is on for Lake House, but update.home_assistant_core is in the critical-override list. Security and Core/OS releases bypass batching." }
+      detail: { heading: "Why this pushed immediately", body: "Daily summary is on for Lake House, but update.home_assistant_core is in the critical-pattern list. The item is still an ordinary individual notification; only its outbound delivery bypasses batching." }
     },
     {
       id: "n2", instance: "lake", kind: "update", level: "heads_up",
@@ -2688,7 +2694,7 @@
       entity: "repair.zwave_js_startup_failed",
       copy: "The Z-Wave controller did not respond on startup. 11 devices are offline until this is fixed, including both door locks.",
       time: "12:04", unread: true, actions: ["ignore", "task", "open"],
-      detail: { heading: "Urgent because devices are down", body: "An error-severity repair that takes security devices offline is the one case where Home Assistant notifications skip every digest setting and every quiet hour." }
+      detail: { heading: "Urgent because devices are down", body: "Action-needed repairs are configured as immediate push triggers. The notification still follows the same individual lifecycle as every other Home Assistant item." }
     },
     {
       id: "n5", instance: "lake", kind: "persistent", level: "fyi",
@@ -2713,13 +2719,13 @@
       copy: "Was open for 6 minutes. Closed at 13:58.",
       time: "13:58", state: "resolved", resolvedText: "Resolved at the source · the door closed on its own",
       actions: ["open"],
-      detail: { heading: "Resolved, not deleted", body: "When the underlying condition clears, the card resolves in place and says who cleared it. It leaves the list at the next digest boundary instead of vanishing mid-scroll." }
+      detail: { heading: "Resolved, not deleted", body: "When the underlying condition clears, the card resolves in place and says who cleared it. Push-summary timing never changes this authoritative notification lifecycle." }
     },
     {
       id: "n8", instance: "condo", kind: "update", level: "heads_up",
       tile: "i-package", title: "ESPHome 2025.7.3 available",
       entity: "update.esphome", version: "2025.7.3", currentVersion: "2025.6.0", backupSupported: false,
-      copy: "Adds support for two new sensor platforms. Not a security release, so it waits for the City Condo digest unless you act on it here.",
+      copy: "Adds support for two new sensor platforms. It is visible and actionable here immediately; City Condo is configured not to send a routine push.",
       time: "11:02", actions: ["install", "skip", "task", "open"],
       detail: { heading: "Add-ons can't be backed up first", body: "Home Assistant only exposes the backup-before-update option for Core, Supervisor, and OS updates. For an add-on the install confirmation says so instead of offering a checkbox it cannot honour." }
     }

@@ -34,12 +34,14 @@ mutating action requires confirmation. Update installation offers a backup
 choice only when the update entity advertises backup support. No arbitrary
 Home Assistant service caller is exposed.
 
-Routine updates default to one digest per connector instance. The digest is
-replaced in place on each successful polling cycle using a stable identity.
-Home Assistant Core, Supervisor, and Operating System updates have explicit
-default critical patterns. Other escalation is pattern-based and user
-configured; Mission Control does not infer that an update is
-"security-relevant" from names, release text, or AI.
+Every Home Assistant condition is stored as an individual Mission Control
+notification with its own stable identity and lifecycle. Routine update
+delivery defaults to one daily outbound push summary per connector instance;
+that summary is a delivery event, not an inbox notification. Home Assistant
+Core, Supervisor, and Operating System updates have explicit default critical
+patterns that may trigger immediate push delivery. Other escalation is
+pattern-based and user configured; Mission Control does not infer that an
+update is "security-relevant" from names, release text, or AI.
 
 ## Job and audience
 
@@ -64,7 +66,8 @@ not exploring analytics or configuring an automation platform.
 - Add two or more Home Assistant instances without their data or credentials
   colliding.
 - Recognize the owning instance before reading a notification body.
-- See routine maintenance without receiving one card per minor update.
+- See and act on each routine maintenance item independently without receiving
+  a separate device push for every minor update.
 - See truly actionable conditions at the right attention level without
   speculative "security" classification.
 - Install or skip a supported update, ignore a repair, dismiss a persistent
@@ -79,11 +82,12 @@ not exploring analytics or configuring an automation platform.
 ### In scope
 
 - Multiple independently named `home-assistant` connector instances.
-- Add and edit flows for identity, URL, token, source toggles, digest behavior,
-  escalation patterns, and action availability.
+- Add and edit flows for identity, URL, token, source toggles, outbound delivery
+  behavior, escalation patterns, and action availability.
 - Existing entity-rule alerts and package checks.
-- Update ingestion, routine update digests, critical update overrides, version
-  and progress presentation, install, and skip.
+- Update ingestion, individual update notifications, outbound update summaries,
+  critical update overrides, version and progress presentation, install, and
+  skip.
 - Persistent-notification ingestion and dismissal.
 - Repair ingestion, severity mapping, ignore, and deep-linking to Home
   Assistant's repair flow.
@@ -332,9 +336,10 @@ The Notifications filter model exposes:
 - **Home Assistant source:** Entity alerts, Updates, Persistent notifications,
   or Repairs.
 
-Filters compose with existing level, state, and category filters. A digest
-counts as source `Updates`. Filter state uses immutable connector instance IDs,
-not display names, so renaming an instance does not break saved views.
+Filters compose with existing level, state, and category filters. Outbound
+summary deliveries do not create filterable inbox records. Filter state uses
+immutable connector instance IDs, not display names, so renaming an instance
+does not break saved views.
 
 ## Onboarding and editing
 
@@ -359,11 +364,11 @@ introduce a separate Home Assistant wizard route.
    - Updates: on.
    - Persistent notifications: on when its read command succeeds.
    - Repairs: on when its read command succeeds.
-   - Routine update digest: on.
+   - Routine update push delivery: daily summary.
    - Allow confirmed Home Assistant actions: off until explicitly enabled.
 4. **Review and save**
-   - Summarize the instance name, hostname, enabled sources, digest behavior,
-     and whether actions are allowed.
+   - Summarize the instance name, hostname, enabled sources, outbound delivery
+     behavior, and whether actions are allowed.
    - Save is allowed when REST authentication succeeds and at least one enabled
      source is readable. Unavailable optional sources remain off with a reason.
 
@@ -405,7 +410,6 @@ interface HomeAssistantConfig {
     };
     updates: {
       enabled: boolean; // default true
-      routineDelivery: 'digest' | 'individual'; // default 'digest'
       criticalEntityPatterns: string[];
     };
     persistentNotifications: {
@@ -418,6 +422,14 @@ interface HomeAssistantConfig {
   };
   actions: {
     enabled: boolean; // default false until user opts in
+  };
+  outboundDelivery: {
+    updatePush: 'immediate' | 'daily_summary' | 'off'; // default 'daily_summary'
+    dailySummaryTime: string; // local HH:mm, default '08:00'
+    immediateCriticalUpdates: boolean; // default true
+    immediateActionNeededRepairs: boolean; // default true
+    immediateUrgentEntityAlerts: boolean; // default true
+    immediateCriticalPersistentNotifications: boolean; // default true
   };
 }
 ```
@@ -433,8 +445,9 @@ update.home_assistant_operating_system_update
 Default `criticalNotificationPatterns` is empty. Patterns use the existing
 case-sensitive glob matcher and are matched only against the documented
 identifier (`entity_id` or `notification_id`). Settings copy explains that
-"critical" means bypassing the routine digest and mapping to Action needed; it
-does not mean Mission Control verified a security advisory.
+"critical" means mapping to Action needed and, when enabled, bypassing the
+scheduled outbound summary with an immediate push. It does not mean Mission
+Control verified a security advisory.
 
 ## Ingestion architecture
 
@@ -508,7 +521,6 @@ collide:
 |---|---|
 | Entity rule | Existing identity, namespaced by `connectorInstanceId` if not already |
 | Individual update | `ha:{instanceId}:update:{entityId}:{latestVersion}` |
-| Routine update digest | `ha:{instanceId}:updates:digest` |
 | Persistent notification | `ha:{instanceId}:persistent:{notificationId}` |
 | Repair | `ha:{instanceId}:repair:{domain}:{issueId}` |
 
@@ -519,9 +531,8 @@ identifiers remain separately in metadata for API calls.
 
 | Source condition | Notification level | Category | Decision |
 |---|---|---|---|
-| Routine update, digest mode | `digest` | `system` | Included in the one instance digest |
-| Routine update, individual mode | `fyi` | `system` | One notification per entity/version |
-| Update entity matches a critical pattern | `action_needed` | `system` | Individual; never included in routine digest |
+| Routine update | `fyi` | `system` | One notification per entity/version |
+| Update entity matches a critical pattern | `action_needed` | `system` | Individual; eligible for immediate push |
 | Update has `in_progress: true` | `heads_up` | `system` | Progress state, not a request to act |
 | Repair severity `critical` | `urgent` | `system` | Home Assistant reserves this for true panic |
 | Repair severity `error` | `action_needed` | `system` | Something is currently broken |
@@ -550,24 +561,26 @@ levels.
 - Secondary actions: **Skip this version** when allowed, **Release notes** when
   a valid URL exists, **Open in Home Assistant**, and generic **Create task**.
 
-#### Routine update digest
+#### Outbound update summary
 
-- One digest per connector instance, never cross-instance.
-- Source ID is always `ha:{instanceId}:updates:digest`.
-- Each successful poll replaces the active digest content in place; it does not
-  append another digest for the same instance.
-- Title: `{count} updates available at {instanceName}`.
-- Body: first three update titles in stable alphabetical order, then
+- Every update remains an individual inbox notification, regardless of outbound
+  delivery preference.
+- `daily_summary` suppresses routine per-item push delivery until the configured
+  local time, then sends at most one push per connector instance summarizing the
+  currently active routine updates.
+- The push title is `{count} updates available at {instanceName}`. Its body lists
+  the first three update titles in stable alphabetical order, then
   `+{remaining} more`.
-- Detail lists every routine update with installed/latest versions and
-  per-update supported actions.
-- Critical-pattern matches are excluded from the digest and emitted
-  individually.
-- When no routine updates remain, resolve the digest. If updates later return,
-  reopen or recreate the stable occurrence according to the shared notification
-  lifecycle without producing duplicate active cards.
-- A polling cycle may write at most one routine digest occurrence per connector
-  instance, even when the fetched state payload contains duplicates.
+- Opening the push deep-links to Notifications filtered to that connector
+  instance and Home Assistant source `Updates`.
+- The summary is a delivery event only. It never creates, replaces, resolves, or
+  groups Mission Control notification records.
+- Critical-pattern matches remain individual notifications and may push
+  immediately when the corresponding trigger is enabled.
+- `immediate` permits routine per-item pushes. `off` suppresses routine update
+  pushes while leaving every update visible and actionable in Notifications.
+- A directly installed or skipped update resolves only its own notification on
+  the next authoritative poll and is absent from later summaries.
 
 ### Persistent notifications
 
@@ -666,8 +679,9 @@ shows the update is no longer available.
   source-specific metadata.
 - The detail panel contains the full body, version/progress or repair metadata,
   source timestamps, and the complete action set.
-- Routine update digests expand in the detail panel; they do not fan out into
-  nested modal dialogs.
+- Each update opens its own detail and action lifecycle. An outbound summary
+  deep-links to the existing filtered notification list rather than opening a
+  second summary-detail surface.
 - Settings show each Home Assistant instance as a separate connector card.
   Expanded settings group Connection, Sources, Attention, and Actions.
 
@@ -679,8 +693,8 @@ shows the update is no longer available.
   detail sheet's action group with full labels.
 - Confirmation uses a bottom sheet or full-screen dialog with the same content
   and default choices as desktop.
-- Digest detail is a single scrolling list with sticky Close and no horizontal
-  table.
+- A summary push opens the normal mobile notification list already filtered to
+  that Home Assistant instance and Updates.
 - Long instance names, entity IDs, versions, and repair keys wrap or truncate
   with an accessible full-value label; they never force horizontal scrolling.
 
@@ -705,8 +719,9 @@ shows the update is no longer available.
   does not force an assertive announcement on page load.
 - Disabled actions expose the reason in adjacent text or an accessible
   description, not only a tooltip.
-- Digest rows are semantic lists; version pairs and progress remain readable to
-  screen readers.
+- Update cards are semantic list items; version pairs and progress remain
+  readable to screen readers. Summary push copy announces the count and
+  instance name.
 - Source, severity, progress, and outcome use text or icons in addition to
   color.
 - Reduced-motion mode removes card exit movement and progress animation while
@@ -760,7 +775,7 @@ Each connector poll records:
 - status and stable error code;
 - duration;
 - fetched, emitted, updated, and resolved counts;
-- routine digest item count;
+- active update count and outbound summary candidate/sent/suppressed counts;
 - invalid-record count; and
 - WebSocket close/timeout outcome.
 
@@ -785,8 +800,9 @@ source.
 - Missing `settingsVersion` is read as version 1.
 - Existing `entityPatterns` and `alertRules` are preserved byte-for-byte after
   validation.
-- For existing connectors, all three new read sources default on, routine update
-  digest defaults on, and mutating actions default off until the user opts in.
+- For existing connectors, all three new read sources default on, update push
+  delivery defaults to a daily summary at 08:00 local time, immediate critical
+  triggers default on, and mutating actions default off until the user opts in.
 - Default critical update patterns are applied only when the setting is absent.
   An explicitly saved empty array means no critical update overrides.
 - Existing notification source IDs and entity-rule behavior remain stable.
@@ -807,7 +823,8 @@ source.
 ### Phase 1 - #1706 Updates slice
 
 - Ingest `update.*` states from the existing REST fetch.
-- Ship routine per-instance digest and critical-pattern individual cards.
+- Ship individual update notifications, per-instance outbound summaries, and
+  immediate critical-pattern push delivery.
 - Present versions, progress, release links, Install, Skip, and supported backup.
 - Add source settings and update-specific tests.
 
@@ -841,9 +858,11 @@ reconciliation or action-safety contracts.
 | Multi-instance | Two servers expose the same entity and notification IDs | Separate cards/actions, each using the correct token and display name |
 | Naming | Add a second instance with a case-insensitive duplicate name | Save blocked with a clear uniqueness error |
 | Filters | Rename an instance used by a saved filter | Filter still works because it stores instance ID |
-| Updates | Routine updates on two instances in one cycle | One digest per instance; no cross-instance grouping |
-| Updates | Digest contents change next poll | Same digest identity is replaced; no duplicate active card |
-| Updates | Critical pattern match | Individual `action_needed` card, excluded from digest |
+| Updates | Routine updates on two instances in one cycle | One individual notification per entity/version with no cross-instance collision |
+| Updates | One update disappears next poll | Only that update notification resolves; unrelated updates remain active |
+| Delivery | Daily summary enabled with six routine updates | Six inbox notifications remain; one push summary deep-links to the filtered list |
+| Delivery | Push delivery off | Individual inbox notifications remain and no routine update push is sent |
+| Updates | Critical pattern match | Individual `action_needed` card and immediate push when that trigger is enabled |
 | Updates | Title mentions "security" but no pattern matches | Routine level; no inferred escalation |
 | Updates | `in_progress: true`, percentage present | `heads_up` Installing state with bounded percentage |
 | Updates | `unknown`/`unavailable` after an active occurrence | Existing occurrence preserved; source marked degraded |
@@ -868,7 +887,7 @@ reconciliation or action-safety contracts.
 | Security | Client tampers with entity/domain/ID | Server ignores/rejects client target and uses stored metadata |
 | Accessibility | Keyboard-only confirmation/action flow | Focus order, Cancel-first dialog, status announcement, and restoration pass |
 | Responsive | 320 px viewport with long names/versions | No horizontal scroll; attribution and primary action remain available |
-| Migration | Existing v1 connector starts after deployment | Entity alerts unchanged; new reads on; digest on; actions off |
+| Migration | Existing v1 connector starts after deployment | Entity alerts unchanged; new reads on; daily push summary on; actions off |
 
 Automated coverage should include source transformer unit tests, WebSocket
 protocol tests with out-of-order IDs and timeouts, provider action tests,
@@ -881,7 +900,7 @@ interaction tests, and one end-to-end two-instance flow.
 |---|---|
 | [mission-control#1756](https://github.com/rsocko/mission-control/issues/1756) | Canonical epic for this complete specification and phased delivery |
 | [mission-control#1706](https://github.com/rsocko/mission-control/issues/1706) | First implementation slice: Phase 1 Updates ingestion, presentation, and actions |
-| [mission-control#627](https://github.com/rsocko/mission-control/issues/627) | Closed as fulfilled after confirming the shipped connector covers the original device-state-to-triage outcome; follow-on work points to #1756 |
+| [mission-control#627](https://github.com/rsocko/mission-control/issues/627) | Reopened for the missing end-to-end device-state-alert-to-Notifications setup and presentation slice |
 | [rsocko/ideation#1421](https://github.com/rsocko/ideation/issues/1421) | Closed as a duplicate of #1756 with the canonical link |
 | [mission-control#133](https://github.com/rsocko/mission-control/issues/133) | Correctly closed: base Home Assistant entity-alert ingestion shipped; do not reopen |
 | [mission-control#1297](https://github.com/rsocko/mission-control/issues/1297) | Correctly closed: homelab alert routing is separate from this pull-based expansion; do not reopen |
@@ -892,8 +911,9 @@ interaction tests, and one end-to-end two-instance flow.
   attribution and independent settings, credentials, health, and actions.
 - Updates, persistent notifications, and repairs use the authoritative
   transports and payloads in this specification.
-- Routine updates form one stable replacement digest per instance and critical
-  escalation occurs only through explicit patterns.
+- Routine updates are individual canonical notifications. Daily summaries are
+  outbound push deliveries only, and immediate critical escalation occurs only
+  through explicit patterns and enabled delivery triggers.
 - All supported actions are allowlisted, confirmed, capability-gated,
   stale-safe, and observable.
 - Resolution occurs only after successful source evidence; failures never clear

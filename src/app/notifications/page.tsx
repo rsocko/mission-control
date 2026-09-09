@@ -426,7 +426,7 @@ function DesktopNotificationsPage() {
     {
       key: 'actionable',
       label: 'Actionable',
-      detail: 'Can be handled',
+      detail: 'Has available actions',
       count: hook.stats.actionable,
       icon: Zap,
       active: hook.filters.actionableOnly,
@@ -634,6 +634,7 @@ function DesktopNotificationsPage() {
               </button>
               <button
                 onClick={() => handleBulkAction('dismiss')}
+                title="Remove as irrelevant; future source activity will not bring it back"
                 className="text-xs px-2 py-1 rounded bg-red-900/30 text-red-300 hover:bg-red-900/50 transition-colors"
               >
                 <Trash2 size={11} className="inline mr-1" />
@@ -641,10 +642,11 @@ function DesktopNotificationsPage() {
               </button>
               <button
                 onClick={() => handleBulkAction('handle')}
+                title="Clear from the inbox; new source activity can bring it back"
                 className="text-xs px-2 py-1 rounded bg-slate-800/50 text-slate-300 hover:bg-slate-800/70 transition-colors"
               >
                 <Archive size={11} className="inline mr-1" />
-                Handle
+                Done
               </button>
               <button
                 onClick={() => { setSelectionScope(null); setBulkSelected(new Set()); }}
@@ -758,7 +760,7 @@ function DesktopNotificationsPage() {
                           setUndoState({
                             snapshots: [restoreSnapshot(notification)],
                             focusId: notification.id,
-                            label: 'handle',
+                            label: 'mark done',
                           });
                           selectAndFocus(next?.id ?? null);
                         }}
@@ -835,7 +837,7 @@ function DesktopNotificationsPage() {
                  setUndoState({
                    snapshots: [restoreSnapshot(selectedNotification)],
                    focusId: selectedNotification.id,
-                   label: 'handle',
+                   label: 'mark done',
                  });
                  selectAndFocus(next?.id ?? null);
                 }}

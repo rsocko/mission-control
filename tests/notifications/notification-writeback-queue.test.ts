@@ -142,7 +142,7 @@ describe('notification writeback outbox', () => {
       {
         id: 'notification-serial-1',
         sourceId: 'serial:first',
-        connectorType: 'serial-test',
+        connectorType: 'document-intelligence',
         connectorInstanceId: 'serial-1',
         title: 'First serial dismissal',
         receivedAt: now,
@@ -151,7 +151,7 @@ describe('notification writeback outbox', () => {
       {
         id: 'notification-serial-2',
         sourceId: 'serial:second',
-        connectorType: 'serial-test',
+        connectorType: 'document-intelligence',
         connectorInstanceId: 'serial-1',
         title: 'Second serial dismissal',
         receivedAt: now,
@@ -162,7 +162,7 @@ describe('notification writeback outbox', () => {
     const dismissAlert = vi.fn().mockResolvedValue(undefined);
     const connector: import('@/lib/connectors').IConnector = {
       id: 'serial-1',
-      type: 'serial-test',
+      type: 'document-intelligence',
       displayName: 'Serial test',
       icon: 'test',
       capabilities: { read: true, write: true } as import('@/types').ConnectorCapabilities,
@@ -194,6 +194,99 @@ describe('notification writeback outbox', () => {
       { status: 'succeeded', attemptCount: 1 },
       { status: 'succeeded', attemptCount: 1 },
     ]);
+  });
+
+  it('settles dismissal locally when the connector has no writeback action', async () => {
+    const now = new Date().toISOString();
+    await db.insert(schema.notifications).values({
+      id: 'outlook-local-dismissal',
+      sourceId: 'email:message-1',
+      connectorType: 'outlook-email',
+      connectorInstanceId: 'outlook-1',
+      title: 'Irrelevant email',
+      receivedAt: now,
+      sortAt: now,
+    });
+    expect(dismissAndEnqueue(['outlook-local-dismissal'], now)).toMatchObject({
+      updatedCount: 1,
+      queuedCount: 0,
+    });
+
+    expect(sqlite.prepare(`
+      SELECT disposition, sync_state AS syncState
+      FROM notifications
+      WHERE id = 'outlook-local-dismissal'
+    `).get()).toEqual({ disposition: 'dismissed', syncState: 'synced' });
+    expect(sqlite.prepare(`
+      SELECT status, attempt_count AS attemptCount
+      FROM notification_writeback_jobs
+      WHERE notification_id = 'outlook-local-dismissal'
+    `).get()).toBeUndefined();
+  });
+
+  it('settles a legacy Outlook dismissal job without source writeback', async () => {
+    const now = new Date().toISOString();
+    await db.insert(schema.notifications).values({
+      id: 'outlook-legacy-dismissal',
+      sourceId: 'email:message-legacy',
+      connectorType: 'outlook-email',
+      connectorInstanceId: 'outlook-legacy',
+      title: 'Previously dismissed email',
+      receivedAt: now,
+      sortAt: now,
+      disposition: 'dismissed',
+      state: 'dismissed',
+      syncState: 'pending',
+    });
+    sqlite.prepare(`
+      INSERT INTO notification_writeback_jobs (
+        id, notification_id, connector_instance_id, connector_type, source_id,
+        action_type, dedupe_key, status, retryable, attempt_count, max_attempts,
+        next_attempt_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'mark_done', ?, 'pending', 1, 0, 3, ?, ?, ?)
+    `).run(
+      'outlook-legacy-job',
+      'outlook-legacy-dismissal',
+      'outlook-legacy',
+      'outlook-email',
+      'message-legacy',
+      'dismiss:outlook-legacy-dismissal',
+      now,
+      now,
+      now,
+    );
+    const connector = {
+      id: 'outlook-legacy',
+      type: 'outlook-email',
+      displayName: 'Outlook Email',
+      icon: 'email',
+      capabilities: { read: true, write: false } as import('@/types').ConnectorCapabilities,
+      initialize: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ success: true, message: 'ok' }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      fetchTasks: async function* () {},
+      fetchNotifications: vi.fn().mockResolvedValue([]),
+      fetchSourceLists: vi.fn().mockResolvedValue([]),
+    } satisfies import('@/lib/connectors').IConnector;
+    const registrySpy = vi.spyOn(connectorRegistry, 'getConnector')
+      .mockImplementation((id) => id === connector.id ? connector : undefined);
+
+    try {
+      await dispatch();
+    } finally {
+      registrySpy.mockRestore();
+    }
+
+    expect(sqlite.prepare(`
+      SELECT status, attempt_count AS attemptCount
+      FROM notification_writeback_jobs
+      WHERE id = 'outlook-legacy-job'
+    `).get()).toEqual({ status: 'succeeded', attemptCount: 1 });
+    expect(sqlite.prepare(`
+      SELECT sync_state AS syncState
+      FROM notifications
+      WHERE id = 'outlook-legacy-dismissal'
+    `).get()).toEqual({ syncState: 'synced' });
   });
 
   it('keeps synchronization settled when an already-succeeded dismissal is repeated', async () => {

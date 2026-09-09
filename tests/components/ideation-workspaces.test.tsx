@@ -43,13 +43,11 @@ describe('IdeationWorkspaceBar', () => {
   beforeEach(() => {
     localStorage.clear();
     vi.restoreAllMocks();
+    useIdeationStore.getState().replaceNodes(workspace('initial', 'Initial').document.nodes);
     useIdeationStore.setState({
-      nodes: workspace('initial', 'Initial').document.nodes,
-      selectedNodeId: null,
       workspaceId: null,
       workspaceRevision: null,
       flushWorkspace: null,
-      past: [],
     });
   });
 
@@ -123,7 +121,7 @@ describe('IdeationWorkspaceBar', () => {
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(1);
   });
 
-  it('defers autosave while a title is temporarily empty instead of crashing', async () => {
+  it('rejects an invalid empty committed title without scheduling autosave', async () => {
     const original = workspace('workspace-one', 'One');
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -139,11 +137,12 @@ describe('IdeationWorkspaceBar', () => {
     render(<IdeationWorkspaceBar />);
     expect(await screen.findByText('One')).toBeInTheDocument();
 
-    act(() => {
+    expect(() => act(() => {
       useIdeationStore.getState().updateLabel('workspace-one-root', '');
-    });
+    })).not.toThrow();
 
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Needs attention'));
+    expect(useIdeationStore.getState().nodes[0].label).toBe('One');
+    expect(screen.getByRole('status')).toHaveTextContent('Saved');
     expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PATCH')).toHaveLength(0);
   });
 

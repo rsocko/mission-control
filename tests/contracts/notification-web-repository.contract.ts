@@ -358,6 +358,30 @@ export function notificationWebRepositoryContractSuite(
       expect(unmuted?.mutedAt).toBeNull();
     });
 
+    it('keeps unsupported connector dismissals local and synchronized', async () => {
+      await seed.insertNotification({
+        id: 'outlook-dismiss',
+        sourceId: 'email:message-1',
+        connectorType: 'outlook-email',
+        connectorInstanceId: 'outlook-conn',
+        title: 'Irrelevant email',
+        receivedAt: '2024-03-02T00:00:00.000Z',
+        sortAt: '2024-03-02T00:00:00.000Z',
+      });
+
+      const result = await repo.dismissNotificationsAndEnqueueWritebacks(
+        ['outlook-dismiss'],
+        '2024-03-02T01:00:00.000Z',
+      );
+
+      expect(result).toEqual({ updatedCount: 1, queuedCount: 0 });
+      expect(await seed.getNotification('outlook-dismiss')).toMatchObject({
+        disposition: 'dismissed',
+        syncState: 'synced',
+      });
+      expect(await seed.listWritebackJobs('outlook-dismiss')).toEqual([]);
+    });
+
     it('deduplicates repeated writeback enqueues for the same action and timestamp', async () => {
       await seed.insertNotification({
         id: 'wb', sourceId: 'github-instance:issue-7', connectorType: 'github-issues',

@@ -28,6 +28,7 @@ import {
   primeNotificationWebPersistenceForSynchronousCompatibility,
   wakeNotificationWritebackDispatcher,
 } from '@/lib/notifications/notification-writeback';
+import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
 
@@ -385,6 +386,7 @@ export function createSqliteNotificationWebRepository(
     `);
     let queued = 0;
     for (const row of rows) {
+      if (!supportsNotificationDismissalWriteback(row.connectorType)) continue;
       const result = insert.run(
         crypto.randomUUID(),
         row.id,

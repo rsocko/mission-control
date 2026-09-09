@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { NotificationCard } from '@/components/notifications/NotificationCard';
+import {
+  NotificationCard,
+  NotificationDetail,
+} from '@/components/notifications/NotificationCard';
 import {
   CollapsedNotificationsRail,
   NotificationsPanel,
@@ -110,6 +113,33 @@ const passive = makeNotification({
   category: 'finance',
   isActionable: false,
   actions: [],
+});
+
+it('distinguishes done from dismiss with consequence-focused labels', () => {
+  render(
+    <>
+      <NotificationCard
+        notification={actionable}
+        onHandle={vi.fn()}
+      />
+      <NotificationDetail
+        notification={actionable}
+        onExecuteAction={vi.fn(async () => ({ success: true }))}
+        onArchive={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    </>,
+  );
+
+  expect(screen.getByRole('button', { name: 'Mark notification done' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Done' })).toHaveAttribute(
+    'title',
+    'Clear from the inbox; new source activity can bring it back',
+  );
+  expect(screen.getByRole('button', { name: 'Dismiss' })).toHaveAttribute(
+    'title',
+    'Remove as irrelevant; future source activity will not bring it back',
+  );
 });
 
 function Harness({

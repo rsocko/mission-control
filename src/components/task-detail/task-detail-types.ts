@@ -81,7 +81,9 @@ export interface SourceList {
 
 /** Partial field payload reported back to hosts after a successful save. */
 export interface TaskFieldUpdate {
-  [key: string]: string | number | null | undefined;
+  title?: string;
+  tagIds?: readonly string[];
+  [key: string]: unknown;
 }
 
 /** A Mission Control hub project a task can be assigned to. */

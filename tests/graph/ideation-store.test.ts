@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import type { IdeationNode } from '@/lib/graph/ideation-types';
 import { useIdeationStore } from '@/lib/stores/ideationStore';
 
 describe('useIdeationStore', () => {
@@ -30,19 +31,15 @@ describe('useIdeationStore', () => {
     useIdeationStore.getState().moveNode(first, child, 0);
     expect(useIdeationStore.getState().nodes.find((node) => node.id === first)?.parentId).toBe(root.id);
 
-    const historyLength = useIdeationStore.getState().past.length;
     useIdeationStore.getState().moveNode(second, 'missing-parent', 0);
     expect(useIdeationStore.getState().nodes.find((node) => node.id === second)?.parentId).toBe(first);
-    expect(useIdeationStore.getState().past).toHaveLength(historyLength);
   });
 
   it('inserts a node at a requested sibling position in one history step', () => {
     const root = useIdeationStore.getState().nodes[0];
     useIdeationStore.getState().addNode(root.id, 'idea', 'First');
     useIdeationStore.getState().addNode(root.id, 'idea', 'Last');
-    const historyLength = useIdeationStore.getState().past.length;
-
-    useIdeationStore.getState().addNode(root.id, 'idea', 'Middle', 1);
+    const middle = useIdeationStore.getState().addNode(root.id, 'idea', 'Middle', 1);
 
     expect(
       useIdeationStore.getState().nodes
@@ -54,7 +51,10 @@ describe('useIdeationStore', () => {
       { label: 'Middle', order: 1 },
       { label: 'Last', order: 2 },
     ]);
-    expect(useIdeationStore.getState().past).toHaveLength(historyLength + 1);
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().nodes.some((node) => node.id === middle)).toBe(false);
+    useIdeationStore.getState().redo();
+    expect(useIdeationStore.getState().nodes.some((node) => node.id === middle)).toBe(true);
   });
 
   it('does not add undo history when title input is committed twice', () => {
@@ -62,16 +62,14 @@ describe('useIdeationStore', () => {
     const taskId = useIdeationStore.getState().addNode(root.id, 'task', 'Original');
 
     useIdeationStore.getState().applyTitleInput(taskId, 'Edited !high #keyboard');
-    const historyLength = useIdeationStore.getState().past.length;
     useIdeationStore.getState().applyTitleInput(taskId, 'Edited !high #keyboard');
 
-    expect(useIdeationStore.getState().past).toHaveLength(historyLength);
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().nodes.find((node) => node.id === taskId)?.label).toBe('Original');
   });
 
   it('applies a text outline as one undoable graph update', () => {
     const root = useIdeationStore.getState().nodes[0];
-    const historyLength = useIdeationStore.getState().past.length;
-
     useIdeationStore.getState().applyTextOutline([
       root.label,
       '  [phase] Discovery',
@@ -88,7 +86,7 @@ describe('useIdeationStore', () => {
         }),
       }),
     ]));
-    expect(useIdeationStore.getState().past).toHaveLength(historyLength + 1);
+    expect(useIdeationStore.getState().canUndo).toBe(true);
     useIdeationStore.getState().undo();
     expect(useIdeationStore.getState().nodes).toHaveLength(1);
   });
@@ -132,8 +130,6 @@ describe('useIdeationStore', () => {
   it('commits title accelerators and their properties in one undo step', () => {
     const root = useIdeationStore.getState().nodes[0];
     const nodeId = useIdeationStore.getState().addNode(root.id, 'task', 'Draft task');
-    const historyBefore = useIdeationStore.getState().past.length;
-
     useIdeationStore.getState().applyTitleInput(nodeId, 'Fix auth !high #backend');
     const node = useIdeationStore.getState().nodes.find((candidate) => candidate.id === nodeId);
 
@@ -144,7 +140,6 @@ describe('useIdeationStore', () => {
         tags: expect.objectContaining({ value: ['backend'] }),
       }),
     }));
-    expect(useIdeationStore.getState().past).toHaveLength(historyBefore + 1);
     useIdeationStore.getState().undo();
     expect(useIdeationStore.getState().nodes.find((candidate) => candidate.id === nodeId)?.label).toBe('Draft task');
   });
@@ -152,8 +147,6 @@ describe('useIdeationStore', () => {
   it('accepts proposals atomically, ignores duplicates, and undoes the whole batch', () => {
     const root = useIdeationStore.getState().nodes[0];
     useIdeationStore.getState().addNode(root.id, 'idea', 'Existing');
-    const historyBeforeAccept = useIdeationStore.getState().past.length;
-
     const added = useIdeationStore.getState().acceptProposals(root.id, [
       { label: 'First proposal' },
       { label: ' first   proposal ' },
@@ -162,7 +155,6 @@ describe('useIdeationStore', () => {
     ]);
 
     expect(added).toHaveLength(2);
-    expect(useIdeationStore.getState().past).toHaveLength(historyBeforeAccept + 1);
     expect(
       useIdeationStore.getState().nodes
         .filter((node) => node.parentId === root.id)
@@ -175,5 +167,45 @@ describe('useIdeationStore', () => {
 
     useIdeationStore.getState().undo();
     expect(useIdeationStore.getState().nodes.some((node) => added.includes(node.id))).toBe(false);
+  });
+
+  it('rejects the 501st node without desynchronizing later mutations', () => {
+    const nodes = Array.from({ length: 500 }, (_, index): IdeationNode => ({
+      id: `node-${index}`,
+      label: `Node ${index}`,
+      kind: 'idea',
+      parentId: index === 0 ? null : 'node-0',
+      sortOrder: index,
+      properties: {},
+    }));
+    useIdeationStore.getState().replaceNodes(nodes);
+
+    expect(() => useIdeationStore.getState().addNode('node-0')).not.toThrow();
+    expect(useIdeationStore.getState().nodes).toHaveLength(500);
+    useIdeationStore.getState().updateLabel('node-0', 'Still editable');
+    expect(useIdeationStore.getState().nodes[0].label).toBe('Still editable');
+  });
+
+  it('bounds compatibility undo history at thirty complete documents', () => {
+    const root = useIdeationStore.getState().nodes[0];
+    for (let index = 0; index < 35; index += 1) {
+      useIdeationStore.getState().updateLabel(root.id, `Revision ${index}`);
+    }
+
+    for (let index = 0; index < 30; index += 1) useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().canUndo).toBe(false);
+    expect(useIdeationStore.getState().nodes[0].label).toBe('Revision 4');
+  });
+
+  it('preserves a still-valid selection across undo and redo', () => {
+    const root = useIdeationStore.getState().nodes[0];
+    const taskId = useIdeationStore.getState().addNode(root.id, 'task', 'Draft');
+    useIdeationStore.getState().selectNode(taskId);
+    useIdeationStore.getState().updateLabel(taskId, 'Edited');
+
+    useIdeationStore.getState().undo();
+    expect(useIdeationStore.getState().selectedNodeId).toBe(taskId);
+    useIdeationStore.getState().redo();
+    expect(useIdeationStore.getState().selectedNodeId).toBe(taskId);
   });
 });

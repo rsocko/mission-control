@@ -67,7 +67,7 @@ export default function MobileTriageEmpty({
           </div>
           <h2 className="text-2xl font-semibold tracking-tight text-white">All caught up! 🎉</h2>
           <p className="mx-auto max-w-[18rem] text-sm leading-6 text-slate-400">
-            Your triage queue is empty. Nice work clearing everything for now.
+            Your inbox is empty. Nice work routing everything for now.
           </p>
         </div>
 

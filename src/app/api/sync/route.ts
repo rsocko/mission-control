@@ -9,6 +9,13 @@ import {
 } from '@/lib/sync/job-queue';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 import { getLocalToday } from '@/lib/utils/date';
+import type { SyncHistoryResultFilter } from '@/db/persistence/connector-management';
+
+const SYNC_HISTORY_RESULT_FILTERS = new Set<SyncHistoryResultFilter>([
+  'changes',
+  'no-changes',
+  'errors',
+]);
 
 async function getScheduleHealth() {
   const jobRepository = await getSyncJobRepository();
@@ -143,6 +150,13 @@ export async function GET(request: Request) {
     const url = new URL(request.url);
     const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') || '15', 10), 1), 50);
     const before = url.searchParams.get('before'); // ISO date cursor
+    const connectorIds = [...new Set(
+      url.searchParams.getAll('source').map(value => value.trim()).filter(Boolean),
+    )].slice(0, 50);
+    const results = [...new Set(url.searchParams.getAll('result'))]
+      .filter((value): value is SyncHistoryResultFilter => (
+        SYNC_HISTORY_RESULT_FILTERS.has(value as SyncHistoryResultFilter)
+      ));
 
     const status = await syncScheduler.getStatus();
     const isSyncing = await syncScheduler.isSyncing();
@@ -151,7 +165,7 @@ export async function GET(request: Request) {
 
     const { history, hasMore } = await (
       await getConnectorManagementPersistence()
-    ).listSyncHistory({ limit, before });
+    ).listSyncHistory({ limit, before, connectorIds, results });
 
     return NextResponse.json({
       status,

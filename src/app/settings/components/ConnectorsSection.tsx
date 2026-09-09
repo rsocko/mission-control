@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plug, RefreshCw, ChevronRight, Trash2, Loader2, Shield, Circle,
   Plus, AlertTriangle, FolderOpen, Zap, Save, Activity,
   Clock, Check, CheckCircle2, X, XCircle, RotateCcw,
+  Eye, EyeOff, History,
 } from 'lucide-react';
 import {
   Select,
@@ -75,8 +77,10 @@ const SCOUT_SOURCE_LABELS: Record<ScoutSourceType, string> = {
   'cross-source': 'Cross-source',
 };
 
-function asSettingsRecord(settings: ConnectorConfig['settings']): Record<string, unknown> {
-  if (settings && typeof settings === 'object' && !Array.isArray(settings)) return settings;
+function asSettingsRecord(settings: unknown): Record<string, unknown> {
+  if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+    return settings as Record<string, unknown>;
+  }
   if (typeof settings === 'string') {
     try {
       const parsed = JSON.parse(settings);
@@ -201,6 +205,15 @@ function ConnectorsSection({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Link
+                      href={`/settings/sync-history?source=${encodeURIComponent(conn.id)}`}
+                      onClick={event => event.stopPropagation()}
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      title={`View ${getConnectorDisplayName(conn)} sync history`}
+                      aria-label={`View ${getConnectorDisplayName(conn)} sync history`}
+                    >
+                      <History size={12} />
+                    </Link>
                     {conn.enabled && conn.type !== 'scout' && (
                       <button onClick={(e) => { e.stopPropagation(); onSync(conn.id); }}
                         disabled={!!isSyncing}
@@ -680,6 +693,299 @@ function DocumentIntelligenceConnectorEditPanel(props: ConnectorEditPanelProps) 
   return <DefaultConnectorEditPanel {...props} variant="document-intelligence" />;
 }
 
+function HomeAssistantConnectorEditPanel({
+  connector,
+  onUpdate,
+  onDelete,
+  confirmDelete,
+  setConfirmDelete,
+  onTested,
+}: ConnectorEditPanelProps) {
+  const initial = asSettingsRecord(connector.settings);
+  const initialSources = asSettingsRecord(initial.sources);
+  const initialDelivery = asSettingsRecord(initial.outboundDelivery);
+  const initialActions = asSettingsRecord(initial.actions);
+  const source = (key: string) => asSettingsRecord(initialSources[key]);
+  const [name, setName] = useState(getConnectorDisplayName(connector));
+  const [baseUrl, setBaseUrl] = useState(
+    typeof initial.baseUrl === 'string' ? initial.baseUrl : 'http://homeassistant.local:8123',
+  );
+  const [accessToken, setAccessToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [pollInterval, setPollInterval] = useState(connector.pollIntervalMinutes || 5);
+  const [sources, setSources] = useState({
+    entityAlerts: source('entityAlerts').enabled !== false,
+    updates: source('updates').enabled !== false,
+    persistentNotifications: source('persistentNotifications').enabled !== false,
+    repairs: source('repairs').enabled !== false,
+  });
+  const [criticalUpdates, setCriticalUpdates] = useState(
+    Array.isArray(source('updates').criticalEntityPatterns)
+      ? (source('updates').criticalEntityPatterns as string[]).join(', ')
+      : '',
+  );
+  const [criticalPersistent, setCriticalPersistent] = useState(
+    Array.isArray(source('persistentNotifications').criticalNotificationPatterns)
+      ? (source('persistentNotifications').criticalNotificationPatterns as string[]).join(', ')
+      : '',
+  );
+  const [actionsEnabled, setActionsEnabled] = useState(initialActions.enabled === true);
+  const [updatePush, setUpdatePush] = useState<'immediate' | 'daily_summary' | 'off'>(
+    initialDelivery.updatePush === 'immediate' || initialDelivery.updatePush === 'off'
+      ? initialDelivery.updatePush
+      : 'daily_summary',
+  );
+  const [dailySummaryTime, setDailySummaryTime] = useState(
+    typeof initialDelivery.dailySummaryTime === 'string' ? initialDelivery.dailySummaryTime : '08:00',
+  );
+  const [immediateCriticalUpdates, setImmediateCriticalUpdates] = useState(initialDelivery.immediateCriticalUpdates !== false);
+  const [immediateActionNeededRepairs, setImmediateActionNeededRepairs] = useState(initialDelivery.immediateActionNeededRepairs !== false);
+  const [immediateUrgentEntityAlerts, setImmediateUrgentEntityAlerts] = useState(initialDelivery.immediateUrgentEntityAlerts !== false);
+  const [immediateCriticalPersistent, setImmediateCriticalPersistent] = useState(initialDelivery.immediateCriticalPersistentNotifications !== false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; details?: string; error?: string } | null>(null);
+
+  function markDirty() {
+    setDirty(true);
+    setSaveError('');
+  }
+
+  const patternList = (value: string) => value.split(',').map(item => item.trim()).filter(Boolean);
+  const settings = {
+    ...initial,
+    schemaVersion: 2,
+    baseUrl: baseUrl.trim().replace(/\/+$/, ''),
+    sources: {
+      ...initialSources,
+      entityAlerts: { ...source('entityAlerts'), enabled: sources.entityAlerts },
+      updates: {
+        ...source('updates'),
+        enabled: sources.updates,
+        criticalEntityPatterns: patternList(criticalUpdates),
+      },
+      persistentNotifications: {
+        ...source('persistentNotifications'),
+        enabled: sources.persistentNotifications,
+        criticalNotificationPatterns: patternList(criticalPersistent),
+      },
+      repairs: { ...source('repairs'), enabled: sources.repairs },
+    },
+    actions: { ...initialActions, enabled: actionsEnabled },
+    outboundDelivery: {
+      ...initialDelivery,
+      updatePush,
+      dailySummaryTime,
+      immediateCriticalUpdates,
+      immediateActionNeededRepairs,
+      immediateUrgentEntityAlerts,
+      immediateCriticalPersistentNotifications: immediateCriticalPersistent,
+    },
+  };
+
+  async function save() {
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onUpdate(connector.id, {
+        name: name.trim(),
+        syncMode: 'poll',
+        pollIntervalMinutes: pollInterval,
+        capabilities: { ...connector.capabilities, write: actionsEnabled },
+        settings,
+        ...(accessToken.trim() ? { credentials: { accessToken: accessToken.trim() } } : {}),
+      });
+      setAccessToken('');
+      setDirty(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save connector');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const response = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'home-assistant',
+          connectorId: connector.id,
+          settings,
+          ...(accessToken.trim()
+            ? { credentials: { accessToken: accessToken.trim() } }
+            : {}),
+        }),
+      });
+      const data = await response.json();
+      setTestResult(data);
+      await onTested?.();
+    } catch {
+      setTestResult({ success: false, error: 'Connection test request failed' });
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-[var(--border)] bg-[var(--surface-0)]/50 px-4 py-5">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Instance name
+          <input value={name} onChange={event => { setName(event.target.value); markDirty(); }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Home Assistant URL
+          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); markDirty(); }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Poll interval
+          <Select value={String(pollInterval)} onValueChange={value => { setPollInterval(Number(value)); markDirty(); }}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {POLL_INTERVAL_OPTIONS.map(option => (
+                <SelectItem key={option.value} value={String(option.value)}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Replace access token
+          <span className="relative mt-1 block">
+            <input type={showToken ? 'text' : 'password'} value={accessToken}
+              onChange={event => { setAccessToken(event.target.value); markDirty(); }}
+              placeholder={connector.hasCredentials ? 'Stored — leave blank to keep' : 'Long-lived access token'}
+              autoComplete="new-password"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)]" />
+            <button type="button" onClick={() => setShowToken(value => !value)}
+              className="absolute inset-y-0 right-0 px-3 text-[var(--text-muted)]" aria-label={showToken ? 'Hide token' : 'Show token'}>
+              {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </span>
+        </label>
+      </div>
+
+      <fieldset className="mt-5">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Notification sources</legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {([
+            ['entityAlerts', 'Device alerts'],
+            ['updates', 'Updates'],
+            ['persistentNotifications', 'Persistent'],
+            ['repairs', 'Repairs'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-sm text-[var(--text-secondary)]">
+              <input type="checkbox" checked={sources[key]} onChange={event => {
+                setSources(current => ({ ...current, [key]: event.target.checked }));
+                markDirty();
+              }} className="h-4 w-4 accent-blue-500" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Routine update push
+          <Select value={updatePush} onValueChange={value => { setUpdatePush(value as typeof updatePush); markDirty(); }}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">Immediate</SelectItem>
+              <SelectItem value="daily_summary">Daily summary</SelectItem>
+              <SelectItem value="off">No push</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="mt-1 block font-normal text-[var(--text-muted)]">This changes outbound delivery only; items remain separate in Notifications.</span>
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Daily summary time
+          <input type="time" value={dailySummaryTime} disabled={updatePush !== 'daily_summary'}
+            onChange={event => { setDailySummaryTime(event.target.value); markDirty(); }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] disabled:opacity-50" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Critical update entity patterns
+          <input value={criticalUpdates} onChange={event => { setCriticalUpdates(event.target.value); markDirty(); }}
+            placeholder="update.home_assistant_core, update.router_*"
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Critical persistent notification IDs
+          <input value={criticalPersistent} onChange={event => { setCriticalPersistent(event.target.value); markDirty(); }}
+            placeholder="security_*, water_leak"
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+      </div>
+
+      <fieldset className="mt-5">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Immediate push overrides</legend>
+        <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+          {([
+            [immediateCriticalUpdates, setImmediateCriticalUpdates, 'Critical updates'],
+            [immediateActionNeededRepairs, setImmediateActionNeededRepairs, 'Action-needed repairs'],
+            [immediateUrgentEntityAlerts, setImmediateUrgentEntityAlerts, 'Urgent device alerts'],
+            [immediateCriticalPersistent, setImmediateCriticalPersistent, 'Critical persistent notifications'],
+          ] as const).map(([checked, setter, label]) => (
+            <label key={label} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <input type="checkbox" checked={checked} onChange={event => { setter(event.target.checked); markDirty(); }}
+                className="h-4 w-4 accent-amber-500" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <label className="mt-5 flex gap-3 rounded-xl border border-amber-700/30 bg-amber-900/10 p-3">
+        <input type="checkbox" checked={actionsEnabled} onChange={event => { setActionsEnabled(event.target.checked); markDirty(); }}
+          className="mt-0.5 h-4 w-4 accent-amber-500" />
+        <span>
+          <span className="block text-sm font-medium text-[var(--text-primary)]">Allow source actions</span>
+          <span className="block text-xs text-[var(--text-muted)]">Install, skip, dismiss, and ignore actions require confirmation.</span>
+        </span>
+      </label>
+
+      {(saveError || testResult) && (
+        <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${
+          testResult?.success
+            ? 'border-emerald-800/40 bg-emerald-900/20 text-emerald-300'
+            : 'border-red-800/40 bg-red-900/20 text-red-300'
+        }`}>
+          {saveError || testResult?.details || testResult?.error}
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+        <button onClick={() => confirmDelete === connector.id ? onDelete(connector.id) : setConfirmDelete(connector.id)}
+          className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300">
+          <Trash2 size={13} /> {confirmDelete === connector.id ? 'Confirm remove' : 'Remove connector'}
+        </button>
+        <div className="flex gap-2">
+          <button onClick={test} disabled={testing}
+            className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50">
+            {testing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />} Test connection
+          </button>
+          <button onClick={save} disabled={!dirty || saving}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ConnectorEditPanel(props: ConnectorEditPanelProps) {
   if (props.connector.type === 'scout') {
     return (
@@ -711,6 +1017,9 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
   }
   if (props.connector.type === 'document-intelligence') {
     return <DocumentIntelligenceConnectorEditPanel {...props} />;
+  }
+  if (props.connector.type === 'home-assistant') {
+    return <HomeAssistantConnectorEditPanel {...props} />;
   }
 
   return <DefaultConnectorEditPanel {...props} />;

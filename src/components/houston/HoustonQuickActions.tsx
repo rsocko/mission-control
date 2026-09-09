@@ -33,7 +33,7 @@ const defaultActions: QuickAction[] = [
   {
     id: 'triage',
     label: 'Triage for me',
-    prompt: 'Review my unread notifications and triage queue. Categorize items into: act now, schedule for later, or dismiss.',
+    prompt: 'Review my unread notifications and Inbox. Categorize items into: act now, schedule for later, or dismiss.',
     icon: <Sparkles size={14} />,
   },
   {

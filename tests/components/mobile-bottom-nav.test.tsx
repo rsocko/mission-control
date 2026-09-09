@@ -96,10 +96,10 @@ afterEach(() => {
 });
 
 describe('MobileBottomNav', () => {
-  it('renders all 5 tabs: Today, Triage, Capture, Sort, Houston', () => {
+  it('renders all 5 tabs: Today, Inbox, Capture, Sort, Houston', () => {
     render(<MobileBottomNav />);
     expect(screen.getByText('Today')).toBeDefined();
-    expect(screen.getByText('Triage')).toBeDefined();
+    expect(screen.getByText('Inbox')).toBeDefined();
     expect(screen.getByText('Capture')).toBeDefined();
     expect(screen.getByText('Sort')).toBeDefined();
     expect(screen.getByText('Houston')).toBeDefined();
@@ -116,10 +116,9 @@ describe('MobileBottomNav', () => {
     expect(hrefs).toContain('/ai');
   });
 
-  it('does not render More or Inbox tabs', () => {
+  it('does not render More or the verbose Quick Sort label', () => {
     render(<MobileBottomNav />);
     expect(screen.queryByText('More')).toBeNull();
-    expect(screen.queryByText('Inbox')).toBeNull();
     expect(screen.queryByText('Quick Sort')).toBeNull();
   });
 
@@ -131,7 +130,7 @@ describe('MobileBottomNav', () => {
   it('marks active tab with aria-current=page', () => {
     mockPathname = '/triage';
     render(<MobileBottomNav />);
-    const triageLink = screen.getByText('Triage').closest('a');
+    const triageLink = screen.getByText('Inbox').closest('a');
     expect(triageLink?.getAttribute('aria-current')).toBe('page');
     const todayLink = screen.getByText('Today').closest('a');
     expect(todayLink?.getAttribute('aria-current')).toBeNull();
@@ -262,7 +261,7 @@ describe('MobileBottomNav', () => {
     render(<MobileBottomNav />);
     // Component should still render all tabs
     expect(screen.getByText('Today')).toBeDefined();
-    expect(screen.getByText('Triage')).toBeDefined();
+    expect(screen.getByText('Inbox')).toBeDefined();
     expect(screen.getByText('Sort')).toBeDefined();
     // No badges should appear
     expect(screen.queryByLabelText(/items/)).toBeNull();

@@ -111,6 +111,8 @@ export interface TaskQueryScope {
    * the quick filter, matching the visible result set.
    */
   readonly includeQuickFilter?: boolean;
+  /** Exclude tasks snoozed beyond this instant from the count. */
+  readonly availableAt?: string;
 }
 
 export type TaskListSortField =

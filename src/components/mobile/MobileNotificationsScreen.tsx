@@ -899,12 +899,16 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params ?? {}),
       });
+      const result = await response.json().catch(() => ({
+        success: false,
+        error: `Notification action failed with HTTP ${response.status}`,
+      }));
       if (!response.ok) {
         cancelExternalNavigation(externalWindow);
-        return { success: false };
+        console.error('Notification action failed:', result.error || `HTTP ${response.status}`);
+        return result;
       }
 
-      const result = await response.json();
       if (result.success && result.result) {
         if (result.result.url) {
           if (result.result.target === '_blank' || result.result.type === 'open_url') {

@@ -379,6 +379,19 @@ export interface NotificationWebPersistence {
     claimedAt: string;
     recoveryCutoff: string;
   }): Promise<boolean>;
+  claimProviderAction(input: {
+    notificationId: string;
+    actionId: string;
+    claimedAt: string;
+    recoveryCutoff: string;
+  }): Promise<boolean>;
+  finalizeProviderAction(input: {
+    notificationId: string;
+    claimedAt: string;
+    now: string;
+    success: boolean;
+    error: string | null;
+  }): Promise<boolean>;
   finalizeWorkflowAction(input: {
     notificationId: string;
     actionId: string;

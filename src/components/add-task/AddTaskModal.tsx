@@ -341,16 +341,13 @@ export function AddTaskModal({
         onTaskCreated?.(newTaskId);
 
         if (addAnother) {
-          // Keep destination and selectedListId from the last task
+          // Keep batch-level organization: destination, list, project, and tags.
           setTitle('');
           setDescription('');
           setDueDate('');
           setDueDateText('');
           setPriority('none');
           setPlanningHorizon(null);
-          setSelectedTags([]);
-          setPrefillTagSlugs([]);
-          setSelectedProjectId('');
           setSubtasks([]);
           setSubtaskInput('');
           setEstimatedDuration(null);

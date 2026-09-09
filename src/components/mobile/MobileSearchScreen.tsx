@@ -50,7 +50,7 @@ const SUGGESTED_SEARCHES = [
 const TYPE_FILTERS: ReadonlyArray<{ key: TypeFilter; label: string }> = [
   { key: 'all', label: 'All' },
   { key: 'tasks', label: 'Tasks' },
-  { key: 'triage', label: 'Triage' },
+  { key: 'triage', label: 'Inbox' },
   { key: 'notes', label: 'Notes' },
 ];
 
@@ -197,7 +197,7 @@ function getBadgeConfig(result: SearchResult) {
   }
 
   return {
-    label: 'Triage',
+    label: 'Inbox',
     icon: Inbox,
     className: 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20',
   };

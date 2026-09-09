@@ -348,11 +348,22 @@ export function getAssignedFilterCondition(
 /**
  * "Inbox" quick filter — untriaged work: local quick captures, tasks in
  * user-configured inbox lists, and anything tagged `needs-triage`.
+ * Tasks inferred from their source/list stop being Inbox items once they have
+ * a planning horizon or project; the explicit tag remains an override.
  */
 export function getInboxFilterCondition(
   inboxLists: readonly InboxListEntry[],
 ): SQL | undefined {
-  const conditions: SQL[] = [eq(tasks.connectorType, 'local')];
+  const conditions: SQL[] = [
+    and(
+      eq(tasks.connectorType, 'local'),
+      isNull(tasks.planningHorizon),
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${taskProjects}
+        WHERE ${taskProjects.taskId} = ${tasks.id}
+      )`,
+    )!,
+  ];
 
   for (const entry of inboxLists) {
     if (entry.sourceListId) {
@@ -360,6 +371,11 @@ export function getInboxFilterCondition(
         and(
           eq(tasks.connectorType, entry.connectorType),
           eq(tasks.sourceListId, entry.sourceListId),
+          isNull(tasks.planningHorizon),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${taskProjects}
+            WHERE ${taskProjects.taskId} = ${tasks.id}
+          )`,
         )!,
       );
     } else if (entry.sourceListName) {
@@ -367,6 +383,11 @@ export function getInboxFilterCondition(
         and(
           eq(tasks.connectorType, entry.connectorType),
           eq(tasks.sourceListName, entry.sourceListName),
+          isNull(tasks.planningHorizon),
+          sql`NOT EXISTS (
+            SELECT 1 FROM ${taskProjects}
+            WHERE ${taskProjects.taskId} = ${tasks.id}
+          )`,
         )!,
       );
     }

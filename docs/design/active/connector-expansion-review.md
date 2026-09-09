@@ -59,9 +59,10 @@ The Outlook Calendar connector renders uniquely on the **Today view**:
 
 ## Expansion Roadmap — Status (§4.4)
 
-### 1. ✅ Home Assistant Alerts — DONE
+### 1. Home Assistant — BASE SHIPPED; EXPANSION SPEC READY
 
-Fully implemented as `home-assistant` connector in `src/lib/connectors/home-assistant/index.ts`.
+Base entity-alert ingestion is implemented as the `home-assistant` connector in
+`src/lib/connectors/home-assistant/index.ts`.
 
 - Configurable entity patterns (`sensor.mail_*`, `binary_sensor.*_door*`, `sensor.*_battery`)
 - Rule engine with conditions: `equals`, `above`, `below`, `changed`
@@ -69,15 +70,18 @@ Fully implemented as `home-assistant` connector in `src/lib/connectors/home-assi
 - Per-rule cooldown support (prevents alert fatigue)
 - **Surfaces:** Alerts panel, triage queue, notification badges
 
-**Proposed next phase:** see
+**Implementation-ready expansion:** see
 [Home Assistant: Multi-Instance, Updates/Repairs, and Custom Actions](../proposed/home-assistant-multi-instance-expansion.md)
-for multi-home support (already architecturally possible, needs UI/labeling
-polish), ingesting HA's Updates and Repairs subsystems (Repairs requires the
-WebSocket API — REST doesn't expose them), and HA-specific action buttons
-(install/skip update, ignore repair, dismiss) via the existing notification
-provider/action framework. Tracked in
-[#1756](https://github.com/rsocko/mission-control/issues/1756) —
-see also #133 and #627.
+for multi-instance naming and filtering, Updates from REST `update.*` states,
+persistent notifications from WebSocket `persistent_notification/get`, Repairs
+from WebSocket `repairs/list_issues`, and confirmed HA-specific actions through
+the existing notification provider framework. Persistent notifications are not
+REST state entities. [#1756](https://github.com/rsocko/mission-control/issues/1756)
+is the canonical epic; [#1706](https://github.com/rsocko/mission-control/issues/1706)
+is the first Updates implementation slice. #133 and #1297 are correctly closed;
+#627 is closed as fulfilled after its acceptance check; and
+[rsocko/ideation#1421](https://github.com/rsocko/ideation/issues/1421) is closed
+as a duplicate of #1756.
 
 ### 2. ✅ Document Intelligence — DONE
 

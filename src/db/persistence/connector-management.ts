@@ -57,6 +57,8 @@ export interface GitHubRepositorySnapshot {
   >>;
 }
 
+export type SyncHistoryResultFilter = 'changes' | 'no-changes' | 'errors';
+
 export interface MicrosoftTodoHealthSnapshot {
   connectors: ManagedConnectorRecord[];
   sourceLists: SourceListRecord[];
@@ -300,6 +302,8 @@ export interface ConnectorManagementPersistence {
   listSyncHistory(input: {
     limit: number;
     before: string | null;
+    connectorIds?: readonly string[];
+    results?: readonly SyncHistoryResultFilter[];
   }): Promise<{ history: SyncHistoryRecord[]; hasMore: boolean }>;
   getSyncWorkerHeartbeat(): Promise<{
     startedAt: string;

@@ -527,5 +527,61 @@ export function runConnectorManagementRepositoryContract(
         }],
       });
     });
+
+    it('filters sync history by connectors and result categories before paging', async () => {
+      const repository = harness.repository();
+      const connectorA = `${PREFIX}-filter-a`;
+      const connectorB = `${PREFIX}-filter-b`;
+      await harness.seedSyncHistory([
+        history(`${PREFIX}-filter-change`, '2099-09-05T01:00:00.000Z', {
+          connectorId: connectorA,
+        }),
+        history(`${PREFIX}-filter-empty`, '2099-09-05T02:00:00.000Z', {
+          connectorId: connectorB,
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+        }),
+        history(`${PREFIX}-filter-error`, '2099-09-05T03:00:00.000Z', {
+          connectorId: connectorA,
+          success: false,
+          errors: ['failed'],
+        }),
+      ]);
+
+      const bySource = await repository.listSyncHistory({
+        limit: 10,
+        before: null,
+        connectorIds: [connectorA],
+      });
+      expect(bySource.history.map(({ id }) => id)).toEqual([
+        `${PREFIX}-filter-error`,
+        `${PREFIX}-filter-change`,
+      ]);
+
+      const noChanges = await repository.listSyncHistory({
+        limit: 10,
+        before: null,
+        results: ['no-changes'],
+        connectorIds: [connectorB],
+      });
+      expect(noChanges.history.map(({ id }) => id)).toEqual([
+        `${PREFIX}-filter-empty`,
+      ]);
+
+      const changedOrErrored = await repository.listSyncHistory({
+        limit: 1,
+        before: null,
+        results: ['changes', 'errors'],
+        connectorIds: [connectorA],
+      });
+      expect(changedOrErrored).toMatchObject({
+        hasMore: true,
+        history: [{ id: `${PREFIX}-filter-error` }],
+      });
+    });
   });
 }

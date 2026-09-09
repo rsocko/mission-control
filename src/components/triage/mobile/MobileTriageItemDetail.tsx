@@ -15,6 +15,7 @@ import type { TriageActionType, TriageItem } from '@/types';
 import { ACTION_META, SOURCE_META } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
 import { MobileSheet } from '@/components/ui/MobileSheet';
+import { getInboxTaskMetadata } from '@/lib/inbox/items';
 
 interface MobileTriageItemDetailProps {
   item: TriageItem | null;
@@ -38,6 +39,7 @@ const SOURCE_BRAND: Record<string, { bg: string; ring: string; text: string }> =
   facebook: { bg: 'bg-blue-500/15', ring: 'ring-blue-400/30', text: 'text-blue-300' },
   tiktok: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-300' },
   pinterest: { bg: 'bg-rose-500/15', ring: 'ring-rose-400/30', text: 'text-rose-300' },
+  task: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-200' },
   web: { bg: 'bg-slate-500/15', ring: 'ring-slate-400/30', text: 'text-slate-300' },
 };
 
@@ -215,6 +217,10 @@ function ActionsSection({
   safeSourceUrl: string;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const task = getInboxTaskMetadata(item);
+  const availableActions = task
+    ? ALL_ACTIONS.filter((action) => ['complete_action', 'snooze', 'dismiss'].includes(action.type))
+    : ALL_ACTIONS;
 
   return (
     <section className="mt-4 rounded-[24px] bg-white/[0.035] p-4 ring-1 ring-white/8 backdrop-blur-xl">
@@ -225,7 +231,7 @@ function ActionsSection({
       >
         <h3 className="text-sm font-semibold text-white">All actions</h3>
         <div className="flex items-center gap-2">
-          <a
+          {!task ? <a
             href={safeSourceUrl}
             target="_blank"
             rel="noreferrer"
@@ -235,7 +241,7 @@ function ActionsSection({
           >
             <ExternalLink size={14} />
             Link
-          </a>
+          </a> : null}
           <ChevronDown
             size={16}
             className={cn('text-slate-400 transition-transform', expanded && 'rotate-180')}
@@ -245,7 +251,7 @@ function ActionsSection({
 
       {expanded && (
         <div className="mt-3 grid grid-cols-3 gap-2">
-          {ALL_ACTIONS.map((action) => {
+          {availableActions.map((action) => {
             const Icon = action.icon;
             const isBusy = busyAction === action.type;
             const isDone = takenActions.has(action.type);
@@ -273,7 +279,9 @@ function ActionsSection({
                 >
                   {isBusy ? <Loader2 size={16} className="animate-spin" /> : isDone ? <Check size={16} /> : <Icon size={16} />}
                 </div>
-                <span className="text-xs font-medium leading-4">{action.label}</span>
+                <span className="text-xs font-medium leading-4">
+                  {task && action.type === 'complete_action' ? 'Keep task' : action.label}
+                </span>
               </button>
             );
           })}
@@ -303,7 +311,7 @@ export default function MobileTriageItemDetail({
       <MobileSheet
         isOpen={false}
         onClose={onClose}
-        ariaLabel="Triage item details"
+        ariaLabel="Inbox item details"
         height="full"
       >
         {null}
@@ -312,10 +320,13 @@ export default function MobileTriageItemDetail({
   }
 
   const item = activeItem;
+  const task = getInboxTaskMetadata(item);
   const source = SOURCE_META[item.sourcePlatform] || SOURCE_META.web;
   const sourceBrand = SOURCE_BRAND[item.sourcePlatform] || SOURCE_BRAND.web;
   const urgency = URGENCY_META[item.aiUrgency];
-  const contentPreview = item.aiSummary || item.description || 'No AI summary is available for this item yet.';
+  const contentPreview = task
+    ? `${task.sourceListName || task.connectorType} · ${task.priority === 'none' ? 'No priority' : `${task.priority} priority`}${task.projectIds.length || task.planningHorizon ? '' : ' · Needs filing'}`
+    : item.aiSummary || item.description || 'No AI summary is available for this item yet.';
   const score = Math.max(0, Math.min(100, item.aiRelevanceScore));
   const safeSourceUrl = /^https?:\/\//i.test(item.sourceUrl) ? item.sourceUrl : '#';
 
@@ -323,7 +334,7 @@ export default function MobileTriageItemDetail({
     <MobileSheet
       isOpen={activeItem !== null}
       onClose={onClose}
-      ariaLabel="Triage item details"
+      ariaLabel="Inbox item details"
       height="full"
       className="rounded-t-[28px] border-white/10 bg-slate-950/95 shadow-[0_-24px_80px_rgba(2,6,23,0.78)] backdrop-blur-2xl"
       contentClassName="flex flex-col overflow-hidden"
@@ -349,7 +360,7 @@ export default function MobileTriageItemDetail({
           type="button"
           onClick={onClose}
           className="flex h-11 w-11 min-h-[44px] min-w-[44px] items-center justify-center rounded-full bg-white/[0.05] text-slate-300 ring-1 ring-white/10 transition-colors hover:bg-white/[0.08] hover:text-white"
-          aria-label="Close triage item details"
+          aria-label="Close inbox item details"
         >
           <X size={16} />
         </button>
@@ -363,21 +374,23 @@ export default function MobileTriageItemDetail({
                 {item.title}
               </h2>
             </div>
-            <div className="w-20 flex-shrink-0">
-              <div className="text-right text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
-                Score
+            {!task ? (
+              <div className="w-20 flex-shrink-0">
+                <div className="text-right text-xs font-semibold uppercase tracking-[0.18em] text-[var(--text-muted)]">
+                  Score
+                </div>
+                <div className="mt-1 text-right text-xl font-bold tabular-nums text-sky-300">{score}</div>
               </div>
-              <div className="mt-1 text-right text-xl font-bold tabular-nums text-sky-300">{score}</div>
-            </div>
+            ) : null}
           </div>
 
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
+          {!task ? <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/8">
             <div
               className="h-full rounded-full bg-gradient-to-r from-sky-500 via-cyan-400 to-emerald-400"
               style={{ width: `${score}%` }}
               aria-hidden="true"
             />
-          </div>
+          </div> : null}
 
           {item.thumbnailUrl ? (
             <div className="mt-4 overflow-hidden rounded-[20px] ring-1 ring-white/10">
@@ -414,7 +427,7 @@ export default function MobileTriageItemDetail({
           ) : null}
         </div>
 
-          <section className="mt-4 rounded-[24px] bg-white/[0.035] p-4 ring-1 ring-white/8 backdrop-blur-xl">
+          {!task ? <section className="mt-4 rounded-[24px] bg-white/[0.035] p-4 ring-1 ring-white/8 backdrop-blur-xl">
             <div className="flex items-center justify-between gap-3">
               <h3 className="text-sm font-semibold text-white">Source metadata</h3>
               <a
@@ -454,9 +467,9 @@ export default function MobileTriageItemDetail({
                 <div className="mt-1 text-sm text-slate-200">{formatDateTime(item.ingestedAt)}</div>
               </div>
             </div>
-          </section>
+          </section> : null}
 
-          <section className="mt-4 rounded-[24px] bg-white/[0.035] p-4 ring-1 ring-white/8 backdrop-blur-xl">
+          {!task ? <section className="mt-4 rounded-[24px] bg-white/[0.035] p-4 ring-1 ring-white/8 backdrop-blur-xl">
             <h3 className="text-sm font-semibold text-white">AI suggested actions</h3>
             <div className="mt-3 space-y-2">
               {item.aiSuggestedActions.length > 0 ? (
@@ -510,7 +523,7 @@ export default function MobileTriageItemDetail({
                 </div>
               )}
             </div>
-          </section>
+          </section> : null}
 
           {/* All actions — inline in scrollable content, collapsed by default */}
           <ActionsSection

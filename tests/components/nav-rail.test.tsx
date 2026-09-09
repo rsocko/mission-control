@@ -153,7 +153,7 @@ describe('NavRail', () => {
     const cases = [
       ['All Tasks', 'lucide-list-checks', 'text-cyan-400'],
       ['My Day', 'lucide-sun', 'text-amber-400'],
-      ['Triage', 'lucide-inbox', 'text-purple-400'],
+      ['Inbox', 'lucide-inbox', 'text-purple-400'],
       ['Projects', 'lucide-chart-network', 'text-violet-400'],
     ];
 
@@ -445,7 +445,7 @@ describe('NavRail', () => {
       'DashboardAll TasksMy DayProjectsKanbanGoalsTimeline'
     );
     expect(screen.getByRole('group', { name: 'Operate' })).toHaveTextContent(
-      'NotificationsRoutinesTriageQuick SortReconciliation'
+      'NotificationsRoutinesInboxQuick SortReconciliation'
     );
     expect(screen.getByRole('group', { name: 'Explore' })).toHaveTextContent(
       'InsightsGraph'
@@ -569,7 +569,7 @@ describe('NavRail', () => {
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
 
     const menu = screen.getByRole('menu', { name: 'Operations navigation' });
-    expect(within(menu).getByRole('menuitem', { name: /^Triage/ })).toHaveAttribute('href', '/triage');
+    expect(within(menu).getByRole('menuitem', { name: /^Inbox/ })).toHaveAttribute('href', '/triage');
     expect(within(menu).getByRole('menuitem', { name: /^Reconciliation/ })).toHaveAttribute(
       'href',
       '/scout/reconciliation',
@@ -662,11 +662,11 @@ describe('NavRail', () => {
     );
   });
 
-  it('uses distinct colors for adjacent Routines and Triage icons', () => {
+  it('uses distinct colors for adjacent Routines and Inbox icons', () => {
     renderNavRail();
 
     const routinesIcon = screen.getByRole('link', { name: 'Routines' }).querySelector('svg');
-    const triageIcon = screen.getByRole('link', { name: 'Triage' }).querySelector('svg');
+    const triageIcon = screen.getByRole('link', { name: 'Inbox' }).querySelector('svg');
     const quickSortIcon = screen.getByRole('link', { name: 'Quick Sort' }).querySelector('svg');
 
     expect(routinesIcon).toHaveClass('text-emerald-400');

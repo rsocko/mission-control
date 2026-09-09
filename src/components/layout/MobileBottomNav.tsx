@@ -30,7 +30,7 @@ interface NavTab {
 
 const tabs: NavTab[] = [
   { href: '/today', label: 'Today', icon: Sun, badgeTone: 'amber', badgeKey: 'myDay' },
-  { href: '/triage', label: 'Triage', icon: Layers, badgeTone: 'red', badgeKey: 'triage' },
+  { href: '/triage', label: 'Inbox', icon: Layers, badgeTone: 'red', badgeKey: 'triage' },
   { href: '/capture', label: 'Capture', icon: PlusCircle, elevated: true },
   { href: '/quick-sort', label: 'Sort', icon: Zap, badgeTone: 'amber', badgeKey: 'quickSort' },
   { href: '/ai', label: 'Houston', icon: HoustonIcon },

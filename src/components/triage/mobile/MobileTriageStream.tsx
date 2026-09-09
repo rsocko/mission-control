@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils/cn';
 import type { TriageItem, TriageSourcePlatform } from '@/types';
 import { CONTENT_TYPE_OPTIONS, SOURCE_OPTIONS } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
+import { getInboxTaskMetadata, type InboxGroup } from '@/lib/inbox/items';
 
 interface MobileTriageStreamProps {
   items: TriageItem[];
@@ -18,6 +19,9 @@ interface MobileTriageStreamProps {
   onSourceFilterChange: (source: TriageSourcePlatform | 'all') => void;
   activeTypeFilter: string | null;
   onTypeFilterChange: (type: string | null) => void;
+  group?: InboxGroup;
+  onGroupChange?: (group: InboxGroup) => void;
+  groupCounts?: Record<InboxGroup, number>;
 }
 
 type PriorityFilter = 'all' | TriageItem['aiUrgency'];
@@ -31,6 +35,7 @@ const SOURCE_BRAND: Record<string, { bg: string; ring: string; text: string }> =
   facebook: { bg: 'bg-blue-500/15', ring: 'ring-blue-400/30', text: 'text-blue-300' },
   tiktok: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-300' },
   pinterest: { bg: 'bg-rose-500/15', ring: 'ring-rose-400/30', text: 'text-rose-300' },
+  task: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-200' },
   web: { bg: 'bg-slate-500/15', ring: 'ring-slate-400/30', text: 'text-slate-300' },
 };
 
@@ -108,6 +113,9 @@ export default function MobileTriageStream({
   onSourceFilterChange,
   activeTypeFilter,
   onTypeFilterChange,
+  group = 'content',
+  onGroupChange,
+  groupCounts = { all: items.length, tasks: 0, content: items.length },
 }: MobileTriageStreamProps) {
   const [activePriorityFilter, setActivePriorityFilter] = useState<PriorityFilter>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
@@ -161,8 +169,8 @@ export default function MobileTriageStream({
       <div className="sticky top-0 z-20 border-b border-white/5 bg-slate-950/95 pb-4 pt-3 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3 px-4">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">Triage stream</p>
-            <h2 className="mt-1 text-xl font-semibold text-white">Inbox feed</h2>
+            <p className="text-xs font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">Review and route</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">Inbox</h2>
             <p className="mt-1 text-sm text-slate-400">{filteredItems.length} item{filteredItems.length === 1 ? '' : 's'} in view</p>
           </div>
 
@@ -178,6 +186,29 @@ export default function MobileTriageStream({
         </div>
 
         <div className="mt-3">
+          <FilterRow label="Groups">
+            {([
+              ['all', 'All'],
+              ['tasks', 'Tasks'],
+              ['content', 'Content'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onGroupChange?.(value)}
+                aria-pressed={group === value}
+                className={cn(
+                  'inline-flex min-h-11 items-center gap-2 rounded-full px-4 text-sm font-medium ring-1 transition',
+                  group === value
+                    ? 'bg-sky-500/15 text-sky-200 ring-sky-400/30'
+                    : 'bg-white/[0.04] text-slate-300 ring-white/8 hover:bg-white/[0.08]',
+                )}
+              >
+                {label}
+                <span className="tabular-nums text-slate-400">{groupCounts[value]}</span>
+              </button>
+            ))}
+          </FilterRow>
           <button
             type="button"
             onClick={() => setFiltersExpanded((v) => !v)}
@@ -193,7 +224,7 @@ export default function MobileTriageStream({
           </button>
           {filtersExpanded && (
             <div className="mt-1 space-y-3 pb-1">
-              <FilterRow label="Sources">
+              {group !== 'tasks' ? <FilterRow label="Content sources">
                 {sourceOptions.map((option) => {
                   const isActive = activeSourceFilter === option.value;
                   const brand = option.value === 'all'
@@ -222,7 +253,7 @@ export default function MobileTriageStream({
                     </button>
                   );
                 })}
-              </FilterRow>
+              </FilterRow> : null}
 
               <FilterRow label="Priority">
                 {PRIORITY_OPTIONS.map((option) => {
@@ -307,7 +338,10 @@ export default function MobileTriageStream({
           <div className="space-y-3">
             {filteredItems.map((item) => {
               const sourceBrand = SOURCE_BRAND[item.sourcePlatform] || SOURCE_BRAND.web;
-              const preview = item.aiSummary || item.description || 'No preview available yet.';
+              const task = getInboxTaskMetadata(item);
+              const preview = task
+                ? `${task.sourceListName || task.connectorType} · ${task.priority === 'none' ? 'No priority' : `${task.priority} priority`}${task.projectIds.length || task.planningHorizon ? '' : ' · Needs filing'}`
+                : item.aiSummary || item.description || 'No preview available yet.';
 
               return (
                 <button
@@ -325,9 +359,11 @@ export default function MobileTriageStream({
                     </div>
 
                     <div className="flex items-center gap-2 pl-2">
-                      <span className="text-sm font-semibold text-sky-300 [font-variant-numeric:tabular-nums]">
-                        {item.aiRelevanceScore}
-                      </span>
+                      {!task ? (
+                        <span className="text-sm font-semibold text-sky-300 [font-variant-numeric:tabular-nums]">
+                          {item.aiRelevanceScore}
+                        </span>
+                      ) : null}
                       <ChevronRight size={16} className="text-[var(--text-muted)]" />
                     </div>
                   </div>

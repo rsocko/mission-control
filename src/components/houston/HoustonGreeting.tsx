@@ -51,7 +51,7 @@ function getHoustonMessage(summary: DailySummary): string {
     return `${summary.dueToday} ${summary.dueToday === 1 ? 'task' : 'tasks'} due today. Let's knock them out.`;
   }
   if (summary.triagePending > 0) {
-    return `${summary.triagePending} items in your triage queue. Ready to process?`;
+    return `${summary.triagePending} items in your Inbox. Ready to process?`;
   }
   if (summary.completedToday > 0) {
     return `You've completed ${summary.completedToday} ${summary.completedToday === 1 ? 'task' : 'tasks'} today. Nice work.`;
@@ -69,7 +69,7 @@ export function HoustonGreeting() {
       try {
         const [tasksRes, triageRes] = await Promise.allSettled([
           fetch('/api/tasks?status=todo&openOnly=true&parentOnly=true&countsOnly=true'),
-          fetch('/api/triage?status=pending&limit=0'),
+          fetch('/api/navigation/counts'),
         ]);
 
         let overdue = 0;
@@ -88,7 +88,7 @@ export function HoustonGreeting() {
         let triagePending = 0;
         if (triageRes.status === 'fulfilled' && triageRes.value.ok) {
           const data = await triageRes.value.json();
-          triagePending = data?.stats?.pending ?? data?.totalFiltered ?? 0;
+          triagePending = data?.triage ?? 0;
         }
 
         setSummary({ overdue, dueToday, inProgress, triagePending, completedToday });
@@ -152,7 +152,7 @@ export function HoustonGreeting() {
               color={summary.dueToday > 0 ? 'amber' : 'muted'}
             />
             <StatPill
-              label="Triage"
+              label="Inbox"
               value={summary.triagePending}
               color={summary.triagePending > 0 ? 'blue' : 'muted'}
             />

@@ -9,6 +9,7 @@ vi.mock('@/db/schema', () => {
 
 const mocks = vi.hoisted(() => ({
   counts: vi.fn(),
+  countTasks: vi.fn(),
   getServerToday: vi.fn(() => '2026-08-16'),
 }));
 
@@ -20,6 +21,12 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 
 vi.mock('@/lib/utils/date', () => ({
   getLocalToday: mocks.getServerToday,
+  getLocalDaysFromNow: vi.fn(() => '2026-08-23'),
+}));
+vi.mock('@/lib/tasks/core/runtime', () => ({
+  getTaskCorePersistence: async () => ({
+    queries: { countTasks: mocks.countTasks },
+  }),
 }));
 
 function projection(overrides: {
@@ -59,6 +66,7 @@ describe('GET /api/navigation/counts', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getServerToday.mockReturnValue('2026-08-16');
+    mocks.countTasks.mockResolvedValue(3);
   });
 
   it('returns all actionable queue counts and notification severity', async () => {
@@ -81,10 +89,14 @@ describe('GET /api/navigation/counts', () => {
     expect(mocks.counts).toHaveBeenCalledWith(
       expect.objectContaining({ date: '2026-08-16' }),
     );
+    expect(mocks.countTasks).toHaveBeenCalledWith(
+      expect.objectContaining({ quickFilter: 'inbox', openOnly: true, parentOnly: true }),
+      expect.objectContaining({ includeQuickFilter: true, availableAt: expect.any(String) }),
+    );
     await expect(response.json()).resolves.toEqual({
       myDay: 4,
       notifications: 2,
-      triage: 11,
+      triage: 14,
       quickSort: 5,
       reconciliation: 3,
       overdue: 6,

@@ -59,6 +59,7 @@ export type NotificationCategory =
 export type SyncMode = 'webhook' | 'poll' | 'manual';
 export type SourceListType = 'list' | 'project' | 'repo' | 'folder' | 'board';
 export type TriageSourcePlatform =
+  | 'task'
   | 'reddit'
   | 'youtube'
   | 'instagram'
@@ -74,7 +75,7 @@ export type TriageSourcePlatform =
   | 'document-intelligence'
   | 'scout'
   | 'web';
-export type TriageContentType = 'link' | 'image' | 'video' | 'text_post' | 'repo' | 'model_3d' | 'article' | 'product' | 'document';
+export type TriageContentType = 'task' | 'link' | 'image' | 'video' | 'text_post' | 'repo' | 'model_3d' | 'article' | 'product' | 'document';
 export type TriageStatus = 'pending' | 'snoozed' | 'actioned' | 'dismissed';
 export type TriageActionType =
   | 'save_karakeep'

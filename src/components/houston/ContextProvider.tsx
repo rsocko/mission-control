@@ -166,7 +166,7 @@ function buildSystemContext({
 
   if (triageStatus.unreadCount > 0) {
     sections.push(
-      `## Triage Queue\n` +
+      `## Inbox Queue\n` +
       `- ${triageStatus.unreadCount} unread notifications\n` +
       `- ${triageStatus.criticalCount} critical items\n` +
       (triageStatus.categories.length > 0 ? `- Categories: ${triageStatus.categories.join(', ')}` : ''),

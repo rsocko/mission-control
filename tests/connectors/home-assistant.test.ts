@@ -17,9 +17,11 @@ import {
 import { homeAssistantNotificationProvider } from '@/lib/notifications/providers/home-assistant';
 
 const nativeWebSocket = globalThis.WebSocket;
+const nativeFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.WebSocket = nativeWebSocket;
+  globalThis.fetch = nativeFetch;
 });
 
 describe('Home Assistant settings', () => {
@@ -268,6 +270,26 @@ describe('Home Assistant WebSocket client', () => {
     expect(result.errors).toEqual({});
     expect(result.persistentNotifications?.[0].notification_id).toBe('notice-1');
     expect(result.repairs?.[0]).toMatchObject({ domain: 'mqtt', issue_id: 'offline' });
+  });
+});
+
+describe('Home Assistant REST client', () => {
+  it('includes Home Assistant response details when a service request fails', async () => {
+    globalThis.fetch = async () => new Response(
+      JSON.stringify({ message: 'Entity update.router does not support installation' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.callService('update', 'install', {
+      entity_id: 'update.router',
+    })).rejects.toThrow(
+      'Home Assistant request failed: HTTP 400: Entity update.router does not support installation',
+    );
   });
 });
 

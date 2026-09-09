@@ -6,6 +6,7 @@ import {
   type HomeAssistantNotificationAction,
 } from '@/lib/connectors/home-assistant';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
+import { connectorLogger } from '@/lib/logger';
 import type { NotificationProviderActionContext, NotificationProviderActionResult } from './types';
 
 function record(value: unknown): Record<string, unknown> {
@@ -51,6 +52,12 @@ export async function executeHomeAssistantProviderAction(
       },
     };
   } catch (error) {
+    connectorLogger.warn({
+      err: error,
+      action,
+      connectorId: context.notification.connectorInstanceId,
+      notificationId: context.notification.id,
+    }, 'Home Assistant notification action failed');
     const status = error instanceof HomeAssistantActionError ? error.status : 503;
     return {
       result: { type: 'home_assistant_action_failed', action },

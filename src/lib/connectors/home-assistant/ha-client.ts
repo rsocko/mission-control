@@ -192,6 +192,37 @@ function asArray(value: unknown): unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+async function responseError(response: Response): Promise<string> {
+  const fallback = `Home Assistant request failed: HTTP ${response.status}`;
+  const text = (await response.text().catch(() => '')).trim();
+  if (!text) return fallback;
+
+  let detail = text;
+  try {
+    const payload = JSON.parse(text) as unknown;
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      const record = payload as Record<string, unknown>;
+      if (typeof record.message === 'string') {
+        detail = record.message;
+      } else if (typeof record.error === 'string') {
+        detail = record.error;
+      } else if (
+        record.error
+        && typeof record.error === 'object'
+        && !Array.isArray(record.error)
+        && typeof (record.error as Record<string, unknown>).message === 'string'
+      ) {
+        detail = String((record.error as Record<string, unknown>).message);
+      }
+    }
+  } catch {
+    // Home Assistant may return plain text for proxy and transport errors.
+  }
+
+  const normalized = detail.replace(/\s+/g, ' ').trim().slice(0, 300);
+  return normalized ? `${fallback}: ${normalized}` : fallback;
+}
+
 export function createHAClient(options: HAClientOptions): HAClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
 
@@ -209,7 +240,7 @@ export function createHAClient(options: HAClientOptions): HAClient {
       signal: init?.signal ?? AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
-      throw new Error(`Home Assistant request failed: HTTP ${response.status}`);
+      throw new Error(await responseError(response));
     }
     return response.status === 204 ? null : response.json();
   }

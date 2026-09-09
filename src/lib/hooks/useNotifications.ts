@@ -151,6 +151,7 @@ export interface UseNotificationsReturn {
 
 export interface ActionResult {
   success: boolean;
+  error?: string;
   result?: {
     type: string;
     url?: string;
@@ -382,11 +383,15 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params || {}),
       });
+      const data = await res.json().catch(() => ({
+        success: false,
+        error: `Notification action failed with HTTP ${res.status}`,
+      })) as ActionResult;
       if (!res.ok) {
         cancelExternalNavigation(externalWindow);
-        throw new Error(`HTTP ${res.status}`);
+        console.error('Notification action failed:', data.error || `HTTP ${res.status}`);
+        return data;
       }
-      const data = await res.json();
       setRefreshTrigger(n => n + 1);
       window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
 

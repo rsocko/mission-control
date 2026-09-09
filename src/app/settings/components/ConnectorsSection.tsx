@@ -837,10 +837,16 @@ function HomeAssistantConnectorEditPanel({
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Poll interval
-          <select value={pollInterval} onChange={event => { setPollInterval(Number(event.target.value)); markDirty(); }}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]">
-            {POLL_INTERVAL_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
+          <Select value={String(pollInterval)} onValueChange={value => { setPollInterval(Number(value)); markDirty(); }}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {POLL_INTERVAL_OPTIONS.map(option => (
+                <SelectItem key={option.value} value={String(option.value)}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Replace access token
@@ -881,12 +887,16 @@ function HomeAssistantConnectorEditPanel({
       <div className="mt-5 grid gap-4 lg:grid-cols-2">
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Routine update push
-          <select value={updatePush} onChange={event => { setUpdatePush(event.target.value as typeof updatePush); markDirty(); }}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]">
-            <option value="immediate">Immediate</option>
-            <option value="daily_summary">Daily summary</option>
-            <option value="off">No push</option>
-          </select>
+          <Select value={updatePush} onValueChange={value => { setUpdatePush(value as typeof updatePush); markDirty(); }}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">Immediate</SelectItem>
+              <SelectItem value="daily_summary">Daily summary</SelectItem>
+              <SelectItem value="off">No push</SelectItem>
+            </SelectContent>
+          </Select>
           <span className="mt-1 block font-normal text-[var(--text-muted)]">This changes outbound delivery only; items remain separate in Notifications.</span>
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">

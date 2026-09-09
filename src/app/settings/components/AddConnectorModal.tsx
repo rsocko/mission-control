@@ -353,12 +353,16 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
       <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_9rem]">
         <label className="block text-sm font-medium text-[var(--text-secondary)]">
           Routine update push
-          <select value={updatePush} onChange={event => setUpdatePush(event.target.value as typeof updatePush)}
-            className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]">
-            <option value="immediate">Immediate</option>
-            <option value="daily_summary">Daily summary</option>
-            <option value="off">No push</option>
-          </select>
+          <Select value={updatePush} onValueChange={value => setUpdatePush(value as typeof updatePush)}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">Immediate</SelectItem>
+              <SelectItem value="daily_summary">Daily summary</SelectItem>
+              <SelectItem value="off">No push</SelectItem>
+            </SelectContent>
+          </Select>
           <span className="mt-1 block text-xs font-normal text-[var(--text-muted)]">Every update still has its own Notification card.</span>
         </label>
         {updatePush === 'daily_summary' && (

@@ -649,10 +649,13 @@ export function createPostgresNotificationWebRepository(
           FROM notification_actions
           WHERE execution_state = 'running'
             AND (
-              (action_type = 'run_workflow' AND claimed_at < $1)
+              (
+                action_type = 'run_workflow'
+                AND claimed_at::timestamptz < $1::timestamptz
+              )
               OR (
                 created_by = 'connector'
-                AND claimed_at < ($1::timestamptz - INTERVAL '25 minutes')
+                AND claimed_at::timestamptz < ($1::timestamptz - INTERVAL '25 minutes')
                 AND EXISTS (
                   SELECT 1 FROM notification_actions gate
                   WHERE gate.notification_id = notification_actions.notification_id

@@ -490,6 +490,15 @@ describe('NavRail', () => {
 
     const menu = screen.getByRole('menu', { name: 'Operations navigation' });
     expect(menu).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('data-state', 'open');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger.querySelector('.lucide-chevron-right')).toHaveClass(
+      'group-data-[state=open]:rotate-90',
+    );
+    expect(menu.querySelector('svg')).toHaveClass(
+      'fill-[var(--surface-1)]',
+      'stroke-[var(--border-strong)]',
+    );
 
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     expect(menu).toBeInTheDocument();

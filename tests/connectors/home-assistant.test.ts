@@ -73,6 +73,9 @@ describe('Home Assistant source transformers', () => {
             installed_version: '2025.6.0',
             latest_version: '2025.7.3',
             supported_features: 9,
+            entity_picture: '/api/brands/integration/homeassistant/icon.png',
+            icon: 'mdi:home-assistant',
+            device_class: 'firmware',
           },
           last_updated: '2025-07-01T12:00:00.000Z',
         },
@@ -98,6 +101,9 @@ describe('Home Assistant source transformers', () => {
       instanceName: 'Lake House',
       installedVersion: '2025.6.0',
       latestVersion: '2025.7.3',
+      entityPicture: '/api/brands/integration/homeassistant/icon.png',
+      mdiIcon: 'mdi:home-assistant',
+      deviceClass: 'firmware',
       supportsInstall: true,
       supportsBackup: true,
       pushDelivery: 'immediate',
@@ -146,6 +152,7 @@ describe('Home Assistant source transformers', () => {
       pushDelivery: 'immediate',
     });
   });
+
 });
 
 describe('Home Assistant notification presentation', () => {
@@ -164,6 +171,45 @@ describe('Home Assistant notification presentation', () => {
     hubProjectIds: [],
     tags: [],
   };
+
+  it('exposes a notification-scoped icon URL for canonical Home Assistant brand images', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'updates',
+        entityPicture: '/api/brands/integration/bambu_lab/icon.png',
+      },
+    });
+
+    expect(presented.presentation).toMatchObject({
+      subjectIconUrl: '/api/notifications/ha-update/subject-icon',
+    });
+  });
+
+  it('uses a repair integration domain but rejects arbitrary entity image URLs', () => {
+    const repair = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        domain: 'mqtt',
+      },
+    });
+    const arbitraryImage = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        attributes: { entity_picture: 'https://example.com/private-camera.jpg' },
+      },
+    });
+
+    expect(repair.presentation).toMatchObject({
+      subjectIconUrl: '/api/notifications/ha-update/subject-icon',
+    });
+    expect(arbitraryImage.presentation?.subjectIconUrl).toBeUndefined();
+  });
 
   it('does not offer update mutations when install is unsupported or already in progress', () => {
     const unsupported = present({
@@ -323,6 +369,30 @@ describe('Home Assistant WebSocket client', () => {
 });
 
 describe('Home Assistant REST client', () => {
+  it('fetches PNG brand images with the connector authorization header', async () => {
+    globalThis.fetch = vi.fn(async (_input, init) => {
+      expect(init?.headers).toMatchObject({
+        Authorization: 'Bearer secret',
+      });
+      return new Response(new Uint8Array([137, 80, 78, 71]), {
+        headers: { 'Content-Type': 'image/png' },
+      });
+    });
+
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+    const image = await client.fetchImage('/api/brands/integration/bambu_lab/icon.png');
+
+    expect(image.contentType).toBe('image/png');
+    expect(Array.from(new Uint8Array(image.body))).toEqual([137, 80, 78, 71]);
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://ha.example.test/api/brands/integration/bambu_lab/icon.png',
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+  });
+
   it('includes Home Assistant response details when a service request fails', async () => {
     globalThis.fetch = async () => new Response(
       JSON.stringify({ message: 'Entity update.router does not support installation' }),

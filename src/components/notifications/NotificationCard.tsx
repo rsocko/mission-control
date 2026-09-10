@@ -148,12 +148,83 @@ interface PresentationMetadataChip {
 interface NotificationPresentation {
   subtitle?: string;
   sourceName?: string;
+  subjectIconUrl?: string;
   repository?: string;
   subjectType?: string;
   entityNumber?: number;
   reasonLabel?: string;
   metadataChips?: Array<string | PresentationMetadataChip>;
   richContent?: NotificationRichContent;
+}
+
+function NotificationIdentity({
+  sourceIcon,
+  subjectIconUrl,
+  sourceName,
+  CategoryIcon,
+  colorClass,
+  size,
+}: {
+  sourceIcon?: string;
+  subjectIconUrl?: string;
+  sourceName: string;
+  CategoryIcon: React.ComponentType<{ size?: number; className?: string }>;
+  colorClass: string;
+  size: 'card' | 'detail';
+}) {
+  const [failedSubjectIconUrl, setFailedSubjectIconUrl] = useState<string | null>(null);
+  const mainSize = size === 'detail' ? 32 : 24;
+  const wrapperClass = size === 'detail' ? 'h-8 w-8' : 'h-6 w-6';
+  const badgeClass = size === 'detail' ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  const badgeSize = size === 'detail' ? 16 : 14;
+
+  if (subjectIconUrl && failedSubjectIconUrl !== subjectIconUrl) {
+    return (
+      <div className={`relative shrink-0 ${wrapperClass}`} title={sourceName}>
+        <Image
+          src={subjectIconUrl}
+          alt=""
+          width={mainSize}
+          height={mainSize}
+          unoptimized
+          onError={() => setFailedSubjectIconUrl(subjectIconUrl)}
+          className={`${wrapperClass} rounded-md bg-[var(--surface-0)] object-contain`}
+        />
+        {sourceIcon && (
+          <Image
+            src={sourceIcon}
+            alt=""
+            width={badgeSize}
+            height={badgeSize}
+            className={`absolute -bottom-1 -right-1 rounded border-2 border-[var(--surface-1)] bg-[var(--surface-1)] object-contain ${badgeClass}`}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (sourceIcon) {
+    return (
+      <Image
+        src={sourceIcon}
+        alt=""
+        title={sourceName}
+        width={mainSize}
+        height={mainSize}
+        className={`${wrapperClass} shrink-0 rounded-md`}
+      />
+    );
+  }
+
+  return (
+    <div
+      title={sourceName}
+      aria-label={sourceName}
+      className={`${wrapperClass} flex shrink-0 items-center justify-center rounded-md bg-[var(--surface-2)] ${colorClass}`}
+    >
+      <CategoryIcon size={size === 'detail' ? 16 : 14} />
+    </div>
+  );
 }
 
 function WritebackStatus({ notification }: { notification: NotificationItem }) {
@@ -425,6 +496,7 @@ export function NotificationCard({
     richContent,
   } = useNotificationDisplay(notification);
   const presentationSubtitle = presentation.subtitle || null;
+  const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
 
   const primaryAction = useMemo(() =>
     notification.actions?.find(a => a.isPrimary),
@@ -501,24 +573,14 @@ export function NotificationCard({
       <div className="pointer-events-none relative z-10 flex items-start gap-2.5">
         {/* Source icon */}
         <div className="flex-shrink-0 mt-0.5">
-          {sourceIcon ? (
-            <Image
-              src={sourceIcon}
-              alt=""
-              title={sourceName}
-              width={24}
-              height={24}
-              className="w-6 h-6 rounded"
-            />
-          ) : (
-            <div
-              title={sourceName}
-              aria-label={sourceName}
-              className={`w-6 h-6 rounded flex items-center justify-center bg-[var(--surface-2)] ${levelConfig.color}`}
-            >
-              <CategoryIcon size={14} />
-            </div>
-          )}
+          <NotificationIdentity
+            sourceIcon={sourceIcon}
+            subjectIconUrl={subjectIconUrl}
+            sourceName={sourceName}
+            CategoryIcon={CategoryIcon}
+            colorClass={levelConfig.color}
+            size="card"
+          />
         </div>
 
         {/* Content */}
@@ -736,6 +798,7 @@ export function NotificationDetail({
     metadataChips,
     richContent,
   } = useNotificationDisplay(notification);
+  const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
 
@@ -785,22 +848,14 @@ export function NotificationDetail({
     <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] ${className}`}>
       <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
-          {sourceIcon ? (
-            <Image
-              src={sourceIcon}
-              alt=""
-              width={32}
-              height={32}
-              className="h-8 w-8 rounded-md"
-            />
-          ) : (
-            <div
-              aria-label={sourceName}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--surface-2)] ${levelConfig.color}`}
-            >
-              <CategoryIcon size={16} />
-            </div>
-          )}
+          <NotificationIdentity
+            sourceIcon={sourceIcon}
+            subjectIconUrl={subjectIconUrl}
+            sourceName={sourceName}
+            CategoryIcon={CategoryIcon}
+            colorClass={levelConfig.color}
+            size="detail"
+          />
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">{sourceName}</p>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">

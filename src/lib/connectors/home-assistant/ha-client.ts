@@ -61,8 +61,14 @@ export interface HAWebSocketSourceResult {
   errors: Partial<Record<'persistentNotifications' | 'repairs', string>>;
 }
 
+export interface HomeAssistantImage {
+  body: ArrayBuffer;
+  contentType: 'image/png';
+}
+
 export interface HAClient {
   fetchStates(): Promise<HomeAssistantState[]>;
+  fetchImage(path: string): Promise<HomeAssistantImage>;
   fetchWebSocketSources(
     sources: Array<'persistentNotifications' | 'repairs'>,
   ): Promise<HAWebSocketSourceResult>;
@@ -248,6 +254,29 @@ export function createHAClient(options: HAClientOptions): HAClient {
   return {
     async fetchStates(): Promise<HomeAssistantState[]> {
       return asArray(await fetchJson('/api/states')) as HomeAssistantState[];
+    },
+
+    async fetchImage(path): Promise<HomeAssistantImage> {
+      const response = await fetch(`${baseUrl}${path}`, {
+        headers: buildHeaders(),
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok) {
+        throw new Error(await responseError(response));
+      }
+      const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim();
+      if (contentType !== 'image/png') {
+        throw new Error('Home Assistant returned an unsupported brand image type');
+      }
+      const contentLength = Number(response.headers.get('content-length'));
+      if (Number.isFinite(contentLength) && contentLength > 2 * 1024 * 1024) {
+        throw new Error('Home Assistant brand image exceeds the 2 MB limit');
+      }
+      const body = await response.arrayBuffer();
+      if (body.byteLength > 2 * 1024 * 1024) {
+        throw new Error('Home Assistant brand image exceeds the 2 MB limit');
+      }
+      return { body, contentType };
     },
 
     async fetchWebSocketSources(sources): Promise<HAWebSocketSourceResult> {

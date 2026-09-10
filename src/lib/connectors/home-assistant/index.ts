@@ -249,7 +249,9 @@ export class HomeAssistantConnector implements IConnector {
             for (const entity of entities) {
               if (evaluateCondition(entity, rule)) {
                 const notification = buildRuleNotification(entity, rule, this.type, this.id);
+                const entityDomain = entity.entity_id.split('.', 1)[0];
                 notification.templateKey = 'home_assistant_entity_alert';
+                notification.actionUrl = `${this.settings.baseUrl}/config/entities?domain=${encodeURIComponent(entityDomain)}`;
                 notification.metadata = {
                   ...notification.metadata,
                   schemaVersion: 2,
@@ -268,6 +270,7 @@ export class HomeAssistantConnector implements IConnector {
           notifications.push(...checkPackages(matching, undefined, this.type, this.id).map(notification => ({
             ...notification,
             templateKey: 'home_assistant_entity_alert',
+            actionUrl: `${this.settings.baseUrl}/config/entities?domain=${encodeURIComponent(notification.sourceId.split('.', 1)[0])}`,
             metadata: {
               ...notification.metadata,
               schemaVersion: 2,

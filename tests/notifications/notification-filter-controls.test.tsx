@@ -16,6 +16,12 @@ const facets: NotificationFacets = {
   level: { heads_up: 3 },
   category: { development: 4, finance: 3, tasks: 2 },
   source: { 'finance-manager': 3, 'github-issues': 2 },
+  sourceAccount: [
+    { key: 'finance-home', label: 'Household', source: 'finance-manager', count: 3 },
+  ],
+  notificationType: [
+    { key: 'finance_spending_alert', label: 'finance_spending_alert', count: 3 },
+  ],
   state: { unread: 5 },
   merchant: [{ key: merchant, label: 'Invented Market', count: 2 }],
 };
@@ -87,6 +93,7 @@ describe('shared notification filter controls', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Repository' }), {
       target: { value: 'octo/app' },
     });
+
     fireEvent.click(screen.getByRole('button', { name: 'Add' }));
     expect(onChange).toHaveBeenLastCalledWith({
       ...DEFAULT_NOTIFICATION_QUERY,
@@ -98,6 +105,31 @@ describe('shared notification filter controls', () => {
     expect(onChange).toHaveBeenLastCalledWith({
       ...DEFAULT_NOTIFICATION_QUERY,
       participating: true,
+    });
+  });
+
+  it('selecting a source account activates its parent source and clears a stale type', () => {
+    const onChange = vi.fn();
+    render(
+      <NotificationFilterControls
+        query={{
+          ...DEFAULT_NOTIFICATION_QUERY,
+          notificationType: 'finance_spending_alert',
+        }}
+        facets={facets}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Source account' }));
+    fireEvent.click(screen.getByRole('button', { name: /Household\s+3/ }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_NOTIFICATION_QUERY,
+      source: 'finance-manager',
+      sourceAccount: 'finance-home',
+      notificationType: null,
     });
   });
 

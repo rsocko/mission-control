@@ -612,6 +612,8 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     level: {},
     category: {},
     source: {},
+    sourceAccount: [],
+    notificationType: [],
     state: {},
     merchant: [],
   });
@@ -678,7 +680,11 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     const data: NotificationsResponse = await response.json();
     const items = data.notifications ?? [];
     setNotifications(items);
-    setFacets(data.facets ?? { level: {}, category: {}, source: {}, state: {}, merchant: [] });
+    setFacets({
+      level: {}, category: {}, source: {}, sourceAccount: [],
+      notificationType: [], state: {}, merchant: [],
+      ...(data.facets ?? {}),
+    });
     setMatchingCount(Number(data.matchingCount ?? items.length));
     setStats({
       unread: data.stats?.unread ?? items.filter(isNotificationUnread).length,

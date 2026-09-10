@@ -25,6 +25,31 @@ function openAction(url: string | undefined): NotificationActionDraft[] {
   }] : [];
 }
 
+function sourceUrl(baseUrl: string, path: string): string {
+  return `${baseUrl.replace(/\/+$/, '')}${path}`;
+}
+
+function legacyOpenUrl(metadata: Record<string, unknown>): string | undefined {
+  const baseUrl = text(metadata.baseUrl);
+  if (!baseUrl) return undefined;
+
+  switch (text(metadata.haSource)) {
+    case 'updates':
+      return sourceUrl(baseUrl, '/config/updates');
+    case 'repairs':
+      return sourceUrl(baseUrl, '/config/repairs');
+    case 'entity_alerts': {
+      const entityId = text(metadata.entityId);
+      const domain = entityId?.split('.', 1)[0];
+      return domain
+        ? sourceUrl(baseUrl, `/config/entities?domain=${encodeURIComponent(domain)}`)
+        : sourceUrl(baseUrl, '/config/entities');
+    }
+    default:
+      return baseUrl;
+  }
+}
+
 export const homeAssistantNotificationProvider: NotificationSourceProvider = {
   sourceType: 'home-assistant',
   displayName: 'Home Assistant',
@@ -36,7 +61,7 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
     present(notification) {
       const metadata = record(notification.metadata);
       const source = text(metadata.haSource);
-      const baseUrl = text(metadata.baseUrl);
+      const actionUrl = text(notification.actionUrl) ?? legacyOpenUrl(metadata);
       const actions: NotificationActionDraft[] = [];
 
       if (
@@ -84,7 +109,7 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
           createdBy: 'connector',
         });
       }
-      actions.push(...openAction(baseUrl));
+      actions.push(...openAction(actionUrl));
       actions.push({
         actionType: 'create_task',
         label: 'Create task',
@@ -103,7 +128,9 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
         presentation: {
           sourceName: text(metadata.instanceName) || 'Home Assistant',
           subtitle: source === 'updates'
-            ? 'Software update'
+            ? notification.templateKey === 'ha_update_critical'
+              ? 'Critical software update'
+              : 'Software update'
             : source === 'repairs'
               ? 'Repair issue'
               : source === 'persistent_notifications'
@@ -125,7 +152,9 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
                 tone: 'info' as const,
               },
             } : {}),
-            footerText: text(metadata.instanceName),
+            footerText: notification.templateKey === 'ha_update_critical'
+              ? 'Action Needed because this update matches a configured critical update pattern.'
+              : text(metadata.instanceName),
           },
         },
         metadata,

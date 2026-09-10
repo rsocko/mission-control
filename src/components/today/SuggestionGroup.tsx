@@ -274,7 +274,7 @@ function SuggestionRow({
         </CompletionBurst>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-400)]"
+          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-0 pr-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-400)]"
           onClick={() => onSelect(task.id)}
         >
           <ConnectorIcon type={task.connectorType} size={12} />

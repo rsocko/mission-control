@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { BookmarkPlus, X } from 'lucide-react';
+import { useEffect, useId, useState } from 'react';
+import { BookmarkPlus, ChevronRight, X } from 'lucide-react';
 import type { NotificationQuery } from '@/lib/notifications/query';
 import {
   hasActiveNotificationFilters,
@@ -30,6 +30,8 @@ export function NotificationViewsBar({
   const [saving, setSaving] = useState(false);
   const [showSave, setShowSave] = useState(false);
   const [viewsLoaded, setViewsLoaded] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const savedViewsId = useId();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -96,10 +98,24 @@ export function NotificationViewsBar({
   if (variant === 'sidebar') {
     return (
       <nav aria-label="Saved notification views" className="mb-4">
-        <div className="mb-2 px-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">
+        <button
+          type="button"
+          aria-expanded={!sidebarCollapsed}
+          aria-controls={savedViewsId}
+          onClick={() => setSidebarCollapsed(collapsed => !collapsed)}
+          className="mb-2 flex w-full items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+        >
+          <ChevronRight
+            size={11}
+            aria-hidden="true"
+            className={`transition-transform duration-150 ${sidebarCollapsed ? '' : 'rotate-90'}`}
+          />
           Saved views
-        </div>
-        <div className="space-y-0.5">
+        </button>
+        <div
+          id={savedViewsId}
+          className={sidebarCollapsed ? 'hidden' : 'space-y-0.5'}
+        >
           {views.map(view => {
             const active = activeViewId === view.id && notificationQueriesEqual(query, view.query);
             return (

@@ -1,6 +1,9 @@
 import type { IConnector } from '@/lib/connectors';
 import type { HomeAssistantImage } from '@/lib/connectors/home-assistant/ha-client';
-import { getHomeAssistantBrandImagePath } from '@/lib/connectors/home-assistant/notification-icons';
+import {
+  getHomeAssistantBrandImagePath,
+  getHomeAssistantPublicBrandImageUrl,
+} from '@/lib/connectors/home-assistant/notification-icons';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { connectorLogger } from '@/lib/logger';
 import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
@@ -30,6 +33,26 @@ function notFound() {
   return Response.json({ error: 'Notification icon not found' }, { status: 404 });
 }
 
+async function fetchPublicBrandImage(url: string): Promise<HomeAssistantImage> {
+  const response = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) {
+    throw new Error(`Home Assistant brand image request failed (${response.status})`);
+  }
+  const contentType = response.headers.get('content-type')?.split(';', 1)[0].trim();
+  if (contentType !== 'image/png') {
+    throw new Error('Home Assistant returned an unsupported brand image type');
+  }
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > 2 * 1024 * 1024) {
+    throw new Error('Home Assistant brand image exceeds the 2 MB limit');
+  }
+  const body = await response.arrayBuffer();
+  if (body.byteLength > 2 * 1024 * 1024) {
+    throw new Error('Home Assistant brand image exceeds the 2 MB limit');
+  }
+  return { body, contentType };
+}
+
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> },
@@ -41,16 +64,22 @@ export async function GET(
     return notFound();
   }
 
-  const path = getHomeAssistantBrandImagePath(record(notification.metadata));
+  const metadata = record(notification.metadata);
+  const publicBrandUrl = getHomeAssistantPublicBrandImageUrl(metadata);
+  const path = getHomeAssistantBrandImagePath(metadata);
   if (!path) return notFound();
 
-  const connector = await getOrInitializeConnector(notification.connectorInstanceId);
-  if (!isHomeAssistantIconConnector(connector)) {
-    return Response.json({ error: 'Home Assistant connector is unavailable' }, { status: 503 });
-  }
-
   try {
-    const image = await connector.fetchNotificationImage(path);
+    let image: HomeAssistantImage;
+    if (publicBrandUrl) {
+      image = await fetchPublicBrandImage(publicBrandUrl);
+    } else {
+      const connector = await getOrInitializeConnector(notification.connectorInstanceId);
+      if (!isHomeAssistantIconConnector(connector)) {
+        return Response.json({ error: 'Home Assistant connector is unavailable' }, { status: 503 });
+      }
+      image = await connector.fetchNotificationImage(path);
+    }
     return new Response(image.body, {
       headers: {
         'Cache-Control': 'private, max-age=3600, stale-while-revalidate=86400',

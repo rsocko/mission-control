@@ -53,6 +53,7 @@ export interface NotificationProviderPresentation {
   templateKey?: string | null;
   presentation?: Record<string, unknown> & {
     sourceName?: string;
+    subjectIcon?: string;
     subjectIconUrl?: string;
     subtitle?: string;
     richContent?: NotificationRichContent;

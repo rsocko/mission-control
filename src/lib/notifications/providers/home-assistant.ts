@@ -138,9 +138,7 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
       const subjectIconUrl = getHomeAssistantBrandImagePath(metadata)
         ? `/api/notifications/${encodeURIComponent(notification.id)}/subject-icon`
         : undefined;
-      const subjectIcon = subjectIconUrl
-        ? undefined
-        : getHomeAssistantMdiIcon(metadata) ?? undefined;
+      const subjectIcon = getHomeAssistantMdiIcon(metadata) ?? undefined;
 
       return {
         presentation: {
@@ -150,7 +148,9 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
           subtitle: source === 'updates'
             ? notification.templateKey === 'ha_update_critical'
               ? 'Critical software update'
-              : 'Software update'
+              : text(metadata.updateType) === 'app'
+                ? 'App update'
+                : 'Software update'
             : source === 'repairs'
               ? 'Repair issue'
               : source === 'persistent_notifications'

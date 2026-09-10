@@ -203,6 +203,49 @@ describe('GET /api/notifications', () => {
     expect(data).toHaveProperty('notifications');
   });
 
+  it('hydrates notification-scoped icon URLs with the persisted notification id', async () => {
+    const receivedAt = new Date().toISOString();
+    mockWebPersistence.queryNotifications.mockResolvedValueOnce({
+      items: [{
+        id: 'persisted-notification-id',
+        title: 'Home Assistant update',
+        level: 'heads_up',
+        state: 'unread',
+        readState: 'unread',
+        disposition: 'inbox',
+        sourceState: 'active',
+        category: 'system',
+        receivedAt,
+        sortAt: receivedAt,
+        levelRank: 2,
+        presentation: {
+          subjectIconUrl: '/api/notifications/update%3Aupdate.router%3A2.0/subject-icon',
+        },
+      }],
+      actions: [],
+      hasMore: false,
+      cursor: null,
+      stats: { total: 1, unread: 1, attention: 1, urgent: 0, actionNeeded: 0, headsUp: 1, fyi: 0, digest: 0, actionable: 0 },
+      facets: {
+        level: { heads_up: 1 }, category: { system: 1 }, source: {},
+        sourceAccount: [], notificationType: [], state: { unread: 1 }, merchant: [],
+      },
+      matchingCount: 1,
+    });
+
+    const { GET } = await import('@/app/api/notifications/route');
+    const response = await GET(new Request('http://localhost/api/notifications'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      notifications: [{
+        id: 'persisted-notification-id',
+        presentation: {
+          subjectIconUrl: '/api/notifications/persisted-notification-id/subject-icon',
+        },
+      }],
+    });
+  });
+
   it('rejects invalid or duplicate merchant parameters before querying', async () => {
     const merchant = `merchant-v1_${'A'.repeat(43)}`;
     const { GET } = await import('@/app/api/notifications/route');

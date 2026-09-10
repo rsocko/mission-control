@@ -8,7 +8,27 @@ import {
 import { legacyStateFromLifecycle } from '@/lib/notifications/lifecycle';
 import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 import type { NotificationState } from '@/types';
-import type { RestoreSnapshot } from '@/db/persistence/notification-web';
+import type { NotificationRow, RestoreSnapshot } from '@/db/persistence/notification-web';
+
+function hydratePresentation(item: NotificationRow): unknown {
+  if (!item.presentation || typeof item.presentation !== 'object' || Array.isArray(item.presentation)) {
+    return item.presentation;
+  }
+
+  const presentation = item.presentation as Record<string, unknown>;
+  const subjectIconUrl = presentation.subjectIconUrl;
+  if (
+    typeof subjectIconUrl !== 'string'
+    || !/^\/api\/notifications\/[^/]+\/subject-icon$/.test(subjectIconUrl)
+  ) {
+    return presentation;
+  }
+
+  return {
+    ...presentation,
+    subjectIconUrl: `/api/notifications/${encodeURIComponent(item.id)}/subject-icon`,
+  };
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
@@ -40,6 +60,7 @@ export async function GET(request: Request) {
     const hydratedItems = result.items.map(item => ({
       ...item,
       state: legacyStateFromLifecycle(item),
+      presentation: hydratePresentation(item),
       actions: actionsByNotification.get(item.id) || [],
     }));
 

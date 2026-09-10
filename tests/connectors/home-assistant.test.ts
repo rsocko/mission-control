@@ -104,10 +104,40 @@ describe('Home Assistant source transformers', () => {
       entityPicture: '/api/brands/integration/homeassistant/icon.png',
       mdiIcon: 'mdi:home-assistant',
       deviceClass: 'firmware',
+      updateType: 'software',
       supportsInstall: true,
       supportsBackup: true,
       pushDelivery: 'immediate',
     });
+  });
+
+  it('identifies Supervisor add-on updates as app updates', () => {
+    const notifications = buildUpdateNotifications({
+      ...common,
+      states: [{
+        entity_id: 'update.mosquitto_broker_update',
+        state: 'on',
+        attributes: {
+          friendly_name: 'Mosquitto broker Update',
+          installed_version: '7.0.0',
+          latest_version: '7.1.1',
+          supported_features: 9,
+          entity_picture: '/api/hassio/addons/core_mosquitto/icon',
+        },
+      }],
+      criticalEntityPatterns: [],
+      updatePush: 'daily_summary',
+      immediateCriticalUpdates: true,
+    });
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].metadata).toMatchObject({
+      entityPicture: '/api/hassio/addons/core_mosquitto/icon',
+      updateType: 'app',
+    });
+
+    const presented = homeAssistantNotificationProvider.signatures[0].present(notifications[0]);
+    expect(presented.presentation?.subtitle).toBe('App update');
   });
 
   it('maps persistent notifications and repairs to stable source identities', () => {
@@ -248,8 +278,8 @@ describe('Home Assistant notification presentation', () => {
 
     expect(presented.presentation).toMatchObject({
       subjectIconUrl: '/api/notifications/ha-update/subject-icon',
+      subjectIcon: 'mdi:package-up',
     });
-    expect(presented.presentation?.subjectIcon).toBeUndefined();
   });
 
   it('uses a repair integration domain but rejects arbitrary entity image URLs', () => {

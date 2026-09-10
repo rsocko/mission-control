@@ -104,7 +104,7 @@
     "metascraper-url": "^5.54.1",
     "metascraper-video": "^5.54.1",
     "motion": "^13.2.0",
-    "next": "16.3.1",
+    "next": "16.3.4",
     "node-cron": "^4.6.0",
     "pg": "8.23.0",
     "pino": "^10.3.1",

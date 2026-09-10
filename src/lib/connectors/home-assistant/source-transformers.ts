@@ -53,6 +53,10 @@ export function buildUpdateNotifications(input: {
     const changedAt = entity.last_updated || entity.last_changed || new Date().toISOString();
     const supportsInstall = (supportedFeatures & UPDATE_SUPPORT_INSTALL) !== 0;
     const supportsBackup = (supportedFeatures & UPDATE_SUPPORT_BACKUP) !== 0;
+    const entityPicture = text(attributes.entity_picture);
+    const updateType = entityPicture?.startsWith('/api/hassio/addons/')
+      ? 'app'
+      : 'software';
 
     return [{
       id: `update:${safeId(entity.entity_id)}:${safeId(latestVersion)}`,
@@ -80,9 +84,10 @@ export function buildUpdateNotifications(input: {
         entityId: entity.entity_id,
         installedVersion,
         latestVersion,
-        entityPicture: text(attributes.entity_picture),
+        entityPicture,
         mdiIcon: text(attributes.icon),
         deviceClass: text(attributes.device_class),
+        updateType,
         inProgress,
         updatePercentage: progress !== null ? Math.min(100, Math.max(0, progress)) : null,
         supportsInstall,

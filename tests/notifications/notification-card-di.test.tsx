@@ -180,6 +180,30 @@ describe('NotificationCard — DI Rich Cards', () => {
       )).toHaveLength(1);
     });
 
+    it('renders a contextual Home Assistant entity icon with a source badge', () => {
+      const notification = makeNotification({
+        id: 'ha-lock-1',
+        connectorType: 'home-assistant',
+        category: 'security',
+        metadata: {
+          schemaVersion: 2,
+          haSource: 'entity_alerts',
+          entityId: 'lock.rear_door',
+          state: 'unlocked',
+          attributes: {},
+        },
+      });
+
+      const { container } = render(<NotificationCard notification={notification} />);
+
+      expect(container.querySelector(
+        'span[aria-label="mdi:lock-open-alert"]',
+      )).not.toBeNull();
+      expect(container.querySelector(
+        'img[src="/icons/connectors/home-assistant.svg"]',
+      )).not.toBeNull();
+    });
+
     it('renders configured presentation metadata chips', () => {
       const notification = makeNotification({
         connectorType: 'home-assistant',

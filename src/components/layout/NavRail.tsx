@@ -528,7 +528,7 @@ export function NavRail({
         </span>
         <span className={cn(
           '-ml-1.5 flex flex-col justify-center whitespace-nowrap overflow-hidden transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-          expanded ? 'opacity-100 max-w-[100px]' : 'opacity-0 max-w-0'
+          expanded ? 'opacity-100 max-w-[108px]' : 'opacity-0 max-w-0'
         )}>
           <span className="text-[14px] leading-4 font-bold tracking-[-0.015em] text-[var(--text-primary)]">
             Mission Control
@@ -546,7 +546,7 @@ export function NavRail({
             onClick={togglePinned}
             aria-label={pinned ? 'Unpin navigation' : 'Pin navigation open'}
             className={cn(
-              'absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
+              'absolute right-0 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
               expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
               pinned && 'text-[var(--accent-400)]'
             )}

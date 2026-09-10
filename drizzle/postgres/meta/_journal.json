@@ -43,6 +43,13 @@
       "when": 1789005149455,
       "tag": "0005_cool_nocturne",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789053000000,
+      "tag": "0006_dedupe_outlook_calendar_notifications",
+      "breakpoints": true
     }
   ]
 }

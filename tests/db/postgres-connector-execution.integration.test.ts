@@ -390,6 +390,7 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
         primaryActionId: `${connectorId}:action`,
         receivedAt: now,
         sortAt: now,
+        expiresAt: '2026-09-03T12:00:00.000Z',
         relatedTaskId: null,
         relatedProjectId: null,
         relatedEntityType: null,
@@ -416,17 +417,25 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
     const notificationRows = await backend.context.pool.query<{
       actions: string;
       deliveries: string;
+      expiresAt: string | null;
     }>(
       `
         SELECT
           (SELECT count(*) FROM notification_actions
             WHERE notification_id = $1)::text AS actions,
           (SELECT count(*) FROM notification_delivery_events
-            WHERE notification_id = $1)::text AS deliveries
+            WHERE notification_id = $1)::text AS deliveries,
+          expires_at AS "expiresAt"
+        FROM notifications
+        WHERE id = $1
       `,
       [`${connectorId}:notification`],
     );
-    expect(notificationRows.rows[0]).toEqual({ actions: '1', deliveries: '2' });
+    expect(notificationRows.rows[0]).toEqual({
+      actions: '1',
+      deliveries: '2',
+      expiresAt: '2026-09-03T12:00:00.000Z',
+    });
     const active = await execution.notifications.listActive(connectorId);
     expect(active).toHaveLength(1);
     await expect(execution.notifications.applyReconciliation({

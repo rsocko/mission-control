@@ -21,7 +21,10 @@ import type {
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
-import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
+import {
+  useHistoryParamSelection,
+  type HistoryParamSelectionSetter,
+} from '@/lib/hooks/useHistoryParamSelection';
 import {
   executeProjectHierarchyCommand,
   loadProjectHierarchy,
@@ -99,7 +102,7 @@ interface ProjectPageMutationsContextValue {
 
 interface ProjectPageTaskInteractionsContextValue {
   selectedTaskId: string | null;
-  setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
+  setSelectedTaskId: HistoryParamSelectionSetter;
   detailMode: Exclude<TaskDetailMode, 'mobile'>;
   setDetailMode: Dispatch<SetStateAction<Exclude<TaskDetailMode, 'mobile'>>>;
   notesOpenRequest: TaskNotesOpenRequest | null;
@@ -199,7 +202,7 @@ export function ProjectPageProvider({
     setNotesOpenRequest(null);
     setDetailMode('panel');
     setSelectedTaskId(taskId);
-  }, [cancelPendingDeselect]);
+  }, [cancelPendingDeselect, setSelectedTaskId]);
 
   const openTaskNotes = useCallback((taskId: string, mode: 'read' | 'edit') => {
     cancelPendingDeselect();
@@ -394,8 +397,11 @@ export function ProjectPageProvider({
       }
       return next;
     });
-    setSelectedTaskId((current) => current === taskId ? null : current);
-  }, []);
+    setSelectedTaskId(
+      (current) => current === taskId ? null : current,
+      { history: 'replace' },
+    );
+  }, [setSelectedTaskId]);
 
   const stageProjectTaskRemoval = useCallback((taskId: string) => {
     const previousTasks = tasks;
@@ -412,6 +418,7 @@ export function ProjectPageProvider({
     phaseItemsByPhase,
     removeTaskFromView,
     selectedTaskId,
+    setSelectedTaskId,
     tasks,
   ]);
 
@@ -589,6 +596,7 @@ export function ProjectPageProvider({
     notesOpenRequest,
     openTaskNotes,
     selectedTaskId,
+    setSelectedTaskId,
     taskActions.completingIds,
     taskActions.getTaskContextActions,
     taskActions.handleAddToMyDay,

@@ -680,7 +680,7 @@ export function TaskDetailPanel({
           onClose={() => { setShowMoveDialog(false); onMoveDialogDismissed?.(); }}
           onSuccess={(_newTaskId, action) => {
             toast.success(action === 'move' ? 'Task moved successfully' : 'Task copied successfully');
-            onClose();
+            onClose(action === 'move' ? 'task-removed' : 'dismiss');
             onUpdate?.();
           }}
         />
@@ -719,7 +719,7 @@ export function TaskDetailPanel({
         {mode === 'mobile' && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             className="absolute right-3 top-3 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
             aria-label="Close task detail"
           >
@@ -733,7 +733,7 @@ export function TaskDetailPanel({
         {mode === 'mobile' && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             className="flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-[var(--surface-2)]"
             aria-label="Close task detail"
           >
@@ -1149,7 +1149,7 @@ export function TaskDetailPanel({
             initial="hidden"
             animate="show"
             exit="exit"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             aria-hidden="true"
           />
           <motion.div

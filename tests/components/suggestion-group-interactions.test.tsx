@@ -59,7 +59,9 @@ function renderGroup({
         tasks={[task]}
         color="red"
         onAdd={onAdd}
+        onComplete={() => onComplete()}
         onSelect={onSelect}
+        completingIds={new Set()}
         getContextMenuActions={() => actions}
         sourceLists={[]}
         listGroups={[]}
@@ -81,6 +83,15 @@ describe('SuggestionGroup task interactions', () => {
     fireEvent.click(screen.getByText('Suggested task'));
 
     expect(onSelect).toHaveBeenCalledWith('task-1');
+  });
+
+  it('marks the task complete from its status circle without opening details', () => {
+    const { onComplete, onSelect } = renderGroup();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark "Suggested task" complete' }));
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('exposes the standard task context menu', async () => {

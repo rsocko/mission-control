@@ -29,6 +29,7 @@ import {
 } from '@/types/dashboard';
 import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
 
 // ─── ICON MAPS ──────────────────────────────────────────────────────────────
 
@@ -803,6 +804,96 @@ export interface NotificationDetailProps {
   className?: string;
 }
 
+function HomeAssistantReleaseNotes({
+  notification,
+}: {
+  notification: NotificationItem;
+}) {
+  const metadata = notification.metadata ?? {};
+  const enabled = notification.connectorType === 'home-assistant'
+    && metadata.haSource === 'updates'
+    && metadata.supportsReleaseNotes === true;
+  if (!enabled) return null;
+
+  return (
+    <HomeAssistantReleaseNotesLoader
+      key={notification.id}
+      notificationId={notification.id}
+    />
+  );
+}
+
+function HomeAssistantReleaseNotesLoader({
+  notificationId,
+}: {
+  notificationId: string;
+}) {
+  const [requestKey, setRequestKey] = useState(0);
+  const [state, setState] = useState<{
+    status: 'loading' | 'loaded' | 'error';
+    notes: string | null;
+  }>({ status: 'loading', notes: null });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/notifications/${encodeURIComponent(notificationId)}/release-notes`, {
+      signal: controller.signal,
+    })
+      .then(async response => {
+        if (!response.ok) throw new Error('Release notes request failed');
+        const payload = await response.json() as { releaseNotes?: unknown };
+        setState({
+          status: 'loaded',
+          notes: typeof payload.releaseNotes === 'string' && payload.releaseNotes.trim()
+            ? payload.releaseNotes
+            : null,
+        });
+      })
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setState({ status: 'error', notes: null });
+      });
+
+    return () => controller.abort();
+  }, [notificationId, requestKey]);
+
+  if (state.status === 'loaded' && !state.notes) return null;
+
+  return (
+    <section className="mt-5 border-t border-[var(--border)] pt-4" aria-labelledby="ha-release-notes-heading">
+      <h3 id="ha-release-notes-heading" className="text-base font-semibold text-[var(--text-primary)]">
+        What&apos;s changed
+      </h3>
+      {state.status === 'loading' && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-[var(--text-secondary)]" role="status">
+          <LoaderCircle size={16} className="animate-spin" />
+          Loading release notes…
+        </div>
+      )}
+      {state.status === 'error' && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-[var(--text-secondary)]" role="alert">
+          <span>Release notes couldn&apos;t be loaded.</span>
+          <button
+            type="button"
+            onClick={() => {
+              setState({ status: 'loading', notes: null });
+              setRequestKey(key => key + 1);
+            }}
+            className="font-medium text-[var(--accent)] underline decoration-[var(--accent)]/50 underline-offset-2 hover:text-[var(--accent-soft)]"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      {state.status === 'loaded' && state.notes && (
+        <div className="mt-3 max-w-[75ch] overflow-hidden text-[var(--text-secondary)]">
+          <AssistantMarkdown>{state.notes}</AssistantMarkdown>
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function NotificationDetail({
   notification,
   onExecuteAction,
@@ -954,6 +1045,8 @@ export function NotificationDetail({
             <RichNotificationContent content={richContent} />
           </div>
         )}
+
+        <HomeAssistantReleaseNotes notification={notification} />
 
         {(primaryAction || secondaryActions.length > 0) && (
           <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-4">

@@ -271,7 +271,7 @@ describe('NavRail', () => {
     renderNavRail();
     const pinButton = screen.getByRole('button', { name: 'Pin navigation open' });
 
-    expect(pinButton).toHaveClass('absolute', 'h-7', 'w-7', 'opacity-0');
+    expect(pinButton).toHaveClass('absolute', 'right-0', 'h-7', 'w-7', 'opacity-0');
     expect(pinButton.querySelector('svg')).toHaveAttribute('width', '16');
     expect(screen.queryByText('Pin sidebar')).not.toBeInTheDocument();
 
@@ -302,7 +302,7 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[100px]');
+    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[108px]');
   });
 
   it('reflects active Houston work in the brand subtitle', () => {

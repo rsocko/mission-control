@@ -6,13 +6,16 @@ import Link from 'next/link';
 import {
   AlertTriangle, ClipboardCheck, BellRing, Info, Newspaper, Inbox,
   ChevronRight, PanelLeftClose, PanelLeftOpen, Globe,
-  Mail, MailOpen, Eye, EyeOff, Settings, Calendar,
+  Mail, MailOpen, Eye, EyeOff, Settings, Calendar, Server, Shapes,
   type LucideIcon,
 } from 'lucide-react';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
 import type { NotificationLevel, NotificationState } from '@/types';
 import { NOTIFICATION_SOURCE_ICONS } from '@/types/dashboard';
-import { formatNotificationSourceLabel } from '@/lib/notifications/categories';
+import {
+  formatNotificationSourceLabel,
+  formatNotificationTypeLabel,
+} from '@/lib/notifications/categories';
 
 // ─── Sidebar item (mirrors dashboard SidebarItem) ────────────────────────────
 
@@ -22,12 +25,16 @@ function SidebarItem({
   count,
   active,
   onClick,
+  nested,
+  expanded,
 }: {
   icon: React.ReactNode;
   label: string;
   count: number;
   active?: boolean;
   onClick?: () => void;
+  nested?: boolean;
+  expanded?: boolean;
 }) {
   return (
     <button
@@ -37,7 +44,7 @@ function SidebarItem({
         active
           ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
           : 'hover:bg-[var(--surface-2)] text-[var(--text-secondary)]'
-      }`}
+      } ${nested ? 'pl-7' : ''}`}
     >
       <span className="w-5 flex items-center justify-center flex-shrink-0">{icon}</span>
       <span className="text-sm font-medium flex-1 truncate">{label}</span>
@@ -47,6 +54,13 @@ function SidebarItem({
         >
           {count}
         </span>
+      )}
+      {expanded !== undefined && (
+        <ChevronRight
+          size={12}
+          aria-hidden="true"
+          className={`flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+        />
       )}
     </button>
   );
@@ -118,6 +132,8 @@ interface NotificationsSidebarProps {
     | 'filters'
     | 'setLevelFilter'
     | 'setSourceFilter'
+    | 'setSourceAccountFilter'
+    | 'setNotificationTypeFilter'
     | 'setStateFilter'
     | 'setDateRangeFilter'
   >;
@@ -144,6 +160,7 @@ export function NotificationsSidebar({
     });
 
   const totalCount = Object.values(facets.level).reduce((s, c) => s + c, 0);
+  const visibleTypes = filters.source ? facets.notificationType : [];
 
   // Collapsed mini rail
   if (collapsed) {
@@ -263,29 +280,85 @@ export function NotificationsSidebar({
               />
               {Object.entries(facets.source)
                 .sort(([, a], [, b]) => b - a)
-                .map(([source, count]) => (
-                  <SidebarItem
-                    key={source}
-                    icon={
-                      NOTIFICATION_SOURCE_ICONS[source] ? (
-                        <Image
-                          src={NOTIFICATION_SOURCE_ICONS[source]}
-                          alt={source}
-                          width={14}
-                          height={14}
+                .map(([source, count]) => {
+                  const instances = facets.sourceAccount
+                    .filter(instance => instance.source === source)
+                    .sort((left, right) => left.label.localeCompare(right.label));
+                  const expanded = filters.source === source;
+                  return (
+                    <React.Fragment key={source}>
+                      <SidebarItem
+                        icon={
+                          NOTIFICATION_SOURCE_ICONS[source] ? (
+                            <Image
+                              src={NOTIFICATION_SOURCE_ICONS[source]}
+                              alt=""
+                              width={14}
+                              height={14}
+                            />
+                          ) : (
+                            <Globe size={14} />
+                          )
+                        }
+                        label={formatNotificationSourceLabel(source)}
+                        count={count}
+                        active={filters.source === source && !filters.sourceAccount}
+                        expanded={instances.length > 0 ? expanded : undefined}
+                        onClick={() => hook.setSourceFilter(
+                          filters.source === source ? null : source,
+                        )}
+                      />
+                      {expanded && instances.map(instance => (
+                        <SidebarItem
+                          key={instance.key}
+                          icon={<Server size={13} />}
+                          label={instance.label}
+                          count={instance.count}
+                          nested
+                          active={filters.sourceAccount === instance.key}
+                          onClick={() => hook.setSourceAccountFilter(
+                            filters.sourceAccount === instance.key ? null : instance.key,
+                          )}
                         />
-                      ) : (
-                        <Globe size={14} />
-                      )
-                    }
-                    label={formatNotificationSourceLabel(source)}
-                    count={count}
-                    active={filters.source === source}
-                    onClick={() =>
-                      hook.setSourceFilter(filters.source === source ? null : source)
-                    }
-                  />
-                ))}
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Type section (scoped to the active source/instance) ── */}
+      {filters.source && visibleTypes.length > 0 && (
+        <div className="mb-4">
+          <SectionHeader
+            label="Type"
+            collapsed={collapsedSections.has('notificationType')}
+            onToggle={() => toggleSection('notificationType')}
+            hasActiveFilter={!!filters.notificationType}
+          />
+          {!collapsedSections.has('notificationType') && (
+            <div className="space-y-0.5">
+              <SidebarItem
+                icon={<Shapes size={14} className="text-blue-400" />}
+                label="All Types"
+                count={visibleTypes.reduce((sum, type) => sum + type.count, 0)}
+                active={!filters.notificationType}
+                onClick={() => hook.setNotificationTypeFilter(null)}
+              />
+              {visibleTypes.map(type => (
+                <SidebarItem
+                  key={type.key}
+                  icon={<Shapes size={13} />}
+                  label={formatNotificationTypeLabel(type.key)}
+                  count={type.count}
+                  active={filters.notificationType === type.key}
+                  onClick={() => hook.setNotificationTypeFilter(
+                    filters.notificationType === type.key ? null : type.key,
+                  )}
+                />
+              ))}
             </div>
           )}
         </div>

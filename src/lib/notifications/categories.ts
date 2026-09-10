@@ -28,6 +28,21 @@ export function formatNotificationSourceLabel(source: string): string {
   return NOTIFICATION_SOURCE_LABELS[source] ?? formatIdentifier(source);
 }
 
+const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
+  home_assistant_entity_alert: 'Device alert',
+  ha_update_available: 'Update available',
+  ha_update_critical: 'Critical update available',
+  ha_persistent_notification: 'Persistent notification',
+  ha_persistent_critical: 'Critical persistent notification',
+  ha_repair_warning: 'Repair warning',
+  ha_repair_error: 'Repair error',
+  ha_repair_critical: 'Critical repair issue',
+};
+
+export function formatNotificationTypeLabel(notificationType: string): string {
+  return NOTIFICATION_TYPE_LABELS[notificationType] ?? formatIdentifier(notificationType);
+}
+
 function formatIdentifier(value: string): string {
   return value
     .split(/[-_]+/)

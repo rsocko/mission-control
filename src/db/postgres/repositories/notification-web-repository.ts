@@ -18,7 +18,11 @@ import {
   MAX_NOTIFICATION_MERCHANT_LABEL_LENGTH,
   MAX_NOTIFICATION_MERCHANT_FACETS,
 } from '@/lib/notifications/query';
-import { normalizeFinanceProviderFacets, financeProviderFilterValues } from '@/lib/finance-insights/provider';
+import {
+  normalizeFinanceProviderAlias,
+  normalizeFinanceProviderFacets,
+  financeProviderFilterValues,
+} from '@/lib/finance-insights/provider';
 import { wakeNotificationWritebackDispatcher } from '@/lib/notifications/notification-writeback';
 import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
@@ -145,6 +149,7 @@ function buildBulkWhereClausesPg(query: NotificationQuery, params: unknown[]): s
     }
   }
   if (query.sourceAccount) { conditions.push(`connector_instance_id = $${params.length + 1}`); params.push(query.sourceAccount); }
+  if (query.notificationType) { conditions.push(`template_key = $${params.length + 1}`); params.push(query.notificationType); }
   if (query.level) { conditions.push(`level = $${params.length + 1}`); params.push(query.level); }
   if (query.category) { conditions.push(`category = $${params.length + 1}`); params.push(query.category); }
   if (query.merchant) {
@@ -453,7 +458,10 @@ export function createPostgresNotificationWebRepository(
           return {
             items: [], actions: [], hasMore: false, cursor: null,
             stats: { total: 0, unread: 0, attention: 0, urgent: 0, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
-            facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+            facets: {
+              level: {}, category: {}, source: {}, sourceAccount: [],
+              notificationType: [], state: {}, merchant: [],
+            },
             matchingCount: 0,
           };
         }
@@ -492,6 +500,7 @@ export function createPostgresNotificationWebRepository(
         }
       }
       if (query.sourceAccount) { conditions.push(`connector_instance_id = $${paramIdx}`); params.push(query.sourceAccount); paramIdx += 1; }
+      if (query.notificationType) { conditions.push(`template_key = $${paramIdx}`); params.push(query.notificationType); paramIdx += 1; }
       if (query.level) { conditions.push(`level = $${paramIdx}`); params.push(query.level); paramIdx += 1; }
       if (query.category) { conditions.push(`category = $${paramIdx}`); params.push(query.category); paramIdx += 1; }
       if (query.merchant) {
@@ -573,7 +582,31 @@ export function createPostgresNotificationWebRepository(
       }
 
       // Stats, facets, matching count in parallel
-      const [statsResult, levelResult, categoryResult, sourceResult, stateResult, merchantResult, matchingResult] = await Promise.all([
+      const typeFacetParams: unknown[] = [now];
+      let typeFacetParamIdx = 2;
+      const typeFacetConditions = [
+        inboxConditionPg(1).sql,
+        `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
+        `template_key IS NOT NULL`,
+      ];
+      if (query.source) {
+        const sourceTypes = financeProviderFilterValues(query.source);
+        const placeholders = sourceTypes.map((_, index) => `$${typeFacetParamIdx + index}`).join(',');
+        typeFacetConditions.push(sourceTypes.length === 1
+          ? `connector_type = $${typeFacetParamIdx}`
+          : `connector_type IN (${placeholders})`);
+        typeFacetParams.push(...sourceTypes);
+        typeFacetParamIdx += sourceTypes.length;
+      }
+      if (query.sourceAccount) {
+        typeFacetConditions.push(`connector_instance_id = $${typeFacetParamIdx}`);
+        typeFacetParams.push(query.sourceAccount);
+      }
+
+      const [
+        statsResult, levelResult, categoryResult, sourceResult, sourceAccountResult,
+        notificationTypeResult, stateResult, merchantResult, matchingResult,
+      ] = await Promise.all([
         pool.query(`
           SELECT COUNT(*) AS total,
             COALESCE(SUM(CASE WHEN read_state = 'unread' THEN 1 ELSE 0 END), 0) AS unread,
@@ -590,6 +623,26 @@ export function createPostgresNotificationWebRepository(
         pool.query(`SELECT level AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY level`, [now]),
         pool.query(`SELECT category AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY category`, [now]),
         pool.query(`SELECT connector_type AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY connector_type`, [now]),
+        pool.query(`
+          SELECT notifications.connector_instance_id AS key,
+                 notifications.connector_type AS source,
+                 COALESCE(connector_configs.name, notifications.connector_instance_id) AS label,
+                 COUNT(*) AS count
+          FROM notifications
+          LEFT JOIN connector_configs ON connector_configs.id = notifications.connector_instance_id
+          WHERE ${inboxConditionPg(1).sql}
+            AND notifications.connector_instance_id NOT IN (
+              SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+            )
+          GROUP BY notifications.connector_instance_id, notifications.connector_type, connector_configs.name
+        `, [now]),
+        pool.query(`
+          SELECT template_key AS key, COUNT(*) AS count
+          FROM notifications
+          WHERE ${typeFacetConditions.join(' AND ')}
+          GROUP BY template_key
+          ORDER BY COUNT(*) DESC, template_key ASC
+        `, typeFacetParams),
         pool.query(`SELECT state AS value, COUNT(*) AS count FROM notifications WHERE connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY state`),
         pool.query(`
           SELECT presentation->>'financeMerchantKey' AS key,
@@ -633,6 +686,18 @@ export function createPostgresNotificationWebRepository(
           level: toRecord(levelResult.rows),
           category: toRecord(categoryResult.rows),
           source: normalizeFinanceProviderFacets(sourceResult.rows),
+          sourceAccount: sourceAccountResult.rows.map((facet: Record<string, unknown>) => ({
+            key: facet.key as string,
+            label: facet.label as string,
+            source: normalizeFinanceProviderAlias(facet.source as string)
+              ?? facet.source as string,
+            count: Number(facet.count),
+          })),
+          notificationType: notificationTypeResult.rows.map((facet: Record<string, unknown>) => ({
+            key: facet.key as string,
+            label: facet.key as string,
+            count: Number(facet.count),
+          })),
           state: toRecord(stateResult.rows),
           merchant: normalizedMerchantFacets,
         },

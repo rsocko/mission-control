@@ -1,18 +1,44 @@
 import 'server-only';
 
-import {
-  HomeAssistantActionError,
-  HomeAssistantConnector,
-  type HomeAssistantNotificationAction,
-} from '@/lib/connectors/home-assistant';
+import type { IConnector } from '@/lib/connectors';
+import type { HomeAssistantNotificationAction } from '@/lib/connectors/home-assistant';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { connectorLogger } from '@/lib/logger';
 import type { NotificationProviderActionContext, NotificationProviderActionResult } from './types';
+
+interface HomeAssistantActionConnector extends IConnector {
+  readonly type: 'home-assistant';
+  executeNotificationAction(
+    action: HomeAssistantNotificationAction,
+    metadata: Record<string, unknown>,
+    input: Record<string, unknown>,
+  ): Promise<void>;
+}
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function isHomeAssistantActionConnector(
+  connector: IConnector | null,
+): connector is HomeAssistantActionConnector {
+  return connector?.type === 'home-assistant'
+    && 'executeNotificationAction' in connector
+    && typeof connector.executeNotificationAction === 'function';
+}
+
+function homeAssistantActionStatus(error: unknown): 409 | 503 {
+  if (
+    error instanceof Error
+    && error.name === 'HomeAssistantActionError'
+    && 'status' in error
+    && (error.status === 409 || error.status === 503)
+  ) {
+    return error.status;
+  }
+  return 503;
 }
 
 export async function executeHomeAssistantProviderAction(
@@ -31,7 +57,7 @@ export async function executeHomeAssistantProviderAction(
     context.notification.connectorInstanceId,
     { refresh: true },
   );
-  if (!(connector instanceof HomeAssistantConnector)) {
+  if (!isHomeAssistantActionConnector(connector)) {
     return {
       result: { type: 'home_assistant_unavailable' },
       error: { message: 'Home Assistant connector is unavailable', status: 503 },
@@ -58,7 +84,7 @@ export async function executeHomeAssistantProviderAction(
       connectorId: context.notification.connectorInstanceId,
       notificationId: context.notification.id,
     }, 'Home Assistant notification action failed');
-    const status = error instanceof HomeAssistantActionError ? error.status : 503;
+    const status = homeAssistantActionStatus(error);
     return {
       result: { type: 'home_assistant_action_failed', action },
       error: {

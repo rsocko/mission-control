@@ -114,6 +114,8 @@ export interface NotificationFacets {
   level: Record<string, number>;
   category: Record<string, number>;
   source: Record<string, number>;
+  sourceAccount: Array<{ key: string; label: string; source: string; count: number }>;
+  notificationType: Array<{ key: string; label: string; count: number }>;
   state: Record<string, number>;
   merchant: Array<{ key: string; label: string; count: number }>;
 }

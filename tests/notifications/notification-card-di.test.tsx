@@ -8,8 +8,11 @@
  * - Preview links
  */
 import { describe, it, expect, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { NotificationCard } from '@/components/notifications/NotificationCard';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  NotificationCard,
+  NotificationDetail,
+} from '@/components/notifications/NotificationCard';
 import {
   registerDefaultNotificationProviders,
   resolveNotificationProvider,
@@ -100,6 +103,47 @@ describe('NotificationCard — DI Rich Cards', () => {
       expect(screen.getByText('GitHub')).toBeDefined();
       expect(container.querySelector('img[src="/icons/connectors/github.svg"]')).not.toBeNull();
       expect(screen.getByText('Development')).toBeDefined();
+    });
+
+    describe('Home Assistant release details', () => {
+      it('loads and renders supported release notes only in the detail view', async () => {
+        const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+          releaseNotes: '## Bug fixes\n\n- Discovery now finds the right devices.',
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+        vi.stubGlobal('fetch', fetchMock);
+        const notification = makeNotification({
+          id: 'ha-update-notes',
+          connectorType: 'home-assistant',
+          category: 'system',
+          metadata: {
+            schemaVersion: 2,
+            haSource: 'updates',
+            entityId: 'update.battery_notes',
+            supportsReleaseNotes: true,
+          },
+        });
+
+        render(
+          <NotificationDetail
+            notification={notification}
+            onExecuteAction={vi.fn(async () => ({ success: true }))}
+          />,
+        );
+
+        expect(screen.getByText('Loading release notes…')).toBeDefined();
+        await waitFor(() => {
+          expect(screen.getByRole('heading', { name: 'Bug fixes' })).toBeDefined();
+        });
+        expect(screen.getByText('Discovery now finds the right devices.')).toBeDefined();
+        expect(fetchMock).toHaveBeenCalledWith(
+          '/api/notifications/ha-update-notes/release-notes',
+          { signal: expect.any(AbortSignal) },
+        );
+        vi.unstubAllGlobals();
+      });
     });
 
     it('attributes document and money alerts to their owning agents', () => {

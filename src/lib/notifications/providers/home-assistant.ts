@@ -2,6 +2,7 @@ import type {
   NotificationActionDraft,
   NotificationSourceProvider,
 } from './types';
+import { getHomeAssistantBrandImagePath } from '@/lib/connectors/home-assistant/notification-icons';
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -123,10 +124,14 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
       const progress = typeof metadata.progress === 'number'
         ? Math.max(0, Math.min(100, metadata.progress))
         : undefined;
+      const subjectIconUrl = getHomeAssistantBrandImagePath(metadata)
+        ? `/api/notifications/${encodeURIComponent(notification.id)}/subject-icon`
+        : undefined;
 
       return {
         presentation: {
           sourceName: text(metadata.instanceName) || 'Home Assistant',
+          subjectIconUrl,
           subtitle: source === 'updates'
             ? notification.templateKey === 'ha_update_critical'
               ? 'Critical software update'

@@ -4,6 +4,8 @@ import type { IConnector } from '@/lib/connectors';
 import type { HomeAssistantNotificationAction } from '@/lib/connectors/home-assistant';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { connectorLogger } from '@/lib/logger';
+import { normalizeNotificationUrl } from './registry';
+import { resolveHomeAssistantOpenUrl } from './home-assistant';
 import type { NotificationProviderActionContext, NotificationProviderActionResult } from './types';
 
 interface HomeAssistantActionConnector extends IConnector {
@@ -44,6 +46,26 @@ function homeAssistantActionStatus(error: unknown): 409 | 503 {
 export async function executeHomeAssistantProviderAction(
   context: NotificationProviderActionContext,
 ): Promise<NotificationProviderActionResult | null> {
+  if (context.action.actionType === 'open_url') {
+    const url = normalizeNotificationUrl(resolveHomeAssistantOpenUrl(
+      record(context.notification.metadata),
+      typeof context.payload.url === 'string' ? context.payload.url : undefined,
+    ));
+    if (!url) {
+      return {
+        result: { type: 'invalid_home_assistant_url' },
+        error: {
+          message: 'Home Assistant action URL must use http or https',
+          status: 400,
+        },
+      };
+    }
+    return {
+      state: 'read',
+      result: { type: 'open_url', url },
+    };
+  }
+
   const action = context.action.actionType as HomeAssistantNotificationAction;
   if (![
     'install_update',

@@ -559,7 +559,7 @@ export function NavRail({
       <div
         ref={scrollRegionRef}
         data-nav-scroll-region
-        className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+        className="min-h-0 flex-1 overflow-hidden"
       >
         <div
           ref={scrollContentRef}

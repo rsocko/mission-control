@@ -30,9 +30,12 @@ function sourceUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${path}`;
 }
 
-function legacyOpenUrl(metadata: Record<string, unknown>): string | undefined {
+export function resolveHomeAssistantOpenUrl(
+  metadata: Record<string, unknown>,
+  storedUrl?: string,
+): string | undefined {
   const baseUrl = text(metadata.baseUrl);
-  if (!baseUrl) return undefined;
+  if (!baseUrl) return storedUrl;
 
   switch (text(metadata.haSource)) {
     case 'updates':
@@ -46,8 +49,10 @@ function legacyOpenUrl(metadata: Record<string, unknown>): string | undefined {
         ? sourceUrl(baseUrl, `/config/entities?domain=${encodeURIComponent(domain)}`)
         : sourceUrl(baseUrl, '/config/entities');
     }
-    default:
+    case 'persistent_notifications':
       return baseUrl;
+    default:
+      return storedUrl ?? baseUrl;
   }
 }
 
@@ -62,7 +67,10 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
     present(notification) {
       const metadata = record(notification.metadata);
       const source = text(metadata.haSource);
-      const actionUrl = text(notification.actionUrl) ?? legacyOpenUrl(metadata);
+      const actionUrl = resolveHomeAssistantOpenUrl(
+        metadata,
+        text(notification.actionUrl),
+      );
       const actions: NotificationActionDraft[] = [];
 
       if (

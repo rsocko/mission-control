@@ -473,6 +473,8 @@ describe('NavRail', () => {
     });
 
     const content = screen.getByRole('group', { name: 'Plan' }).parentElement;
+    expect(content?.parentElement).toHaveClass('overflow-hidden');
+    expect(content?.parentElement).not.toHaveClass('overflow-y-auto');
     expect(content).toHaveAttribute('data-collapsed-groups', 'system operations');
     expect(screen.getByRole('button', { name: 'Open System navigation' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Operations navigation' })).toBeInTheDocument();

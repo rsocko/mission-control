@@ -44,6 +44,36 @@ beforeEach(() => {
 });
 
 describe('Home Assistant notification actions', () => {
+  it('upgrades a persisted root URL when opening an update notification', async () => {
+    const actionContext = {
+      ...context,
+      notification: {
+        ...context.notification,
+        sourceId: 'update.tapo_cameras_control_update',
+        metadata: {
+          schemaVersion: 2,
+          haSource: 'updates',
+          baseUrl: 'https://ha.example.test',
+        },
+      },
+      action: {
+        ...context.action,
+        actionType: 'open_url',
+        payload: { url: 'https://ha.example.test' },
+      },
+      payload: { url: 'https://ha.example.test' },
+    };
+
+    await expect(executeHomeAssistantProviderAction(actionContext)).resolves.toEqual({
+      state: 'read',
+      result: {
+        type: 'open_url',
+        url: 'https://ha.example.test/config/updates',
+      },
+    });
+    expect(mocks.getOrInitializeConnector).not.toHaveBeenCalled();
+  });
+
   it.each([
     'install_update',
     'skip_update',

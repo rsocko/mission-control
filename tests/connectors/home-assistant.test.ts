@@ -226,6 +226,23 @@ describe('Home Assistant notification presentation', () => {
     });
   });
 
+  it('upgrades a persisted root action URL for an update notification', () => {
+    const result = present({
+      ...notification,
+      actionUrl: 'https://ha.example.test',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'updates',
+        actionsEnabled: false,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+
+    expect(result.actions?.find(action => action.actionType === 'open_url')?.payload).toEqual({
+      url: 'https://ha.example.test/config/updates',
+    });
+  });
+
   it.each([
     ['updates', {}, 'https://ha.example.test/config/updates'],
     ['repairs', {}, 'https://ha.example.test/config/repairs'],

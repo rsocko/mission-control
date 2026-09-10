@@ -15,6 +15,7 @@ import {
   Search,
   Tag,
   UserRoundCheck,
+  Shapes,
   X,
   Zap,
   type LucideIcon,
@@ -28,6 +29,7 @@ import {
 import {
   formatNotificationCategoryLabel,
   formatNotificationSourceLabel,
+  formatNotificationTypeLabel,
 } from '@/lib/notifications/categories';
 import { cn } from '@/lib/utils';
 
@@ -40,6 +42,7 @@ type BuilderFilterKey =
   | 'reason'
   | 'subjectType'
   | 'sourceAccount'
+  | 'notificationType'
   | 'participating'
   | 'actionableOnly';
 
@@ -64,7 +67,8 @@ const FILTER_DEFINITIONS: FilterDefinition[] = [
   { key: 'owner', label: 'Owner', icon: CircleUserRound, kind: 'text' },
   { key: 'reason', label: 'Reason', icon: GitPullRequest, kind: 'text' },
   { key: 'subjectType', label: 'Subject type', icon: Tag, kind: 'text' },
-  { key: 'sourceAccount', label: 'Source account', icon: UserRoundCheck, kind: 'text' },
+  { key: 'sourceAccount', label: 'Source account', icon: UserRoundCheck, kind: 'options' },
+  { key: 'notificationType', label: 'Type', icon: Shapes, kind: 'options' },
   { key: 'participating', label: 'Participating only', icon: UserRoundCheck, kind: 'boolean' },
   { key: 'actionableOnly', label: 'Actionable only', icon: Zap, kind: 'boolean' },
   { key: 'source', label: 'Source', icon: ListFilter, kind: 'options', common: true },
@@ -109,7 +113,17 @@ export function activeNotificationFilters(
     });
   }
   if (query.sourceAccount) {
-    filters.push({ key: 'sourceAccount', label: `Source account: ${query.sourceAccount}` });
+    const account = facets.sourceAccount.find(facet => facet.key === query.sourceAccount);
+    filters.push({
+      key: 'sourceAccount',
+      label: `Source account: ${account?.label ?? query.sourceAccount}`,
+    });
+  }
+  if (query.notificationType) {
+    filters.push({
+      key: 'notificationType',
+      label: `Type: ${formatNotificationTypeLabel(query.notificationType)}`,
+    });
   }
   if (query.state) filters.push({ key: 'state', label: `State: ${formatLabel(query.state)}` });
   if (query.actionableOnly) filters.push({ key: 'actionableOnly', label: 'Actionable only' });
@@ -214,7 +228,19 @@ export function NotificationFilterControls({
   function applyOption(value: string) {
     if (selectedKey === 'category') onChange({ ...query, category: value });
     else if (selectedKey === 'merchant') onChange({ ...query, merchant: value });
-    else if (selectedKey === 'source') onChange({ ...query, source: value });
+    else if (selectedKey === 'source') {
+      onChange({ ...query, source: value, sourceAccount: null, notificationType: null });
+    }
+    else if (selectedKey === 'sourceAccount') {
+      const account = facets.sourceAccount.find(facet => facet.key === value);
+      onChange({
+        ...query,
+        source: account?.source ?? query.source,
+        sourceAccount: value,
+        notificationType: null,
+      });
+    }
+    else if (selectedKey === 'notificationType') onChange({ ...query, notificationType: value });
     else return;
     closeBuilder();
     triggerRef.current?.focus();
@@ -228,7 +254,6 @@ export function NotificationFilterControls({
     else if (selectedKey === 'owner') onChange({ ...query, owner: value });
     else if (selectedKey === 'reason') onChange({ ...query, reason: value });
     else if (selectedKey === 'subjectType') onChange({ ...query, subjectType: value });
-    else if (selectedKey === 'sourceAccount') onChange({ ...query, sourceAccount: value });
     else return;
     closeBuilder();
     triggerRef.current?.focus();
@@ -498,6 +523,18 @@ function filterOptions(
         count: facet.count,
       })),
     ];
+  }
+  if (key === 'sourceAccount') {
+    return facets.sourceAccount
+      .filter(facet => !query.source || facet.source === query.source)
+      .map(facet => ({ value: facet.key, label: facet.label, count: facet.count }));
+  }
+  if (key === 'notificationType') {
+    return facets.notificationType.map(facet => ({
+      value: facet.key,
+      label: formatNotificationTypeLabel(facet.key),
+      count: facet.count,
+    }));
   }
   return [];
 }

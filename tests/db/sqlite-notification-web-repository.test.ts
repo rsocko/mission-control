@@ -79,6 +79,53 @@ describe('SQLite NotificationWebPersistence', () => {
     expect(result).toBeNull();
   });
 
+  it('returns named source instances and source-scoped notification types', async () => {
+    const now = new Date().toISOString();
+    const handle = sqlite as unknown as SqliteHandle;
+    handle.prepare(`
+      INSERT OR REPLACE INTO connector_configs (
+        id, type, name, capabilities, credentials, settings, synced_lists, created_at, updated_at
+      ) VALUES (?, ?, ?, '{}', '{}', '{}', '[]', ?, ?)
+    `).run('ha-home', 'home-assistant', 'Home', now, now);
+    handle.prepare(`
+      INSERT INTO notifications (
+        id, source_id, connector_type, connector_instance_id, title,
+        template_key, received_at, sort_at
+      ) VALUES (?, ?, 'home-assistant', 'ha-home', ?, ?, ?, ?)
+    `).run('ha-update', 'update.core', 'Core update', 'ha_update_critical', now, now);
+    handle.prepare(`
+      INSERT INTO notifications (
+        id, source_id, connector_type, connector_instance_id, title,
+        template_key, received_at, sort_at
+      ) VALUES (?, ?, 'home-assistant', 'ha-home', ?, ?, ?, ?)
+    `).run('ha-device', 'sensor.office', 'Office alert', 'home_assistant_entity_alert', now, now);
+
+    const result = await repo.queryNotifications({
+      query: {
+        q: null, level: null, category: null, merchant: null,
+        source: 'home-assistant', sourceAccount: 'ha-home',
+        notificationType: 'ha_update_critical', state: null,
+        actionableOnly: false, dateRange: null, repository: null,
+        owner: null, reason: null, subjectType: null, participating: false,
+        sort: 'newest',
+      },
+      limit: 50,
+      cursor: null,
+    });
+
+    expect(result.items.map(item => item.id)).toEqual(['ha-update']);
+    expect(result.facets.sourceAccount).toContainEqual({
+      key: 'ha-home',
+      label: 'Home',
+      source: 'home-assistant',
+      count: 2,
+    });
+    expect(result.facets.notificationType).toEqual([
+      { key: 'ha_update_critical', label: 'ha_update_critical', count: 1 },
+      { key: 'home_assistant_entity_alert', label: 'home_assistant_entity_alert', count: 1 },
+    ]);
+  });
+
   it('retryWritebacks returns empty when no retryable jobs', async () => {
     const { retried } = await repo.retryWritebacks('id', ['nonexistent'], new Date().toISOString());
     expect(retried).toEqual([]);

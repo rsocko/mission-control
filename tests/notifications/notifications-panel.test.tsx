@@ -190,6 +190,8 @@ function Harness({
       level: { action_needed: 1, digest: 1 },
       category: { development: 1, finance: 1 },
       source: { github: 2 },
+      sourceAccount: [],
+      notificationType: [],
       state: { unread: 2 },
       merchant: [],
     },
@@ -221,6 +223,7 @@ function Harness({
     setReasonFilter: vi.fn(),
     setSubjectTypeFilter: vi.fn(),
     setSourceAccountFilter: vi.fn(),
+    setNotificationTypeFilter: vi.fn(),
     setParticipatingFilter: vi.fn(),
     replaceFilters: vi.fn(),
     setAttentionView: view => {

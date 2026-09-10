@@ -104,7 +104,7 @@ const FUTURE = '2999-01-01T00:00:00.000Z';
 function emptyQuery(overrides: Partial<NotificationQuery> = {}): NotificationQuery {
   return {
     q: null, level: null, category: null, merchant: null,
-    source: null, sourceAccount: null, state: null,
+    source: null, sourceAccount: null, notificationType: null, state: null,
     actionableOnly: false, dateRange: null, repository: null,
     owner: null, reason: null, subjectType: null,
     participating: false, sort: 'newest',

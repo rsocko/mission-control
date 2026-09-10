@@ -19,7 +19,11 @@ import {
   MAX_NOTIFICATION_MERCHANT_LABEL_LENGTH,
   MAX_NOTIFICATION_MERCHANT_FACETS,
 } from '@/lib/notifications/query';
-import { normalizeFinanceProviderFacets, financeProviderFilterValues } from '@/lib/finance-insights/provider';
+import {
+  normalizeFinanceProviderAlias,
+  normalizeFinanceProviderFacets,
+  financeProviderFilterValues,
+} from '@/lib/finance-insights/provider';
 import {
   NOTIFICATION_IS_INBOX_SQL,
   NOTIFICATION_COUNTS_TOWARD_ATTENTION_SQL,
@@ -176,6 +180,10 @@ function buildWhereClauses(
   if (query.sourceAccount) {
     conditions.push(`connector_instance_id = ?`);
     params.push(query.sourceAccount);
+  }
+  if (query.notificationType) {
+    conditions.push(`template_key = ?`);
+    params.push(query.notificationType);
   }
   if (query.level) {
     conditions.push(`level = ?`);
@@ -517,7 +525,10 @@ export function createSqliteNotificationWebRepository(
           return {
             items: [], actions: [], hasMore: false, cursor: null,
             stats: { total: 0, unread: 0, attention: 0, urgent: 0, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
-            facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+            facets: {
+              level: {}, category: {}, source: {}, sourceAccount: [],
+              notificationType: [], state: {}, merchant: [],
+            },
             matchingCount: 0,
           };
         }
@@ -589,6 +600,44 @@ export function createSqliteNotificationWebRepository(
           AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
         GROUP BY connector_type
       `).all(now) as Array<{ value: string | null; count: number }>;
+      const sourceAccountFacets = sqlite.prepare(`
+        SELECT connector_instance_id AS key,
+               connector_type AS source,
+               COALESCE(
+                 (SELECT name FROM connector_configs WHERE id = notifications.connector_instance_id),
+                 connector_instance_id
+               ) AS label,
+               COUNT(*) AS count
+        FROM notifications WHERE ${inboxConditionSql()}
+          AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
+        GROUP BY connector_instance_id, connector_type
+      `).all(now) as Array<{ key: string; label: string; source: string; count: number }>;
+      const typeFacetParams: unknown[] = [now];
+      const typeFacetConditions = [
+        inboxConditionSql(),
+        `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
+        `template_key IS NOT NULL`,
+      ];
+      if (query.source) {
+        const sourceTypes = financeProviderFilterValues(query.source);
+        typeFacetConditions.push(
+          sourceTypes.length === 1
+            ? `connector_type = ?`
+            : `connector_type IN (${sourceTypes.map(() => '?').join(',')})`,
+        );
+        typeFacetParams.push(...sourceTypes);
+      }
+      if (query.sourceAccount) {
+        typeFacetConditions.push(`connector_instance_id = ?`);
+        typeFacetParams.push(query.sourceAccount);
+      }
+      const notificationTypeFacets = sqlite.prepare(`
+        SELECT template_key AS key, COUNT(*) AS count
+        FROM notifications
+        WHERE ${typeFacetConditions.join(' AND ')}
+        GROUP BY template_key
+        ORDER BY COUNT(*) DESC, template_key ASC
+      `).all(...typeFacetParams) as Array<{ key: string; count: number }>;
       const stateFacets = sqlite.prepare(`
         SELECT state AS value, COUNT(*) AS count
         FROM notifications WHERE connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
@@ -645,6 +694,16 @@ export function createSqliteNotificationWebRepository(
           level: toRecord(levelFacets),
           category: toRecord(categoryFacets),
           source: normalizeFinanceProviderFacets(sourceFacets),
+          sourceAccount: sourceAccountFacets.map(facet => ({
+            ...facet,
+            source: normalizeFinanceProviderAlias(facet.source) ?? facet.source,
+            count: Number(facet.count),
+          })),
+          notificationType: notificationTypeFacets.map(facet => ({
+            key: facet.key,
+            label: facet.key,
+            count: Number(facet.count),
+          })),
           state: toRecord(stateFacets),
           merchant: normalizedMerchantFacets,
         },

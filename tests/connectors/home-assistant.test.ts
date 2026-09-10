@@ -132,11 +132,13 @@ describe('Home Assistant source transformers', () => {
       id: 'persistent:water_filter',
       level: 'action_needed',
       templateKey: 'ha_persistent_critical',
+      actionUrl: 'https://ha.example.test',
     });
     expect(repairs[0]).toMatchObject({
       id: 'repair:mqtt:broker_unavailable',
       level: 'action_needed',
       templateKey: 'ha_repair_error',
+      actionUrl: 'https://ha.example.test/config/repairs',
     });
     expect(repairs[0].metadata).toMatchObject({
       domain: 'mqtt',
@@ -201,6 +203,7 @@ describe('Home Assistant notification presentation', () => {
   it('offers install and skip only for an installable idle update', () => {
     const result = present({
       ...notification,
+      actionUrl: 'https://ha.example.test/config/updates',
       metadata: {
         schemaVersion: 2,
         haSource: 'updates',
@@ -218,6 +221,35 @@ describe('Home Assistant notification presentation', () => {
       'open_url',
       'create_task',
     ]);
+    expect(result.actions?.find(action => action.actionType === 'open_url')?.payload).toEqual({
+      url: 'https://ha.example.test/config/updates',
+    });
+  });
+
+  it.each([
+    ['updates', {}, 'https://ha.example.test/config/updates'],
+    ['repairs', {}, 'https://ha.example.test/config/repairs'],
+    ['entity_alerts', { entityId: 'binary_sensor.garage_door' }, 'https://ha.example.test/config/entities?domain=binary_sensor'],
+    ['persistent_notifications', {}, 'https://ha.example.test/'],
+  ])('restores the %s destination for notifications stored before action URLs', (
+    haSource,
+    sourceMetadata,
+    expectedUrl,
+  ) => {
+    const result = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource,
+        actionsEnabled: false,
+        baseUrl: 'https://ha.example.test/',
+        ...sourceMetadata,
+      },
+    });
+
+    expect(result.actions?.find(action => action.actionType === 'open_url')?.payload).toEqual({
+      url: expectedUrl,
+    });
   });
 });
 
@@ -393,6 +425,94 @@ describe('HomeAssistantConnector', () => {
       service: 'install',
       data: { entity_id: 'update.router', backup: true },
     }]);
+  });
+
+  it('skips an available update through the update service', async () => {
+    const calls: Array<{ domain: string; service: string; data: Record<string, unknown> }> = [];
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchStates: async () => [{
+          entity_id: 'update.router',
+          state: 'on',
+          attributes: {
+            latest_version: '1.1',
+            supported_features: 1,
+            auto_update: false,
+          },
+        }],
+        callService: async (domain: string, service: string, data: Record<string, unknown>) => {
+          calls.push({ domain, service, data });
+        },
+      },
+    });
+
+    await connector.executeNotificationAction(
+      'skip_update',
+      { entityId: 'update.router', latestVersion: '1.1', canSkip: true },
+      {},
+    );
+
+    expect(calls).toEqual([{
+      domain: 'update',
+      service: 'skip',
+      data: { entity_id: 'update.router' },
+    }]);
+  });
+
+  it('dismisses an active persistent notification through the persistent notification service', async () => {
+    const calls: Array<{ domain: string; service: string; data: Record<string, unknown> }> = [];
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          persistentNotifications: [{ notification_id: 'water_filter' }],
+          errors: {},
+        }),
+        callService: async (domain: string, service: string, data: Record<string, unknown>) => {
+          calls.push({ domain, service, data });
+        },
+      },
+    });
+
+    await connector.executeNotificationAction(
+      'dismiss_persistent_notification',
+      { notificationId: 'water_filter' },
+      {},
+    );
+
+    expect(calls).toEqual([{
+      domain: 'persistent_notification',
+      service: 'dismiss',
+      data: { notification_id: 'water_filter' },
+    }]);
+  });
+
+  it('ignores an active repair through the repairs WebSocket API', async () => {
+    const calls: Array<{ domain: string; issueId: string }> = [];
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          repairs: [{ domain: 'mqtt', issue_id: 'broker_unavailable', ignored: false }],
+          errors: {},
+        }),
+        ignoreRepair: async (domain: string, issueId: string) => {
+          calls.push({ domain, issueId });
+        },
+      },
+    });
+
+    await connector.executeNotificationAction(
+      'ignore_repair',
+      { domain: 'mqtt', issueId: 'broker_unavailable' },
+      {},
+    );
+
+    expect(calls).toEqual([{ domain: 'mqtt', issueId: 'broker_unavailable' }]);
   });
 
   it('rejects a stale update version before calling Home Assistant', async () => {

@@ -124,7 +124,10 @@ function makeHook(overrides: Partial<UseNotificationsReturn>): UseNotificationsR
       digest: 0,
       actionable: 0,
     },
-    facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+    facets: {
+      level: {}, category: {}, source: {}, sourceAccount: [],
+      notificationType: [], state: {}, merchant: [],
+    },
     matchingCount: 0,
     operationalStatus: {
       isSyncing: false,
@@ -153,6 +156,7 @@ function makeHook(overrides: Partial<UseNotificationsReturn>): UseNotificationsR
     setReasonFilter: vi.fn(),
     setSubjectTypeFilter: vi.fn(),
     setSourceAccountFilter: vi.fn(),
+    setNotificationTypeFilter: vi.fn(),
     setParticipatingFilter: vi.fn(),
     replaceFilters: vi.fn(),
     setAttentionView: vi.fn(),
@@ -245,6 +249,8 @@ describe('NotificationsPage data states', () => {
         level: {},
         category: { finance: 2, tasks: 1 },
         source: { 'finance-manager': 2 },
+        sourceAccount: [],
+        notificationType: [],
         state: {},
         merchant: [{ key: merchant, label: 'Invented Market', count: 1 }],
       },

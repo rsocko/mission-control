@@ -124,7 +124,9 @@ export function buildPersistentNotifications(input: {
       templateKey: critical ? 'ha_persistent_critical' : 'ha_persistent_notification',
       isRead: false,
       isActionable: input.actionsEnabled,
-      actionUrl: sourceUrl(input.baseUrl, '/config/notifications'),
+      // Home Assistant exposes persistent notifications only through its
+      // notification drawer, which has no URL-addressable route.
+      actionUrl: input.baseUrl,
       receivedAt,
       sourceActivityAt: receivedAt,
       sourceActivityKey: `${notificationId}:${receivedAt}`,

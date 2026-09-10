@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   fetchNotificationImage: vi.fn(),
@@ -46,6 +46,10 @@ describe('Home Assistant notification subject icon route', () => {
     });
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('proxies a canonical brand image through the owning connector', async () => {
     const response = await requestIcon();
 
@@ -59,6 +63,55 @@ describe('Home Assistant notification subject icon route', () => {
       .toEqual([137, 80, 78, 71]);
   });
 
+  it('fetches legacy HACS brand artwork directly from the trusted public host', async () => {
+    mocks.findNotificationForAction.mockResolvedValueOnce({
+      id: 'notification-1',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      metadata: {
+        entityPicture: 'https://brands.home-assistant.io/_/bambu_lab/icon.png',
+      },
+    });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      new Uint8Array([137, 80, 78, 71]),
+      {
+        status: 200,
+        headers: {
+          'Content-Length': '4',
+          'Content-Type': 'image/png',
+        },
+      },
+    ));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await requestIcon();
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://brands.home-assistant.io/_/bambu_lab/icon.png',
+      { signal: expect.any(AbortSignal) },
+    );
+    expect(mocks.getOrInitializeConnector).not.toHaveBeenCalled();
+  });
+
+  it('proxies authenticated Supervisor add-on artwork through Home Assistant', async () => {
+    mocks.findNotificationForAction.mockResolvedValueOnce({
+      id: 'notification-1',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      metadata: {
+        entityPicture: '/api/hassio/addons/core_matter_server/icon',
+      },
+    });
+
+    const response = await requestIcon();
+
+    expect(response.status).toBe(200);
+    expect(mocks.getOrInitializeConnector).toHaveBeenCalledWith('ha-home');
+    expect(mocks.fetchNotificationImage)
+      .toHaveBeenCalledWith('/api/hassio/addons/core_matter_server/icon');
+  });
+
   it('does not proxy arbitrary entity picture URLs', async () => {
     mocks.findNotificationForAction.mockResolvedValueOnce({
       id: 'notification-1',
@@ -66,6 +119,22 @@ describe('Home Assistant notification subject icon route', () => {
       connectorInstanceId: 'ha-home',
       metadata: {
         attributes: { entity_picture: 'http://169.254.169.254/latest/meta-data' },
+      },
+    });
+
+    const response = await requestIcon();
+
+    expect(response.status).toBe(404);
+    expect(mocks.getOrInitializeConnector).not.toHaveBeenCalled();
+  });
+
+  it('does not proxy arbitrary authenticated Home Assistant API paths', async () => {
+    mocks.findNotificationForAction.mockResolvedValueOnce({
+      id: 'notification-1',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      metadata: {
+        entityPicture: '/api/config',
       },
     });
 

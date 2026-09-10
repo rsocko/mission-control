@@ -13,6 +13,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { formatTimeAgo } from '@/lib/utils/dashboard-helpers';
 import type { InboundNotification, NotificationItem, NotificationAction } from '@/types';
 import type {
@@ -148,6 +149,7 @@ interface PresentationMetadataChip {
 interface NotificationPresentation {
   subtitle?: string;
   sourceName?: string;
+  subjectIcon?: string;
   subjectIconUrl?: string;
   repository?: string;
   subjectType?: string;
@@ -159,6 +161,7 @@ interface NotificationPresentation {
 
 function NotificationIdentity({
   sourceIcon,
+  subjectIcon,
   subjectIconUrl,
   sourceName,
   CategoryIcon,
@@ -166,6 +169,7 @@ function NotificationIdentity({
   size,
 }: {
   sourceIcon?: string;
+  subjectIcon?: string;
   subjectIconUrl?: string;
   sourceName: string;
   CategoryIcon: React.ComponentType<{ size?: number; className?: string }>;
@@ -189,6 +193,31 @@ function NotificationIdentity({
           unoptimized
           onError={() => setFailedSubjectIconUrl(subjectIconUrl)}
           className={`${wrapperClass} rounded-md bg-[var(--surface-0)] object-contain`}
+        />
+        {sourceIcon && (
+          <Image
+            src={sourceIcon}
+            alt=""
+            width={badgeSize}
+            height={badgeSize}
+            className={`absolute -bottom-1 -right-1 rounded border-2 border-[var(--surface-1)] bg-[var(--surface-1)] object-contain ${badgeClass}`}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (subjectIcon) {
+    return (
+      <div
+        aria-hidden="true"
+        className={`relative flex shrink-0 items-center justify-center rounded-md bg-sky-500/15 text-sky-400 ${wrapperClass}`}
+        title={sourceName}
+      >
+        <IconRenderer
+          value={subjectIcon}
+          size={size === 'detail' ? 24 : 18}
+          fallback={<CategoryIcon size={size === 'detail' ? 18 : 14} />}
         />
         {sourceIcon && (
           <Image
@@ -496,6 +525,7 @@ export function NotificationCard({
     richContent,
   } = useNotificationDisplay(notification);
   const presentationSubtitle = presentation.subtitle || null;
+  const subjectIcon = presentation.subjectIcon?.trim() || undefined;
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
 
   const primaryAction = useMemo(() =>
@@ -575,6 +605,7 @@ export function NotificationCard({
         <div className="flex-shrink-0 mt-0.5">
           <NotificationIdentity
             sourceIcon={sourceIcon}
+            subjectIcon={subjectIcon}
             subjectIconUrl={subjectIconUrl}
             sourceName={sourceName}
             CategoryIcon={CategoryIcon}
@@ -798,6 +829,7 @@ export function NotificationDetail({
     metadataChips,
     richContent,
   } = useNotificationDisplay(notification);
+  const subjectIcon = presentation.subjectIcon?.trim() || undefined;
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
@@ -850,6 +882,7 @@ export function NotificationDetail({
         <div className="flex min-w-0 items-center gap-3">
           <NotificationIdentity
             sourceIcon={sourceIcon}
+            subjectIcon={subjectIcon}
             subjectIconUrl={subjectIconUrl}
             sourceName={sourceName}
             CategoryIcon={CategoryIcon}

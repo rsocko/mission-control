@@ -446,6 +446,14 @@ export default function TodayPage() {
         totalMinutes={totalMinutes}
         whatsNextLoading={actions.whatsNextLoading}
         onAddToDay={actions.addToDay}
+        onCompleteTask={(task) => {
+          void actions.completeTask(task.id, {
+            title: task.title,
+            status: task.status,
+            editPolicy: task.editPolicy,
+          });
+        }}
+        completingIds={actions.completingIds}
         onSelectTask={(taskId) => {
           const isClosing = selectedTaskId === taskId;
           setDetailSurface('desktop');

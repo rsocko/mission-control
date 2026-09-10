@@ -185,6 +185,71 @@ describe('Home Assistant notification presentation', () => {
     expect(presented.presentation).toMatchObject({
       subjectIconUrl: '/api/notifications/ha-update/subject-icon',
     });
+    expect(presented.presentation?.subjectIcon).toBeUndefined();
+  });
+
+  it('uses the Home Assistant entity icon when no brand image is available', () => {
+    const explicit = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        entityId: 'binary_sensor.garage_motion',
+        state: 'on',
+        attributes: { icon: 'mdi:motion-sensor' },
+      },
+    });
+    const lock = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        entityId: 'lock.rear_door',
+        state: 'unlocked',
+        attributes: { icon: 'https://example.com/not-an-icon' },
+      },
+    });
+
+    expect(explicit.presentation).toMatchObject({
+      subjectIcon: 'mdi:motion-sensor',
+    });
+    expect(lock.presentation).toMatchObject({
+      subjectIcon: 'mdi:lock-open-alert',
+    });
+  });
+
+  it('uses Home Assistant generic update artwork when an update has no brand image', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'updates',
+        entityId: 'update.advanced_camera_card_update',
+        state: 'on',
+      },
+    });
+
+    expect(presented.presentation).toMatchObject({
+      subjectIcon: 'mdi:package-up',
+    });
+  });
+
+  it('uses authenticated Supervisor add-on artwork for non-HACS updates', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'updates',
+        entityId: 'update.matter_server_update',
+        state: 'on',
+        entityPicture: '/api/hassio/addons/core_matter_server/icon',
+      },
+    });
+
+    expect(presented.presentation).toMatchObject({
+      subjectIconUrl: '/api/notifications/ha-update/subject-icon',
+    });
+    expect(presented.presentation?.subjectIcon).toBeUndefined();
   });
 
   it('uses a repair integration domain but rejects arbitrary entity image URLs', () => {

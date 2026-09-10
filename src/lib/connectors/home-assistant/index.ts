@@ -448,6 +448,13 @@ export class HomeAssistantConnector implements IConnector {
     return this.client!.fetchImage(path);
   }
 
+  async fetchNotificationReleaseNotes(entityId: string) {
+    if (!entityId.startsWith('update.')) {
+      throw new Error('Home Assistant update entity is invalid');
+    }
+    return this.client!.fetchUpdateReleaseNotes(entityId);
+  }
+
   async fetchSourceLists(): Promise<SourceList[]> {
     const now = new Date().toISOString();
     const lists: SourceList[] = [];

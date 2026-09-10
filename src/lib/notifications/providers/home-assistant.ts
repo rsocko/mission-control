@@ -6,6 +6,7 @@ import {
   getHomeAssistantBrandImagePath,
   getHomeAssistantMdiIcon,
 } from '@/lib/connectors/home-assistant/notification-icons';
+import { normalizeNotificationUrl } from './registry';
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -132,8 +133,9 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
 
       const installedVersion = text(metadata.installedVersion);
       const latestVersion = text(metadata.latestVersion);
-      const progress = typeof metadata.progress === 'number'
-        ? Math.max(0, Math.min(100, metadata.progress))
+      const releaseUrl = normalizeNotificationUrl(metadata.releaseUrl);
+      const progress = typeof metadata.updatePercentage === 'number'
+        ? Math.max(0, Math.min(100, metadata.updatePercentage))
         : undefined;
       const subjectIconUrl = getHomeAssistantBrandImagePath(metadata)
         ? `/api/notifications/${encodeURIComponent(notification.id)}/subject-icon`
@@ -171,6 +173,12 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
                 label: `${progress}% installed`,
                 tone: 'info' as const,
               },
+            } : {}),
+            ...(releaseUrl ? {
+              links: [{
+                label: 'Read release announcement',
+                url: releaseUrl,
+              }],
             } : {}),
             footerText: notification.templateKey === 'ha_update_critical'
               ? 'Action Needed because this update matches a configured critical update pattern.'

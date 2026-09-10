@@ -4,6 +4,7 @@ import { matchPattern } from './entity-transformer';
 
 const UPDATE_SUPPORT_INSTALL = 1;
 const UPDATE_SUPPORT_BACKUP = 8;
+const UPDATE_SUPPORT_RELEASE_NOTES = 16;
 
 function text(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
@@ -46,7 +47,7 @@ export function buildUpdateNotifications(input: {
 
     const latestVersion = text(attributes.latest_version) ?? 'available';
     const installedVersion = text(attributes.installed_version) ?? 'unknown';
-    const title = text(attributes.friendly_name) ?? entity.entity_id;
+    const title = text(attributes.title) ?? text(attributes.friendly_name) ?? entity.entity_id;
     const supportedFeatures = finiteNumber(attributes.supported_features) ?? 0;
     const critical = input.criticalEntityPatterns.some(pattern => matchPattern(entity.entity_id, pattern));
     const progress = finiteNumber(attributes.update_percentage);
@@ -92,6 +93,7 @@ export function buildUpdateNotifications(input: {
         updatePercentage: progress !== null ? Math.min(100, Math.max(0, progress)) : null,
         supportsInstall,
         supportsBackup,
+        supportsReleaseNotes: (supportedFeatures & UPDATE_SUPPORT_RELEASE_NOTES) !== 0,
         canSkip: !bool(attributes.auto_update),
         releaseUrl: text(attributes.release_url),
         baseUrl: input.baseUrl,

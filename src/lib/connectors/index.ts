@@ -45,8 +45,16 @@ export {
 export interface AlertReconciliation {
   sourceId: string;
   resolved: boolean;
+  /** False when the source could not authoritatively verify this notification. */
+  verified?: boolean;
   reason?: string;       // e.g. "PR merged", "condition cleared", "email replied"
   resolvedAt?: string;   // ISO timestamp of upstream resolution
+}
+
+export interface NotificationSourceHealth {
+  sourceId: string;
+  status: 'ok' | 'disabled' | 'failed';
+  error?: string;
 }
 
 export interface TransferIdentityRefresh {
@@ -233,6 +241,9 @@ export interface IConnector {
    */
   getActiveAlertSourceIds?(since?: Date): Promise<string[] | null>;
 
+  /** Health from the most recent notification fetch, keyed by source-list source ID. */
+  getNotificationSourceHealth?(): NotificationSourceHealth[];
+
   /**
    * Per-ID reconciliation: given specific sourceIds that MC holds as active,
    * return which ones are resolved upstream.
@@ -241,6 +252,9 @@ export interface IConnector {
    * Only called for sourceIds NOT already resolved by getActiveAlertSourceIds().
    */
   reconcileAlerts?(activeSourceIds: string[]): Promise<AlertReconciliation[]>;
+
+  /** Override the default per-sync reconciliation cap; null means all active alerts. */
+  readonly reconcileAlertsBatchSize?: number | null;
 }
 
 let defaultFactoriesRegistered = false;

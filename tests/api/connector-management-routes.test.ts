@@ -136,6 +136,56 @@ describe('connector management API routes', () => {
     });
   });
 
+  it('rejects duplicate Home Assistant instance names case-insensitively', async () => {
+      mocks.getOverview.mockResolvedValue({
+        connectors: [{
+          id: 'ha-home',
+          type: 'home-assistant',
+          name: 'Lake House',
+          deletedAt: null,
+        }],
+        sourceLists: [],
+        openTaskCounts: [],
+        syncOutcomes: [],
+      });
+      const { POST } = await import('@/app/api/connectors/route');
+      const response = await POST(new Request('http://localhost/api/connectors', {
+        method: 'POST',
+        body: JSON.stringify({
+          type: 'home-assistant',
+          name: ' lake house ',
+          credentials: { accessToken: 'secret' },
+          settings: { baseUrl: 'https://ha.example.test' },
+        }),
+      }));
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        error: 'A Home Assistant connector with this name already exists',
+      });
+      expect(mocks.createConnector).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty Home Assistant instance name on update', async () => {
+      mocks.getConnector.mockResolvedValue({
+        id: 'ha-home',
+        type: 'home-assistant',
+        name: 'Lake House',
+        settings: { baseUrl: 'https://ha.example.test' },
+      });
+      const { PATCH } = await import('@/app/api/connectors/route');
+      const response = await PATCH(new Request('http://localhost/api/connectors', {
+        method: 'PATCH',
+        body: JSON.stringify({ id: 'ha-home', name: '   ' }),
+      }));
+
+      expect(response.status).toBe(400);
+      await expect(response.json()).resolves.toMatchObject({
+        error: 'A Home Assistant instance name is required',
+      });
+      expect(mocks.updateConnector).not.toHaveBeenCalled();
+  });
+
   it('patches grouping and visibility through one source-list operation', async () => {
     const { PATCH } = await import('@/app/api/source-lists/[id]/route');
     const response = await PATCH(new Request('http://localhost/api/source-lists/list-1', {

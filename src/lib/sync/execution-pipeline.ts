@@ -851,10 +851,31 @@ export class SyncExecutionPipeline {
 
       // ─── PHASE 5: Persist notifications ────────────────────────────────────
       throwIfSyncAborted(options?.signal);
-      const remoteNotifications = await remoteNotificationsPromise;
+      let remoteNotifications;
+      try {
+        remoteNotifications = await remoteNotificationsPromise;
+      } catch (error) {
+        const notificationSourceHealth = connector.getNotificationSourceHealth?.() ?? [];
+        if (notificationSourceHealth.length > 0) {
+          await executionPersistence.lists.updateHealth({
+            connectorId,
+            observedAt: new Date().toISOString(),
+            sources: notificationSourceHealth,
+          });
+        }
+        throw error;
+      }
       notificationsAdded = await this.upsertNotifications(connectorId, connector.type, remoteNotifications);
       notificationsAdded += domainDataResult?.notificationsAdded ?? 0;
       await connector.commitNotificationFetch?.();
+      const notificationSourceHealth = connector.getNotificationSourceHealth?.() ?? [];
+      if (notificationSourceHealth.length > 0) {
+        await executionPersistence.lists.updateHealth({
+          connectorId,
+          observedAt: new Date().toISOString(),
+          sources: notificationSourceHealth,
+        });
+      }
 
       // ─── PHASE 6: Reconcile stale notifications ─────────────────────
       const alertsReconciled = await this.reconcileStaleNotifications(connectorId, connector, since);
@@ -1413,26 +1434,36 @@ export class SyncExecutionPipeline {
 
     // Strategy 2: Per-ID reconciliation — checks underlying subject state
     // (e.g. PR merged, issue closed) even if the notification is still in
-    // the user's upstream inbox. Capped to avoid API rate-limit exhaustion.
+    // the user's upstream inbox. Remote per-item checks are capped to avoid API
+    // rate-limit exhaustion; connectors using an in-memory snapshot may opt out.
     if (connector.reconcileAlerts) {
-      const batch = remainingAfterStrategy1.slice(0, SyncExecutionPipeline.RECONCILE_BATCH_LIMIT);
+      const batch = connector.reconcileAlertsBatchSize === null
+        ? remainingAfterStrategy1
+        : remainingAfterStrategy1.slice(
+            0,
+            connector.reconcileAlertsBatchSize
+              ?? SyncExecutionPipeline.RECONCILE_BATCH_LIMIT,
+          );
       const sourceIds = batch.map(n => n.sourceId);
       try {
         const results = await connector.reconcileAlerts(sourceIds);
         const resultMap = new Map(results.map(r => [r.sourceId, r]));
-        const outcomes = batch.map((notification) => {
+        const outcomes = batch.flatMap((notification) => {
           const result = resultMap.get(notification.sourceId);
+          if (result?.verified === false) return [];
           if (result?.resolved) {
-            return {
+            return [{
               notificationId: notification.id,
               resolved: true,
               resolvedAt: result.resolvedAt || now,
               reason: result.reason || 'handled_upstream',
-            };
+            }];
           }
-          return { notificationId: notification.id, resolved: false };
+          return [{ notificationId: notification.id, resolved: false }];
         });
-        resolved += await notificationPersistence.applyReconciliation({ outcomes, now });
+        if (outcomes.length > 0) {
+          resolved += await notificationPersistence.applyReconciliation({ outcomes, now });
+        }
 
         return resolved;
       } catch (err) {

@@ -97,6 +97,11 @@ not exploring analytics or configuring an automation platform.
   Settings behavior.
 - Generic "Create task" on every resulting Mission Control notification.
 
+Mission Control preserves the existing entity-rule defaults for compatibility,
+but does not add a rule-authoring UI. Users should create, filter, and suppress
+new device-state policy in Home Assistant, where the source entities and
+automation context are authoritative.
+
 ### Non-goals
 
 - Reimplementing Home Assistant repair flows. Fixable repairs open Home
@@ -900,7 +905,7 @@ interaction tests, and one end-to-end two-instance flow.
 |---|---|
 | [mission-control#1756](https://github.com/rsocko/mission-control/issues/1756) | Canonical epic for this complete specification and phased delivery |
 | [mission-control#1706](https://github.com/rsocko/mission-control/issues/1706) | First implementation slice: Phase 1 Updates ingestion, presentation, and actions |
-| [mission-control#627](https://github.com/rsocko/mission-control/issues/627) | Reopened for the missing end-to-end device-state-alert-to-Notifications setup and presentation slice |
+| [mission-control#627](https://github.com/rsocko/mission-control/issues/627) | Closed as fulfilled by the supported setup and Notifications path; rule authoring remains in Home Assistant |
 | [rsocko/ideation#1421](https://github.com/rsocko/ideation/issues/1421) | Closed as a duplicate of #1756 with the canonical link |
 | [mission-control#133](https://github.com/rsocko/mission-control/issues/133) | Correctly closed: base Home Assistant entity-alert ingestion shipped; do not reopen |
 | [mission-control#1297](https://github.com/rsocko/mission-control/issues/1297) | Correctly closed: homelab alert routing is separate from this pull-based expansion; do not reopen |

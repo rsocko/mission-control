@@ -341,6 +341,9 @@ export interface SourceList {
   type: SourceListType;
   taskCount: number;
   lastSyncedAt: string;
+  healthStatus?: 'ok' | 'disabled' | 'failed';
+  healthError?: string;
+  lastSuccessfulAt?: string;
   /** Non-public connector evidence consumed after legacy source identity resolution. */
   externalIdentity?: ExternalIdentityEvidence;
   /** Identifies special/smart lists (e.g. 'flaggedEmails', 'defaultList') from Graph API */

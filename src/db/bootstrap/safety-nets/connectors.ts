@@ -55,6 +55,15 @@ export function applyConnectorSourceListColumnSafetyNets(_sqlite: Database.Datab
   if (sourceListColumns.length > 0 && !sourceListColumns.some((column) => column.name === 'icon_color')) {
     _sqlite.exec('ALTER TABLE source_lists ADD COLUMN icon_color TEXT');
   }
+  if (sourceListColumns.length > 0 && !sourceListColumns.some((column) => column.name === 'health_status')) {
+    _sqlite.exec('ALTER TABLE source_lists ADD COLUMN health_status TEXT');
+  }
+  if (sourceListColumns.length > 0 && !sourceListColumns.some((column) => column.name === 'health_error')) {
+    _sqlite.exec('ALTER TABLE source_lists ADD COLUMN health_error TEXT');
+  }
+  if (sourceListColumns.length > 0 && !sourceListColumns.some((column) => column.name === 'last_successful_at')) {
+    _sqlite.exec('ALTER TABLE source_lists ADD COLUMN last_successful_at TEXT');
+  }
 }
 
 export function applyConnectorSyncLogColumnSafetyNets(_sqlite: Database.Database): void {

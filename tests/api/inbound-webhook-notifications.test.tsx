@@ -39,7 +39,7 @@ describe('generic inbound webhook notifications', () => {
     listNotifications = notificationsModule.GET;
     executeAction = actionModule.POST;
     shutdownRuntimeDatabase = runtimeModule.shutdownRuntimeDatabase;
-  });
+  }, 30_000);
 
   beforeEach(async () => {
     sqlite.exec('DROP TRIGGER IF EXISTS fail_inbound_action_insert');

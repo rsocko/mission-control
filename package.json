@@ -131,7 +131,12 @@
     "zustand": "^5.0.15"
   },
   "overrides": {
-    "@github/copilot": "1.0.76-0"
+    "@github/copilot": "1.0.76-0",
+    "@hono/node-server": "1.19.15",
+    "baseline-browser-mapping": "2.11.20",
+    "browserslist": "4.28.7",
+    "hono": "4.13.5",
+    "qs": "6.16.0"
   },
   "devDependencies": {
     "@github/copilot-sdk": "1.0.11",

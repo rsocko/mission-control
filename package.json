@@ -167,7 +167,7 @@
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
     "@vercel/nft": "^1.10.2",
-    "@vitejs/plugin-react": "^6.0.3",
+    "@vitejs/plugin-react": "^6.1.1",
     "drizzle-kit": "^0.31.10",
     "esbuild": "^0.28.1",
     "eslint": "^9",

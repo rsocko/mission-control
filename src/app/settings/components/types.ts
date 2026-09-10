@@ -44,6 +44,9 @@ export interface SourceList {
   type: string;
   taskCount: number;
   lastSyncedAt: string | null;
+  healthStatus?: 'ok' | 'disabled' | 'failed' | null;
+  healthError?: string | null;
+  lastSuccessfulAt?: string | null;
   wellKnownListName?: string | null;
   groupId: string | null;
   sortOrder?: number;

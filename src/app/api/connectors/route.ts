@@ -381,6 +381,9 @@ export async function PATCH(request: Request) {
       }
     }
     if (existing?.type === 'home-assistant' && updates.name !== undefined) {
+      if (typeof updates.name !== 'string' || !updates.name.trim()) {
+        return ApiErrors.badRequest('A Home Assistant instance name is required');
+      }
       const duplicate = configsNameMatch(
         (await persistence.getOverview(false)).connectors,
         updates.name,

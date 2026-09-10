@@ -350,6 +350,9 @@ const SOURCE_LIST_COLUMNS = `
   type,
   task_count AS taskCount,
   last_synced_at AS lastSyncedAt,
+  health_status AS healthStatus,
+  health_error AS healthError,
+  last_successful_at AS lastSuccessfulAt,
   well_known_list_name AS wellKnownListName,
   group_id AS groupId,
   sort_order AS sortOrder,
@@ -480,6 +483,31 @@ export function createSqliteConnectorExecutionRepositories(
                 DELETE FROM source_lists WHERE id = ? AND connector_instance_id = ?
               `).run(stale.id, command.connectorId);
             }
+          }
+        });
+      },
+
+      async updateHealth(input) {
+        immediate(database, () => {
+          const update = database.prepare(`
+            UPDATE source_lists
+            SET health_status = @status,
+                health_error = @error,
+                last_successful_at = CASE
+                  WHEN @status = 'ok' THEN @observedAt
+                  ELSE last_successful_at
+                END
+            WHERE connector_instance_id = @connectorId
+              AND source_id = @sourceId
+          `);
+          for (const source of input.sources) {
+            update.run({
+              connectorId: input.connectorId,
+              observedAt: input.observedAt,
+              sourceId: source.sourceId,
+              status: source.status,
+              error: source.error?.replace(/\s+/g, ' ').trim().slice(0, 300) || null,
+            });
           }
         });
       },

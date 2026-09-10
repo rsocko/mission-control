@@ -695,6 +695,7 @@ function DocumentIntelligenceConnectorEditPanel(props: ConnectorEditPanelProps) 
 
 function HomeAssistantConnectorEditPanel({
   connector,
+  sourceLists,
   onUpdate,
   onDelete,
   confirmDelete,
@@ -746,7 +747,13 @@ function HomeAssistantConnectorEditPanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState('');
   const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<{ success: boolean; details?: string; error?: string } | null>(null);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    details?: string;
+    error?: string;
+    sources?: Record<string, { available?: boolean; count?: number; error?: string }>;
+  } | null>(null);
+  const [testedConnectionFingerprint, setTestedConnectionFingerprint] = useState<string | null>(null);
 
   function markDirty() {
     setDirty(true);
@@ -784,8 +791,29 @@ function HomeAssistantConnectorEditPanel({
       immediateCriticalPersistentNotifications: immediateCriticalPersistent,
     },
   };
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+  const initialSourceEnabled = {
+    entityAlerts: source('entityAlerts').enabled !== false,
+    updates: source('updates').enabled !== false,
+    persistentNotifications: source('persistentNotifications').enabled !== false,
+    repairs: source('repairs').enabled !== false,
+  };
+  const sourcesChanged = Object.entries(sources).some(
+    ([key, enabled]) => initialSourceEnabled[key as keyof typeof initialSourceEnabled] !== enabled,
+  );
+  const connectionChanged = normalizedBaseUrl !== (
+    typeof initial.baseUrl === 'string' ? initial.baseUrl.replace(/\/+$/, '') : ''
+  ) || Boolean(accessToken.trim()) || sourcesChanged;
+  const connectionFingerprint = JSON.stringify({
+    baseUrl: normalizedBaseUrl,
+    accessToken: accessToken.trim() || 'stored',
+    sources,
+  });
+  const connectionTestCurrent = !connectionChanged
+    || (testResult?.success === true && testedConnectionFingerprint === connectionFingerprint);
 
   async function save() {
+    if (!name.trim() || !connectionTestCurrent) return;
     setSaving(true);
     setSaveError('');
     try {
@@ -823,10 +851,30 @@ function HomeAssistantConnectorEditPanel({
         }),
       });
       const data = await response.json();
-      setTestResult(data);
+      const sourceAvailable = {
+        entityAlerts: data.sources?.states?.available === true,
+        updates: data.sources?.states?.available === true,
+        persistentNotifications: data.sources?.persistentNotifications?.available === true,
+        repairs: data.sources?.repairs?.available === true,
+      };
+      const enabledReadable = Object.entries(sources).some(
+        ([sourceKey, enabled]) => (
+          enabled && sourceAvailable[sourceKey as keyof typeof sourceAvailable]
+        ),
+      );
+      const successful = response.ok && data.success && enabledReadable;
+      setTestResult(successful
+        ? data
+        : {
+            ...data,
+            success: false,
+            error: data.error || 'None of the enabled notification sources are readable. Disable unavailable sources or update Home Assistant permissions.',
+          });
+      setTestedConnectionFingerprint(successful ? connectionFingerprint : null);
       await onTested?.();
     } catch {
       setTestResult({ success: false, error: 'Connection test request failed' });
+      setTestedConnectionFingerprint(null);
     } finally {
       setTesting(false);
     }
@@ -838,11 +886,13 @@ function HomeAssistantConnectorEditPanel({
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Instance name
           <input value={name} onChange={event => { setName(event.target.value); markDirty(); }}
+            aria-invalid={!name.trim()}
             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          {!name.trim() && <span className="mt-1 block text-xs text-red-400">Enter an instance name.</span>}
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Home Assistant URL
-          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); markDirty(); }}
+          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); markDirty(); setTestResult(null); setTestedConnectionFingerprint(null); }}
             className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
@@ -862,7 +912,7 @@ function HomeAssistantConnectorEditPanel({
           Replace access token
           <span className="relative mt-1 block">
             <input type={showToken ? 'text' : 'password'} value={accessToken}
-              onChange={event => { setAccessToken(event.target.value); markDirty(); }}
+              onChange={event => { setAccessToken(event.target.value); markDirty(); setTestResult(null); setTestedConnectionFingerprint(null); }}
               placeholder={connector.hasCredentials ? 'Stored — leave blank to keep' : 'Long-lived access token'}
               autoComplete="new-password"
               className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)]" />
@@ -887,10 +937,61 @@ function HomeAssistantConnectorEditPanel({
               <input type="checkbox" checked={sources[key]} onChange={event => {
                 setSources(current => ({ ...current, [key]: event.target.checked }));
                 markDirty();
+                setTestResult(null);
+                setTestedConnectionFingerprint(null);
               }} className="h-4 w-4 accent-blue-500" />
               {label}
             </label>
           ))}
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {([
+            ['entityAlerts', 'entity-alerts', 'Device alerts'],
+            ['updates', 'updates', 'Updates'],
+            ['persistentNotifications', 'persistent-notifications', 'Persistent notifications'],
+            ['repairs', 'repairs', 'Repairs'],
+          ] as const).map(([settingKey, sourceId, label]) => {
+              const sourceList = sourceLists.find(item => (
+                item.connectorInstanceId === connector.id && item.sourceId === sourceId
+              ));
+              const status = !sources[settingKey]
+                ? 'disabled'
+                : sourceList?.healthStatus ?? 'pending';
+              const statusLabel = status === 'ok'
+                ? 'Healthy'
+                : status === 'failed'
+                  ? 'Degraded'
+                  : status === 'pending'
+                    ? 'Pending first sync'
+                    : 'Disabled';
+              return (
+                <div key={sourceId} className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-xs font-medium text-[var(--text-secondary)]" title={label}>
+                      {label}
+                    </span>
+                    <span className={`shrink-0 text-xs font-medium ${
+                      status === 'ok'
+                        ? 'text-emerald-400'
+                        : status === 'failed'
+                          ? 'text-red-400'
+                          : 'text-[var(--text-muted)]'
+                    }`}>
+                      {statusLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-[var(--text-muted)]" title={sourceList?.healthError ?? undefined}>
+                    {status === 'disabled'
+                      ? 'Disabled in this connector.'
+                      : status === 'failed'
+                      ? sourceList?.healthError || 'The latest source check failed.'
+                      : sourceList?.lastSuccessfulAt
+                        ? `Last successful sync ${new Date(sourceList.lastSuccessfulAt).toLocaleString()}`
+                        : 'No successful source sync recorded yet.'}
+                  </p>
+                </div>
+              );
+            })}
         </div>
       </fieldset>
 
@@ -976,12 +1077,17 @@ function HomeAssistantConnectorEditPanel({
             className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50">
             {testing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />} Test connection
           </button>
-          <button onClick={save} disabled={!dirty || saving}
+          <button onClick={save} disabled={!dirty || saving || !name.trim() || !connectionTestCurrent}
             className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
           </button>
         </div>
       </div>
+      {connectionChanged && !connectionTestCurrent && !testing && (
+        <p className="mt-2 text-end text-xs text-[var(--text-muted)]" role="status">
+          Test the changed connection or source selection successfully before saving.
+        </p>
+      )}
     </div>
   );
 }

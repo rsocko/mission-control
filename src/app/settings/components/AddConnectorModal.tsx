@@ -193,6 +193,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
     message?: string;
     sources?: Record<string, { available?: boolean; count?: number; error?: string }>;
   }>({ status: 'idle' });
+  const [testedFingerprint, setTestedFingerprint] = useState<string | null>(null);
 
   const normalizedUrl = baseUrl.trim().replace(/\/+$/, '');
   let urlError = '';
@@ -202,7 +203,15 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
   } catch {
     urlError = 'Enter a valid Home Assistant URL.';
   }
-  const canSubmit = Boolean(name.trim() && accessToken.trim() && !urlError && Object.values(sources).some(Boolean));
+  const canTest = Boolean(name.trim() && accessToken.trim() && !urlError && Object.values(sources).some(Boolean));
+  const connectionFingerprint = JSON.stringify({
+    baseUrl: normalizedUrl,
+    accessToken,
+    sources,
+  });
+  const canSubmit = canTest
+    && testState.status === 'success'
+    && testedFingerprint === connectionFingerprint;
 
   function settingsPayload() {
     return {
@@ -230,7 +239,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
   }
 
   async function testConnection() {
-    if (!canSubmit) return;
+    if (!canTest) return;
     setTestState({ status: 'testing' });
     try {
       const response = await fetch('/api/connectors/test-pre-save', {
@@ -243,11 +252,29 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
         }),
       });
       const data = await response.json();
-      setTestState(response.ok && data.success
-        ? { status: 'success', message: data.details, sources: data.sources }
-        : { status: 'error', message: data.error || 'Connection test failed' });
+      const sourceAvailable = {
+        entityAlerts: data.sources?.states?.available === true,
+        updates: data.sources?.states?.available === true,
+        persistentNotifications: data.sources?.persistentNotifications?.available === true,
+        repairs: data.sources?.repairs?.available === true,
+      };
+      const enabledReadable = Object.entries(sources).some(
+        ([source, enabled]) => enabled && sourceAvailable[source as keyof typeof sourceAvailable],
+      );
+      if (response.ok && data.success && enabledReadable) {
+        setTestState({ status: 'success', message: data.details, sources: data.sources });
+        setTestedFingerprint(connectionFingerprint);
+      } else {
+        setTestState({
+          status: 'error',
+          message: data.error || 'None of the enabled notification sources are readable. Disable unavailable sources or update Home Assistant permissions.',
+          sources: data.sources,
+        });
+        setTestedFingerprint(null);
+      }
     } catch {
       setTestState({ status: 'error', message: 'Connection test request failed' });
+      setTestedFingerprint(null);
     }
   }
 
@@ -313,7 +340,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
         </label>
         <label className="block text-sm font-medium text-[var(--text-secondary)]">
           Home Assistant URL
-          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); setTestState({ status: 'idle' }); }}
+          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); setTestState({ status: 'idle' }); setTestedFingerprint(null); }}
             aria-invalid={Boolean(urlError)}
             className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
           {urlError && <span className="mt-1 block text-xs text-red-400">{urlError}</span>}
@@ -324,7 +351,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
         Long-lived access token
         <span className="relative mt-1 block">
           <input type={showToken ? 'text' : 'password'} value={accessToken}
-            onChange={event => { setAccessToken(event.target.value); setTestState({ status: 'idle' }); }}
+            onChange={event => { setAccessToken(event.target.value); setTestState({ status: 'idle' }); setTestedFingerprint(null); }}
             autoComplete="new-password" className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)] focus:outline-none" />
           <button type="button" onClick={() => setShowToken(value => !value)}
             className="absolute inset-y-0 right-0 px-3 text-[var(--text-muted)]" aria-label={showToken ? 'Hide token' : 'Show token'}>
@@ -339,7 +366,11 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
           {HA_SOURCE_OPTIONS.map(option => (
             <label key={option.key} className="flex gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-3">
               <input type="checkbox" checked={sources[option.key]}
-                onChange={event => setSources(current => ({ ...current, [option.key]: event.target.checked }))}
+                onChange={event => {
+                  setSources(current => ({ ...current, [option.key]: event.target.checked }));
+                  setTestState({ status: 'idle' });
+                  setTestedFingerprint(null);
+                }}
                 className="mt-0.5 h-4 w-4 accent-blue-500" />
               <span>
                 <span className="block text-sm font-medium text-[var(--text-primary)]">{option.label}</span>
@@ -405,7 +436,7 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
       <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
         <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-secondary)]">Cancel</button>
         <div className="flex gap-2">
-          <button onClick={testConnection} disabled={!canSubmit || testState.status === 'testing'}
+          <button onClick={testConnection} disabled={!canTest || testState.status === 'testing'}
             className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] px-4 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50 sm:flex-none">
             {testState.status === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />} Test
           </button>
@@ -415,6 +446,11 @@ function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; 
           </button>
         </div>
       </div>
+      {canTest && !canSubmit && testState.status !== 'testing' && (
+        <p className="mt-2 text-end text-xs text-[var(--text-muted)]" role="status">
+          Test this configuration successfully before saving.
+        </p>
+      )}
     </div>
   );
 }

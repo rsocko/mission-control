@@ -8,7 +8,7 @@
  * - Preview links
  */
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { NotificationCard } from '@/components/notifications/NotificationCard';
 import {
   registerDefaultNotificationProviders,
@@ -130,6 +130,54 @@ describe('NotificationCard — DI Rich Cards', () => {
 
       expect(screen.getByText('Production n8n')).toBeDefined();
       expect(screen.queryByText('Custom REST')).toBeNull();
+    });
+
+    it('layers a contextual Home Assistant icon over the connector source badge', () => {
+      const notification = makeNotification({
+        id: 'ha-update-1',
+        connectorType: 'home-assistant',
+        category: 'system',
+        metadata: {
+          schemaVersion: 2,
+          haSource: 'updates',
+          entityPicture: '/api/brands/integration/bambu_lab/icon.png',
+        },
+      });
+
+      const { container } = render(<NotificationCard notification={notification} />);
+      const imageSources = Array.from(container.querySelectorAll('img'))
+        .map(image => image.getAttribute('src'));
+
+      expect(imageSources).toContain('/api/notifications/ha-update-1/subject-icon');
+      expect(imageSources).toContain('/icons/connectors/home-assistant.svg');
+    });
+
+    it('falls back to the connector icon when contextual artwork cannot load', () => {
+      const notification = makeNotification({
+        id: 'ha-update-1',
+        connectorType: 'home-assistant',
+        category: 'system',
+        metadata: {
+          schemaVersion: 2,
+          haSource: 'updates',
+          entityPicture: '/api/brands/integration/bambu_lab/icon.png',
+        },
+      });
+
+      const { container } = render(<NotificationCard notification={notification} />);
+      const contextualIcon = container.querySelector(
+        'img[src="/api/notifications/ha-update-1/subject-icon"]',
+      );
+      if (!contextualIcon) throw new Error('Expected the contextual Home Assistant icon');
+
+      fireEvent.error(contextualIcon);
+
+      expect(container.querySelector(
+        'img[src="/api/notifications/ha-update-1/subject-icon"]',
+      )).toBeNull();
+      expect(container.querySelectorAll(
+        'img[src="/icons/connectors/home-assistant.svg"]',
+      )).toHaveLength(1);
     });
 
     it('renders configured presentation metadata chips', () => {

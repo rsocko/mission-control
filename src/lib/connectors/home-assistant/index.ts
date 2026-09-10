@@ -28,6 +28,7 @@ import {
   buildRepairNotifications,
   buildUpdateNotifications,
 } from './source-transformers';
+import { getHomeAssistantBrandImagePath } from './notification-icons';
 
 export type { AlertRule } from './entity-transformer';
 export type { HomeAssistantState } from './ha-client';
@@ -358,6 +359,13 @@ export class HomeAssistantConnector implements IConnector {
       ? notifications.map(notification => notification.id)
       : null;
     return notifications;
+  }
+
+  async fetchNotificationImage(path: string) {
+    if (getHomeAssistantBrandImagePath({ entityPicture: path }) !== path) {
+      throw new Error('Home Assistant notification image path is invalid');
+    }
+    return this.client!.fetchImage(path);
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {

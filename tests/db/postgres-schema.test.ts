@@ -255,7 +255,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(5);
+    expect(migrations).toHaveLength(6);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -338,6 +338,17 @@ describe('PostgreSQL schema', () => {
       createRunIndex,
     ]].sort((left, right) => left - right));
     expect(semanticKeyVersionSql.match(/--> statement-breakpoint/g)).toHaveLength(5);
+
+    const sourceHealthSql = readFileSync(resolve(migrationDirectory, migrations[5]), 'utf8');
+    expect(sourceHealthSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "health_status" text',
+    );
+    expect(sourceHealthSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "health_error" text',
+    );
+    expect(sourceHealthSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "last_successful_at" text',
+    );
   });
 
   it('ships the additive project-hierarchy integrity parity migration', () => {
@@ -346,7 +357,7 @@ describe('PostgreSQL schema', () => {
       resolve(migrationDirectory, 'meta/_journal.json'),
       'utf8',
     )) as { entries: Array<{ idx: number; tag: string }> };
-    expect(journal.entries.at(-1)).toMatchObject({
+    expect(journal.entries.find(entry => entry.tag === '0004_project_hierarchy_integrity')).toMatchObject({
       idx: 4,
       tag: '0004_project_hierarchy_integrity',
     });

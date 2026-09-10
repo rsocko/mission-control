@@ -1466,6 +1466,9 @@ export function createPostgresConnectorExecutionRepositories(
               type,
               task_count AS "taskCount",
               last_synced_at AS "lastSyncedAt",
+              health_status AS "healthStatus",
+              health_error AS "healthError",
+              last_successful_at AS "lastSuccessfulAt",
               well_known_list_name AS "wellKnownListName",
               group_id AS "groupId",
               sort_order AS "sortOrder",
@@ -1546,6 +1549,33 @@ export function createPostgresConnectorExecutionRepositories(
                 [stale.id, command.connectorId],
               );
             }
+          }
+        });
+      },
+
+      async updateHealth(input) {
+        await transaction(pool, async (client) => {
+          for (const source of input.sources) {
+            await client.query(
+              `
+                UPDATE source_lists
+                SET health_status = $1,
+                    health_error = $2,
+                    last_successful_at = CASE
+                      WHEN $1 = 'ok' THEN $3
+                      ELSE last_successful_at
+                    END
+                WHERE connector_instance_id = $4
+                  AND source_id = $5
+              `,
+              [
+                source.status,
+                source.error?.replace(/\s+/g, ' ').trim().slice(0, 300) || null,
+                input.observedAt,
+                input.connectorId,
+                source.sourceId,
+              ],
+            );
           }
         });
       },

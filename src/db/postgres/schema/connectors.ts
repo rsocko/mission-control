@@ -53,6 +53,9 @@ export const sourceLists = pgTable('source_lists', {
   type: text('type').notNull(), // list | project | repo | folder | board
   taskCount: integer('task_count').notNull().default(0),
   lastSyncedAt: text('last_synced_at'),
+  healthStatus: text('health_status').$type<'ok' | 'disabled' | 'failed'>(),
+  healthError: text('health_error'),
+  lastSuccessfulAt: text('last_successful_at'),
   wellKnownListName: text('well_known_list_name'), // flaggedEmails, defaultList, etc.
   groupId: text('group_id').references(() => listGroups.id, { onDelete: 'set null' }),
   sortOrder: integer('sort_order').notNull().default(0),

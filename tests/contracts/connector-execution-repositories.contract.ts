@@ -112,12 +112,36 @@ export function describeConnectorExecutionRepositoriesContract(
         lists: [{ sourceId: 'remote-list', parentFolderGroupId: 'folder-1' }],
         now: NOW,
       })).resolves.toBe(1);
+      await harness.repositories.lists.updateHealth({
+        connectorId: 'portable-connector',
+        observedAt: NOW,
+        sources: [{ sourceId: 'remote-list', status: 'ok' }],
+      });
 
       await expect(harness.repositories.lists.list('portable-connector')).resolves.toEqual([
         expect.objectContaining({
           id: 'portable-list',
           sourceId: 'remote-list',
           groupId: expect.any(String),
+          healthStatus: 'ok',
+          healthError: null,
+          lastSuccessfulAt: NOW,
+        }),
+      ]);
+      await harness.repositories.lists.updateHealth({
+        connectorId: 'portable-connector',
+        observedAt: '2026-09-05T00:00:00.000Z',
+        sources: [{
+          sourceId: 'remote-list',
+          status: 'failed',
+          error: '  upstream   unavailable  ',
+        }],
+      });
+      await expect(harness.repositories.lists.list('portable-connector')).resolves.toEqual([
+        expect.objectContaining({
+          healthStatus: 'failed',
+          healthError: 'upstream unavailable',
+          lastSuccessfulAt: NOW,
         }),
       ]);
       await expect(harness.repositories.lists.applyDiscovery({

@@ -379,7 +379,7 @@ describe('HomeAssistantConnector', () => {
     syncedLists: [],
   };
 
-  it('keeps successful source items but disables reconciliation after a partial failure', async () => {
+  it('reconciles successful sources without clearing a failed sibling source', async () => {
     const connector = new HomeAssistantConnector();
     await connector.initialize(config);
     Object.assign(connector, {
@@ -410,6 +410,97 @@ describe('HomeAssistantConnector', () => {
       'persistent:notice',
     ]);
     await expect(connector.getActiveAlertSourceIds()).resolves.toBeNull();
+    await expect(connector.reconcileAlerts([
+      'ha-lake:update:update.router:1.1',
+      'ha-lake:persistent:old-notice',
+      'ha-lake:repair:mqtt:offline',
+    ])).resolves.toEqual([
+      {
+        sourceId: 'ha-lake:update:update.router:1.1',
+        resolved: false,
+        verified: true,
+      },
+      {
+        sourceId: 'ha-lake:persistent:old-notice',
+        resolved: true,
+        verified: true,
+        reason: 'not_in_source',
+      },
+      {
+        sourceId: 'ha-lake:repair:mqtt:offline',
+        resolved: false,
+        verified: false,
+      },
+    ]);
+    expect(connector.getNotificationSourceHealth()).toEqual([
+      { sourceId: 'entity-alerts', status: 'disabled' },
+      { sourceId: 'updates', status: 'ok' },
+      { sourceId: 'persistent-notifications', status: 'ok' },
+      { sourceId: 'repairs', status: 'failed', error: 'Repairs unavailable' },
+    ]);
+  });
+
+  it('preserves an existing update while Home Assistant reports it unavailable', async () => {
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchStates: async () => [{
+          entity_id: 'update.router',
+          state: 'unavailable',
+          attributes: {
+            latest_version: '1.1',
+          },
+        }],
+        fetchWebSocketSources: async () => ({
+          persistentNotifications: [],
+          repairs: [],
+          errors: {},
+        }),
+      },
+    });
+
+    await expect(connector.fetchNotifications()).resolves.toEqual([]);
+    await expect(connector.reconcileAlerts([
+      'ha-lake:update:update.router:1.1',
+    ])).resolves.toEqual([{
+      sourceId: 'ha-lake:update:update.router:1.1',
+      resolved: false,
+      verified: false,
+    }]);
+  });
+
+  it('resolves notifications after their Home Assistant source is disabled', async () => {
+    const connector = new HomeAssistantConnector();
+    await connector.initialize({
+      ...config,
+      settings: {
+        ...config.settings,
+        sources: {
+          entityAlerts: { enabled: false },
+          updates: { enabled: false, criticalEntityPatterns: [] },
+          persistentNotifications: {
+            enabled: false,
+            criticalNotificationPatterns: [],
+          },
+          repairs: { enabled: false },
+        },
+      },
+    });
+
+    await expect(connector.fetchNotifications()).resolves.toEqual([]);
+    expect(connector.reconcileAlertsBatchSize).toBeNull();
+    await expect(connector.reconcileAlerts([
+      'ha-lake:update:update.router:1.1',
+      'ha-lake:persistent:notice',
+      'ha-lake:repair:mqtt:offline',
+      'ha-lake:rule:door-open:binary_sensor.garage',
+    ])).resolves.toEqual([
+      expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
+      expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
+      expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
+      expect.objectContaining({ resolved: true, reason: 'source_disabled' }),
+    ]);
   });
 
   it('uses only stored notification metadata for an update action target', async () => {

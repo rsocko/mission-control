@@ -1,4 +1,9 @@
-import type { ConnectorFactory, IConnector } from '../index';
+import type {
+  AlertReconciliation,
+  ConnectorFactory,
+  IConnector,
+  NotificationSourceHealth,
+} from '../index';
 import type {
   InboundNotification,
   ConnectorCapabilities,
@@ -46,6 +51,19 @@ export type HomeAssistantNotificationAction =
   | 'skip_update'
   | 'dismiss_persistent_notification'
   | 'ignore_repair';
+
+type HomeAssistantSource =
+  | 'entityAlerts'
+  | 'updates'
+  | 'persistentNotifications'
+  | 'repairs';
+
+type SourceReconciliationState = {
+  status: 'ok' | 'disabled' | 'failed';
+  activeIds: Set<string>;
+  uncertainEntityIds?: Set<string>;
+  error?: string;
+};
 
 export class HomeAssistantActionError extends Error {
   constructor(
@@ -161,6 +179,7 @@ export class HomeAssistantConnector implements IConnector {
   readonly type = 'home-assistant';
   readonly displayName = 'Home Assistant';
   readonly icon = '🏠';
+  readonly reconcileAlertsBatchSize = null;
   readonly capabilities: ConnectorCapabilities = {
     read: true,
     write: false,
@@ -178,7 +197,7 @@ export class HomeAssistantConnector implements IConnector {
   private settings: HomeAssistantSettings = DEFAULT_HOME_ASSISTANT_SETTINGS;
   private accessToken = '';
   private client: HAClient | null = null;
-  private lastActiveNotificationIds: string[] | null = null;
+  private lastSourceReconciliation: Record<HomeAssistantSource, SourceReconciliationState> | null = null;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -225,7 +244,7 @@ export class HomeAssistantConnector implements IConnector {
     this.config = null;
     this.client = null;
     this.accessToken = '';
-    this.lastActiveNotificationIds = null;
+    this.lastSourceReconciliation = null;
   }
 
   async *fetchTasks(): AsyncGenerator<TaskItem[], void, unknown> {
@@ -237,12 +256,32 @@ export class HomeAssistantConnector implements IConnector {
     const notifications: InboundNotification[] = [];
     let failedSourceCount = 0;
     const failures: Error[] = [];
+    const reconciliation: Record<HomeAssistantSource, SourceReconciliationState> = {
+      entityAlerts: {
+        status: this.settings.sources.entityAlerts.enabled ? 'failed' : 'disabled',
+        activeIds: new Set(),
+      },
+      updates: {
+        status: this.settings.sources.updates.enabled ? 'failed' : 'disabled',
+        activeIds: new Set(),
+        uncertainEntityIds: new Set(),
+      },
+      persistentNotifications: {
+        status: this.settings.sources.persistentNotifications.enabled ? 'failed' : 'disabled',
+        activeIds: new Set(),
+      },
+      repairs: {
+        status: this.settings.sources.repairs.enabled ? 'failed' : 'disabled',
+        activeIds: new Set(),
+      },
+    };
     const needsStates = this.settings.sources.entityAlerts.enabled || this.settings.sources.updates.enabled;
 
     if (needsStates) {
       try {
         const states = await this.client!.fetchStates();
         if (this.settings.sources.entityAlerts.enabled) {
+          reconciliation.entityAlerts.status = 'ok';
           const matching = states.filter((state) => matchesPatterns(state.entity_id, this.settings.entityPatterns));
           for (const rule of this.settings.alertRules) {
             const entities = matching.filter((state) => matchPattern(state.entity_id, rule.entityPattern));
@@ -264,10 +303,11 @@ export class HomeAssistantConnector implements IConnector {
                     : 'default',
                 };
                 notifications.push(notification);
+                reconciliation.entityAlerts.activeIds.add(notification.id);
               }
             }
           }
-          notifications.push(...checkPackages(matching, undefined, this.type, this.id).map(notification => ({
+          const packageNotifications = checkPackages(matching, undefined, this.type, this.id).map(notification => ({
             ...notification,
             templateKey: 'home_assistant_entity_alert',
             actionUrl: `${this.settings.baseUrl}/config/entities?domain=${encodeURIComponent(notification.sourceId.split('.', 1)[0])}`,
@@ -279,10 +319,21 @@ export class HomeAssistantConnector implements IConnector {
               baseUrl: this.settings.baseUrl,
               pushDelivery: 'default',
             },
-          })));
+          }));
+          notifications.push(...packageNotifications);
+          packageNotifications.forEach(notification => {
+            reconciliation.entityAlerts.activeIds.add(notification.id);
+          });
         }
         if (this.settings.sources.updates.enabled) {
-          notifications.push(...buildUpdateNotifications({
+          reconciliation.updates.status = 'ok';
+          states
+            .filter(state => (
+              state.entity_id.startsWith('update.')
+              && (state.state === 'unknown' || state.state === 'unavailable')
+            ))
+            .forEach(state => reconciliation.updates.uncertainEntityIds?.add(state.entity_id));
+          const updateNotifications = buildUpdateNotifications({
             states,
             connectorType: this.type,
             connectorInstanceId: this.id,
@@ -292,10 +343,21 @@ export class HomeAssistantConnector implements IConnector {
             criticalEntityPatterns: this.settings.sources.updates.criticalEntityPatterns,
             updatePush: this.settings.outboundDelivery.updatePush,
             immediateCriticalUpdates: this.settings.outboundDelivery.immediateCriticalUpdates,
-          }));
+          });
+          notifications.push(...updateNotifications);
+          updateNotifications.forEach(notification => {
+            reconciliation.updates.activeIds.add(notification.id);
+          });
         }
       } catch (error) {
-        failures.push(error instanceof Error ? error : new Error(String(error)));
+        const failure = error instanceof Error ? error : new Error(String(error));
+        failures.push(failure);
+        if (this.settings.sources.entityAlerts.enabled) {
+          reconciliation.entityAlerts.error = failure.message;
+        }
+        if (this.settings.sources.updates.enabled) {
+          reconciliation.updates.error = failure.message;
+        }
         failedSourceCount += Number(this.settings.sources.entityAlerts.enabled)
           + Number(this.settings.sources.updates.enabled);
       }
@@ -311,7 +373,8 @@ export class HomeAssistantConnector implements IConnector {
       try {
         const result = await this.client!.fetchWebSocketSources(websocketSources);
         if (result.persistentNotifications) {
-          notifications.push(...buildPersistentNotifications({
+          reconciliation.persistentNotifications.status = 'ok';
+          const persistentNotifications = buildPersistentNotifications({
             items: result.persistentNotifications,
             connectorType: this.type,
             connectorInstanceId: this.id,
@@ -322,10 +385,15 @@ export class HomeAssistantConnector implements IConnector {
               this.settings.sources.persistentNotifications.criticalNotificationPatterns,
             immediateCritical:
               this.settings.outboundDelivery.immediateCriticalPersistentNotifications,
-          }));
+          });
+          notifications.push(...persistentNotifications);
+          persistentNotifications.forEach(notification => {
+            reconciliation.persistentNotifications.activeIds.add(notification.id);
+          });
         }
         if (result.repairs) {
-          notifications.push(...buildRepairNotifications({
+          reconciliation.repairs.status = 'ok';
+          const repairNotifications = buildRepairNotifications({
             issues: result.repairs,
             connectorType: this.type,
             connectorInstanceId: this.id,
@@ -334,14 +402,28 @@ export class HomeAssistantConnector implements IConnector {
             actionsEnabled: this.settings.actions.enabled,
             immediateActionNeeded:
               this.settings.outboundDelivery.immediateActionNeededRepairs,
-          }));
+          });
+          notifications.push(...repairNotifications);
+          repairNotifications.forEach(notification => {
+            reconciliation.repairs.activeIds.add(notification.id);
+          });
         }
         for (const error of Object.values(result.errors)) {
           failures.push(new Error(error));
           failedSourceCount += 1;
         }
+        if (result.errors.persistentNotifications) {
+          reconciliation.persistentNotifications.error = result.errors.persistentNotifications;
+        }
+        if (result.errors.repairs) {
+          reconciliation.repairs.error = result.errors.repairs;
+        }
       } catch (error) {
-        failures.push(error instanceof Error ? error : new Error(String(error)));
+        const failure = error instanceof Error ? error : new Error(String(error));
+        failures.push(failure);
+        websocketSources.forEach(source => {
+          reconciliation[source].error = failure.message;
+        });
         failedSourceCount += websocketSources.length;
       }
     }
@@ -351,12 +433,10 @@ export class HomeAssistantConnector implements IConnector {
       + Number(this.settings.sources.updates.enabled)
       + websocketSources.length;
     if (sourceCount > 0 && failedSourceCount >= sourceCount) {
-      this.lastActiveNotificationIds = null;
+      this.lastSourceReconciliation = reconciliation;
       throw new AggregateError(failures, 'All enabled Home Assistant sources failed');
     }
-    this.lastActiveNotificationIds = failedSourceCount === 0
-      ? notifications.map(notification => notification.id)
-      : null;
+    this.lastSourceReconciliation = reconciliation;
     return notifications;
   }
 
@@ -389,7 +469,70 @@ export class HomeAssistantConnector implements IConnector {
    */
   async getActiveAlertSourceIds(since?: Date): Promise<string[] | null> {
     void since;
-    return this.lastActiveNotificationIds;
+    return null;
+  }
+
+  getNotificationSourceHealth(): NotificationSourceHealth[] {
+    if (!this.lastSourceReconciliation) return [];
+    const sourceIds: Record<HomeAssistantSource, string> = {
+      entityAlerts: 'entity-alerts',
+      updates: 'updates',
+      persistentNotifications: 'persistent-notifications',
+      repairs: 'repairs',
+    };
+    return (Object.keys(sourceIds) as HomeAssistantSource[]).map(source => ({
+      sourceId: sourceIds[source],
+      status: this.lastSourceReconciliation![source].status,
+      ...(this.lastSourceReconciliation![source].error
+        ? { error: this.lastSourceReconciliation![source].error }
+        : {}),
+    }));
+  }
+
+  async reconcileAlerts(sourceIds: string[]): Promise<AlertReconciliation[]> {
+    const cycle = this.lastSourceReconciliation;
+    if (!cycle) {
+      return sourceIds.map(sourceId => ({ sourceId, resolved: false, verified: false }));
+    }
+
+    const connectorPrefix = `${this.id}:`;
+    return sourceIds.map((sourceId): AlertReconciliation => {
+      const localId = sourceId.startsWith(connectorPrefix)
+        ? sourceId.slice(connectorPrefix.length)
+        : sourceId;
+      const source: HomeAssistantSource = localId.startsWith('update:')
+        ? 'updates'
+        : localId.startsWith('persistent:')
+          ? 'persistentNotifications'
+          : localId.startsWith('repair:')
+            ? 'repairs'
+            : 'entityAlerts';
+      const state = cycle[source];
+
+      if (state.status === 'failed') {
+        return { sourceId, resolved: false, verified: false };
+      }
+      if (source === 'updates') {
+        const encodedEntityId = localId.slice('update:'.length).split(':', 1)[0] ?? '';
+        let entityId = encodedEntityId;
+        try {
+          entityId = decodeURIComponent(encodedEntityId);
+        } catch {
+          return { sourceId, resolved: false, verified: false };
+        }
+        if (state.uncertainEntityIds?.has(entityId)) {
+          return { sourceId, resolved: false, verified: false };
+        }
+      }
+
+      const resolved = state.status === 'disabled' || !state.activeIds.has(localId);
+      return {
+        sourceId,
+        resolved,
+        verified: true,
+        ...(resolved ? { reason: state.status === 'disabled' ? 'source_disabled' : 'not_in_source' } : {}),
+      };
+    });
   }
 
   async executeNotificationAction(

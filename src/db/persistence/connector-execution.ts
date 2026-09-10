@@ -67,6 +67,9 @@ export interface SourceListRecord {
   type: string;
   taskCount: number;
   lastSyncedAt: string | null;
+  healthStatus: 'ok' | 'disabled' | 'failed' | null;
+  healthError: string | null;
+  lastSuccessfulAt: string | null;
   wellKnownListName: string | null;
   groupId: string | null;
   sortOrder: number;
@@ -106,6 +109,15 @@ export interface RemoteFolderGroup {
 export interface SourceListPersistence {
   list(connectorId: string): Promise<SourceListRecord[]>;
   applyDiscovery(command: SourceListDiscoveryCommand): Promise<void>;
+  updateHealth(input: {
+    connectorId: string;
+    observedAt: string;
+    sources: readonly {
+      sourceId: string;
+      status: 'ok' | 'disabled' | 'failed';
+      error?: string;
+    }[];
+  }): Promise<void>;
   assignFolderGroups(input: {
     groups: readonly RemoteFolderGroup[];
     lists: readonly { sourceId: string; parentFolderGroupId: string }[];

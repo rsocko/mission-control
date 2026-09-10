@@ -8,10 +8,12 @@ import { ArrowUpDown, ChevronDown, ChevronRight, History, Info, Plus, RotateCcw 
 import { TaskContextMenu, type HubProject, type TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { ConnectorIcon } from './SortableTaskRow';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import type { SourceList, SuggestionTask } from './types';
 
 const PAGE_SIZE = 5;
@@ -36,7 +38,9 @@ interface SuggestionGroupProps {
   tasks: SuggestionTask[];
   color: string;
   onAdd: (taskId: string) => void;
+  onComplete: (task: SuggestionTask) => void;
   onSelect: (taskId: string) => void;
+  completingIds: ReadonlySet<string>;
   getContextMenuActions: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
@@ -52,7 +56,9 @@ export function SuggestionGroup({
   tasks,
   color,
   onAdd,
+  onComplete,
   onSelect,
+  completingIds,
   getContextMenuActions,
   sourceLists,
   listGroups,
@@ -167,7 +173,7 @@ export function SuggestionGroup({
                     const task = visibleTasks[virtualRow.index];
                     return (
                       <div key={task.id} className="absolute left-0 top-0 w-full" style={{ height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }}>
-                        <SuggestionRow task={task} styles={styles} onAdd={onAdd} onSelect={onSelect} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />
+                        <SuggestionRow task={task} styles={styles} onAdd={onAdd} onComplete={onComplete} onSelect={onSelect} isCompleting={completingIds.has(task.id)} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />
                       </div>
                     );
                   })}
@@ -175,7 +181,7 @@ export function SuggestionGroup({
               </div>
             ) : (
               <div ref={suggestionsRef} className="px-2 py-1.5 space-y-0.5">
-                {visibleTasks.map((task) => <SuggestionRow key={task.id} task={task} styles={styles} onAdd={onAdd} onSelect={onSelect} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />)}
+                {visibleTasks.map((task) => <SuggestionRow key={task.id} task={task} styles={styles} onAdd={onAdd} onComplete={onComplete} onSelect={onSelect} isCompleting={completingIds.has(task.id)} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />)}
               </div>
             )}
             {totalPages > 1 && (
@@ -202,7 +208,9 @@ function SuggestionRow({
   task,
   styles,
   onAdd,
+  onComplete,
   onSelect,
+  isCompleting,
   getContextMenuActions,
   sourceLists,
   listGroups,
@@ -211,12 +219,17 @@ function SuggestionRow({
   task: SuggestionTask;
   styles: { header: string };
   onAdd: (taskId: string) => void;
+  onComplete: (task: SuggestionTask) => void;
   onSelect: (taskId: string) => void;
+  isCompleting: boolean;
   getContextMenuActions: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
   projects: HubProject[];
 }) {
+  const canComplete = canEditTaskField(task.editPolicy, 'status');
+  const completionBlockedReason = taskFieldBlockedReason(task.editPolicy, 'status');
+
   return (
     <TaskContextMenu
       task={{
@@ -241,12 +254,29 @@ function SuggestionRow({
       <div
         className="flex items-center gap-2 rounded-md hover:bg-white/5 transition-colors group/item"
       >
+        <CompletionBurst celebrating={isCompleting}>
+          <Tooltip content={canComplete ? 'Mark complete' : completionBlockedReason}>
+            <button
+              type="button"
+              onClick={() => onComplete(task)}
+              disabled={isCompleting || !canComplete}
+              aria-label={canComplete ? `Mark "${task.title}" complete` : completionBlockedReason}
+              className="group/status ml-2 flex h-5 w-5 shrink-0 items-center justify-center disabled:cursor-not-allowed"
+            >
+              <TaskStatusIndicator
+                status={task.status}
+                microStatus={task.microStatus}
+                isCompleting={isCompleting}
+                size="sm"
+              />
+            </button>
+          </Tooltip>
+        </CompletionBurst>
         <button
           type="button"
           className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-400)]"
           onClick={() => onSelect(task.id)}
         >
-          <TaskStatusIndicator status={task.status} microStatus={task.microStatus} size="sm" />
           <ConnectorIcon type={task.connectorType} size={12} />
           <span className="min-w-0 flex-1">
             <span className="text-xs text-[var(--text-primary)] truncate block">{task.title}</span>

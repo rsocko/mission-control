@@ -50,6 +50,35 @@ function createQueryWrapper(queryClient = new QueryClient()) {
 }
 
 describe('useSyncStreamConnection history refresh', () => {
+  it('requests an incremental sync for the selected connector', async () => {
+    vi.stubGlobal('EventSource', MockEventSource);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ results: [{ connectorId: 'github-1', success: true }] }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const { result, unmount } = renderHook(() => useSyncStreamConnection(), {
+      wrapper: createQueryWrapper(),
+    });
+
+    act(() => {
+      result.current.triggerSync('github-1');
+    });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ connectorId: 'github-1' }),
+      });
+    });
+    expect(result.current.progress).toMatchObject({
+      isSyncing: true,
+      connectorId: 'github-1',
+    });
+    unmount();
+  });
+
   it('does not poll sync status while the SSE connection is healthy', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('EventSource', MockEventSource);

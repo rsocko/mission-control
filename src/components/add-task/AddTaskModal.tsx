@@ -355,7 +355,7 @@ export function AddTaskModal({
           setCustomDurationInput('');
           setRecurrence('none');
           setRecurrenceMode('schedule');
-          setAddToMyDay(false);
+          setAddToMyDay(initialAddToMyDay ?? false);
           setTagSearchQuery('');
           setShowTagDropdown(false);
           titleRef.current?.focus();

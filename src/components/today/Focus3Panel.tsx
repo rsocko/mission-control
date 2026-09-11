@@ -5,8 +5,24 @@ import { motion, AnimatePresence } from 'motion/react';
 import Image from 'next/image';
 import {
   Zap, X, Sparkles, Loader2, Square, FilePlus2, Search,
-  BatteryMedium, Leaf, Moon, Check, ChevronDown, ChevronUp,
+  BatteryMedium, Leaf, Moon, ChevronDown, ChevronUp, GripVertical,
 } from 'lucide-react';
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import { toast } from 'sonner';
 import { dropdownVariants, fadeSlideUp, scaleIn } from '@/lib/motion';
 import { TaskPickerDialog } from '@/components/projects/TaskPickerDialog';
@@ -22,6 +38,10 @@ import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
+import {
+  LOCAL_QUICK_ADD_DESTINATION,
+  useQuickAddDestinations,
+} from '@/lib/hooks/useQuickAddDestinations';
 
 interface FocusItem {
   id: string;
@@ -78,9 +98,15 @@ const ENERGY_CONFIG: Record<string, { icon: typeof Zap; label: string; className
 
 export function Focus3Panel({
   onRefresh,
+  selectedTaskId,
+  onSelectTask,
+  onDoubleClickTask,
   compact = false,
 }: {
   onRefresh?: () => void;
+  selectedTaskId?: string | null;
+  onSelectTask?: (taskId: string) => void;
+  onDoubleClickTask?: (taskId: string) => void;
   compact?: boolean;
 }) {
   const [scope, setScope] = useState<'today' | 'week'>('today');
@@ -95,6 +121,16 @@ export function Focus3Panel({
   const [showCreateTask, setShowCreateTask] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const { completingIds, runTaskCompletion } = useTaskCompletion();
+  const { destinations } = useQuickAddDestinations({
+    sourceFilter: null,
+    listFilter: null,
+    listFilterName: null,
+    listFilterConnectorType: null,
+  });
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
 
   const { toggleCalm } = useViewMode();
 
@@ -143,6 +179,36 @@ export function Focus3Panel({
       onRefresh?.();
     } catch {
       toast.error('Failed to remove focus item');
+    }
+  }
+
+  async function reorderFocusItem({ active, over }: DragEndEvent) {
+    if (!over || active.id === over.id) return;
+
+    const fromIndex = items.findIndex((item) => item.id === active.id);
+    const toIndex = items.findIndex((item) => item.id === over.id);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    const movingItem = items[fromIndex];
+    const targetItem = items[toIndex];
+    const reordered = [...items];
+    reordered[fromIndex] = { ...targetItem, slot: movingItem.slot };
+    reordered[toIndex] = { ...movingItem, slot: targetItem.slot };
+
+    if (scope === 'today') setTodayItems(reordered);
+    else setWeekItems(reordered);
+
+    try {
+      const response = await fetch('/api/focus-items', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: movingItem.id, slot: targetItem.slot }),
+      });
+      if (!response.ok) throw new Error('Failed to reorder focus items');
+    } catch (error) {
+      uiLogger.error('Failed to reorder focus items', { error });
+      toast.error('Could not reorder Focus 3');
+      void fetchFocusItems();
     }
   }
 
@@ -300,32 +366,46 @@ export function Focus3Panel({
             <Loader2 size={16} className="animate-spin" />
           </div>
         ) : (
-          <div className="space-y-1.5">
-            <AnimatePresence mode="popLayout">
-              {slots.map((item, i) => (
-                <motion.div
-                  key={item ? item.id : `empty-${i}`}
-                  variants={fadeSlideUp}
-                  initial="hidden"
-                  animate="show"
-                  exit="exit"
-                  layout
-                >
-                  {item ? (
-                    <FocusSlot
-                      item={item}
-                      slotNumber={i + 1}
-                      onRemove={() => removeFocusItem(item.id)}
-                      onComplete={() => completeFocusTask(item.taskId, item.title)}
-                      isCompleting={completingIds.has(item.taskId)}
-                    />
-                  ) : (
-                    <EmptySlot slotNumber={i + 1} onClick={() => setAddMenuOpen(!addMenuOpen)} />
-                  )}
-                </motion.div>
-              ))}
-            </AnimatePresence>
-          </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={(event) => { void reorderFocusItem(event); }}
+          >
+            <SortableContext
+              items={items.map((item) => item.id)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="space-y-1.5">
+                <AnimatePresence mode="popLayout">
+                  {slots.map((item, i) => (
+                    <motion.div
+                      key={item ? item.id : `empty-${i}`}
+                      variants={fadeSlideUp}
+                      initial="hidden"
+                      animate="show"
+                      exit="exit"
+                      layout
+                    >
+                      {item ? (
+                        <FocusSlot
+                          item={item}
+                          slotNumber={i + 1}
+                          onRemove={() => removeFocusItem(item.id)}
+                          onComplete={() => completeFocusTask(item.taskId, item.title)}
+                          onSelect={() => onSelectTask?.(item.taskId)}
+                          onDoubleClick={() => onDoubleClickTask?.(item.taskId)}
+                          isSelected={selectedTaskId === item.taskId}
+                          isCompleting={completingIds.has(item.taskId)}
+                        />
+                      ) : (
+                        <EmptySlot slotNumber={i + 1} onClick={() => setAddMenuOpen(!addMenuOpen)} />
+                      )}
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </div>
+            </SortableContext>
+          </DndContext>
         )}
       </div>
 
@@ -451,8 +531,9 @@ export function Focus3Panel({
           <AddTaskModal
             initialInput=""
             initialParsed={null}
-            initialDestination={{ id: 'local', label: 'Local', connectorType: 'local', account: null, color: 'var(--text-muted)' }}
-            destinations={[{ id: 'local', label: 'Local', connectorType: 'local', account: null, color: 'var(--text-muted)' }]}
+            initialDestination={LOCAL_QUICK_ADD_DESTINATION}
+            destinations={destinations}
+            initialAddToMyDay={scope === 'today'}
             onTaskCreated={(taskId) => {
               void addFocusItem(taskId);
             }}
@@ -470,17 +551,31 @@ function FocusSlot({
   slotNumber,
   onRemove,
   onComplete,
+  onSelect,
+  onDoubleClick,
+  isSelected,
   isCompleting,
 }: {
   item: FocusItem;
   slotNumber: number;
   onRemove: () => void;
   onComplete: () => void;
+  onSelect: () => void;
+  onDoubleClick: () => void;
+  isSelected: boolean;
   isCompleting: boolean;
 }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.id,
+  });
   const isCompleted = item.status === 'done';
   const visuallyCompleted = isCompleted || isCompleting;
   const canComplete = canEditTaskField(item.editPolicy, 'status');
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  };
 
   function handleComplete() {
     if (visuallyCompleted || !canComplete) return;
@@ -488,11 +583,31 @@ function FocusSlot({
   }
 
   return (
-    <div className="group flex items-center gap-3 px-3 py-2.5 rounded-md hover:bg-[var(--surface-0)] transition-[background-color] duration-100">
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`group flex items-center gap-3 rounded-md px-3 py-2.5 transition-[background-color,box-shadow,opacity] duration-100 hover:bg-[var(--surface-0)] ${
+        isSelected ? 'bg-[var(--accent-500)]/8 ring-1 ring-inset ring-[var(--accent-400)]' : ''
+      }`}
+    >
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        onClick={(event) => event.stopPropagation()}
+        className="-ml-1 touch-none cursor-grab p-1 text-[var(--text-muted)] opacity-0 transition-opacity hover:text-[var(--text-secondary)] focus:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 active:cursor-grabbing"
+        aria-label={`Reorder ${item.title}`}
+      >
+        <GripVertical size={14} />
+      </button>
+
       {/* Completion checkbox with burst */}
       <CompletionBurst celebrating={isCompleting}>
         <button
-          onClick={handleComplete}
+          onClick={(event) => {
+            event.stopPropagation();
+            handleComplete();
+          }}
           disabled={visuallyCompleted || !canComplete}
           className="group/status flex h-6 w-6 shrink-0 items-center justify-center text-xs font-bold"
           title={visuallyCompleted
@@ -511,35 +626,40 @@ function FocusSlot({
         </button>
       </CompletionBurst>
 
-      {/* Connector icon */}
-      <ConnectorIcon type={item.connectorType} size={14} />
+      <button
+        type="button"
+        aria-pressed={isSelected}
+        onClick={onSelect}
+        onDoubleClick={onDoubleClick}
+        className="flex min-w-0 flex-1 items-center gap-3 rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+      >
+        <ConnectorIcon type={item.connectorType} size={14} />
 
-      {/* Task info */}
-      <div className="flex-1 min-w-0">
-        <p className={`text-sm font-medium truncate ${
-          visuallyCompleted
-            ? 'line-through text-[var(--text-muted)]'
-            : 'text-[var(--text-primary)]'
-        }`}>
-          {item.title}
-        </p>
-        <div className="flex items-center gap-2 mt-0.5">
-          {item.sourceListName && (
-            <span className="text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
-          )}
-          <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
-          {item.isAiSuggested && (
-            <span className="text-xs text-purple-400/70 flex items-center gap-0.5">
-              <Sparkles size={8} /> AI
-            </span>
-          )}
+        <div className="min-w-0 flex-1">
+          <p className={`truncate text-sm font-medium ${
+            visuallyCompleted
+              ? 'line-through text-[var(--text-muted)]'
+              : 'text-[var(--text-primary)]'
+          }`}>
+            {item.title}
+          </p>
+          <div className="mt-0.5 flex items-center gap-2">
+            {item.sourceListName && (
+              <span className="text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
+            )}
+            <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
+            {item.isAiSuggested && (
+              <span className="flex items-center gap-0.5 text-xs text-purple-400/70">
+                <Sparkles size={8} /> AI
+              </span>
+            )}
+          </div>
         </div>
-      </div>
 
-      {/* Priority dot */}
-      {item.priority !== 'none' && (
-        <span className={`w-2 h-2 rounded-full ${getTaskPriorityVisual(item.priority).dotClass} flex-shrink-0`} />
-      )}
+        {item.priority !== 'none' && (
+          <span className={`h-2 w-2 flex-shrink-0 rounded-full ${getTaskPriorityVisual(item.priority).dotClass}`} />
+        )}
+      </button>
 
       {/* Remove button */}
       <Tooltip content="Remove from Focus 3">

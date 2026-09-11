@@ -205,8 +205,13 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
       `, [connectorId]);
       await pool.query('DELETE FROM notifications WHERE connector_instance_id = $1', [connectorId]);
       await pool.query('DELETE FROM notification_push_rules WHERE connector_instance_id = $1', [connectorId]);
+      await pool.query('DELETE FROM sync_deletion_snapshots WHERE connector_id = $1', [connectorId]);
       await pool.query('DELETE FROM task_tags WHERE task_id IN (SELECT id FROM tasks WHERE connector_instance_id = $1)', [connectorId]);
+      await pool.query('DELETE FROM task_projects WHERE task_id IN (SELECT id FROM tasks WHERE connector_instance_id = $1)', [connectorId]);
+      await pool.query(`DELETE FROM task_projects WHERE task_id LIKE $1 || ':%'`, [connectorId]);
       await pool.query('DELETE FROM tasks WHERE connector_instance_id = $1', [connectorId]);
+      await pool.query(`DELETE FROM tasks WHERE id LIKE $1 || ':%'`, [connectorId]);
+      await pool.query('DELETE FROM hub_projects WHERE id = $1', [`${connectorId}:project`]);
       await pool.query('DELETE FROM tags WHERE source = $1', [connectorId]);
       await pool.query('DELETE FROM source_lists WHERE connector_instance_id = $1', [connectorId]);
       await pool.query('DELETE FROM sync_log WHERE connector_id = $1', [connectorId]);
@@ -532,6 +537,58 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
       [connectorId],
     );
     expect(lease.rowCount).toBe(0);
+  });
+
+  it('archives and restores a project-associated task after a remote 404', async () => {
+    const connectorId = `layer2-${randomUUID()}`;
+    connectorIds.add(connectorId);
+    const taskId = `${connectorId}:task`;
+    const projectId = `${connectorId}:project`;
+    const now = new Date().toISOString();
+    await backend.context.pool.query(
+      `
+        INSERT INTO connector_configs (
+          id, type, name, enabled, capabilities, credentials, settings,
+          synced_lists, created_at, updated_at
+        ) VALUES ($1, 'microsoft-todo', 'To Do', true, '{}', '{}', '{}', '[]', $2, $2)
+      `,
+      [connectorId, now],
+    );
+    await backend.context.pool.query(
+      `INSERT INTO hub_projects (id, name, created_at, updated_at)
+       VALUES ($1, 'Archived task project', $2, $2)`,
+      [projectId, now],
+    );
+    const execution = createPostgresConnectorExecutionRepositories(backend.context.pool);
+    await execution.pulls.insertBatch([{
+      task: connectorExecutionTask({
+        id: taskId,
+        sourceId: `${connectorId}:remote-task`,
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: connectorId,
+        syncStatus: 'push_error',
+      }),
+      tags: [],
+    }]);
+    await backend.context.pool.query(
+      'INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)',
+      [taskId, projectId],
+    );
+
+    const archived = await execution.deletions.archiveAndDeleteTask(
+      taskId,
+      'Remote returned 404/410',
+    );
+    expect(archived).toEqual(expect.objectContaining({ taskTitle: 'Portable task' }));
+    await expect(execution.deletions.restoreDeletionSnapshot(
+      archived!.snapshotId,
+      'local',
+    )).resolves.toEqual({ taskId, alreadyRestored: false });
+    const membership = await backend.context.pool.query(
+      'SELECT 1 FROM task_projects WHERE task_id = $1 AND project_id = $2',
+      [taskId, projectId],
+    );
+    expect(membership.rowCount).toBe(1);
   });
 });
 

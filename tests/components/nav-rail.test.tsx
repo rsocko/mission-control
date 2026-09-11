@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
+import { initialProgress, type SyncProgress } from '@/lib/hooks/useSyncStream';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import type { NavigationCounts } from '@/lib/navigation/badges';
 import { RECENT_PROJECT_IDS_STORAGE_KEY } from '@/lib/navigation/recent-projects';
@@ -14,11 +15,17 @@ function renderNavRail({
   isSyncing = false,
   syncStatus = [],
   counts,
+  syncProgress,
+  showSyncBanner,
+  onShowSyncBannerChange,
 }: {
   isAiActive?: boolean;
   isSyncing?: boolean;
   syncStatus?: ConnectorHealthInfo[];
   counts?: NavigationCounts;
+  syncProgress?: SyncProgress;
+  showSyncBanner?: boolean;
+  onShowSyncBannerChange?: (show: boolean) => void;
 } = {}) {
   return render(
     <TooltipProvider>
@@ -28,6 +35,9 @@ function renderNavRail({
         isSyncing={isSyncing}
         syncStatus={syncStatus}
         counts={counts}
+        syncProgress={syncProgress}
+        showSyncBanner={showSyncBanner}
+        onShowSyncBannerChange={onShowSyncBannerChange}
       />
     </TooltipProvider>
   );
@@ -376,8 +386,24 @@ describe('NavRail', () => {
   });
 
   it('opens sync status from the nav and shows active syncing state', () => {
+    const onShowSyncBannerChange = vi.fn();
     renderNavRail({
       isSyncing: true,
+      syncProgress: {
+        ...initialProgress,
+        isSyncing: true,
+        connectorId: 'connector-1',
+        connectorName: 'Microsoft To Do',
+        phase: 'tasks',
+        currentList: 'Work',
+        listIndex: 2,
+        totalLists: 5,
+        totalTasks: 48,
+        parentTasks: 40,
+        subtasks: 8,
+      },
+      showSyncBanner: true,
+      onShowSyncBannerChange,
       syncStatus: [
         {
           id: 'connector-1',
@@ -396,8 +422,16 @@ describe('NavRail', () => {
     expect(heading).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toContainElement(heading);
     expect(screen.getAllByText('Syncing…').length).toBeGreaterThan(0);
+    expect(screen.getByText('Microsoft To Do')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
+    expect(screen.getByText('List 2 of 5')).toBeInTheDocument();
+    expect(screen.getByText('40 tasks synced · 8 subtasks')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Sync progress' })).toHaveAttribute('aria-valuenow', '40');
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('Never')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Show top sync progress bar' }));
+    expect(onShowSyncBannerChange).toHaveBeenCalledWith(false);
   });
 
   it('shows inline sync details whenever the navigation is expanded', () => {

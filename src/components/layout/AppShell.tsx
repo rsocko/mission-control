@@ -44,6 +44,7 @@ import {
 } from '@/lib/hooks/useSystemHealth';
 import { useNavigationCounts } from '@/lib/hooks/useNavigationBadges';
 import { useAppBadge, useBadgeMode } from '@/lib/hooks/useAppBadge';
+import { useSyncBannerPreference } from '@/lib/hooks/useSyncBannerPreference';
 
 interface FeatureFlags {
   taskCreation: boolean;
@@ -327,6 +328,7 @@ function AppShellInner({
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const navigationCounts = useNavigationCounts();
   const [badgeMode] = useBadgeMode();
+  const { showBanner: showSyncBanner, setShowBanner: setShowSyncBanner } = useSyncBannerPreference();
   const appBadgeCount = badgeMode === 'unread_notifications'
     ? navigationCounts.unreadNotifications
     : badgeMode === 'myday_incomplete'
@@ -349,6 +351,9 @@ function AppShellInner({
         isSyncing={syncProgress.isSyncing}
         counts={navigationCounts}
         syncStatus={health?.connectors ?? []}
+        syncProgress={syncProgress}
+        showSyncBanner={showSyncBanner}
+        onShowSyncBannerChange={setShowSyncBanner}
       />
 
       {/* Right area: toolbar + content */}
@@ -376,7 +381,7 @@ function AppShellInner({
         )}
 
         {/* Sync Progress Banner */}
-        <SyncProgressBanner progress={syncProgress} />
+        {showSyncBanner && <SyncProgressBanner progress={syncProgress} />}
 
         {/* Quick Sort keeps a single live queue landmark during route hydration. */}
         {pathname === '/quick-sort' ? (

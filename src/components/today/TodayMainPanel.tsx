@@ -701,7 +701,13 @@ export function TodayMainPanel({
         ) : view === 'list' ? (
           <>
             <div className="mb-6 grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-              <Focus3Panel onRefresh={fetchData} compact />
+              <Focus3Panel
+                onRefresh={fetchData}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={onSelectTask}
+                onDoubleClickTask={onDoubleClickTask}
+                compact
+              />
               <InProgressPanel
                 items={inProgressItems}
                 onSelectTask={onSelectTask}

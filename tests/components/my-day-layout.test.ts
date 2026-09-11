@@ -22,6 +22,14 @@ const sidebarSource = readFileSync(
   resolve(process.cwd(), 'src/components/today/TodaySidebar.tsx'),
   'utf8',
 );
+const focusSource = readFileSync(
+  resolve(process.cwd(), 'src/components/today/Focus3Panel.tsx'),
+  'utf8',
+);
+const addTaskModalSource = readFileSync(
+  resolve(process.cwd(), 'src/components/add-task/AddTaskModal.tsx'),
+  'utf8',
+);
 
 describe('My Day desktop layout', () => {
   it('labels summary metrics by what they count', () => {
@@ -68,5 +76,22 @@ describe('My Day desktop layout', () => {
     expect(pageSource).toContain('className="hidden h-full min-h-0 sm:block"');
     expect(sidebarSource).toContain('flex h-full min-h-0 w-80');
     expect(sidebarSource).toContain('min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain');
+  });
+
+  it('connects Focus 3 to My Day task creation and detail interactions', () => {
+    expect(focusSource).toContain('useQuickAddDestinations({');
+    expect(focusSource).toContain('destinations={destinations}');
+    expect(focusSource).toContain("initialAddToMyDay={scope === 'today'}");
+    expect(addTaskModalSource).toContain('setAddToMyDay(initialAddToMyDay ?? false)');
+    expect(source).toContain('selectedTaskId={selectedTaskId}');
+    expect(source).toContain('onSelectTask={onSelectTask}');
+    expect(source).toContain('onDoubleClickTask={onDoubleClickTask}');
+  });
+
+  it('supports accessible Focus 3 reordering', () => {
+    expect(focusSource).toContain('<DndContext');
+    expect(focusSource).toContain('void reorderFocusItem(event)');
+    expect(focusSource).toContain('sortableKeyboardCoordinates');
+    expect(focusSource).toContain('aria-label={`Reorder ${item.title}`}');
   });
 });

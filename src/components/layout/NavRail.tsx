@@ -54,6 +54,7 @@ import {
   NavigationRailMorph,
 } from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import type { SyncProgress } from '@/lib/hooks/useSyncStream';
 import {
   EMPTY_NAVIGATION_COUNTS,
   type NavigationCounts,
@@ -160,6 +161,9 @@ interface NavRailProps {
   isSyncing?: boolean;
   counts?: NavigationCounts;
   syncStatus?: ConnectorHealthInfo[];
+  syncProgress?: SyncProgress;
+  showSyncBanner?: boolean;
+  onShowSyncBannerChange?: (show: boolean) => void;
 }
 
 function ActiveSyncIcon({ className }: { className?: string }) {
@@ -173,6 +177,9 @@ export function NavRail({
   isSyncing = false,
   counts = EMPTY_NAVIGATION_COUNTS,
   syncStatus = [],
+  syncProgress,
+  showSyncBanner = true,
+  onShowSyncBannerChange,
 }: NavRailProps) {
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
@@ -203,6 +210,12 @@ export function NavRail({
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
   const activeSyncStatus = syncStatus.filter((status) => status.status !== 'disabled');
   const showSyncStatusControl = isSyncing || activeSyncStatus.length > 0;
+  const syncPercent = syncProgress && syncProgress.totalLists > 0
+    ? Math.min(100, Math.round((syncProgress.listIndex / syncProgress.totalLists) * 100))
+    : 0;
+  const syncedTasks = syncProgress
+    ? syncProgress.parentTasks || syncProgress.totalTasks
+    : 0;
   const layoutSignature = [
     features?.aiEnabled,
     features?.financeEnabled,
@@ -452,6 +465,65 @@ export function NavRail({
             </span>
           )}
         </div>
+        {isSyncing && (
+          <div
+            className="-mx-3 mb-3 border-y border-blue-400/15 bg-blue-400/[0.06] px-3 py-3"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-400/10 text-blue-400">
+                <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                  {syncProgress?.connectorName || 'Preparing next source'}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-[var(--text-secondary)]">
+                  {!syncProgress?.phase
+                    ? 'Waiting for sync details…'
+                    : syncProgress.phase === 'push'
+                      ? 'Pushing local changes…'
+                      : syncProgress.phase === 'lists'
+                        ? 'Discovering lists…'
+                        : syncProgress.currentList || 'Loading tasks…'}
+                </p>
+              </div>
+            </div>
+
+            {syncProgress && syncProgress.totalLists > 0 && (
+              <div className="mt-3">
+                <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
+                  <span>
+                    List {syncProgress.listIndex.toLocaleString()} of {syncProgress.totalLists.toLocaleString()}
+                  </span>
+                  <span className="tabular-nums">{syncPercent}%</span>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-label="Sync progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={syncPercent}
+                  className="h-1 overflow-hidden rounded-full bg-[var(--surface-3)]"
+                >
+                  <div
+                    className="h-full rounded-full bg-blue-400 transition-[width] duration-300"
+                    style={{ width: `${syncPercent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {syncProgress && (syncedTasks > 0 || syncProgress.subtasks > 0) && (
+              <p className="mt-2 text-xs tabular-nums text-[var(--text-tertiary)]">
+                {syncedTasks.toLocaleString()} tasks synced
+                {syncProgress.subtasks > 0 && (
+                  <> · {syncProgress.subtasks.toLocaleString()} subtasks</>
+                )}
+              </p>
+            )}
+          </div>
+        )}
         <div className="max-h-56 space-y-2 overflow-y-auto">
           {activeSyncStatus.map((status) => {
             const isHealthy = status.status === 'healthy';
@@ -491,6 +563,34 @@ export function NavRail({
             <p className="text-xs text-[var(--text-muted)]">No active connectors.</p>
           )}
         </div>
+        {onShowSyncBannerChange && (
+          <div className="-mx-3 -mb-3 mt-3 flex items-center justify-between border-t border-[var(--border)] px-3 py-2.5">
+            <div className="pr-3">
+              <p className="text-xs font-medium text-[var(--text-secondary)]">Show top progress bar</p>
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                Keep sync details visible across the app
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-label="Show top sync progress bar"
+              aria-checked={showSyncBanner}
+              onClick={() => onShowSyncBannerChange(!showSyncBanner)}
+              className={cn(
+                'relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors',
+                showSyncBanner ? 'bg-blue-500' : 'bg-[var(--surface-4)]',
+              )}
+            >
+              <span
+                className={cn(
+                  'h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform',
+                  showSyncBanner ? 'translate-x-[18px]' : 'translate-x-[3px]',
+                )}
+              />
+            </button>
+          </div>
+        )}
         <Popover.Arrow className="fill-[var(--border)]" />
       </Popover.Content>
     </Popover.Portal>

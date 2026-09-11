@@ -162,6 +162,7 @@ interface NavRailProps {
   counts?: NavigationCounts;
   syncStatus?: ConnectorHealthInfo[];
   syncProgress?: SyncProgress;
+  onSyncConnector?: (connectorId: string) => void;
   showSyncBanner?: boolean;
   onShowSyncBannerChange?: (show: boolean) => void;
 }
@@ -178,6 +179,7 @@ export function NavRail({
   counts = EMPTY_NAVIGATION_COUNTS,
   syncStatus = [],
   syncProgress,
+  onSyncConnector,
   showSyncBanner = true,
   onShowSyncBannerChange,
 }: NavRailProps) {
@@ -527,8 +529,9 @@ export function NavRail({
         <div className="max-h-56 space-y-2 overflow-y-auto">
           {activeSyncStatus.map((status) => {
             const isHealthy = status.status === 'healthy';
+            const isThisConnectorSyncing = isSyncing && syncProgress?.connectorId === status.id;
             return (
-              <div key={status.id} className="flex items-center justify-between text-xs">
+              <div key={status.id} className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex min-w-0 items-center gap-1.5">
                   {CONNECTOR_ICONS[status.type] && (
                     <Image
@@ -540,22 +543,40 @@ export function NavRail({
                   )}
                   <span className="truncate text-[var(--text-secondary)]">{status.name}</span>
                 </div>
-                {status.lastSyncAt ? (
-                  <span
-                    className={cn(
-                      'flex items-center gap-1',
-                      isHealthy ? 'text-green-400' : 'text-amber-400',
-                    )}
-                  >
-                    {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                    <span>{formatSyncTime(status.lastSyncAt)}</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-[var(--text-muted)]">
-                    <AlertCircle size={10} />
-                    <span>Never</span>
-                  </span>
-                )}
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  {status.lastSyncAt ? (
+                    <span
+                      className={cn(
+                        'flex items-center gap-1',
+                        isHealthy ? 'text-green-400' : 'text-amber-400',
+                      )}
+                    >
+                      {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                      <span>{formatSyncTime(status.lastSyncAt)}</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[var(--text-muted)]">
+                      <AlertCircle size={10} />
+                      <span>Never</span>
+                    </span>
+                  )}
+                  {onSyncConnector && (
+                    <button
+                      type="button"
+                      aria-label={`Sync ${status.name}`}
+                      title={`Sync ${status.name}`}
+                      disabled={isSyncing}
+                      onClick={() => onSyncConnector(status.id)}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-3)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <RefreshCw
+                        size={12}
+                        className={cn(isThisConnectorSyncing && 'animate-spin text-blue-400')}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}

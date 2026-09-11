@@ -282,6 +282,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       showHealthTooltip={showHealthTooltip}
       setShowHealthTooltip={setShowHealthTooltip}
       syncProgress={syncContextValue.progress}
+      onSyncConnector={syncContextValue.triggerSync}
     >
       {children}
     </AppShellInner>
@@ -301,6 +302,7 @@ function AppShellInner({
   showHealthTooltip,
   setShowHealthTooltip,
   syncProgress,
+  onSyncConnector,
   children,
 }: {
   features: FeatureFlags | null;
@@ -309,6 +311,7 @@ function AppShellInner({
   showHealthTooltip: boolean;
   setShowHealthTooltip: (v: boolean) => void;
   syncProgress: import('@/lib/hooks/useSyncStream').SyncProgress;
+  onSyncConnector: (connectorId: string) => void;
   children: React.ReactNode;
 }) {
   const { isDrawerOpen, openDrawer, closeDrawer } = useMobileDrawer();
@@ -352,6 +355,7 @@ function AppShellInner({
         counts={navigationCounts}
         syncStatus={health?.connectors ?? []}
         syncProgress={syncProgress}
+        onSyncConnector={onSyncConnector}
         showSyncBanner={showSyncBanner}
         onShowSyncBannerChange={setShowSyncBanner}
       />

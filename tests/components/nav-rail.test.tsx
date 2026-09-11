@@ -16,6 +16,7 @@ function renderNavRail({
   syncStatus = [],
   counts,
   syncProgress,
+  onSyncConnector,
   showSyncBanner,
   onShowSyncBannerChange,
 }: {
@@ -24,6 +25,7 @@ function renderNavRail({
   syncStatus?: ConnectorHealthInfo[];
   counts?: NavigationCounts;
   syncProgress?: SyncProgress;
+  onSyncConnector?: (connectorId: string) => void;
   showSyncBanner?: boolean;
   onShowSyncBannerChange?: (show: boolean) => void;
 } = {}) {
@@ -36,6 +38,7 @@ function renderNavRail({
         syncStatus={syncStatus}
         counts={counts}
         syncProgress={syncProgress}
+        onSyncConnector={onSyncConnector}
         showSyncBanner={showSyncBanner}
         onShowSyncBannerChange={onShowSyncBannerChange}
       />
@@ -48,10 +51,10 @@ function mockAdaptiveNavGeometry(initialFitLevel: number) {
   let observedTarget: Element | null = null;
   let observerCallback: ResizeObserverCallback | null = null;
 
-  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function () {
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
     return this.hasAttribute('data-nav-scroll-region') ? 500 : 0;
   });
-  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function () {
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
     const level = this.getAttribute('data-collapse-level');
     if (level === null) return 0;
     return Number(level) < fitLevel ? 560 : 470;
@@ -432,6 +435,65 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('switch', { name: 'Show top sync progress bar' }));
     expect(onShowSyncBannerChange).toHaveBeenCalledWith(false);
+  });
+
+  it('triggers an incremental sync for an individual connector', () => {
+    const onSyncConnector = vi.fn();
+    renderNavRail({
+      onSyncConnector,
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'github',
+          name: 'GitHub',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sync GitHub' }));
+
+    expect(onSyncConnector).toHaveBeenCalledWith('connector-1');
+  });
+
+  it('disables connector sync controls and spins the active connector during a sync', () => {
+    renderNavRail({
+      isSyncing: true,
+      onSyncConnector: vi.fn(),
+      syncProgress: {
+        ...initialProgress,
+        isSyncing: true,
+        connectorId: 'connector-1',
+      },
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'github',
+          name: 'GitHub',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+        {
+          id: 'connector-2',
+          type: 'mstodo',
+          name: 'To Do',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+
+    const activeButton = screen.getByRole('button', { name: 'Sync GitHub' });
+    expect(activeButton).toBeDisabled();
+    expect(activeButton.querySelector('svg')).toHaveClass('animate-spin', 'text-blue-400');
+    expect(screen.getByRole('button', { name: 'Sync To Do' })).toBeDisabled();
   });
 
   it('shows inline sync details whenever the navigation is expanded', () => {

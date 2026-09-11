@@ -590,6 +590,43 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
     );
     expect(membership.rowCount).toBe(1);
   });
+
+  it('deletes a retained task with project relationships', async () => {
+    const connectorId = `layer2-${randomUUID()}`;
+    connectorIds.add(connectorId);
+    const taskId = `${connectorId}:task`;
+    const projectId = `${connectorId}:project`;
+    const now = new Date().toISOString();
+    await backend.context.pool.query(
+      `INSERT INTO hub_projects (id, name, created_at, updated_at)
+       VALUES ($1, 'Retained task project', $2, $2)`,
+      [projectId, now],
+    );
+    const execution = createPostgresConnectorExecutionRepositories(backend.context.pool);
+    await execution.pulls.insertBatch([{
+      task: connectorExecutionTask({
+        id: taskId,
+        sourceId: `${connectorId}:remote-task`,
+        connectorType: 'document-intelligence',
+        connectorInstanceId: connectorId,
+        syncStatus: 'push_error',
+      }),
+      tags: [],
+    }]);
+    await backend.context.pool.query(
+      'INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)',
+      [taskId, projectId],
+    );
+
+    await expect(execution.retention.deleteTaskTree(taskId)).resolves.toBeUndefined();
+
+    const [task, membership] = await Promise.all([
+      backend.context.pool.query('SELECT 1 FROM tasks WHERE id = $1', [taskId]),
+      backend.context.pool.query('SELECT 1 FROM task_projects WHERE task_id = $1', [taskId]),
+    ]);
+    expect(task.rowCount).toBe(0);
+    expect(membership.rowCount).toBe(0);
+  });
 });
 
 afterAll(async () => {

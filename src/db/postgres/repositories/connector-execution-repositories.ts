@@ -385,11 +385,7 @@ async function assertGenericTaskMutationSupported(
   client: Client,
   taskId: string,
 ): Promise<void> {
-  const task = await getTask(client, taskId, true);
-  if (!task) return;
-  if (task.connectorType === 'github-issues') {
-    throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion or retention');
-  }
+  await assertGenericTaskDeletionSupported(client, taskId);
   const [unsupported] = await query<{
     dependencies: string;
     projects: string;
@@ -416,6 +412,17 @@ async function assertGenericTaskMutationSupported(
     throw new UnsupportedConnectorExecutionError(
       'identity, dependency, or project relationship mutation',
     );
+  }
+}
+
+async function assertGenericTaskDeletionSupported(
+  client: Client,
+  taskId: string,
+): Promise<void> {
+  const task = await getTask(client, taskId, true);
+  if (!task) return;
+  if (task.connectorType === 'github-issues') {
+    throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion or retention');
   }
 }
 
@@ -3198,7 +3205,7 @@ export function createPostgresConnectorExecutionRepositories(
             [taskId],
           );
           for (const task of ids) {
-            await assertGenericTaskMutationSupported(client, task.id);
+            await assertGenericTaskDeletionSupported(client, task.id);
           }
           for (const task of ids) await deleteTaskRows(client, task.id);
         });

@@ -46,6 +46,20 @@ describe('useHistoryParamSelection', () => {
     expect(back).toHaveBeenCalledOnce();
   });
 
+  it('replaces the detail URL when its task was removed from the current view', () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    const { result } = renderHook(() => useHistoryParamSelection('taskId'));
+
+    act(() => result.current[1]('task-1'));
+    act(() => result.current[1](null, { history: 'replace' }));
+
+    expect(back).not.toHaveBeenCalled();
+    expect(result.current[0]).toBeNull();
+    expect(window.location.pathname).toBe('/today');
+    expect(window.location.search).toBe('?keep=1');
+    expect(currentAppHistoryDetail()).toBeNull();
+  });
+
   it('removes only its parameter for a direct-linked detail', async () => {
     uninstall?.();
     window.history.replaceState({}, '', '/today?keep=1&taskId=task-1');

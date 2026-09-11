@@ -646,9 +646,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         >
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => {
+            onClose={(reason) => {
               clearTaskNotesRequest();
-              setSelectedTaskId(null);
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
             }}
             onUpdate={(fields) => {
               if (fields && selectedTaskId) {

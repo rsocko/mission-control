@@ -181,7 +181,7 @@ export interface TaskDetailMetadata {
 
 export interface TaskDetailPanelProps {
   taskId: string;
-  onClose: () => void;
+  onClose: (reason?: 'dismiss' | 'task-removed') => void;
   onUpdate?: (fields?: TaskFieldUpdate) => void;
   onSubtaskCountChange?: (done: number, total: number) => void;
   availableTags?: TaskTag[];

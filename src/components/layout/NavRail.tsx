@@ -667,12 +667,12 @@ export function NavRail({
             onClick={togglePinned}
             aria-label={pinned ? 'Unpin navigation' : 'Pin navigation open'}
             className={cn(
-              'absolute right-0 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
+              'absolute -right-1 top-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
               expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
               pinned && 'text-[var(--accent-400)]'
             )}
           >
-            {pinned ? <PinOff size={16} /> : <Pin size={16} />}
+            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
           </button>
         </Tooltip>
       </div>

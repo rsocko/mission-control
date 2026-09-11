@@ -284,8 +284,8 @@ describe('NavRail', () => {
     renderNavRail();
     const pinButton = screen.getByRole('button', { name: 'Pin navigation open' });
 
-    expect(pinButton).toHaveClass('absolute', 'right-0', 'h-7', 'w-7', 'opacity-0');
-    expect(pinButton.querySelector('svg')).toHaveAttribute('width', '16');
+    expect(pinButton).toHaveClass('absolute', '-right-1', 'top-1.5', 'h-6', 'w-6', 'opacity-0');
+    expect(pinButton.querySelector('svg')).toHaveAttribute('width', '14');
     expect(screen.queryByText('Pin sidebar')).not.toBeInTheDocument();
 
     fireEvent.mouseEnter(screen.getByRole('navigation', { name: 'Main navigation' }));

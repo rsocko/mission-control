@@ -293,6 +293,8 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     stopListening: voiceStop,
   } = useVoiceCapture({ onTranscript: handleVoiceTranscript, onError: (msg) => toast.error(msg) });
   const isVoiceListening = voiceState === 'listening';
+  const isVoiceStarting = voiceState === 'starting';
+  const isVoiceActive = isVoiceStarting || isVoiceListening;
 
   const parseInput = useCallback((text: string) => parseTaskInput(text, {
     ...quickAddPreferences,
@@ -1356,26 +1358,32 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           <div className="flex shrink-0 items-center gap-1 pr-1">
             {/* Voice input toggle */}
             {voiceSupported && (
-              <Tooltip content={isVoiceListening ? 'Stop dictation' : 'Dictate task'}>
+              <Tooltip content={isVoiceActive ? 'Stop dictation' : 'Dictate task'}>
                 <button
                   type="button"
                   onMouseDown={(e) => {
                     e.preventDefault();
-                    if (isVoiceListening) {
+                    if (isVoiceActive) {
                       voiceStop();
                     } else {
                       voiceStart();
                     }
                   }}
-                  aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'}
+                  aria-label={
+                    isVoiceListening
+                      ? 'Stop voice input'
+                      : isVoiceStarting
+                        ? 'Cancel voice input'
+                        : 'Start voice input'
+                  }
                   className={cn(
                     'inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors',
-                    isVoiceListening
+                    isVoiceActive
                       ? 'text-red-400 bg-red-500/10 border border-red-500/30 animate-pulse'
                       : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
                   )}
                 >
-                  {isVoiceListening ? <Square size={13} className="fill-current" /> : <Mic size={13} />}
+                  {isVoiceActive ? <Square size={13} className="fill-current" /> : <Mic size={13} />}
                 </button>
               </Tooltip>
             )}

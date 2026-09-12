@@ -96,6 +96,7 @@ import {
   getPhaseTaskStatusSummary,
   shouldCompactCompletedPhase,
 } from '@/lib/projects/phase-task-status';
+import { LARGE_PHASE_TASK_THRESHOLD } from '@/lib/projects/phase-reorganization';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -151,6 +152,7 @@ import type {
   RequestConfirmation,
 } from './contracts';
 import { AIPlanControl } from './AIPlanControl';
+import { PhaseReorganizationTrigger } from './PhaseReorganizationTrigger';
 import { PlanTaskRow } from '../PlanTaskRow';
 import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
@@ -1206,8 +1208,25 @@ export function ProjectPhasesTab({
         </CardHeader>
 
         {/* AI Insights - inline hints based on phase data */}
-        {phases.length >= 2 && (() => {
-          const insights: Array<{ type: 'gap' | 'stale' | 'overlap'; message: string }> = [];
+        {phases.length > 0 && (() => {
+          const insights: Array<{
+            type: 'gap' | 'stale' | 'overlap' | 'large';
+            message: string;
+            phaseId?: string;
+            phaseName?: string;
+          }> = [];
+          const largePhases = phases.filter(
+            (phase) => (phaseEntries[phase.id] ?? []).length > LARGE_PHASE_TASK_THRESHOLD,
+          );
+          for (const largePhase of largePhases) {
+            const taskCount = (phaseEntries[largePhase.id] ?? []).length;
+            insights.push({
+              type: 'large',
+              message: `“${largePhase.name}” has ${taskCount} tasks and may be easier to manage if subdivided.`,
+              phaseId: largePhase.id,
+              phaseName: largePhase.name,
+            });
+          }
           const stalePhasesCount = phases.filter((p) => p.status === 'in_progress').length;
           if (stalePhasesCount > 2) {
             insights.push({ type: 'stale', message: `${stalePhasesCount} phases are marked in-progress simultaneously — consider focusing on fewer.` });
@@ -1235,7 +1254,15 @@ export function ProjectPhasesTab({
                 {insights.slice(0, 3).map((insight, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
                     <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-purple-400 flex-shrink-0" />
-                    <span>{insight.message}</span>
+                    <span className="flex-1">{insight.message}</span>
+                    {insight.phaseId && insight.phaseName ? (
+                      <PhaseReorganizationTrigger
+                        phaseId={insight.phaseId}
+                        phaseName={insight.phaseName}
+                        proposalActions={proposalActions}
+                        compact
+                      />
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1458,10 +1485,28 @@ export function ProjectPhasesTab({
                                         </Tooltip>
                                       ) : null}
                                       {/* Task count — read-only pill, visually distinct */}
-                                      <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                                      <span
+                                        className={cn(
+                                          'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium',
+                                          allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                            ? 'bg-amber-500/10 text-amber-300'
+                                            : 'bg-[var(--surface-2)] text-[var(--text-secondary)]',
+                                        )}
+                                        title={allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                          ? 'Large phases can be harder to scan and maintain.'
+                                          : undefined}
+                                      >
                                         <Layers3 size={11} />
                                         {hasPlanTaskFilters || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? ' · Large phase' : ''}
                                       </span>
+                                      {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? (
+                                        <PhaseReorganizationTrigger
+                                          phaseId={phase.id}
+                                          phaseName={phase.name}
+                                          proposalActions={proposalActions}
+                                        />
+                                      ) : null}
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">

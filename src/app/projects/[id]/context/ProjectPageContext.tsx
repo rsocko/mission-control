@@ -69,6 +69,8 @@ function hierarchyCommandTaskIds(command: ProjectHierarchyCommand): string[] {
       return command.states.map((state) => state.taskId);
     case 'update_phase_item':
       return [command.taskId];
+    case 'replace_phase_structure':
+      return command.placements.map((placement) => placement.taskId);
     case 'reorder_phases':
       return [];
   }

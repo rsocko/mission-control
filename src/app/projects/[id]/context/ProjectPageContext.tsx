@@ -69,6 +69,8 @@ function hierarchyCommandTaskIds(command: ProjectHierarchyCommand): string[] {
       return command.states.map((state) => state.taskId);
     case 'update_phase_item':
       return [command.taskId];
+    case 'replace_phase_structure':
+      return command.placements.map((placement) => placement.taskId);
     case 'reorder_phases':
       return [];
   }
@@ -85,6 +87,7 @@ interface ProjectPageDataContextValue {
   progress: ProgressSummary;
   phaseEntries: Record<string, PhaseTaskEntry[]>;
   taskToPhase: Map<string, ProjectPhase>;
+  unassignedTasks: ProjectTask[];
   phaseMenuItems: Array<{ id: string; name: string }>;
   reportRefreshKey: string;
 }
@@ -507,6 +510,12 @@ export function ProjectPageProvider({
     }
     return mapping;
   }, [phaseItemsByPhase, phases]);
+  const unassignedTasks = useMemo(
+    () => phases.length > 0
+      ? tasks.filter((task) => !taskToPhase.has(task.id))
+      : [],
+    [phases.length, taskToPhase, tasks],
+  );
   const phaseMenuItems = useMemo(
     () => phases.map((phase) => ({ id: phase.id, name: phase.name })),
     [phases],
@@ -533,6 +542,7 @@ export function ProjectPageProvider({
     progress,
     phaseEntries,
     taskToPhase,
+    unassignedTasks,
     phaseMenuItems,
     reportRefreshKey,
   }), [
@@ -548,6 +558,7 @@ export function ProjectPageProvider({
     reportRefreshKey,
     taskToPhase,
     tasks,
+    unassignedTasks,
   ]);
 
   const mutationsValue = useMemo<ProjectPageMutationsContextValue>(() => ({

@@ -209,6 +209,46 @@ export interface Tag {
 
 export type ProjectStatus = 'not_started' | 'active' | 'on_hold' | 'completed' | 'cancelled';
 export type ProjectHealth = 'on_track' | 'at_risk' | 'behind';
+export type ProjectPulseState = 'on_track' | 'watch' | 'off_track' | 'unknown';
+export type ProjectPulseFreshness = 'fresh' | 'aging' | 'stale' | 'unknown';
+export type ProjectPulseTrend = 'improving' | 'stable' | 'worsening' | 'unknown';
+export type ProjectPulseConfidence = 'high' | 'medium' | 'low';
+export type ProjectPulseReasonCode =
+  | 'target_missed'
+  | 'late_phase'
+  | 'overdue_work'
+  | 'deadline_pressure'
+  | 'phase_deadline'
+  | 'stale_activity'
+  | 'no_tasks'
+  | 'limited_schedule'
+  | 'lifecycle_inactive';
+
+export interface ProjectPulseReason {
+  code: ProjectPulseReasonCode;
+  detail: string;
+}
+
+export interface ProjectPulse {
+  state: ProjectPulseState;
+  legacyHealth: ProjectHealth;
+  summary: string;
+  reasons: ProjectPulseReason[];
+  freshness: {
+    state: ProjectPulseFreshness;
+    label: string;
+    daysSinceActivity: number | null;
+  };
+  trend: {
+    state: ProjectPulseTrend;
+    label: string;
+  };
+  confidence: {
+    level: ProjectPulseConfidence;
+    label: string;
+  };
+  suggestion: string | null;
+}
 
 export interface ProjectProgress {
   totalTasks: number;
@@ -217,6 +257,7 @@ export interface ProjectProgress {
   percentComplete: number;
   health: ProjectHealth;
   lastActivity?: string;
+  pulse?: ProjectPulse;
 }
 
 // ─── PROJECT PHASES ─────────────────────────────────────────────────────────

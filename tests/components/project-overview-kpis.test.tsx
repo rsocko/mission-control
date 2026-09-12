@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ProjectOverviewKpis } from '@/app/projects/[id]/components';
 
 describe('ProjectOverviewKpis', () => {
-  it('presents progress, task flow, and health as accessible visuals', () => {
+  it('presents progress, task flow, and Pulse evidence accessibly', () => {
     render(
       <ProjectOverviewKpis
         progress={{
@@ -14,16 +14,25 @@ describe('ProjectOverviewKpis', () => {
           cancelledTasks: 0,
           percentComplete: 25,
         }}
-        health={{
-          health: 'on_track',
-          message: 'Progress is tracking well against the current plan.',
+        pulse={{
+          state: 'on_track',
+          legacyHealth: 'on_track',
+          summary: 'Progress is tracking well against the current plan.',
+          reasons: [],
+          freshness: { state: 'fresh', label: 'Active today', daysSinceActivity: 0 },
+          trend: { state: 'improving', label: '5 completed this week' },
+          confidence: { level: 'high', label: 'Strong evidence' },
+          suggestion: null,
         }}
       />,
     );
 
     expect(screen.getByRole('img', { name: '25% of project tasks complete' })).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '3 of 20 tasks in progress' })).toBeInTheDocument();
-    expect(screen.getByRole('img', { name: 'Project health: On track' })).toBeInTheDocument();
+    expect(screen.getByText('Project pulse')).toBeInTheDocument();
+    expect(screen.getByText('On track')).toBeInTheDocument();
+    expect(screen.getByText('Fresh')).toBeInTheDocument();
+    expect(screen.getByText('Improving')).toBeInTheDocument();
     expect(screen.getByText('12')).toBeInTheDocument();
     expect(screen.getByText('15% of tasks')).toBeInTheDocument();
   });
@@ -39,9 +48,15 @@ describe('ProjectOverviewKpis', () => {
           cancelledTasks: 0,
           percentComplete: 0,
         }}
-        health={{
-          health: 'on_track',
-          message: 'No schedule risks detected.',
+        pulse={{
+          state: 'unknown',
+          legacyHealth: 'on_track',
+          summary: 'No tasks are assigned, so delivery cannot be assessed yet.',
+          reasons: [{ code: 'no_tasks', detail: 'No tasks are assigned, so delivery cannot be assessed yet.' }],
+          freshness: { state: 'unknown', label: 'No activity yet', daysSinceActivity: null },
+          trend: { state: 'unknown', label: 'Not enough recent history' },
+          confidence: { level: 'low', label: 'Limited evidence' },
+          suggestion: 'Add the first task to make progress measurable.',
         }}
       />,
     );
@@ -62,14 +77,22 @@ describe('ProjectOverviewKpis', () => {
           cancelledTasks: 1,
           percentComplete: 25,
         }}
-        health={{
-          health: 'at_risk',
-          message: 'One milestone needs attention.',
+        pulse={{
+          state: 'watch',
+          legacyHealth: 'at_risk',
+          summary: 'One milestone needs attention.',
+          reasons: [{ code: 'phase_deadline', detail: 'One milestone needs attention.' }],
+          freshness: { state: 'aging', label: 'Active 8 days ago', daysSinceActivity: 8 },
+          trend: { state: 'stable', label: 'No completion trend yet' },
+          confidence: { level: 'medium', label: 'Some schedule gaps' },
+          suggestion: 'Confirm the next deliverable for the ending phase.',
         }}
       />,
     );
 
     expect(screen.getByText('To do')).toBeInTheDocument();
     expect(screen.getByText('Cancelled')).toBeInTheDocument();
+    expect(screen.getByText('One milestone needs attention.')).toBeInTheDocument();
+    expect(screen.getByText(/Confirm the next deliverable/)).toBeInTheDocument();
   });
 });

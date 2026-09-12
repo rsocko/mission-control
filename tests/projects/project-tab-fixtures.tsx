@@ -1100,7 +1100,7 @@ export function installProjectPageHarness(
 export type ProjectTabName = 'Overview' | 'Plan' | 'Project Tasks' | 'Settings';
 
 export function tabButtonName(tab: ProjectTabName) {
-  return new RegExp(`^${tab}( \\(\\d+\\))?$`);
+  return new RegExp(`^${tab}( \\(\\d+\\))?( \\d+ unphased tasks?)?$`);
 }
 
 export async function projectPageElement(

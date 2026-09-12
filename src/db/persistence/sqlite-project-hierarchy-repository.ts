@@ -266,6 +266,71 @@ function applyMutations(
         `).run(...values, mutation.itemId);
         break;
       }
+      case 'insert_phase': {
+        const inserted = sqlite.prepare(`
+          INSERT OR IGNORE INTO project_phases (
+            id, project_id, name, description, status, color, estimated_days,
+            target_start, target_end, start_after_phase_id, sort_order,
+            completed_at, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          mutation.phase.id,
+          mutation.phase.projectId,
+          mutation.phase.name,
+          mutation.phase.description,
+          mutation.phase.status,
+          mutation.phase.color,
+          mutation.phase.estimatedDays,
+          mutation.phase.targetStart,
+          mutation.phase.targetEnd,
+          mutation.phase.startAfterPhaseId,
+          mutation.phase.sortOrder,
+          mutation.phase.completedAt,
+          mutation.phase.createdAt,
+          mutation.phase.updatedAt,
+        );
+        if (inserted.changes !== 1) {
+          throw new ProjectHierarchyServiceError(
+            'Phase ID already exists',
+            409,
+            'PHASE_ID_CONFLICT',
+          );
+        }
+        break;
+      }
+      case 'update_phase':
+        sqlite.prepare(`
+          UPDATE project_phases SET
+            name = ?, description = ?, status = ?, color = ?,
+            estimated_days = ?, target_start = ?, target_end = ?,
+            start_after_phase_id = ?, sort_order = ?, completed_at = ?,
+            updated_at = ?
+          WHERE id = ? AND project_id = ?
+        `).run(
+          mutation.phase.name,
+          mutation.phase.description,
+          mutation.phase.status,
+          mutation.phase.color,
+          mutation.phase.estimatedDays,
+          mutation.phase.targetStart,
+          mutation.phase.targetEnd,
+          mutation.phase.startAfterPhaseId,
+          mutation.phase.sortOrder,
+          mutation.phase.completedAt,
+          mutation.phase.updatedAt,
+          mutation.phase.id,
+          projectId,
+        );
+        break;
+      case 'delete_phase':
+        sqlite.prepare(`
+          UPDATE project_phases
+          SET start_after_phase_id = NULL, updated_at = ?
+          WHERE project_id = ? AND start_after_phase_id = ?
+        `).run(mutation.updatedAt, projectId, mutation.phaseId);
+        sqlite.prepare('DELETE FROM project_phases WHERE id = ? AND project_id = ?')
+          .run(mutation.phaseId, projectId);
+        break;
       case 'set_phase_sort_order':
         sqlite.prepare(`
           UPDATE project_phases SET sort_order = ?, updated_at = ? WHERE id = ?

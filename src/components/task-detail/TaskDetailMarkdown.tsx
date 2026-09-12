@@ -3,6 +3,10 @@
 import { createContext, useContext, useState, type ImgHTMLAttributes } from 'react';
 import dynamic from 'next/dynamic';
 import { ExternalLink, ImageOff } from 'lucide-react';
+import {
+  getTaskImageSource,
+  isGitHubUserAttachmentUrl,
+} from '@/lib/github-user-attachments';
 
 interface MarkdownNode {
   type: string;
@@ -34,6 +38,7 @@ export function remarkOnlyEmbeddedImages() {
 
 /** Source URL used by the fallback shown when an embedded image fails to load. */
 export const MarkdownSourceUrlContext = createContext<string | null>(null);
+const MarkdownTaskIdContext = createContext<string | undefined>(undefined);
 
 /** Renders a markdown image and degrades to an explanatory card when it fails. */
 export function EmbeddedMarkdownImage({
@@ -43,10 +48,12 @@ export function EmbeddedMarkdownImage({
   ...imageProps
 }: ImgHTMLAttributes<HTMLImageElement>) {
   const sourceUrl = useContext(MarkdownSourceUrlContext);
+  const taskId = useContext(MarkdownTaskIdContext);
   const [failedSrc, setFailedSrc] = useState<ImgHTMLAttributes<HTMLImageElement>['src'] | null>(null);
-  const failed = src != null && failedSrc === src;
+  const renderedSrc = typeof src === 'string' ? getTaskImageSource(src, taskId) : src;
+  const failed = renderedSrc != null && failedSrc === renderedSrc;
   const isPrivateGitHubAttachment = typeof src === 'string'
-    && src.startsWith('https://github.com/user-attachments/assets/');
+    && isGitHubUserAttachmentUrl(src);
 
   if (failed) {
     return (
@@ -82,11 +89,11 @@ export function EmbeddedMarkdownImage({
     // eslint-disable-next-line @next/next/no-img-element
     <img
       {...imageProps}
-      src={src}
+      src={renderedSrc}
       alt={alt ?? ''}
       onError={(event) => {
         onError?.(event);
-        setFailedSrc(src ?? null);
+        setFailedSrc(renderedSrc ?? null);
       }}
     />
   );
@@ -98,6 +105,8 @@ export interface TaskDetailMarkdownProps {
   onCheckboxToggle?: (index: number, checked: boolean) => void;
   /** Task source URL offered when an embedded image cannot be loaded. */
   sourceUrl?: string | null;
+  /** Task whose GitHub connector authenticates private embedded images. */
+  taskId?: string;
 }
 
 /**
@@ -124,47 +133,49 @@ export const TaskDetailMarkdown = dynamic(
     return function InteractiveMarkdown(props: TaskDetailMarkdownProps) {
       let checkboxIndex = -1;
       return (
-        <MarkdownSourceUrlContext.Provider value={props.sourceUrl ?? null}>
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm, remarkBreaks, remarkOnlyEmbeddedImages]}
-            rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
-            components={{
-              a: ({ node, href, ...anchorProps }) => {
-                void node;
-                const isExternal = /^https?:\/\//i.test(href ?? '');
-                return (
-                  <a
-                    {...anchorProps}
-                    href={href}
-                    rel={isExternal ? 'noopener noreferrer' : undefined}
-                    target={isExternal ? '_blank' : undefined}
-                  />
-                );
-              },
-              img: EmbeddedMarkdownImage,
-              input: (inputProps) => {
-                if (inputProps.type === 'checkbox') {
-                  checkboxIndex++;
-                  const idx = checkboxIndex;
+        <MarkdownTaskIdContext.Provider value={props.taskId}>
+          <MarkdownSourceUrlContext.Provider value={props.sourceUrl ?? null}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm, remarkBreaks, remarkOnlyEmbeddedImages]}
+              rehypePlugins={[rehypeRaw, rehypeSanitize, rehypeHighlight]}
+              components={{
+                a: ({ node, href, ...anchorProps }) => {
+                  void node;
+                  const isExternal = /^https?:\/\//i.test(href ?? '');
                   return (
-                    <input
-                      type="checkbox"
-                      checked={!!inputProps.checked}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        props.onCheckboxToggle?.(idx, e.target.checked);
-                      }}
-                      className="cursor-pointer mr-1"
+                    <a
+                      {...anchorProps}
+                      href={href}
+                      rel={isExternal ? 'noopener noreferrer' : undefined}
+                      target={isExternal ? '_blank' : undefined}
                     />
                   );
-                }
-                return <input {...inputProps} />;
-              },
-            }}
-          >
-            {props.children}
-          </ReactMarkdown>
-        </MarkdownSourceUrlContext.Provider>
+                },
+                img: EmbeddedMarkdownImage,
+                input: (inputProps) => {
+                  if (inputProps.type === 'checkbox') {
+                    checkboxIndex++;
+                    const idx = checkboxIndex;
+                    return (
+                      <input
+                        type="checkbox"
+                        checked={!!inputProps.checked}
+                        onChange={(e) => {
+                          e.stopPropagation();
+                          props.onCheckboxToggle?.(idx, e.target.checked);
+                        }}
+                        className="cursor-pointer mr-1"
+                      />
+                    );
+                  }
+                  return <input {...inputProps} />;
+                },
+              }}
+            >
+              {props.children}
+            </ReactMarkdown>
+          </MarkdownSourceUrlContext.Provider>
+        </MarkdownTaskIdContext.Provider>
       );
     };
   },

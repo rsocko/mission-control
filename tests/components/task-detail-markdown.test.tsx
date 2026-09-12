@@ -7,6 +7,13 @@ import {
   remarkOnlyEmbeddedImages,
   toggleMarkdownCheckbox,
 } from '@/components/task-detail/TaskDetailMarkdown';
+import {
+  getTaskImageSource,
+  isGitHubUserAttachmentUrl,
+} from '@/lib/github-user-attachments';
+
+const GITHUB_ATTACHMENT =
+  'https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef';
 
 interface MarkdownNode {
   type: string;
@@ -109,7 +116,7 @@ describe('EmbeddedMarkdownImage', () => {
   it('explains private GitHub attachments and links to the source task', () => {
     render(
       <MarkdownSourceUrlContext.Provider value="https://github.com/acme/repo/issues/7">
-        <EmbeddedMarkdownImage src="https://github.com/user-attachments/assets/abc" alt="Screenshot" />
+        <EmbeddedMarkdownImage src={GITHUB_ATTACHMENT} alt="Screenshot" />
       </MarkdownSourceUrlContext.Provider>,
     );
 
@@ -120,6 +127,25 @@ describe('EmbeddedMarkdownImage', () => {
       'href',
       'https://github.com/acme/repo/issues/7',
     );
+  });
+
+  describe('GitHub user attachment URLs', () => {
+    it('rewrites canonical attachment URLs through the task-scoped proxy', () => {
+      expect(getTaskImageSource(GITHUB_ATTACHMENT, 'task/1')).toBe(
+        `/api/tasks/task%2F1/github-attachment?url=${encodeURIComponent(GITHUB_ATTACHMENT)}`,
+      );
+    });
+
+    it.each([
+      'http://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef',
+      'https://github.com.evil.example/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef',
+      'https://github.com/user-attachments/assets/not-a-uuid',
+      'https://github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef?redirect=1',
+      'https://user:pass@github.com/user-attachments/assets/01234567-89ab-cdef-0123-456789abcdef',
+    ])('leaves unsupported URL unchanged: %s', (url) => {
+      expect(isGitHubUserAttachmentUrl(url)).toBe(false);
+      expect(getTaskImageSource(url, 'task-1')).toBe(url);
+    });
   });
 
   it('omits the source link when no source URL is available', () => {
@@ -171,6 +197,19 @@ describe('TaskDetailMarkdown', () => {
     expect(await screen.findByAltText('Embedded')).toBeInTheDocument();
     expect(document.querySelector('script')).toBeNull();
     expect(screen.getByText(/alert\(1\)/)).toBeInTheDocument();
+  });
+
+  it('routes private GitHub attachments through the current task', async () => {
+    render(
+      <TaskDetailMarkdown taskId="task-1">
+        {`![Private screenshot](${GITHUB_ATTACHMENT})`}
+      </TaskDetailMarkdown>,
+    );
+
+    expect(await screen.findByAltText('Private screenshot')).toHaveAttribute(
+      'src',
+      `/api/tasks/task-1/github-attachment?url=${encodeURIComponent(GITHUB_ATTACHMENT)}`,
+    );
   });
 
   it('reports checkbox toggles by rendered index', async () => {

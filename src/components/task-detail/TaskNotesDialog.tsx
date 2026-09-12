@@ -8,6 +8,7 @@ import { modalContent, modalOverlay } from '@/lib/motion';
 import { TaskDetailMarkdown } from './TaskDetailMarkdown';
 
 export interface TaskNotesDialogProps {
+  taskId: string;
   /** Task title shown as dialog context. */
   taskTitle: string;
   /** Saved notes markdown. */
@@ -32,6 +33,7 @@ export interface TaskNotesDialogProps {
 
 /** Full-screen notes dialog with read and side-by-side edit modes. */
 export function TaskNotesDialog({
+  taskId,
   taskTitle,
   description,
   descValue,
@@ -125,7 +127,7 @@ export function TaskNotesDialog({
               />
               <div className="h-full overflow-y-auto rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)] p-5" aria-label="Notes preview">
                 <div className="prose prose-invert max-w-none">
-                  <TaskDetailMarkdown sourceUrl={sourceUrl}>
+                  <TaskDetailMarkdown sourceUrl={sourceUrl} taskId={taskId}>
                     {descValue || '*Nothing to preview yet.*'}
                   </TaskDetailMarkdown>
                 </div>
@@ -136,6 +138,7 @@ export function TaskNotesDialog({
               <TaskDetailMarkdown
                 onCheckboxToggle={onCheckboxToggle}
                 sourceUrl={sourceUrl}
+                taskId={taskId}
               >
                 {description || '*No notes yet.*'}
               </TaskDetailMarkdown>

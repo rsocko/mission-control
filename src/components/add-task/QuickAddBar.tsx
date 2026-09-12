@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
-import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Plus, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
+import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Ellipsis, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
 import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
 import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE, getTaskPriorityVisual } from '@/lib/constants/task-formatting';
@@ -1211,20 +1211,21 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
 
   return (
     <>
-      <div ref={barRef} className="relative z-10" style={{ minHeight: '2.5rem' }}>
+      <div ref={barRef} className="quick-add-bar relative z-10">
         <div
-          className={`absolute left-0 right-0 top-0 flex flex-wrap items-center gap-2 bg-[var(--surface-1)] rounded-xl px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 border ${
+          className={`relative flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--surface-1)] px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 ${
             isFocused
               ? 'border-[var(--border-focus)] shadow-[var(--shadow-focus-glow)]'
               : 'border-[var(--border)] shadow-[var(--shadow-sm)]'
           }`}
         >
-          {/* Plus dropdown menu */}
-          <div ref={plusMenuRef} className="relative">
+          <div className="flex w-full min-w-0 items-center gap-2">
+          {/* Overflow actions menu */}
+          <div ref={plusMenuRef} className="relative shrink-0">
             <Tooltip content="More actions">
               <button
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                type="button"
+                onClick={() => {
                   setShowPlusMenu(!showPlusMenu);
                 }}
                 className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
@@ -1233,8 +1234,10 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     : 'text-blue-400 hover:text-blue-300 hover:bg-[var(--surface-2)]'
                 }`}
                 aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded={showPlusMenu}
               >
-                <Plus size={16} />
+                <Ellipsis size={17} />
               </button>
             </Tooltip>
             <AnimatePresence>
@@ -1244,11 +1247,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                   initial="hidden"
                   animate="show"
                   exit="exit"
+                  role="menu"
                   className="absolute left-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-lg py-1"
                 >
                   <button
-                    onMouseDown={(e) => {
-                      e.preventDefault();
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
                       setShowPlusMenu(false);
                       setShowTemplatePicker(true);
                     }}
@@ -1259,8 +1264,9 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     <span className="ml-auto text-xs text-[var(--text-muted)]">Ctrl+Shift+T</span>
                   </button>
                   <button
-                    onMouseDown={(e) => {
-                      e.preventDefault();
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
                       setShowPlusMenu(false);
                       setShowModal(true);
                     }}
@@ -1270,6 +1276,59 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     <span>Expanded form</span>
                     <span className="ml-auto text-xs text-[var(--text-muted)]">Ctrl+Shift+N</span>
                   </button>
+                  <div className="my-1 h-px bg-[var(--border-subtle)]" />
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    onClick={() => {
+                      setMyDayActive(active => !active);
+                      setShowPlusMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)]"
+                    aria-checked={myDayActive}
+                  >
+                    <Sun size={13} className={myDayActive ? 'text-amber-300' : 'text-[var(--text-muted)]'} />
+                    <span>{myDayActive ? 'Remove from My Day' : 'Add to My Day'}</span>
+                    {myDayActive && <Check size={13} className="ml-auto text-amber-300" />}
+                  </button>
+                  {visibleContextProject && (
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      onClick={() => {
+                        setContextProjectActive(active => !active);
+                        setShowPlusMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)]"
+                      aria-checked={contextProjectActive}
+                    >
+                      <GitBranch size={13} className={contextProjectActive ? 'text-pink-300' : 'text-[var(--text-muted)]'} />
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        {contextProjectActive ? 'Remove from' : 'Add to'} {visibleContextProject.name}
+                      </span>
+                      {contextProjectActive && <Check size={13} className="shrink-0 text-pink-300" />}
+                    </button>
+                  )}
+                  {voiceSupported && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        if (isVoiceActive) {
+                          voiceStop();
+                        } else {
+                          voiceStart();
+                        }
+                        setShowPlusMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)]"
+                    >
+                      {isVoiceActive
+                        ? <Square size={13} className="fill-current text-red-400" />
+                        : <Mic size={13} className="text-[var(--text-muted)]" />}
+                      <span>{isVoiceActive ? 'Stop dictation' : 'Dictate task'}</span>
+                    </button>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1361,110 +1420,118 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                         ? `Add task to ${destination.shortLabel ?? destination.label}...`
                         : 'Add a task... (t/ for templates)'
               }
-              className="min-w-[12rem]"
+              className="quick-add-input min-w-0"
             />
           </div>
 
           {/* Actions */}
-          <div className="flex shrink-0 items-center gap-1 pr-1">
+          <div className="quick-add-actions flex shrink-0 items-center gap-1 pr-1">
             {/* Voice input toggle */}
             {voiceSupported && (
-              <Tooltip content={isVoiceActive ? 'Stop dictation' : 'Dictate task'}>
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    if (isVoiceActive) {
-                      voiceStop();
-                    } else {
-                      voiceStart();
+              <div className="quick-add-secondary-voice">
+                <Tooltip content={isVoiceActive ? 'Stop dictation' : 'Dictate task'}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      if (isVoiceActive) {
+                        voiceStop();
+                      } else {
+                        voiceStart();
+                      }
+                    }}
+                    aria-label={
+                      isVoiceListening
+                        ? 'Stop voice input'
+                        : isVoiceStarting
+                          ? 'Cancel voice input'
+                          : 'Start voice input'
                     }
-                  }}
-                  aria-label={
-                    isVoiceListening
-                      ? 'Stop voice input'
-                      : isVoiceStarting
-                        ? 'Cancel voice input'
-                        : 'Start voice input'
-                  }
-                  className={cn(
-                    'inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors',
-                    isVoiceActive
-                      ? 'text-red-400 bg-red-500/10 border border-red-500/30 animate-pulse'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
-                  )}
-                >
-                  {isVoiceActive ? <Square size={13} className="fill-current" /> : <Mic size={13} />}
-                </button>
-              </Tooltip>
+                    className={cn(
+                      'inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors',
+                      isVoiceActive
+                        ? 'text-red-400 bg-red-500/10 border border-red-500/30 animate-pulse'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
+                    )}
+                  >
+                    {isVoiceActive ? <Square size={13} className="fill-current" /> : <Mic size={13} />}
+                  </button>
+                </Tooltip>
+              </div>
             )}
 
             {/* My Day pill — shown when addToMyDay is active, toggleable */}
-            {myDayActive && (
-              <Tooltip content="Remove from My Day">
-                <button
-                  type="button"
-                  onClick={() => setMyDayActive(false)}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-amber-900/30 text-amber-300 border border-amber-700/40 hover:bg-amber-900/50 transition-colors"
-                >
-                  <Sun size={12} />
-                  <span>My Day</span>
-                  <span className="text-amber-400/60 ml-0.5">×</span>
-                </button>
-              </Tooltip>
-            )}
-            {!myDayActive && isFocused && (
-              <Tooltip content="Add to My Day">
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setMyDayActive(true);
-                  }}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-[var(--text-muted)] hover:text-amber-300 hover:bg-amber-900/20 border border-transparent hover:border-amber-700/30 transition-colors"
-                >
-                  <Sun size={12} />
-                  <span className="hidden sm:inline">My Day</span>
-                </button>
-              </Tooltip>
-            )}
+            <div className="quick-add-secondary-my-day">
+              {myDayActive && (
+                <Tooltip content="Remove from My Day">
+                  <button
+                    type="button"
+                    onClick={() => setMyDayActive(false)}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-amber-900/30 text-amber-300 border border-amber-700/40 hover:bg-amber-900/50 transition-colors"
+                  >
+                    <Sun size={12} />
+                    <span>My Day</span>
+                    <span className="text-amber-400/60 ml-0.5">×</span>
+                  </button>
+                </Tooltip>
+              )}
+              {!myDayActive && isFocused && (
+                <Tooltip content="Add to My Day">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setMyDayActive(true);
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-[var(--text-muted)] hover:text-amber-300 hover:bg-amber-900/20 border border-transparent hover:border-amber-700/30 transition-colors"
+                  >
+                    <Sun size={12} />
+                    <span>My Day</span>
+                  </button>
+                </Tooltip>
+              )}
+            </div>
 
             {visibleContextProject && (
-              <QuickAddProjectControl
-                project={visibleContextProject}
-                active={contextProjectActive}
-                onActiveChange={setContextProjectActive}
-              />
+              <div className="quick-add-secondary-project">
+                <QuickAddProjectControl
+                  project={visibleContextProject}
+                  active={contextProjectActive}
+                  onActiveChange={setContextProjectActive}
+                />
+              </div>
             )}
 
             {/* Expand to full form — shown when focused with text */}
             {isFocused && input.trim() && !listTypeahead && !templateTypeahead && !tagTypeahead && !priorityTypeahead && !effortTypeahead && (
-              <Tooltip content="Expanded form (Ctrl+Shift+N)">
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setShowModal(true);
-                  }}
-                  className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
-                  aria-label="Open expanded form"
-                >
-                  <Maximize2 size={13} />
-                </button>
-              </Tooltip>
+              <div className="quick-add-secondary-expand">
+                <Tooltip content="Expanded form (Ctrl+Shift+N)">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setShowModal(true);
+                    }}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
+                    aria-label="Open expanded form"
+                  >
+                    <Maximize2 size={13} />
+                  </button>
+                </Tooltip>
+              </div>
             )}
 
             {/* Destination pill */}
             <motion.button
               ref={destPillRef}
               onClick={() => setShowDestPicker(!showDestPicker)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--surface-2)] text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--surface-3)] transition-colors"
+              className="quick-add-destination inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--surface-2)] text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--surface-3)] transition-colors"
               animate={pillFlash ? { scale: [1, 1.08, 1], borderColor: ['var(--border)', 'var(--accent)', 'var(--border)'] } : {}}
               transition={{ duration: 0.4, ease: 'easeOut' }}
               title={destination.label}
             >
               <ConnectorIconImg type={destination.connectorType} size={14} />
-              <span className="max-w-[120px] truncate">{destination.shortLabel ?? destination.label}</span>
+              <span className="quick-add-destination-label max-w-[120px] truncate">{destination.shortLabel ?? destination.label}</span>
               <span className="text-[var(--text-muted)]">▾</span>
             </motion.button>
 
@@ -1479,6 +1546,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 {isSubmitting ? '...' : '↵ Add'}
               </button>
             )}
+          </div>
           </div>
 
           {/* Compound task split hint — inside bar as a full-width second row */}

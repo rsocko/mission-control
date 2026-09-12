@@ -43,6 +43,7 @@ import type {
 
 function AssignPhaseTarget({
   phase,
+  projectColor,
   entries,
   isExpanded,
   isDragging,
@@ -62,6 +63,7 @@ function AssignPhaseTarget({
   projects = [],
 }: {
   phase: ProjectPhase;
+  projectColor?: string;
   entries: PhaseTaskEntry[];
   isExpanded: boolean;
   isDragging: boolean;
@@ -85,7 +87,7 @@ function AssignPhaseTarget({
     data: { type: 'phase-drop' },
   });
 
-  const phaseColor = getPhaseColor(phase);
+  const phaseColor = getPhaseColor(phase, projectColor ? { color: projectColor } : null);
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(phase.name);
 
@@ -249,6 +251,7 @@ function UnassignedDropTarget({ isDragging, children }: { isDragging: boolean; c
 
 interface PhaseAssignViewProps {
   phases: ProjectPhase[];
+  projectColor?: string;
   unassignedTasks: ProjectTask[];
   phaseEntries: Record<string, PhaseTaskEntry[]>;
   sensors: ReturnType<typeof import('@dnd-kit/core').useSensors>;
@@ -278,6 +281,7 @@ interface PhaseAssignViewProps {
 
 export function PhaseAssignView({
   phases,
+  projectColor,
   unassignedTasks,
   phaseEntries,
   sensors,
@@ -510,6 +514,7 @@ export function PhaseAssignView({
                 <AssignPhaseTarget
                   key={phase.id}
                   phase={phase}
+                  projectColor={projectColor}
                   entries={phaseEntries[phase.id] ?? []}
                   isExpanded={expandedPhases.has(phase.id)}
                   isDragging={isDragging}

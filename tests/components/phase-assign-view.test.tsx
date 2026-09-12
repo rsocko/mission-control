@@ -7,6 +7,7 @@ import type {
   ProjectPhaseViewModel as ProjectPhase,
   ProjectTaskViewModel as ProjectTask,
 } from '@/app/projects/[id]/types';
+import { COLOR_PRESETS } from '@/lib/constants/colors';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
 
 vi.mock('@dnd-kit/core', () => ({
@@ -96,12 +97,17 @@ const task: ProjectTask = {
   metadata: null,
 };
 
-function renderView(onRenamePhase = vi.fn()) {
+function renderView(
+  onRenamePhase = vi.fn(),
+  renderedPhase = phase,
+  projectColor?: string,
+) {
   render(
     <PhaseAssignView
-      phases={[phase]}
+      phases={[renderedPhase]}
+      projectColor={projectColor}
       unassignedTasks={[]}
-      phaseEntries={{ [phase.id]: [] }}
+      phaseEntries={{ [renderedPhase.id]: [] }}
       sensors={[]}
       collisionDetection={vi.fn()}
       tasks={[]}
@@ -123,13 +129,23 @@ function renderView(onRenamePhase = vi.fn()) {
       onLinkExistingTask={vi.fn()}
       activeDragId={null}
       getTaskContextActions={() => taskContextActions}
-      phaseMenuItems={[{ id: phase.id, name: phase.name }]}
+      phaseMenuItems={[{ id: renderedPhase.id, name: renderedPhase.name }]}
     />,
   );
   return onRenamePhase;
 }
 
 describe('PhaseAssignView phase names', () => {
+  it('uses the project color when a phase inherits its color', () => {
+    const inheritedPhase = { ...phase, color: null };
+    renderView(vi.fn(), inheritedPhase, COLOR_PRESETS[3]);
+
+    const phaseName = screen.getByRole('button', { name: inheritedPhase.name });
+    expect(phaseName.previousElementSibling).toHaveStyle({
+      backgroundColor: COLOR_PRESETS[3],
+    });
+  });
+
   it('opens an unassigned task when its row is double-clicked', () => {
     const onDoubleClickTask = vi.fn();
     render(

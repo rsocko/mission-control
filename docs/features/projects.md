@@ -44,7 +44,7 @@ Individual project page with tasks, kanban, and progress details.
 - **Portfolio pulse** — Task completion and in-progress breakdown across visible projects
 - **Launch actions** — Create a blank project, ideate in Graph, or import a project plan
 - **Sidebar affordance** — A Show All Projects action expands the project navigator when it is collapsed
-- **Health indicators** — On Track / At Risk / Behind (derived from progress + target date)
+- **Project Pulse** — On Track / Watch / Off Track / Unknown, with deterministic reasons, freshness, trend, confidence, and a bounded next move derived from current project signals
 - **Hidden projects** — Review and restore hidden projects from the landing page
 
 ### Project Properties
@@ -63,7 +63,7 @@ Individual project page with tasks, kanban, and progress details.
 ### Project Detail View
 - Full task list scoped to the project
 - Kanban board with project-specific columns
-- Progress summary and health indicator
+- Progress summary and explainable Project Pulse; lifecycle status remains separate from the inferred delivery assessment
 
 ### Auto-Include Rules
 - Rules can match tasks by tag, title text, source list, or connector

@@ -2,7 +2,6 @@
 
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
-import type { ProjectHealth } from '@/types';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fadeSlideUp } from '@/lib/motion';
@@ -49,9 +48,9 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
     toggleTask,
   } = useProjectPageTaskInteractions();
 
-  const health = useMemo(() => {
+  const pulse = useMemo(() => {
     if (!project) {
-      return { health: 'on_track' as ProjectHealth, message: 'Loading health…' };
+      return null;
     }
     return getHealthSummary(project, phases, tasks, progress);
   }, [phases, progress, project, tasks]);
@@ -75,7 +74,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
 
   return (
     <motion.section variants={fadeSlideUp} className="space-y-6">
-      <ProjectOverviewKpis progress={progress} health={health} />
+      {pulse && <ProjectOverviewKpis progress={progress} pulse={pulse} />}
 
       <BurnReportCard
         projectId={projectId}

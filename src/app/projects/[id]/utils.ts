@@ -14,7 +14,6 @@ import {
 } from 'date-fns';
 import type {
   LocalDisposition,
-  ProjectHealth,
   TaskPriority,
   TaskStatus,
 } from '@/types';
@@ -24,6 +23,7 @@ import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
+import { deriveProjectPulse } from '@/lib/projects/project-pulse';
 export {
   getProjectTaskConnectorIcon as getConnectorIcon,
   getProjectTaskPriorityColor as getPriorityDotColor,
@@ -249,8 +249,14 @@ export function getProjectTabCount(
   return null;
 }
 
-export function getHealthSummary(project: ProjectRecord, phases: ProjectPhase[], tasks: ProjectTask[], progress: ProgressSummary): HealthSummary {
-  const today = startOfDay(new Date());
+export function getHealthSummary(
+  project: ProjectRecord,
+  phases: ProjectPhase[],
+  tasks: ProjectTask[],
+  progress: ProgressSummary,
+  now = new Date(),
+): HealthSummary {
+  const today = startOfDay(now);
   const overdueTasks = tasks.filter((task) => {
     if (!task.dueDate || task.status === 'done' || task.status === 'cancelled') return false;
     return isBefore(startOfDay(parseLocalDate(task.dueDate)), today);
@@ -259,40 +265,42 @@ export function getHealthSummary(project: ProjectRecord, phases: ProjectPhase[],
     if (!phase.targetEnd || phase.status === 'completed') return false;
     return isBefore(startOfDay(parseLocalDate(phase.targetEnd)), today);
   }).length;
-  const targetDate = project.targetDate ? startOfDay(parseLocalDate(project.targetDate)) : null;
-  const daysToTarget = targetDate ? differenceInCalendarDays(targetDate, today) : null;
+  const upcomingPhaseDeadlines = phases.filter((phase) => {
+    if (!phase.targetEnd || phase.status === 'completed') return false;
+    const daysRemaining = differenceInCalendarDays(startOfDay(parseLocalDate(phase.targetEnd)), today);
+    return daysRemaining >= 0 && daysRemaining <= 7;
+  }).length;
+  const timestamps = [
+    project.updatedAt,
+    ...phases.map((phase) => phase.updatedAt),
+    ...tasks.map((task) => task.updatedAt),
+  ]
+    .map((value) => new Date(value))
+    .filter((value) => !Number.isNaN(value.getTime()));
+  const lastActivity = timestamps.length > 0
+    ? new Date(Math.max(...timestamps.map((value) => value.getTime()))).toISOString()
+    : null;
+  const sevenDaysAgo = subDays(now, 7);
+  const recentlyCompletedTasks = tasks.filter((task) => {
+    if (task.status !== 'done') return false;
+    const completedAt = task.completedAt ? new Date(task.completedAt) : new Date(task.updatedAt);
+    return !Number.isNaN(completedAt.getTime()) && completedAt >= sevenDaysAgo && completedAt <= now;
+  }).length;
 
-  if (
-    overdueTasks > 0 ||
-    latePhases > 0 ||
-    (daysToTarget !== null && daysToTarget < 0 && progress.percentComplete < 100)
-  ) {
-    return {
-      health: 'behind',
-      message: overdueTasks > 0
-        ? `${overdueTasks} ${overdueTasks === 1 ? 'task is' : 'tasks are'} past due — worth a look.`
-        : 'At least one phase is past its target window.',
-    };
-  }
-
-  if (
-    (daysToTarget !== null && daysToTarget <= 14 && progress.percentComplete < 75) ||
-    phases.some((phase) => {
-      if (!phase.targetEnd || phase.status === 'completed') return false;
-      const daysRemaining = differenceInCalendarDays(startOfDay(parseLocalDate(phase.targetEnd)), today);
-      return daysRemaining >= 0 && daysRemaining <= 7;
-    })
-  ) {
-    return {
-      health: 'at_risk',
-      message: 'Upcoming deadlines are close relative to current progress.',
-    };
-  }
-
-  return {
-    health: 'on_track',
-    message: progress.totalTasks > 0 ? 'Progress is tracking well against the current plan.' : 'Project structure is in place and ready for work.',
-  };
+  return deriveProjectPulse({
+    totalTasks: progress.totalTasks,
+    completedTasks: progress.completedTasks,
+    percentComplete: progress.percentComplete,
+    overdueTasks,
+    scheduledTasks: tasks.filter((task) => Boolean(task.dueDate)).length,
+    targetDate: project.targetDate,
+    latePhases,
+    upcomingPhaseDeadlines,
+    phasesWithDates: phases.filter((phase) => Boolean(phase.targetEnd)).length,
+    lastActivity,
+    recentlyCompletedTasks,
+    lifecycleStatus: getProjectStatus(project),
+  }, now);
 }
 
 export function buildGanttRows(phases: ProjectPhase[], phaseEntries: Record<string, PhaseTaskEntry[]>, project: ProjectRecord | null): GanttPhaseRow[] {

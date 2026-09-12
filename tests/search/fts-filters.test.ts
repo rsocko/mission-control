@@ -3,22 +3,21 @@ import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-d
 
 describe('FTS authoritative filters', () => {
   let searchFTS: typeof import('@/lib/search/fts').searchFTS;
+  let searchFTSFacets: typeof import('@/lib/search/fts').searchFTSFacets;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
 
-    const [database, schema, fts] = await Promise.all([
-      importInitializedSqliteDatabase(),
-      import('@/db/schema'),
-      import('@/lib/search/fts'),
-    ]);
+    const database = await importInitializedSqliteDatabase();
+    const fts = await import('@/lib/search/fts');
     const timestamp = '2030-01-01T00:00:00.000Z';
     const makeTask = (
       id: string,
       sourceListName: string,
       status: string,
+      dueDate: string | null = null,
     ) => ({
       id,
       sourceId: `source-${id}`,
@@ -27,6 +26,7 @@ describe('FTS authoritative filters', () => {
       title: 'Quarterly planning',
       status,
       priority: 'none',
+      dueDate,
       sourceListName,
       metadata: {},
       syncStatus: 'synced' as const,
@@ -35,12 +35,14 @@ describe('FTS authoritative filters', () => {
       lastSyncedAt: timestamp,
     });
 
-    await database.default.insert(schema.tasks).values([
+    await database.default.insert(database.schema.tasks).values([
       ...Array.from({ length: 55 }, (_, index) => (
         makeTask(`irrelevant-${index}`, 'Other project', 'todo')
       )),
       makeTask('filtered-match', 'Project Alpha', 'in_progress'),
       makeTask('completed-match', 'Project Alpha', 'done'),
+      makeTask('recent-match', 'Project Alpha', 'todo', '2030-01-20T00:00:00.000Z'),
+      makeTask('old-match', 'Project Alpha', 'todo', '2029-12-01T00:00:00.000Z'),
       {
         ...makeTask('github-issue-123', 'octo/repo', 'todo'),
         sourceId: 'octo/repo:123',
@@ -90,8 +92,33 @@ describe('FTS authoritative filters', () => {
         description: 'Other lexical fixture',
       },
     ]);
+    await database.default.insert(database.schema.notifications).values([
+      ...Array.from({ length: 25 }, (_, index) => ({
+        id: `triage-${index}`,
+        sourceId: `triage-source-${index}`,
+        connectorType: 'monitoring',
+        connectorInstanceId: 'monitoring',
+        title: 'Quarterly planning alert',
+        body: 'Operational alert',
+        category: 'sync',
+        receivedAt: timestamp,
+        sortAt: timestamp,
+      })),
+      {
+        id: 'note-match',
+        sourceId: 'note-source',
+        connectorType: 'capture',
+        connectorInstanceId: 'capture',
+        title: 'Quarterly planning note',
+        body: 'Meeting memo',
+        category: 'capture',
+        receivedAt: timestamp,
+        sortAt: timestamp,
+      },
+    ]);
 
     searchFTS = fts.searchFTS;
+    searchFTSFacets = fts.searchFTSFacets;
   });
 
   it('applies task filters before the result limit', async () => {
@@ -104,6 +131,43 @@ describe('FTS authoritative filters', () => {
     });
 
     expect(results.map((result) => result.id)).toEqual(['filtered-match']);
+  });
+
+  it('returns bounded facet counts from all matches before the result limit', async () => {
+    const facets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      excludeDone: true,
+      limit: 1,
+    });
+
+    expect(facets.sources).toEqual(expect.arrayContaining([
+      { value: 'Other project', count: 55 },
+      { value: 'Project Alpha', count: 7 },
+    ]));
+    expect(facets.statuses).toEqual(expect.arrayContaining([
+      { value: 'todo', count: 61 },
+      { value: 'in_progress', count: 1 },
+    ]));
+    expect(facets.sources.length).toBeLessThanOrEqual(50);
+    expect(facets.statuses.length).toBeLessThanOrEqual(50);
+  });
+
+  it('does not constrain a facet by its own selected value', async () => {
+    const facets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      source: 'Project Alpha',
+      excludeDone: true,
+      limit: 1,
+    });
+
+    expect(facets.sources).toEqual(expect.arrayContaining([
+      { value: 'Other project', count: 55 },
+      { value: 'Project Alpha', count: 7 },
+    ]));
+    expect(facets.statuses).toEqual(expect.arrayContaining([
+      { value: 'todo', count: 6 },
+      { value: 'in_progress', count: 1 },
+    ]));
   });
 
   it('applies Universe visibility before the result limit', async () => {
@@ -122,6 +186,74 @@ describe('FTS authoritative filters', () => {
       'dismissed-match',
     ]));
     expect(results.map((result) => result.id)).toContain('filtered-match');
+
+    const facets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      source: 'Project Alpha',
+      universeEligible: true,
+      excludeConnectorInstanceIds: ['deleted-connector'],
+      limit: 1,
+    });
+    expect(facets.sources).toContainEqual({ value: 'Project Alpha', count: 4 });
+  });
+
+  it('applies date filters before the result limit', async () => {
+    const recent = await searchFTS('Quarterly planning', {
+      type: 'tasks',
+      dateFrom: '2030-01-10T00:00:00.000Z',
+      limit: 1,
+    });
+    const overdue = await searchFTS('Quarterly planning', {
+      type: 'tasks',
+      dueBefore: '2030-01-01T00:00:00.000Z',
+      limit: 1,
+    });
+
+    expect(recent.map((result) => result.id)).toEqual(['recent-match']);
+    expect(overdue.map((result) => result.id)).toEqual(['old-match']);
+
+    const recentFacets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      dateFrom: '2030-01-10T00:00:00.000Z',
+      limit: 1,
+    });
+    const overdueFacets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      dueBefore: '2030-01-01T00:00:00.000Z',
+      limit: 1,
+    });
+    expect(recentFacets.sources).toContainEqual({ value: 'Project Alpha', count: 1 });
+    expect(overdueFacets.sources).toContainEqual({ value: 'Project Alpha', count: 1 });
+  });
+
+  it('applies mobile notification kinds before the result limit', async () => {
+    const notes = await searchFTS('Quarterly planning', {
+      type: 'notifications',
+      notificationKind: 'notes',
+      limit: 1,
+    });
+    const triage = await searchFTS('Quarterly planning', {
+      type: 'notifications',
+      notificationKind: 'triage',
+      limit: 50,
+    });
+
+    expect(notes.map((result) => result.id)).toEqual(['note-match']);
+    expect(triage).toHaveLength(25);
+    expect(triage.map((result) => result.id)).not.toContain('note-match');
+
+    const noteFacets = await searchFTSFacets('Quarterly planning', {
+      type: 'notifications',
+      notificationKind: 'notes',
+      limit: 1,
+    });
+    const triageFacets = await searchFTSFacets('Quarterly planning', {
+      type: 'notifications',
+      notificationKind: 'triage',
+      limit: 1,
+    });
+    expect(noteFacets.sources).toEqual([{ value: 'capture', count: 1 }]);
+    expect(triageFacets.sources).toEqual([{ value: 'monitoring', count: 25 }]);
   });
 
   it.each(['123', '#123'])('finds a GitHub issue by number with query %s', async (query) => {

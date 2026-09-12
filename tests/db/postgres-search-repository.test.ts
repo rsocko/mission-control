@@ -5,6 +5,7 @@ import {
   PostgresKeywordSearchRepository,
   truncate,
 } from '@/db/postgres/search';
+import { mergeSearchFacetRows } from '@/lib/search/repository';
 
 describe('PostgreSQL keyword search repository — pure helpers', () => {
   describe('normalizeLimit', () => {
@@ -59,10 +60,82 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         const [sql, params] = query.mock.calls[0] as [string, unknown[]];
         expect(sql).toContain('t.parent_id IS NULL');
         expect(sql).toContain("t.local_disposition = 'active'");
-        expect(sql).toContain('t.connector_type = ANY($6::text[])');
-        expect(sql).toContain('t.connector_instance_id = ANY($7::text[])');
-        expect(sql.indexOf('t.parent_id IS NULL')).toBeLessThan(sql.indexOf('LIMIT $8'));
-        expect(params[6]).toEqual(['deleted-connector']);
+        expect(sql).toContain('t.connector_type = ANY($8::text[])');
+        expect(sql).toContain('t.connector_instance_id = ANY($9::text[])');
+        expect(sql.indexOf('t.parent_id IS NULL')).toBeLessThan(sql.indexOf('LIMIT $10'));
+        expect(params[8]).toEqual(['deleted-connector']);
+      });
+
+      it('pushes date predicates before the task result limit', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('planning', {
+          type: 'tasks',
+          dateFrom: '2030-01-01T00:00:00.000Z',
+          dueBefore: '2030-02-01T00:00:00.000Z',
+          limit: 20,
+        });
+
+        const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+        expect(sql).toContain("COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4");
+        expect(sql).toContain('t.due_date < $5');
+        expect(sql.indexOf('t.due_date < $5')).toBeLessThan(sql.indexOf('LIMIT $10'));
+        expect(params.slice(3, 5)).toEqual([
+          '2030-01-01T00:00:00.000Z',
+          '2030-02-01T00:00:00.000Z',
+        ]);
+      });
+
+      it('pushes mobile notification kinds before the notification result limit', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('planning', {
+          type: 'notifications',
+          notificationKind: 'notes',
+          limit: 20,
+        });
+
+        const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+        expect(sql).toContain("($4 = 'notes' AND");
+        expect(sql).toContain("STRPOS(LOWER(");
+        expect(sql.indexOf("($4 = 'notes' AND")).toBeLessThan(sql.indexOf('LIMIT $8'));
+        expect(params[3]).toBe('notes');
+      });
+
+      it('counts and bounds facets before result limiting', async () => {
+        const query = vi.fn().mockImplementation((sql: string) => Promise.resolve({
+          rows: [{
+            value: sql.includes('SELECT t.id, COALESCE')
+              ? 'Project Alpha'
+              : 'in_progress',
+            count: 57,
+          }],
+        }));
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        const facets = await repository.facets('planning', {
+          type: 'tasks',
+          source: 'Project Alpha',
+          status: 'in_progress',
+          limit: 1,
+        });
+
+        expect(facets).toEqual({
+          sources: [{ value: 'Project Alpha', count: 57 }],
+          statuses: [{ value: 'in_progress', count: 57 }],
+        });
+        expect(query).toHaveBeenCalledTimes(2);
+        for (const [sql, params] of query.mock.calls as Array<[string, unknown[]]>) {
+          expect(sql).toContain('COUNT(*)::integer AS count');
+          expect(sql).not.toContain('LIMIT');
+          if (sql.includes('SELECT t.id, COALESCE')) {
+            expect(params.slice(1, 3)).toEqual([null, 'in_progress']);
+          } else {
+            expect(params.slice(1, 3)).toEqual(['Project Alpha', null]);
+          }
+        }
       });
 
       it('orders exact titles and title prefixes before relevance score and limit', async () => {
@@ -80,7 +153,7 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         expect(sql).toContain(
           'ORDER BY "titleMatchRank", rank DESC, lower(t.title), t.id',
         );
-        expect(sql.indexOf('ORDER BY "titleMatchRank"')).toBeLessThan(sql.indexOf('LIMIT $8'));
+        expect(sql.indexOf('ORDER BY "titleMatchRank"')).toBeLessThan(sql.indexOf('LIMIT $10'));
       });
     });
 
@@ -99,6 +172,21 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
       expect(truncate(null)).toBe('');
       expect(truncate(undefined)).toBe('');
       expect(truncate('   ')).toBe('');
+    });
+
+    describe('mergeSearchFacetRows', () => {
+      it('sums cross-channel counts before bounding the response', () => {
+        const rows = Array.from({ length: 55 }, (_, index) => ({
+          value: `source-${index}`,
+          count: 1,
+        }));
+        rows.push({ value: 'source-54', count: 4 });
+
+        const facets = mergeSearchFacetRows(rows);
+
+        expect(facets).toHaveLength(50);
+        expect(facets[0]).toEqual({ value: 'source-54', count: 5 });
+      });
     });
 
     it('leaves short text untouched', () => {

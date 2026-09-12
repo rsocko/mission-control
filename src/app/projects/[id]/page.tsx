@@ -129,6 +129,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     progress,
     project,
     tasks,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     loadProjectDetail,
@@ -560,7 +561,15 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                       : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border)]',
                   )}
                 >
-                  {tab.label}{count !== null ? ` (${count})` : ''}
+                  <span>{tab.label}{count !== null ? ` (${count})` : ''}</span>
+                  {tab.id === 'phases' && unassignedTasks.length > 0 ? (
+                    <span
+                      aria-label={`${unassignedTasks.length} unphased ${unassignedTasks.length === 1 ? 'task' : 'tasks'}`}
+                      className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--warning)]/15 px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-[var(--warning)]"
+                    >
+                      {unassignedTasks.length}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}

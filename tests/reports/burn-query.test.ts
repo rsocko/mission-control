@@ -34,7 +34,8 @@ function createDatabase() {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      completed_at TEXT
+      completed_at TEXT,
+      deleted_at TEXT
     );
     CREATE TABLE task_history_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -102,7 +103,7 @@ describe('getBurnReport', () => {
       INSERT INTO project_phases VALUES (
         'phase-1', 'project-1', 'Build', '2026-07-01', '2026-07-15'
       );
-      INSERT INTO tasks VALUES
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES
         ('task-1', 'Migrated task', '2026-07-01T08:00:00.000Z', '2026-07-01T10:00:00.000Z'),
         ('task-2', 'Added task', '2026-07-01T08:00:00.000Z', NULL);
     `);
@@ -180,7 +181,7 @@ describe('getBurnReport', () => {
       INSERT INTO hub_projects VALUES (
         'project-1', 'Reporting', '2026-06-01', '2026-08-31'
       );
-      INSERT INTO tasks VALUES (
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES (
         'task-1',
         'Historical task',
         '2026-06-10T08:00:00.000Z',
@@ -228,7 +229,7 @@ describe('getBurnReport', () => {
       INSERT INTO hub_projects VALUES (
         'project-1', 'Reporting', '2025-03-01', '2026-08-31'
       );
-      INSERT INTO tasks VALUES (
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES (
         'task-1',
         'Older organized task',
         '2025-03-25T08:00:00.000Z',

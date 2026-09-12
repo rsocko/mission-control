@@ -343,6 +343,14 @@ describe('PostgreSQL schema', () => {
     expect(sourceHealthSql).toContain(
       'ALTER TABLE "source_lists" ADD COLUMN "health_status" text',
     );
+
+    const taskSoftDeleteSql = readFileSync(resolve(migrationDirectory, migrations[7]), 'utf8');
+    expect(taskSoftDeleteSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "deleted_at" text',
+    );
+    expect(taskSoftDeleteSql).toContain(
+      'CREATE INDEX "idx_tasks_deleted_at" ON "tasks"',
+    );
     expect(sourceHealthSql).toContain(
       'ALTER TABLE "source_lists" ADD COLUMN "health_error" text',
     );

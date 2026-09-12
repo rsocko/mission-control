@@ -1,5 +1,5 @@
 {
-  "id": "98166902-e378-4db9-b588-1104d5adefd6",
+  "id": "5a330c1e-7382-46bd-81ac-d60924826117",
   "prevId": "3110e400-b557-4ac6-bf24-10d21cca807b",
   "version": "7",
   "dialect": "postgresql",
@@ -21201,6 +21201,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "deleted_at": {
+          "name": "deleted_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
         "recurrence_generated_from_task_id": {
           "name": "recurrence_generated_from_task_id",
           "type": "text",
@@ -21212,19 +21218,6 @@
           "type": "text",
           "primaryKey": false,
           "notNull": false
-        },
-        "sibling_order": {
-          "name": "sibling_order",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "subtask_order_revision": {
-          "name": "subtask_order_revision",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "default": 0
         },
         "depth": {
           "name": "depth",
@@ -21384,17 +21377,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_tasks_parent_sibling_order": {
-          "name": "idx_tasks_parent_sibling_order",
+        "idx_tasks_local_disposition": {
+          "name": "idx_tasks_local_disposition",
           "columns": [
             {
-              "expression": "parent_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "sibling_order",
+              "expression": "local_disposition",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -21405,11 +21392,11 @@
           "method": "btree",
           "with": {}
         },
-        "idx_tasks_local_disposition": {
-          "name": "idx_tasks_local_disposition",
+        "idx_tasks_deleted_at": {
+          "name": "idx_tasks_deleted_at",
           "columns": [
             {
-              "expression": "local_disposition",
+              "expression": "deleted_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

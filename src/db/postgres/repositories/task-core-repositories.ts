@@ -170,6 +170,7 @@ import {
   type TaskQueryScope,
   type TaskRemovalOutcome,
   type TaskRemovalRepository,
+  type TaskRestoreOutcome,
   type TaskQuickSortLogEntry,
   type TaskQuickSortOperation,
   type TaskQuickSortOperationReservation,
@@ -1914,7 +1915,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
 
   async getTask(taskId: string): Promise<TaskCoreTaskRow | null> {
     const [row] = await this.db.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     return row ? toMoveTaskRow(row) : null;
   }
 
@@ -2484,7 +2485,7 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
 
   async getTaskDetail(taskId: string, myDayDate: string): Promise<TaskDetailResult | null> {
     const [task] = await this.db.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     if (!task) return null;
     const [tagRows, projectRows, subtasks, scheduleRows, myDayRows] = await Promise.all([
       this.db.select({ tagId: taskTags.tagId }).from(taskTags)
@@ -3008,7 +3009,8 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
 
   async getTaskWriteContext(taskId: string, requestedTagIds: readonly string[] = []) {
     const [task, scheduleRows, tagRows, requestedTagRows, stateRows, evaluationRows] = await Promise.all([
-      this.db.select(MOVE_TASK_COLUMNS).from(tasks).where(eq(tasks.id, taskId)).limit(1),
+      this.db.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1),
       this.db.select().from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
       this.db.select({ id: tags.id, name: tags.name }).from(taskTags)
         .innerJoin(tags, eq(taskTags.tagId, tags.id)).where(eq(taskTags.taskId, taskId)),
@@ -3279,7 +3281,7 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
 
   async getTaskRemovalContext(taskId: string) {
     const [row] = await this.db.select(MOVE_TASK_COLUMNS).from(tasks)
-      .where(eq(tasks.id, taskId)).limit(1);
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     return row ? { task: toMoveTaskRow(row) } : null;
   }
 
@@ -3301,7 +3303,21 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
         } as const;
       }
       if (input.mode === 'local-delete') {
-        await deleteTaskWithinTransaction(tx, input.taskId, false);
+        const changed = await tx.update(tasks).set({
+          deletedAt: input.now,
+          updatedAt: input.now,
+        }).where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.updatedAt, input.expectedUpdatedAt),
+          isNull(tasks.deletedAt),
+        )).returning({ id: tasks.id });
+        if (changed.length !== 1) {
+          const [latest] = await tx.select({ updatedAt: tasks.updatedAt }).from(tasks)
+            .where(eq(tasks.id, input.taskId)).limit(1);
+          return latest
+            ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
+            : { kind: 'not-found' } as const;
+        }
       } else {
         const patch = input.mode === 'mirror-dismiss'
           ? { localDisposition: 'dismissed' as const, updatedAt: input.now }
@@ -3346,7 +3362,7 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
             : input.mode === 'local-delete'
               ? 'deleted'
               : 'pending-remote',
-        taskVersion: input.mode === 'local-delete' ? null : input.now,
+        taskVersion: input.now,
       } as const;
     });
   }
@@ -3372,6 +3388,47 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
       }
       await deleteTaskWithinTransaction(tx, input.taskId, false);
       return { kind: 'committed', action: 'deleted', taskVersion: null } as const;
+    });
+  }
+
+  async restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx.select({
+        id: tasks.id,
+        title: tasks.title,
+        description: tasks.description,
+        sourceListName: tasks.sourceListName,
+        connectorType: tasks.connectorType,
+        status: tasks.status,
+        deletedAt: tasks.deletedAt,
+      }).from(tasks).where(eq(tasks.id, taskId)).limit(1).for('update');
+      if (!current) return { kind: 'not-found' } as const;
+      if (!current.deletedAt) return { kind: 'not-deleted' } as const;
+      const restored = await tx.update(tasks).set({ deletedAt: null, updatedAt: now })
+        .where(and(eq(tasks.id, taskId), eq(tasks.deletedAt, current.deletedAt)))
+        .returning({ id: tasks.id });
+      if (restored.length !== 1) return { kind: 'not-deleted' } as const;
+      return {
+        kind: 'restored',
+        task: {
+          id: current.id,
+          title: current.title,
+          description: current.description,
+          sourceListName: current.sourceListName,
+          connectorType: current.connectorType,
+          status: current.status,
+        },
+      } as const;
+    });
+  }
+
+  async purgeDeletedBefore(cutoff: string): Promise<readonly string[]> {
+    return this.db.transaction(async (tx) => {
+      const stale = await tx.select({ id: tasks.id }).from(tasks)
+        .where(and(isNotNull(tasks.deletedAt), lte(tasks.deletedAt, cutoff)))
+        .for('update');
+      for (const task of stale) await deleteTaskWithinTransaction(tx, task.id, false);
+      return stale.map((task) => task.id);
     });
   }
 }

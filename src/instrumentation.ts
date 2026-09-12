@@ -154,6 +154,18 @@ export async function register() {
     } catch (err) {
       syncLogger.warn({ err }, 'Instrumentation: task reminder scheduler init failed (non-fatal)');
     }
+    try {
+      const { taskDeletionRetentionScheduler } = await import(
+        '@/lib/tasks/deletion-retention'
+      );
+      await taskDeletionRetentionScheduler.start();
+      syncLogger.info('Instrumentation: task deletion retention scheduler initialized');
+    } catch (err) {
+      syncLogger.warn(
+        { err },
+        'Instrumentation: task deletion retention scheduler init failed (non-fatal)',
+      );
+    }
   }
   markRuntimeReady();
 }

@@ -26,6 +26,7 @@ export const tasks = sqliteTable('tasks', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
+  deletedAt: text('deleted_at'),
   // Set only on locally generated recurring occurrences. One successor per occurrence.
   recurrenceGeneratedFromTaskId: text('recurrence_generated_from_task_id'),
 
@@ -74,6 +75,7 @@ export const tasks = sqliteTable('tasks', {
   uniqueIndex('idx_tasks_source_connector').on(table.sourceId, table.connectorInstanceId),
   index('idx_tasks_parent_sibling_order').on(table.parentId, table.siblingOrder),
   index('idx_tasks_local_disposition').on(table.localDisposition),
+  index('idx_tasks_deleted_at').on(table.deletedAt),
   index('idx_tasks_planning_horizon').on(table.planningHorizon),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),

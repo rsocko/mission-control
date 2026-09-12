@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1b2282bd-3b4a-4c25-a394-d223e09e753b",
-  "prevId": "092bbccb-dc41-4c18-886e-842faf4941a0",
+  "id": "6ced717c-026b-4ae9-bc6c-050f68e98843",
+  "prevId": "1b2282bd-3b4a-4c25-a394-d223e09e753b",
   "tables": {
     "agent_dispatch_attempts": {
       "name": "agent_dispatch_attempts",
@@ -18692,6 +18692,21 @@
           "notNull": false,
           "autoincrement": false
         },
+        "sibling_order": {
+          "name": "sibling_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subtask_order_revision": {
+          "name": "subtask_order_revision",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
         "depth": {
           "name": "depth",
           "type": "integer",
@@ -18840,6 +18855,14 @@
             "connector_instance_id"
           ],
           "isUnique": true
+        },
+        "idx_tasks_parent_sibling_order": {
+          "name": "idx_tasks_parent_sibling_order",
+          "columns": [
+            "parent_id",
+            "sibling_order"
+          ],
+          "isUnique": false
         },
         "idx_tasks_local_disposition": {
           "name": "idx_tasks_local_disposition",

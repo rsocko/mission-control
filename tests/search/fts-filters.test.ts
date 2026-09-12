@@ -69,6 +69,26 @@ describe('FTS authoritative filters', () => {
         ...makeTask('dismissed-match', 'Project Alpha', 'todo'),
         localDisposition: 'dismissed',
       },
+      {
+        ...makeTask('ranking-exact', 'Search ranking', 'todo'),
+        title: 'Mercury launch',
+        description: 'Exact title fixture',
+      },
+      {
+        ...makeTask('ranking-prefix', 'Search ranking', 'todo'),
+        title: 'Mercury launch checklist',
+        description: 'Title prefix fixture',
+      },
+      {
+        ...makeTask('ranking-title-body', 'Search ranking', 'todo'),
+        title: 'Mercury readiness',
+        description: 'Coordinate the launch window',
+      },
+      {
+        ...makeTask('ranking-other', 'Search ranking', 'todo'),
+        title: 'Review the Mercury launch',
+        description: 'Other lexical fixture',
+      },
     ]);
 
     searchFTS = fts.searchFTS;
@@ -114,5 +134,22 @@ describe('FTS authoritative filters', () => {
     expect(results.map((result) => result.id)).toContain('github-issue-123');
     expect(results.map((result) => result.id)).not.toContain('local-task-123');
     expect(results.find((result) => result.id === 'github-issue-123')?.metadata.issueNumber).toBe(123);
+  });
+
+  it('ranks exact titles before title prefixes and other lexical matches', async () => {
+    const results = await searchFTS('Mercury launch', {
+      type: 'tasks',
+      limit: 10,
+    });
+
+    expect(results.slice(0, 2).map((result) => result.id)).toEqual([
+      'ranking-exact',
+      'ranking-prefix',
+    ]);
+    expect(results.slice(2).map((result) => result.id)).toEqual(expect.arrayContaining([
+      'ranking-other',
+      'ranking-title-body',
+    ]));
+    expect(results.map((result) => result.metadata.titleMatchRank)).toEqual([0, 1, 2, 2]);
   });
 });

@@ -7,7 +7,18 @@ import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { differenceInCalendarDays } from 'date-fns';
-import { FilePlus2, Search } from 'lucide-react';
+import {
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  CircleHelp,
+  Clock3,
+  FilePlus2,
+  Lightbulb,
+  Minus,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
@@ -16,9 +27,9 @@ import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
-import type { ProjectHealth, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
+import type { ProjectPulseState, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
 import { getPriorityDotColor } from './utils';
-import { GANTT_HEADER_HEIGHT, GANTT_ROW_HEIGHT, HEALTH_LABELS, PHASE_STATUS_LABELS, STATUS_LABELS, TASK_STATUS_LABELS } from './constants';
+import { GANTT_HEADER_HEIGHT, GANTT_ROW_HEIGHT, PHASE_STATUS_LABELS, STATUS_LABELS, TASK_STATUS_LABELS } from './constants';
 import type {
   GanttPhaseRow,
   HealthSummary,
@@ -103,18 +114,19 @@ export function LoadingSkeleton() {
   );
 }
 
-const HEALTH_VISUALS: Record<ProjectHealth, { color: string; position: number }> = {
-  behind: { color: 'var(--danger)', position: 0 },
-  at_risk: { color: 'var(--warning)', position: 1 },
-  on_track: { color: 'var(--success)', position: 2 },
+const PULSE_VISUALS: Record<ProjectPulseState, { color: string; label: string }> = {
+  on_track: { color: 'var(--success)', label: 'On track' },
+  watch: { color: 'var(--warning)', label: 'Watch' },
+  off_track: { color: 'var(--danger)', label: 'Off track' },
+  unknown: { color: 'var(--text-muted)', label: 'Unknown' },
 };
 
 export function ProjectOverviewKpis({
   progress,
-  health,
+  pulse,
 }: {
   progress: ProgressSummary;
-  health: HealthSummary;
+  pulse: HealthSummary;
 }) {
   const inProgressPercent = progress.totalTasks > 0
     ? (progress.inProgressTasks / progress.totalTasks) * 100
@@ -129,7 +141,17 @@ export function ProjectOverviewKpis({
   const ringBackground = progress.totalTasks > 0
     ? `conic-gradient(var(--success) 0 ${completedEnd}%, var(--accent-500) ${completedEnd}% ${inProgressEnd}%, var(--surface-3) ${inProgressEnd}% ${todoEnd}%, var(--warning) ${todoEnd}% 100%)`
     : 'var(--surface-3)';
-  const healthVisual = HEALTH_VISUALS[health.health];
+  const pulseVisual = PULSE_VISUALS[pulse.state];
+  const supportingReasons = pulse.reasons
+    .filter((reason) => reason.detail !== pulse.summary)
+    .slice(0, 2);
+  const TrendIcon = pulse.trend.state === 'improving'
+    ? ArrowUpRight
+    : pulse.trend.state === 'worsening'
+      ? ArrowDownRight
+      : pulse.trend.state === 'unknown'
+        ? CircleHelp
+        : Minus;
   const taskStates = [
     { label: 'Done', value: progress.completedTasks, color: 'var(--success)' },
     { label: 'Active', value: progress.inProgressTasks, color: 'var(--accent-500)' },
@@ -140,8 +162,8 @@ export function ProjectOverviewKpis({
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <Card className="overflow-hidden border-[var(--border-subtle)] md:col-span-2">
+    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
+      <Card className="overflow-hidden border-[var(--border-subtle)] md:col-span-2 xl:col-span-5">
         <CardContent className="grid h-full gap-5 p-5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center">
           <div
             role="img"
@@ -174,7 +196,7 @@ export function ProjectOverviewKpis({
                 <div key={item.label} className="min-w-0 rounded-lg bg-[var(--surface-0)] px-3 py-2.5">
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="truncate text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{item.label}</span>
+                    <span className="truncate text-xs font-medium text-[var(--text-muted)]">{item.label}</span>
                   </div>
                   <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-primary)]">{item.value}</p>
                 </div>
@@ -184,7 +206,7 @@ export function ProjectOverviewKpis({
         </CardContent>
       </Card>
 
-      <Card className="border-[var(--border-subtle)]">
+      <Card className="border-[var(--border-subtle)] xl:col-span-3">
         <CardContent className="flex h-full flex-col p-5">
           <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">In progress</p>
           <div className="mt-3 flex items-end justify-between gap-3">
@@ -209,29 +231,65 @@ export function ProjectOverviewKpis({
         </CardContent>
       </Card>
 
-      <Card className="border-[var(--border-subtle)]">
+      <Card className="border-[var(--border-subtle)] md:col-span-2 xl:col-span-4">
         <CardContent className="flex h-full flex-col p-5">
-          <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Health</p>
-          <div className="mt-3">
-            <HealthBadge health={health.health} />
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Project pulse</p>
+              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Inferred from current project signals</p>
+            </div>
+            <PulseBadge state={pulse.state} />
           </div>
-          <div
-            role="img"
-            aria-label={`Project health: ${HEALTH_LABELS[health.health]}`}
-            className="mt-5 grid grid-cols-3 gap-1.5"
-          >
-            {(['behind', 'at_risk', 'on_track'] as ProjectHealth[]).map((state, index) => (
-              <span
-                key={state}
-                className="h-2 rounded-full transition-opacity"
-                style={{
-                  backgroundColor: HEALTH_VISUALS[state].color,
-                  opacity: index === healthVisual.position ? 1 : 0.2,
-                }}
-              />
-            ))}
-          </div>
-          <p className="mt-auto pt-4 text-sm leading-5 text-[var(--text-secondary)]">{health.message}</p>
+
+          <p className="mt-4 text-sm leading-5 text-[var(--text-secondary)]">{pulse.summary}</p>
+
+          <dl className="mt-4 grid grid-cols-3 divide-x divide-[var(--border-subtle)] border-y border-[var(--border-subtle)] py-3">
+            <div className="min-w-0 pr-3">
+              <dt className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+                <Clock3 size={12} aria-hidden="true" />
+                Freshness
+              </dt>
+              <dd className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]" title={pulse.freshness.label}>
+                {pulse.freshness.state === 'fresh' ? 'Fresh' : pulse.freshness.state === 'aging' ? 'Aging' : pulse.freshness.state === 'stale' ? 'Stale' : 'Unknown'}
+              </dd>
+            </div>
+            <div className="min-w-0 px-3">
+              <dt className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+                <TrendIcon size={12} aria-hidden="true" />
+                Trend
+              </dt>
+              <dd className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]" title={pulse.trend.label}>
+                {pulse.trend.state === 'improving' ? 'Improving' : pulse.trend.state === 'worsening' ? 'Worsening' : pulse.trend.state === 'stable' ? 'Stable' : 'Unknown'}
+              </dd>
+            </div>
+            <div className="min-w-0 pl-3">
+              <dt className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+                <ShieldCheck size={12} aria-hidden="true" />
+                Confidence
+              </dt>
+              <dd className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]" title={pulse.confidence.label}>
+                {pulse.confidence.level === 'high' ? 'High' : pulse.confidence.level === 'medium' ? 'Medium' : 'Low'}
+              </dd>
+            </div>
+          </dl>
+
+          {supportingReasons.length > 0 && (
+            <ul className="mt-3 space-y-1.5" aria-label="Pulse reasons">
+              {supportingReasons.map((reason) => (
+                <li key={reason.code} className="flex gap-2 text-xs leading-5 text-[var(--text-secondary)]">
+                  <Activity size={13} className="mt-1 shrink-0" style={{ color: pulseVisual.color }} aria-hidden="true" />
+                  <span>{reason.detail}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {pulse.suggestion && (
+            <div className="mt-3 flex gap-2 border-t border-[var(--border-subtle)] pt-3 text-xs leading-5 text-[var(--text-primary)]">
+              <Lightbulb size={14} className="mt-0.5 shrink-0 text-[var(--accent-400)]" aria-hidden="true" />
+              <p><span className="font-semibold">Next move:</span> {pulse.suggestion}</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -245,9 +303,9 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variant}>{STATUS_LABELS[status]}</Badge>;
 }
 
-export function HealthBadge({ health }: { health: ProjectHealth }) {
-  const variant = health === 'on_track' ? 'success' : health === 'at_risk' ? 'warning' : 'danger';
-  return <Badge variant={variant}>{HEALTH_LABELS[health]}</Badge>;
+export function PulseBadge({ state }: { state: ProjectPulseState }) {
+  const variant = state === 'on_track' ? 'success' : state === 'watch' ? 'warning' : state === 'off_track' ? 'danger' : 'secondary';
+  return <Badge variant={variant}>{PULSE_VISUALS[state].label}</Badge>;
 }
 
 export function PhaseStatusBadge({ status }: { status: 'pending' | 'in_progress' | 'completed' }) {

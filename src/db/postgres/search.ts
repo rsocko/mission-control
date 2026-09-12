@@ -8,6 +8,7 @@ import type {
   SearchableTaskRecord,
 } from '@/lib/search/repository';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
+import { compareKeywordResults } from '@/lib/search/keyword-ranking';
 
 export function normalizeLimit(limit = 20): number {
   return Math.max(1, Math.min(limit, 50));
@@ -40,6 +41,7 @@ interface TaskSearchRow {
   titleHl: string;
   descSnippet: string;
   rank: number;
+  titleMatchRank: number;
   status: string;
   priority: string;
   sourceListName: string | null;
@@ -53,6 +55,7 @@ interface NotificationSearchRow {
   titleHl: string;
   bodySnippet: string;
   rank: number;
+  titleMatchRank: number;
   severity: string;
   category: string;
   isRead: boolean;
@@ -80,6 +83,7 @@ function toTaskSearchResult(row: TaskSearchRow): SearchResult {
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
       rank: row.rank,
+      titleMatchRank: row.titleMatchRank,
     },
   };
 }
@@ -105,6 +109,7 @@ function toNotificationSearchResult(row: NotificationSearchRow): SearchResult {
       connectorType: row.connectorType,
       receivedAt: row.receivedAt,
       rank: row.rank,
+      titleMatchRank: row.titleMatchRank,
     },
   };
 }
@@ -179,6 +184,7 @@ async function searchTasksByIssueNumber(
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
       issueNumber,
+      titleMatchRank: 0,
     },
   }));
 }
@@ -207,6 +213,11 @@ async function searchTasks(
           ''
         ) AS "descSnippet",
         ts_rank_cd(d.search_vector, websearch_to_tsquery('english', $1)) AS rank,
+        CASE
+          WHEN lower(btrim(t.title)) = lower(btrim($1)) THEN 0
+          WHEN starts_with(lower(btrim(t.title)), lower(btrim($1))) THEN 1
+          ELSE 2
+        END AS "titleMatchRank",
         t.status,
         t.priority,
         t.source_list_name AS "sourceListName",
@@ -224,7 +235,7 @@ async function searchTasks(
           AND NOT (t.connector_type = ANY($6::text[]))
           AND NOT (t.connector_instance_id = ANY($7::text[]))
         ))
-      ORDER BY rank DESC
+      ORDER BY "titleMatchRank", rank DESC, lower(t.title), t.id
       LIMIT $8
     `,
     [
@@ -265,6 +276,11 @@ async function searchNotifications(
           ''
         ) AS "bodySnippet",
         ts_rank_cd(d.search_vector, websearch_to_tsquery('english', $1)) AS rank,
+        CASE
+          WHEN lower(btrim(a.title)) = lower(btrim($1)) THEN 0
+          WHEN starts_with(lower(btrim(a.title)), lower(btrim($1))) THEN 1
+          ELSE 2
+        END AS "titleMatchRank",
         a.level AS severity,
         a.category,
         (a.read_state = 'read') AS "isRead",
@@ -276,7 +292,7 @@ async function searchNotifications(
         AND ($2::text IS NULL OR a.connector_type = $2)
         AND ($3::text IS NULL OR a.category = $3)
         AND ($4::boolean = false OR LOWER(a.category) <> 'done')
-      ORDER BY rank DESC
+      ORDER BY "titleMatchRank", rank DESC, lower(a.title), a.id
       LIMIT $5
     `,
     [tsQuery, source, status, filters.excludeDone === true, limit],
@@ -425,7 +441,7 @@ export class PostgresKeywordSearchRepository implements KeywordSearchRepository 
         seen.add(key);
         return true;
       })
-      .sort((left, right) => right.score - left.score)
+      .sort(compareKeywordResults)
       .slice(0, limit);
   }
 }

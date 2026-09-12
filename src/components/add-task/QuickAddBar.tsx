@@ -241,6 +241,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [parsed, setParsed] = useState<ParsedTask | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [mobileCaptureSemantics, setMobileCaptureSemantics] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [inlineToast, setInlineToast] = useState<InlineToast | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -646,12 +647,22 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   // Listen for custom event to open quick-add (from mobile "Add task" button).
   // On mobile the bar is visually hidden, so we open the full AddTaskModal directly.
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
       // Check if we're on a narrow viewport (bar is hidden via `hidden sm:block`)
       const isMobile = window.innerWidth < 640;
       if (isMobile) {
+        const detail = (event as CustomEvent<{ defaultTags?: string[] }>).detail;
+        const defaultTagTokens = detail?.defaultTags
+          ?.map(tag => `#${tag.trim().replace(/\s+/g, '-')}`)
+          .filter(token => token.length > 1)
+          .join(' ');
+        if (defaultTagTokens) {
+          setInput(current => [current.trim(), defaultTagTokens].filter(Boolean).join(' '));
+        }
+        setMobileCaptureSemantics(true);
         setShowModal(true);
       } else {
+        setMobileCaptureSemantics(false);
         setIsFocused(true);
         setTimeout(() => {
           inputHandleRef.current?.focus();
@@ -2131,12 +2142,18 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             initialListId={quickAddCtx.listFilter || undefined}
             initialTemplateId={selectedTemplateId || undefined}
             initialAddToMyDay={myDayActive}
-            onClose={() => { setShowModal(false); setSelectedTemplateId(null); }}
+            enableQuickAddSemantics={mobileCaptureSemantics}
+            onClose={() => {
+              setShowModal(false);
+              setMobileCaptureSemantics(false);
+              setSelectedTemplateId(null);
+            }}
             onSubmit={() => {
               setInput('');
               setCurrentInputParentTaskId(undefined);
               setParsed(null);
               setShowModal(false);
+              setMobileCaptureSemantics(false);
               setSelectedTemplateId(null);
               onTaskAdded?.();
               window.dispatchEvent(new CustomEvent('mission-control:task-added'));

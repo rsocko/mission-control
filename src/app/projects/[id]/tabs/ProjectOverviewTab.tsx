@@ -2,8 +2,10 @@
 
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
+import { ArrowRight, TriangleAlert } from 'lucide-react';
 import type { ProjectHealth } from '@/types';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -42,6 +44,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
     projectId,
     reportRefreshKey,
     tasks,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     handleGraphTaskSelect,
@@ -75,6 +78,41 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
 
   return (
     <motion.section variants={fadeSlideUp} className="space-y-6">
+      {unassignedTasks.length > 0 ? (
+        <div
+          role="status"
+          className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-[var(--warning)]/35 bg-[var(--warning)]/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex min-w-0 gap-3">
+            <TriangleAlert
+              size={18}
+              className="mt-0.5 shrink-0 text-[var(--warning)]"
+              aria-hidden="true"
+            />
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                {unassignedTasks.length} {unassignedTasks.length === 1 ? 'task needs' : 'tasks need'} a phase
+              </p>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                {project.autoIncludeRules.length > 0
+                  ? 'Auto-include rules can add project tasks without placing them in the plan.'
+                  : 'These project tasks are not represented in the plan yet.'}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-[var(--warning)]/40 bg-[var(--surface-1)] text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+            onClick={() => onOpenPhase(null)}
+          >
+            Assign in Plan
+            <ArrowRight size={14} aria-hidden="true" />
+          </Button>
+        </div>
+      ) : null}
+
       <ProjectOverviewKpis progress={progress} health={health} />
 
       <BurnReportCard

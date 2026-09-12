@@ -12,6 +12,7 @@ import {
   toasts,
   type ProjectPageHarness,
 } from './project-tab-fixtures';
+import { COLOR_PRESETS } from '@/lib/constants/colors';
 
 vi.mock('next/navigation', async () => (
   (await import('./project-tab-fixtures')).nextNavigationModule()
@@ -272,6 +273,50 @@ describe('project phases (Plan) tab', () => {
     expect(screen.getByRole('button', { name: 'Build' })).toBeInTheDocument();
     expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
       .not.toContainEqual({ name: 'Abandoned' });
+  });
+
+  it('changes a phase color and can restore the project color fallback', async () => {
+    await renderProjectTab('Plan');
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+
+    fireEvent.click(within(discovery).getByRole('button', { name: 'Change Discovery color' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Set Discovery color to Violet' }));
+
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ color: COLOR_PRESETS[1] });
+    });
+
+    fireEvent.click(within(phaseRegion('Discovery')).getByRole('button', { name: 'Change Discovery color' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Use project color' }));
+
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ color: null });
+    });
+  });
+
+  it('uses the phase color for Gantt labels and bars', async () => {
+    harness = installProjectPageHarness({
+      project: { name: 'Plan Project' },
+      phases: [
+        makePhase('phase-design', {
+          name: 'Design',
+          color: COLOR_PRESETS[2],
+          estimatedDays: 3,
+        }),
+      ],
+      tasks: [],
+    });
+    await renderProjectTab('Plan');
+
+    fireEvent.click(screen.getByRole('button', { name: /^gantt$/i }));
+    const phaseBar = await screen.findByRole('button', { name: 'Phase: Design, Pending' });
+
+    expect(phaseBar).toHaveStyle({
+      backgroundColor: 'rgba(236, 72, 153, 0.22)',
+      borderColor: 'rgba(236, 72, 153, 0.46)',
+    });
   });
 
   it('saves phase description, estimate, and schedule edits', async () => {

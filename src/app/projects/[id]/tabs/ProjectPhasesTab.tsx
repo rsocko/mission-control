@@ -67,6 +67,7 @@ import {
 } from '@/components/bulk-actions';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
+import { PhaseColorPicker } from '@/components/projects/PhaseColorPicker';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import {
   ViewDensityToggle,
@@ -141,7 +142,6 @@ import {
   filterProjectTasks,
   getConnectorIcon,
   getPhaseColor,
-  getPhaseStatusColor,
   getTaskStatusColor,
   getTimelineRange,
   toRgba,
@@ -1350,6 +1350,13 @@ export function ProjectPhasesTab({
                               >
                                 <GripVertical size={14} />
                               </button>
+                              <PhaseColorPicker
+                                phaseName={phase.name}
+                                value={phase.color}
+                                fallbackColor={project.color}
+                                disabled={isPhaseMutationDisabled}
+                                onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                              />
                               <CheckCircle2 size={16} className="shrink-0 text-[var(--success)]" />
                               <span className="min-w-0 truncate text-sm font-medium text-[var(--text-secondary)]">
                                 {phase.name}
@@ -1402,7 +1409,15 @@ export function ProjectPhasesTab({
                             <div className="relative rounded-t-[var(--radius-lg)] bg-[var(--surface-1)]">
                               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="flex min-w-0 gap-3">
-                                  <span className="mt-4 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: phaseColor }} aria-hidden="true" />
+                                  <div className="mt-1">
+                                    <PhaseColorPicker
+                                      phaseName={phase.name}
+                                      value={phase.color}
+                                      fallbackColor={project.color}
+                                      disabled={isPhaseMutationDisabled}
+                                      onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                                    />
+                                  </div>
                                   <button
                                     type="button"
                                     {...dragHandleProps}
@@ -1870,6 +1885,7 @@ export function ProjectPhasesTab({
           ) : visiblePhaseViewMode === 'assign' ? (
             <PhaseAssignView
               phases={phases}
+              projectColor={project.color}
               unassignedTasks={unassignedTasks}
               phaseEntries={phaseEntries}
               sensors={sensors}
@@ -1933,7 +1949,7 @@ export function ProjectPhasesTab({
                   </div>
 
                   {ganttRows.map((row) => {
-                    const phaseStatusColor = getPhaseStatusColor(row.phase.status);
+                    const phaseColor = getPhaseColor(row.phase, project);
                     const phaseOffset = differenceInCalendarDays(row.start, timelineRange.start) * timelineCellWidth;
                     const phaseWidth = row.durationDays * timelineCellWidth;
 
@@ -1941,7 +1957,7 @@ export function ProjectPhasesTab({
                       <div key={row.phase.id} className="flex border-b border-[var(--border-subtle)] last:border-b-0">
                         <div className="sticky left-0 z-10 w-[220px] shrink-0 border-r border-[var(--border)] bg-[var(--surface-0)] px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseStatusColor }} />
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseColor }} />
                             <p className="truncate text-sm font-medium text-[var(--text-primary)]">{row.phase.name}</p>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-2 text-[12px] text-[var(--text-tertiary)]">
@@ -1962,8 +1978,8 @@ export function ProjectPhasesTab({
                             style={{
                               left: phaseOffset,
                               width: Math.max(phaseWidth, 24),
-                              backgroundColor: toRgba(phaseStatusColor, 0.22),
-                              borderColor: toRgba(phaseStatusColor, 0.46),
+                              backgroundColor: toRgba(phaseColor, 0.22),
+                              borderColor: toRgba(phaseColor, 0.46),
                             }}
                             role="button"
                             tabIndex={0}

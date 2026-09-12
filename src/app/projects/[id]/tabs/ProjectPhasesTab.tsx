@@ -67,6 +67,7 @@ import {
 } from '@/components/bulk-actions';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
+import { PhaseColorPicker } from '@/components/projects/PhaseColorPicker';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import {
   ViewDensityToggle,
@@ -95,6 +96,7 @@ import {
   getPhaseTaskStatusSummary,
   shouldCompactCompletedPhase,
 } from '@/lib/projects/phase-task-status';
+import { LARGE_PHASE_TASK_THRESHOLD } from '@/lib/projects/phase-reorganization';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -140,7 +142,6 @@ import {
   filterProjectTasks,
   getConnectorIcon,
   getPhaseColor,
-  getPhaseStatusColor,
   getTaskStatusColor,
   getTimelineRange,
   toRgba,
@@ -151,6 +152,7 @@ import type {
   RequestConfirmation,
 } from './contracts';
 import { AIPlanControl } from './AIPlanControl';
+import { PhaseReorganizationTrigger } from './PhaseReorganizationTrigger';
 import { PlanTaskRow } from '../PlanTaskRow';
 import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
@@ -209,7 +211,7 @@ export function ProjectPhasesTab({
     projectId,
     reportRefreshKey,
     tasks,
-    taskToPhase,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     hierarchyAnnouncement,
@@ -411,12 +413,6 @@ export function ProjectPhasesTab({
     ]),
     tasks: tasks.map((task) => [task.id, task.status, task.updatedAt]),
   }), [phaseItemsByPhase, phases, tasks]);
-
-  // Tasks in the project that are not assigned to any phase
-  const unassignedTasks = useMemo(() => {
-    if (phases.length === 0) return [];
-    return tasks.filter((t) => !taskToPhase.has(t.id));
-  }, [tasks, taskToPhase, phases]);
 
   const visibleUnassignedTasks = useMemo(() => {
     return unassignedTasks.filter((task) => filteredPlanTaskIds.has(task.id));
@@ -1212,8 +1208,25 @@ export function ProjectPhasesTab({
         </CardHeader>
 
         {/* AI Insights - inline hints based on phase data */}
-        {phases.length >= 2 && (() => {
-          const insights: Array<{ type: 'gap' | 'stale' | 'overlap'; message: string }> = [];
+        {phases.length > 0 && (() => {
+          const insights: Array<{
+            type: 'gap' | 'stale' | 'overlap' | 'large';
+            message: string;
+            phaseId?: string;
+            phaseName?: string;
+          }> = [];
+          const largePhases = phases.filter(
+            (phase) => (phaseEntries[phase.id] ?? []).length > LARGE_PHASE_TASK_THRESHOLD,
+          );
+          for (const largePhase of largePhases) {
+            const taskCount = (phaseEntries[largePhase.id] ?? []).length;
+            insights.push({
+              type: 'large',
+              message: `“${largePhase.name}” has ${taskCount} tasks and may be easier to manage if subdivided.`,
+              phaseId: largePhase.id,
+              phaseName: largePhase.name,
+            });
+          }
           const stalePhasesCount = phases.filter((p) => p.status === 'in_progress').length;
           if (stalePhasesCount > 2) {
             insights.push({ type: 'stale', message: `${stalePhasesCount} phases are marked in-progress simultaneously — consider focusing on fewer.` });
@@ -1241,7 +1254,15 @@ export function ProjectPhasesTab({
                 {insights.slice(0, 3).map((insight, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
                     <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-purple-400 flex-shrink-0" />
-                    <span>{insight.message}</span>
+                    <span className="flex-1">{insight.message}</span>
+                    {insight.phaseId && insight.phaseName ? (
+                      <PhaseReorganizationTrigger
+                        phaseId={insight.phaseId}
+                        phaseName={insight.phaseName}
+                        proposalActions={proposalActions}
+                        compact
+                      />
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1329,6 +1350,13 @@ export function ProjectPhasesTab({
                               >
                                 <GripVertical size={14} />
                               </button>
+                              <PhaseColorPicker
+                                phaseName={phase.name}
+                                value={phase.color}
+                                fallbackColor={project.color}
+                                disabled={isPhaseMutationDisabled}
+                                onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                              />
                               <CheckCircle2 size={16} className="shrink-0 text-[var(--success)]" />
                               <span className="min-w-0 truncate text-sm font-medium text-[var(--text-secondary)]">
                                 {phase.name}
@@ -1381,7 +1409,15 @@ export function ProjectPhasesTab({
                             <div className="relative rounded-t-[var(--radius-lg)] bg-[var(--surface-1)]">
                               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="flex min-w-0 gap-3">
-                                  <span className="mt-4 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: phaseColor }} aria-hidden="true" />
+                                  <div className="mt-1">
+                                    <PhaseColorPicker
+                                      phaseName={phase.name}
+                                      value={phase.color}
+                                      fallbackColor={project.color}
+                                      disabled={isPhaseMutationDisabled}
+                                      onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                                    />
+                                  </div>
                                   <button
                                     type="button"
                                     {...dragHandleProps}
@@ -1449,10 +1485,28 @@ export function ProjectPhasesTab({
                                         </Tooltip>
                                       ) : null}
                                       {/* Task count — read-only pill, visually distinct */}
-                                      <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                                      <span
+                                        className={cn(
+                                          'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium',
+                                          allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                            ? 'bg-amber-500/10 text-amber-300'
+                                            : 'bg-[var(--surface-2)] text-[var(--text-secondary)]',
+                                        )}
+                                        title={allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                          ? 'Large phases can be harder to scan and maintain.'
+                                          : undefined}
+                                      >
                                         <Layers3 size={11} />
                                         {hasPlanTaskFilters || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? ' · Large phase' : ''}
                                       </span>
+                                      {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? (
+                                        <PhaseReorganizationTrigger
+                                          phaseId={phase.id}
+                                          phaseName={phase.name}
+                                          proposalActions={proposalActions}
+                                        />
+                                      ) : null}
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
@@ -1831,6 +1885,7 @@ export function ProjectPhasesTab({
           ) : visiblePhaseViewMode === 'assign' ? (
             <PhaseAssignView
               phases={phases}
+              projectColor={project.color}
               unassignedTasks={unassignedTasks}
               phaseEntries={phaseEntries}
               sensors={sensors}
@@ -1894,7 +1949,7 @@ export function ProjectPhasesTab({
                   </div>
 
                   {ganttRows.map((row) => {
-                    const phaseStatusColor = getPhaseStatusColor(row.phase.status);
+                    const phaseColor = getPhaseColor(row.phase, project);
                     const phaseOffset = differenceInCalendarDays(row.start, timelineRange.start) * timelineCellWidth;
                     const phaseWidth = row.durationDays * timelineCellWidth;
 
@@ -1902,7 +1957,7 @@ export function ProjectPhasesTab({
                       <div key={row.phase.id} className="flex border-b border-[var(--border-subtle)] last:border-b-0">
                         <div className="sticky left-0 z-10 w-[220px] shrink-0 border-r border-[var(--border)] bg-[var(--surface-0)] px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseStatusColor }} />
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseColor }} />
                             <p className="truncate text-sm font-medium text-[var(--text-primary)]">{row.phase.name}</p>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-2 text-[12px] text-[var(--text-tertiary)]">
@@ -1923,8 +1978,8 @@ export function ProjectPhasesTab({
                             style={{
                               left: phaseOffset,
                               width: Math.max(phaseWidth, 24),
-                              backgroundColor: toRgba(phaseStatusColor, 0.22),
-                              borderColor: toRgba(phaseStatusColor, 0.46),
+                              backgroundColor: toRgba(phaseColor, 0.22),
+                              borderColor: toRgba(phaseColor, 0.46),
                             }}
                             role="button"
                             tabIndex={0}

@@ -77,6 +77,8 @@ export class MicrosoftTodoConnector implements IConnector {
     delete: true,
     sync: true,
     subtasks: true,
+    subtaskOrderRead: false,
+    subtaskOrderWrite: false,
     lists: true,
     tags: true,
     tagWriteBack: true,

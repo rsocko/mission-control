@@ -813,6 +813,18 @@ export function installProjectPageHarness(
         }
         break;
       }
+      case 'replace_phase_structure': {
+        phases.splice(0, phases.length, ...command.phases);
+        for (const phaseId of Object.keys(phaseItemsByPhase)) {
+          phaseItemsByPhase[phaseId] = [];
+        }
+        for (const placement of command.placements) {
+          if (placement.phaseId) {
+            attachTasks([placement.taskId], placement.phaseId, placement.index);
+          }
+        }
+        break;
+      }
     }
 
     return {
@@ -1100,7 +1112,7 @@ export function installProjectPageHarness(
 export type ProjectTabName = 'Overview' | 'Plan' | 'Project Tasks' | 'Settings';
 
 export function tabButtonName(tab: ProjectTabName) {
-  return new RegExp(`^${tab}( \\(\\d+\\))?$`);
+  return new RegExp(`^${tab}( \\(\\d+\\))?( \\d+ unphased tasks?)?$`);
 }
 
 export async function projectPageElement(

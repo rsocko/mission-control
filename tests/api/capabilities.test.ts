@@ -944,11 +944,46 @@ describe('task route capability enforcement', () => {
       params: Promise.resolve({ id: task.id }),
     });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ success: true, action: 'deleted' });
+    expect(await response.json()).toEqual({
+      success: true,
+      action: 'deleted',
+      restorable: true,
+    });
     expect(removals[0].mode).toBe('local-delete');
     expect(searchMocks.remove).toHaveBeenCalledWith(task.id);
     expect(searchMocks.semanticDelete).toHaveBeenCalledWith('task', task.id);
     expect(connectorMocks.getConnector).not.toHaveBeenCalled();
+  });
+
+  it('restores a soft-deleted local task and republishes its search documents', async () => {
+    registerFakeTaskCorePersistence({
+      removals: {
+        restoreTask: vi.fn(async () => ({
+          kind: 'restored' as const,
+          task: {
+            id: task.id,
+            title: task.title,
+            description: task.description,
+            sourceListName: task.sourceListName,
+            connectorType: task.connectorType,
+            status: task.status,
+          },
+        })),
+      },
+    });
+    const { POST } = await import('@/app/api/tasks/[id]/restore/route');
+    const response = await POST(
+      new Request('http://localhost:3099/api/tasks/task-1/restore', { method: 'POST' }),
+      { params: Promise.resolve({ id: task.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      success: true,
+      task: { id: task.id },
+    });
+    expect(searchMocks.index).toHaveBeenCalledWith(expect.objectContaining({ id: task.id }));
+    expect(searchMocks.semanticUpsert).toHaveBeenCalledWith('task', task.id);
   });
 
   it('rejects deletes when connector delete capability is false', async () => {

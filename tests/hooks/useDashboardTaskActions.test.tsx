@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useRef, useState } from 'react';
 import {
@@ -29,6 +29,7 @@ const task = {
   taskSourceModel: 'mc-owned',
   microStatus: null,
   priority: 'none',
+  planningHorizon: null,
   dueDate: null,
   connectorType: 'local',
   connectorInstanceId: 'local',
@@ -78,7 +79,7 @@ function useHarness(
   const [, setMyDayTaskIds] = useState(new Set<string>());
   const [myDayItemStatuses, setMyDayItemStatuses] = useState(new Map<string, string>());
   const [, setExitingTasks] = useState<DashboardTaskExit[]>([]);
-  const [, setConfirmDialog] = useState<DashboardTaskConfirmDialog>({
+  const [confirmDialog, setConfirmDialog] = useState<DashboardTaskConfirmDialog>({
     open: false,
     title: '',
     message: '',
@@ -106,7 +107,7 @@ function useHarness(
     updateTaskGroupCounts,
   });
 
-  return { actions, taskResponse };
+  return { actions, taskResponse, confirmDialog };
 }
 
 afterEach(() => {
@@ -118,6 +119,46 @@ afterEach(() => {
 });
 
 describe('useDashboardTaskActions', () => {
+  it('deletes immediately and restores through the server when undo is clicked', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, action: 'deleted', restorable: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const { result } = renderHook(() => useHarness());
+
+    act(() => result.current.actions.deleteTask('task-1'));
+    act(() => result.current.confirmDialog.onConfirm());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1',
+      { method: 'DELETE' },
+    ));
+    expect(result.current.taskResponse.tasks).toHaveLength(0);
+
+    const options = toast.success.mock.calls.at(-1)?.[1] as {
+      action: { onClick: () => void };
+    };
+    await act(async () => {
+      options.action.onClick();
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1/restore',
+      { method: 'POST' },
+    ));
+    expect(result.current.taskResponse.tasks).toEqual([task]);
+  });
+
   it('keeps the action object and its functions stable across state and option changes', () => {
     const { result, rerender } = renderHook(
       ({ quickFilter }) => useHarness(quickFilter),

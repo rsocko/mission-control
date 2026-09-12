@@ -12,6 +12,7 @@ import { triggerHaptic, triggerHapticFeedback } from '@/lib/utils/haptics';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { isInactiveTaskStatus, PRIORITY_DOT_COLORS } from '@/lib/constants/task-formatting';
+import { getConnectorLabel } from '@/lib/constants/colors';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { MyDayItem } from './types';
 import {
@@ -22,6 +23,7 @@ import {
 } from '@/lib/tasks/client-edit-policy';
 import type { LocalDisposition } from '@/types';
 import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { TaskConnectorSyncState } from '@/components/task-list/TaskConnectorSyncState';
 import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 
 const SWIPE_THRESHOLD = 80;
@@ -110,6 +112,7 @@ export function MobileSwipeTaskRow({
     && option.value !== item.localDisposition
     && canSetTaskLocalDisposition(item.editPolicy, item.localDisposition, option.value)
   ));
+  const connectorLabel = getConnectorLabel(item.connectorType);
 
   // Background colors for swipe indicators
   const leftBgOpacity = useTransform(x, [-FULL_SWIPE_THRESHOLD, -SWIPE_THRESHOLD, 0], [1, 0.6, 0]);
@@ -350,7 +353,7 @@ export function MobileSwipeTaskRow({
                 {CONNECTOR_ICONS[item.connectorType] && (
                   <Image
                     src={CONNECTOR_ICONS[item.connectorType]}
-                    alt={item.connectorType}
+                    alt={connectorLabel}
                     width={11}
                     height={11}
                     className="flex-shrink-0"
@@ -360,15 +363,27 @@ export function MobileSwipeTaskRow({
               </span>
             )}
             {/* Source icon only (when no list name but connector icon exists) */}
-            {!item.sourceListName && CONNECTOR_ICONS[item.connectorType] && (
-              <Image
-                src={CONNECTOR_ICONS[item.connectorType]}
-                alt={item.connectorType}
-                width={11}
-                height={11}
-                className="flex-shrink-0 opacity-60"
-              />
+            {!item.sourceListName && (
+              <span className="flex min-w-0 shrink items-center gap-1 text-xs text-[var(--text-muted)]">
+                {CONNECTOR_ICONS[item.connectorType] && (
+                  <Image
+                    src={CONNECTOR_ICONS[item.connectorType]}
+                    alt=""
+                    width={11}
+                    height={11}
+                    className="shrink-0 opacity-60"
+                  />
+                )}
+                <span className="truncate">{connectorLabel}</span>
+              </span>
             )}
+            <TaskConnectorSyncState
+              compact
+              syncStatus={item.syncStatus}
+              connectorType={item.connectorType}
+              connectorInstanceId={item.connectorInstanceId}
+              pushRetryCount={item.pushRetryCount}
+            />
             {/* Due indicator */}
             {dueDateStr && (
               <span className={cn(

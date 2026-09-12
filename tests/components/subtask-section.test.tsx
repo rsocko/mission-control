@@ -16,6 +16,42 @@ afterEach(() => {
 });
 
 describe('SubtaskSection', () => {
+  it('shows accessible reorder handles and identifies local-only ordering', () => {
+    render(
+      <SubtaskSection
+        taskId="task-1"
+        subtasks={[
+          { id: 'subtask-1', title: 'First', status: 'todo' },
+          { id: 'subtask-2', title: 'Second', status: 'todo' },
+        ]}
+        onSubtasksChange={vi.fn()}
+        orderIsLocalOnly
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Reorder "First"' })).toHaveAttribute(
+      'title',
+      'Order is saved in Mission Control only',
+    );
+    expect(screen.getByText('Order is saved in Mission Control only.')).toBeInTheDocument();
+  });
+
+  it('hides reorder controls when subtasks are read-only', () => {
+    render(
+      <SubtaskSection
+        taskId="task-1"
+        subtasks={[
+          { id: 'subtask-1', title: 'First', status: 'todo' },
+          { id: 'subtask-2', title: 'Second', status: 'todo' },
+        ]}
+        onSubtasksChange={vi.fn()}
+        canEdit={false}
+      />,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Reorder "First"' })).not.toBeInTheDocument();
+  });
+
   it('completes a subtask without refreshing the parent view', async () => {
     const onSubtasksChange = vi.fn();
     const onUpdate = vi.fn();

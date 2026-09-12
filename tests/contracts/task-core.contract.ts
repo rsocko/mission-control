@@ -32,6 +32,7 @@ export interface SeedTask {
   createdAt?: string;
   updatedAt?: string;
   completedAt?: string | null;
+  deletedAt?: string | null;
   parentId?: string | null;
   depth?: number;
   isChecklistItem?: boolean;
@@ -213,6 +214,7 @@ export interface TaskCoreContractHarness {
   listAttachmentTaskIds(): Promise<string[]>;
   listMyDayTaskIds(): Promise<string[]>;
   getTaskUpdatedAt(taskId: string): Promise<string | null>;
+  getTaskDeletedAt(taskId: string): Promise<string | null>;
   countOutboxEvents(stableKey: string): Promise<number>;
   insertTriageItem(input: {
     id: string;
@@ -560,7 +562,7 @@ export function describeTaskCoreContract(
           .map((task) => task.id)).toHaveLength(1);
       });
 
-      it('orders subtasks by creation time and stable id tie-breaker', async () => {
+      it('appends new subtasks and atomically reorders an exact sibling set', async () => {
         await harness.insertTasks([{ id: 'ordered-parent' }]);
         const repository = harness.persistence.ancillary;
         for (const task of [
@@ -588,10 +590,35 @@ export function describeTaskCoreContract(
           });
         }
         await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
-          expect.objectContaining({ id: 'ordered-a' }),
-          expect.objectContaining({ id: 'ordered-b' }),
-          expect.objectContaining({ id: 'ordered-c' }),
+          expect.objectContaining({ id: 'ordered-c', siblingOrder: 0 }),
+          expect.objectContaining({ id: 'ordered-b', siblingOrder: 1 }),
+          expect.objectContaining({ id: 'ordered-a', siblingOrder: 2 }),
         ]);
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-c', 'ordered-b'],
+          expectedRevision: 0,
+        })).resolves.toEqual({ kind: 'reordered', revision: 1 });
+        await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
+          expect.objectContaining({ id: 'ordered-a', siblingOrder: 0 }),
+          expect.objectContaining({ id: 'ordered-c', siblingOrder: 1 }),
+          expect.objectContaining({ id: 'ordered-b', siblingOrder: 2 }),
+        ]);
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-b', 'ordered-c'],
+          expectedRevision: 0,
+        })).resolves.toEqual({ kind: 'revision-conflict', currentRevision: 1 });
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-b', 'not-a-child'],
+          expectedRevision: 1,
+        })).resolves.toEqual({ kind: 'invalid-children' });
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-a', 'ordered-c'],
+          expectedRevision: 1,
+        })).resolves.toEqual({ kind: 'invalid-children' });
       });
 
       it('normalizes concurrent tag mutations by slug and keeps links idempotent', async () => {
@@ -1135,8 +1162,28 @@ export function describeTaskCoreContract(
           expectedUpdatedAt: NOW,
           mode: 'local-delete',
           now: NOW,
-        })).toEqual({ kind: 'committed', action: 'deleted', taskVersion: null });
+        })).toEqual({ kind: 'committed', action: 'deleted', taskVersion: NOW });
         expect(await harness.persistence.details.getTaskDetail('task-delete', TODAY)).toBeNull();
+        expect(await harness.getTaskDeletedAt('task-delete')).toBe(NOW);
+        expect(await harness.persistence.removals.restoreTask(
+          'task-delete',
+          '2026-08-05T12:01:00.000Z',
+        )).toMatchObject({ kind: 'restored', task: { id: 'task-delete' } });
+        expect(await harness.persistence.details.getTaskDetail('task-delete', TODAY))
+          .toMatchObject({ task: { id: 'task-delete' } });
+      });
+
+      it('purges only soft-deleted tasks older than the retention cutoff', async () => {
+        await harness.insertTasks([
+          { id: 'task-old-delete', deletedAt: '2026-07-01T00:00:00.000Z' },
+          { id: 'task-new-delete', deletedAt: '2026-08-04T00:00:00.000Z' },
+          { id: 'task-active' },
+        ]);
+
+        expect(await harness.persistence.removals.purgeDeletedBefore(
+          '2026-08-01T00:00:00.000Z',
+        )).toEqual(['task-old-delete']);
+        expect(await harness.listTaskIds()).toEqual(['task-active', 'task-new-delete']);
       });
 
       it('fences remote deletion finalization by both lease and task version', async () => {
@@ -1182,6 +1229,14 @@ export function describeTaskCoreContract(
       it('an empty spec matches every visible task', async () => {
         const count = await harness.persistence.queries.countTasks(makeSpec());
         expect(count).toBe(4);
+      });
+
+      it('excludes soft-deleted tasks from canonical queries', async () => {
+        await harness.insertTasks([{
+          id: 'task-deleted',
+          deletedAt: '2026-08-05T12:00:00.000Z',
+        }]);
+        expect(await harness.persistence.queries.countTasks(makeSpec())).toBe(4);
       });
 
       it('applies the default active disposition without dropping other rows', async () => {

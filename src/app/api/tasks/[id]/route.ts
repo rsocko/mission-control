@@ -862,6 +862,7 @@ export async function DELETE(
       return NextResponse.json({
         success: true,
         action: 'dismissed',
+        restorable: false,
         connectorType: task.connectorType,
         writeBack: 'none',
       });
@@ -889,6 +890,7 @@ export async function DELETE(
       return NextResponse.json({
         success: true,
         action: 'cancelled',
+        restorable: false,
         connectorType: task.connectorType,
         writeBack: statusPolicy.mutation,
       });
@@ -924,6 +926,7 @@ export async function DELETE(
       return NextResponse.json({
         success: true,
         action: willClose ? 'closed' : 'deleted',
+        restorable: false,
         connectorType: task.connectorType,
       });
     }
@@ -942,7 +945,7 @@ export async function DELETE(
       }, { status: 409 });
     }
     await removeTaskSearch(id);
-    return NextResponse.json({ success: true, action: 'deleted' });
+    return NextResponse.json({ success: true, action: 'deleted', restorable: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete task', error);
   }
@@ -1055,6 +1058,7 @@ export async function GET(
         tagIds: detail.tagIds,
         projectIds: detail.projectIds,
         subtasks: detail.subtasks,
+        subtaskOrderRevision: detail.subtaskOrderRevision,
         isInMyDay: detail.isInMyDay,
         taskSourceModel: editPolicy.sourceModel,
         editPolicy,

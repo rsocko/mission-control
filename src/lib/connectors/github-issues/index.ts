@@ -28,6 +28,7 @@ import {
 
 import { createGitHubClient } from './github-client';
 import type { GitHubClient, GitHubRestIssue, GitHubRestRepository } from './github-client';
+import { getGitHubConnectorToken } from './credentials';
 import {
   isNativeGitHubIssueSourceId,
   mapGraphQLIssueToTask,
@@ -173,7 +174,7 @@ export class GitHubIssuesConnector implements IConnector {
     this.config = config;
     (this as { id: string }).id = config.id;
     const settings = config.settings as unknown as GitHubConfig;
-    const token = config.credentials.token || config.credentials.pat || settings.token || '';
+    const token = getGitHubConnectorToken(config.credentials, config.settings) ?? '';
     this.client = createGitHubClient(token, settings.apiOrigin);
     this.repos = settings.repos || [];
     this.notifications.configure({

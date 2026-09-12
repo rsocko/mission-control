@@ -1,6 +1,7 @@
 import db, { sqlite } from '@/db';
 import { notifications, tasks } from '@/db/schema';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
+import { compareKeywordResults } from '@/lib/search/keyword-ranking';
 import type {
   KeywordSearchRepository,
   SearchFilters,
@@ -215,7 +216,12 @@ export async function warmUpFTS() {
   await ensureFTSReady();
 }
 
-function searchTasks(query: string, limit: number, filters: SearchFilters): SearchResult[] {
+function searchTasks(
+  query: string,
+  queryText: string,
+  limit: number,
+  filters: SearchFilters,
+): SearchResult[] {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
   const rows = sqlite
@@ -228,6 +234,11 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
           COALESCE(highlight(tasks_fts, 0, '<mark>', '</mark>'), t.title) AS title_hl,
           COALESCE(NULLIF(snippet(tasks_fts, 1, '<mark>', '</mark>', '...', 24), ''), '') AS desc_snippet,
           bm25(tasks_fts, 10.0, 4.0, 2.0, 1.0) AS rank,
+          CASE
+            WHEN LOWER(TRIM(t.title)) = LOWER(TRIM(?)) THEN 0
+            WHEN INSTR(LOWER(TRIM(t.title)), LOWER(TRIM(?))) = 1 THEN 1
+            ELSE 2
+          END AS title_match_rank,
           t.status,
           t.priority,
           t.due_date AS dueDate,
@@ -252,11 +263,13 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
             AND t.connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
             AND t.connector_instance_id NOT IN (SELECT value FROM json_each(?))
           ))
-        ORDER BY rank
+        ORDER BY title_match_rank, rank, LOWER(t.title), t.id
         LIMIT ?
       `
     )
     .all(
+      queryText,
+      queryText,
       query,
       source,
       source,
@@ -279,6 +292,7 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
       title_hl: string;
       desc_snippet: string;
       rank: number;
+      title_match_rank: number;
       status: string;
       priority: string;
       dueDate: string | null;
@@ -307,6 +321,7 @@ function searchTasks(query: string, limit: number, filters: SearchFilters): Sear
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
       rank: row.rank,
+      titleMatchRank: row.title_match_rank,
       rowid: row.rowid,
     },
   }));
@@ -400,11 +415,17 @@ function searchTasksByIssueNumber(
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
       issueNumber,
+      titleMatchRank: 0,
     },
   }));
 }
 
-function searchNotifications(query: string, limit: number, filters: SearchFilters): SearchResult[] {
+function searchNotifications(
+  query: string,
+  queryText: string,
+  limit: number,
+  filters: SearchFilters,
+): SearchResult[] {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
   const notificationKind = filters.notificationKind ?? null;
@@ -430,6 +451,11 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
           COALESCE(highlight(alerts_fts, 0, '<mark>', '</mark>'), a.title) AS title_hl,
           COALESCE(NULLIF(snippet(alerts_fts, 1, '<mark>', '</mark>', '...', 24), ''), '') AS body_snippet,
           bm25(alerts_fts, 10.0, 4.0, 2.0) AS rank,
+          CASE
+            WHEN LOWER(TRIM(a.title)) = LOWER(TRIM(?)) THEN 0
+            WHEN INSTR(LOWER(TRIM(a.title)), LOWER(TRIM(?))) = 1 THEN 1
+            ELSE 2
+          END AS title_match_rank,
           a.level AS severity,
           a.category,
           CASE WHEN a.state = 'read' THEN 1 ELSE 0 END AS isRead,
@@ -446,11 +472,13 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
           AND (? IS NULL OR a.received_at >= ?)
           AND (? IS NULL)
           AND (? = 0 OR LOWER(a.category) <> 'done')
-        ORDER BY rank
+        ORDER BY title_match_rank, rank, LOWER(a.title), a.id
         LIMIT ?
       `
     )
     .all(
+      queryText,
+      queryText,
       query,
       source,
       source,
@@ -471,6 +499,7 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
       title_hl: string;
       body_snippet: string;
       rank: number;
+      title_match_rank: number;
       severity: string;
       category: string;
       isRead: number;
@@ -501,6 +530,7 @@ function searchNotifications(query: string, limit: number, filters: SearchFilter
       receivedAt: row.receivedAt,
       notificationKind: row.isNote ? 'notes' : 'triage',
       rank: row.rank,
+      titleMatchRank: row.title_match_rank,
       rowid: row.rowid,
     },
   }));
@@ -527,8 +557,12 @@ export async function searchFTS(
 
   const results = [
     ...exactIssueResults,
-    ...(type === 'all' || type === 'tasks' ? searchTasks(matchQuery, limit, options) : []),
-    ...(type === 'all' || type === 'notifications' ? searchNotifications(matchQuery, limit, options) : []),
+    ...(type === 'all' || type === 'tasks'
+      ? searchTasks(matchQuery, normalizedQuery, limit, options)
+      : []),
+    ...(type === 'all' || type === 'notifications'
+      ? searchNotifications(matchQuery, normalizedQuery, limit, options)
+      : []),
   ];
   const seen = new Set<string>();
 
@@ -539,7 +573,7 @@ export async function searchFTS(
       seen.add(key);
       return true;
     })
-    .sort((left, right) => right.score - left.score)
+    .sort(compareKeywordResults)
     .slice(0, limit);
 }
 

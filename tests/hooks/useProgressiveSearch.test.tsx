@@ -44,7 +44,14 @@ describe('useProgressiveSearch', () => {
       const url = String(input);
       if (url.includes('__status_check__')) return pendingStatus;
       if (url.includes('mode=keyword')) {
-        return response({ results: [searchResult('exact', 'fts')], durationMs: 12 });
+        return response({
+          results: [searchResult('exact', 'fts')],
+          durationMs: 12,
+          facets: {
+            sources: [{ value: 'Lower-ranked project', count: 2 }],
+            statuses: [{ value: 'todo', count: 12 }],
+          },
+        });
       }
       if (url.includes('mode=semantic')) {
         return response({ results: [searchResult('related', 'semantic')], durationMs: 80 });
@@ -58,6 +65,9 @@ describe('useProgressiveSearch', () => {
     }));
 
     await waitFor(() => expect(result.current.results.map((item) => item.id)).toEqual(['exact']));
+    expect(result.current.facets.sources).toEqual([
+      { value: 'Lower-ranked project', count: 2 },
+    ]);
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('mode=semantic'))).toBe(false);
 
     await act(async () => {
@@ -128,6 +138,37 @@ describe('useProgressiveSearch', () => {
       }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     });
     expect(result.current.results[0]?.id).toBe('beta');
+  });
+
+  it('sends server-side scope, source, status, and date filters', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('__status_check__')) {
+        return response({ semanticEnabled: false, semanticAvailable: false, results: [] });
+      }
+      return response({ results: [], durationMs: 5 });
+    });
+
+    renderHook(() => useProgressiveSearch({
+      query: 'alpha',
+      enabled: true,
+      type: 'notifications',
+      notificationKind: 'notes',
+      source: 'Project Alpha',
+      status: 'open',
+      date: '7d',
+    }));
+
+    await waitFor(() => {
+      const keywordUrl = fetchSpy.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes('mode=keyword'));
+      expect(keywordUrl).toContain('type=notifications');
+      expect(keywordUrl).toContain('notificationKind=notes');
+      expect(keywordUrl).toContain('source=Project+Alpha');
+      expect(keywordUrl).toContain('status=open');
+      expect(keywordUrl).toContain('date=7d');
+    });
   });
 
   it.each([

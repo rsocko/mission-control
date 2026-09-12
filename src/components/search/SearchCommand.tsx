@@ -18,6 +18,10 @@ import {
 import { toast } from 'sonner';
 import { taskLogger } from '@/lib/client-logger';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import {
+  DESKTOP_SEARCH_DEBOUNCE_MS,
+  useDebouncedSearchQuery,
+} from '@/lib/hooks/useDebouncedSearchQuery';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 type TypeFilter = 'all' | 'tasks' | 'notifications';
@@ -101,7 +105,10 @@ export function SearchCommand() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debouncedQuery = useDebouncedSearchQuery(query, {
+    enabled: open,
+    debounceMs: DESKTOP_SEARCH_DEBOUNCE_MS,
+  });
   const [activeIndex, setActiveIndex] = useState(-1);
   const [previewTaskId, setPreviewTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ActiveFilters>({ type: 'all', source: null, status: null, excludeDone: true });
@@ -176,19 +183,7 @@ export function SearchCommand() {
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
     setActiveIndex(-1);
-
-    if (!value.trim()) {
-      setDebouncedQuery('');
-    }
   }, []);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedQuery(query.trim());
-    }, 80);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [query]);
 
   useEffect(() => {
     const openSearch = () => setOpen(true);
@@ -318,7 +313,6 @@ export function SearchCommand() {
       window.dispatchEvent(new CustomEvent('mission-control:task-added'));
       toast.success(`Created “${taskToCreate.title}”`);
       setQuery('');
-      setDebouncedQuery('');
       handleOpenChange(false);
     } catch (error) {
       taskLogger.error('Failed to create task from command palette', { error });

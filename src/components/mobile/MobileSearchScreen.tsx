@@ -19,6 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fadeSlideUp, modalContent, modalOverlay, staggerContainer } from '@/lib/motion';
 import type { SearchResult } from '@/lib/search/fts';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import {
+  MOBILE_SEARCH_DEBOUNCE_MS,
+  useDebouncedSearchQuery,
+} from '@/lib/hooks/useDebouncedSearchQuery';
 import { cn } from '@/lib/utils';
 
 export interface MobileSearchScreenProps {
@@ -39,7 +43,6 @@ interface RecentSearchesSectionProps {
 
 const RECENT_SEARCHES_KEY = 'mc:recent-searches';
 const MAX_RECENT_SEARCHES = 5;
-const SEARCH_DEBOUNCE_MS = 300;
 
 const SUGGESTED_SEARCHES = [
   'High priority tasks',
@@ -366,7 +369,11 @@ export function MobileSearchScreen({
   const previouslyOpenRef = useRef(false);
 
   const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debouncedQuery = useDebouncedSearchQuery(query, {
+    enabled: isOpen,
+    debounceMs: MOBILE_SEARCH_DEBOUNCE_MS,
+    immediateQuery: isOpen ? initialQuery : '',
+  });
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -403,7 +410,6 @@ export function MobileSearchScreen({
     if (!previouslyOpenRef.current) {
       const nextQuery = initialQuery?.trim() ?? '';
       setQuery(nextQuery);
-      setDebouncedQuery(nextQuery);
       setTypeFilter('all');
       setProjectFilter('all');
       setStatusFilter('all');
@@ -447,21 +453,6 @@ export function MobileSearchScreen({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
-
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const timeoutId = window.setTimeout(() => {
-      const nextValue = query.trim();
-      setDebouncedQuery(nextValue);
-
-      if (!nextValue) {
-        setDebouncedQuery('');
-      }
-    }, SEARCH_DEBOUNCE_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isOpen, query]);
 
   const projectOptions = useMemo(
     () => facets.sources.map((facet) => facet.value),
@@ -507,7 +498,6 @@ export function MobileSearchScreen({
 
   const handleClearQuery = useCallback(() => {
     setQuery('');
-    setDebouncedQuery('');
     setTypeFilter('all');
     setProjectFilter('all');
     setStatusFilter('all');

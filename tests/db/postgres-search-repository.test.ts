@@ -99,6 +99,24 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
           }
         }
       });
+
+      it('orders exact titles and title prefixes before relevance score and limit', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('Mercury launch', {
+          type: 'tasks',
+          limit: 20,
+        });
+
+        const [sql] = query.mock.calls[0] as [string, unknown[]];
+        expect(sql).toContain('WHEN lower(btrim(t.title)) = lower(btrim($1)) THEN 0');
+        expect(sql).toContain('WHEN starts_with(lower(btrim(t.title)), lower(btrim($1))) THEN 1');
+        expect(sql).toContain(
+          'ORDER BY "titleMatchRank", rank DESC, lower(t.title), t.id',
+        );
+        expect(sql.indexOf('ORDER BY "titleMatchRank"')).toBeLessThan(sql.indexOf('LIMIT $8'));
+      });
     });
 
     it('clamps to a minimum of 1', () => {

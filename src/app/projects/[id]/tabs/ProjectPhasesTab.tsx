@@ -209,7 +209,7 @@ export function ProjectPhasesTab({
     projectId,
     reportRefreshKey,
     tasks,
-    taskToPhase,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     hierarchyAnnouncement,
@@ -411,12 +411,6 @@ export function ProjectPhasesTab({
     ]),
     tasks: tasks.map((task) => [task.id, task.status, task.updatedAt]),
   }), [phaseItemsByPhase, phases, tasks]);
-
-  // Tasks in the project that are not assigned to any phase
-  const unassignedTasks = useMemo(() => {
-    if (phases.length === 0) return [];
-    return tasks.filter((t) => !taskToPhase.has(t.id));
-  }, [tasks, taskToPhase, phases]);
 
   const visibleUnassignedTasks = useMemo(() => {
     return unassignedTasks.filter((task) => filteredPlanTaskIds.has(task.id));

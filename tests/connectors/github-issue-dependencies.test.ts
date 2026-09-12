@@ -728,6 +728,14 @@ describe('GitHub issue dependencies', () => {
           status: 200,
         });
       }
+      if (url.includes('/issues/10/sub_issues?')) {
+        return new Response(JSON.stringify([{
+          ...githubIssue('acme/app', 20, 5020),
+          node_id: 'I_20',
+        }]), {
+          status: 200,
+        });
+      }
       throw new Error(`Unexpected request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);

@@ -170,6 +170,16 @@ export const TRUSTED_TASK_COLUMN_APPEND_EVENTS = {
       firstReachableCommit: '11336db7cfcf1d613309c1c0f636215eb8ac2cb1',
     },
   },
+  subtaskOrderMigration: {
+    columns: ['sibling_order', 'subtask_order_revision'],
+    provenance: {
+      kind: 'migration',
+      tag: '0132_nosy_otto_octavius',
+      path: 'drizzle/0132_nosy_otto_octavius.sql',
+      sha256: 'bca47755da4ddef636376069b36ff66b3bc9c2d36598f69f1b0e3d9e6f9faabd',
+      firstReachableCommit: '99d6922f97e1fbb204c7b276b189195eabde5ba2',
+    },
+  },
 } as const satisfies Readonly<Record<string, TaskColumnAppendEvent>>;
 
 export const TRUSTED_TASK_APPEND_COLUMNS = [
@@ -207,6 +217,7 @@ const ORDERED_MIGRATION_EVENTS = [
   'recurrenceMigration',
   'planningHorizonMigration',
   'deletedAtMigration',
+  'subtaskOrderMigration',
 ] as const satisfies readonly (keyof typeof TRUSTED_TASK_COLUMN_APPEND_EVENTS)[];
 
 const STATUS_RUNTIME_BOUNDARIES = [
@@ -240,7 +251,7 @@ const STATUS_RUNTIME_BOUNDARIES = [
   },
   {
     id: 'fresh',
-    afterTag: '0131_gigantic_toxin',
+    afterTag: '0132_nosy_otto_octavius',
   },
 ] as const;
 
@@ -248,7 +259,7 @@ const migrationBoundaryChronologies = STATUS_RUNTIME_BOUNDARIES.map(
   ({ id, afterTag }, boundaryIndex): TrustedTasksChronology => ({
     id,
     origin: `status/retry runtime after ${afterTag}`,
-    checkpointTags: [...new Set([afterTag, '0131_gigantic_toxin'])],
+    checkpointTags: [...new Set([afterTag, '0132_nosy_otto_octavius'])],
     events: [
       ...ORDERED_MIGRATION_EVENTS.slice(
         0,
@@ -278,6 +289,7 @@ export const TRUSTED_TASKS_CHRONOLOGIES: readonly TrustedTasksChronology[] = [
       'delayInsightsMigration',
       'relativeRemindersMigration',
       'deletedAtMigration',
+      'subtaskOrderMigration',
     ],
   },
 ] as const;

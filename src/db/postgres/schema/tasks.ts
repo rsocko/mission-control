@@ -45,6 +45,8 @@ export const tasks = pgTable('tasks', {
 
   // Hierarchy
   parentId: text('parent_id'),
+  siblingOrder: integer('sibling_order'),
+  subtaskOrderRevision: integer('subtask_order_revision').notNull().default(0),
   depth: integer('depth').notNull().default(0),
   isChecklistItem: boolean('is_checklist_item').notNull().default(false),
 
@@ -85,6 +87,7 @@ export const tasks = pgTable('tasks', {
 }, (table) => [
   index('idx_tasks_search_vector').using('gin', table.searchVector),
   uniqueIndex('idx_tasks_source_connector').on(table.sourceId, table.connectorInstanceId),
+  index('idx_tasks_parent_sibling_order').on(table.parentId, table.siblingOrder),
   index('idx_tasks_local_disposition').on(table.localDisposition),
   index('idx_tasks_deleted_at').on(table.deletedAt),
   index('idx_tasks_planning_horizon').on(table.planningHorizon),

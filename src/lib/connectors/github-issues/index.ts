@@ -138,6 +138,8 @@ export class GitHubIssuesConnector implements IConnector {
     close: true,
     sync: true,
     subtasks: true,
+    subtaskOrderRead: true,
+    subtaskOrderWrite: true,
     lists: true,
     tags: true,
     tagWriteBack: true,
@@ -887,6 +889,43 @@ export class GitHubIssuesConnector implements IConnector {
     return created;
   }
 
+  async reorderSubTasks(
+    parentSourceId: string,
+    orderedSubTaskSourceIds: readonly string[],
+  ): Promise<void> {
+    const authorizedParent = this.resolveSourceRoute(parentSourceId, 'primary_issue');
+    const { repo, issueNumber: parentNumber } = parseSourceId(authorizedParent);
+    const childDatabaseIds = await Promise.all(orderedSubTaskSourceIds.map(async (sourceId) => {
+      const { repo: childRepo, issueNumber } = parseSourceId(sourceId);
+      const response = await this.client!.restFetch(`/repos/${childRepo}/issues/${issueNumber}`);
+      if (!response.ok) {
+        throw new Error(`Failed to resolve GitHub sub-issue: ${response.status}`);
+      }
+      const issue = await response.json() as GitHubRestIssue;
+      if (typeof issue.id !== 'number') {
+        throw new Error('GitHub sub-issue did not include a database ID');
+      }
+      return issue.id;
+    }));
+
+    for (let index = 1; index < childDatabaseIds.length; index++) {
+      const response = await this.client!.restFetch(
+        `/repos/${repo}/issues/${parentNumber}/sub_issues/priority`,
+        {
+          method: 'PATCH',
+          headers: { 'X-GitHub-Api-Version': '2026-03-10' },
+          body: JSON.stringify({
+            sub_issue_id: childDatabaseIds[index],
+            after_id: childDatabaseIds[index - 1],
+          }),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`Failed to reprioritize GitHub sub-issue: ${response.status}`);
+      }
+    }
+  }
+
   async getLastSyncToken(): Promise<string | null> {
     return null;
   }
@@ -1157,6 +1196,7 @@ export class GitHubIssuesConnector implements IConnector {
         }
       }
     `;
+    const subIssueOrderByParent = new Map<string, Promise<Map<string, number>>>();
 
     let stagedPageCount = 0;
     try {
@@ -1280,6 +1320,22 @@ export class GitHubIssuesConnector implements IConnector {
                 )
               : undefined,
           );
+          if (issue.parent) {
+            const parentSourceId =
+              `${issue.parent.repository.nameWithOwner}:${issue.parent.number}`;
+            let orderPromise = subIssueOrderByParent.get(parentSourceId);
+            if (!orderPromise) {
+              orderPromise = this.fetchSubIssueOrder(parentSourceId, options?.signal);
+              subIssueOrderByParent.set(parentSourceId, orderPromise);
+            }
+            const siblingOrder = (await orderPromise).get(issue.id);
+            if (siblingOrder === undefined) {
+              throw new Error(
+                `GitHub sub-issue order did not include ${task.sourceId}`,
+              );
+            }
+            task.siblingOrder = siblingOrder;
+          }
           pageTasks.push(task);
         }
         if (options?.dependencyGeneration) {
@@ -1324,6 +1380,40 @@ export class GitHubIssuesConnector implements IConnector {
       }
       throw error;
     }
+  }
+
+  private async fetchSubIssueOrder(
+    parentSourceId: string,
+    signal?: AbortSignal,
+  ): Promise<Map<string, number>> {
+    const { repo, issueNumber } = parseSourceId(parentSourceId);
+    const order = new Map<string, number>();
+    let page = 1;
+
+    while (true) {
+      const response = await this.client!.restFetch(
+        `/repos/${repo}/issues/${issueNumber}/sub_issues?per_page=100&page=${page}`,
+        {
+          headers: { 'X-GitHub-Api-Version': '2026-03-10' },
+          signal,
+        },
+      );
+      if (!response.ok) {
+        throw new Error(
+          `Failed to read GitHub sub-issue order for ${parentSourceId}: ${response.status}`,
+        );
+      }
+      const subIssues = await response.json() as GitHubRestIssue[];
+      for (const subIssue of subIssues) {
+        if (subIssue.node_id) {
+          order.set(subIssue.node_id, order.size);
+        }
+      }
+      if (subIssues.length < 100) break;
+      page++;
+    }
+
+    return order;
   }
 
   private async fetchAllGraphQLBlockers(

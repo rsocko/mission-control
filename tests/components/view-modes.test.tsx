@@ -33,6 +33,13 @@ vi.mock('lucide-react', () => ({
   Italic: () => <span data-testid="icon-italic">I</span>,
   Link2: () => <span data-testid="icon-link">L</span>,
   List: () => <span data-testid="icon-list">•</span>,
+  AlertTriangle: () => <span data-testid="icon-alert-triangle">!</span>,
+  CheckCircle2: () => <span data-testid="icon-check-circle">✓</span>,
+  CircleHelp: () => <span data-testid="icon-circle-help">?</span>,
+  GitMerge: () => <span data-testid="icon-git-merge">⇄</span>,
+  Loader2: () => <span data-testid="icon-loader">↻</span>,
+  RefreshCw: () => <span data-testid="icon-refresh">↻</span>,
+  ShieldAlert: () => <span data-testid="icon-shield-alert">!</span>,
 }));
 
 vi.mock('sonner', () => ({

@@ -191,4 +191,33 @@ describe('MobileSwipeTaskRow haptics', () => {
     fireEvent.click(screen.getByRole('button', { name: /Mark handled here/i }));
     expect(onSetLocalDisposition).toHaveBeenCalledWith('task-1', 'handled');
   });
+
+  it.each([
+    ['synced', 'Confirmed'],
+    ['pending_push', 'Pending'],
+    ['push_error', 'Failed'],
+    ['push_failed', 'Blocked'],
+    ['conflict', 'Conflicted'],
+  ])('surfaces the %s connector operation state', (syncStatus, label) => {
+    render(
+      <MobileSwipeTaskRow
+        item={{
+          ...item,
+          connectorType: 'github-issues',
+          connectorInstanceId: 'github-work',
+          sourceListName: 'rsocko/mission-control',
+          syncStatus,
+        }}
+        onComplete={vi.fn()}
+        onRemoveFromDay={vi.fn()}
+        onTap={vi.fn()}
+        onScheduleTomorrow={vi.fn()}
+        onSchedulePickDay={vi.fn()}
+        onSnooze={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('status', { name: `GitHub Issues sync state: ${label}` })).toBeVisible();
+    expect(screen.getByText('rsocko/mission-control')).toBeVisible();
+  });
 });

@@ -119,6 +119,7 @@ export interface TaskItem {
 
   // Hierarchy
   parentId?: string;
+  siblingOrder?: number | null;
   childIds: string[];
   depth: number;
   isChecklistItem: boolean;
@@ -605,6 +606,10 @@ export interface ConnectorCapabilities {
   close?: boolean;         // Source supports closing/cancelling without hard deletion
   sync: boolean;
   subtasks: boolean;
+  /** Whether the source exposes a stable native subtask order during reads. */
+  subtaskOrderRead?: boolean;
+  /** Whether reordered subtasks can be written back to the source. */
+  subtaskOrderWrite?: boolean;
   lists: boolean;
   tags: boolean;          // Source supports tags/labels/categories
   tagWriteBack: boolean;  // Can write tags back to source

@@ -202,6 +202,8 @@ function fakePersistence(): TaskCorePersistence {
       copyTask: () => record('copyTask', { kind: 'task-not-found' as const }),
       promoteSubtask: () => record('promoteSubtask', { kind: 'not-found' as const }),
       listSubtasks: () => record('listSubtasks', []),
+      getSubtaskOrderState: () => record('getSubtaskOrderState', null),
+      reorderSubtasks: () => record('reorderSubtasks', { kind: 'parent-not-found' as const }),
       getSubtaskProposalSnapshot: () => record('getSubtaskProposalSnapshot', null),
       createSubtask: () => record('createSubtask', { kind: 'parent-not-found' as const }),
       acceptSubtaskProposal: () => record('acceptSubtaskProposal', { kind: 'stale' as const }),

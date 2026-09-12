@@ -560,7 +560,7 @@ export function describeTaskCoreContract(
           .map((task) => task.id)).toHaveLength(1);
       });
 
-      it('orders subtasks by creation time and stable id tie-breaker', async () => {
+      it('appends new subtasks and atomically reorders an exact sibling set', async () => {
         await harness.insertTasks([{ id: 'ordered-parent' }]);
         const repository = harness.persistence.ancillary;
         for (const task of [
@@ -588,10 +588,35 @@ export function describeTaskCoreContract(
           });
         }
         await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
-          expect.objectContaining({ id: 'ordered-a' }),
-          expect.objectContaining({ id: 'ordered-b' }),
-          expect.objectContaining({ id: 'ordered-c' }),
+          expect.objectContaining({ id: 'ordered-c', siblingOrder: 0 }),
+          expect.objectContaining({ id: 'ordered-b', siblingOrder: 1 }),
+          expect.objectContaining({ id: 'ordered-a', siblingOrder: 2 }),
         ]);
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-c', 'ordered-b'],
+          expectedRevision: 0,
+        })).resolves.toEqual({ kind: 'reordered', revision: 1 });
+        await expect(repository.listSubtasks('ordered-parent')).resolves.toEqual([
+          expect.objectContaining({ id: 'ordered-a', siblingOrder: 0 }),
+          expect.objectContaining({ id: 'ordered-c', siblingOrder: 1 }),
+          expect.objectContaining({ id: 'ordered-b', siblingOrder: 2 }),
+        ]);
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-b', 'ordered-c'],
+          expectedRevision: 0,
+        })).resolves.toEqual({ kind: 'revision-conflict', currentRevision: 1 });
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-b', 'not-a-child'],
+          expectedRevision: 1,
+        })).resolves.toEqual({ kind: 'invalid-children' });
+        await expect(repository.reorderSubtasks({
+          parentTaskId: 'ordered-parent',
+          orderedChildIds: ['ordered-a', 'ordered-a', 'ordered-c'],
+          expectedRevision: 1,
+        })).resolves.toEqual({ kind: 'invalid-children' });
       });
 
       it('normalizes concurrent tag mutations by slug and keeps links idempotent', async () => {

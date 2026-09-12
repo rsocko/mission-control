@@ -124,6 +124,8 @@ export function registerFakeTaskCorePersistence(
       copyTask: async () => ({ kind: 'task-not-found' }),
       promoteSubtask: async () => ({ kind: 'not-found' }),
       listSubtasks: async () => [],
+      getSubtaskOrderState: async () => null,
+      reorderSubtasks: async () => ({ kind: 'parent-not-found' }),
       getSubtaskProposalSnapshot: async () => null,
       createSubtask: async () => ({ kind: 'parent-not-found' }),
       acceptSubtaskProposal: async () => ({ kind: 'stale' }),

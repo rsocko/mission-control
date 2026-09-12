@@ -1855,6 +1855,8 @@ const MOVE_TASK_COLUMNS = {
   completedAt: tasks.completedAt,
   recurrenceGeneratedFromTaskId: tasks.recurrenceGeneratedFromTaskId,
   parentId: tasks.parentId,
+  siblingOrder: tasks.siblingOrder,
+  subtaskOrderRevision: tasks.subtaskOrderRevision,
   depth: tasks.depth,
   isChecklistItem: tasks.isChecklistItem,
   sourceListId: tasks.sourceListId,
@@ -2141,8 +2143,80 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
       priority: tasks.priority,
       effort: tasks.effort,
       parentId: tasks.parentId,
+      siblingOrder: tasks.siblingOrder,
     }).from(tasks).where(eq(tasks.parentId, parentTaskId))
-      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      );
+  }
+
+  async getSubtaskOrderState(parentTaskId: string) {
+    const [parent] = await this.db.select({
+      revision: tasks.subtaskOrderRevision,
+    }).from(tasks).where(eq(tasks.id, parentTaskId)).limit(1);
+    if (!parent) return null;
+    return {
+      revision: parent.revision,
+      subtasks: await this.listSubtasks(parentTaskId),
+    };
+  }
+
+  async reorderSubtasks(input: {
+    readonly parentTaskId: string;
+    readonly orderedChildIds: readonly string[];
+    readonly expectedRevision: number;
+  }) {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`subtask-order:${input.parentTaskId}`}))`,
+      );
+      const [parent] = await tx.select({
+        revision: tasks.subtaskOrderRevision,
+      }).from(tasks).where(eq(tasks.id, input.parentTaskId)).limit(1);
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      if (parent.revision !== input.expectedRevision) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+
+      const children = await tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.parentId, input.parentTaskId));
+      const currentIds = new Set(children.map((child) => child.id));
+      const orderedIds = new Set(input.orderedChildIds);
+      if (
+        currentIds.size !== input.orderedChildIds.length
+        || orderedIds.size !== input.orderedChildIds.length
+        || input.orderedChildIds.some((id) => !currentIds.has(id))
+      ) {
+        return { kind: 'invalid-children' } as const;
+      }
+
+      for (const [siblingOrder, taskId] of input.orderedChildIds.entries()) {
+        await tx.update(tasks).set({ siblingOrder }).where(and(
+          eq(tasks.id, taskId),
+          eq(tasks.parentId, input.parentTaskId),
+        ));
+      }
+      const revision = parent.revision + 1;
+      const updated = await tx.update(tasks).set({
+        subtaskOrderRevision: revision,
+      }).where(and(
+        eq(tasks.id, input.parentTaskId),
+        eq(tasks.subtaskOrderRevision, input.expectedRevision),
+      )).returning({ id: tasks.id });
+      if (updated.length !== 1) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+      return { kind: 'reordered', revision } as const;
+    });
   }
 
   private async readProposalSnapshot(
@@ -2185,7 +2259,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     return this.db.transaction(async (tx) => {
       if (!input.task.parentId) return { kind: 'parent-not-found' } as const;
       await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.task.parentId}`}))`,
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`subtask-order:${input.task.parentId}`}))`,
       );
       const [existing] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
         .where(eq(tasks.id, input.task.id)).limit(1);
@@ -2197,7 +2271,14 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
       const [parent] = await tx.select({ id: tasks.id }).from(tasks)
         .where(eq(tasks.id, input.task.parentId)).limit(1);
       if (!parent) return { kind: 'parent-not-found' } as const;
-      await tx.insert(tasks).values(moveTaskInsertValues(input.task));
+      const [lastSibling] = await tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId))
+        .limit(1);
+      await tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      });
       return { kind: 'created' } as const;
     });
   }
@@ -2209,7 +2290,7 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
     return this.db.transaction(async (tx) => {
       if (!input.task.parentId) return { kind: 'stale' } as const;
       await tx.execute(
-        sql`SELECT pg_advisory_xact_lock(hashtext(${`task-ancillary:${input.task.parentId}`}))`,
+        sql`SELECT pg_advisory_xact_lock(hashtext(${`subtask-order:${input.task.parentId}`}))`,
       );
       const [existing] = await tx.select(MOVE_TASK_COLUMNS).from(tasks)
         .where(eq(tasks.id, input.task.id)).limit(1);
@@ -2221,7 +2302,14 @@ class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
           : { kind: 'id-conflict' } as const;
       }
       if (!sameSnapshot(current, input.expected)) return { kind: 'stale' } as const;
-      await tx.insert(tasks).values(moveTaskInsertValues(input.task));
+      const [lastSibling] = await tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId))
+        .limit(1);
+      await tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      });
       const snapshot = await this.readProposalSnapshot(tx, input.task.parentId);
       if (!snapshot) throw new Error('Subtask parent disappeared during proposal acceptance');
       return { kind: 'created', snapshot } as const;
@@ -2410,7 +2498,13 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
         sourceId: tasks.sourceId,
         connectorType: tasks.connectorType,
         effort: tasks.effort,
-      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(asc(tasks.id)),
+        siblingOrder: tasks.siblingOrder,
+      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      ),
       this.db.select({
         estimatedDuration: taskSchedules.estimatedDuration,
         recurrence: taskSchedules.recurrence,
@@ -2426,6 +2520,7 @@ class PostgresTaskDetailReadRepository implements TaskDetailReadRepository {
       tagIds: tagRows.map((row) => row.tagId),
       projectIds: projectRows.map((row) => row.projectId),
       subtasks,
+      subtaskOrderRevision: task.subtaskOrderRevision ?? 0,
       schedule: scheduleRows[0] ?? null,
       isInMyDay: myDayRows.length > 0,
     };
@@ -3310,7 +3405,14 @@ class PostgresWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepo
 
   async listChildTasks(parentTaskId: string, limit: number): Promise<TaskMoveTaskRow[]> {
     const rows = await this.db.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.parentId, parentTaskId)).limit(limit);
+      .from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE "C"`),
+      )
+      .limit(limit);
     return rows.map(toMoveTaskRow);
   }
 

@@ -218,7 +218,12 @@ export function priorityToImportance(priority?: TaskItem['priority']): string {
 }
 
 export function parseSourceId(sourceId: string): { listId: string; taskId: string } {
-  const [listId, taskId] = sourceId.split(':');
+  const separator = sourceId.lastIndexOf(':');
+  if (separator <= 0 || separator === sourceId.length - 1) {
+    throw new Error('Invalid Microsoft To Do task source ID');
+  }
+  const listId = sourceId.slice(0, separator);
+  const taskId = sourceId.slice(separator + 1);
   return { listId, taskId };
 }
 

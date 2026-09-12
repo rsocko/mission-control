@@ -113,6 +113,8 @@ export function registerFakeTaskCorePersistence(
       getTaskRemovalContext: async () => null,
       applyTaskRemoval: async () => ({ kind: 'not-found' }),
       finalizeRemoteTaskRemoval: async () => ({ kind: 'not-found' }),
+      restoreTask: async () => ({ kind: 'not-found' }),
+      purgeDeletedBefore: async () => [],
       ...inputs.removals,
     },
     ancillary: {

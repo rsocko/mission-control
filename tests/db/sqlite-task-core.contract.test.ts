@@ -96,6 +96,7 @@ beforeAll(async () => {
         createdAt: row.createdAt ?? DEFAULT_NOW,
         updatedAt: row.updatedAt ?? DEFAULT_NOW,
         completedAt: row.completedAt ?? null,
+        deletedAt: row.deletedAt ?? null,
         parentId: row.parentId ?? null,
         depth: row.depth ?? 0,
         isChecklistItem: row.isChecklistItem ?? false,
@@ -401,6 +402,12 @@ beforeAll(async () => {
         .prepare('SELECT updated_at AS updatedAt FROM tasks WHERE id = ?')
         .get(taskId) as { updatedAt: string } | undefined;
       return row?.updatedAt ?? null;
+    },
+    async getTaskDeletedAt(taskId) {
+      const row = sqlite
+        .prepare('SELECT deleted_at AS deletedAt FROM tasks WHERE id = ?')
+        .get(taskId) as { deletedAt: string | null } | undefined;
+      return row?.deletedAt ?? null;
     },
     async countOutboxEvents(stableKey) {
       const row = sqlite

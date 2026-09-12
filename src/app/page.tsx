@@ -1132,26 +1132,45 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
               requestAnimationFrame(() => {
                 const ids = Array.from(state.bulkSelected);
                 actions.setBulkSelected(new Set()); actions.setBulkMode(false);
-                // Optimistically remove tasks from state
-                const previousTasks = state.taskResponse.tasks.filter(t => ids.includes(t.id));
                 actions.setRefreshTrigger((n) => n + 1);
-                // Deferred delete with undo window
-                let undone = false;
-                pushUndoWithToast(`${ids.length} task${ids.length > 1 ? 's' : ''} deleted`, () => {
-                  undone = true;
-                  // Restore is handled by refresh since tasks weren't deleted server-side yet
-                  actions.setRefreshTrigger((n) => n + 1);
-                });
-                setTimeout(async () => {
-                  if (!undone) {
-                    const failedIds: string[] = [];
-                    for (const id of ids) {
-                      try { const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); if (!res.ok) failedIds.push(id); } catch { failedIds.push(id); }
+                void (async () => {
+                  const results = await Promise.all(ids.map(async (id) => {
+                    try {
+                      const response = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+                      const body = await response.json().catch(() => ({})) as {
+                        restorable?: boolean;
+                      };
+                      return { id, ok: response.ok, restorable: body.restorable === true };
+                    } catch {
+                      return { id, ok: false, restorable: false };
                     }
-                    if (failedIds.length > 0) toast.error(`Failed to delete ${failedIds.length} task${failedIds.length > 1 ? 's' : ''}`);
+                  }));
+                  const failed = results.filter((result) => !result.ok);
+                  const restorableIds = results
+                    .filter((result) => result.ok && result.restorable)
+                    .map((result) => result.id);
+                  if (failed.length > 0) {
+                    toast.error(`Failed to delete ${failed.length} task${failed.length > 1 ? 's' : ''}`);
                   }
                   actions.setRefreshTrigger((n) => n + 1);
-                }, 5500);
+                  if (restorableIds.length > 0) {
+                    pushUndoWithToast(
+                      `${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`,
+                      async () => {
+                        const restores = await Promise.all(restorableIds.map((id) =>
+                          fetch(`/api/tasks/${id}/restore`, { method: 'POST' }),
+                        ));
+                        const restoreFailures = restores.filter((response) => !response.ok).length;
+                        actions.setRefreshTrigger((n) => n + 1);
+                        if (restoreFailures > 0) {
+                          throw new Error(`Failed to restore ${restoreFailures} task${restoreFailures > 1 ? 's' : ''}`);
+                        }
+                      },
+                    );
+                  } else if (failed.length < results.length) {
+                    toast.success(`${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`);
+                  }
+                })();
               });
             },
           });

@@ -68,4 +68,5 @@ export const sqliteKeywordSearchRepository: KeywordSearchRepository = {
     requireCapability().sqliteKeywordSearchRepository.removeNotification(...args),
   warmUp: (...args) => requireCapability().sqliteKeywordSearchRepository.warmUp(...args),
   search: (...args) => requireCapability().sqliteKeywordSearchRepository.search(...args),
+  facets: (...args) => requireCapability().sqliteKeywordSearchRepository.facets(...args),
 };

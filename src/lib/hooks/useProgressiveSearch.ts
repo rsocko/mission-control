@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { SearchResult } from '@/lib/search/fts';
+import type { SearchFacets, SearchResult } from '@/lib/search/fts';
 import { fuseHybridResults } from '@/lib/search/hybrid-ranking';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
@@ -12,6 +12,7 @@ interface SearchResponse {
   semanticAvailable?: boolean;
   semanticEnabled?: boolean;
   durationMs?: number;
+  facets?: SearchFacets;
   results: SearchResult[];
 }
 
@@ -70,6 +71,7 @@ export function useProgressiveSearch({
   const [note, setNote] = useState<string | null>(null);
   const [semanticEnabled, setSemanticEnabled] = useState(false);
   const [semanticAvailable, setSemanticAvailable] = useState(false);
+  const [facets, setFacets] = useState<SearchFacets>({ sources: [], statuses: [] });
   const [capabilityReady, setCapabilityReady] = useState(false);
   const [keywordRevision, setKeywordRevision] = useState(0);
 
@@ -107,6 +109,7 @@ export function useProgressiveSearch({
       setKeywordDurationMs(null);
       setSemanticDurationMs(null);
       setNote(null);
+      setFacets({ sources: [], statuses: [] });
       return;
     }
 
@@ -138,6 +141,7 @@ export function useProgressiveSearch({
         setKeywordResults(payload.results);
         setKeywordDurationMs(payload.durationMs ?? null);
         setNote(payload.note ?? null);
+        setFacets(payload.facets ?? { sources: [], statuses: [] });
         setKeywordRevision(revision);
       })
       .catch((error: unknown) => {
@@ -145,6 +149,7 @@ export function useProgressiveSearch({
         setKeywordResults([]);
         setKeywordDurationMs(null);
         setNote(error instanceof Error ? error.message : 'Search failed.');
+        setFacets({ sources: [], statuses: [] });
       })
       .finally(() => {
         if (!controller.signal.aborted && requestRevisionRef.current === revision) {
@@ -248,5 +253,6 @@ export function useProgressiveSearch({
     semanticDurationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   };
 }

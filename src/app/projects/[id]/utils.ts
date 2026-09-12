@@ -200,7 +200,7 @@ export function getProjectStatus(project: ProjectRecord) {
   return project.statusOverride ?? project.status;
 }
 
-export function getPhaseColor(phase: ProjectPhase, project?: ProjectRecord | null) {
+export function getPhaseColor(phase: ProjectPhase, project?: Pick<ProjectRecord, 'color'> | null) {
   return phase.color || project?.color || 'var(--accent-500)';
 }
 

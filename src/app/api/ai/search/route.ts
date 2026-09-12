@@ -7,12 +7,22 @@ export async function GET(request: Request) {
   const query = searchParams.get('q')?.trim();
   const requestedType = searchParams.get('type') || 'all';
   const requestedMode = searchParams.get('mode') || 'hybrid';
+  const requestedDate = searchParams.get('date') || 'all';
+  const requestedNotificationKind = searchParams.get('notificationKind');
   const type = ['tasks', 'notifications', 'all'].includes(requestedType)
     ? requestedType as 'tasks' | 'notifications' | 'all'
     : null;
   const mode = ['keyword', 'semantic', 'hybrid'].includes(requestedMode)
     ? requestedMode as 'keyword' | 'semantic' | 'hybrid'
     : null;
+  const date = ['all', '7d', '30d', 'overdue'].includes(requestedDate)
+    ? requestedDate as 'all' | '7d' | '30d' | 'overdue'
+    : null;
+  const notificationKind = requestedNotificationKind === null
+    ? undefined
+    : ['triage', 'notes'].includes(requestedNotificationKind)
+      ? requestedNotificationKind as 'triage' | 'notes'
+      : null;
   const requestedLimit = Number.parseInt(searchParams.get('limit') || '20', 10);
   const limit = Number.isFinite(requestedLimit)
     ? Math.max(1, Math.min(requestedLimit, 50))
@@ -25,8 +35,17 @@ export async function GET(request: Request) {
   if (!query) {
     return Response.json({ error: 'q parameter is required' }, { status: 400 });
   }
-  if (!type || !mode) {
-    return Response.json({ error: 'type or mode parameter is invalid' }, { status: 400 });
+  if (
+    !type
+    || !mode
+    || !date
+    || notificationKind === null
+    || (notificationKind !== undefined && type !== 'notifications')
+  ) {
+    return Response.json(
+      { error: 'type, mode, date, or notificationKind parameter is invalid' },
+      { status: 400 },
+    );
   }
 
   // Status-only check for the client to discover capabilities without searching
@@ -50,6 +69,11 @@ export async function GET(request: Request) {
   }
 
   const startMs = performance.now();
+  const now = new Date();
+  const dateFrom = date === '7d' || date === '30d'
+    ? new Date(now.getTime() - Number.parseInt(date, 10) * 24 * 60 * 60 * 1000).toISOString()
+    : undefined;
+  const dueBefore = date === 'overdue' ? now.toISOString() : undefined;
   let excludedConnectorInstanceIds: string[] = [];
   if (universeEligible) {
     const connectorRepository = getCorePersistenceRepositories().connectors;
@@ -67,6 +91,9 @@ export async function GET(request: Request) {
     limit,
     ...(source ? { source } : {}),
     ...(status ? { status } : {}),
+    ...(notificationKind ? { notificationKind } : {}),
+    ...(dateFrom ? { dateFrom } : {}),
+    ...(dueBefore ? { dueBefore } : {}),
     ...(excludeDone ? { excludeDone: true } : {}),
     ...(universeEligible ? {
       universeEligible: true,

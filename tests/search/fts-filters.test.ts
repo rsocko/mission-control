@@ -19,6 +19,7 @@ describe('FTS authoritative filters', () => {
       id: string,
       sourceListName: string,
       status: string,
+      dueDate: string | null = null,
     ) => ({
       id,
       sourceId: `source-${id}`,
@@ -27,6 +28,7 @@ describe('FTS authoritative filters', () => {
       title: 'Quarterly planning',
       status,
       priority: 'none',
+      dueDate,
       sourceListName,
       metadata: {},
       syncStatus: 'synced' as const,
@@ -41,6 +43,8 @@ describe('FTS authoritative filters', () => {
       )),
       makeTask('filtered-match', 'Project Alpha', 'in_progress'),
       makeTask('completed-match', 'Project Alpha', 'done'),
+      makeTask('recent-match', 'Project Alpha', 'todo', '2030-01-20T00:00:00.000Z'),
+      makeTask('old-match', 'Project Alpha', 'todo', '2029-12-01T00:00:00.000Z'),
       {
         ...makeTask('github-issue-123', 'octo/repo', 'todo'),
         sourceId: 'octo/repo:123',
@@ -90,6 +94,30 @@ describe('FTS authoritative filters', () => {
         description: 'Other lexical fixture',
       },
     ]);
+    await database.default.insert(schema.notifications).values([
+      ...Array.from({ length: 25 }, (_, index) => ({
+        id: `triage-${index}`,
+        sourceId: `triage-source-${index}`,
+        connectorType: 'monitoring',
+        connectorInstanceId: 'monitoring',
+        title: 'Quarterly planning alert',
+        body: 'Operational alert',
+        category: 'sync',
+        receivedAt: timestamp,
+        sortAt: timestamp,
+      })),
+      {
+        id: 'note-match',
+        sourceId: 'note-source',
+        connectorType: 'capture',
+        connectorInstanceId: 'capture',
+        title: 'Quarterly planning note',
+        body: 'Meeting memo',
+        category: 'capture',
+        receivedAt: timestamp,
+        sortAt: timestamp,
+      },
+    ]);
 
     searchFTS = fts.searchFTS;
   });
@@ -122,6 +150,39 @@ describe('FTS authoritative filters', () => {
       'dismissed-match',
     ]));
     expect(results.map((result) => result.id)).toContain('filtered-match');
+  });
+
+  it('applies date filters before the result limit', async () => {
+    const recent = await searchFTS('Quarterly planning', {
+      type: 'tasks',
+      dateFrom: '2030-01-10T00:00:00.000Z',
+      limit: 1,
+    });
+    const overdue = await searchFTS('Quarterly planning', {
+      type: 'tasks',
+      dueBefore: '2030-01-01T00:00:00.000Z',
+      limit: 1,
+    });
+
+    expect(recent.map((result) => result.id)).toEqual(['recent-match']);
+    expect(overdue.map((result) => result.id)).toEqual(['old-match']);
+  });
+
+  it('applies mobile notification kinds before the result limit', async () => {
+    const notes = await searchFTS('Quarterly planning', {
+      type: 'notifications',
+      notificationKind: 'notes',
+      limit: 1,
+    });
+    const triage = await searchFTS('Quarterly planning', {
+      type: 'notifications',
+      notificationKind: 'triage',
+      limit: 50,
+    });
+
+    expect(notes.map((result) => result.id)).toEqual(['note-match']);
+    expect(triage).toHaveLength(25);
+    expect(triage.map((result) => result.id)).not.toContain('note-match');
   });
 
   it.each(['123', '#123'])('finds a GitHub issue by number with query %s', async (query) => {

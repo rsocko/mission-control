@@ -157,6 +157,9 @@ export interface IConnector {
   /** Update a sub-task/checklist item */
   updateSubTask?(parentSourceId: string, subTaskSourceId: string, updates: Partial<TaskItem>): Promise<void>;
 
+  /** Reorder all direct sub-tasks under a parent. */
+  reorderSubTasks?(parentSourceId: string, orderedSubTaskSourceIds: readonly string[]): Promise<void>;
+
   /** Add a tag/label to a task in the source system */
   addTagToTask?(sourceId: string, tagName: string): Promise<void>;
 

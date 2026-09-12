@@ -122,4 +122,35 @@ describe('useProgressiveSearch', () => {
     });
     expect(result.current.results[0]?.id).toBe('beta');
   });
+
+  it('sends server-side scope, source, status, and date filters', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url.includes('__status_check__')) {
+        return response({ semanticEnabled: false, semanticAvailable: false, results: [] });
+      }
+      return response({ results: [], durationMs: 5 });
+    });
+
+    renderHook(() => useProgressiveSearch({
+      query: 'alpha',
+      enabled: true,
+      type: 'notifications',
+      notificationKind: 'notes',
+      source: 'Project Alpha',
+      status: 'open',
+      date: '7d',
+    }));
+
+    await waitFor(() => {
+      const keywordUrl = fetchSpy.mock.calls
+        .map(([url]) => String(url))
+        .find((url) => url.includes('mode=keyword'));
+      expect(keywordUrl).toContain('type=notifications');
+      expect(keywordUrl).toContain('notificationKind=notes');
+      expect(keywordUrl).toContain('source=Project+Alpha');
+      expect(keywordUrl).toContain('status=open');
+      expect(keywordUrl).toContain('date=7d');
+    });
+  });
 });

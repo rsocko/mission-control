@@ -2076,13 +2076,16 @@ describe('TaskDetailPanel redesigned presentations', () => {
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
 
     const image = await screen.findByRole('img', { name: 'Image' });
-    expect(image).toHaveAttribute('src', imageUrl);
+    expect(image).toHaveAttribute(
+      'src',
+      `/api/tasks/task-1/github-attachment?url=${encodeURIComponent(imageUrl)}`,
+    );
     expect(image).toHaveAttribute('width', '572');
     expect(image).toHaveAttribute('height', '738');
   });
 
   it('replaces a failed GitHub image with a link to the source task', async () => {
-    const imageUrl = 'https://github.com/user-attachments/assets/private-image';
+    const imageUrl = 'https://github.com/user-attachments/assets/61668656-37e6-4245-b2a3-92a4a0daac2a';
     const sourceUrl = 'https://github.com/octo-org/mission-control/issues/2149';
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);

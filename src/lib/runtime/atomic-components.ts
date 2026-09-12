@@ -14,6 +14,7 @@ export const PACKAGED_SYNC_WORKER_COMPONENT_ORDER = Object.freeze([
   'sync-claim-worker',
   'durable-ai',
   'task-reminders',
+  'task-deletion-retention',
   'event-outbox',
   'notification-enrichment',
   'sync-schedulers',

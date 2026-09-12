@@ -57,6 +57,7 @@ export async function runPackagedSyncWorker(
       { publicRuntimeRelease },
       { WorkerHealthSnapshotScheduler },
       { taskReminderScheduler },
+      { taskDeletionRetentionScheduler },
       { financeConnectionRecoveryScheduler },
       { houstonMemoryRetentionScheduler },
       { getWorkerPersistenceRepositories },
@@ -87,6 +88,7 @@ export async function runPackagedSyncWorker(
       import('@/lib/runtime/release'),
       import('@/lib/telemetry/health-snapshot'),
       import('@/lib/push/task-reminder-scheduler'),
+      import('@/lib/tasks/deletion-retention'),
       import('@/lib/connectors/monarch-money/recovery-scheduler'),
       import('@/lib/houston-memory/retention'),
       import('@/lib/persistence/worker-runtime'),
@@ -274,6 +276,11 @@ export async function runPackagedSyncWorker(
           syncLogger.info('Sync worker: durable task reminder scheduler initialized');
         },
         stop: () => taskReminderScheduler.stop(),
+      },
+      {
+        name: 'task-deletion-retention',
+        start: () => taskDeletionRetentionScheduler.start(),
+        stop: () => taskDeletionRetentionScheduler.stop(),
       },
       {
         name: 'event-outbox',

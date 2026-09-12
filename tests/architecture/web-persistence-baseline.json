@@ -40,10 +40,10 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 269,
+    "apiRoutes": 270,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 262,
+    "cleanRoutes": 263,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 2,
@@ -288,6 +288,7 @@
     "src/app/api/tasks/[id]/relationship-candidates/route.ts",
     "src/app/api/tasks/[id]/relationships/[relationshipId]/route.ts",
     "src/app/api/tasks/[id]/relationships/route.ts",
+    "src/app/api/tasks/[id]/restore/route.ts",
     "src/app/api/tasks/[id]/route.ts",
     "src/app/api/tasks/[id]/subtasks/route.ts",
     "src/app/api/tasks/[id]/tags/route.ts",
@@ -564,6 +565,7 @@
     "src/app/api/tasks/[id]/relationship-candidates/route.ts",
     "src/app/api/tasks/[id]/relationships/[relationshipId]/route.ts",
     "src/app/api/tasks/[id]/relationships/route.ts",
+    "src/app/api/tasks/[id]/restore/route.ts",
     "src/app/api/tasks/[id]/route.ts",
     "src/app/api/tasks/[id]/subtasks/route.ts",
     "src/app/api/tasks/[id]/tags/route.ts",

@@ -18,6 +18,7 @@ export const DATABASE_OPERATION_NAMES = [
   'sync-phase-projects',
   'worker-health-snapshot',
   'worker-task-reminders',
+  'task-deletion-retention',
   'worker-triage-import',
   'worker-finance-recovery',
 ] as const;

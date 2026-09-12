@@ -9,7 +9,7 @@ import {
   type SetStateAction,
 } from 'react';
 import { toast } from 'sonner';
-import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
+import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { notifyTaskChanged } from '@/lib/task-change-events';
@@ -465,6 +465,7 @@ export function useDashboardTaskActions(
       toast.error(task.editPolicy.removalReason ?? 'This task cannot be removed');
       return;
     }
+    const taskIndex = dependencies.taskResponse.tasks.findIndex((candidate) => candidate.id === taskId);
     const confirmation = taskRemovalConfirmation(task.editPolicy, task.title);
     dependencies.setConfirmDialog({
       open: true,
@@ -474,46 +475,38 @@ export function useDashboardTaskActions(
         dependencies.setConfirmDialog((dialog) => ({ ...dialog, open: false }));
         requestAnimationFrame(() => {
           animateTaskExit(taskId, task.title);
-          const previous = dependencies.taskResponse;
-          dependencies.setTaskResponse((current) => ({
-            ...current,
-            tasks: current.tasks.filter((candidate) => candidate.id !== taskId),
-            total: current.total - 1,
-          }));
-          let undone = false;
-          const undoId = useUndoStore.getState().pushUndo({
-            label: 'Task deleted',
-            undo: () => {
-              undone = true;
-              dependencies.setTaskResponse(previous);
-            },
-          });
-          toast.success('Task deleted', {
-            action: {
-              label: 'Undo',
-              onClick: () => {
-                undone = true;
-                useUndoStore.getState().removeEntry(undoId);
-                dependencies.setTaskResponse(previous);
-              },
-            },
-            duration: 5000,
-          });
-          setTimeout(async () => {
-            if (!undone) {
-              try {
-                const response = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
-                if (!response.ok) {
-                  const data = await response.json().catch(() => ({}));
-                  dependencies.setTaskResponse(previous);
-                  toast.error(data.error || 'Failed to delete task');
-                }
-              } catch {
-                dependencies.setTaskResponse(previous);
-                toast.error('Failed to delete task');
+          dependencies.setTaskResponse((current) => removeTaskFromResponse(current, taskId, task));
+          void (async () => {
+            try {
+              const response = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+              const data = await response.json().catch(() => ({})) as {
+                error?: string;
+                restorable?: boolean;
+              };
+              if (!response.ok) throw new Error(data.error || 'Failed to delete task');
+              notifyTaskChanged(taskId);
+
+              if (data.restorable) {
+                pushUndoWithToast('Task deleted', async () => {
+                  const restore = await fetch(`/api/tasks/${taskId}/restore`, { method: 'POST' });
+                  if (!restore.ok) {
+                    const restoreData = await restore.json().catch(() => ({})) as { error?: string };
+                    throw new Error(restoreData.error || 'Failed to restore task');
+                  }
+                  dependencies.setTaskResponse((current) =>
+                    restoreTaskToResponse(current, task, taskIndex));
+                  notifyTaskChanged(taskId);
+                  void optionsRef.current.fetchData(false, true);
+                });
+              } else {
+                toast.success('Task deleted');
               }
+            } catch (error) {
+              dependencies.setTaskResponse((current) =>
+                restoreTaskToResponse(current, task, taskIndex));
+              toast.error(error instanceof Error ? error.message : 'Failed to delete task');
             }
-          }, 5500);
+          })();
         });
       },
     });

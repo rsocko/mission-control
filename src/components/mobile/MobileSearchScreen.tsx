@@ -212,7 +212,13 @@ function getBadgeConfig(result: SearchResult) {
 
 function getProjectLabel(result: SearchResult) {
   const metadata = result.metadata ?? {};
-  return getString(metadata, ['projectName', 'project', 'projectTitle', 'sourceListName']);
+  return getString(metadata, [
+    'projectName',
+    'project',
+    'projectTitle',
+    'sourceListName',
+    'connectorType',
+  ]);
 }
 
 function getStatusLabel(result: SearchResult) {
@@ -318,12 +324,6 @@ function matchesDateFilter(result: SearchResult, dateFilter: DateFilter) {
   return compareDate.getTime() >= now - days * 24 * 60 * 60 * 1000;
 }
 
-function uniqueSorted(values: Array<string | undefined>) {
-  return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).sort((a, b) =>
-    a.localeCompare(b),
-  );
-}
-
 function RecentSearchesSection({ recentSearches, onSelect, onClear }: RecentSearchesSectionProps) {
   if (recentSearches.length === 0) return null;
 
@@ -392,6 +392,7 @@ export function MobileSearchScreen({
     keywordDurationMs: durationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: isOpen,
@@ -461,13 +462,13 @@ export function MobileSearchScreen({
   }, [isOpen, onClose]);
 
   const projectOptions = useMemo(
-    () => uniqueSorted(results.map((result) => getProjectLabel(result))),
-    [results],
+    () => facets.sources.map((facet) => facet.value),
+    [facets.sources],
   );
 
   const statusOptions = useMemo(
-    () => uniqueSorted(results.map((result) => getStatusLabel(result))),
-    [results],
+    () => facets.statuses.map((facet) => facet.value),
+    [facets.statuses],
   );
 
   const filteredResults = useMemo(() => {

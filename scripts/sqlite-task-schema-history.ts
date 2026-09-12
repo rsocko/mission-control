@@ -160,6 +160,16 @@ export const TRUSTED_TASK_COLUMN_APPEND_EVENTS = {
       sourceMarkers: ['ALTER TABLE tasks ADD COLUMN planning_horizon TEXT'],
     },
   },
+  deletedAtMigration: {
+    columns: ['deleted_at'],
+    provenance: {
+      kind: 'migration',
+      tag: '0131_gigantic_toxin',
+      path: 'drizzle/0131_gigantic_toxin.sql',
+      sha256: '1c8f6684c77c141582de6871a41b1cd5470110b9f04b7c2cf000b6c1cf2cffc7',
+      firstReachableCommit: '11336db7cfcf1d613309c1c0f636215eb8ac2cb1',
+    },
+  },
 } as const satisfies Readonly<Record<string, TaskColumnAppendEvent>>;
 
 export const TRUSTED_TASK_APPEND_COLUMNS = [
@@ -196,6 +206,7 @@ const ORDERED_MIGRATION_EVENTS = [
   'relativeRemindersMigration',
   'recurrenceMigration',
   'planningHorizonMigration',
+  'deletedAtMigration',
 ] as const satisfies readonly (keyof typeof TRUSTED_TASK_COLUMN_APPEND_EVENTS)[];
 
 const STATUS_RUNTIME_BOUNDARIES = [
@@ -229,7 +240,7 @@ const STATUS_RUNTIME_BOUNDARIES = [
   },
   {
     id: 'fresh',
-    afterTag: '0118_add_planning_horizon',
+    afterTag: '0131_gigantic_toxin',
   },
 ] as const;
 
@@ -237,11 +248,16 @@ const migrationBoundaryChronologies = STATUS_RUNTIME_BOUNDARIES.map(
   ({ id, afterTag }, boundaryIndex): TrustedTasksChronology => ({
     id,
     origin: `status/retry runtime after ${afterTag}`,
-    checkpointTags: [afterTag, '0118_add_planning_horizon'],
+    checkpointTags: [...new Set([afterTag, '0131_gigantic_toxin'])],
     events: [
-      ...ORDERED_MIGRATION_EVENTS.slice(0, boundaryIndex),
+      ...ORDERED_MIGRATION_EVENTS.slice(
+        0,
+        id === 'fresh' ? ORDERED_MIGRATION_EVENTS.length : boundaryIndex,
+      ),
       'statusAndRetryRuntime',
-      ...ORDERED_MIGRATION_EVENTS.slice(boundaryIndex),
+      ...ORDERED_MIGRATION_EVENTS.slice(
+        id === 'fresh' ? ORDERED_MIGRATION_EVENTS.length : boundaryIndex,
+      ),
     ],
   }),
 );
@@ -261,6 +277,7 @@ export const TRUSTED_TASKS_CHRONOLOGIES: readonly TrustedTasksChronology[] = [
       'planningHorizonRuntime',
       'delayInsightsMigration',
       'relativeRemindersMigration',
+      'deletedAtMigration',
     ],
   },
 ] as const;

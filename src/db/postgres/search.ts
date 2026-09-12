@@ -44,6 +44,7 @@ interface TaskSearchRow {
   titleMatchRank: number;
   status: string;
   priority: string;
+  dueDate: string | null;
   sourceListName: string | null;
   connectorType: string;
   updatedAt: string;
@@ -61,6 +62,7 @@ interface NotificationSearchRow {
   isRead: boolean;
   connectorType: string;
   receivedAt: string;
+  isNote: boolean;
 }
 
 function toTaskSearchResult(row: TaskSearchRow): SearchResult {
@@ -79,6 +81,7 @@ function toTaskSearchResult(row: TaskSearchRow): SearchResult {
     metadata: {
       status: row.status,
       priority: row.priority,
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
       sourceListName: row.sourceListName,
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
@@ -108,6 +111,7 @@ function toNotificationSearchResult(row: NotificationSearchRow): SearchResult {
       isActionable: true,
       connectorType: row.connectorType,
       receivedAt: row.receivedAt,
+      notificationKind: row.isNote ? 'notes' : 'triage',
       rank: row.rank,
       titleMatchRank: row.titleMatchRank,
     },
@@ -130,6 +134,7 @@ async function searchTasksByIssueNumber(
         t.description,
         t.status,
         t.priority,
+        t.due_date AS "dueDate",
         t.source_list_name AS "sourceListName",
         t.connector_type AS "connectorType",
         t.updated_at AS "updatedAt"
@@ -138,20 +143,28 @@ async function searchTasksByIssueNumber(
         AND t.source_id LIKE $1
         AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
         AND ($3::text IS NULL OR t.status = $3)
-        AND ($4::boolean = false OR LOWER(t.status) <> 'done')
-        AND ($5::boolean = false OR (
+        AND ($4::text IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4)
+        AND ($5::text IS NULL OR (
+          t.due_date IS NOT NULL
+          AND t.due_date <> ''
+          AND t.due_date < $5
+        ))
+        AND ($6::boolean = false OR LOWER(t.status) <> 'done')
+        AND ($7::boolean = false OR (
           t.parent_id IS NULL
           AND t.local_disposition = 'active'
-          AND NOT (t.connector_type = ANY($6::text[]))
-          AND NOT (t.connector_instance_id = ANY($7::text[]))
+          AND NOT (t.connector_type = ANY($8::text[]))
+          AND NOT (t.connector_instance_id = ANY($9::text[]))
         ))
       ORDER BY t.updated_at DESC
-      LIMIT $8
+      LIMIT $10
     `,
     [
       `%:${issueNumber}`,
       source,
       status,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone === true,
       filters.universeEligible === true,
       [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
@@ -165,6 +178,7 @@ async function searchTasksByIssueNumber(
     description: string | null;
     status: string;
     priority: string;
+    dueDate: string | null;
     sourceListName: string | null;
     connectorType: string;
     updatedAt: string;
@@ -180,6 +194,7 @@ async function searchTasksByIssueNumber(
     metadata: {
       status: row.status,
       priority: row.priority,
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
       sourceListName: row.sourceListName,
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
@@ -220,6 +235,7 @@ async function searchTasks(
         END AS "titleMatchRank",
         t.status,
         t.priority,
+        t.due_date AS "dueDate",
         t.source_list_name AS "sourceListName",
         t.connector_type AS "connectorType",
         t.updated_at AS "updatedAt"
@@ -228,20 +244,28 @@ async function searchTasks(
       WHERE d.search_vector @@ websearch_to_tsquery('english', $1)
         AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
         AND ($3::text IS NULL OR t.status = $3)
-        AND ($4::boolean = false OR LOWER(t.status) <> 'done')
-        AND ($5::boolean = false OR (
+        AND ($4::text IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4)
+        AND ($5::text IS NULL OR (
+          t.due_date IS NOT NULL
+          AND t.due_date <> ''
+          AND t.due_date < $5
+        ))
+        AND ($6::boolean = false OR LOWER(t.status) <> 'done')
+        AND ($7::boolean = false OR (
           t.parent_id IS NULL
           AND t.local_disposition = 'active'
-          AND NOT (t.connector_type = ANY($6::text[]))
-          AND NOT (t.connector_instance_id = ANY($7::text[]))
+          AND NOT (t.connector_type = ANY($8::text[]))
+          AND NOT (t.connector_instance_id = ANY($9::text[]))
         ))
       ORDER BY "titleMatchRank", rank DESC, lower(t.title), t.id
-      LIMIT $8
+      LIMIT $10
     `,
     [
       tsQuery,
       source,
       status,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone === true,
       filters.universeEligible === true,
       [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
@@ -260,6 +284,19 @@ async function searchNotifications(
 ): Promise<SearchResult[]> {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
+  const notificationKind = filters.notificationKind ?? null;
+  const noteHint = `LOWER(
+    COALESCE(a.category, '') || ' ' ||
+    COALESCE(a.connector_type, '') || ' ' ||
+    a.title || ' ' || COALESCE(d.body, '')
+  )`;
+  const noteMatch = `(
+    STRPOS(${noteHint}, 'capture') > 0
+    OR STRPOS(${noteHint}, 'note') > 0
+    OR STRPOS(${noteHint}, 'memo') > 0
+    OR STRPOS(${noteHint}, 'idea') > 0
+    OR STRPOS(${noteHint}, 'journal') > 0
+  )`;
   const result = await pool.query(
     `
       SELECT
@@ -285,17 +322,32 @@ async function searchNotifications(
         a.category,
         (a.read_state = 'read') AS "isRead",
         a.connector_type AS "connectorType",
-        a.received_at AS "receivedAt"
+        a.received_at AS "receivedAt",
+        CASE WHEN ${noteMatch} THEN true ELSE false END AS "isNote"
       FROM notification_search_documents d
       INNER JOIN notifications a ON a.id = d.id
       WHERE d.search_vector @@ websearch_to_tsquery('english', $1)
         AND ($2::text IS NULL OR a.connector_type = $2)
         AND ($3::text IS NULL OR a.category = $3)
-        AND ($4::boolean = false OR LOWER(a.category) <> 'done')
+        AND ($4::text IS NULL
+          OR ($4 = 'notes' AND ${noteMatch})
+          OR ($4 = 'triage' AND NOT ${noteMatch}))
+        AND ($5::text IS NULL OR a.received_at >= $5)
+        AND ($6::text IS NULL)
+        AND ($7::boolean = false OR LOWER(a.category) <> 'done')
       ORDER BY "titleMatchRank", rank DESC, lower(a.title), a.id
-      LIMIT $5
+      LIMIT $8
     `,
-    [tsQuery, source, status, filters.excludeDone === true, limit],
+    [
+      tsQuery,
+      source,
+      status,
+      notificationKind,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
+      filters.excludeDone === true,
+      limit,
+    ],
   );
   return result.rows.map(toNotificationSearchResult);
 }

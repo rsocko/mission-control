@@ -241,6 +241,7 @@ function searchTasks(
           END AS title_match_rank,
           t.status,
           t.priority,
+          t.due_date AS dueDate,
           t.source_list_name AS sourceListName,
           t.connector_type AS connectorType,
           t.updated_at AS updatedAt
@@ -249,6 +250,12 @@ function searchTasks(
         WHERE tasks_fts MATCH ?
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
+          AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
+          AND (? IS NULL OR (
+            t.due_date IS NOT NULL
+            AND t.due_date <> ''
+            AND t.due_date < ?
+          ))
           AND (? = 0 OR LOWER(t.status) <> 'done')
           AND (? = 0 OR (
             t.parent_id IS NULL
@@ -269,6 +276,10 @@ function searchTasks(
       source,
       status,
       status,
+      filters.dateFrom ?? null,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       filters.universeEligible ? 1 : 0,
       ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
@@ -284,6 +295,7 @@ function searchTasks(
       title_match_rank: number;
       status: string;
       priority: string;
+      dueDate: string | null;
       sourceListName: string | null;
       connectorType: string;
       updatedAt: string;
@@ -304,6 +316,7 @@ function searchTasks(
     metadata: {
       status: row.status,
       priority: row.priority,
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
       sourceListName: row.sourceListName,
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
@@ -331,6 +344,7 @@ function searchTasksByIssueNumber(
           t.description,
           t.status,
           t.priority,
+          t.due_date AS dueDate,
           t.source_list_name AS sourceListName,
           t.connector_type AS connectorType,
           t.updated_at AS updatedAt
@@ -339,6 +353,12 @@ function searchTasksByIssueNumber(
           AND t.source_id LIKE ?
           AND (? IS NULL OR t.source_list_name = ? OR t.connector_type = ?)
           AND (? IS NULL OR t.status = ?)
+          AND (? IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= ?)
+          AND (? IS NULL OR (
+            t.due_date IS NOT NULL
+            AND t.due_date <> ''
+            AND t.due_date < ?
+          ))
           AND (? = 0 OR LOWER(t.status) <> 'done')
           AND (? = 0 OR (
             t.parent_id IS NULL
@@ -357,6 +377,10 @@ function searchTasksByIssueNumber(
       source,
       status,
       status,
+      filters.dateFrom ?? null,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       filters.universeEligible ? 1 : 0,
       ...NOTIFICATION_ONLY_CONNECTOR_TYPES,
@@ -368,6 +392,7 @@ function searchTasksByIssueNumber(
       description: string | null;
       status: string;
       priority: string;
+      dueDate: string | null;
       sourceListName: string | null;
       connectorType: string;
       updatedAt: string;
@@ -385,6 +410,7 @@ function searchTasksByIssueNumber(
     metadata: {
       status: row.status,
       priority: row.priority,
+      ...(row.dueDate ? { dueDate: row.dueDate } : {}),
       sourceListName: row.sourceListName,
       connectorType: row.connectorType,
       updatedAt: row.updatedAt,
@@ -402,6 +428,19 @@ function searchNotifications(
 ): SearchResult[] {
   const source = filters.source ?? null;
   const status = filters.status ?? null;
+  const notificationKind = filters.notificationKind ?? null;
+  const noteHint = `LOWER(
+    COALESCE(a.category, '') || ' ' ||
+    COALESCE(a.connector_type, '') || ' ' ||
+    a.title || ' ' || COALESCE(a.body, '')
+  )`;
+  const noteMatch = `(
+    INSTR(${noteHint}, 'capture') > 0
+    OR INSTR(${noteHint}, 'note') > 0
+    OR INSTR(${noteHint}, 'memo') > 0
+    OR INSTR(${noteHint}, 'idea') > 0
+    OR INSTR(${noteHint}, 'journal') > 0
+  )`;
   const rows = sqlite
     .prepare(
       `
@@ -422,12 +461,16 @@ function searchNotifications(
           CASE WHEN a.state = 'read' THEN 1 ELSE 0 END AS isRead,
           1 AS isActionable,
           a.connector_type AS connectorType,
-          a.received_at AS receivedAt
+          a.received_at AS receivedAt,
+          CASE WHEN ${noteMatch} THEN 1 ELSE 0 END AS isNote
         FROM alerts_fts
         INNER JOIN notifications a ON a.id = alerts_fts.entityId
         WHERE alerts_fts MATCH ?
           AND (? IS NULL OR a.connector_type = ?)
           AND (? IS NULL OR a.category = ?)
+          AND (? IS NULL OR (? = 'notes' AND ${noteMatch}) OR (? = 'triage' AND NOT ${noteMatch}))
+          AND (? IS NULL OR a.received_at >= ?)
+          AND (? IS NULL)
           AND (? = 0 OR LOWER(a.category) <> 'done')
         ORDER BY title_match_rank, rank, LOWER(a.title), a.id
         LIMIT ?
@@ -441,6 +484,12 @@ function searchNotifications(
       source,
       status,
       status,
+      notificationKind,
+      notificationKind,
+      notificationKind,
+      filters.dateFrom ?? null,
+      filters.dateFrom ?? null,
+      filters.dueBefore ?? null,
       filters.excludeDone ? 1 : 0,
       limit,
     ) as Array<{
@@ -457,6 +506,7 @@ function searchNotifications(
       isActionable: number;
       connectorType: string;
       receivedAt: string;
+      isNote: number;
     }>;
 
   return rows.map((row) => ({
@@ -478,6 +528,7 @@ function searchNotifications(
       isActionable: Boolean(row.isActionable),
       connectorType: row.connectorType,
       receivedAt: row.receivedAt,
+      notificationKind: row.isNote ? 'notes' : 'triage',
       rank: row.rank,
       titleMatchRank: row.title_match_rank,
       rowid: row.rowid,

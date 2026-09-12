@@ -5,6 +5,7 @@ import type { SearchResult } from '@/lib/search/fts';
 import { fuseHybridResults } from '@/lib/search/hybrid-ranking';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
+type SearchDate = '7d' | '30d' | 'overdue';
 
 interface SearchResponse {
   note?: string | null;
@@ -21,6 +22,8 @@ interface UseProgressiveSearchOptions {
   limit?: number;
   source?: string | null;
   status?: string | null;
+  notificationKind?: 'triage' | 'notes' | null;
+  date?: SearchDate | null;
   excludeDone?: boolean;
   universeEligible?: boolean;
 }
@@ -51,6 +54,8 @@ export function useProgressiveSearch({
   limit = 20,
   source = null,
   status = null,
+  notificationKind = null,
+  date = null,
   excludeDone = false,
   universeEligible = false,
 }: UseProgressiveSearchOptions) {
@@ -115,6 +120,8 @@ export function useProgressiveSearch({
     });
     if (source) params.set('source', source);
     if (status) params.set('status', status);
+    if (notificationKind) params.set('notificationKind', notificationKind);
+    if (date) params.set('date', date);
     if (excludeDone) params.set('excludeDone', 'true');
     if (universeEligible) params.set('universeEligible', 'true');
 
@@ -146,7 +153,18 @@ export function useProgressiveSearch({
       });
 
     return () => controller.abort();
-  }, [enabled, excludeDone, limit, normalizedQuery, source, status, type, universeEligible]);
+  }, [
+    date,
+    enabled,
+    excludeDone,
+    limit,
+    normalizedQuery,
+    notificationKind,
+    source,
+    status,
+    type,
+    universeEligible,
+  ]);
 
   useEffect(() => {
     if (
@@ -170,6 +188,8 @@ export function useProgressiveSearch({
     });
     if (source) params.set('source', source);
     if (status) params.set('status', status);
+    if (notificationKind) params.set('notificationKind', notificationKind);
+    if (date) params.set('date', date);
     if (excludeDone) params.set('excludeDone', 'true');
     if (universeEligible) params.set('universeEligible', 'true');
 
@@ -194,11 +214,13 @@ export function useProgressiveSearch({
     return () => controller.abort();
   }, [
     capabilityReady,
+    date,
     enabled,
     excludeDone,
     keywordRevision,
     limit,
     normalizedQuery,
+    notificationKind,
     semanticAvailable,
     semanticEnabled,
     source,

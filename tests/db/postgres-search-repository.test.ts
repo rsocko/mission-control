@@ -60,10 +60,48 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         const [sql, params] = query.mock.calls[0] as [string, unknown[]];
         expect(sql).toContain('t.parent_id IS NULL');
         expect(sql).toContain("t.local_disposition = 'active'");
-        expect(sql).toContain('t.connector_type = ANY($6::text[])');
-        expect(sql).toContain('t.connector_instance_id = ANY($7::text[])');
-        expect(sql.indexOf('t.parent_id IS NULL')).toBeLessThan(sql.indexOf('LIMIT $8'));
-        expect(params[6]).toEqual(['deleted-connector']);
+        expect(sql).toContain('t.connector_type = ANY($8::text[])');
+        expect(sql).toContain('t.connector_instance_id = ANY($9::text[])');
+        expect(sql.indexOf('t.parent_id IS NULL')).toBeLessThan(sql.indexOf('LIMIT $10'));
+        expect(params[8]).toEqual(['deleted-connector']);
+      });
+
+      it('pushes date predicates before the task result limit', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('planning', {
+          type: 'tasks',
+          dateFrom: '2030-01-01T00:00:00.000Z',
+          dueBefore: '2030-02-01T00:00:00.000Z',
+          limit: 20,
+        });
+
+        const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+        expect(sql).toContain("COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4");
+        expect(sql).toContain('t.due_date < $5');
+        expect(sql.indexOf('t.due_date < $5')).toBeLessThan(sql.indexOf('LIMIT $10'));
+        expect(params.slice(3, 5)).toEqual([
+          '2030-01-01T00:00:00.000Z',
+          '2030-02-01T00:00:00.000Z',
+        ]);
+      });
+
+      it('pushes mobile notification kinds before the notification result limit', async () => {
+        const query = vi.fn().mockResolvedValue({ rows: [] });
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        await repository.search('planning', {
+          type: 'notifications',
+          notificationKind: 'notes',
+          limit: 20,
+        });
+
+        const [sql, params] = query.mock.calls[0] as [string, unknown[]];
+        expect(sql).toContain("($4 = 'notes' AND");
+        expect(sql).toContain("STRPOS(LOWER(");
+        expect(sql.indexOf("($4 = 'notes' AND")).toBeLessThan(sql.indexOf('LIMIT $8'));
+        expect(params[3]).toBe('notes');
       });
 
       it('counts and bounds facets before result limiting', async () => {
@@ -115,7 +153,7 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         expect(sql).toContain(
           'ORDER BY "titleMatchRank", rank DESC, lower(t.title), t.id',
         );
-        expect(sql.indexOf('ORDER BY "titleMatchRank"')).toBeLessThan(sql.indexOf('LIMIT $8'));
+        expect(sql.indexOf('ORDER BY "titleMatchRank"')).toBeLessThan(sql.indexOf('LIMIT $10'));
       });
     });
 

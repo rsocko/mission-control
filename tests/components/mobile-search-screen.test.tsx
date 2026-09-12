@@ -250,6 +250,41 @@ describe('MobileSearchScreen', () => {
     expect(screen.getByRole('button', { name: /open capture capture note/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open task alpha task/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open triage inbox alert/i })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(([url]) => {
+        const requestUrl = String(url);
+        return requestUrl.includes('q=alpha')
+          && requestUrl.includes('type=notifications')
+          && requestUrl.includes('notificationKind=notes');
+      })).toBe(true);
+    });
+  });
+
+  it('sends project, status, and date filters with the search request', async () => {
+    mockSearchApi(
+      [makeResult()],
+      {
+        sources: [{ value: 'Alpha', count: 1 }],
+        statuses: [{ value: 'Open', count: 1 }],
+      },
+    );
+    render(<MobileSearchScreen isOpen={true} onClose={vi.fn()} initialQuery="alpha" />);
+
+    await screen.findByRole('button', { name: /open task alpha task/i });
+    fireEvent.click(screen.getByRole('button', { name: 'Alpha' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    fireEvent.click(screen.getByRole('button', { name: '7 days' }));
+
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(([url]) => {
+        const requestUrl = String(url);
+        return requestUrl.includes('q=alpha')
+          && requestUrl.includes('source=Alpha')
+          && requestUrl.includes('status=Open')
+          && requestUrl.includes('date=7d');
+      })).toBe(true);
+    });
   });
 
   it('offers authoritative facets that are absent from the limited result page', async () => {

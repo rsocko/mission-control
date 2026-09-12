@@ -157,6 +157,34 @@ describe('AI search route', () => {
     });
   });
 
+  it('translates date presets into authoritative search bounds', async () => {
+    mocks.searchWithBranches.mockResolvedValue({ results: [], branches: {} });
+    const { GET } = await import('@/app/api/ai/search/route');
+
+    await GET(new Request(
+      'http://localhost/api/ai/search?q=urgent&type=notifications&mode=keyword&notificationKind=notes&date=7d',
+    ));
+
+    expect(mocks.searchWithBranches).toHaveBeenCalledWith(
+      'urgent',
+      expect.objectContaining({
+        type: 'notifications',
+        notificationKind: 'notes',
+        dateFrom: expect.any(String),
+      }),
+    );
+  });
+
+  it('rejects an unsupported date preset', async () => {
+    const { GET } = await import('@/app/api/ai/search/route');
+    const response = await GET(new Request(
+      'http://localhost/api/ai/search?q=urgent&mode=keyword&date=tomorrow',
+    ));
+
+    expect(response.status).toBe(400);
+    expect(mocks.searchWithBranches).not.toHaveBeenCalled();
+  });
+
   it('derives the Universe visibility scope before searching', async () => {
     mocks.searchWithBranches.mockResolvedValue({ results: [], branches: {} });
     const { GET } = await import('@/app/api/ai/search/route');

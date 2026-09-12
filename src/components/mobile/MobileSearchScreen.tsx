@@ -163,6 +163,10 @@ function deriveCategory(result: SearchResult): Exclude<TypeFilter, 'all'> {
   if (result.type === 'task') return 'tasks';
 
   const metadata = result.metadata ?? {};
+  const notificationKind = getString(metadata, ['notificationKind']);
+  if (notificationKind === 'notes' || notificationKind === 'triage') {
+    return notificationKind;
+  }
   const hint = [
     getString(metadata, ['entityType', 'itemType', 'kind', 'recordType', 'category']),
     getString(metadata, ['sourceListName', 'connectorType', 'projectName']),
@@ -392,9 +396,12 @@ export function MobileSearchScreen({
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: isOpen,
+    type: typeFilter === 'all' || typeFilter === 'tasks' ? typeFilter : 'notifications',
+    notificationKind: typeFilter === 'triage' || typeFilter === 'notes' ? typeFilter : null,
     limit: 20,
     source: projectFilter === 'all' ? null : projectFilter,
     status: statusFilter === 'all' ? null : statusFilter,
+    date: dateFilter === 'all' ? null : dateFilter,
   });
 
   useEffect(() => {

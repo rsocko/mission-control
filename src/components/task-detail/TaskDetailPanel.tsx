@@ -876,6 +876,7 @@ export function TaskDetailPanel({
 
         <TaskNotesSection
           mode={mode}
+          taskId={task.id}
           description={task.description}
           descValue={descValue}
           editingDesc={editingDesc}
@@ -1101,6 +1102,7 @@ export function TaskDetailPanel({
           <AnimatePresence>
             {notesExpanded && (
               <TaskNotesDialog
+                taskId={task.id}
                 taskTitle={task.title}
                 description={task.description}
                 descValue={descValue}

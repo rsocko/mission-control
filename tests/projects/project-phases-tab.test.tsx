@@ -126,6 +126,28 @@ describe('project phases (Plan) tab', () => {
     expect(screen.getByRole('button', { name: 'Drag task to a phase' })).toBeInTheDocument();
   });
 
+  it('flags oversized phases and opens a scoped structure review', async () => {
+    const largeTasks = Array.from({ length: 13 }, (_, index) => (
+      makeTask(`task-${index}`, { title: `Task ${index + 1}` })
+    ));
+    harness = installProjectPageHarness({
+      project: { name: 'Large Plan' },
+      phases: [makePhase('phase-large', { name: 'Launch', sortOrder: 0 })],
+      phaseItems: {
+        'phase-large': largeTasks.map((task, index) => (
+          makePhaseItem('phase-large', task.id, index)
+        )),
+      },
+      tasks: largeTasks,
+    });
+    await renderProjectTab('Plan');
+
+    const phase = await screen.findByRole('region', { name: 'Launch phase' });
+    expect(within(phase).getByText(/13 tasks · Large phase/)).toBeInTheDocument();
+    fireEvent.click(within(phase).getByRole('button', { name: 'Review structure' }));
+    expect(await screen.findByRole('dialog', { name: 'Review “Launch”' })).toBeInTheDocument();
+  });
+
   it('keeps task detail open when a Plan list row is double-clicked', async () => {
     await renderProjectTab('Plan');
 

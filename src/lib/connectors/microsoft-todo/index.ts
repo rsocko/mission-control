@@ -20,6 +20,12 @@ import { mergeConnectorSettings } from '../shared/connector-config-store';
 
 import { createGraphClient, GRAPH_BASE_URL, SUBSTRATE_BASE_URL } from './graph-client';
 import type { GraphClient } from './graph-client';
+import {
+  graphTodoChecklistItemPath,
+  graphTodoListPath,
+  graphTodoTaskPath,
+  graphTodoTasksPath,
+} from './resource-paths';
 import { mapGraphTask, mapSubstrateTask, mapChecklistItem, mapStatus, statusToGraph, priorityToImportance, parseSourceId } from './task-transformer';
 import { removeMicrosoftTodoTitleTag } from './title-tags';
 import type {
@@ -43,16 +49,21 @@ function removeBufferedRecurringTask(tasks: TaskItem[], sourceId: string): void 
   }
 }
 
-function graphTodoListPath(listId: string): string {
-  return `/me/todo/lists/${encodeURIComponent(listId)}`;
+function parseParentTaskSourceId(sourceId: string): { listId: string; taskId: string } {
+  const { listId, taskId, checklistItemId } = parseSourceId(sourceId);
+  if (checklistItemId) {
+    throw new Error('Microsoft To Do checklist item ID cannot be used as a parent task ID');
+  }
+  return { listId, taskId };
 }
 
-function graphTodoTasksPath(listId: string): string {
-  return `${graphTodoListPath(listId)}/tasks`;
-}
-
-function graphTodoTaskPath(listId: string, taskId: string): string {
-  return `${graphTodoTasksPath(listId)}/${encodeURIComponent(taskId)}`;
+function resolveChecklistItemId(sourceId: string): string {
+  if (!sourceId.includes(':')) return sourceId;
+  const { checklistItemId } = parseSourceId(sourceId);
+  if (!checklistItemId) {
+    throw new Error('Invalid Microsoft To Do checklist item source ID');
+  }
+  return checklistItemId;
 }
 
 export class MicrosoftTodoConnector implements IConnector {
@@ -222,7 +233,7 @@ export class MicrosoftTodoConnector implements IConnector {
 
     for (const folderId of unresolvedFolderIds) {
       try {
-        const res = await this.client.graphFetch(`/me/todo/lists/${encodeURIComponent(folderId)}`);
+        const res = await this.client.graphFetch(graphTodoListPath(folderId));
         if (res.ok) {
           const data = await res.json();
           if (data.displayName) {
@@ -297,7 +308,7 @@ export class MicrosoftTodoConnector implements IConnector {
           try {
             let listName = local.name;
             try {
-              const listRes = await this.client.graphFetch(`/me/todo/lists/${encodeURIComponent(local.sourceId)}`);
+              const listRes = await this.client.graphFetch(graphTodoListPath(local.sourceId));
               if (listRes.ok) {
                 const listData = await listRes.json();
                 if (listData.displayName) listName = listData.displayName;
@@ -392,7 +403,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async updateTask(sourceId: string, updates: Partial<TaskItem>): Promise<TaskItem> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const body: Record<string, unknown> = {};
 
     if (updates.title) body.title = updates.title;
@@ -427,7 +438,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async completeTask(sourceId: string): Promise<void> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const categories = await this.getCategoriesWithMicroStatus(listId, taskId, null);
     const res = await this.client.graphFetch(graphTodoTaskPath(listId, taskId), {
       method: 'PATCH',
@@ -455,7 +466,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async createSubTask(parentSourceId: string, task: Partial<TaskItem>): Promise<TaskItem> {
-    const { listId, taskId } = parseSourceId(parentSourceId);
+    const { listId, taskId } = parseParentTaskSourceId(parentSourceId);
     const body = { displayName: task.title || 'Untitled', isChecked: task.status === 'done' };
     const res = await this.client.graphFetch(`${graphTodoTaskPath(listId, taskId)}/checklistItems`, { method: 'POST', body: JSON.stringify(body) });
     if (!res.ok) throw new Error(`Failed to create checklist item: ${res.status}`);
@@ -464,29 +475,30 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async completeSubTask(parentSourceId: string, subTaskSourceId: string): Promise<void> {
-    const { listId, taskId } = parseSourceId(parentSourceId);
-    const parts = subTaskSourceId.split(':');
-    const checklistItemId = parts.length >= 3 ? parts[parts.length - 1] : subTaskSourceId;
-    const res = await this.client.graphFetch(`${graphTodoTaskPath(listId, taskId)}/checklistItems/${encodeURIComponent(checklistItemId)}`, { method: 'PATCH', body: JSON.stringify({ isChecked: true }) });
+    const { listId, taskId } = parseParentTaskSourceId(parentSourceId);
+    const checklistItemId = resolveChecklistItemId(subTaskSourceId);
+    const res = await this.client.graphFetch(graphTodoChecklistItemPath(listId, taskId, checklistItemId), { method: 'PATCH', body: JSON.stringify({ isChecked: true }) });
     if (res.status === 404) return; // Task or checklist item already deleted remotely — treat as success
     if (!res.ok) throw new Error(`Failed to complete checklist item: ${res.status}`);
   }
 
   async updateSubTask(parentSourceId: string, subTaskSourceId: string, updates: Partial<TaskItem>): Promise<void> {
-    const { listId, taskId } = parseSourceId(parentSourceId);
-    const parts = subTaskSourceId.split(':');
-    const checklistItemId = parts.length >= 3 ? parts[parts.length - 1] : subTaskSourceId;
+    const { listId, taskId } = parseParentTaskSourceId(parentSourceId);
+    const checklistItemId = resolveChecklistItemId(subTaskSourceId);
     const body: Record<string, unknown> = {};
     if (updates.title !== undefined) body.displayName = updates.title;
     if (updates.status !== undefined) body.isChecked = updates.status === 'done';
-    const res = await this.client.graphFetch(`${graphTodoTaskPath(listId, taskId)}/checklistItems/${encodeURIComponent(checklistItemId)}`, { method: 'PATCH', body: JSON.stringify(body) });
+    const res = await this.client.graphFetch(graphTodoChecklistItemPath(listId, taskId, checklistItemId), { method: 'PATCH', body: JSON.stringify(body) });
     if (res.status === 404) return; // Task or checklist item already deleted remotely — treat as success
     if (!res.ok) throw new Error(`Failed to update checklist item: ${res.status}`);
   }
 
   async deleteTask(sourceId: string): Promise<void> {
-    const { listId, taskId } = parseSourceId(sourceId);
-    const res = await this.client.graphFetch(graphTodoTaskPath(listId, taskId), { method: 'DELETE' });
+    const { listId, taskId, checklistItemId } = parseSourceId(sourceId);
+    const path = checklistItemId
+      ? graphTodoChecklistItemPath(listId, taskId, checklistItemId)
+      : graphTodoTaskPath(listId, taskId);
+    const res = await this.client.graphFetch(path, { method: 'DELETE' });
     if (res.status === 404) return; // Task already deleted remotely — treat as success
     if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`);
   }
@@ -494,7 +506,7 @@ export class MicrosoftTodoConnector implements IConnector {
   // ─── Attachment Methods ─────────────────────────────────────────────────
 
   async uploadAttachment(sourceId: string, file: { name: string; contentType: string; contentBase64: string }): Promise<{ id: string; name: string; size: number }> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const sizeBytes = Math.ceil(file.contentBase64.length * 3 / 4);
 
     // Use direct POST for files < 3MB, upload session for larger
@@ -568,7 +580,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async listAttachments(sourceId: string): Promise<Array<{ id: string; name: string; contentType: string; size: number }>> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const res = await this.client.graphFetch(
       `${graphTodoTaskPath(listId, taskId)}/attachments`,
     );
@@ -584,7 +596,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async deleteAttachment(sourceId: string, attachmentId: string): Promise<void> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const res = await this.client.graphFetch(
       `${graphTodoTaskPath(listId, taskId)}/attachments/${encodeURIComponent(attachmentId)}`,
       { method: 'DELETE' },
@@ -594,7 +606,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async getAttachmentContent(sourceId: string, attachmentId: string): Promise<{ contentBase64: string; contentType: string }> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const res = await this.client.graphFetch(
       `${graphTodoTaskPath(listId, taskId)}/attachments/${encodeURIComponent(attachmentId)}`,
     );
@@ -611,7 +623,7 @@ export class MicrosoftTodoConnector implements IConnector {
    * MS Todo has no native comments, so we append a separator and the note to the task's body.
    */
   async addComment(sourceId: string, body: string): Promise<void> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const getRes = await this.client.graphFetch(`${graphTodoTaskPath(listId, taskId)}?$select=body`);
     if (!getRes.ok) throw new Error(`Failed to fetch task body: ${getRes.status}`);
     const data = await getRes.json();
@@ -632,7 +644,7 @@ export class MicrosoftTodoConnector implements IConnector {
 
   async addTagsToTask(sourceId: string, tagNames: string[]): Promise<void> {
     if (!tagNames.length) return;
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const hashtags = tagNames.map(name => `#${name.replace(/\s+/g, '-')}`);
     const res = await this.client.graphFetch(graphTodoTaskPath(listId, taskId));
     if (!res.ok) throw new Error(`Failed to fetch task for tag write-back: ${res.status}`);
@@ -647,7 +659,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async removeTagFromTask(sourceId: string, tagName: string): Promise<void> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const res = await this.client.graphFetch(graphTodoTaskPath(listId, taskId));
     if (!res.ok) throw new Error(`Failed to fetch task for tag removal: ${res.status}`);
     const data = await res.json();
@@ -659,7 +671,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async renameList(sourceId: string, newName: string): Promise<void> {
-    const res = await this.client.graphFetch(`/me/todo/lists/${encodeURIComponent(sourceId)}`, { method: 'PATCH', body: JSON.stringify({ displayName: newName }) });
+    const res = await this.client.graphFetch(graphTodoListPath(sourceId), { method: 'PATCH', body: JSON.stringify({ displayName: newName }) });
     if (!res.ok) { const text = await res.text().catch(() => ''); throw new Error(`Failed to rename list: ${res.status} ${text}`); }
   }
 
@@ -675,12 +687,12 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async deleteList(sourceId: string): Promise<void> {
-    const res = await this.client.graphFetch(`/me/todo/lists/${encodeURIComponent(sourceId)}`, { method: 'DELETE' });
+    const res = await this.client.graphFetch(graphTodoListPath(sourceId), { method: 'DELETE' });
     if (!res.ok && res.status !== 204) { const text = await res.text().catch(() => ''); throw new Error(`Failed to delete list: ${res.status} ${text}`); }
   }
 
   async moveTaskToList(sourceId: string, targetListSourceId: string): Promise<string> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const sourceTaskPath = graphTodoTaskPath(listId, taskId);
     const getRes = await this.client.graphFetch(sourceTaskPath);
     if (!getRes.ok) throw new Error(`Failed to read task: ${getRes.status}`);
@@ -709,7 +721,7 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async setMyDay(sourceId: string, isInMyDay: boolean): Promise<void> {
-    const { listId, taskId } = parseSourceId(sourceId);
+    const { listId, taskId } = parseParentTaskSourceId(sourceId);
     const today = getLocalToday() + 'T00:00:00Z';
 
     try {
@@ -888,7 +900,7 @@ export class MicrosoftTodoConnector implements IConnector {
     expandedResources: GraphLinkedResource[] | undefined,
   ): Promise<GraphLinkedResource[]> {
     const resources = [...(expandedResources ?? [])];
-    let url = `/me/todo/lists/${encodeURIComponent(listId)}/tasks/${encodeURIComponent(taskId)}/linkedResources`;
+    let url = `${graphTodoTaskPath(listId, taskId)}/linkedResources`;
 
     while (url) {
       let response: Response;

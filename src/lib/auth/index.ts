@@ -1,4 +1,5 @@
 import { authLogger } from '@/lib/logger';
+import { graphTodoTasksPath } from '@/lib/connectors/microsoft-todo/resource-paths';
 import { resolveCertificateCredentials, buildCertificateAuthParams } from './certificate';
 import { isPkceEnabled, generatePkceChallenge, storePkceVerifier, consumePkceVerifier } from './pkce';
 /**
@@ -595,7 +596,7 @@ export async function probePermissions(connectorInstanceId: string): Promise<{
     const lists = await todoReadRes.json();
     if (lists.value?.length > 0) {
       const testListId = lists.value[0].id;
-      const writeTestRes = await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${testListId}/tasks?$top=1`, {
+      const writeTestRes = await fetch(`https://graph.microsoft.com/v1.0${graphTodoTasksPath(testListId)}?$top=1`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       canWriteTodo = writeTestRes.ok;

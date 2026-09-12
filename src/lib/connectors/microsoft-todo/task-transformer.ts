@@ -217,14 +217,19 @@ export function priorityToImportance(priority?: TaskItem['priority']): string {
   }
 }
 
-export function parseSourceId(sourceId: string): { listId: string; taskId: string } {
-  const separator = sourceId.lastIndexOf(':');
-  if (separator <= 0 || separator === sourceId.length - 1) {
+export function parseSourceId(sourceId: string): {
+  listId: string;
+  taskId: string;
+  checklistItemId?: string;
+} {
+  const [listId, taskId, ...checklistIdParts] = sourceId.split(':');
+  if (!listId || !taskId) {
     throw new Error('Invalid Microsoft To Do task source ID');
   }
-  const listId = sourceId.slice(0, separator);
-  const taskId = sourceId.slice(separator + 1);
-  return { listId, taskId };
+  const checklistItemId = checklistIdParts.length > 0
+    ? checklistIdParts.join(':')
+    : undefined;
+  return { listId, taskId, checklistItemId };
 }
 
 export function parseRecurrencePattern(recurrence: NonNullable<GraphTodoTask['recurrence']>): string {

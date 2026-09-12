@@ -144,6 +144,7 @@ export function TaskDetailPanel({
     connectorCaps,
     supportsAttachments,
     supportsSubtasks,
+    supportsSubtaskOrderWrite,
     extraTags,
     setExtraTags,
     potentialDuplicates,
@@ -1002,6 +1003,8 @@ export function TaskDetailPanel({
             onUpdate={onUpdate}
             canEdit={canManageSubtasks}
             canCreateSubtasks={canManageSubtasks}
+            orderRevision={task.subtaskOrderRevision ?? 0}
+            orderIsLocalOnly={!supportsSubtaskOrderWrite}
           />
         </section>
 

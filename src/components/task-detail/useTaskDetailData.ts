@@ -40,6 +40,7 @@ export interface UseTaskDetailDataResult {
   connectorCaps: TagConnectorCaps | null;
   supportsAttachments: boolean;
   supportsSubtasks: boolean;
+  supportsSubtaskOrderWrite: boolean;
   extraTags: TaskTag[];
   setExtraTags: React.Dispatch<React.SetStateAction<TaskTag[]>>;
   potentialDuplicates: DuplicateCandidate[];
@@ -67,6 +68,7 @@ export function useTaskDetailData({
   const [connectorCaps, setConnectorCaps] = useState<TagConnectorCaps | null>(null);
   const [supportsAttachments, setSupportsAttachments] = useState(false);
   const [supportsSubtasks, setSupportsSubtasks] = useState(false);
+  const [supportsSubtaskOrderWrite, setSupportsSubtaskOrderWrite] = useState(false);
   const [extraTags, setExtraTags] = useState<TaskTag[]>([]);
   const [potentialDuplicates, setPotentialDuplicates] = useState<DuplicateCandidate[]>([]);
   const [hubProjects, setHubProjects] = useState<HubProject[]>([]);
@@ -153,6 +155,7 @@ export function useTaskDetailData({
       setConnectorCaps(null);
       setSupportsAttachments(false);
       setSupportsSubtasks(false);
+      setSupportsSubtaskOrderWrite(false);
       return;
     }
     const isLocal = isLocalTaskSource({
@@ -162,15 +165,18 @@ export function useTaskDetailData({
     setConnectorCaps(null);
     setSupportsAttachments(isLocal);
     setSupportsSubtasks(isLocal);
+    setSupportsSubtaskOrderWrite(isLocal);
     const controller = new AbortController();
     const applySupport = (support: {
       connectorCaps: TagConnectorCaps | null;
       supportsAttachments: boolean;
       supportsSubtasks: boolean;
+      supportsSubtaskOrderWrite: boolean;
     }) => {
       setConnectorCaps(support.connectorCaps);
       setSupportsAttachments(support.supportsAttachments);
       setSupportsSubtasks(support.supportsSubtasks);
+      setSupportsSubtaskOrderWrite(support.supportsSubtaskOrderWrite);
     };
     fetchConnectorSupport(taskConnectorInstanceId, isLocal, controller.signal)
       .then(applySupport)
@@ -180,6 +186,7 @@ export function useTaskDetailData({
           connectorCaps: null,
           supportsAttachments: isLocal,
           supportsSubtasks: isLocal,
+          supportsSubtaskOrderWrite: isLocal,
         });
       });
     return () => controller.abort();
@@ -228,6 +235,7 @@ export function useTaskDetailData({
     connectorCaps,
     supportsAttachments,
     supportsSubtasks,
+    supportsSubtaskOrderWrite,
     extraTags,
     setExtraTags,
     potentialDuplicates,

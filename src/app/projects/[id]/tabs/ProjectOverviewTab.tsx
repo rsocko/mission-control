@@ -3,7 +3,6 @@
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
 import { ArrowRight, TriangleAlert } from 'lucide-react';
-import type { ProjectHealth } from '@/types';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -52,9 +51,9 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
     toggleTask,
   } = useProjectPageTaskInteractions();
 
-  const health = useMemo(() => {
+  const pulse = useMemo(() => {
     if (!project) {
-      return { health: 'on_track' as ProjectHealth, message: 'Loading health…' };
+      return null;
     }
     return getHealthSummary(project, phases, tasks, progress);
   }, [phases, progress, project, tasks]);
@@ -113,7 +112,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
         </div>
       ) : null}
 
-      <ProjectOverviewKpis progress={progress} health={health} />
+      {pulse && <ProjectOverviewKpis progress={progress} pulse={pulse} />}
 
       <BurnReportCard
         projectId={projectId}

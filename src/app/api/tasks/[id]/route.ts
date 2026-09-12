@@ -1058,6 +1058,7 @@ export async function GET(
         tagIds: detail.tagIds,
         projectIds: detail.projectIds,
         subtasks: detail.subtasks,
+        subtaskOrderRevision: detail.subtaskOrderRevision,
         isInMyDay: detail.isInMyDay,
         taskSourceModel: editPolicy.sourceModel,
         editPolicy,

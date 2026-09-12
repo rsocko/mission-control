@@ -13,6 +13,29 @@ export interface SearchOptions extends SearchFilters {
   limit?: number;
 }
 
+export interface SearchFacet {
+  value: string;
+  count: number;
+}
+
+export interface SearchFacets {
+  sources: SearchFacet[];
+  statuses: SearchFacet[];
+}
+
+export const SEARCH_FACET_LIMIT = 50;
+
+export function mergeSearchFacetRows(rows: SearchFacet[]): SearchFacet[] {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const value = row.value.trim();
+    if (value) counts.set(value, (counts.get(value) ?? 0) + Number(row.count));
+  }
+  return Array.from(counts, ([value, count]) => ({ value, count }))
+    .sort((left, right) => right.count - left.count || left.value.localeCompare(right.value))
+    .slice(0, SEARCH_FACET_LIMIT);
+}
+
 export interface SearchResult {
   type: 'task' | 'notification';
   id: string;
@@ -66,4 +89,5 @@ export interface KeywordSearchRepository {
   removeNotification(notificationId: string): Promise<void>;
   warmUp(): Promise<void>;
   search(query: string, options?: SearchOptions): Promise<SearchResult[]>;
+  facets(query: string, options?: SearchOptions): Promise<SearchFacets>;
 }

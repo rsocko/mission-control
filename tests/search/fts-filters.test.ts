@@ -3,17 +3,15 @@ import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-d
 
 describe('FTS authoritative filters', () => {
   let searchFTS: typeof import('@/lib/search/fts').searchFTS;
+  let searchFTSFacets: typeof import('@/lib/search/fts').searchFTSFacets;
 
   beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
 
-    const [database, schema, fts] = await Promise.all([
-      importInitializedSqliteDatabase(),
-      import('@/db/schema'),
-      import('@/lib/search/fts'),
-    ]);
+    const database = await importInitializedSqliteDatabase();
+    const fts = await import('@/lib/search/fts');
     const timestamp = '2030-01-01T00:00:00.000Z';
     const makeTask = (
       id: string,
@@ -35,7 +33,7 @@ describe('FTS authoritative filters', () => {
       lastSyncedAt: timestamp,
     });
 
-    await database.default.insert(schema.tasks).values([
+    await database.default.insert(database.schema.tasks).values([
       ...Array.from({ length: 55 }, (_, index) => (
         makeTask(`irrelevant-${index}`, 'Other project', 'todo')
       )),
@@ -72,6 +70,7 @@ describe('FTS authoritative filters', () => {
     ]);
 
     searchFTS = fts.searchFTS;
+    searchFTSFacets = fts.searchFTSFacets;
   });
 
   it('applies task filters before the result limit', async () => {
@@ -84,6 +83,43 @@ describe('FTS authoritative filters', () => {
     });
 
     expect(results.map((result) => result.id)).toEqual(['filtered-match']);
+  });
+
+  it('returns bounded facet counts from all matches before the result limit', async () => {
+    const facets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      excludeDone: true,
+      limit: 1,
+    });
+
+    expect(facets.sources).toEqual(expect.arrayContaining([
+      { value: 'Other project', count: 55 },
+      { value: 'Project Alpha', count: 5 },
+    ]));
+    expect(facets.statuses).toEqual(expect.arrayContaining([
+      { value: 'todo', count: 59 },
+      { value: 'in_progress', count: 1 },
+    ]));
+    expect(facets.sources.length).toBeLessThanOrEqual(50);
+    expect(facets.statuses.length).toBeLessThanOrEqual(50);
+  });
+
+  it('does not constrain a facet by its own selected value', async () => {
+    const facets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      source: 'Project Alpha',
+      excludeDone: true,
+      limit: 1,
+    });
+
+    expect(facets.sources).toEqual(expect.arrayContaining([
+      { value: 'Other project', count: 55 },
+      { value: 'Project Alpha', count: 5 },
+    ]));
+    expect(facets.statuses).toEqual(expect.arrayContaining([
+      { value: 'todo', count: 4 },
+      { value: 'in_progress', count: 1 },
+    ]));
   });
 
   it('applies Universe visibility before the result limit', async () => {
@@ -102,6 +138,15 @@ describe('FTS authoritative filters', () => {
       'dismissed-match',
     ]));
     expect(results.map((result) => result.id)).toContain('filtered-match');
+
+    const facets = await searchFTSFacets('Quarterly planning', {
+      type: 'tasks',
+      source: 'Project Alpha',
+      universeEligible: true,
+      excludeConnectorInstanceIds: ['deleted-connector'],
+      limit: 1,
+    });
+    expect(facets.sources).toContainEqual({ value: 'Project Alpha', count: 2 });
   });
 
   it.each(['123', '#123'])('finds a GitHub issue by number with query %s', async (query) => {

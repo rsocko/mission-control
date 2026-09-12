@@ -96,20 +96,6 @@ function renderHighlightedText(value: string) {
   });
 }
 
-function extractRefiners(results: SearchResult[]) {
-  const sources = new Set<string>();
-  const statuses = new Set<string>();
-
-  for (const result of results) {
-    const source = result.metadata.sourceListName || result.metadata.connectorType;
-    if (source) sources.add(String(source));
-    const status = result.metadata.status || result.metadata.category;
-    if (status) statuses.add(String(status));
-  }
-
-  return { sources: Array.from(sources).sort(), statuses: Array.from(statuses).sort() };
-}
-
 export function SearchCommand() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -137,6 +123,7 @@ export function SearchCommand() {
     keywordDurationMs: durationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: open,
@@ -259,7 +246,10 @@ export function SearchCommand() {
     return filtered;
   }, [results, filters.source, filters.status, filters.excludeDone]);
 
-  const refiners = useMemo(() => extractRefiners(results), [results]);
+  const refiners = useMemo(() => ({
+    sources: facets.sources.map((facet) => facet.value),
+    statuses: facets.statuses.map((facet) => facet.value),
+  }), [facets]);
 
   const groupedResults = useMemo(() => ({
     tasks: filteredResults.filter((result) => result.type === 'task'),

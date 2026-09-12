@@ -63,7 +63,13 @@ function makeResult(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function mockSearchApi(results: unknown[] = []) {
+function mockSearchApi(
+  results: unknown[] = [],
+  facets = {
+    sources: [] as Array<{ value: string; count: number }>,
+    statuses: [] as Array<{ value: string; count: number }>,
+  },
+) {
   mockFetch.mockImplementation((input: RequestInfo | URL) => {
     const url = String(input);
 
@@ -77,7 +83,7 @@ function mockSearchApi(results: unknown[] = []) {
     if (url.includes('/api/ai/search?')) {
       return Promise.resolve({
         ok: true,
-        json: () => Promise.resolve({ results, durationMs: 42, note: null }),
+        json: () => Promise.resolve({ results, facets, durationMs: 42, note: null }),
       });
     }
 
@@ -244,6 +250,36 @@ describe('MobileSearchScreen', () => {
     expect(screen.getByRole('button', { name: /open capture capture note/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open task alpha task/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /open triage inbox alert/i })).not.toBeInTheDocument();
+  });
+
+  it('offers authoritative facets that are absent from the limited result page', async () => {
+    mockSearchApi(
+      [makeResult()],
+      {
+        sources: [
+          { value: 'Alpha', count: 30 },
+          { value: 'Lower-ranked project', count: 2 },
+        ],
+        statuses: [
+          { value: 'Open', count: 30 },
+          { value: 'Blocked', count: 2 },
+        ],
+      },
+    );
+
+    render(<MobileSearchScreen isOpen={true} onClose={vi.fn()} initialQuery="alpha" />);
+
+    await screen.findByRole('button', { name: /open task alpha task/i });
+
+    expect(screen.getByRole('button', { name: 'Lower-ranked project' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Blocked' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Lower-ranked project' }));
+    await waitFor(() => {
+      expect(mockFetch.mock.calls.some(([url]) =>
+        String(url).includes('source=Lower-ranked+project'),
+      )).toBe(true);
+    });
   });
 
   it('highlights matched text in results', async () => {

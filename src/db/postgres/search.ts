@@ -1,6 +1,11 @@
 import type { Pool } from 'pg';
+import {
+  mergeSearchFacetRows,
+} from '@/lib/search/repository';
 import type {
   KeywordSearchRepository,
+  SearchFacet,
+  SearchFacets,
   SearchFilters,
   SearchOptions,
   SearchResult,
@@ -107,6 +112,100 @@ function toNotificationSearchResult(row: NotificationSearchRow): SearchResult {
       rank: row.rank,
     },
   };
+}
+
+async function taskFacetRows(
+  pool: Pool,
+  query: string,
+  issueNumber: number | null,
+  facet: 'source' | 'status',
+  filters: SearchFilters,
+): Promise<SearchFacet[]> {
+  const valueExpression = facet === 'source'
+    ? "COALESCE(NULLIF(t.source_list_name, ''), NULLIF(t.connector_type, ''))"
+    : "NULLIF(t.status, '')";
+  const result = await pool.query(
+    `
+      WITH task_matches AS (
+        SELECT t.id, ${valueExpression} AS value
+        FROM task_search_documents d
+        INNER JOIN tasks t ON t.id = d.id
+        WHERE d.search_vector @@ websearch_to_tsquery('english', $1)
+          AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
+          AND ($3::text IS NULL OR t.status = $3)
+          AND ($4::boolean = false OR LOWER(t.status) <> 'done')
+          AND ($5::boolean = false OR (
+            t.parent_id IS NULL
+            AND t.local_disposition = 'active'
+            AND NOT (t.connector_type = ANY($6::text[]))
+            AND NOT (t.connector_instance_id = ANY($7::text[]))
+          ))
+        UNION
+        SELECT t.id, ${valueExpression} AS value
+        FROM tasks t
+        WHERE $8::integer IS NOT NULL
+          AND t.connector_type = 'github-issues'
+          AND t.source_id LIKE ('%:' || $8::text)
+          AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
+          AND ($3::text IS NULL OR t.status = $3)
+          AND ($4::boolean = false OR LOWER(t.status) <> 'done')
+          AND ($5::boolean = false OR (
+            t.parent_id IS NULL
+            AND t.local_disposition = 'active'
+            AND NOT (t.connector_type = ANY($6::text[]))
+            AND NOT (t.connector_instance_id = ANY($7::text[]))
+          ))
+      )
+      SELECT value, COUNT(*)::integer AS count
+      FROM task_matches
+      WHERE value IS NOT NULL
+      GROUP BY value
+      ORDER BY count DESC, value
+    `,
+    [
+      query,
+      filters.source ?? null,
+      filters.status ?? null,
+      filters.excludeDone === true,
+      filters.universeEligible === true,
+      [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
+      filters.excludeConnectorInstanceIds ?? [],
+      issueNumber,
+    ],
+  );
+  return result.rows as SearchFacet[];
+}
+
+async function notificationFacetRows(
+  pool: Pool,
+  query: string,
+  facet: 'source' | 'status',
+  filters: SearchFilters,
+): Promise<SearchFacet[]> {
+  const valueExpression = facet === 'source'
+    ? "NULLIF(a.connector_type, '')"
+    : "NULLIF(a.category, '')";
+  const result = await pool.query(
+    `
+      SELECT ${valueExpression} AS value, COUNT(*)::integer AS count
+      FROM notification_search_documents d
+      INNER JOIN notifications a ON a.id = d.id
+      WHERE d.search_vector @@ websearch_to_tsquery('english', $1)
+        AND ($2::text IS NULL OR a.connector_type = $2)
+        AND ($3::text IS NULL OR a.category = $3)
+        AND ($4::boolean = false OR LOWER(a.category) <> 'done')
+        AND ${valueExpression} IS NOT NULL
+      GROUP BY value
+      ORDER BY count DESC, value
+    `,
+    [
+      query,
+      filters.source ?? null,
+      filters.status ?? null,
+      filters.excludeDone === true,
+    ],
+  );
+  return result.rows as SearchFacet[];
 }
 
 async function searchTasksByIssueNumber(
@@ -427,6 +526,34 @@ export class PostgresKeywordSearchRepository implements KeywordSearchRepository 
       })
       .sort((left, right) => right.score - left.score)
       .slice(0, limit);
+  }
+
+  async facets(query: string, options: SearchOptions = {}): Promise<SearchFacets> {
+    const normalizedQuery = query.trim();
+    if (!normalizedQuery) return { sources: [], statuses: [] };
+
+    const type = options.type ?? 'all';
+    const issueNumber = parseIssueNumberQuery(normalizedQuery);
+    const rowsFor = async (facet: 'source' | 'status') => {
+      const facetFilters = {
+        ...options,
+        ...(facet === 'source' ? { source: undefined } : { status: undefined }),
+      };
+      const [taskRows, notificationRows] = await Promise.all([
+        type === 'all' || type === 'tasks'
+          ? taskFacetRows(this.pool, normalizedQuery, issueNumber, facet, facetFilters)
+          : Promise.resolve([]),
+        type === 'all' || type === 'notifications'
+          ? notificationFacetRows(this.pool, normalizedQuery, facet, facetFilters)
+          : Promise.resolve([]),
+      ]);
+      return mergeSearchFacetRows([...taskRows, ...notificationRows]);
+    };
+    const [sources, statuses] = await Promise.all([
+      rowsFor('source'),
+      rowsFor('status'),
+    ]);
+    return { sources, statuses };
   }
 }
 

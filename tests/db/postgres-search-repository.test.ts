@@ -5,6 +5,7 @@ import {
   PostgresKeywordSearchRepository,
   truncate,
 } from '@/db/postgres/search';
+import { mergeSearchFacetRows } from '@/lib/search/repository';
 
 describe('PostgreSQL keyword search repository — pure helpers', () => {
   describe('normalizeLimit', () => {
@@ -64,6 +65,40 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
         expect(sql.indexOf('t.parent_id IS NULL')).toBeLessThan(sql.indexOf('LIMIT $8'));
         expect(params[6]).toEqual(['deleted-connector']);
       });
+
+      it('counts and bounds facets before result limiting', async () => {
+        const query = vi.fn().mockImplementation((sql: string) => Promise.resolve({
+          rows: [{
+            value: sql.includes('SELECT t.id, COALESCE')
+              ? 'Project Alpha'
+              : 'in_progress',
+            count: 57,
+          }],
+        }));
+        const repository = new PostgresKeywordSearchRepository({ query } as never);
+
+        const facets = await repository.facets('planning', {
+          type: 'tasks',
+          source: 'Project Alpha',
+          status: 'in_progress',
+          limit: 1,
+        });
+
+        expect(facets).toEqual({
+          sources: [{ value: 'Project Alpha', count: 57 }],
+          statuses: [{ value: 'in_progress', count: 57 }],
+        });
+        expect(query).toHaveBeenCalledTimes(2);
+        for (const [sql, params] of query.mock.calls as Array<[string, unknown[]]>) {
+          expect(sql).toContain('COUNT(*)::integer AS count');
+          expect(sql).not.toContain('LIMIT');
+          if (sql.includes('SELECT t.id, COALESCE')) {
+            expect(params.slice(1, 3)).toEqual([null, 'in_progress']);
+          } else {
+            expect(params.slice(1, 3)).toEqual(['Project Alpha', null]);
+          }
+        }
+      });
     });
 
     it('clamps to a minimum of 1', () => {
@@ -81,6 +116,21 @@ describe('PostgreSQL keyword search repository — pure helpers', () => {
       expect(truncate(null)).toBe('');
       expect(truncate(undefined)).toBe('');
       expect(truncate('   ')).toBe('');
+    });
+
+    describe('mergeSearchFacetRows', () => {
+      it('sums cross-channel counts before bounding the response', () => {
+        const rows = Array.from({ length: 55 }, (_, index) => ({
+          value: `source-${index}`,
+          count: 1,
+        }));
+        rows.push({ value: 'source-54', count: 4 });
+
+        const facets = mergeSearchFacetRows(rows);
+
+        expect(facets).toHaveLength(50);
+        expect(facets[0]).toEqual({ value: 'source-54', count: 5 });
+      });
     });
 
     it('leaves short text untouched', () => {

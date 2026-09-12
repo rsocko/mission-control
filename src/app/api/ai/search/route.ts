@@ -1,4 +1,5 @@
 import { getSearchStatus, searchWithBranches } from '@/lib/search/semantic';
+import { searchFTSFacets } from '@/lib/search/fts';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { withRuntimeOperation } from '@/lib/telemetry/operations';
 
@@ -45,6 +46,7 @@ export async function GET(request: Request) {
       semanticMetrics: status.semanticMetrics,
       semanticIndex: status.semanticMetrics?.index ?? null,
       branches: {},
+      facets: { sources: [], statuses: [] },
       results: [],
     });
   }
@@ -73,7 +75,7 @@ export async function GET(request: Request) {
       excludeConnectorInstanceIds: excludedConnectorInstanceIds,
     } : {}),
   };
-  const [execution, statusResult] = await withRuntimeOperation({
+  const [execution, statusResult, facets] = await withRuntimeOperation({
     kind: 'semantic-search',
     name: mode,
     traceId: request.headers.get('x-trace-id') ?? undefined,
@@ -88,6 +90,9 @@ export async function GET(request: Request) {
           durationMs: Math.round(performance.now() - statusStartedAt),
         };
       })(),
+      mode === 'semantic'
+        ? Promise.resolve({ sources: [], statuses: [] })
+        : searchFTSFacets(query, searchOptions),
     ]));
 
   const durationMs = Math.round(performance.now() - startMs);
@@ -105,6 +110,7 @@ export async function GET(request: Request) {
     semanticMetrics: statusResult.status.semanticMetrics,
     semanticIndex: statusResult.status.semanticMetrics?.index ?? null,
     branches: execution.branches,
+    facets,
     statusDurationMs: statusResult.durationMs,
     results: execution.results,
   });

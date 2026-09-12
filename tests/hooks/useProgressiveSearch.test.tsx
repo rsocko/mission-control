@@ -37,7 +37,14 @@ describe('useProgressiveSearch', () => {
       const url = String(input);
       if (url.includes('__status_check__')) return pendingStatus;
       if (url.includes('mode=keyword')) {
-        return response({ results: [searchResult('exact', 'fts')], durationMs: 12 });
+        return response({
+          results: [searchResult('exact', 'fts')],
+          durationMs: 12,
+          facets: {
+            sources: [{ value: 'Lower-ranked project', count: 2 }],
+            statuses: [{ value: 'todo', count: 12 }],
+          },
+        });
       }
       if (url.includes('mode=semantic')) {
         return response({ results: [searchResult('related', 'semantic')], durationMs: 80 });
@@ -51,6 +58,9 @@ describe('useProgressiveSearch', () => {
     }));
 
     await waitFor(() => expect(result.current.results.map((item) => item.id)).toEqual(['exact']));
+    expect(result.current.facets.sources).toEqual([
+      { value: 'Lower-ranked project', count: 2 },
+    ]);
     expect(fetchSpy.mock.calls.some(([url]) => String(url).includes('mode=semantic'))).toBe(false);
 
     await act(async () => {

@@ -264,7 +264,12 @@ function RuleEditor({
               </SelectItem>
             </SelectContent>
           </Select>
-          <label className="relative">
+          <label className={cn(
+            'input-glow relative h-9 rounded-lg border bg-[var(--surface-0)]',
+            rateLimitValid
+              ? 'border-[var(--border)]'
+              : 'border-red-500 focus-within:border-red-500 focus-within:ring-2 focus-within:ring-red-500/20',
+          )}>
             <span className="sr-only">{label} hourly limit</span>
             <input
               type="number"
@@ -278,12 +283,7 @@ function RuleEditor({
               }))}
               placeholder="No limit"
               aria-invalid={!rateLimitValid}
-              className={cn(
-                'h-9 w-full rounded-lg border bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none',
-                rateLimitValid
-                  ? 'border-[var(--border)] focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20'
-                  : 'border-red-500 focus:ring-2 focus:ring-red-500/20',
-              )}
+              className="h-full w-full rounded-lg border-0 bg-transparent px-2 text-xs text-[var(--text-primary)] outline-none"
             />
           </label>
           <div className="col-span-2 flex justify-end gap-1 sm:col-span-1">

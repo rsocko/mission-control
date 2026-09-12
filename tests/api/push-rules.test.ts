@@ -35,7 +35,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
   }),
 }));
 
-vi.mock('@/lib/connectors', () => ({
+vi.mock('@/lib/connectors/registry-runtime', () => ({
   connectorRegistry: {
     getNotificationTypeCatalog: mocks.getCatalog,
   },

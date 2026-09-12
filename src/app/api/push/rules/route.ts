@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
-import { connectorRegistry } from '@/lib/connectors';
+import { connectorRegistry } from '@/lib/connectors/registry-runtime';
 import {
   resetNotificationPushRule,
   saveNotificationPushRule,

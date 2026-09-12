@@ -28,6 +28,8 @@ export interface MyDayItem {
   planningSignalCount?: number;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  pushRetryCount?: number;
   sourceId?: string;
   sourceListId?: string | null;
   sourceListName: string | null;

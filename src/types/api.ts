@@ -70,6 +70,8 @@ export type TaskListItemDto = TaskListDomainFields & {
   linkedSourceCount?: number;
   hasDescription: boolean;
   editPolicy: TaskEditPolicy;
+  syncStatus?: string;
+  pushRetryCount?: number;
 };
 
 export interface TaskListStatsDto {

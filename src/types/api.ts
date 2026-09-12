@@ -98,7 +98,7 @@ export interface TaskListResponseDto {
 
 type HubProjectSummaryFields = Pick<
   HubProject,
-  'id' | 'name' | 'color'
+  'id' | 'name' | 'color' | 'appearance'
 >;
 
 export type KanbanColumnDto = Pick<KanbanColumn, 'id' | 'name' | 'color'> &

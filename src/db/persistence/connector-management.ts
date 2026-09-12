@@ -1,4 +1,5 @@
 import type { SourceListRecord } from './connector-execution';
+import type { ContextAppearance } from '@/types';
 
 export interface ManagedConnectorRecord {
   id: string;
@@ -279,6 +280,7 @@ export interface ConnectorManagementPersistence {
     sourceListId: string;
     groupId?: string | null;
     hidden?: boolean;
+    appearance?: ContextAppearance | null;
   }): Promise<void>;
   applyLocalSourceListRename(input: {
     sourceListId: string;

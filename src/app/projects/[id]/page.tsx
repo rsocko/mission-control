@@ -24,6 +24,7 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
+import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';
 import { CONNECTOR_COLORS } from '@/lib/constants/colors';
 import { projectLogger } from '@/lib/client-logger';
 import { taskFilterContextForEntityCollection } from '@/lib/graph/graph-navigation';
@@ -449,7 +450,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const isGraphView = activeTab === 'phases' && phasesGraphView;
 
   return (
-    <div className="relative flex h-full min-h-0 overflow-hidden">
+    <ContextThemeSurface
+      kind="project"
+      accentColor={project.color}
+      appearance={project.appearance}
+      className="flex h-full min-h-0"
+    >
     <motion.div
       className={cn(
         'min-h-0 min-w-0 flex-1',
@@ -460,7 +466,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       animate="show"
     >
       {/* Compact sticky header */}
-      <motion.section ref={stickyHeaderRef} variants={scaleIn} className="sticky top-0 z-20 bg-[var(--surface-0)]">
+      <motion.section ref={stickyHeaderRef} variants={scaleIn} className="sticky top-0 z-20 bg-[color-mix(in_srgb,var(--surface-0)_90%,transparent)] backdrop-blur-xl">
         <div className="border-b border-[var(--border)] px-4 sm:px-6">
           {/* Top row: title + stats */}
           <div className="flex items-center gap-3 py-3">
@@ -686,6 +692,6 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         </motion.div>
       ) : null}
     </AnimatePresence>
-    </div>
+    </ContextThemeSurface>
   );
 }

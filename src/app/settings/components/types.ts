@@ -4,6 +4,7 @@ import {
   isSourceListSelected,
   normalizeSyncedLists,
 } from '@/lib/connectors/source-list-selection';
+import type { ContextAppearance } from '@/types';
 
 export { getConnectorDisplayName } from '@/lib/connectors/display-name';
 export { isSourceListSelected, normalizeSyncedLists };
@@ -54,6 +55,7 @@ export interface SourceList {
   icon?: string | null;
   iconColor?: string | null;
   selectedForSync?: boolean;
+  appearance?: ContextAppearance | null;
 }
 
 export interface ListGroup {

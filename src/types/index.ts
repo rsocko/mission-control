@@ -210,6 +210,22 @@ export interface Tag {
 export type ProjectStatus = 'not_started' | 'active' | 'on_hold' | 'completed' | 'cancelled';
 export type ProjectHealth = 'on_track' | 'at_risk' | 'behind';
 
+export type ContextThemeStrength = 'whisper' | 'frame' | 'atmosphere' | 'canvas';
+export type ContextThemeBackdrop = 'none' | 'aurora' | 'ridge' | 'nebula';
+
+export interface ContextAppearance {
+  strength: ContextThemeStrength;
+  backdrop: ContextThemeBackdrop;
+  accentColor?: string;
+}
+
+export interface ContextThemePreferences {
+  projectStrength: ContextThemeStrength;
+  listStrength: ContextThemeStrength;
+  defaultBackdrop: ContextThemeBackdrop;
+  backdropsEnabled: boolean;
+}
+
 export interface ProjectProgress {
   totalTasks: number;
   completedTasks: number;
@@ -260,6 +276,7 @@ export interface HubProject {
   color: string;
   icon?: string;
   iconColor?: string;
+  appearance?: ContextAppearance | null;
 
   sourceBindings: SourceBinding[];
   autoIncludeRules: AutoIncludeRule[];

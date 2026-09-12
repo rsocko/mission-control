@@ -1,6 +1,10 @@
 import type { PersistenceJson } from '@/db/persistence/contracts';
 import type { SettingsRepository } from '@/db/persistence/core-repositories';
 import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
+import type { ContextThemePreferences } from '@/types';
+import {
+  normalizeContextThemePreferences,
+} from '@/lib/context-appearance';
 
 export interface CaptureDestinationSetting {
   connectorType: string;
@@ -50,6 +54,7 @@ export const DEFAULT_DOPAMINE_MENU_SETTINGS: DopamineMenuSettings = {
 const CAPTURE_DESTINATION_KEY = 'capture.defaultDestination';
 const DOPAMINE_MENU_KEY = 'dopamine-menu';
 const INBOX_LISTS_KEY = 'inbox.lists';
+const CONTEXT_THEME_KEY = 'appearance.contextThemes';
 
 export interface PreferenceSettingsRepository {
   getCaptureDestination(): Promise<CaptureDestinationSetting>;
@@ -58,6 +63,8 @@ export interface PreferenceSettingsRepository {
   patchDopamineMenu(patch: DopamineMenuSettingsPatch): Promise<DopamineMenuSettings>;
   getInboxLists(): Promise<InboxListEntry[]>;
   setInboxLists(lists: InboxListEntry[]): Promise<void>;
+  getContextThemes(): Promise<ContextThemePreferences>;
+  setContextThemes(settings: ContextThemePreferences): Promise<void>;
 }
 
 function asPersistenceJson(value: object): PersistenceJson {
@@ -109,6 +116,14 @@ export class CorePreferenceSettingsRepository implements PreferenceSettingsRepos
 
   async setInboxLists(lists: InboxListEntry[]): Promise<void> {
     await this.settings.set(INBOX_LISTS_KEY, asPersistenceJson(lists));
+  }
+
+  async getContextThemes(): Promise<ContextThemePreferences> {
+    return normalizeContextThemePreferences(await this.settings.get(CONTEXT_THEME_KEY));
+  }
+
+  async setContextThemes(settings: ContextThemePreferences): Promise<void> {
+    await this.settings.set(CONTEXT_THEME_KEY, asPersistenceJson(settings));
   }
 }
 

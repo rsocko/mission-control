@@ -87,6 +87,7 @@ export async function createHubProject(input: {
       typeof input.iconColor === 'string' ? input.iconColor : null,
       color,
     ) ?? null,
+    appearance: null,
     sourceBindings: Array.isArray(input.sourceBindings) ? input.sourceBindings : [],
     autoIncludeRules: normalizeAutoIncludeRules(input.autoIncludeRules),
     kanbanColumns: Array.isArray(input.kanbanColumns) ? input.kanbanColumns : [],

@@ -65,6 +65,46 @@
         "value": "9px",
         "createdAt": "2026-09-09T04:26:22.994Z",
         "reason": "DESIGN.md caption typography explicitly permits the 9-11px range"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#2dd4bf",
+        "createdAt": "2026-09-12T23:12:56.820Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#7c3aed",
+        "createdAt": "2026-09-12T23:12:56.877Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#0ea5e9",
+        "createdAt": "2026-09-12T23:12:56.933Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "#c084fc",
+        "createdAt": "2026-09-12T23:12:56.986Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(124,58,237,.24)",
+        "createdAt": "2026-09-12T23:12:57.041Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(4,18,31,.96)",
+        "createdAt": "2026-09-12T23:12:57.097Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(192,132,252,.3)",
+        "createdAt": "2026-09-12T23:12:57.151Z"
+      },
+      {
+        "rule": "design-system-color",
+        "value": "rgba(14,165,233,.18)",
+        "createdAt": "2026-09-12T23:12:57.207Z"
       }
     ]
   },

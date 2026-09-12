@@ -55,6 +55,7 @@ import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';
 
 const MobileDashboard = dynamic(
   () => import('@/components/dashboard/mobile/MobileDashboard').then(mod => mod.MobileDashboard),
@@ -130,6 +131,15 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   const textFilter = useDashboardViewStore((s) => s.textFilter);
   const setTextFilter = useDashboardViewStore((s) => s.setTextFilter);
   const parsedTextFilter = useMemo(() => parseFilterQuery(textFilter), [textFilter]);
+  const activeSourceList = state.listFilter
+    ? state.sourceLists.find((list) => (
+        list.sourceId === state.listFilter
+        || `${list.connectorInstanceId}:${list.sourceId}` === state.listFilter
+      ))
+    : null;
+  const activeProject = state.projectFilter
+    ? state.projects.find((project) => project.id === state.projectFilter)
+    : null;
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
@@ -199,16 +209,22 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   });
 
   return (
-    <>
+    <ContextThemeSurface
+      kind="list"
+      active={!isAllTasksPage && Boolean(activeSourceList)}
+      accentColor={activeSourceList?.appearance?.accentColor ?? activeSourceList?.iconColor ?? activeProject?.color}
+      appearance={activeSourceList?.appearance ?? activeProject?.appearance}
+      className="h-full min-h-0"
+    >
       {!isAllTasksPage && (
-        <div className="sm:hidden px-4 pt-3 pb-2 overflow-y-auto h-full">
+        <div className="h-full w-full overflow-y-auto px-4 pb-2 pt-3 sm:hidden">
           <InsightsBackLink />
           <MobileDashboard />
         </div>
       )}
 
       {/* Desktop task workspace */}
-      <div className="hidden min-w-0 sm:flex h-full">
+      <div className="hidden h-full w-full min-w-0 sm:flex">
       <div aria-live="polite" aria-atomic="true" className="sr-only" id="task-announcements" />
 
       <DashboardSidebar
@@ -845,7 +861,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
         />
       )}
     </div>
-    </>
+    </ContextThemeSurface>
   );
 }
 

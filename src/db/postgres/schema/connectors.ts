@@ -9,6 +9,7 @@ import {
   primaryKey,
 } from 'drizzle-orm/pg-core';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { ContextAppearance } from '@/types';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -64,6 +65,7 @@ export const sourceLists = pgTable('source_lists', {
   userDisplayName: text('user_display_name'),
   icon: text('icon'),
   iconColor: text('icon_color'),
+  appearance: jsonb('appearance').$type<ContextAppearance>(),
 });
 
 // ─── WORK MICROSOFT TO DO BRIDGE ────────────────────────────────────────────

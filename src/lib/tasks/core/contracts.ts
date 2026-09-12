@@ -797,6 +797,21 @@ export type TaskRemovalOutcome =
       readonly taskVersion: string | null;
     };
 
+export type TaskRestoreOutcome =
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'not-deleted' }
+  | {
+      readonly kind: 'restored';
+      readonly task: {
+        readonly id: string;
+        readonly title: string;
+        readonly description: string | null;
+        readonly sourceListName: string | null;
+        readonly connectorType: string;
+        readonly status: string;
+      };
+    };
+
 export interface TaskRemovalRepository {
   getTaskRemovalContext(taskId: string): Promise<TaskRemovalContext | null>;
   applyTaskRemoval(input: {
@@ -815,6 +830,8 @@ export interface TaskRemovalRepository {
     readonly leaseToken: string;
     readonly expectedUpdatedAt: string;
   }): Promise<TaskRemovalOutcome>;
+  restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome>;
+  purgeDeletedBefore(cutoff: string): Promise<readonly string[]>;
 }
 
 /**

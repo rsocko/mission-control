@@ -455,6 +455,7 @@ export function SearchCommand() {
                           value={query}
                           onChange={(event) => handleQueryChange(event.target.value)}
                           onKeyDown={handleKeyDown}
+                          aria-label="Search tasks and notifications"
                           placeholder="Search tasks and notifications..."
                           className="w-full bg-transparent text-base text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                         />
@@ -711,7 +712,11 @@ export function SearchCommand() {
                     ) : null}
 
                     {loading && debouncedQuery && filteredResults.length === 0 ? (
-                      <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]"
+                      >
                         <Loader2 size={14} className="animate-spin" />
                         Searching...
                       </div>
@@ -719,14 +724,31 @@ export function SearchCommand() {
 
                     {/* Inline typing indicator before debounce fires */}
                     {!loading && query.trim() && query.trim() !== debouncedQuery ? (
-                      <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]"
+                      >
                         <Loader2 size={14} className="animate-spin" />
                         <span className="animate-pulse">Typing...</span>
                       </div>
                     ) : null}
 
-                    {!loading && debouncedQuery && filteredResults.length === 0 ? (
-                      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-4 py-8 text-center">
+                    {!loading && debouncedQuery && filteredResults.length === 0 && note ? (
+                      <div
+                        role="alert"
+                        className="rounded-[var(--radius-lg)] border border-red-500/20 bg-red-500/5 px-4 py-8 text-center"
+                      >
+                        <p className="text-sm text-[var(--text-primary)]">Search unavailable.</p>
+                        <p className="mt-2 text-xs text-[var(--text-tertiary)]">{note}</p>
+                      </div>
+                    ) : null}
+
+                    {!loading && debouncedQuery && filteredResults.length === 0 && !note ? (
+                      <div
+                        role="status"
+                        className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-4 py-8 text-center"
+                      >
                         <p className="text-sm text-[var(--text-primary)]">No matching results.</p>
                         <p className="mt-2 text-xs text-[var(--text-tertiary)]">
                           {hasActiveFilters ? (

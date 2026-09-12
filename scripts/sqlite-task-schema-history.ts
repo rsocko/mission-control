@@ -160,6 +160,16 @@ export const TRUSTED_TASK_COLUMN_APPEND_EVENTS = {
       sourceMarkers: ['ALTER TABLE tasks ADD COLUMN planning_horizon TEXT'],
     },
   },
+  subtaskOrderMigration: {
+    columns: ['sibling_order', 'subtask_order_revision'],
+    provenance: {
+      kind: 'migration',
+      tag: '0131_add-subtask-order',
+      path: 'drizzle/0131_add-subtask-order.sql',
+      sha256: 'bca47755da4ddef636376069b36ff66b3bc9c2d36598f69f1b0e3d9e6f9faabd',
+      firstReachableCommit: '99d6922f97e1fbb204c7b276b189195eabde5ba2',
+    },
+  },
 } as const satisfies Readonly<Record<string, TaskColumnAppendEvent>>;
 
 export const TRUSTED_TASK_APPEND_COLUMNS = [
@@ -238,11 +248,18 @@ const migrationBoundaryChronologies = STATUS_RUNTIME_BOUNDARIES.map(
     id,
     origin: `status/retry runtime after ${afterTag}`,
     checkpointTags: [afterTag, '0118_add_planning_horizon'],
-    events: [
-      ...ORDERED_MIGRATION_EVENTS.slice(0, boundaryIndex),
-      'statusAndRetryRuntime',
-      ...ORDERED_MIGRATION_EVENTS.slice(boundaryIndex),
-    ],
+    events: id === 'fresh'
+      ? [
+          ...ORDERED_MIGRATION_EVENTS,
+          'subtaskOrderMigration',
+          'statusAndRetryRuntime',
+        ]
+      : [
+          ...ORDERED_MIGRATION_EVENTS.slice(0, boundaryIndex),
+          'statusAndRetryRuntime',
+          ...ORDERED_MIGRATION_EVENTS.slice(boundaryIndex),
+          'subtaskOrderMigration',
+        ],
   }),
 );
 
@@ -261,6 +278,7 @@ export const TRUSTED_TASKS_CHRONOLOGIES: readonly TrustedTasksChronology[] = [
       'planningHorizonRuntime',
       'delayInsightsMigration',
       'relativeRemindersMigration',
+      'subtaskOrderMigration',
     ],
   },
 ] as const;

@@ -114,6 +114,15 @@ describe('project detail shell', () => {
     expect(screen.queryByRole('heading', { name: 'Description' })).not.toBeInTheDocument();
   });
 
+  it('shows the unphased task count on the Plan tab', async () => {
+    await renderProjectPage();
+
+    const planTab = await screen.findByRole('button', {
+      name: /^Plan \(1\) 1 unphased task$/,
+    });
+    expect(within(planTab).getByLabelText('1 unphased task')).toHaveTextContent('1');
+  });
+
   it('keeps the header usable for an unknown tab query and recovers on selection', async () => {
     navigationState.search = 'tab=not-a-tab';
     await renderProjectPage();

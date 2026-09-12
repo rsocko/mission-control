@@ -40,6 +40,7 @@ import { TaskProjectAssignmentSection } from './TaskProjectAssignmentSection';
 import { TaskPlanningSection } from './TaskPlanningSection';
 import { TaskDuplicatesSection } from './TaskDuplicatesSection';
 import { TaskSourceActionsSection } from './TaskSourceActionsSection';
+import { TaskConnectorSyncState } from '@/components/task-list/TaskConnectorSyncState';
 import { TaskDocumentPreviewSection } from './TaskDocumentPreviewSection';
 import { TaskAttachmentCard } from './TaskAttachmentCard';
 import { OwlTaskActions } from './OwlTaskActions';
@@ -776,6 +777,15 @@ export function TaskDetailPanel({
           onModeChange={onModeChange}
         />
 
+        <TaskConnectorSyncState
+          taskId={task.id}
+          syncStatus={task.syncStatus}
+          connectorType={task.connectorType}
+          connectorInstanceId={task.connectorInstanceId}
+          pushRetryCount={task.pushRetryCount}
+          onRetryComplete={() => onUpdate?.()}
+        />
+
         {mode === 'panel' && task.subtasks && task.subtasks.length > 0 && (() => {
           const completedSubtasks = task.subtasks.filter((subtask) => subtask.status === 'done').length;
           return (
@@ -783,7 +793,7 @@ export function TaskDetailPanel({
               type="button"
               onClick={jumpToSubtasks}
               aria-label={`Jump to subtasks, ${completedSubtasks} of ${task.subtasks.length} complete`}
-              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
+              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
             >
               <ListChecks size={12} aria-hidden="true" />
               Subtasks {completedSubtasks}/{task.subtasks.length}

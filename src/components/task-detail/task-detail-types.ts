@@ -45,6 +45,9 @@ export interface TaskDetail {
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  lastSyncedAt?: string;
+  pushRetryCount?: number;
   sourceListId: string | null;
   sourceListName: string | null;
   sourceId: string | null;

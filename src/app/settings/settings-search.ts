@@ -59,6 +59,13 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Alertmanager', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['homelab', 'prometheus', 'incident', 'webhook'] },
   { title: 'Notification enrichment', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['re-enrichment', 'ai enrichment'] },
   { title: 'Push Notifications', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['alerts', 'browser'] },
+  {
+    title: 'Connector Push Rules',
+    section: 'notifications',
+    sectionLabel: 'Data Sources',
+    target: 'Choose which connector events can interrupt you',
+    keywords: ['source alerts', 'notification types', 'minimum level', 'lock screen preview'],
+  },
   { title: 'Do Not Disturb', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['dnd', 'mute'] },
   { title: 'Scheduled Summaries', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['schedule', 'notification scheduler'] },
   { title: 'Morning Summary', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['digest'] },

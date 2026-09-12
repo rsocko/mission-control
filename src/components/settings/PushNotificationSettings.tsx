@@ -28,6 +28,7 @@ import {
   requestMCNativeBridge,
   type NativeBridgeWindow,
 } from '@/lib/native/bridge';
+import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
 
 /* ─────── Types ─────── */
 
@@ -569,6 +570,8 @@ export function PushNotificationSettings() {
           Saving...
         </p>
       )}
+
+      <ConnectorPushRules />
     </div>
   );
 }

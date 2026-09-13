@@ -639,7 +639,7 @@ export function NavRail({
       }}
     >
       {/* Brand */}
-      <div className="relative flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
+      <div className="group relative flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
         <span className="w-16 flex items-center justify-center flex-shrink-0">
           {isSyncing ? (
             <ActiveSyncIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
@@ -649,7 +649,9 @@ export function NavRail({
         </span>
         <span className={cn(
           '-ml-1.5 flex flex-col justify-center whitespace-nowrap overflow-hidden transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-          expanded ? 'opacity-100 max-w-[108px]' : 'opacity-0 max-w-0'
+          expanded
+            ? 'opacity-100 max-w-[132px] group-hover:max-w-[108px] group-focus-within:max-w-[108px] [@media(hover:none)]:max-w-[108px]'
+            : 'opacity-0 max-w-0'
         )}>
           <span className="text-[14px] leading-4 font-bold tracking-[-0.015em] text-[var(--text-primary)]">
             Mission Control
@@ -667,8 +669,10 @@ export function NavRail({
             onClick={togglePinned}
             aria-label={pinned ? 'Unpin navigation' : 'Pin navigation open'}
             className={cn(
-              'absolute -right-1 top-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
-              expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
+              'absolute -right-1 top-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus:opacity-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
+              expanded
+                ? 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'
+                : 'pointer-events-none opacity-0',
               pinned && 'text-[var(--accent-400)]'
             )}
           >

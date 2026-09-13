@@ -12,6 +12,12 @@ export const DEFAULT_HOME_ASSISTANT_CRITICAL_UPDATE_PATTERNS = [
   'update.home_assistant_supervisor_update',
   'update.home_assistant_operating_system_update',
 ];
+const HOME_ASSISTANT_OPENING_DEVICE_CLASSES = [
+  'door',
+  'garage_door',
+  'opening',
+  'window',
+];
 
 export interface HomeAssistantSourceSettings {
   entityAlerts: { enabled: boolean };
@@ -36,7 +42,7 @@ export interface HomeAssistantOutboundDeliverySettings {
 }
 
 export interface HomeAssistantSettings {
-  settingsVersion: 2;
+  settingsVersion: 3;
   baseUrl: string;
   entityPatterns: string[];
   alertRules: AlertRule[];
@@ -53,6 +59,7 @@ export const DEFAULT_HOME_ASSISTANT_ALERT_RULES: AlertRule[] = [
   {
     id: 'door-open',
     entityPattern: 'binary_sensor.*_door*',
+    deviceClasses: [...HOME_ASSISTANT_OPENING_DEVICE_CLASSES],
     condition: 'equals',
     value: 'on',
     level: 'action_needed',
@@ -93,7 +100,7 @@ export const DEFAULT_HOME_ASSISTANT_ALERT_RULES: AlertRule[] = [
 ];
 
 export const DEFAULT_HOME_ASSISTANT_SETTINGS: HomeAssistantSettings = {
-  settingsVersion: 2,
+  settingsVersion: 3,
   baseUrl: DEFAULT_HOME_ASSISTANT_URL,
   entityPatterns: [...DEFAULT_HOME_ASSISTANT_ENTITY_PATTERNS],
   alertRules: [...DEFAULT_HOME_ASSISTANT_ALERT_RULES],
@@ -147,7 +154,7 @@ function stringArray(value: unknown, fallback: readonly string[]): string[] {
   ));
 }
 
-function alertRules(value: unknown): AlertRule[] {
+function alertRules(value: unknown, settingsVersion: number): AlertRule[] {
   if (!Array.isArray(value)) return [...DEFAULT_HOME_ASSISTANT_ALERT_RULES];
   const rules = value.flatMap((item): AlertRule[] => {
     const candidate = record(item);
@@ -163,9 +170,18 @@ function alertRules(value: unknown): AlertRule[] {
     ) {
       return [];
     }
+    const deviceClasses = stringArray(candidate.deviceClasses, []);
+    const migrateLegacyDoorRule = settingsVersion < 3
+      && candidate.id === 'door-open'
+      && candidate.entityPattern === 'binary_sensor.*_door*';
     return [{
       id: candidate.id,
       entityPattern: candidate.entityPattern,
+      ...(deviceClasses.length > 0
+        ? { deviceClasses }
+        : migrateLegacyDoorRule
+          ? { deviceClasses: [...HOME_ASSISTANT_OPENING_DEVICE_CLASSES] }
+          : {}),
       condition: condition as AlertRule['condition'],
       ...(typeof candidate.value === 'string' ? { value: candidate.value } : {}),
       level: level as NotificationLevel,
@@ -195,6 +211,7 @@ export function normalizeHomeAssistantBaseUrl(value: unknown): string {
 
 export function normalizeHomeAssistantSettings(value: unknown): HomeAssistantSettings {
   const raw = record(value);
+  const settingsVersion = typeof raw.settingsVersion === 'number' ? raw.settingsVersion : 1;
   const sources = record(raw.sources);
   const updates = record(sources.updates);
   const persistent = record(sources.persistentNotifications);
@@ -215,10 +232,10 @@ export function normalizeHomeAssistantSettings(value: unknown): HomeAssistantSet
     : DEFAULT_HOME_ASSISTANT_SETTINGS.outboundDelivery.dailySummaryTime;
 
   return {
-    settingsVersion: 2,
+    settingsVersion: 3,
     baseUrl: normalizeHomeAssistantBaseUrl(raw.baseUrl),
     entityPatterns: stringArray(raw.entityPatterns, DEFAULT_HOME_ASSISTANT_ENTITY_PATTERNS),
-    alertRules: alertRules(raw.alertRules),
+    alertRules: alertRules(raw.alertRules, settingsVersion),
     sources: {
       entityAlerts: {
         enabled: booleanValue(

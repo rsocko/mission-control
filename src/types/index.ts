@@ -251,6 +251,22 @@ export interface ProjectPulse {
   suggestion: string | null;
 }
 
+export type ContextThemeStrength = 'whisper' | 'frame' | 'atmosphere' | 'canvas';
+export type ContextThemeBackdrop = 'none' | 'aurora' | 'ridge' | 'nebula';
+
+export interface ContextAppearance {
+  strength: ContextThemeStrength;
+  backdrop: ContextThemeBackdrop;
+  accentColor?: string;
+}
+
+export interface ContextThemePreferences {
+  projectStrength: ContextThemeStrength;
+  listStrength: ContextThemeStrength;
+  defaultBackdrop: ContextThemeBackdrop;
+  backdropsEnabled: boolean;
+}
+
 export interface ProjectProgress {
   totalTasks: number;
   completedTasks: number;
@@ -302,6 +318,7 @@ export interface HubProject {
   color: string;
   icon?: string;
   iconColor?: string;
+  appearance?: ContextAppearance | null;
 
   sourceBindings: SourceBinding[];
   autoIncludeRules: AutoIncludeRule[];

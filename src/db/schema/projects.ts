@@ -4,6 +4,7 @@ import type {
   ProjectHierarchyCommandRequest,
   ProjectHierarchyCommandResult,
 } from '@/lib/projects/hierarchy-types';
+import type { ContextAppearance } from '@/types';
 
 // ─── HUB PROJECTS ───────────────────────────────────────────────────────────
 
@@ -14,6 +15,7 @@ export const hubProjects = sqliteTable('hub_projects', {
   color: text('color').notNull().default('#3b82f6'),
   icon: text('icon'),
   iconColor: text('icon_color'),
+  appearance: text('appearance', { mode: 'json' }).$type<ContextAppearance>(),
   sourceBindings: text('source_bindings', { mode: 'json' }).notNull().default('[]'),
   autoIncludeRules: text('auto_include_rules', { mode: 'json' }).notNull().default('[]'),
   kanbanColumns: text('kanban_columns', { mode: 'json' }).notNull().default('[]'),

@@ -13,6 +13,7 @@ export type SettingsSection =
   | 'contentTypes'
   | 'priorityEntities'
   | 'dashboard'
+  | 'contextThemes'
   | 'storage'
   | 'shortcuts'
   | 'notifications'
@@ -39,6 +40,7 @@ export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   triageSources: 'Triage Sources',
   priorityEntities: 'Priority Entities',
   dashboard: 'Dashboard',
+  contextThemes: 'Context Themes',
   shortcuts: 'Taskbar Shortcuts',
   ai: 'AI Provider',
   storage: 'Storage & Cache',
@@ -85,6 +87,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Priority Entities', section: 'priorityEntities', sectionLabel: 'Organization', keywords: ['smart score', 'people', 'projects'] },
 
   { title: 'Dashboard KPIs', section: 'dashboard', sectionLabel: 'Appearance', keywords: ['metrics', 'cards'] },
+  { title: 'Context Themes', section: 'contextThemes', sectionLabel: 'Appearance', keywords: ['project color', 'list color', 'backdrop', 'appearance', 'frame'] },
   { title: 'KPI Rotation', section: 'dashboard', sectionLabel: 'Appearance', target: 'Rotation', keywords: ['cycle', 'dashboard'] },
   { title: 'KPI Auto-surface', section: 'dashboard', sectionLabel: 'Appearance', target: 'Auto-surface', keywords: ['dashboard', 'automatic'] },
   { title: 'Taskbar Shortcuts', section: 'shortcuts', sectionLabel: 'Appearance', keywords: ['pwa', 'quick launch'] },

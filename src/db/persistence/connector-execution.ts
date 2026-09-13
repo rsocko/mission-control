@@ -1,5 +1,6 @@
 import type {
   ConnectorConfig,
+  ContextAppearance,
   NotificationDisposition,
   NotificationReadState,
   NotificationReopenPolicy,
@@ -78,6 +79,7 @@ export interface SourceListRecord {
   userDisplayName: string | null;
   icon: string | null;
   iconColor: string | null;
+  appearance?: ContextAppearance | null;
 }
 
 export interface SourceListWrite {

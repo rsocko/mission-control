@@ -12,7 +12,7 @@ import type { TaskListItemDto } from '@/types/api';
 
 type ProjectDetailDomainFields = Pick<
   HubProject,
-  'id' | 'name' | 'color' | 'sortOrder' | 'metadata' | 'createdAt' | 'updatedAt'
+  'id' | 'name' | 'color' | 'appearance' | 'sortOrder' | 'metadata' | 'createdAt' | 'updatedAt'
 >;
 
 export type ProjectDetailViewModel = ProjectDetailDomainFields & {

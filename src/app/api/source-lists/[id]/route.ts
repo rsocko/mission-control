@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import { contextAppearanceSchema } from '@/lib/context-appearance';
 
 export async function PATCH(
   request: Request,
@@ -18,7 +19,11 @@ export async function PATCH(
       return NextResponse.json({ error: 'Source list not found' }, { status: 404 });
     }
 
-    const updates: { groupId?: string | null; hidden?: boolean } = {};
+    const updates: {
+      groupId?: string | null;
+      hidden?: boolean;
+      appearance?: ReturnType<typeof contextAppearanceSchema.parse> | null;
+    } = {};
 
     if ('groupId' in body) {
       const nextGroupId = body.groupId === null
@@ -40,6 +45,21 @@ export async function PATCH(
       updates.hidden = Boolean(body.hidden);
     }
 
+    if ('appearance' in body) {
+      if (body.appearance === null) {
+        updates.appearance = null;
+      } else {
+        const parsed = contextAppearanceSchema.safeParse(body.appearance);
+        if (!parsed.success) {
+          return NextResponse.json(
+            { error: parsed.error.issues[0]?.message || 'Invalid appearance' },
+            { status: 400 },
+          );
+        }
+        updates.appearance = parsed.data;
+      }
+    }
+
     if (Object.keys(updates).length === 0) {
       return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 });
     }
@@ -48,6 +68,7 @@ export async function PATCH(
       sourceListId: id,
       groupId: updates.groupId,
       hidden: updates.hidden,
+      appearance: updates.appearance,
     });
     return NextResponse.json({ success: true });
   } catch (error) {

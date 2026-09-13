@@ -35,6 +35,8 @@ import {
 import { getConnectorDisplayName } from '@/lib/connectors/display-name';
 import { useInlineRename } from '@/lib/hooks/useInlineRename';
 import { runSourceListRenameRequest, settleSourceListRename } from '../source-list-renames';
+import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
+import type { ContextAppearance } from '@/types';
 
 import { IconPickerButton as EmojiPickerButton, IconRenderer } from '@/components/ui/icon-picker';
 
@@ -49,6 +51,7 @@ function ListGroupsSection({
   onAssignList,
   onRefresh,
   onRenameList,
+  onUpdateAppearance,
 }: {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
@@ -60,12 +63,14 @@ function ListGroupsSection({
   onAssignList: (id: string, groupId: string | null) => Promise<void>;
   onRefresh: () => Promise<void>;
   onRenameList: (sourceListId: string, newName: string) => (() => Promise<void>);
+  onUpdateAppearance?: (sourceListId: string, appearance: ContextAppearance | null) => Promise<void>;
 }) {
   const [newName, setNewName] = useState('');
   const [newIcon, setNewIcon] = useState('');
   const [newIconColor, setNewIconColor] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [assigningListId, setAssigningListId] = useState<string | null>(null);
+  const [appearanceListId, setAppearanceListId] = useState('');
   const [localGroupOrder, setLocalGroupOrder] = useState<string[]>([]);
   const [localUngroupedOrder, setLocalUngroupedOrder] = useState<string[]>([]);
   const [collapseAllVersion, setCollapseAllVersion] = useState<{ version: number; collapsed: boolean }>({ version: 1, collapsed: true });
@@ -419,6 +424,48 @@ function ListGroupsSection({
               </div>
             </div>
           </div>
+
+          {onUpdateAppearance ? <div className="rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-5">
+            <div className="mb-5 max-w-md">
+              <h3 className="text-sm font-semibold text-[var(--text-primary)]">List appearance</h3>
+              <p className="mt-1 text-xs leading-relaxed text-[var(--text-muted)]">
+                Choose how a list feels when it is the only active dashboard context.
+              </p>
+              <Select value={appearanceListId} onValueChange={setAppearanceListId}>
+                <SelectTrigger className="mt-3">
+                  <SelectValue placeholder="Choose a list..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {sortedSourceLists.map((sourceList) => (
+                    <SelectItem key={sourceList.id} value={sourceList.id}>
+                      {sourceList.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {appearanceListId ? (() => {
+              const sourceList = sortedSourceLists.find((candidate) => candidate.id === appearanceListId);
+              if (!sourceList) return null;
+              return (
+                <ContextAppearancePicker
+                  value={sourceList.appearance ?? null}
+                  kind="list"
+                  fallbackAccent={sourceList.iconColor || '#3b82f6'}
+                  inheritLabel="Use global list style"
+                  onChange={(appearance) => {
+                    void onUpdateAppearance(sourceList.id, appearance)
+                      .then(() => toast.success(appearance ? 'List appearance updated' : 'List appearance now follows the global style'))
+                      .catch(() => toast.error('Failed to update list appearance'));
+                  }}
+                />
+              );
+            })() : (
+              <div className="rounded-xl border border-dashed border-[var(--border)] px-4 py-8 text-center text-sm text-[var(--text-muted)]">
+                Select a list to preview and customize its context theme.
+              </div>
+            )}
+          </div> : null}
         </>
       )}
     </div>

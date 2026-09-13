@@ -392,6 +392,7 @@ export function describeSqliteGraphReportingRepositoryContract(): void {
       CREATE TABLE hub_projects (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
         color TEXT NOT NULL DEFAULT '#3b82f6', icon TEXT, icon_color TEXT,
+        appearance TEXT,
         source_bindings TEXT NOT NULL DEFAULT '[]', auto_include_rules TEXT NOT NULL DEFAULT '[]',
         kanban_columns TEXT NOT NULL DEFAULT '[]', default_view TEXT NOT NULL DEFAULT 'list',
         default_filters TEXT, status TEXT NOT NULL DEFAULT 'active', status_override TEXT,

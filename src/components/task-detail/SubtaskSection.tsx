@@ -56,19 +56,15 @@ export interface SubtaskSectionProps {
   onSubtaskPromoted?: (subtaskId: string) => void;
   /** Revision used to reject stale reorder requests. */
   orderRevision?: number;
-  /** True when the source cannot mirror Mission Control's chosen order. */
-  orderIsLocalOnly?: boolean;
 }
 
 function SortableSubtaskRow({
   subtask,
   disabled,
-  orderIsLocalOnly,
   children,
 }: {
   subtask: Subtask;
   disabled: boolean;
-  orderIsLocalOnly: boolean;
   children: ReactNode;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -91,7 +87,7 @@ function SortableSubtaskRow({
           {...attributes}
           {...listeners}
           aria-label={`Reorder "${subtask.title}"`}
-          title={orderIsLocalOnly ? 'Order is saved in Mission Control only' : 'Reorder subtask'}
+          title="Reorder subtask"
           className="shrink-0 cursor-grab touch-none text-[var(--text-muted)] opacity-60 transition-opacity hover:opacity-100 focus:opacity-100 active:cursor-grabbing"
         >
           <GripVertical size={13} aria-hidden="true" />
@@ -115,7 +111,6 @@ export function SubtaskSection({
   canCreateSubtasks = canEdit,
   onSubtaskPromoted,
   orderRevision = 0,
-  orderIsLocalOnly = false,
 }: SubtaskSectionProps) {
   const [newTitle, setNewTitle] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -322,7 +317,6 @@ export function SubtaskSection({
             key={st.id}
             subtask={st}
             disabled={!canEdit || subtasks.length < 2}
-            orderIsLocalOnly={orderIsLocalOnly}
           >
             <button
               type="button"
@@ -391,12 +385,6 @@ export function SubtaskSection({
         ))}
           </SortableContext>
         </DndContext>
-
-        {canEdit && orderIsLocalOnly && subtasks.length > 1 && (
-          <p className="pl-5 text-xs text-[var(--text-muted)]">
-            Order is saved in Mission Control only.
-          </p>
-        )}
 
         {/* Add subtask input */}
         {canCreateSubtasks && (

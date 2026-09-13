@@ -311,6 +311,44 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('button', { name: /Jump to subtasks/ })).not.toBeInTheDocument();
   });
 
+  it('uses an info tooltip instead of persistent copy for local-only subtask ordering', async () => {
+    const remoteTask = {
+      ...task,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'todo:task-1',
+      subtasks: [
+        { id: 'subtask-1', title: 'First', status: 'todo' },
+        { id: 'subtask-2', title: 'Second', status: 'todo' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task: remoteTask });
+      if (url === '/api/features') {
+        return json({
+          taskDestinations: [{
+            id: 'todo-1',
+            capabilities: { subtasks: true, subtaskOrderWrite: false },
+          }],
+        });
+      }
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    const infoButton = await screen.findByRole('button', {
+      name: 'Subtask order is saved in Mission Control only',
+    });
+    expect(screen.queryByText('Subtask order is saved in Mission Control only.')).not.toBeInTheDocument();
+
+    fireEvent.pointerMove(infoButton, { pointerType: 'mouse' });
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Subtask order is saved in Mission Control only.',
+    );
+  });
+
   it('scrolls only the panel to subtasks and focuses its heading', async () => {
     const taskWithSubtasks = {
       ...task,

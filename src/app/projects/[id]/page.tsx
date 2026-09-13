@@ -513,8 +513,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       <motion.section
         ref={stickyHeaderRef}
         variants={scaleIn}
-        className="sticky top-0 z-20 backdrop-blur-xl"
-        style={{ background: 'var(--context-header)' }}
+        className="sticky top-0 z-20 [background:var(--context-header)] backdrop-blur-xl"
       >
         <div className="border-b border-[var(--border)] px-4 sm:px-6">
           {/* Top row: title + stats */}

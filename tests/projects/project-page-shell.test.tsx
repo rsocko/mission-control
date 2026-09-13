@@ -136,6 +136,16 @@ describe('project detail shell', () => {
     expect(navigationState.push).not.toHaveBeenCalled();
   });
 
+  it('keeps the project backdrop visible through the sticky header', async () => {
+    await renderProjectPage();
+
+    const header = (await screen.findByRole('heading', { name: 'Shell Project' })).closest('section');
+    expect(header).toHaveClass(
+      '[background:var(--context-header)]',
+      'backdrop-blur-xl',
+    );
+  });
+
   it('runs the route-triggered AI proposal while another tab is active', async () => {
     navigationState.search = 'tab=tasks&action=ai-suggest';
     await renderProjectPage();

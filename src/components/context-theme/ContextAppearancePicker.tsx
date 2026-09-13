@@ -14,8 +14,8 @@ import type { ContextAppearance, ContextThemePreferences } from '@/types';
 import { uiLogger } from '@/lib/client-logger';
 
 const strengthCopy: Record<ContextAppearance['strength'], { label: string; detail: string }> = {
-  whisper: { label: 'Whisper', detail: 'Fine outline and a quiet header tint' },
-  frame: { label: 'Frame', detail: 'A strong color boundary around the workspace' },
+  whisper: { label: 'Whisper', detail: 'Quietly tinted surfaces with a fine outline' },
+  frame: { label: 'Frame', detail: 'Tinted surfaces inside a complete color boundary' },
   atmosphere: { label: 'Atmosphere', detail: 'Backdrop fades through the upper workspace' },
   canvas: { label: 'Canvas', detail: 'Backdrop fills the entire working surface' },
 };

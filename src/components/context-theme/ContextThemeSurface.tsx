@@ -26,6 +26,76 @@ const backdropStyles: Record<ContextAppearance['backdrop'], string> = {
   ].join(','),
 };
 
+const solidSurfaceMixes: Record<ContextAppearance['strength'], {
+  surface0: string;
+  surface1: string;
+  surface2: string;
+  border: string;
+}> = {
+  whisper: {
+    surface0: 'color-mix(in srgb, #0b1120 97%, var(--context-accent))',
+    surface1: 'color-mix(in srgb, #111827 96%, var(--context-accent))',
+    surface2: 'color-mix(in srgb, #1e293b 96%, var(--context-accent))',
+    border: 'color-mix(in srgb, #1e293b 88%, var(--context-accent))',
+  },
+  frame: {
+    surface0: 'color-mix(in srgb, #0b1120 94%, var(--context-accent))',
+    surface1: 'color-mix(in srgb, #111827 93%, var(--context-accent))',
+    surface2: 'color-mix(in srgb, #1e293b 94%, var(--context-accent))',
+    border: 'color-mix(in srgb, #1e293b 78%, var(--context-accent))',
+  },
+  atmosphere: {
+    surface0: 'color-mix(in srgb, #0b1120 91%, var(--context-accent))',
+    surface1: 'color-mix(in srgb, #111827 90%, var(--context-accent))',
+    surface2: 'color-mix(in srgb, #1e293b 92%, var(--context-accent))',
+    border: 'color-mix(in srgb, #1e293b 76%, var(--context-accent))',
+  },
+  canvas: {
+    surface0: 'color-mix(in srgb, #0b1120 88%, var(--context-accent))',
+    surface1: 'color-mix(in srgb, #111827 87%, var(--context-accent))',
+    surface2: 'color-mix(in srgb, #1e293b 89%, var(--context-accent))',
+    border: 'color-mix(in srgb, #1e293b 70%, var(--context-accent))',
+  },
+};
+
+const translucentSurfaceMixes = {
+  atmosphere: {
+    surface0: 'color-mix(in srgb, #0b1120 88%, transparent)',
+    surface1: 'color-mix(in srgb, #111827 87%, transparent)',
+    surface2: 'color-mix(in srgb, #1e293b 90%, transparent)',
+  },
+  canvas: {
+    surface0: 'color-mix(in srgb, #0b1120 80%, transparent)',
+    surface1: 'color-mix(in srgb, #111827 82%, transparent)',
+    surface2: 'color-mix(in srgb, #1e293b 86%, transparent)',
+  },
+} as const;
+
+export function getContextThemeSurfaceStyle(resolved: ContextAppearance): CSSProperties {
+  const hasBackdrop = resolved.backdrop !== 'none'
+    && (resolved.strength === 'atmosphere' || resolved.strength === 'canvas');
+  const solidMixes = solidSurfaceMixes[resolved.strength];
+  const surfaceMixes = hasBackdrop
+    ? translucentSurfaceMixes[resolved.strength as keyof typeof translucentSurfaceMixes]
+    : solidMixes;
+
+  return {
+    '--context-accent': resolved.accentColor,
+    '--context-backdrop': backdropStyles[resolved.backdrop],
+    '--context-header': [
+      'linear-gradient(90deg,',
+      'color-mix(in srgb, var(--context-accent) 14%, var(--surface-0)),',
+      'color-mix(in srgb, var(--context-accent) 4%, var(--surface-0)) 58%,',
+      'var(--surface-0))',
+    ].join(' '),
+    '--surface-0': surfaceMixes.surface0,
+    '--surface-1': surfaceMixes.surface1,
+    '--surface-2': surfaceMixes.surface2,
+    '--border': solidMixes.border,
+    '--border-subtle': 'color-mix(in srgb, #162032 84%, var(--context-accent))',
+  } as CSSProperties;
+}
+
 export function ContextThemeSurface({
   kind,
   accentColor,
@@ -66,16 +136,9 @@ export function ContextThemeSurface({
     [accentColor, appearance, kind, preferences],
   );
   if (!active) return <div className={className}>{children}</div>;
-  const isBackdrop = resolved.strength === 'atmosphere' || resolved.strength === 'canvas';
-  const style = {
-    '--context-accent': resolved.accentColor,
-    '--context-backdrop': backdropStyles[resolved.backdrop],
-    boxShadow: resolved.strength === 'whisper'
-      ? 'inset 0 0 0 1px color-mix(in srgb, var(--context-accent) 55%, transparent)'
-      : resolved.strength === 'frame'
-        ? 'inset 0 0 0 5px color-mix(in srgb, var(--context-accent) 72%, transparent)'
-        : undefined,
-  } as CSSProperties;
+  const isBackdropStrength = resolved.strength === 'atmosphere' || resolved.strength === 'canvas';
+  const hasBackdrop = isBackdropStrength && resolved.backdrop !== 'none';
+  const style = getContextThemeSurfaceStyle(resolved);
 
   return (
     <div
@@ -93,16 +156,32 @@ export function ContextThemeSurface({
           'pointer-events-none absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-opacity duration-300',
           resolved.strength === 'whisper' && 'opacity-100',
           resolved.strength === 'frame' && 'opacity-0',
-          resolved.strength === 'atmosphere' && 'opacity-55 [mask-image:linear-gradient(to_bottom,black_0%,black_36%,transparent_82%)]',
-          resolved.strength === 'canvas' && 'opacity-80',
+          resolved.strength === 'atmosphere' && (hasBackdrop
+            ? 'opacity-55 [mask-image:linear-gradient(to_bottom,black_0%,black_36%,transparent_82%)]'
+            : 'opacity-100'),
+          resolved.strength === 'canvas' && (hasBackdrop ? 'opacity-80' : 'opacity-100'),
         )}
         style={{
-          backgroundImage: isBackdrop
+          backgroundImage: hasBackdrop
             ? 'var(--context-backdrop)'
-            : 'linear-gradient(to bottom, color-mix(in srgb, var(--context-accent) 10%, transparent), transparent 24%)',
+            : [
+                'radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--context-accent) 18%, transparent), transparent 42%)',
+                'linear-gradient(to bottom, color-mix(in srgb, var(--context-accent) 9%, transparent), transparent 36%)',
+              ].join(','),
         }}
       />
       <div className="relative z-[1] flex h-full min-h-0 w-full">{children}</div>
+      {resolved.strength === 'whisper' || resolved.strength === 'frame' ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 z-40"
+          style={{
+            boxShadow: resolved.strength === 'frame'
+              ? 'inset 0 0 0 4px color-mix(in srgb, var(--context-accent) 72%, transparent)'
+              : 'inset 0 0 0 1px color-mix(in srgb, var(--context-accent) 58%, transparent)',
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import {
   normalizeContextThemePreferences,
   resolveContextAppearance,
 } from '@/lib/context-appearance';
+import { getContextThemeSurfaceStyle } from '@/components/context-theme/ContextThemeSurface';
 
 describe('context appearance', () => {
   it('uses distinct project and list defaults', () => {
@@ -55,5 +56,28 @@ describe('context appearance', () => {
       ...DEFAULT_CONTEXT_THEME_PREFERENCES,
       projectStrength: 'whisper',
     });
+  });
+
+  it('tints solid surfaces when no backdrop is selected', () => {
+    const style = getContextThemeSurfaceStyle({
+      strength: 'frame',
+      backdrop: 'none',
+      accentColor: '#10b981',
+    }) as Record<string, string>;
+
+    expect(style['--surface-1']).toContain('var(--context-accent)');
+    expect(style['--surface-1']).not.toContain('transparent');
+    expect(style['--context-header']).toContain('var(--context-accent)');
+  });
+
+  it('uses translucent surfaces when a backdrop is visible', () => {
+    const style = getContextThemeSurfaceStyle({
+      strength: 'canvas',
+      backdrop: 'aurora',
+      accentColor: '#10b981',
+    }) as Record<string, string>;
+
+    expect(style['--surface-0']).toContain('transparent');
+    expect(style['--surface-1']).toContain('transparent');
   });
 });

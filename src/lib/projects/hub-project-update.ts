@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { normalizeAutoIncludeRules } from '@/lib/rules';
+import { contextAppearanceSchema } from '@/lib/context-appearance';
 
 const colorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const nullableTextSchema = z.string().max(10_000).nullable();
@@ -27,6 +28,7 @@ export const hubProjectUpdateSchema = z.object({
   color: colorSchema.optional(),
   icon: z.string().trim().min(1).max(100).nullable().optional(),
   iconColor: colorSchema.nullable().optional(),
+  appearance: contextAppearanceSchema.nullable().optional(),
   sourceBindings: z.array(sourceBindingSchema).optional(),
   autoIncludeRules: z.array(z.unknown()).optional(),
   kanbanColumns: z.array(kanbanColumnSchema).optional(),

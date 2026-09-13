@@ -142,6 +142,9 @@ export function getSemanticSearchRuntime(): SemanticSearchRuntime {
 interface SearchFilters {
   source?: string;
   status?: string;
+  notificationKind?: 'triage' | 'notes';
+  dateFrom?: string;
+  dueBefore?: string;
   excludeDone?: boolean;
   universeEligible?: boolean;
   excludeConnectorInstanceIds?: string[];
@@ -204,6 +207,9 @@ export async function executeSearchWithBranches(
   const filters: SearchFilters = {
     source: options.source,
     status: options.status,
+    notificationKind: options.notificationKind,
+    dateFrom: options.dateFrom,
+    dueBefore: options.dueBefore,
     excludeDone: options.excludeDone,
     universeEligible: options.universeEligible,
     excludeConnectorInstanceIds: options.excludeConnectorInstanceIds,
@@ -1092,8 +1098,19 @@ function metadataBoolean(
   return metadata[key] === true;
 }
 
+function notificationKind(result: SemanticQueryResult): 'triage' | 'notes' {
+  const hint = [
+    metadataString(result.metadata, 'category'),
+    metadataString(result.metadata, 'connectorType'),
+    result.title,
+    result.body,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /(capture|note|memo|idea|journal)/.test(hint) ? 'notes' : 'triage';
+}
+
 function toSearchResult(result: SemanticQueryResult): SearchResult | null {
   if (result.entityType === 'task') {
+    const dueDate = metadataString(result.metadata, 'dueDate');
     return {
       type: 'task',
       id: result.entityId,
@@ -1105,6 +1122,7 @@ function toSearchResult(result: SemanticQueryResult): SearchResult | null {
       metadata: {
         status: metadataString(result.metadata, 'status'),
         priority: metadataString(result.metadata, 'priority'),
+        ...(dueDate ? { dueDate } : {}),
         sourceListName: metadataString(result.metadata, 'sourceListName'),
         connectorType: metadataString(result.metadata, 'connectorType'),
         updatedAt: result.sourceUpdatedAt,
@@ -1124,6 +1142,7 @@ function toSearchResult(result: SemanticQueryResult): SearchResult | null {
       metadata: {
         severity: metadataString(result.metadata, 'level'),
         category,
+        notificationKind: notificationKind(result),
         isRead: metadataString(result.metadata, 'readState') === 'read'
           || metadataString(result.metadata, 'state') === 'read',
         isActionable: metadataBoolean(result.metadata, 'isActionable'),
@@ -1162,6 +1181,9 @@ export async function semanticSearch(
       metadataFilters: buildMetadataFilters(options),
       excludeConnectorInstanceIds: options.excludeConnectorInstanceIds,
       rootTaskOnly: options.universeEligible,
+      notificationKind: options.notificationKind,
+      dateFrom: options.dateFrom,
+      dueBefore: options.dueBefore,
       minScore: SIMILARITY_THRESHOLD,
       now: new Date().toISOString(),
     });

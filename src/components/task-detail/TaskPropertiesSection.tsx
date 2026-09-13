@@ -139,7 +139,7 @@ export function TaskStatusField({
         )}
         Status
       </span>
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <Select
           value={status}
           onValueChange={(next) => {
@@ -151,10 +151,10 @@ export function TaskStatusField({
           <SelectTrigger
             aria-label="Task status"
             title={!canEditStatus ? statusBlockedReason : statusSaveLabel}
-            className={
+            className={`min-w-0 max-w-full flex-1 basis-28 ${
             status === 'done' ? 'text-[var(--success)]' :
             TASK_STATUS_VISUALS[status as keyof typeof TASK_STATUS_VISUALS]?.textClass ?? TASK_STATUS_VISUALS.todo.textClass
-          }>
+          }`}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -174,7 +174,7 @@ export function TaskStatusField({
 
         {/* Status reason badge — shown when task is closed with a specific reason */}
         {isClosed && statusReason && statusReason !== 'completed' && (
-          <span className={`text-xs rounded px-1.5 py-0.5 font-medium ${
+          <span className={`inline-flex max-w-full flex-wrap items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium whitespace-normal break-words ${
             statusReason === 'not_planned'
               ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20'
               : statusReason === 'moved'

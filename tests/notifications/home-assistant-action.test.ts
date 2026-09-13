@@ -85,13 +85,24 @@ describe('Home Assistant notification actions', () => {
       action: { ...context.action, actionType },
     };
 
-    await expect(executeHomeAssistantProviderAction(actionContext)).resolves.toEqual({
-      result: {
-        type: 'home_assistant_action_accepted',
-        action: actionType,
-        confirmation: 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
-      },
-    });
+    await expect(executeHomeAssistantProviderAction(actionContext)).resolves.toEqual(
+      actionType === 'dismiss_persistent_notification'
+        ? {
+            state: 'dismissed',
+            result: {
+              type: 'home_assistant_action_accepted',
+              action: actionType,
+              confirmation: 'Dismissed in Home Assistant and Mission Control.',
+            },
+          }
+        : {
+            result: {
+              type: 'home_assistant_action_accepted',
+              action: actionType,
+              confirmation: 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
+            },
+          },
+    );
     expect(mocks.executeNotificationAction).toHaveBeenCalledWith(
       actionType,
       { notificationId: 'water_filter' },

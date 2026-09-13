@@ -29,6 +29,15 @@ describe('notification saved views sidebar', () => {
     const reviewRequests = await screen.findByRole('button', { name: 'Review requests' });
     expect(reviewRequests).toHaveAttribute('aria-current', 'page');
     expect(screen.queryByRole('button', { name: 'Save current view' })).not.toBeInTheDocument();
+
+    const sectionToggle = screen.getByRole('button', { name: 'Saved views' });
+    const section = document.getElementById(sectionToggle.getAttribute('aria-controls')!);
+    expect(sectionToggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(sectionToggle);
+    expect(sectionToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(section).toHaveClass('hidden');
+    fireEvent.click(sectionToggle);
+
     fireEvent.click(reviewRequests);
     expect(onApply).toHaveBeenCalledWith(DEFAULT_GITHUB_NOTIFICATION_VIEWS[0]);
 

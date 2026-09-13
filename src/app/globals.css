@@ -163,6 +163,52 @@ p, li {
   text-wrap: pretty;
 }
 
+/* Quick Entry adapts to its toolbar slot rather than the viewport. */
+.quick-add-bar {
+  container-type: inline-size;
+}
+
+.quick-add-input {
+  min-width: 12rem;
+}
+
+@container (max-width: 34rem) {
+  .quick-add-secondary-project {
+    display: none;
+  }
+}
+
+@container (max-width: 30rem) {
+  .quick-add-secondary-voice {
+    display: none;
+  }
+
+  .quick-add-input {
+    min-width: 8rem;
+  }
+}
+
+@container (max-width: 26rem) {
+  .quick-add-secondary-my-day,
+  .quick-add-secondary-expand {
+    display: none;
+  }
+}
+
+@container (max-width: 22rem) {
+  .quick-add-input {
+    min-width: 0;
+  }
+
+  .quick-add-destination {
+    padding-inline: 0.375rem;
+  }
+
+  .quick-add-destination-label {
+    display: none;
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 8px;

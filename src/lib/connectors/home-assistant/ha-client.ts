@@ -69,6 +69,7 @@ export interface HomeAssistantImage {
 export interface HAClient {
   fetchStates(): Promise<HomeAssistantState[]>;
   fetchImage(path: string): Promise<HomeAssistantImage>;
+  fetchUpdateReleaseNotes(entityId: string): Promise<string | null>;
   fetchWebSocketSources(
     sources: Array<'persistentNotifications' | 'repairs'>,
   ): Promise<HAWebSocketSourceResult>;
@@ -78,7 +79,7 @@ export interface HAClient {
 }
 
 type WebSocketCommand = {
-  key: 'persistentNotifications' | 'repairs' | 'repairAction';
+  key: 'persistentNotifications' | 'repairs' | 'repairAction' | 'releaseNotes';
   message: Record<string, unknown>;
 };
 
@@ -277,6 +278,26 @@ export function createHAClient(options: HAClientOptions): HAClient {
         throw new Error('Home Assistant brand image exceeds the 2 MB limit');
       }
       return { body, contentType };
+    },
+
+    async fetchUpdateReleaseNotes(entityId): Promise<string | null> {
+      const result = await runWebSocketCommands(options, [{
+        key: 'releaseNotes',
+        message: {
+          type: 'update/release_notes',
+          entity_id: entityId,
+        },
+      }]);
+      if (typeof result.releaseNotesError === 'string') {
+        throw new Error(result.releaseNotesError);
+      }
+      if (result.releaseNotes === null || result.releaseNotes === undefined) {
+        return null;
+      }
+      if (typeof result.releaseNotes !== 'string') {
+        throw new Error('Home Assistant returned invalid update release notes');
+      }
+      return result.releaseNotes.slice(0, 256_000);
     },
 
     async fetchWebSocketSources(sources): Promise<HAWebSocketSourceResult> {

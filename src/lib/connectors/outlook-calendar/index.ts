@@ -5,9 +5,7 @@ import type {
   ConnectorConfig,
   ConnectorCapabilities,
   SourceList,
-  SyncResult,
 } from '@/types';
-import { randomUUID } from 'crypto';
 import { getTimezone, ianaToWindowsTimezone } from '@/lib/mode';
 import { createGraphClient, type GraphClient } from '../microsoft-todo/graph-client';
 
@@ -151,7 +149,7 @@ export class OutlookCalendarConnector implements IConnector {
         : startTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
       notifications.push({
-        id: randomUUID(),
+        id: `cal:${event.id}`,
         sourceId: `cal:${event.id}`,
         connectorType: this.type,
         connectorInstanceId: this.id,

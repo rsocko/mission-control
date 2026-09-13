@@ -8,6 +8,7 @@ import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumen
 import { TaskSourceActionsSection } from '@/components/task-detail/TaskSourceActionsSection';
 import { TaskDetailFooter, TaskMobileActionBar } from '@/components/task-detail/TaskDetailFooter';
 import { TaskDuplicatesSection } from '@/components/task-detail/TaskDuplicatesSection';
+import { TaskStatusField } from '@/components/task-detail/TaskPropertiesSection';
 
 vi.mock('@/components/task-detail/DuplicateTaskPreview', () => ({
   DuplicateTaskPreview: ({ candidate }: { candidate: { title: string } }) => <div>{candidate.title}</div>,
@@ -111,6 +112,40 @@ describe('TaskDetailHeader', () => {
 
     expect(onModeChange).toHaveBeenNthCalledWith(1, 'panel');
     expect(onModeChange).toHaveBeenNthCalledWith(2, 'workspace');
+  });
+});
+
+describe('TaskStatusField', () => {
+  it('keeps a closed status reason inside the status card at narrow widths', () => {
+    render(
+      <TaskStatusField
+        status="cancelled"
+        statusReason="not_planned"
+        microStatus={null}
+        connectorType="github-issues"
+        canEditStatus
+        canEditMicroStatus
+        onStatusChange={vi.fn()}
+        onComplete={vi.fn()}
+        showMicroStatusPicker={false}
+        onToggleMicroStatusPicker={vi.fn()}
+        onMicroStatusChange={vi.fn()}
+        microStatusSuggestion={null}
+        onRequestMicroStatusSuggestion={vi.fn()}
+        onDismissMicroStatusSuggestion={vi.fn()}
+        showCloseReasonPicker={false}
+        onCloseWithReason={vi.fn()}
+        onCancelCloseReason={vi.fn()}
+      />,
+    );
+
+    const statusTrigger = screen.getByRole('combobox', { name: 'Task status' });
+    const statusReason = screen.getByText('Not Planned');
+
+    expect(statusTrigger.parentElement).toHaveClass('flex-wrap', 'min-w-0');
+    expect(statusTrigger).toHaveClass('flex-1', 'basis-28', 'min-w-0', 'max-w-full');
+    expect(statusReason).toHaveClass('max-w-full', 'whitespace-normal', 'break-words');
+    expect(statusTrigger.closest('.rounded-xl')).toContainElement(statusReason);
   });
 });
 

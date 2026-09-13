@@ -195,6 +195,7 @@ export function mapStatus(graphStatus: string): TaskItem['status'] {
 export function statusToGraph(status: TaskItem['status']): string {
   switch (status) {
     case 'done': return 'completed';
+    case 'cancelled': return 'completed';
     case 'in_progress': return 'inProgress';
     case 'todo': return 'notStarted';
     default: return 'notStarted';
@@ -217,9 +218,19 @@ export function priorityToImportance(priority?: TaskItem['priority']): string {
   }
 }
 
-export function parseSourceId(sourceId: string): { listId: string; taskId: string } {
-  const [listId, taskId] = sourceId.split(':');
-  return { listId, taskId };
+export function parseSourceId(sourceId: string): {
+  listId: string;
+  taskId: string;
+  checklistItemId?: string;
+} {
+  const [listId, taskId, ...checklistIdParts] = sourceId.split(':');
+  if (!listId || !taskId) {
+    throw new Error('Invalid Microsoft To Do task source ID');
+  }
+  const checklistItemId = checklistIdParts.length > 0
+    ? checklistIdParts.join(':')
+    : undefined;
+  return { listId, taskId, checklistItemId };
 }
 
 export function parseRecurrencePattern(recurrence: NonNullable<GraphTodoTask['recurrence']>): string {

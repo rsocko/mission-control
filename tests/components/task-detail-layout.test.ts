@@ -36,7 +36,7 @@ describe('task detail side-panel layouts', () => {
     expect(matrix).toContain('className="hidden min-w-0 shrink sm:flex"');
     expect(matrix).toContain('mode={state.detailMode}');
     expect(matrix).toContain('onModeChange={actions.setDetailMode}');
-    expect(matrix).toContain('taskSelection.toggleTask(task.id)');
+    expect(matrix).toContain('taskSelection.selectTask(task.id)');
     expect(matrix).toContain('mode="mobile"');
     expect(matrix).not.toContain('mode="dialog"');
     expect(today).not.toContain('w-[430px]');

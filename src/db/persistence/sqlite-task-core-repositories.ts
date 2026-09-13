@@ -173,6 +173,7 @@ import {
   type TaskQueryScope,
   type TaskRemovalOutcome,
   type TaskRemovalRepository,
+  type TaskRestoreOutcome,
   type TaskQuickSortLogEntry,
   type TaskQuickSortOperation,
   type TaskQuickSortOperationReservation,
@@ -1710,6 +1711,8 @@ const MOVE_TASK_COLUMNS = {
   completedAt: tasks.completedAt,
   recurrenceGeneratedFromTaskId: tasks.recurrenceGeneratedFromTaskId,
   parentId: tasks.parentId,
+  siblingOrder: tasks.siblingOrder,
+  subtaskOrderRevision: tasks.subtaskOrderRevision,
   depth: tasks.depth,
   isChecklistItem: tasks.isChecklistItem,
   sourceListId: tasks.sourceListId,
@@ -1776,7 +1779,7 @@ class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
 
   async getTask(taskId: string): Promise<TaskCoreTaskRow | null> {
     const [row] = await this.database.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     return row ? toMoveTaskRow(row) : null;
   }
 
@@ -2002,8 +2005,77 @@ class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
       priority: tasks.priority,
       effort: tasks.effort,
       parentId: tasks.parentId,
+      siblingOrder: tasks.siblingOrder,
     }).from(tasks).where(eq(tasks.parentId, parentTaskId))
-      .orderBy(asc(tasks.createdAt), asc(tasks.id));
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      );
+  }
+
+  async getSubtaskOrderState(parentTaskId: string) {
+    const parent = await this.database.select({
+      revision: tasks.subtaskOrderRevision,
+    }).from(tasks).where(eq(tasks.id, parentTaskId)).get();
+    if (!parent) return null;
+    return {
+      revision: parent.revision,
+      subtasks: await this.listSubtasks(parentTaskId),
+    };
+  }
+
+  async reorderSubtasks(input: {
+    readonly parentTaskId: string;
+    readonly orderedChildIds: readonly string[];
+    readonly expectedRevision: number;
+  }) {
+    return this.runTransaction((tx) => {
+      const parent = tx.select({
+        revision: tasks.subtaskOrderRevision,
+      }).from(tasks).where(eq(tasks.id, input.parentTaskId)).get();
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      if (parent.revision !== input.expectedRevision) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+
+      const children = tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.parentId, input.parentTaskId)).all();
+      const currentIds = new Set(children.map((child) => child.id));
+      const orderedIds = new Set(input.orderedChildIds);
+      if (
+        currentIds.size !== input.orderedChildIds.length
+        || orderedIds.size !== input.orderedChildIds.length
+        || input.orderedChildIds.some((id) => !currentIds.has(id))
+      ) {
+        return { kind: 'invalid-children' } as const;
+      }
+
+      input.orderedChildIds.forEach((taskId, siblingOrder) => {
+        tx.update(tasks).set({ siblingOrder }).where(and(
+          eq(tasks.id, taskId),
+          eq(tasks.parentId, input.parentTaskId),
+        )).run();
+      });
+      const revision = parent.revision + 1;
+      const updated = tx.update(tasks).set({
+        subtaskOrderRevision: revision,
+      }).where(and(
+        eq(tasks.id, input.parentTaskId),
+        eq(tasks.subtaskOrderRevision, input.expectedRevision),
+      )).run();
+      if (updated.changes !== 1) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+      return { kind: 'reordered', revision } as const;
+    });
   }
 
   private readProposalSnapshot(
@@ -2053,7 +2125,14 @@ class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
         ? tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, input.task.parentId)).get()
         : null;
       if (!parent) return { kind: 'parent-not-found' } as const;
-      tx.insert(tasks).values(moveTaskInsertValues(input.task)).run();
+      const lastSibling = tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId!))
+        .get();
+      tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      }).run();
       return { kind: 'created' } as const;
     });
   }
@@ -2075,7 +2154,14 @@ class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
           : { kind: 'id-conflict' } as const;
       }
       if (!sameSnapshot(current, input.expected)) return { kind: 'stale' } as const;
-      tx.insert(tasks).values(moveTaskInsertValues(input.task)).run();
+      const lastSibling = tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId!))
+        .get();
+      tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      }).run();
       const snapshot = this.readProposalSnapshot(tx, input.task.parentId!);
       if (!snapshot) throw new Error('Subtask parent disappeared during proposal acceptance');
       return { kind: 'created', snapshot } as const;
@@ -2245,7 +2331,7 @@ class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
 
   async getTaskDetail(taskId: string, myDayDate: string): Promise<TaskDetailResult | null> {
     const [task] = await this.database.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     if (!task) return null;
     const [tagRows, projectRows, subtasks, scheduleRows, myDayRows] = await Promise.all([
       this.database.select({ tagId: taskTags.tagId }).from(taskTags)
@@ -2259,7 +2345,13 @@ class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
         sourceId: tasks.sourceId,
         connectorType: tasks.connectorType,
         effort: tasks.effort,
-      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(asc(tasks.id)),
+        siblingOrder: tasks.siblingOrder,
+      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      ),
       this.database.select({
         estimatedDuration: taskSchedules.estimatedDuration,
         recurrence: taskSchedules.recurrence,
@@ -2275,6 +2367,7 @@ class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
       tagIds: tagRows.map((row) => row.tagId),
       projectIds: projectRows.map((row) => row.projectId),
       subtasks,
+      subtaskOrderRevision: task.subtaskOrderRevision ?? 0,
       schedule: scheduleRows[0] ?? null,
       isInMyDay: myDayRows.length > 0,
     };
@@ -2771,7 +2864,8 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
 
   async getTaskWriteContext(taskId: string, requestedTagIds: readonly string[] = []) {
     const [task, scheduleRows, tagRows, requestedTagRows, stateRows, evaluationRows] = await Promise.all([
-      this.database.select(MOVE_TASK_COLUMNS).from(tasks).where(eq(tasks.id, taskId)).limit(1),
+      this.database.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1),
       this.database.select().from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
       this.database.select({ id: tags.id, name: tags.name }).from(taskTags)
         .innerJoin(tags, eq(taskTags.tagId, tags.id)).where(eq(taskTags.taskId, taskId)),
@@ -3044,7 +3138,7 @@ class SqliteTaskRemovalRepository implements TaskRemovalRepository {
 
   async getTaskRemovalContext(taskId: string) {
     const [row] = await this.database.select(MOVE_TASK_COLUMNS).from(tasks)
-      .where(eq(tasks.id, taskId)).limit(1);
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
     return row ? { task: toMoveTaskRow(row) } : null;
   }
 
@@ -3066,7 +3160,23 @@ class SqliteTaskRemovalRepository implements TaskRemovalRepository {
         } as const;
       }
       if (input.mode === 'local-delete') {
-        deleteTaskWithinTransaction(tx, input.taskId, false);
+        const changed = tx.update(tasks).set({
+          deletedAt: input.now,
+          updatedAt: input.now,
+        }).where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.updatedAt, input.expectedUpdatedAt),
+          isNull(tasks.deletedAt),
+        )).run();
+        if (changed.changes !== 1) {
+          const latest = tx.select({
+            updatedAt: tasks.updatedAt,
+            deletedAt: tasks.deletedAt,
+          }).from(tasks).where(eq(tasks.id, input.taskId)).get();
+          return latest
+            ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
+            : { kind: 'not-found' } as const;
+        }
       } else {
         const patch = input.mode === 'mirror-dismiss'
           ? { localDisposition: 'dismissed' as const, updatedAt: input.now }
@@ -3113,7 +3223,7 @@ class SqliteTaskRemovalRepository implements TaskRemovalRepository {
             : input.mode === 'local-delete'
               ? 'deleted'
               : 'pending-remote',
-        taskVersion: input.mode === 'local-delete' ? null : input.now,
+        taskVersion: input.now,
       } as const;
     });
   }
@@ -3141,6 +3251,44 @@ class SqliteTaskRemovalRepository implements TaskRemovalRepository {
       return { kind: 'committed', action: 'deleted', taskVersion: null } as const;
     });
   }
+
+  async restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select({
+        id: tasks.id,
+        title: tasks.title,
+        description: tasks.description,
+        sourceListName: tasks.sourceListName,
+        connectorType: tasks.connectorType,
+        status: tasks.status,
+        deletedAt: tasks.deletedAt,
+      }).from(tasks).where(eq(tasks.id, taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      if (!current.deletedAt) return { kind: 'not-deleted' } as const;
+      tx.update(tasks).set({ deletedAt: null, updatedAt: now })
+        .where(and(eq(tasks.id, taskId), eq(tasks.deletedAt, current.deletedAt))).run();
+      return {
+        kind: 'restored',
+        task: {
+          id: current.id,
+          title: current.title,
+          description: current.description,
+          sourceListName: current.sourceListName,
+          connectorType: current.connectorType,
+          status: current.status,
+        },
+      } as const;
+    });
+  }
+
+  async purgeDeletedBefore(cutoff: string): Promise<readonly string[]> {
+    return this.runTransaction((tx) => {
+      const stale = tx.select({ id: tasks.id }).from(tasks)
+        .where(and(isNotNull(tasks.deletedAt), lte(tasks.deletedAt, cutoff))).all();
+      for (const task of stale) deleteTaskWithinTransaction(tx, task.id, false);
+      return stale.map((task) => task.id);
+    });
+  }
 }
 
 class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepository {
@@ -3157,7 +3305,14 @@ class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveReposi
 
   async listChildTasks(parentTaskId: string, limit: number): Promise<TaskMoveTaskRow[]> {
     const rows = await this.database.select(MOVE_TASK_COLUMNS)
-      .from(tasks).where(eq(tasks.parentId, parentTaskId)).limit(limit);
+      .from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      )
+      .limit(limit);
     return rows.map(toMoveTaskRow);
   }
 

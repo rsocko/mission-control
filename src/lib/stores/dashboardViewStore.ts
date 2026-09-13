@@ -9,7 +9,7 @@ import type {
 import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 
 interface DashboardViewState {
-  // Filters (session-scoped but survive navigation)
+  // Dashboard filters persist across navigation and browser sessions.
   sourceFilter: string | null;
   listFilter: string | null;
   listGroupFilter: string | null;

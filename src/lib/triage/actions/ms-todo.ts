@@ -1,5 +1,6 @@
 import { createGraphClient } from '@/lib/connectors/microsoft-todo/graph-client';
 import type { GraphClient } from '@/lib/connectors/microsoft-todo/graph-client';
+import { graphTodoTasksPath } from '@/lib/connectors/microsoft-todo/resource-paths';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import type { TriageItem } from '@/types';
 import logger from '@/lib/logger';
@@ -180,7 +181,7 @@ export async function findTodoTaskFromTriageItem(
     ? { listId: options.listId, resolvedName: options.listName || 'Custom List' }
     : await resolveListId(client, targetListName);
   const marker = getTriageMarker(item.id);
-  let url = `/me/todo/lists/${listId}/tasks?$top=100`;
+  let url = `${graphTodoTasksPath(listId)}?$top=100`;
 
   while (url) {
     const res = await client.graphFetch(url);
@@ -260,7 +261,7 @@ export async function createTodoTaskFromTriageItem(
 
   let res: Response;
   try {
-    res = await client.graphFetch(`/me/todo/lists/${listId}/tasks`, {
+    res = await client.graphFetch(graphTodoTasksPath(listId), {
       method: 'POST',
       body: JSON.stringify(graphBody),
     });

@@ -193,6 +193,102 @@ describe('semanticSearch over the durable index', () => {
     expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(2);
   });
 
+  it('applies date filters before semantic candidate scoring', async () => {
+    const indexId = await harness.createIdentity();
+    await Promise.all([
+      harness.seedEntity({
+        indexId,
+        entityType: 'task',
+        entityId: 'recent-due',
+        title: 'Recent planning task',
+        metadata: { dueDate: '2026-09-10T00:00:00.000Z' },
+        embedding: [1, 0, 0],
+      }),
+      harness.seedEntity({
+        indexId,
+        entityType: 'task',
+        entityId: 'overdue',
+        title: 'Overdue planning task',
+        metadata: { dueDate: '2026-08-01T00:00:00.000Z' },
+        embedding: [1, 0, 0],
+      }),
+      harness.seedEntity({
+        indexId,
+        entityType: 'alert',
+        entityId: 'recent-alert',
+        title: 'Recent planning alert',
+        metadata: { receivedAt: '2026-09-11T00:00:00.000Z' },
+        sourceUpdatedAt: '2026-09-11T00:00:00.000Z',
+        embedding: [1, 0, 0],
+      }),
+      harness.seedEntity({
+        indexId,
+        entityType: 'alert',
+        entityId: 'old-modified-alert',
+        title: 'Old planning alert',
+        metadata: { receivedAt: '2026-08-01T00:00:00.000Z' },
+        sourceUpdatedAt: '2026-09-11T00:00:00.000Z',
+        embedding: [1, 0, 0],
+      }),
+    ]);
+    await harness.activate(indexId);
+
+    harness.embeddings.enqueueVector([1, 0, 0]);
+    const recent = await semantic.semanticSearch('planning', {
+      dateFrom: '2026-09-01T00:00:00.000Z',
+    });
+    expect(recent.map((result) => result.id).sort()).toEqual(['recent-alert', 'recent-due']);
+    expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(2);
+
+    harness.embeddings.enqueueVector([1, 0, 0]);
+    const overdue = await semantic.semanticSearch('planning', {
+      dueBefore: '2026-09-01T00:00:00.000Z',
+    });
+    expect(overdue.map((result) => result.id)).toEqual(['overdue']);
+    expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(1);
+  });
+
+  it('applies mobile notification kinds before semantic candidate scoring', async () => {
+    const indexId = await harness.createIdentity();
+    await Promise.all([
+      harness.seedEntity({
+        indexId,
+        entityType: 'alert',
+        entityId: 'capture-note',
+        title: 'Quarterly planning note',
+        body: 'Meeting memo',
+        metadata: { category: 'capture', connectorType: 'capture' },
+        embedding: [1, 0, 0],
+      }),
+      harness.seedEntity({
+        indexId,
+        entityType: 'alert',
+        entityId: 'inbox-alert',
+        title: 'Quarterly planning alert',
+        body: 'Operational incident',
+        metadata: { category: 'sync', connectorType: 'monitoring' },
+        embedding: [1, 0, 0],
+      }),
+    ]);
+    await harness.activate(indexId);
+
+    harness.embeddings.enqueueVector([1, 0, 0]);
+    const notes = await semantic.semanticSearch('planning', {
+      type: 'notifications',
+      notificationKind: 'notes',
+    });
+    expect(notes.map((result) => result.id)).toEqual(['capture-note']);
+    expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(1);
+
+    harness.embeddings.enqueueVector([1, 0, 0]);
+    const triage = await semantic.semanticSearch('planning', {
+      type: 'notifications',
+      notificationKind: 'triage',
+    });
+    expect(triage.map((result) => result.id)).toEqual(['inbox-alert']);
+    expect(semantic.getSemanticSearchMetrics().search.lastCandidates).toBe(1);
+  });
+
   it('excludes non-root tasks from Universe semantic seed search before scoring', async () => {
     await seedCorpus();
     harness.embeddings.enqueueVector([0, 0, 1]);

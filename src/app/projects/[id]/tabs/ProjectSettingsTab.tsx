@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { IconPickerButton } from '@/components/ui/icon-picker';
+import { ContextAppearancePicker } from '@/components/context-theme/ContextAppearancePicker';
 import {
   Select,
   SelectContent,
@@ -479,6 +480,39 @@ export function ProjectSettingsTab({
               ))}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-[var(--border-subtle)]">
+        <CardHeader>
+          <CardTitle className="text-base">Project Appearance</CardTitle>
+          <CardDescription>
+            Make this project recognizable at a glance without changing semantic colors.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ContextAppearancePicker
+            value={project.appearance ?? null}
+            kind="project"
+            fallbackAccent={project.color}
+            inheritLabel="Use global project style"
+            onChange={(appearance) => {
+              void (async () => {
+                try {
+                  const response = await fetch(`/api/hub-projects/${projectId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ appearance }),
+                  });
+                  if (!response.ok) throw new Error('Failed to update project appearance');
+                  setProject((previous) => previous ? { ...previous, appearance } : previous);
+                  toast.success(appearance ? 'Project appearance updated' : 'Project appearance now follows the global style');
+                } catch {
+                  toast.error('Failed to update project appearance');
+                }
+              })();
+            }}
+          />
         </CardContent>
       </Card>
 

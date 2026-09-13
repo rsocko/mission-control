@@ -1,4 +1,5 @@
 import type {
+  ContextAppearance,
   ProjectPhase,
   ProjectPhaseItem,
 } from '@/types';
@@ -10,6 +11,7 @@ export interface ProjectOrganizationProject {
   color: string;
   icon: string | null;
   iconColor: string | null;
+  appearance?: ContextAppearance | null;
   sourceBindings: unknown[];
   autoIncludeRules: unknown[];
   kanbanColumns: unknown[];
@@ -41,6 +43,7 @@ export type ProjectOrganizationProjectUpdate = Partial<Pick<
   | 'color'
   | 'icon'
   | 'iconColor'
+  | 'appearance'
   | 'sourceBindings'
   | 'defaultView'
   | 'defaultFilters'
@@ -171,6 +174,7 @@ export interface ListOrganizationSourceList {
   userDisplayName: string | null;
   icon: string | null;
   iconColor: string | null;
+  appearance?: ContextAppearance | null;
 }
 
 export interface ListOrganizationSnapshot {

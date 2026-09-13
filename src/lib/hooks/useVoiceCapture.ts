@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useSyncExternalStore } from 'react';
 
-export type VoiceCaptureState = 'idle' | 'listening' | 'unsupported' | 'denied';
+export type VoiceCaptureState = 'idle' | 'starting' | 'listening' | 'unsupported' | 'denied';
 
 interface UseVoiceCaptureOptions {
   onTranscript?: (text: string) => void;
@@ -66,6 +66,9 @@ export function useVoiceCapture(options: UseVoiceCaptureOptions = {}): UseVoiceC
     }
 
     const requestId = ++startRequestRef.current;
+    setState('starting');
+    setTranscript('');
+    setInterimTranscript('');
 
     // Guard against double-start
     if (recognitionRef.current) {

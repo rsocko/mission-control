@@ -10,6 +10,97 @@ afterEach(() => {
 });
 
 describe('AddTaskModal submission guard', () => {
+  it('applies Quick Add semantic tokens during mobile capture', async () => {
+    const taskBodies: Record<string, unknown>[] = [];
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === '/api/tasks') {
+        taskBodies.push(JSON.parse(String(init?.body)));
+        return Promise.resolve(new Response(JSON.stringify({ id: 'task-1' })));
+      }
+      if (url === '/api/tags') {
+        return Promise.resolve(new Response(JSON.stringify({
+          tags: [{ id: 'tag-ops', name: 'ops', slug: 'ops', color: null }],
+        })));
+      }
+      if (url === '/api/hub-projects') {
+        return Promise.resolve(new Response(JSON.stringify({
+          projects: [{ id: 'project-launch', name: 'Launch', color: '#3b82f6' }],
+        })));
+      }
+      if (url === '/api/subtask-templates') {
+        return Promise.resolve(new Response(JSON.stringify({ templates: [] })));
+      }
+      if (url === '/api/connectors/work/lists') {
+        return Promise.resolve(new Response(JSON.stringify({ sourceLists: [] })));
+      }
+      return Promise.resolve(new Response(JSON.stringify({})));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const localDestination: ComponentProps<typeof AddTaskModal>['initialDestination'] = {
+      id: 'local',
+      label: 'Local',
+      connectorType: 'local',
+      account: null,
+      color: '#64748b',
+    };
+    const workDestination: ComponentProps<typeof AddTaskModal>['initialDestination'] = {
+      id: 'work',
+      label: 'Work',
+      connectorType: 'microsoft-todo',
+      account: 'work',
+      color: '#3b82f6',
+    };
+
+    render(
+      <TooltipProvider>
+        <AddTaskModal
+          initialInput=""
+          initialParsed={null}
+          initialDestination={localDestination}
+          destinations={[localDestination, workDestination]}
+          enableQuickAddSemantics
+          onClose={vi.fn()}
+          onSubmit={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    const titleInput = screen.getByPlaceholderText('Task, date, #tag, !priority…');
+    fireEvent.change(titleInput, {
+      target: { value: 'Ship release !high #ops +Launch ^3 ~soon ~30m weekly @work' },
+    });
+
+    await screen.findByText('#ops');
+    await waitFor(() => expect(screen.getByText('+Launch')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+
+    await waitFor(() => expect(taskBodies).toHaveLength(1));
+    expect(taskBodies[0]).toEqual(expect.objectContaining({
+      title: 'Ship release',
+      priority: 'high',
+      planningHorizon: 'soon',
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'work',
+      tags: ['tag-ops'],
+      tagSlugs: [],
+      projectIds: ['project-launch'],
+      estimatedDuration: 30,
+      effort: 3,
+      recurrence: 'weekly',
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Local' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Add Task' }));
+
+    await waitFor(() => expect(taskBodies).toHaveLength(2));
+    expect(taskBodies[1]).toEqual(expect.objectContaining({
+      connectorType: 'local',
+    }));
+    expect(taskBodies[1]).not.toHaveProperty('connectorInstanceId');
+  });
+
   it('sends one task request when submit is triggered twice before React rerenders', async () => {
     let resolveTaskRequest: ((response: Response) => void) | undefined;
     const taskRequest = new Promise<Response>((resolve) => {

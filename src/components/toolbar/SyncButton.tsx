@@ -9,7 +9,7 @@ export function SyncButton() {
 
   return (
     <button
-      onClick={triggerSync}
+      onClick={() => triggerSync()}
       disabled={syncing}
       aria-label={syncing ? 'Syncing sources…' : 'Sync all sources now'}
       className="flex items-center gap-1.5 p-2 text-xs font-medium text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] rounded-[var(--radius-sm)] hover:bg-[var(--surface-2)] transition-colors duration-[var(--transition-fast)] disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-[var(--accent)]"

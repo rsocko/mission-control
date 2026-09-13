@@ -70,6 +70,8 @@ export type TaskListItemDto = TaskListDomainFields & {
   linkedSourceCount?: number;
   hasDescription: boolean;
   editPolicy: TaskEditPolicy;
+  syncStatus?: string;
+  pushRetryCount?: number;
 };
 
 export interface TaskListStatsDto {
@@ -98,7 +100,7 @@ export interface TaskListResponseDto {
 
 type HubProjectSummaryFields = Pick<
   HubProject,
-  'id' | 'name' | 'color'
+  'id' | 'name' | 'color' | 'appearance'
 >;
 
 export type KanbanColumnDto = Pick<KanbanColumn, 'id' | 'name' | 'color'> &

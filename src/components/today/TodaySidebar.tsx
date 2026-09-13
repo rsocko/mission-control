@@ -12,7 +12,9 @@ interface TodaySidebarProps {
   totalMinutes: number;
   whatsNextLoading: boolean;
   onAddToDay: (taskId: string) => void;
+  onCompleteTask: (task: SuggestionTask) => void;
   onSelectTask: (taskId: string) => void;
+  completingIds: ReadonlySet<string>;
   getContextMenuActions: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
@@ -25,14 +27,25 @@ export function TodaySidebar({
   totalMinutes,
   whatsNextLoading,
   onAddToDay,
+  onCompleteTask,
   onSelectTask,
+  completingIds,
   getContextMenuActions,
   sourceLists,
   listGroups,
   projects,
   onGetWhatsNext,
 }: TodaySidebarProps) {
-  const interactionProps = { onAdd: onAddToDay, onSelect: onSelectTask, getContextMenuActions, sourceLists, listGroups, projects };
+  const interactionProps = {
+    onAdd: onAddToDay,
+    onComplete: onCompleteTask,
+    onSelect: onSelectTask,
+    completingIds,
+    getContextMenuActions,
+    sourceLists,
+    listGroups,
+    projects,
+  };
 
   return (
     <aside className="flex h-full min-h-0 w-80 flex-shrink-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface-1)]" aria-label="Plan and focus suggestions">

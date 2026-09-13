@@ -1276,6 +1276,7 @@ export class SyncExecutionPipeline {
           primaryActionId: primaryAction?.id || null,
           receivedAt: alert.receivedAt || now,
           sortAt: alert.receivedAt || now,
+          expiresAt: alert.expiresAt ?? null,
           relatedTaskId: enriched?.relatedTaskId || null,
           relatedProjectId: enriched?.relatedProjectId || null,
           relatedEntityType: enriched?.relatedEntityType || null,

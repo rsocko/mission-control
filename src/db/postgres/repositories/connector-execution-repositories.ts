@@ -385,11 +385,7 @@ async function assertGenericTaskMutationSupported(
   client: Client,
   taskId: string,
 ): Promise<void> {
-  const task = await getTask(client, taskId, true);
-  if (!task) return;
-  if (task.connectorType === 'github-issues') {
-    throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion or retention');
-  }
+  await assertGenericTaskDeletionSupported(client, taskId);
   const [unsupported] = await query<{
     dependencies: string;
     projects: string;
@@ -416,6 +412,17 @@ async function assertGenericTaskMutationSupported(
     throw new UnsupportedConnectorExecutionError(
       'identity, dependency, or project relationship mutation',
     );
+  }
+}
+
+async function assertGenericTaskDeletionSupported(
+  client: Client,
+  taskId: string,
+): Promise<void> {
+  const task = await getTask(client, taskId, true);
+  if (!task) return;
+  if (task.connectorType === 'github-issues') {
+    throw new UnsupportedConnectorExecutionError('GitHub identity-backed deletion or retention');
   }
 }
 
@@ -1039,14 +1046,14 @@ async function ingestNotification(
         level, level_rank, category, template_key, state, read_state,
         disposition, source_state, sync_state, source_resolved_at,
         last_source_activity_at, last_source_activity_key, last_source_synced_at,
-        is_actionable, primary_action_id, received_at, sort_at, group_key,
-        dedupe_key, related_task_id,
+        is_actionable, primary_action_id, received_at, sort_at, expires_at,
+        group_key, dedupe_key, related_task_id,
         related_project_id, related_entity_type, related_entity_id,
         navigation_target, metadata, presentation, enrichment_revision, enrichment_generation
       ) VALUES (
         $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
         $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-        $25, $26, $27, $28, $29, $30, $31, $32, $33, $34
+        $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35
       )
       ON CONFLICT(source_id) DO NOTHING
       RETURNING id
@@ -1075,6 +1082,7 @@ async function ingestNotification(
       input.primaryActionId,
       input.receivedAt,
       input.sortAt,
+      input.expiresAt ?? null,
       input.groupKey ?? null,
       input.dedupeKey ?? null,
       input.relatedTaskId,
@@ -1177,20 +1185,21 @@ async function ingestNotification(
           last_source_activity_key = COALESCE($13, last_source_activity_key),
           last_source_synced_at = $11,
           sort_at = CASE WHEN $14 THEN COALESCE($12, $11) ELSE sort_at END,
-          group_key = $15,
-          dedupe_key = $16,
-          related_task_id = $17,
-          related_project_id = $18,
-          related_entity_type = $19,
-          related_entity_id = $20,
-          navigation_target = $21,
-          metadata = $22,
-          presentation = $23,
-          is_actionable = $24,
-          primary_action_id = $25,
-          enrichment_revision = COALESCE($26, enrichment_revision),
-          enrichment_generation = $27
-        WHERE id = $28
+          expires_at = $15,
+          group_key = $16,
+          dedupe_key = $17,
+          related_task_id = $18,
+          related_project_id = $19,
+          related_entity_type = $20,
+          related_entity_id = $21,
+          navigation_target = $22,
+          metadata = $23,
+          presentation = $24,
+          is_actionable = $25,
+          primary_action_id = $26,
+          enrichment_revision = COALESCE($27, enrichment_revision),
+          enrichment_generation = $28
+        WHERE id = $29
       `,
       [
         input.title,
@@ -1211,6 +1220,7 @@ async function ingestNotification(
         input.sourceActivityAt,
         input.sourceActivityKey,
         reopen,
+        input.expiresAt ?? null,
         input.groupKey ?? null,
         input.dedupeKey ?? null,
         input.relatedTaskId,
@@ -2320,25 +2330,6 @@ export function createPostgresConnectorExecutionRepositories(
 
       async archiveAndDeleteTask(taskId, reason, expectedFence) {
         return transaction(pool, async (client) => {
-          const affected = await query<{ id: string }>(
-            client,
-            `
-              WITH RECURSIVE tree(id, path) AS (
-                SELECT id, ARRAY[id] FROM tasks WHERE id = $1
-                UNION ALL
-                SELECT child.id, tree.path || child.id
-                FROM tasks AS child JOIN tree ON child.parent_id = tree.id
-                WHERE NOT (child.id = ANY(tree.path))
-              )
-              SELECT id FROM tree
-            `,
-            [taskId],
-          );
-          if (!expectedFence) {
-            for (const row of affected) {
-              await assertGenericTaskMutationSupported(client, row.id);
-            }
-          }
           const task = await getTask(client, taskId, true);
           if (!task) return null;
           // Identity-backed deletion re-reads every frozen fence inside this
@@ -2521,15 +2512,33 @@ export function createPostgresConnectorExecutionRepositories(
             }
           }
           const relations = objectValue(snapshot.relationshipData);
-          if (
-            arrayValue(relations.dependencies).length > 0
-            || arrayValue(relations.projectIds).length > 0
-            || arrayValue(relations.linkedSources).length > 0
-            || arrayValue(relations.phaseItems).length > 0
-          ) {
-            throw new UnsupportedConnectorExecutionError(
-              'identity, dependency, or project relationship restore',
+          for (const value of arrayValue(relations.dependencies)) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+            const row = value as Record<string, unknown>;
+            const archivedTaskId = String(row.task_id ?? row.taskId);
+            const archivedDependsOnTaskId = String(
+              row.depends_on_task_id ?? row.dependsOnTaskId,
             );
+            const counterpartId = archivedTaskId === snapshot.originalTaskId
+              ? archivedDependsOnTaskId
+              : archivedTaskId;
+            if (
+              archivedTaskId !== snapshot.originalTaskId
+              && archivedDependsOnTaskId !== snapshot.originalTaskId
+            ) continue;
+            if (!await getTask(client, counterpartId, true)) {
+              await client.query(
+                `
+                  UPDATE sync_deletion_snapshots
+                  SET recovery_state = 'quarantined',
+                      quarantine_reason = 'missing_relationship_counterpart',
+                      recovery_validation = 'blocked'
+                  WHERE id = $1
+                `,
+                [snapshotId],
+              );
+              return { relationshipError: 'A snapshotted dependency counterpart is unavailable' };
+            }
           }
           if (await getTask(client, snapshot.originalTaskId, true)) {
             await client.query(
@@ -2604,6 +2613,12 @@ export function createPostgresConnectorExecutionRepositories(
               [restored.id, tagId],
             );
           }
+          for (const projectId of arrayValue(relations.projectIds).map(String)) {
+            await client.query(
+              'INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)',
+              [restored.id, projectId],
+            );
+          }
           const schedule = relations.schedule;
           if (schedule && typeof schedule === 'object' && !Array.isArray(schedule)) {
             const row = schedule as Record<string, unknown>;
@@ -2622,6 +2637,77 @@ export function createPostgresConnectorExecutionRepositories(
                 row.is_time_blocked ?? row.isTimeBlocked ?? false,
                 row.recurrence ?? null,
                 row.recurrence_mode ?? row.recurrenceMode ?? 'schedule',
+              ],
+            );
+          }
+          const linkedSources = arrayValue(relations.linkedSources)
+            .filter((value): value is Record<string, unknown> => (
+              Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+            ));
+          for (const row of linkedSources) {
+            await client.query(
+              `
+                INSERT INTO task_linked_sources (
+                  id, task_id, connector_type, connector_instance_id, source_id,
+                  title, linked_at, match_confidence, metadata
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+              `,
+              [
+                row.id,
+                restored.id,
+                row.connector_type ?? row.connectorType,
+                row.connector_instance_id ?? row.connectorInstanceId,
+                row.source_id ?? row.sourceId,
+                row.title,
+                row.linked_at ?? row.linkedAt,
+                row.match_confidence ?? row.matchConfidence ?? null,
+                row.metadata ?? {},
+              ],
+            );
+          }
+          const linkedSourceById = new Map(linkedSources.map((row) => [String(row.id), row]));
+          for (const value of arrayValue(relations.linkedSourceEntities)) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+            const row = value as Record<string, unknown>;
+            const linkedSourceId = String(row.linked_source_id ?? row.linkedSourceId);
+            const connectorInstanceId = String(
+              row.connector_instance_id ?? row.connectorInstanceId,
+            );
+            const externalEntityId = String(row.external_entity_id ?? row.externalEntityId);
+            const linkedSource = linkedSourceById.get(linkedSourceId);
+            if (!linkedSource) continue;
+            if (
+              (linkedSource.connector_type ?? linkedSource.connectorType) !== 'github-issues'
+              || String(
+                linkedSource.connector_instance_id ?? linkedSource.connectorInstanceId,
+              ) !== connectorInstanceId
+            ) continue;
+            const available = await client.query(
+              'SELECT 1 FROM external_entities WHERE id = $1',
+              [externalEntityId],
+            );
+            const occupied = await client.query(
+              `
+                SELECT 1 FROM task_linked_source_entities
+                WHERE connector_instance_id = $1 AND external_entity_id = $2
+              `,
+              [connectorInstanceId, externalEntityId],
+            );
+            if (available.rowCount !== 1 || occupied.rowCount !== 0) continue;
+            await client.query(
+              `
+                INSERT INTO task_linked_source_entities (
+                  linked_source_id, connector_instance_id, external_entity_id,
+                  verified_at, created_at, updated_at
+                ) VALUES ($1, $2, $3, $4, $5, $6)
+              `,
+              [
+                linkedSourceId,
+                connectorInstanceId,
+                externalEntityId,
+                row.verified_at ?? row.verifiedAt,
+                row.created_at ?? row.createdAt,
+                row.updated_at ?? row.updatedAt,
               ],
             );
           }
@@ -2647,6 +2733,72 @@ export function createPostgresConnectorExecutionRepositories(
               ],
             );
           }
+          for (const value of arrayValue(relations.phaseItems)) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+            const row = value as Record<string, unknown>;
+            await client.query(
+              `
+                INSERT INTO project_phase_items (
+                  id, phase_id, task_id, sort_order, estimated_effort_hours,
+                  is_proposed, proposal_type, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+              `,
+              [
+                randomUUID(),
+                row.phase_id ?? row.phaseId,
+                restored.id,
+                row.sort_order ?? row.sortOrder ?? 0,
+                row.estimated_effort_hours ?? row.estimatedEffortHours ?? null,
+                row.is_proposed ?? row.isProposed ?? false,
+                row.proposal_type ?? row.proposalType ?? null,
+                row.created_at ?? row.createdAt,
+              ],
+            );
+          }
+          for (const value of arrayValue(relations.dependencies)) {
+            if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+            const row = value as Record<string, unknown>;
+            const archivedTaskId = String(row.task_id ?? row.taskId);
+            const archivedDependsOnTaskId = String(
+              row.depends_on_task_id ?? row.dependsOnTaskId,
+            );
+            if (
+              archivedTaskId !== snapshot.originalTaskId
+              && archivedDependsOnTaskId !== snapshot.originalTaskId
+            ) continue;
+            const dependencyTaskId = archivedTaskId === snapshot.originalTaskId
+              ? restored.id
+              : archivedTaskId;
+            const dependsOnTaskId = archivedDependsOnTaskId === snapshot.originalTaskId
+              ? restored.id
+              : archivedDependsOnTaskId;
+            const counterpartId = dependencyTaskId === restored.id
+              ? dependsOnTaskId
+              : dependencyTaskId;
+            if (!await getTask(client, counterpartId, true)) {
+              throw new Error('A snapshotted dependency counterpart is unavailable');
+            }
+            await client.query(
+              `
+                INSERT INTO task_dependencies (
+                  id, task_id, depends_on_task_id, type, connector_instance_id,
+                  sync_status, sync_action, sync_error, last_synced_at, created_at
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+              `,
+              [
+                randomUUID(),
+                dependencyTaskId,
+                dependsOnTaskId,
+                row.type ?? 'blocks',
+                row.connector_instance_id ?? row.connectorInstanceId ?? null,
+                row.sync_status ?? row.syncStatus ?? 'local',
+                row.sync_action ?? row.syncAction ?? null,
+                row.sync_error ?? row.syncError ?? null,
+                row.last_synced_at ?? row.lastSyncedAt ?? null,
+                row.created_at ?? row.createdAt,
+              ],
+            );
+          }
           await client.query(
             `
               UPDATE sync_deletion_snapshots
@@ -2665,6 +2817,7 @@ export function createPostgresConnectorExecutionRepositories(
         if ('fenceError' in outcome) {
           throw new Error(`GitHub recovery fenced: ${outcome.fenceError}`);
         }
+        if ('relationshipError' in outcome) throw new Error(outcome.relationshipError);
         return outcome;
       },
     },
@@ -3052,7 +3205,7 @@ export function createPostgresConnectorExecutionRepositories(
             [taskId],
           );
           for (const task of ids) {
-            await assertGenericTaskMutationSupported(client, task.id);
+            await assertGenericTaskDeletionSupported(client, task.id);
           }
           for (const task of ids) await deleteTaskRows(client, task.id);
         });

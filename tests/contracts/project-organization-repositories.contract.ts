@@ -129,6 +129,11 @@ export function projectOrganizationRepositoriesContract(
         {
           name: 'Renamed',
           metadata: { owner: 'platform' },
+          appearance: {
+            strength: 'canvas',
+            backdrop: 'ridge',
+            accentColor: '#14b8a6',
+          },
           updatedAt: '2026-01-02T00:00:00.000Z',
         },
       );
@@ -140,6 +145,11 @@ export function projectOrganizationRepositoriesContract(
         ORGANIZATION_FIXTURE.projectId,
       )).resolves.toMatchObject({
         name: 'Renamed',
+        appearance: {
+          strength: 'canvas',
+          backdrop: 'ridge',
+          accentColor: '#14b8a6',
+        },
         metadata: { owner: 'platform' },
         hierarchyRevision: 0,
       });

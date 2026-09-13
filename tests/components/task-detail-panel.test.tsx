@@ -311,6 +311,44 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('button', { name: /Jump to subtasks/ })).not.toBeInTheDocument();
   });
 
+  it('uses an info tooltip instead of persistent copy for local-only subtask ordering', async () => {
+    const remoteTask = {
+      ...task,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'todo:task-1',
+      subtasks: [
+        { id: 'subtask-1', title: 'First', status: 'todo' },
+        { id: 'subtask-2', title: 'Second', status: 'todo' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task: remoteTask });
+      if (url === '/api/features') {
+        return json({
+          taskDestinations: [{
+            id: 'todo-1',
+            capabilities: { subtasks: true, subtaskOrderWrite: false },
+          }],
+        });
+      }
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    const infoButton = await screen.findByRole('button', {
+      name: 'Subtask order is saved in Mission Control only',
+    });
+    expect(screen.queryByText('Subtask order is saved in Mission Control only.')).not.toBeInTheDocument();
+
+    fireEvent.pointerMove(infoButton, { pointerType: 'mouse' });
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Subtask order is saved in Mission Control only.',
+    );
+  });
+
   it('scrolls only the panel to subtasks and focuses its heading', async () => {
     const taskWithSubtasks = {
       ...task,
@@ -2076,13 +2114,16 @@ describe('TaskDetailPanel redesigned presentations', () => {
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
 
     const image = await screen.findByRole('img', { name: 'Image' });
-    expect(image).toHaveAttribute('src', imageUrl);
+    expect(image).toHaveAttribute(
+      'src',
+      `/api/tasks/task-1/github-attachment?url=${encodeURIComponent(imageUrl)}`,
+    );
     expect(image).toHaveAttribute('width', '572');
     expect(image).toHaveAttribute('height', '738');
   });
 
   it('replaces a failed GitHub image with a link to the source task', async () => {
-    const imageUrl = 'https://github.com/user-attachments/assets/private-image';
+    const imageUrl = 'https://github.com/user-attachments/assets/61668656-37e6-4245-b2a3-92a4a0daac2a';
     const sourceUrl = 'https://github.com/octo-org/mission-control/issues/2149';
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);

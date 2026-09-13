@@ -7,6 +7,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Chainable DB mock ──────────────────────────────────────────────────────
 
+const actionMocks = vi.hoisted(() => ({
+  executeNotificationAction: vi.fn(),
+  queueFollowUpSync: vi.fn(),
+}));
+
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn().mockResolvedValue({
+    type: 'home-assistant',
+    executeNotificationAction: actionMocks.executeNotificationAction,
+  }),
+}));
+
+vi.mock('@/lib/sync', () => ({
+  syncScheduler: {
+    queueFollowUpSync: actionMocks.queueFollowUpSync,
+  },
+}));
+
 type ChainableProxy = Record<PropertyKey, unknown>;
 
 function chainable<T>(terminal: T) {
@@ -152,6 +170,8 @@ const mockWebPersistence = {
   updateNotificationFromAction: vi.fn(async () => {
     await mockDb.update();
   }),
+  claimProviderAction: vi.fn().mockResolvedValue(true),
+  finalizeProviderAction: vi.fn().mockResolvedValue(true),
   claimWorkflowAction: vi.fn(async () => {
     const result = await mockDb.update();
     return result.changes === 1;
@@ -201,6 +221,49 @@ describe('GET /api/notifications', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data).toHaveProperty('notifications');
+  });
+
+  it('hydrates notification-scoped icon URLs with the persisted notification id', async () => {
+    const receivedAt = new Date().toISOString();
+    mockWebPersistence.queryNotifications.mockResolvedValueOnce({
+      items: [{
+        id: 'persisted-notification-id',
+        title: 'Home Assistant update',
+        level: 'heads_up',
+        state: 'unread',
+        readState: 'unread',
+        disposition: 'inbox',
+        sourceState: 'active',
+        category: 'system',
+        receivedAt,
+        sortAt: receivedAt,
+        levelRank: 2,
+        presentation: {
+          subjectIconUrl: '/api/notifications/update%3Aupdate.router%3A2.0/subject-icon',
+        },
+      }],
+      actions: [],
+      hasMore: false,
+      cursor: null,
+      stats: { total: 1, unread: 1, attention: 1, urgent: 0, actionNeeded: 0, headsUp: 1, fyi: 0, digest: 0, actionable: 0 },
+      facets: {
+        level: { heads_up: 1 }, category: { system: 1 }, source: {},
+        sourceAccount: [], notificationType: [], state: { unread: 1 }, merchant: [],
+      },
+      matchingCount: 1,
+    });
+
+    const { GET } = await import('@/app/api/notifications/route');
+    const response = await GET(new Request('http://localhost/api/notifications'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      notifications: [{
+        id: 'persisted-notification-id',
+        presentation: {
+          subjectIconUrl: '/api/notifications/persisted-notification-id/subject-icon',
+        },
+      }],
+    });
   });
 
   it('rejects invalid or duplicate merchant parameters before querying', async () => {
@@ -550,7 +613,11 @@ describe('POST /api/notifications/[id]/snooze', () => {
 });
 
 describe('POST /api/notifications/[id]/actions/[actionId]', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actionMocks.executeNotificationAction.mockResolvedValue(undefined);
+    actionMocks.queueFollowUpSync.mockResolvedValue(undefined);
+  });
 
   it('should import action route module', async () => {
     const routeMod = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
@@ -611,6 +678,54 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
 
     const res = await POST(req, { params: Promise.resolve({ id: 'n1', actionId: 'a1' }) });
     expect(res.status).toBe(400);
+  });
+
+  it('dismisses a Home Assistant notification locally and queues reconciliation', async () => {
+    mockWebPersistence.findNotificationForAction.mockResolvedValueOnce({
+      id: 'n1',
+      sourceId: 'water_filter',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      title: 'Replace water filter',
+      body: null,
+      category: 'home',
+      navigationTarget: null,
+      metadata: { notificationId: 'water_filter' },
+      presentation: {},
+    });
+    mockWebPersistence.findNotificationAction.mockResolvedValueOnce({
+      id: 'a1',
+      notificationId: 'n1',
+      actionType: 'dismiss_persistent_notification',
+      payload: {},
+    });
+
+    const { POST } = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
+    const response = await POST(new Request(
+      'http://localhost/api/notifications/n1/actions/a1',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    ), {
+      params: Promise.resolve({ id: 'n1', actionId: 'a1' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      result: {
+        type: 'home_assistant_action_accepted',
+        action: 'dismiss_persistent_notification',
+      },
+    });
+    expect(mockWebPersistence.updateNotificationFromAction).toHaveBeenCalledWith({
+      notificationId: 'n1',
+      state: 'dismissed',
+      now: expect.any(String),
+    });
+    expect(actionMocks.queueFollowUpSync).toHaveBeenCalledWith('ha-home');
   });
 
   it.each([

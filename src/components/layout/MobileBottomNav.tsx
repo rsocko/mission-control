@@ -78,6 +78,8 @@ function CaptureFab({ href, isActive }: { href: string; isActive: boolean }) {
   });
 
   const isListening = voiceState === 'listening';
+  const isStarting = voiceState === 'starting';
+  const isVoiceActive = isStarting || isListening;
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -149,22 +151,26 @@ function CaptureFab({ href, isActive }: { href: string; isActive: boolean }) {
             'flex items-center justify-center w-12 h-12 rounded-full shadow-lg transition-colors',
             isListening
               ? 'bg-red-500 text-white animate-pulse'
+              : isStarting
+                ? 'bg-[var(--accent-600)] text-white animate-pulse'
               : isActive
                 ? 'bg-[var(--accent-600)] text-white'
                 : 'bg-[var(--accent-600)] text-white opacity-90'
           )}
         >
-          {isListening ? <Mic size={24} /> : <PlusCircle size={24} />}
+          {isVoiceActive ? <Mic size={24} /> : <PlusCircle size={24} />}
         </span>
         <span
           className={cn(
             'text-[11px] font-medium leading-tight',
             isListening
               ? 'text-red-400'
+              : isStarting
+                ? 'text-[var(--accent-400)]'
               : isActive ? 'text-[var(--accent-400)]' : 'text-[var(--text-tertiary)]'
           )}
         >
-          {isListening ? 'Listening…' : 'Capture'}
+          {isListening ? 'Listening…' : isStarting ? 'Starting…' : 'Capture'}
         </span>
       </Link>
 
@@ -174,7 +180,13 @@ function CaptureFab({ href, isActive }: { href: string; isActive: boolean }) {
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-xl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {isStopping ? 'Stopping…' : isListening ? 'Listening — speak your task' : 'Processing…'}
+                {isStopping
+                  ? 'Stopping…'
+                  : isListening
+                    ? 'Listening — speak your task'
+                    : isStarting
+                      ? 'Preparing microphone…'
+                      : 'Processing…'}
               </span>
               <button
                 type="button"

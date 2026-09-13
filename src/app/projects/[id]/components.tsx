@@ -7,7 +7,18 @@ import { useDroppable } from '@dnd-kit/core';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { differenceInCalendarDays } from 'date-fns';
-import { FilePlus2, Search } from 'lucide-react';
+import {
+  Activity,
+  ArrowDownRight,
+  ArrowUpRight,
+  CircleHelp,
+  Clock3,
+  FilePlus2,
+  Lightbulb,
+  Minus,
+  Search,
+  ShieldCheck,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { SubtaskPill } from '@/components/ui/SubtaskPill';
@@ -16,9 +27,9 @@ import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
 import { getTaskStatusVisual } from '@/lib/constants/task-formatting';
-import type { ProjectHealth, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
+import type { ProjectPulseState, ProjectStatus, TaskPriority, TaskStatus } from '@/types';
 import { getPriorityDotColor } from './utils';
-import { GANTT_HEADER_HEIGHT, GANTT_ROW_HEIGHT, HEALTH_LABELS, PHASE_STATUS_LABELS, STATUS_LABELS, TASK_STATUS_LABELS } from './constants';
+import { GANTT_HEADER_HEIGHT, GANTT_ROW_HEIGHT, PHASE_STATUS_LABELS, STATUS_LABELS, TASK_STATUS_LABELS } from './constants';
 import type {
   GanttPhaseRow,
   HealthSummary,
@@ -103,18 +114,19 @@ export function LoadingSkeleton() {
   );
 }
 
-const HEALTH_VISUALS: Record<ProjectHealth, { color: string; position: number }> = {
-  behind: { color: 'var(--danger)', position: 0 },
-  at_risk: { color: 'var(--warning)', position: 1 },
-  on_track: { color: 'var(--success)', position: 2 },
+const PULSE_VISUALS: Record<ProjectPulseState, { color: string; label: string }> = {
+  on_track: { color: 'var(--success)', label: 'On track' },
+  watch: { color: 'var(--warning)', label: 'Watch' },
+  off_track: { color: 'var(--danger)', label: 'Off track' },
+  unknown: { color: 'var(--text-muted)', label: 'Unknown' },
 };
 
 export function ProjectOverviewKpis({
   progress,
-  health,
+  pulse,
 }: {
   progress: ProgressSummary;
-  health: HealthSummary;
+  pulse: HealthSummary;
 }) {
   const inProgressPercent = progress.totalTasks > 0
     ? (progress.inProgressTasks / progress.totalTasks) * 100
@@ -129,7 +141,17 @@ export function ProjectOverviewKpis({
   const ringBackground = progress.totalTasks > 0
     ? `conic-gradient(var(--success) 0 ${completedEnd}%, var(--accent-500) ${completedEnd}% ${inProgressEnd}%, var(--surface-3) ${inProgressEnd}% ${todoEnd}%, var(--warning) ${todoEnd}% 100%)`
     : 'var(--surface-3)';
-  const healthVisual = HEALTH_VISUALS[health.health];
+  const pulseVisual = PULSE_VISUALS[pulse.state];
+  const supportingReasons = pulse.reasons
+    .filter((reason) => reason.detail !== pulse.summary)
+    .slice(0, 2);
+  const TrendIcon = pulse.trend.state === 'improving'
+    ? ArrowUpRight
+    : pulse.trend.state === 'worsening'
+      ? ArrowDownRight
+      : pulse.trend.state === 'unknown'
+        ? CircleHelp
+        : Minus;
   const taskStates = [
     { label: 'Done', value: progress.completedTasks, color: 'var(--success)' },
     { label: 'Active', value: progress.inProgressTasks, color: 'var(--accent-500)' },
@@ -140,9 +162,9 @@ export function ProjectOverviewKpis({
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <Card className="overflow-hidden border-[var(--border-subtle)] md:col-span-2">
-        <CardContent className="grid h-full gap-5 p-5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.85fr)]">
+      <Card className="overflow-hidden border-[var(--border-subtle)]">
+        <CardContent className="grid h-full gap-6 p-5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:p-6">
           <div
             role="img"
             aria-label={`${progress.percentComplete}% of project tasks complete`}
@@ -160,78 +182,112 @@ export function ProjectOverviewKpis({
           </div>
 
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Project progress</p>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {progress.totalTasks > 0
-                ? `${progress.completedTasks} of ${progress.totalTasks} tasks completed`
-                : 'No tasks assigned yet'}
-            </p>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Project progress</p>
+              <p className="text-xs tabular-nums text-[var(--text-tertiary)]">
+                {progress.totalTasks > 0
+                  ? `${progress.completedTasks} of ${progress.totalTasks} complete`
+                  : 'No tasks assigned yet'}
+              </p>
+            </div>
             <div className={cn(
-              'mt-4 grid gap-2',
+              'mt-4 grid gap-x-4 gap-y-3 border-y border-[var(--border-subtle)] py-3',
               taskStates.length === 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3',
             )}>
               {taskStates.map((item) => (
-                <div key={item.label} className="min-w-0 rounded-lg bg-[var(--surface-0)] px-3 py-2.5">
+                <div key={item.label} className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                    <span className="truncate text-[10px] uppercase tracking-wide text-[var(--text-muted)]">{item.label}</span>
+                    <span className="truncate text-xs font-medium text-[var(--text-muted)]">{item.label}</span>
                   </div>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-primary)]">{item.value}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{item.value}</p>
                 </div>
               ))}
+            </div>
+
+            <div className="mt-4">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-[var(--text-secondary)]">
+                  {progress.inProgressTasks > 0 ? 'Work in motion' : 'No active tasks right now.'}
+                </span>
+                <span className="tabular-nums text-[var(--text-muted)]">
+                  {progress.totalTasks > 0 ? `${Math.round(inProgressPercent)}% of tasks` : 'No tasks'}
+                </span>
+              </div>
+              <div
+                role="img"
+                aria-label={`${progress.inProgressTasks} of ${progress.totalTasks} tasks in progress`}
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]"
+              >
+                <div
+                  className="h-full rounded-full bg-[var(--accent-500)]"
+                  style={{ width: `${Math.min(100, inProgressPercent)}%` }}
+                />
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
 
       <Card className="border-[var(--border-subtle)]">
-        <CardContent className="flex h-full flex-col p-5">
-          <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">In progress</p>
-          <div className="mt-3 flex items-end justify-between gap-3">
-            <p className="text-3xl font-bold tabular-nums text-[var(--text-primary)]">{progress.inProgressTasks}</p>
-            <p className="pb-1 text-xs tabular-nums text-[var(--text-muted)]">
-              {progress.totalTasks > 0 ? `${Math.round(inProgressPercent)}% of tasks` : 'No tasks'}
-            </p>
+        <CardContent className="flex h-full flex-col p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Project pulse</p>
+            <PulseBadge state={pulse.state} />
           </div>
-          <div
-            role="img"
-            aria-label={`${progress.inProgressTasks} of ${progress.totalTasks} tasks in progress`}
-            className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--surface-3)]"
-          >
-            <div
-              className="h-full rounded-full bg-[var(--accent-500)]"
-              style={{ width: `${Math.min(100, inProgressPercent)}%` }}
-            />
-          </div>
-          <p className="mt-auto pt-4 text-sm leading-5 text-[var(--text-secondary)]">
-            {progress.inProgressTasks > 0 ? 'Active work is moving through the plan.' : 'No active tasks right now.'}
-          </p>
-        </CardContent>
-      </Card>
 
-      <Card className="border-[var(--border-subtle)]">
-        <CardContent className="flex h-full flex-col p-5">
-          <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Health</p>
-          <div className="mt-3">
-            <HealthBadge health={health.health} />
-          </div>
-          <div
-            role="img"
-            aria-label={`Project health: ${HEALTH_LABELS[health.health]}`}
-            className="mt-5 grid grid-cols-3 gap-1.5"
-          >
-            {(['behind', 'at_risk', 'on_track'] as ProjectHealth[]).map((state, index) => (
-              <span
-                key={state}
-                className="h-2 rounded-full transition-opacity"
-                style={{
-                  backgroundColor: HEALTH_VISUALS[state].color,
-                  opacity: index === healthVisual.position ? 1 : 0.2,
-                }}
-              />
-            ))}
-          </div>
-          <p className="mt-auto pt-4 text-sm leading-5 text-[var(--text-secondary)]">{health.message}</p>
+          <p className="mt-4 max-w-[52ch] text-sm leading-6 text-[var(--text-secondary)]">{pulse.summary}</p>
+
+          <dl className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-[var(--border-subtle)] py-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <dt className="sr-only">Freshness</dt>
+              <dd
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
+                title={pulse.freshness.label}
+              >
+                <Clock3 size={12} aria-hidden="true" />
+                {pulse.freshness.state === 'fresh' ? 'Fresh' : pulse.freshness.state === 'aging' ? 'Aging' : pulse.freshness.state === 'stale' ? 'Stale' : 'Unknown'}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <dt className="sr-only">Trend</dt>
+              <dd
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
+                title={pulse.trend.label}
+              >
+                <TrendIcon size={12} aria-hidden="true" />
+                {pulse.trend.state === 'improving' ? 'Improving' : pulse.trend.state === 'worsening' ? 'Worsening' : pulse.trend.state === 'stable' ? 'Stable' : 'Unknown'}
+              </dd>
+            </div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <dt className="sr-only">Confidence</dt>
+              <dd
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
+                title={pulse.confidence.label}
+              >
+                <ShieldCheck size={12} aria-hidden="true" />
+                {pulse.confidence.level === 'high' ? 'High confidence' : pulse.confidence.level === 'medium' ? 'Medium confidence' : 'Low confidence'}
+              </dd>
+            </div>
+          </dl>
+
+          {supportingReasons.length > 0 && (
+            <ul className="mt-4 space-y-2" aria-label="Pulse reasons">
+              {supportingReasons.map((reason) => (
+                <li key={reason.code} className="flex gap-2 text-xs leading-5 text-[var(--text-tertiary)]">
+                  <Activity size={13} className="mt-1 shrink-0" style={{ color: pulseVisual.color }} aria-hidden="true" />
+                  <span>{reason.detail}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {pulse.suggestion && (
+            <div className="mt-auto flex gap-2 pt-5 text-xs leading-5 text-[var(--text-primary)]">
+              <Lightbulb size={14} className="mt-0.5 shrink-0 text-[var(--accent-400)]" aria-hidden="true" />
+              <p><span className="font-semibold">Next:</span> {pulse.suggestion}</p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -245,9 +301,9 @@ export function StatusBadge({ status }: { status: ProjectStatus }) {
   return <Badge variant={variant}>{STATUS_LABELS[status]}</Badge>;
 }
 
-export function HealthBadge({ health }: { health: ProjectHealth }) {
-  const variant = health === 'on_track' ? 'success' : health === 'at_risk' ? 'warning' : 'danger';
-  return <Badge variant={variant}>{HEALTH_LABELS[health]}</Badge>;
+export function PulseBadge({ state }: { state: ProjectPulseState }) {
+  const variant = state === 'on_track' ? 'success' : state === 'watch' ? 'warning' : state === 'off_track' ? 'danger' : 'secondary';
+  return <Badge variant={variant}>{PULSE_VISUALS[state].label}</Badge>;
 }
 
 export function PhaseStatusBadge({ status }: { status: 'pending' | 'in_progress' | 'completed' }) {

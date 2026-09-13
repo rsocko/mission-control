@@ -14,6 +14,7 @@ import type {
 } from './connector-management';
 import type { SourceListRecord } from './connector-execution';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
+import { normalizeContextAppearance } from '@/lib/context-appearance';
 
 type SqliteDatabase = Database.Database;
 type SqliteDrizzle = BetterSQLite3Database<typeof schema>;
@@ -29,8 +30,9 @@ interface SqliteConnectorRow extends Omit<
   syncedLists: unknown;
 }
 
-interface SqliteSourceListRow extends Omit<SourceListRecord, 'hidden'> {
+interface SqliteSourceListRow extends Omit<SourceListRecord, 'hidden' | 'appearance'> {
   hidden: number;
+  appearance: unknown;
 }
 
 interface SqliteSyncHistoryRow extends Omit<
@@ -88,7 +90,8 @@ const SOURCE_LIST_COLUMNS = `
   last_known_remote_name AS lastKnownRemoteName,
   user_display_name AS userDisplayName,
   icon,
-  icon_color AS iconColor
+  icon_color AS iconColor,
+  appearance
 `;
 
 const SYNC_HISTORY_COLUMNS = `
@@ -128,7 +131,15 @@ function mapConnector(row: SqliteConnectorRow): ManagedConnectorRecord {
 }
 
 function mapSourceList(row: SqliteSourceListRow): SourceListRecord {
-  return { ...row, hidden: row.hidden !== 0 };
+  return {
+    ...row,
+    hidden: row.hidden !== 0,
+    appearance: normalizeContextAppearance(
+      typeof row.appearance === 'string'
+        ? decodeLenientJsonObject(row.appearance)
+        : row.appearance,
+    ),
+  };
 }
 
 function mapSyncHistory(row: SqliteSyncHistoryRow): SyncHistoryRecord {
@@ -630,6 +641,10 @@ export function createSqliteConnectorManagementRepository(
       if (input.hidden !== undefined) {
         assignments.push('hidden = ?');
         values.push(input.hidden ? 1 : 0);
+      }
+      if (input.appearance !== undefined) {
+        assignments.push('appearance = ?');
+        values.push(input.appearance === null ? null : JSON.stringify(input.appearance));
       }
       if (assignments.length === 0) return;
       values.push(input.sourceListId);

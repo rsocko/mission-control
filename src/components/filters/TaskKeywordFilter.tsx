@@ -200,18 +200,18 @@ export function TaskKeywordFilter({
   useEffect(() => {
     controlledContextRef.current = controller?.context;
   }, [controller?.context]);
-  const controlledDashboard = controller
-    ? taskFilterContextToDashboard(controller.context)
-    : null;
-  const textFilter = controller?.context.query ?? storeTextFilter;
-  const sourceFilter = controlledDashboard?.sourceFilter ?? storeSourceFilter;
-  const listFilter = controlledDashboard?.listFilter ?? storeListFilter;
-  const listGroupFilter = controlledDashboard?.listGroupFilter ?? storeListGroupFilter;
-  const tagFilter = controlledDashboard?.tagFilter ?? storeTagFilter;
-  const quickFilter = controlledDashboard?.quickFilter ?? storeQuickFilter;
-  const projectFilter = controlledDashboard?.projectFilter ?? storeProjectFilter;
-  const priorityFilter = controlledDashboard?.priorityFilter ?? storePriorityFilter;
-  const statusFilter = controlledDashboard?.statusFilter ?? storeStatusFilter;
+  const controlledDashboard = taskFilterContextToDashboard(
+    controller?.context ?? EMPTY_TASK_FILTER_CONTEXT,
+  );
+  const textFilter = controller ? controller.context.query : storeTextFilter;
+  const sourceFilter = controller ? controlledDashboard.sourceFilter : storeSourceFilter;
+  const listFilter = controller ? controlledDashboard.listFilter : storeListFilter;
+  const listGroupFilter = controller ? controlledDashboard.listGroupFilter : storeListGroupFilter;
+  const tagFilter = controller ? controlledDashboard.tagFilter : storeTagFilter;
+  const quickFilter = controller ? controlledDashboard.quickFilter : storeQuickFilter;
+  const projectFilter = controller ? controlledDashboard.projectFilter : storeProjectFilter;
+  const priorityFilter = controller ? controlledDashboard.priorityFilter : storePriorityFilter;
+  const statusFilter = controller ? controlledDashboard.statusFilter : storeStatusFilter;
 
   const updateControlledContext = useCallback((
     patch: Partial<Omit<TaskFilterContext, 'version'>>,

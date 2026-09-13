@@ -18,6 +18,10 @@ import {
 import { toast } from 'sonner';
 import { taskLogger } from '@/lib/client-logger';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import {
+  DESKTOP_SEARCH_DEBOUNCE_MS,
+  useDebouncedSearchQuery,
+} from '@/lib/hooks/useDebouncedSearchQuery';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 
 type TypeFilter = 'all' | 'tasks' | 'notifications';
@@ -96,26 +100,15 @@ function renderHighlightedText(value: string) {
   });
 }
 
-function extractRefiners(results: SearchResult[]) {
-  const sources = new Set<string>();
-  const statuses = new Set<string>();
-
-  for (const result of results) {
-    const source = result.metadata.sourceListName || result.metadata.connectorType;
-    if (source) sources.add(String(source));
-    const status = result.metadata.status || result.metadata.category;
-    if (status) statuses.add(String(status));
-  }
-
-  return { sources: Array.from(sources).sort(), statuses: Array.from(statuses).sort() };
-}
-
 export function SearchCommand() {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debouncedQuery = useDebouncedSearchQuery(query, {
+    enabled: open,
+    debounceMs: DESKTOP_SEARCH_DEBOUNCE_MS,
+  });
   const [activeIndex, setActiveIndex] = useState(-1);
   const [previewTaskId, setPreviewTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ActiveFilters>({ type: 'all', source: null, status: null, excludeDone: true });
@@ -137,6 +130,7 @@ export function SearchCommand() {
     keywordDurationMs: durationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: open,
@@ -189,19 +183,7 @@ export function SearchCommand() {
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
     setActiveIndex(-1);
-
-    if (!value.trim()) {
-      setDebouncedQuery('');
-    }
   }, []);
-
-  useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedQuery(query.trim());
-    }, 80);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [query]);
 
   useEffect(() => {
     const openSearch = () => setOpen(true);
@@ -259,7 +241,10 @@ export function SearchCommand() {
     return filtered;
   }, [results, filters.source, filters.status, filters.excludeDone]);
 
-  const refiners = useMemo(() => extractRefiners(results), [results]);
+  const refiners = useMemo(() => ({
+    sources: facets.sources.map((facet) => facet.value),
+    statuses: facets.statuses.map((facet) => facet.value),
+  }), [facets]);
 
   const groupedResults = useMemo(() => ({
     tasks: filteredResults.filter((result) => result.type === 'task'),
@@ -328,7 +313,6 @@ export function SearchCommand() {
       window.dispatchEvent(new CustomEvent('mission-control:task-added'));
       toast.success(`Created “${taskToCreate.title}”`);
       setQuery('');
-      setDebouncedQuery('');
       handleOpenChange(false);
     } catch (error) {
       taskLogger.error('Failed to create task from command palette', { error });
@@ -461,6 +445,7 @@ export function SearchCommand() {
                           value={query}
                           onChange={(event) => handleQueryChange(event.target.value)}
                           onKeyDown={handleKeyDown}
+                          aria-label="Search tasks and notifications"
                           placeholder="Search tasks and notifications..."
                           className="w-full bg-transparent text-base text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                         />
@@ -717,7 +702,11 @@ export function SearchCommand() {
                     ) : null}
 
                     {loading && debouncedQuery && filteredResults.length === 0 ? (
-                      <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]"
+                      >
                         <Loader2 size={14} className="animate-spin" />
                         Searching...
                       </div>
@@ -725,14 +714,31 @@ export function SearchCommand() {
 
                     {/* Inline typing indicator before debounce fires */}
                     {!loading && query.trim() && query.trim() !== debouncedQuery ? (
-                      <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]"
+                      >
                         <Loader2 size={14} className="animate-spin" />
                         <span className="animate-pulse">Typing...</span>
                       </div>
                     ) : null}
 
-                    {!loading && debouncedQuery && filteredResults.length === 0 ? (
-                      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-4 py-8 text-center">
+                    {!loading && debouncedQuery && filteredResults.length === 0 && note ? (
+                      <div
+                        role="alert"
+                        className="rounded-[var(--radius-lg)] border border-red-500/20 bg-red-500/5 px-4 py-8 text-center"
+                      >
+                        <p className="text-sm text-[var(--text-primary)]">Search unavailable.</p>
+                        <p className="mt-2 text-xs text-[var(--text-tertiary)]">{note}</p>
+                      </div>
+                    ) : null}
+
+                    {!loading && debouncedQuery && filteredResults.length === 0 && !note ? (
+                      <div
+                        role="status"
+                        className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-4 py-8 text-center"
+                      >
                         <p className="text-sm text-[var(--text-primary)]">No matching results.</p>
                         <p className="mt-2 text-xs text-[var(--text-tertiary)]">
                           {hasActiveFilters ? (

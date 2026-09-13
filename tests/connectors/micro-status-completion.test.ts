@@ -131,7 +131,7 @@ describe('micro-status cleanup for terminal states', () => {
     });
   });
 
-  it('removes Microsoft Todo mc:* categories when cancelling with sync disabled', async () => {
+  it('completes Microsoft Todo tasks when cancelling with sync disabled', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = input.toString();
@@ -145,7 +145,7 @@ describe('micro-status cleanup for terminal states', () => {
       return Response.json({
         id: 'task-1',
         title: 'Cancelled task',
-        status: 'notStarted',
+        status: 'completed',
         importance: 'normal',
         categories: ['Customer'],
         createdDateTime: '2026-07-31T00:00:00Z',
@@ -171,7 +171,7 @@ describe('micro-status cleanup for terminal states', () => {
 
     const cancellationCall = calls.find(call => call.init?.method === 'PATCH');
     expect(JSON.parse(String(cancellationCall?.init?.body))).toEqual({
-      status: 'notStarted',
+      status: 'completed',
       categories: ['Customer'],
     });
   });

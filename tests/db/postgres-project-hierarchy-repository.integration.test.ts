@@ -113,6 +113,13 @@ describe.skipIf(!connectionString)('PostgreSQL project-hierarchy adapter', () =>
                     '[]'::jsonb, 'list', 'active', FALSE, 0, 0, '{}'::jsonb, $2, $2)
         `, [projectId, NOW]);
       },
+      async seedForeignPhase(projectId, phaseId) {
+        await pool.query(`
+          INSERT INTO project_phases (
+            id, project_id, name, status, sort_order, created_at, updated_at
+          ) VALUES ($1, $2, 'Foreign phase', 'pending', 0, $3, $3)
+        `, [phaseId, projectId, NOW]);
+      },
       async readRevision(projectId) {
         const { rows } = await pool.query<{ revision: number }>(
           'SELECT hierarchy_revision AS revision FROM hub_projects WHERE id = $1',

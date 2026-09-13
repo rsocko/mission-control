@@ -1,6 +1,7 @@
-import type { ProjectStatus, ProjectHealth, ProjectProgress, HubProject, Tag } from '@/types';
+import type { ProjectStatus, ProjectProgress, HubProject, Tag } from '@/types';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
+import { deriveProjectPulse } from '@/lib/projects/project-pulse';
 
 // ─── STATUS INFERENCE ───────────────────────────────────────────────────────
 
@@ -11,28 +12,6 @@ export function inferProjectStatus(progress: ProjectProgress, override?: Project
   if (progress.percentComplete === 100) return 'completed';
   if (progress.inProgressTasks > 0 || progress.completedTasks > 0) return 'active';
   return 'not_started';
-}
-
-export function inferHealth(
-  targetDate: string | null | undefined,
-  progress: ProjectProgress,
-  overdueTasks: number
-): ProjectHealth {
-  const overduePercent = overdueTasks / Math.max(progress.totalTasks, 1);
-
-  if (overduePercent > 0.3) return 'behind';
-  if (overduePercent > 0.1) return 'at_risk';
-
-  if (targetDate) {
-    const target = new Date(targetDate);
-    const now = new Date();
-    const daysRemaining = (target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-    // At risk if <20% of time left but <80% complete
-    if (daysRemaining < 7 && progress.percentComplete < 80) return 'at_risk';
-    if (daysRemaining < 0 && progress.percentComplete < 100) return 'behind';
-  }
-
-  return 'on_track';
 }
 
 // ─── PROGRESS COMPUTATION ───────────────────────────────────────────────────
@@ -307,9 +286,25 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
       totalTasks, completedTasks, inProgressTasks, percentComplete,
       health: 'on_track', lastActivity,
     };
-    progress.health = inferHealth(project.targetDate, progress, overdueTasks);
-
     const status = inferProjectStatus(progress, project.statusOverride as ProjectStatus | null);
+    const recentlyCompletedTasks = projectTasks.filter((task) => (
+      task.status === 'done'
+      && task.completedAt
+      && new Date(task.completedAt) >= new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000))
+      && new Date(task.completedAt) <= now
+    )).length;
+    progress.pulse = deriveProjectPulse({
+      totalTasks,
+      completedTasks,
+      percentComplete,
+      overdueTasks,
+      scheduledTasks: projectTasks.filter((task) => Boolean(task.dueDate)).length,
+      targetDate: project.targetDate,
+      lastActivity,
+      recentlyCompletedTasks,
+      lifecycleStatus: status,
+    }, now);
+    progress.health = progress.pulse.legacyHealth;
 
     return { ...project, status, progress };
   });

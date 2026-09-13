@@ -54,6 +54,7 @@ import {
   NavigationRailMorph,
 } from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
+import type { SyncProgress } from '@/lib/hooks/useSyncStream';
 import {
   EMPTY_NAVIGATION_COUNTS,
   type NavigationCounts,
@@ -160,6 +161,10 @@ interface NavRailProps {
   isSyncing?: boolean;
   counts?: NavigationCounts;
   syncStatus?: ConnectorHealthInfo[];
+  syncProgress?: SyncProgress;
+  onSyncConnector?: (connectorId: string) => void;
+  showSyncBanner?: boolean;
+  onShowSyncBannerChange?: (show: boolean) => void;
 }
 
 function ActiveSyncIcon({ className }: { className?: string }) {
@@ -173,6 +178,10 @@ export function NavRail({
   isSyncing = false,
   counts = EMPTY_NAVIGATION_COUNTS,
   syncStatus = [],
+  syncProgress,
+  onSyncConnector,
+  showSyncBanner = true,
+  onShowSyncBannerChange,
 }: NavRailProps) {
   const pathname = usePathname();
   const { pinned, togglePinned } = useNavRailPrefs();
@@ -203,6 +212,12 @@ export function NavRail({
   const brandSubtitle = isAiActive ? 'Houston: working' : 'Houston: standing by';
   const activeSyncStatus = syncStatus.filter((status) => status.status !== 'disabled');
   const showSyncStatusControl = isSyncing || activeSyncStatus.length > 0;
+  const syncPercent = syncProgress && syncProgress.totalLists > 0
+    ? Math.min(100, Math.round((syncProgress.listIndex / syncProgress.totalLists) * 100))
+    : 0;
+  const syncedTasks = syncProgress
+    ? syncProgress.parentTasks || syncProgress.totalTasks
+    : 0;
   const layoutSignature = [
     features?.aiEnabled,
     features?.financeEnabled,
@@ -452,11 +467,71 @@ export function NavRail({
             </span>
           )}
         </div>
+        {isSyncing && (
+          <div
+            className="-mx-3 mb-3 border-y border-blue-400/15 bg-blue-400/[0.06] px-3 py-3"
+            aria-live="polite"
+          >
+            <div className="flex items-start gap-2.5">
+              <span className="mt-0.5 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg bg-blue-400/10 text-blue-400">
+                <RefreshCw size={14} className="animate-spin" aria-hidden="true" />
+              </span>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                  {syncProgress?.connectorName || 'Preparing next source'}
+                </p>
+                <p className="mt-0.5 truncate text-xs text-[var(--text-secondary)]">
+                  {!syncProgress?.phase
+                    ? 'Waiting for sync details…'
+                    : syncProgress.phase === 'push'
+                      ? 'Pushing local changes…'
+                      : syncProgress.phase === 'lists'
+                        ? 'Discovering lists…'
+                        : syncProgress.currentList || 'Loading tasks…'}
+                </p>
+              </div>
+            </div>
+
+            {syncProgress && syncProgress.totalLists > 0 && (
+              <div className="mt-3">
+                <div className="mb-1.5 flex items-center justify-between text-xs text-[var(--text-tertiary)]">
+                  <span>
+                    List {syncProgress.listIndex.toLocaleString()} of {syncProgress.totalLists.toLocaleString()}
+                  </span>
+                  <span className="tabular-nums">{syncPercent}%</span>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-label="Sync progress"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={syncPercent}
+                  className="h-1 overflow-hidden rounded-full bg-[var(--surface-3)]"
+                >
+                  <div
+                    className="h-full rounded-full bg-blue-400 transition-[width] duration-300"
+                    style={{ width: `${syncPercent}%` }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {syncProgress && (syncedTasks > 0 || syncProgress.subtasks > 0) && (
+              <p className="mt-2 text-xs tabular-nums text-[var(--text-tertiary)]">
+                {syncedTasks.toLocaleString()} tasks synced
+                {syncProgress.subtasks > 0 && (
+                  <> · {syncProgress.subtasks.toLocaleString()} subtasks</>
+                )}
+              </p>
+            )}
+          </div>
+        )}
         <div className="max-h-56 space-y-2 overflow-y-auto">
           {activeSyncStatus.map((status) => {
             const isHealthy = status.status === 'healthy';
+            const isThisConnectorSyncing = isSyncing && syncProgress?.connectorId === status.id;
             return (
-              <div key={status.id} className="flex items-center justify-between text-xs">
+              <div key={status.id} className="flex items-center justify-between gap-2 text-xs">
                 <div className="flex min-w-0 items-center gap-1.5">
                   {CONNECTOR_ICONS[status.type] && (
                     <Image
@@ -468,22 +543,40 @@ export function NavRail({
                   )}
                   <span className="truncate text-[var(--text-secondary)]">{status.name}</span>
                 </div>
-                {status.lastSyncAt ? (
-                  <span
-                    className={cn(
-                      'flex items-center gap-1',
-                      isHealthy ? 'text-green-400' : 'text-amber-400',
-                    )}
-                  >
-                    {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
-                    <span>{formatSyncTime(status.lastSyncAt)}</span>
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-[var(--text-muted)]">
-                    <AlertCircle size={10} />
-                    <span>Never</span>
-                  </span>
-                )}
+                <div className="flex flex-shrink-0 items-center gap-1">
+                  {status.lastSyncAt ? (
+                    <span
+                      className={cn(
+                        'flex items-center gap-1',
+                        isHealthy ? 'text-green-400' : 'text-amber-400',
+                      )}
+                    >
+                      {isHealthy ? <CheckCircle2 size={10} /> : <AlertCircle size={10} />}
+                      <span>{formatSyncTime(status.lastSyncAt)}</span>
+                    </span>
+                  ) : (
+                    <span className="flex items-center gap-1 text-[var(--text-muted)]">
+                      <AlertCircle size={10} />
+                      <span>Never</span>
+                    </span>
+                  )}
+                  {onSyncConnector && (
+                    <button
+                      type="button"
+                      aria-label={`Sync ${status.name}`}
+                      title={`Sync ${status.name}`}
+                      disabled={isSyncing}
+                      onClick={() => onSyncConnector(status.id)}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-3)] hover:text-blue-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400/70 disabled:cursor-not-allowed disabled:opacity-45"
+                    >
+                      <RefreshCw
+                        size={12}
+                        className={cn(isThisConnectorSyncing && 'animate-spin text-blue-400')}
+                        aria-hidden="true"
+                      />
+                    </button>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -491,6 +584,34 @@ export function NavRail({
             <p className="text-xs text-[var(--text-muted)]">No active connectors.</p>
           )}
         </div>
+        {onShowSyncBannerChange && (
+          <div className="-mx-3 -mb-3 mt-3 flex items-center justify-between border-t border-[var(--border)] px-3 py-2.5">
+            <div className="pr-3">
+              <p className="text-xs font-medium text-[var(--text-secondary)]">Show top progress bar</p>
+              <p className="mt-0.5 text-xs text-[var(--text-muted)]">
+                Keep sync details visible across the app
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-label="Show top sync progress bar"
+              aria-checked={showSyncBanner}
+              onClick={() => onShowSyncBannerChange(!showSyncBanner)}
+              className={cn(
+                'relative inline-flex h-5 w-9 flex-shrink-0 items-center rounded-full transition-colors',
+                showSyncBanner ? 'bg-blue-500' : 'bg-[var(--surface-4)]',
+              )}
+            >
+              <span
+                className={cn(
+                  'h-3.5 w-3.5 rounded-full bg-white shadow-sm transition-transform',
+                  showSyncBanner ? 'translate-x-[18px]' : 'translate-x-[3px]',
+                )}
+              />
+            </button>
+          </div>
+        )}
         <Popover.Arrow className="fill-[var(--border)]" />
       </Popover.Content>
     </Popover.Portal>
@@ -518,7 +639,7 @@ export function NavRail({
       }}
     >
       {/* Brand */}
-      <div className="relative flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
+      <div className="group relative flex items-center flex-shrink-0 h-[58px] border-b border-[var(--border)]">
         <span className="w-16 flex items-center justify-center flex-shrink-0">
           {isSyncing ? (
             <ActiveSyncIcon className="drop-shadow-[0_0_6px_rgba(168,85,247,0.22)]" />
@@ -528,7 +649,9 @@ export function NavRail({
         </span>
         <span className={cn(
           '-ml-1.5 flex flex-col justify-center whitespace-nowrap overflow-hidden transition-[opacity,max-width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',
-          expanded ? 'opacity-100 max-w-[100px]' : 'opacity-0 max-w-0'
+          expanded
+            ? 'opacity-100 max-w-[132px] group-hover:max-w-[108px] group-focus-within:max-w-[108px] [@media(hover:none)]:max-w-[108px]'
+            : 'opacity-0 max-w-0'
         )}>
           <span className="text-[14px] leading-4 font-bold tracking-[-0.015em] text-[var(--text-primary)]">
             Mission Control
@@ -546,12 +669,14 @@ export function NavRail({
             onClick={togglePinned}
             aria-label={pinned ? 'Unpin navigation' : 'Pin navigation open'}
             className={cn(
-              'absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:ring-2 focus-visible:ring-[var(--accent)]',
-              expanded ? 'opacity-100' : 'pointer-events-none opacity-0',
+              'absolute -right-1 top-1.5 flex h-6 w-6 items-center justify-center rounded-md text-[var(--text-muted)] transition-[color,background-color,opacity] duration-200 hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus:opacity-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)]',
+              expanded
+                ? 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100'
+                : 'pointer-events-none opacity-0',
               pinned && 'text-[var(--accent-400)]'
             )}
           >
-            {pinned ? <PinOff size={16} /> : <Pin size={16} />}
+            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
           </button>
         </Tooltip>
       </div>

@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
-import { Circle, ListChecks, Loader2, X } from 'lucide-react';
+import { Circle, Info, ListChecks, Loader2, X } from 'lucide-react';
 import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';
 import { useImagePasteHandler } from './TaskAttachmentSection';
 import { LinkedSourcesSection } from './LinkedSourcesSection';
 import { TaskMoveDialog } from './TaskMoveDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Tooltip } from '@/components/ui/Tooltip';
 import type { TaskField } from '@/types';
 import {
   canEditTaskField,
@@ -40,6 +41,7 @@ import { TaskProjectAssignmentSection } from './TaskProjectAssignmentSection';
 import { TaskPlanningSection } from './TaskPlanningSection';
 import { TaskDuplicatesSection } from './TaskDuplicatesSection';
 import { TaskSourceActionsSection } from './TaskSourceActionsSection';
+import { TaskConnectorSyncState } from '@/components/task-list/TaskConnectorSyncState';
 import { TaskDocumentPreviewSection } from './TaskDocumentPreviewSection';
 import { TaskAttachmentCard } from './TaskAttachmentCard';
 import { OwlTaskActions } from './OwlTaskActions';
@@ -143,6 +145,7 @@ export function TaskDetailPanel({
     connectorCaps,
     supportsAttachments,
     supportsSubtasks,
+    supportsSubtaskOrderWrite,
     extraTags,
     setExtraTags,
     potentialDuplicates,
@@ -680,7 +683,7 @@ export function TaskDetailPanel({
           onClose={() => { setShowMoveDialog(false); onMoveDialogDismissed?.(); }}
           onSuccess={(_newTaskId, action) => {
             toast.success(action === 'move' ? 'Task moved successfully' : 'Task copied successfully');
-            onClose();
+            onClose(action === 'move' ? 'task-removed' : 'dismiss');
             onUpdate?.();
           }}
         />
@@ -719,7 +722,7 @@ export function TaskDetailPanel({
         {mode === 'mobile' && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             className="absolute right-3 top-3 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
             aria-label="Close task detail"
           >
@@ -733,7 +736,7 @@ export function TaskDetailPanel({
         {mode === 'mobile' && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             className="flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-[var(--surface-2)]"
             aria-label="Close task detail"
           >
@@ -775,6 +778,16 @@ export function TaskDetailPanel({
           onModeChange={onModeChange}
         />
 
+        <TaskConnectorSyncState
+          taskId={task.id}
+          taskStatus={task.status}
+          syncStatus={task.syncStatus}
+          connectorType={task.connectorType}
+          connectorInstanceId={task.connectorInstanceId}
+          pushRetryCount={task.pushRetryCount}
+          onRetryComplete={() => onUpdate?.()}
+        />
+
         {mode === 'panel' && task.subtasks && task.subtasks.length > 0 && (() => {
           const completedSubtasks = task.subtasks.filter((subtask) => subtask.status === 'done').length;
           return (
@@ -782,7 +795,7 @@ export function TaskDetailPanel({
               type="button"
               onClick={jumpToSubtasks}
               aria-label={`Jump to subtasks, ${completedSubtasks} of ${task.subtasks.length} complete`}
-              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
+              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
             >
               <ListChecks size={12} aria-hidden="true" />
               Subtasks {completedSubtasks}/{task.subtasks.length}
@@ -876,6 +889,7 @@ export function TaskDetailPanel({
 
         <TaskNotesSection
           mode={mode}
+          taskId={task.id}
           description={task.description}
           descValue={descValue}
           editingDesc={editingDesc}
@@ -982,6 +996,17 @@ export function TaskDetailPanel({
               Subtasks
               {task.subtasks && task.subtasks.length > 0 && ` (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`}
             </h3>
+            {canManageSubtasks && !supportsSubtaskOrderWrite && (task.subtasks?.length ?? 0) > 1 && (
+              <Tooltip content="Subtask order is saved in Mission Control only.">
+                <button
+                  type="button"
+                  aria-label="Subtask order is saved in Mission Control only"
+                  className="rounded-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                >
+                  <Info size={12} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
           </div>
           <SubtaskSection
             key={task.id}
@@ -991,6 +1016,7 @@ export function TaskDetailPanel({
             onUpdate={onUpdate}
             canEdit={canManageSubtasks}
             canCreateSubtasks={canManageSubtasks}
+            orderRevision={task.subtaskOrderRevision ?? 0}
           />
         </section>
 
@@ -1101,6 +1127,7 @@ export function TaskDetailPanel({
           <AnimatePresence>
             {notesExpanded && (
               <TaskNotesDialog
+                taskId={task.id}
                 taskTitle={task.title}
                 description={task.description}
                 descValue={descValue}
@@ -1149,7 +1176,7 @@ export function TaskDetailPanel({
             initial="hidden"
             animate="show"
             exit="exit"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             aria-hidden="true"
           />
           <motion.div

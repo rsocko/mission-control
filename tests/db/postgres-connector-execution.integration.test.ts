@@ -205,8 +205,13 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
       `, [connectorId]);
       await pool.query('DELETE FROM notifications WHERE connector_instance_id = $1', [connectorId]);
       await pool.query('DELETE FROM notification_push_rules WHERE connector_instance_id = $1', [connectorId]);
+      await pool.query('DELETE FROM sync_deletion_snapshots WHERE connector_id = $1', [connectorId]);
       await pool.query('DELETE FROM task_tags WHERE task_id IN (SELECT id FROM tasks WHERE connector_instance_id = $1)', [connectorId]);
+      await pool.query('DELETE FROM task_projects WHERE task_id IN (SELECT id FROM tasks WHERE connector_instance_id = $1)', [connectorId]);
+      await pool.query(`DELETE FROM task_projects WHERE task_id LIKE $1 || ':%'`, [connectorId]);
       await pool.query('DELETE FROM tasks WHERE connector_instance_id = $1', [connectorId]);
+      await pool.query(`DELETE FROM tasks WHERE id LIKE $1 || ':%'`, [connectorId]);
+      await pool.query('DELETE FROM hub_projects WHERE id = $1', [`${connectorId}:project`]);
       await pool.query('DELETE FROM tags WHERE source = $1', [connectorId]);
       await pool.query('DELETE FROM source_lists WHERE connector_instance_id = $1', [connectorId]);
       await pool.query('DELETE FROM sync_log WHERE connector_id = $1', [connectorId]);
@@ -390,6 +395,7 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
         primaryActionId: `${connectorId}:action`,
         receivedAt: now,
         sortAt: now,
+        expiresAt: '2026-09-03T12:00:00.000Z',
         relatedTaskId: null,
         relatedProjectId: null,
         relatedEntityType: null,
@@ -416,17 +422,25 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
     const notificationRows = await backend.context.pool.query<{
       actions: string;
       deliveries: string;
+      expiresAt: string | null;
     }>(
       `
         SELECT
           (SELECT count(*) FROM notification_actions
             WHERE notification_id = $1)::text AS actions,
           (SELECT count(*) FROM notification_delivery_events
-            WHERE notification_id = $1)::text AS deliveries
+            WHERE notification_id = $1)::text AS deliveries,
+          expires_at AS "expiresAt"
+        FROM notifications
+        WHERE id = $1
       `,
       [`${connectorId}:notification`],
     );
-    expect(notificationRows.rows[0]).toEqual({ actions: '1', deliveries: '2' });
+    expect(notificationRows.rows[0]).toEqual({
+      actions: '1',
+      deliveries: '2',
+      expiresAt: '2026-09-03T12:00:00.000Z',
+    });
     const active = await execution.notifications.listActive(connectorId);
     expect(active).toHaveLength(1);
     await expect(execution.notifications.applyReconciliation({
@@ -523,6 +537,95 @@ describePostgres('PostgreSQL generic connector execution smoke', () => {
       [connectorId],
     );
     expect(lease.rowCount).toBe(0);
+  });
+
+  it('archives and restores a project-associated task after a remote 404', async () => {
+    const connectorId = `layer2-${randomUUID()}`;
+    connectorIds.add(connectorId);
+    const taskId = `${connectorId}:task`;
+    const projectId = `${connectorId}:project`;
+    const now = new Date().toISOString();
+    await backend.context.pool.query(
+      `
+        INSERT INTO connector_configs (
+          id, type, name, enabled, capabilities, credentials, settings,
+          synced_lists, created_at, updated_at
+        ) VALUES ($1, 'microsoft-todo', 'To Do', true, '{}', '{}', '{}', '[]', $2, $2)
+      `,
+      [connectorId, now],
+    );
+    await backend.context.pool.query(
+      `INSERT INTO hub_projects (id, name, created_at, updated_at)
+       VALUES ($1, 'Archived task project', $2, $2)`,
+      [projectId, now],
+    );
+    const execution = createPostgresConnectorExecutionRepositories(backend.context.pool);
+    await execution.pulls.insertBatch([{
+      task: connectorExecutionTask({
+        id: taskId,
+        sourceId: `${connectorId}:remote-task`,
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: connectorId,
+        syncStatus: 'push_error',
+      }),
+      tags: [],
+    }]);
+    await backend.context.pool.query(
+      'INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)',
+      [taskId, projectId],
+    );
+
+    const archived = await execution.deletions.archiveAndDeleteTask(
+      taskId,
+      'Remote returned 404/410',
+    );
+    expect(archived).toEqual(expect.objectContaining({ taskTitle: 'Portable task' }));
+    await expect(execution.deletions.restoreDeletionSnapshot(
+      archived!.snapshotId,
+      'local',
+    )).resolves.toEqual({ taskId, alreadyRestored: false });
+    const membership = await backend.context.pool.query(
+      'SELECT 1 FROM task_projects WHERE task_id = $1 AND project_id = $2',
+      [taskId, projectId],
+    );
+    expect(membership.rowCount).toBe(1);
+  });
+
+  it('deletes a retained task with project relationships', async () => {
+    const connectorId = `layer2-${randomUUID()}`;
+    connectorIds.add(connectorId);
+    const taskId = `${connectorId}:task`;
+    const projectId = `${connectorId}:project`;
+    const now = new Date().toISOString();
+    await backend.context.pool.query(
+      `INSERT INTO hub_projects (id, name, created_at, updated_at)
+       VALUES ($1, 'Retained task project', $2, $2)`,
+      [projectId, now],
+    );
+    const execution = createPostgresConnectorExecutionRepositories(backend.context.pool);
+    await execution.pulls.insertBatch([{
+      task: connectorExecutionTask({
+        id: taskId,
+        sourceId: `${connectorId}:remote-task`,
+        connectorType: 'document-intelligence',
+        connectorInstanceId: connectorId,
+        syncStatus: 'push_error',
+      }),
+      tags: [],
+    }]);
+    await backend.context.pool.query(
+      'INSERT INTO task_projects (task_id, project_id) VALUES ($1, $2)',
+      [taskId, projectId],
+    );
+
+    await expect(execution.retention.deleteTaskTree(taskId)).resolves.toBeUndefined();
+
+    const [task, membership] = await Promise.all([
+      backend.context.pool.query('SELECT 1 FROM tasks WHERE id = $1', [taskId]),
+      backend.context.pool.query('SELECT 1 FROM task_projects WHERE task_id = $1', [taskId]),
+    ]);
+    expect(task.rowCount).toBe(0);
+    expect(membership.rowCount).toBe(0);
   });
 });
 

@@ -15,6 +15,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Columns3 } from 'lucide-react';
 import { toast } from 'sonner';
 import PhaseProposalReview, { type PhaseProposal } from '@/components/projects/PhaseProposalReview';
+import { PhaseReorganizationReview } from '@/components/projects/PhaseReorganizationReview';
 import { TaskPickerDialog } from '@/components/projects/TaskPickerDialog';
 import { AddTaskModal } from '@/components/add-task';
 import { Badge } from '@/components/ui/badge';
@@ -24,12 +25,14 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { ViewInGraphLink } from '@/components/graph/ViewInGraphLink';
+import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';
 import { CONNECTOR_COLORS } from '@/lib/constants/colors';
 import { projectLogger } from '@/lib/client-logger';
 import { taskFilterContextForEntityCollection } from '@/lib/graph/graph-navigation';
 import { scaleIn, staggerContainer } from '@/lib/motion';
 import { ProjectHierarchyClientError } from '@/lib/projects/hierarchy-client';
 import type { ProjectHierarchyCommand } from '@/lib/projects/hierarchy-types';
+import type { PhaseReorganizationProposal } from '@/lib/projects/phase-reorganization';
 import { cn } from '@/lib/utils';
 
 import { LoadingSkeleton, StatusBadge } from './components';
@@ -127,6 +130,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     progress,
     project,
     tasks,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     loadProjectDetail,
@@ -239,6 +243,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const [isProposalOpen, setIsProposalOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRefining, setIsRefining] = useState(false);
+  const [reorganizationProposal, setReorganizationProposal] = useState<PhaseReorganizationProposal | null>(null);
+  const [isReorganizationOpen, setIsReorganizationOpen] = useState(false);
+  const [isReorganizing, setIsReorganizing] = useState(false);
 
   const handleGeneratePhaseProposal = useCallback(async (guidance?: string) => {
     if (!projectId) return;
@@ -304,12 +311,50 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }
   }, [phaseItemsByPhase, phases, projectId]);
 
+  const handleReorganizePhase = useCallback(async (phaseId: string, guidance?: string) => {
+    setIsReorganizing(true);
+    try {
+      const response = await fetch('/api/project-phases/ai-reorganize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId,
+          phaseId,
+          ...(guidance ? { instruction: guidance } : {}),
+        }),
+      });
+      const payload = (await response.json().catch(() => null)) as {
+        proposal?: PhaseReorganizationProposal;
+        error?: string;
+      } | null;
+      if (!response.ok || !payload?.proposal) {
+        throw new Error(payload?.error || 'Failed to review phase structure');
+      }
+      setReorganizationProposal(payload.proposal);
+      setIsReorganizationOpen(true);
+      toast.success('Phase structure review ready');
+    } catch (caughtError) {
+      toast.error(caughtError instanceof Error ? caughtError.message : 'Failed to review phase structure');
+    } finally {
+      setIsReorganizing(false);
+    }
+  }, [projectId]);
+
   const proposalActions = useMemo(() => ({
     generate: (guidance?: string) => { void handleGeneratePhaseProposal(guidance); },
     refine: (guidance?: string) => { void handleRefinePhases(guidance); },
+    reorganize: (phaseId: string, guidance?: string) => { void handleReorganizePhase(phaseId, guidance); },
     isGenerating,
     isRefining,
-  }), [handleGeneratePhaseProposal, handleRefinePhases, isGenerating, isRefining]);
+    isReorganizing,
+  }), [
+    handleGeneratePhaseProposal,
+    handleRefinePhases,
+    handleReorganizePhase,
+    isGenerating,
+    isRefining,
+    isReorganizing,
+  ]);
 
   // Auto-trigger AI suggest when navigated with ?action=ai-suggest
   useEffect(() => {
@@ -449,7 +494,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const isGraphView = activeTab === 'phases' && phasesGraphView;
 
   return (
-    <div className="relative flex h-full min-h-0 overflow-hidden">
+    <ContextThemeSurface
+      kind="project"
+      accentColor={project.color}
+      appearance={project.appearance}
+      className="flex h-full min-h-0"
+    >
     <motion.div
       className={cn(
         'min-h-0 min-w-0 flex-1',
@@ -460,7 +510,11 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       animate="show"
     >
       {/* Compact sticky header */}
-      <motion.section ref={stickyHeaderRef} variants={scaleIn} className="sticky top-0 z-20 bg-[var(--surface-0)]">
+      <motion.section
+        ref={stickyHeaderRef}
+        variants={scaleIn}
+        className="sticky top-0 z-20 [background:var(--context-header)] backdrop-blur-xl"
+      >
         <div className="border-b border-[var(--border)] px-4 sm:px-6">
           {/* Top row: title + stats */}
           <div className="flex items-center gap-3 py-3">
@@ -517,7 +571,15 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
                       : 'border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border)]',
                   )}
                 >
-                  {tab.label}{count !== null ? ` (${count})` : ''}
+                  <span>{tab.label}{count !== null ? ` (${count})` : ''}</span>
+                  {tab.id === 'phases' && unassignedTasks.length > 0 ? (
+                    <span
+                      aria-label={`${unassignedTasks.length} unphased ${unassignedTasks.length === 1 ? 'task' : 'tasks'}`}
+                      className="ml-2 inline-flex min-w-5 items-center justify-center rounded-full bg-[var(--warning)]/15 px-1.5 py-0.5 text-xs font-semibold leading-none tabular-nums text-[var(--warning)]"
+                    >
+                      {unassignedTasks.length}
+                    </span>
+                  ) : null}
                 </button>
               );
             })}
@@ -586,6 +648,24 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         />
       ) : null}
 
+      {reorganizationProposal ? (
+        <PhaseReorganizationReview
+          proposal={reorganizationProposal}
+          projectId={projectId}
+          taskMap={proposalTaskMap}
+          isOpen={isReorganizationOpen}
+          onAccept={() => {
+            setIsReorganizationOpen(false);
+            setReorganizationProposal(null);
+            void loadProjectDetail({ background: true });
+          }}
+          onReject={() => {
+            setIsReorganizationOpen(false);
+            setReorganizationProposal(null);
+          }}
+        />
+      ) : null}
+
       {/* ── Create task modal (scoped to a phase) ─────────────────────────── */}
       <AnimatePresence>
         {createTaskTarget !== null && (
@@ -646,9 +726,12 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         >
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => {
+            onClose={(reason) => {
               clearTaskNotesRequest();
-              setSelectedTaskId(null);
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
             }}
             onUpdate={(fields) => {
               if (fields && selectedTaskId) {
@@ -683,6 +766,6 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
         </motion.div>
       ) : null}
     </AnimatePresence>
-    </div>
+    </ContextThemeSurface>
   );
 }

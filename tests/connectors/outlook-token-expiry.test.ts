@@ -120,6 +120,36 @@ describe('OutlookCalendarConnector — auth failure surfacing', () => {
   });
 });
 
+describe('OutlookCalendarConnector — notification identity', () => {
+  it('uses a stable event identity and expiration across repeated polls', async () => {
+    const event = {
+      id: 'event-123',
+      subject: 'US Bank Credit Card',
+      start: { dateTime: '2026-09-11T01:00:00' },
+      end: { dateTime: '2026-09-11T02:00:00' },
+      location: {},
+      organizer: { emailAddress: { name: 'Bank' } },
+      isAllDay: false,
+      isCancelled: false,
+      webLink: 'https://outlook.office.com/calendar/item/event-123',
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => (
+      Response.json({ value: [event] }, { status: 200 })
+    )));
+
+    const connector = outlookCalendarFactory.create();
+    await connector.initialize(makeConfig({ type: 'outlook-calendar' }));
+
+    const [first] = await connector.fetchNotifications();
+    const [second] = await connector.fetchNotifications();
+
+    expect(first.id).toBe('cal:event-123');
+    expect(second.id).toBe(first.id);
+    expect(first.sourceId).toBe('cal:event-123');
+    expect(first.expiresAt).toBe('2026-09-11T02:00:00.000Z');
+  });
+});
+
 describe('OutlookEmailConnector / OutlookCalendarConnector — token auto-refresh', () => {
   it('resolves the access token via getValidToken (not a static cached token) and invalidates it on a 401 before giving up', async () => {
     const auth = await import('@/lib/auth');

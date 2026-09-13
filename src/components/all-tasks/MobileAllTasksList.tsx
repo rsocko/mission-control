@@ -64,6 +64,8 @@ function taskToMyDayItem(task: Task): MyDayItem {
     dueDate: task.dueDate,
     connectorType: task.connectorType,
     connectorInstanceId: task.connectorInstanceId,
+    syncStatus: task.syncStatus,
+    pushRetryCount: task.pushRetryCount,
     sourceId: task.sourceId ?? undefined,
     sourceListName: task.sourceListName,
     createdAt: null,

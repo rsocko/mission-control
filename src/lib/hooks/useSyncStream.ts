@@ -41,8 +41,8 @@ export interface SyncProgress {
 
 export interface SyncStreamContextValue {
   progress: SyncProgress;
-  /** Trigger a full sync — sets isSyncing immediately so all consumers react */
-  triggerSync: () => void;
+  /** Trigger an incremental sync, optionally scoped to one connector. */
+  triggerSync: (connectorId?: string) => void;
 }
 
 const initialProgress: SyncProgress = {
@@ -501,14 +501,14 @@ export function useSyncStreamConnection() {
     };
   }, [connect, stopFallbackPolling]);
 
-  const triggerSync = useCallback(async () => {
+  const triggerSync = useCallback(async (connectorId?: string) => {
     if (progress.isSyncing) return;
     // Immediately show syncing state so banner + bottom-left react instantly
     setProgress((prev) => ({
       ...prev,
       isSyncing: true,
       phase: null,
-      connectorId: null,
+      connectorId: connectorId ?? null,
       connectorName: null,
       currentList: null,
       listIndex: 0,
@@ -524,7 +524,7 @@ export function useSyncStreamConnection() {
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(connectorId ? { connectorId } : {}),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));

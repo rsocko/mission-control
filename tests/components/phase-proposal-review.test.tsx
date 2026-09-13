@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import PhaseProposalReview, {
   type PhaseProposal,
 } from '@/components/projects/PhaseProposalReview';
+import { COLOR_PRESETS } from '@/lib/constants/colors';
 
 const {
   executeProjectHierarchyCommand,
@@ -43,7 +44,7 @@ const proposal: PhaseProposal = {
   phases: [{
     name: 'Next',
     description: 'Next work',
-    color: '#123456',
+    color: COLOR_PRESETS[0],
     estimatedDays: 2,
     taskIds: ['task-1'],
     reasoning: 'Move the task',
@@ -97,5 +98,29 @@ describe('PhaseProposalReview', () => {
     }));
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(onAccept).toHaveBeenCalled();
+  });
+
+  it('lets users change a proposed phase color before accepting it', async () => {
+    render(
+      <PhaseProposalReview
+        proposal={proposal}
+        projectId="project-1"
+        taskMap={new Map()}
+        onAccept={vi.fn()}
+        onReject={vi.fn()}
+        isOpen
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Change Next color' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Set Next color to Emerald' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Accept all' }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/project-phases', expect.objectContaining({
+        method: 'POST',
+        body: expect.stringContaining(`"color":"${COLOR_PRESETS[4]}"`),
+      }));
+    });
   });
 });

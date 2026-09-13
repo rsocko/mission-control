@@ -202,6 +202,8 @@ function fakePersistence(): TaskCorePersistence {
       copyTask: () => record('copyTask', { kind: 'task-not-found' as const }),
       promoteSubtask: () => record('promoteSubtask', { kind: 'not-found' as const }),
       listSubtasks: () => record('listSubtasks', []),
+      getSubtaskOrderState: () => record('getSubtaskOrderState', null),
+      reorderSubtasks: () => record('reorderSubtasks', { kind: 'parent-not-found' as const }),
       getSubtaskProposalSnapshot: () => record('getSubtaskProposalSnapshot', null),
       createSubtask: () => record('createSubtask', { kind: 'parent-not-found' as const }),
       acceptSubtaskProposal: () => record('acceptSubtaskProposal', { kind: 'stale' as const }),
@@ -586,7 +588,7 @@ describe('task-core under PostgreSQL with a poisoned SQLite module', () => {
       new URLSearchParams(''),
     );
     expect(where.baseWhere).toBeDefined();
-    expect(modules.canonicalFilter.getTaskSourceVisibilityConditions()).toHaveLength(2);
+    expect(modules.canonicalFilter.getTaskSourceVisibilityConditions()).toHaveLength(3);
   });
 
   it('builds identity-aware quick filters from the registered composition', async () => {

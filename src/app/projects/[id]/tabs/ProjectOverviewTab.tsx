@@ -2,8 +2,9 @@
 
 import React, { useMemo } from 'react';
 import { motion } from 'motion/react';
-import type { ProjectHealth } from '@/types';
+import { ArrowRight, TriangleAlert } from 'lucide-react';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -42,16 +43,17 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
     projectId,
     reportRefreshKey,
     tasks,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     handleGraphTaskSelect,
     selectedTaskId,
-    toggleTask,
+    selectTask,
   } = useProjectPageTaskInteractions();
 
-  const health = useMemo(() => {
+  const pulse = useMemo(() => {
     if (!project) {
-      return { health: 'on_track' as ProjectHealth, message: 'Loading health…' };
+      return null;
     }
     return getHealthSummary(project, phases, tasks, progress);
   }, [phases, progress, project, tasks]);
@@ -75,7 +77,42 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
 
   return (
     <motion.section variants={fadeSlideUp} className="space-y-6">
-      <ProjectOverviewKpis progress={progress} health={health} />
+      {unassignedTasks.length > 0 ? (
+        <div
+          role="status"
+          className="flex flex-col gap-4 rounded-[var(--radius-lg)] border border-[var(--warning)]/35 bg-[var(--warning)]/10 p-4 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <div className="flex min-w-0 gap-3">
+            <TriangleAlert
+              size={18}
+              className="mt-0.5 shrink-0 text-[var(--warning)]"
+              aria-hidden="true"
+            />
+            <div>
+              <p className="text-sm font-semibold text-[var(--text-primary)]">
+                {unassignedTasks.length} {unassignedTasks.length === 1 ? 'task needs' : 'tasks need'} a phase
+              </p>
+              <p className="mt-1 text-sm text-[var(--text-secondary)]">
+                {project.autoIncludeRules.length > 0
+                  ? 'Auto-include rules can add project tasks without placing them in the plan.'
+                  : 'These project tasks are not represented in the plan yet.'}
+              </p>
+            </div>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-[var(--warning)]/40 bg-[var(--surface-1)] text-[var(--text-primary)] hover:bg-[var(--surface-2)]"
+            onClick={() => onOpenPhase(null)}
+          >
+            Assign in Plan
+            <ArrowRight size={14} aria-hidden="true" />
+          </Button>
+        </div>
+      ) : null}
+
+      {pulse && <ProjectOverviewKpis progress={progress} pulse={pulse} />}
 
       <BurnReportCard
         projectId={projectId}
@@ -133,7 +170,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
                         'flex min-h-10 items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-4 py-3 cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
                         selectedTaskId === task.id && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
                       )}
-                      onClick={() => toggleTask(task.id)}
+                      onClick={() => selectTask(task.id)}
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">

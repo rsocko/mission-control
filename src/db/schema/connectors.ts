@@ -8,6 +8,7 @@ import {
   primaryKey,
 } from 'drizzle-orm/sqlite-core';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { ContextAppearance } from '@/types';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -63,6 +64,7 @@ export const sourceLists = sqliteTable('source_lists', {
   userDisplayName: text('user_display_name'),
   icon: text('icon'),
   iconColor: text('icon_color'),
+  appearance: text('appearance', { mode: 'json' }).$type<ContextAppearance>(),
 });
 
 // ─── WORK MICROSOFT TO DO BRIDGE ────────────────────────────────────────────

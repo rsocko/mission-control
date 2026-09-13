@@ -1661,6 +1661,39 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         OR a.metadata -> 'parentId' = 'null'::jsonb
       )`;
     }
+    if (request.notificationKind) {
+      const noteHint = `LOWER(
+        COALESCE(a.metadata ->> 'category', '') || ' ' ||
+        COALESCE(a.metadata ->> 'connectorType', '') || ' ' ||
+        candidate_document.title || ' ' || candidate_document.body
+      )`;
+      const noteMatch = `(
+        STRPOS(${noteHint}, 'capture') > 0
+        OR STRPOS(${noteHint}, 'note') > 0
+        OR STRPOS(${noteHint}, 'memo') > 0
+        OR STRPOS(${noteHint}, 'idea') > 0
+        OR STRPOS(${noteHint}, 'journal') > 0
+      )`;
+      where += request.notificationKind === 'notes'
+        ? ` AND ${noteMatch}`
+        : ` AND NOT ${noteMatch}`;
+    }
+    if (request.dateFrom) {
+      params.push(request.dateFrom);
+      where += ` AND (
+        CASE
+          WHEN a.entity_type = 'task'
+            THEN COALESCE(NULLIF(a.metadata ->> 'dueDate', ''), a.source_updated_at)
+          ELSE COALESCE(NULLIF(a.metadata ->> 'receivedAt', ''), a.source_updated_at)
+        END
+      ) >= $${params.length}`;
+    }
+    if (request.dueBefore) {
+      params.push(request.dueBefore);
+      where += ` AND a.entity_type = 'task'
+        AND NULLIF(a.metadata ->> 'dueDate', '') IS NOT NULL
+        AND a.metadata ->> 'dueDate' < $${params.length}`;
+    }
     if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
       params.push(request.excludeEntityIds);
       where += ` AND NOT (a.entity_id = ANY($${params.length}::text[]))`;
@@ -1716,6 +1749,8 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
                    a.embedding::halfvec(${dimensions})
                      <=> $1::halfvec(${dimensions}) AS distance
             FROM semantic_vector_ann a
+            INNER JOIN semantic_documents candidate_document
+              ON candidate_document.id = a.document_id
             WHERE ${where}
             ORDER BY a.embedding::halfvec(${dimensions})
                      <=> $1::halfvec(${dimensions})
@@ -1896,6 +1931,39 @@ export class PostgresSemanticIndexRepository implements SemanticIndexRepository 
         d.metadata -> 'parentId' IS NULL
         OR d.metadata -> 'parentId' = 'null'::jsonb
       )`;
+    }
+    if (request.notificationKind) {
+      const noteHint = `LOWER(
+        COALESCE(d.metadata ->> 'category', '') || ' ' ||
+        COALESCE(d.metadata ->> 'connectorType', '') || ' ' ||
+        d.title || ' ' || d.body
+      )`;
+      const noteMatch = `(
+        STRPOS(${noteHint}, 'capture') > 0
+        OR STRPOS(${noteHint}, 'note') > 0
+        OR STRPOS(${noteHint}, 'memo') > 0
+        OR STRPOS(${noteHint}, 'idea') > 0
+        OR STRPOS(${noteHint}, 'journal') > 0
+      )`;
+      sql += request.notificationKind === 'notes'
+        ? ` AND ${noteMatch}`
+        : ` AND NOT ${noteMatch}`;
+    }
+    if (request.dateFrom) {
+      params.push(request.dateFrom);
+      sql += ` AND (
+        CASE
+          WHEN v.entity_type = 'task'
+            THEN COALESCE(NULLIF(d.metadata ->> 'dueDate', ''), v.source_updated_at)
+          ELSE COALESCE(NULLIF(d.metadata ->> 'receivedAt', ''), v.source_updated_at)
+        END
+      ) >= $${params.length}`;
+    }
+    if (request.dueBefore) {
+      params.push(request.dueBefore);
+      sql += ` AND v.entity_type = 'task'
+        AND NULLIF(d.metadata ->> 'dueDate', '') IS NOT NULL
+        AND d.metadata ->> 'dueDate' < $${params.length}`;
     }
     if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
       params.push(request.excludeEntityIds);

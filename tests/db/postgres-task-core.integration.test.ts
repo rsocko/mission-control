@@ -105,11 +105,11 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           `INSERT INTO tasks (
             id, source_id, connector_type, connector_instance_id, title, description,
             status, local_disposition, priority, planning_horizon, due_date,
-            created_at, updated_at, completed_at, parent_id, depth, is_checklist_item,
+            created_at, updated_at, completed_at, deleted_at, parent_id, depth, is_checklist_item,
             source_list_id, source_list_name, assignee, micro_status, metadata,
             sync_status, last_synced_at, effort, snoozed_until
           ) VALUES (
-            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26
+            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27
           )`,
           [
             row.id,
@@ -126,6 +126,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
             row.createdAt ?? DEFAULT_NOW,
             row.updatedAt ?? DEFAULT_NOW,
             row.completedAt ?? null,
+            row.deletedAt ?? null,
             row.parentId ?? null,
             row.depth ?? 0,
             row.isChecklistItem ?? false,
@@ -533,6 +534,13 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         [taskId],
       );
       return result.rows[0]?.updated_at ?? null;
+    },
+    async getTaskDeletedAt(taskId) {
+      const result = await client.query<{ deleted_at: string | null }>(
+        'SELECT deleted_at FROM tasks WHERE id = $1',
+        [taskId],
+      );
+      return result.rows[0]?.deleted_at ?? null;
     },
     async countOutboxEvents(stableKey) {
       const result = await client.query<{ count: string }>(

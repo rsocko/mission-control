@@ -72,6 +72,7 @@ const METADATA_TEXT = sql`${tasks.metadata}::text`;
 
 export function getTaskSourceVisibilityConditions(): SQL[] {
   return [
+    isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (
       SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
       WHERE ${connectorConfigs.deletedAt} IS NOT NULL

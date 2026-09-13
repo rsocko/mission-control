@@ -104,10 +104,84 @@ describe('Home Assistant source transformers', () => {
       entityPicture: '/api/brands/integration/homeassistant/icon.png',
       mdiIcon: 'mdi:home-assistant',
       deviceClass: 'firmware',
+      updateType: 'software',
       supportsInstall: true,
       supportsBackup: true,
+      supportsReleaseNotes: false,
       pushDelivery: 'immediate',
     });
+  });
+
+  it('advertises full release notes and links the release announcement when provided', () => {
+    const [notification] = buildUpdateNotifications({
+      ...common,
+      states: [{
+        entity_id: 'update.battery_notes',
+        state: 'on',
+        attributes: {
+          friendly_name: 'Battery Notes',
+          installed_version: '3.4.8',
+          latest_version: '3.6.3',
+          release_summary: 'Bug fixes and sensor improvements.',
+          release_url: 'https://github.com/example/battery-notes/releases/tag/3.6.3',
+          title: 'Battery Notes',
+          update_percentage: 42,
+          supported_features: 17,
+        },
+      }],
+      criticalEntityPatterns: [],
+      updatePush: 'daily_summary',
+      immediateCriticalUpdates: true,
+    });
+
+    expect(notification.body).toBe('Bug fixes and sensor improvements.');
+    expect(notification.title).toBe('Update available: Battery Notes');
+    expect(notification.metadata).toMatchObject({
+      supportsInstall: true,
+      supportsReleaseNotes: true,
+      releaseUrl: 'https://github.com/example/battery-notes/releases/tag/3.6.3',
+    });
+    expect(homeAssistantNotificationProvider.signatures[0].present(notification)
+      .presentation?.richContent).toMatchObject({
+        progress: {
+          value: 42,
+          max: 100,
+          label: '42% installed',
+        },
+        links: [{
+          label: 'Read release announcement',
+          url: 'https://github.com/example/battery-notes/releases/tag/3.6.3',
+        }],
+      });
+  });
+
+  it('identifies Supervisor add-on updates as app updates', () => {
+    const notifications = buildUpdateNotifications({
+      ...common,
+      states: [{
+        entity_id: 'update.mosquitto_broker_update',
+        state: 'on',
+        attributes: {
+          friendly_name: 'Mosquitto broker Update',
+          installed_version: '7.0.0',
+          latest_version: '7.1.1',
+          supported_features: 9,
+          entity_picture: '/api/hassio/addons/core_mosquitto/icon',
+        },
+      }],
+      criticalEntityPatterns: [],
+      updatePush: 'daily_summary',
+      immediateCriticalUpdates: true,
+    });
+
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0].metadata).toMatchObject({
+      entityPicture: '/api/hassio/addons/core_mosquitto/icon',
+      updateType: 'app',
+    });
+
+    const presented = homeAssistantNotificationProvider.signatures[0].present(notifications[0]);
+    expect(presented.presentation?.subtitle).toBe('App update');
   });
 
   it('maps persistent notifications and repairs to stable source identities', () => {
@@ -184,6 +258,71 @@ describe('Home Assistant notification presentation', () => {
 
     expect(presented.presentation).toMatchObject({
       subjectIconUrl: '/api/notifications/ha-update/subject-icon',
+    });
+    expect(presented.presentation?.subjectIcon).toBeUndefined();
+  });
+
+  it('uses the Home Assistant entity icon when no brand image is available', () => {
+    const explicit = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        entityId: 'binary_sensor.garage_motion',
+        state: 'on',
+        attributes: { icon: 'mdi:motion-sensor' },
+      },
+    });
+    const lock = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        entityId: 'lock.rear_door',
+        state: 'unlocked',
+        attributes: { icon: 'https://example.com/not-an-icon' },
+      },
+    });
+
+    expect(explicit.presentation).toMatchObject({
+      subjectIcon: 'mdi:motion-sensor',
+    });
+    expect(lock.presentation).toMatchObject({
+      subjectIcon: 'mdi:lock-open-alert',
+    });
+  });
+
+  it('uses Home Assistant generic update artwork when an update has no brand image', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'updates',
+        entityId: 'update.advanced_camera_card_update',
+        state: 'on',
+      },
+    });
+
+    expect(presented.presentation).toMatchObject({
+      subjectIcon: 'mdi:package-up',
+    });
+  });
+
+  it('uses authenticated Supervisor add-on artwork for non-HACS updates', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'updates',
+        entityId: 'update.matter_server_update',
+        state: 'on',
+        entityPicture: '/api/hassio/addons/core_matter_server/icon',
+      },
+    });
+
+    expect(presented.presentation).toMatchObject({
+      subjectIconUrl: '/api/notifications/ha-update/subject-icon',
+      subjectIcon: 'mdi:package-up',
     });
   });
 
@@ -365,6 +504,53 @@ describe('Home Assistant WebSocket client', () => {
     expect(result.errors).toEqual({});
     expect(result.persistentNotifications?.[0].notification_id).toBe('notice-1');
     expect(result.repairs?.[0]).toMatchObject({ domain: 'mqtt', issue_id: 'offline' });
+  });
+
+  it('fetches Markdown release notes for a supported update entity', async () => {
+    const sent: Record<string, unknown>[] = [];
+    class FakeWebSocket {
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+
+      constructor() {
+        queueMicrotask(() => this.emit({ type: 'auth_required' }));
+      }
+
+      send(data: string) {
+        const message = JSON.parse(data) as Record<string, unknown>;
+        sent.push(message);
+        if (message.type === 'auth') {
+          queueMicrotask(() => this.emit({ type: 'auth_ok' }));
+        } else if (message.type === 'update/release_notes') {
+          queueMicrotask(() => this.emit({
+            id: message.id,
+            type: 'result',
+            success: true,
+            result: '## Bug fixes\n\n- Fixed discovery.',
+          }));
+        }
+      }
+
+      close() {}
+
+      private emit(message: Record<string, unknown>) {
+        this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
+      }
+    }
+
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const notes = await createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    }).fetchUpdateReleaseNotes('update.battery_notes');
+
+    expect(notes).toBe('## Bug fixes\n\n- Fixed discovery.');
+    expect(sent).toContainEqual(expect.objectContaining({
+      type: 'update/release_notes',
+      entity_id: 'update.battery_notes',
+    }));
   });
 });
 

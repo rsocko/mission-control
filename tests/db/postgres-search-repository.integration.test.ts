@@ -100,6 +100,45 @@ describePostgres('PostgreSQL keyword search repository integration', () => {
     expect(results.find((result) => result.id === task.id)?.highlights?.title).toContain('<mark>');
   });
 
+  it('ranks exact titles before title prefixes and other lexical matches', async () => {
+    const query = `mercuryranking${randomUUID().replaceAll('-', '')}`;
+    const fixtures = [
+      await insertTask({
+        id: `search-ranking-exact-${randomUUID()}`,
+        title: query,
+        description: 'Exact title fixture',
+      }),
+      await insertTask({
+        id: `search-ranking-prefix-${randomUUID()}`,
+        title: `${query} checklist`,
+        description: 'Title prefix fixture',
+      }),
+      await insertTask({
+        id: `search-ranking-other-${randomUUID()}`,
+        title: `Review ${query}`,
+        description: 'Other lexical fixture',
+      }),
+      await insertTask({
+        id: `search-ranking-body-${randomUUID()}`,
+        title: 'Unrelated readiness review',
+        description: `Coordinate ${query} from the body`,
+      }),
+    ];
+    await Promise.all(fixtures.map((task) => search.indexTask(task)));
+
+    const results = await search.search(query, { type: 'tasks', limit: 10 });
+
+    expect(results.slice(0, 2).map((result) => result.id)).toEqual([
+      fixtures[0].id,
+      fixtures[1].id,
+    ]);
+    expect(results.slice(2).map((result) => result.id)).toEqual(expect.arrayContaining([
+      fixtures[2].id,
+      fixtures[3].id,
+    ]));
+    expect(results.map((result) => result.metadata.titleMatchRank)).toEqual([0, 1, 2, 2]);
+  });
+
   it('a task is not findable via search before indexTask is called (no automatic mirroring)', async () => {
     const uniqueToken = `unindexedtoken${randomUUID().slice(0, 8)}`;
     const task = await insertTask({

@@ -44,6 +44,7 @@ import {
 } from '@/lib/hooks/useSystemHealth';
 import { useNavigationCounts } from '@/lib/hooks/useNavigationBadges';
 import { useAppBadge, useBadgeMode } from '@/lib/hooks/useAppBadge';
+import { useSyncBannerPreference } from '@/lib/hooks/useSyncBannerPreference';
 
 interface FeatureFlags {
   taskCreation: boolean;
@@ -281,6 +282,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       showHealthTooltip={showHealthTooltip}
       setShowHealthTooltip={setShowHealthTooltip}
       syncProgress={syncContextValue.progress}
+      onSyncConnector={syncContextValue.triggerSync}
     >
       {children}
     </AppShellInner>
@@ -300,6 +302,7 @@ function AppShellInner({
   showHealthTooltip,
   setShowHealthTooltip,
   syncProgress,
+  onSyncConnector,
   children,
 }: {
   features: FeatureFlags | null;
@@ -308,6 +311,7 @@ function AppShellInner({
   showHealthTooltip: boolean;
   setShowHealthTooltip: (v: boolean) => void;
   syncProgress: import('@/lib/hooks/useSyncStream').SyncProgress;
+  onSyncConnector: (connectorId: string) => void;
   children: React.ReactNode;
 }) {
   const { isDrawerOpen, openDrawer, closeDrawer } = useMobileDrawer();
@@ -327,6 +331,7 @@ function AppShellInner({
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const navigationCounts = useNavigationCounts();
   const [badgeMode] = useBadgeMode();
+  const { showBanner: showSyncBanner, setShowBanner: setShowSyncBanner } = useSyncBannerPreference();
   const appBadgeCount = badgeMode === 'unread_notifications'
     ? navigationCounts.unreadNotifications
     : badgeMode === 'myday_incomplete'
@@ -349,6 +354,10 @@ function AppShellInner({
         isSyncing={syncProgress.isSyncing}
         counts={navigationCounts}
         syncStatus={health?.connectors ?? []}
+        syncProgress={syncProgress}
+        onSyncConnector={onSyncConnector}
+        showSyncBanner={showSyncBanner}
+        onShowSyncBannerChange={setShowSyncBanner}
       />
 
       {/* Right area: toolbar + content */}
@@ -376,7 +385,7 @@ function AppShellInner({
         )}
 
         {/* Sync Progress Banner */}
-        <SyncProgressBanner progress={syncProgress} />
+        {showSyncBanner && <SyncProgressBanner progress={syncProgress} />}
 
         {/* Quick Sort keeps a single live queue landmark during route hydration. */}
         {pathname === '/quick-sort' ? (

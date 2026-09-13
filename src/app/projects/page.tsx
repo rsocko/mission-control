@@ -141,6 +141,7 @@ function MetricCard({
 
 function ProjectCard({ project }: { project: RecentProject }) {
   const progress = Math.min(100, Math.max(0, project.progress.percentComplete));
+  const pulse = project.progress.pulse;
 
   return (
     <Link
@@ -164,6 +165,28 @@ function ProjectCard({ project }: { project: RecentProject }) {
         </span>
       </div>
       <h3 className="mt-3 truncate text-sm font-semibold text-[var(--text-primary)]">{project.name}</h3>
+      {pulse && (
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] font-medium">
+          <span
+            className="h-1.5 w-1.5 rounded-full"
+            style={{
+              backgroundColor: pulse.state === 'on_track'
+                ? 'var(--success)'
+                : pulse.state === 'watch'
+                  ? 'var(--warning)'
+                  : pulse.state === 'off_track'
+                    ? 'var(--danger)'
+                    : 'var(--text-muted)',
+            }}
+            aria-hidden="true"
+          />
+          <span className="text-[var(--text-secondary)]">
+            {pulse.state === 'off_track' ? 'Off track' : pulse.state === 'on_track' ? 'On track' : pulse.state === 'watch' ? 'Watch' : 'Unknown'}
+          </span>
+          <span className="text-[var(--text-muted)]">·</span>
+          <span className="truncate text-[var(--text-muted)]">{pulse.freshness.label}</span>
+        </div>
+      )}
       <p className="mt-1 line-clamp-2 min-h-8 text-[11px] leading-4 text-[var(--text-muted)]">
         {project.nextTask ? `Next: ${project.nextTask.title}` : 'No open task selected as the next step'}
       </p>

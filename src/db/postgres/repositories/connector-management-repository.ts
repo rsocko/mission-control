@@ -83,7 +83,8 @@ const SOURCE_LIST_COLUMNS = `
   last_known_remote_name AS "lastKnownRemoteName",
   user_display_name AS "userDisplayName",
   icon,
-  icon_color AS "iconColor"
+  icon_color AS "iconColor",
+  appearance
 `;
 
 const SYNC_HISTORY_COLUMNS = `
@@ -740,6 +741,10 @@ export function createPostgresConnectorManagementRepository(
       if (input.hidden !== undefined) {
         values.push(input.hidden);
         assignments.push(`hidden = $${values.length}`);
+      }
+      if (input.appearance !== undefined) {
+        values.push(input.appearance === null ? null : JSON.stringify(input.appearance));
+        assignments.push(`appearance = $${values.length}::jsonb`);
       }
       if (assignments.length === 0) return;
       values.push(input.sourceListId);

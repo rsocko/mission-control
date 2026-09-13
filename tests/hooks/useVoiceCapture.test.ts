@@ -85,6 +85,18 @@ describe('useVoiceCapture microphone permission', () => {
     expect(getUserMedia).not.toHaveBeenCalled();
   });
 
+  it('reports a starting state until speech recognition begins', async () => {
+    configureBrowser(
+      'Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Version/18.0 Mobile/15E148 Safari/604.1',
+      true,
+    );
+    const { result } = renderHook(() => useVoiceCapture());
+
+    await act(async () => result.current.startListening());
+
+    expect(result.current.state).toBe('starting');
+  });
+
   it('does not pre-acquire the microphone in a regular Edge tab', async () => {
     configureBrowser(
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36 Edg/140.0.0.0',

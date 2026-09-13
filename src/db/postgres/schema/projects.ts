@@ -12,6 +12,7 @@ import type {
   ProjectHierarchyCommandRequest,
   ProjectHierarchyCommandResult,
 } from '@/lib/projects/hierarchy-types';
+import type { ContextAppearance } from '@/types';
 
 // ─── HUB PROJECTS ───────────────────────────────────────────────────────────
 
@@ -22,6 +23,7 @@ export const hubProjects = pgTable('hub_projects', {
   color: text('color').notNull().default('#3b82f6'),
   icon: text('icon'),
   iconColor: text('icon_color'),
+  appearance: jsonb('appearance').$type<ContextAppearance>(),
   sourceBindings: jsonb('source_bindings').notNull().default([]),
   autoIncludeRules: jsonb('auto_include_rules').notNull().default([]),
   kanbanColumns: jsonb('kanban_columns').notNull().default([]),

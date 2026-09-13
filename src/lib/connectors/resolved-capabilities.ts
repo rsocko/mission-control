@@ -19,6 +19,8 @@ export const CAPABILITY_DEFAULTS: Record<string, Partial<ConnectorCapabilities>>
     tags: true,
     tagWriteBack: true,
     tagScope: 'global',
+    subtaskOrderRead: false,
+    subtaskOrderWrite: false,
     ...MICROSOFT_TODO_TASK_AUTHORITY,
   },
   'microsoft-todo-work': {
@@ -28,6 +30,8 @@ export const CAPABILITY_DEFAULTS: Record<string, Partial<ConnectorCapabilities>>
     microStatusSync: false,
     microStatusWriteBack: false,
     tagScope: 'global',
+    subtaskOrderRead: false,
+    subtaskOrderWrite: false,
     ...WORK_TODO_TASK_AUTHORITY,
   },
   'github-issues': {
@@ -39,6 +43,8 @@ export const CAPABILITY_DEFAULTS: Record<string, Partial<ConnectorCapabilities>>
     microStatusSync: true,
     microStatusWriteBack: true,
     tagScope: 'per-list',
+    subtaskOrderRead: true,
+    subtaskOrderWrite: true,
     ...GITHUB_ISSUES_TASK_AUTHORITY,
   },
   'document-intelligence': {

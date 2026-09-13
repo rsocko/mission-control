@@ -1,6 +1,12 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import { useState } from 'react';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
+import {
+  EMPTY_TASK_FILTER_CONTEXT,
+  normalizeTaskFilterContext,
+  type TaskFilterContext,
+} from '@/lib/task-filter-context';
 import { toast } from 'sonner';
 
 vi.mock('sonner', () => ({
@@ -107,6 +113,41 @@ describe('TaskKeywordFilter applied sidebar filters', () => {
     expect(screen.getByText('quick:Recently Closed')).toBeInTheDocument();
   });
 
+  it('keeps controlled filters isolated from persisted dashboard filters', () => {
+    useDashboardViewStore.setState({
+      sourceFilter: 'github-issues',
+      listFilter: 'source-list-1',
+      listGroupFilter: 'group-1',
+      quickFilter: 'myDay',
+      projectFilter: 'project-1',
+    });
+
+    render(
+      <TaskKeywordFilter
+        {...defaultProps}
+        controller={{
+          context: EMPTY_TASK_FILTER_CONTEXT,
+          setContext: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.queryByText('source:github-issues')).not.toBeInTheDocument();
+    expect(screen.queryByText('list:Mission Control')).not.toBeInTheDocument();
+    expect(screen.queryByText('group:Group')).not.toBeInTheDocument();
+    expect(screen.queryByText('quick:My Day')).not.toBeInTheDocument();
+    expect(screen.queryByText('project:Project')).not.toBeInTheDocument();
+  });
+
+  it('removes a quick filter from a controlled filter bar', () => {
+    render(<ControlledQuickFilterHarness />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove quick:My Day filter' }));
+
+    expect(screen.queryByText('quick:My Day')).not.toBeInTheDocument();
+    expect(screen.getByTestId('controlled-quick-filter')).toHaveTextContent('none');
+  });
+
   it('restores a removed query token', () => {
     useDashboardViewStore.setState({ textFilter: 'priority:high status:todo' });
 
@@ -210,6 +251,23 @@ describe('TaskKeywordFilter applied sidebar filters', () => {
     expect(useDashboardViewStore.getState().textFilter).toBe('waiting');
   });
 });
+
+function ControlledQuickFilterHarness() {
+  const [context, setContext] = useState<TaskFilterContext>(() => normalizeTaskFilterContext({
+    quickFilter: 'myDay',
+    myDayDate: '2026-09-10',
+  }));
+
+  return (
+    <>
+      <TaskKeywordFilter
+        {...defaultProps}
+        controller={{ context, setContext }}
+      />
+      <output data-testid="controlled-quick-filter">{context.quickFilter ?? 'none'}</output>
+    </>
+  );
+}
 
 function undoLastFilterChange() {
   const options = vi.mocked(toast).mock.calls.at(-1)?.[1] as

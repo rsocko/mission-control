@@ -15,6 +15,15 @@ import {
   subscribeToAppHistory,
 } from '@/lib/navigation/app-history';
 
+export interface HistoryParamSelectionOptions {
+  history?: 'back' | 'replace';
+}
+
+export type HistoryParamSelectionSetter = (
+  action: SetStateAction<string | null>,
+  options?: HistoryParamSelectionOptions,
+) => void;
+
 function currentHref(): string {
   return `${window.location.pathname}${window.location.search}${window.location.hash}`;
 }
@@ -46,7 +55,7 @@ export function useHistoryParamSelection(param: string) {
     }
   }), [param]);
 
-  const updateSelection = useCallback((action: SetStateAction<string | null>) => {
+  const updateSelection = useCallback<HistoryParamSelectionSetter>((action, options) => {
     const next = typeof action === 'function'
       ? action(selectedRef.current)
       : action;
@@ -87,7 +96,7 @@ export function useHistoryParamSelection(param: string) {
       const openedHere = existingDetail?.param === param
         && existingDetail.parentHref === parentHref
         && getAppHistorySnapshot().canGoBack;
-      if (openedHere) {
+      if (openedHere && options?.history !== 'replace') {
         closingRef.current = true;
         window.history.back();
         return;

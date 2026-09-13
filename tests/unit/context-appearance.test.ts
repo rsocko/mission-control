@@ -68,6 +68,9 @@ describe('context appearance', () => {
     expect(style['--surface-1']).toContain('var(--context-accent)');
     expect(style['--surface-1']).not.toContain('transparent');
     expect(style['--context-header']).toContain('var(--context-accent)');
+    expect(style.boxShadow).toBe(
+      'inset 0 0 0 4px color-mix(in srgb, var(--context-accent) 72%, transparent)',
+    );
   });
 
   it('uses translucent surfaces when a backdrop is visible', () => {
@@ -79,5 +82,6 @@ describe('context appearance', () => {
 
     expect(style['--surface-0']).toContain('transparent');
     expect(style['--surface-1']).toContain('transparent');
+    expect(style.boxShadow).toBeUndefined();
   });
 });

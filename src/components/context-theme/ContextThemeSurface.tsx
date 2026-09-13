@@ -78,6 +78,11 @@ export function getContextThemeSurfaceStyle(resolved: ContextAppearance): CSSPro
   const surfaceMixes = hasBackdrop
     ? translucentSurfaceMixes[resolved.strength as keyof typeof translucentSurfaceMixes]
     : solidMixes;
+  const frameShadow = resolved.strength === 'frame'
+    ? 'inset 0 0 0 4px color-mix(in srgb, var(--context-accent) 72%, transparent)'
+    : resolved.strength === 'whisper'
+      ? 'inset 0 0 0 1px color-mix(in srgb, var(--context-accent) 58%, transparent)'
+      : undefined;
 
   return {
     '--context-accent': resolved.accentColor,
@@ -93,6 +98,7 @@ export function getContextThemeSurfaceStyle(resolved: ContextAppearance): CSSPro
     '--surface-2': surfaceMixes.surface2,
     '--border': solidMixes.border,
     '--border-subtle': 'color-mix(in srgb, #162032 84%, var(--context-accent))',
+    boxShadow: frameShadow,
   } as CSSProperties;
 }
 
@@ -171,17 +177,6 @@ export function ContextThemeSurface({
         }}
       />
       <div className="relative z-[1] flex h-full min-h-0 w-full">{children}</div>
-      {resolved.strength === 'whisper' || resolved.strength === 'frame' ? (
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-0 z-40"
-          style={{
-            boxShadow: resolved.strength === 'frame'
-              ? 'inset 0 0 0 4px color-mix(in srgb, var(--context-accent) 72%, transparent)'
-              : 'inset 0 0 0 1px color-mix(in srgb, var(--context-accent) 58%, transparent)',
-          }}
-        />
-      ) : null}
     </div>
   );
 }

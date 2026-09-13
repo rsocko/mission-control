@@ -167,7 +167,7 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
 }
 
 const HA_SOURCE_OPTIONS = [
-  { key: 'entityAlerts', label: 'Device alerts', description: 'Rules for doors, batteries, motion, and package sensors.' },
+  { key: 'entityAlerts', label: 'Polled device rules', description: 'Legacy convenience rules for doors, batteries, motion, and package sensors. Prefer Home Assistant automations for custom logic.' },
   { key: 'updates', label: 'Updates', description: 'One actionable notification for each available update.' },
   { key: 'persistentNotifications', label: 'Persistent notifications', description: 'Notifications created in Home Assistant.' },
   { key: 'repairs', label: 'Repairs', description: 'Warnings and errors from Home Assistant Repairs.' },

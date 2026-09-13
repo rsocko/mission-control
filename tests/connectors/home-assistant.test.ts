@@ -14,6 +14,9 @@ import {
   buildRepairNotifications,
   buildUpdateNotifications,
 } from '@/lib/connectors/home-assistant/source-transformers';
+import {
+  evaluateCondition,
+} from '@/lib/connectors/home-assistant/entity-transformer';
 import { homeAssistantNotificationProvider } from '@/lib/notifications/providers/home-assistant';
 
 const nativeWebSocket = globalThis.WebSocket;
@@ -25,7 +28,7 @@ afterEach(() => {
 });
 
 describe('Home Assistant settings', () => {
-  it('migrates legacy settings into the v2 source and delivery model', () => {
+  it('migrates legacy settings into the current source and delivery model', () => {
     const settings = normalizeHomeAssistantSettings({
       baseUrl: 'https://ha.example.test///',
       entityPatterns: ['binary_sensor.*'],
@@ -42,6 +45,51 @@ describe('Home Assistant settings', () => {
       dailySummaryTime: '07:30',
     });
     expect(settings.actions.enabled).toBe(true);
+  });
+
+  it('restricts the legacy default door rule to opening device classes', () => {
+    const settings = normalizeHomeAssistantSettings({
+      settingsVersion: 2,
+      alertRules: [{
+        id: 'door-open',
+        entityPattern: 'binary_sensor.*_door*',
+        condition: 'equals',
+        value: 'on',
+        level: 'action_needed',
+        category: 'security',
+        title: '{{friendly_name}} left open',
+        cooldownMinutes: 30,
+      }],
+    });
+
+    expect(settings.settingsVersion).toBe(3);
+    expect(settings.alertRules[0].deviceClasses).toEqual([
+      'door',
+      'garage_door',
+      'opening',
+      'window',
+    ]);
+  });
+
+  it('does not classify an active doorbell diagnostic as an open door', () => {
+    const doorRule = DEFAULT_HOME_ASSISTANT_SETTINGS.alertRules[0];
+
+    expect(evaluateCondition({
+      entity_id: 'binary_sensor.cape_front_doorbell_debug_device',
+      state: 'on',
+      attributes: {
+        friendly_name: 'Cape Front Doorbell Debug (device)',
+      },
+    }, doorRule)).toBe(false);
+
+    expect(evaluateCondition({
+      entity_id: 'binary_sensor.cape_front_door_contact',
+      state: 'on',
+      attributes: {
+        friendly_name: 'Cape Front Door',
+        device_class: 'door',
+      },
+    }, doorRule)).toBe(true);
   });
 
   it('rejects unsafe or malformed Home Assistant URLs', () => {
@@ -273,6 +321,7 @@ describe('Home Assistant notification presentation', () => {
         attributes: { icon: 'mdi:motion-sensor' },
       },
     });
+
     const lock = present({
       ...notification,
       metadata: {
@@ -290,6 +339,27 @@ describe('Home Assistant notification presentation', () => {
     expect(lock.presentation).toMatchObject({
       subjectIcon: 'mdi:lock-open-alert',
     });
+  });
+
+  it('shows the source entity, raw state, device class, and rule for entity alerts', () => {
+    const presented = present({
+      ...notification,
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'entity_alerts',
+        entityId: 'binary_sensor.front_door_contact',
+        state: 'on',
+        ruleId: 'door-open',
+        attributes: { device_class: 'door' },
+      },
+    });
+
+    expect(presented.presentation?.metadataChips).toEqual([
+      { label: 'Entity', value: 'binary_sensor.front_door_contact' },
+      { label: 'HA state', value: 'on' },
+      { label: 'Device class', value: 'door' },
+      { label: 'Rule', value: 'door-open' },
+    ]);
   });
 
   it('uses Home Assistant generic update artwork when an update has no brand image', () => {

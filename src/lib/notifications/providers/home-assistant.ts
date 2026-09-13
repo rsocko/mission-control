@@ -141,6 +141,18 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
         ? `/api/notifications/${encodeURIComponent(notification.id)}/subject-icon`
         : undefined;
       const subjectIcon = getHomeAssistantMdiIcon(metadata) ?? undefined;
+      const attributes = record(metadata.attributes);
+      const entityAlertDetails: Array<{ label: string; value: string }> = [];
+      if (source === 'entity_alerts') {
+        for (const [label, value] of [
+          ['Entity', text(metadata.entityId)],
+          ['HA state', text(metadata.state)],
+          ['Device class', text(attributes.device_class)],
+          ['Rule', text(metadata.ruleId)],
+        ] as const) {
+          if (value) entityAlertDetails.push({ label, value });
+        }
+      }
 
       return {
         presentation: {
@@ -159,6 +171,7 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
                 ? 'Persistent notification'
                 : 'Device alert',
           providerSignature: 'home-assistant-v2',
+          ...(entityAlertDetails.length ? { metadataChips: entityAlertDetails } : {}),
           richContent: {
             ...(installedVersion || latestVersion ? {
               stats: [

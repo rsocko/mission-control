@@ -929,7 +929,7 @@ function HomeAssistantConnectorEditPanel({
         <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Notification sources</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {([
-            ['entityAlerts', 'Device alerts'],
+            ['entityAlerts', 'Polled device rules'],
             ['updates', 'Updates'],
             ['persistentNotifications', 'Persistent'],
             ['repairs', 'Repairs'],
@@ -947,7 +947,7 @@ function HomeAssistantConnectorEditPanel({
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {([
-            ['entityAlerts', 'entity-alerts', 'Device alerts'],
+            ['entityAlerts', 'entity-alerts', 'Polled device rules'],
             ['updates', 'updates', 'Updates'],
             ['persistentNotifications', 'persistent-notifications', 'Persistent notifications'],
             ['repairs', 'repairs', 'Repairs'],

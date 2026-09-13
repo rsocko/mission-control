@@ -379,6 +379,7 @@ export function MobileSwipeTaskRow({
             )}
             <TaskConnectorSyncState
               compact
+              taskStatus={item.status}
               syncStatus={item.syncStatus}
               connectorType={item.connectorType}
               connectorInstanceId={item.connectorInstanceId}

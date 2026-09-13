@@ -7,6 +7,46 @@ afterEach(() => {
 });
 
 describe('TaskConnectorSyncState', () => {
+  it('shows the synced task outcome instead of a generic confirmation', () => {
+    const { rerender } = render(
+      <TaskConnectorSyncState
+        taskStatus="cancelled"
+        syncStatus="synced"
+        connectorType="microsoft-todo"
+      />,
+    );
+
+    expect(screen.getByText('Cancelled')).toBeVisible();
+    expect(screen.getByText(
+      'Cancelled here and marked complete in Microsoft To Do.',
+    )).toBeVisible();
+    expect(screen.queryByText('Confirmed')).not.toBeInTheDocument();
+
+    rerender(
+      <TaskConnectorSyncState
+        taskStatus="done"
+        syncStatus="synced"
+        connectorType="microsoft-todo"
+      />,
+    );
+
+    expect(screen.getByText('Done')).toBeVisible();
+    expect(screen.getByText('Marked done in Microsoft To Do.')).toBeVisible();
+  });
+
+  it('describes a successful non-terminal change as synced', () => {
+    render(
+      <TaskConnectorSyncState
+        taskStatus="todo"
+        syncStatus="synced"
+        connectorType="microsoft-todo"
+      />,
+    );
+
+    expect(screen.getByText('Synced')).toBeVisible();
+    expect(screen.getByText('Changes synced with Microsoft To Do.')).toBeVisible();
+  });
+
   it('prevents duplicate retries and announces a confirmed retry', async () => {
     vi.spyOn(window.navigator, 'onLine', 'get').mockReturnValue(true);
     let resolveSync!: (value: Response) => void;

@@ -710,6 +710,8 @@ async function writeThrough(
         } else {
           throw new Error('Connector does not support task completion');
         }
+      } else if (updates.status === 'cancelled' && connector.cancelTask) {
+        await connector.cancelTask(claimedTask.sourceId);
       } else if (updates.status === 'cancelled' && connector.closeTaskWithReason) {
         const reason = updates.statusReason === 'duplicate' ? 'duplicate' : 'not_planned';
         await connector.closeTaskWithReason(claimedTask.sourceId, reason);

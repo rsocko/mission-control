@@ -9,6 +9,7 @@ import {
   Loader2,
   RefreshCw,
   ShieldAlert,
+  XCircle,
 } from 'lucide-react';
 import { getConnectorLabel } from '@/lib/constants/colors';
 import { notifyTaskChanged } from '@/lib/task-change-events';
@@ -27,8 +28,8 @@ interface OperationPresentation {
 const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
   confirmed: {
     state: 'confirmed',
-    label: 'Confirmed',
-    detail: (sourceLabel) => `Changes are confirmed by ${sourceLabel}.`,
+    label: 'Synced',
+    detail: (sourceLabel) => `Changes synced with ${sourceLabel}.`,
     className: 'border-emerald-800/40 bg-emerald-950/35 text-emerald-300',
     icon: CheckCircle2,
   },
@@ -77,10 +78,35 @@ const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
   },
 };
 
-export function getTaskOperationPresentation(syncStatus: string | null | undefined) {
+function getSyncedPresentation(taskStatus: string | null | undefined): OperationPresentation {
+  if (taskStatus === 'done') {
+    return {
+      ...PRESENTATIONS.confirmed,
+      label: 'Done',
+      detail: (sourceLabel) => `Marked done in ${sourceLabel}.`,
+    };
+  }
+
+  if (taskStatus === 'cancelled') {
+    return {
+      ...PRESENTATIONS.confirmed,
+      label: 'Cancelled',
+      detail: (sourceLabel) => `Cancelled here and marked complete in ${sourceLabel}.`,
+      className: 'border-slate-700 bg-slate-950/35 text-slate-300',
+      icon: XCircle,
+    };
+  }
+
+  return PRESENTATIONS.confirmed;
+}
+
+export function getTaskOperationPresentation(
+  syncStatus: string | null | undefined,
+  taskStatus?: string | null,
+) {
   switch (syncStatus) {
     case 'synced':
-      return PRESENTATIONS.confirmed;
+      return getSyncedPresentation(taskStatus);
     case 'pending_push':
     case 'pushing':
     case 'move_in_progress':
@@ -99,6 +125,7 @@ export function getTaskOperationPresentation(syncStatus: string | null | undefin
 
 interface TaskConnectorSyncStateProps {
   taskId?: string;
+  taskStatus?: string | null;
   syncStatus?: string | null;
   connectorType: string;
   connectorInstanceId?: string | null;
@@ -109,6 +136,7 @@ interface TaskConnectorSyncStateProps {
 
 export function TaskConnectorSyncState({
   taskId,
+  taskStatus,
   syncStatus,
   connectorType,
   connectorInstanceId,
@@ -116,7 +144,7 @@ export function TaskConnectorSyncState({
   compact = false,
   onRetryComplete,
 }: TaskConnectorSyncStateProps) {
-  const presentation = getTaskOperationPresentation(syncStatus);
+  const presentation = getTaskOperationPresentation(syncStatus, taskStatus);
   const sourceLabel = getConnectorLabel(connectorType);
   const Icon = presentation.icon;
   const canRetry = !compact

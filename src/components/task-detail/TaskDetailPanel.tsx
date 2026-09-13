@@ -780,6 +780,7 @@ export function TaskDetailPanel({
 
         <TaskConnectorSyncState
           taskId={task.id}
+          taskStatus={task.status}
           syncStatus={task.syncStatus}
           connectorType={task.connectorType}
           connectorInstanceId={task.connectorInstanceId}

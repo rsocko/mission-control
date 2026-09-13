@@ -450,6 +450,10 @@ export class MicrosoftTodoConnector implements IConnector {
     if (!res.ok) throw new Error(`Failed to complete task: ${res.status}`);
   }
 
+  async cancelTask(sourceId: string): Promise<void> {
+    await this.completeTask(sourceId);
+  }
+
   private async getCategoriesWithMicroStatus(
     listId: string,
     taskId: string,

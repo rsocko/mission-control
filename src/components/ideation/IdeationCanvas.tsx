@@ -99,6 +99,7 @@ type IdeationCanvasNode = IdeationNode & {
   proposal?: IdeationExpansionProposal;
   onAcceptProposal?: (proposalId: string) => void;
   onDismissProposal?: (proposalId: string) => void;
+  onUpdateProposal?: (proposalId: string, label: string) => void;
   onExpand?: () => void;
 };
 
@@ -368,6 +369,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
   };
 
   if (node.data.proposal) {
+    const proposalName = node.data.label.trim() || 'untitled';
     return (
       <div
         style={style}
@@ -377,7 +379,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
         )}
         data-outline-node-id={node.id}
         role="group"
-        aria-label={`AI suggestion: ${node.data.label}`}
+        aria-label={`AI suggestion: ${proposalName}`}
       >
         <OutlineGuides node={node} active={isOnSelectedPath} />
         <div className="flex h-7 w-full items-center gap-2">
@@ -385,7 +387,22 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
             <span className={styles.outlineNodeDot} data-outline-marker="dot" />
           </span>
           <Sparkles size={13} className="shrink-0 text-violet-300" />
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">{node.data.label}</span>
+          <input
+            type="text"
+            value={node.data.label}
+            maxLength={120}
+            onChange={(event) => {
+              node.data.onUpdateProposal?.(
+                node.data.proposal?.id ?? '',
+                event.currentTarget.value,
+              );
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50 focus:ring-2 focus:ring-violet-400/25"
+            aria-label={`Edit suggestion ${proposalName} in outline`}
+            aria-invalid={!node.data.label.trim()}
+          />
           <button
             ref={propertyToggleRef}
             type="button"
@@ -393,8 +410,9 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
               event.stopPropagation();
               node.data.onAcceptProposal?.(node.data.proposal?.id ?? '');
             }}
-            className="rounded p-1 text-emerald-300 hover:bg-emerald-500/15"
-            aria-label={`Accept suggestion ${node.data.label} in outline`}
+            disabled={!node.data.label.trim()}
+            className="rounded p-1 text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Accept suggestion ${proposalName} in outline`}
           >
             <Check size={13} />
           </button>
@@ -405,7 +423,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
               node.data.onDismissProposal?.(node.data.proposal?.id ?? '');
             }}
             className="rounded p-1 text-[var(--text-tertiary)] hover:bg-white/10 hover:text-white"
-            aria-label={`Dismiss suggestion ${node.data.label} in outline`}
+            aria-label={`Dismiss suggestion ${proposalName} in outline`}
           >
             <X size={13} />
           </button>
@@ -904,17 +922,33 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
   const config = KIND_CONFIG[data.node.kind];
   const Icon = config.icon;
   if (data.node.proposal) {
+    const proposalName = data.node.label.trim() || 'untitled';
     return (
       <div
         className="w-48 rounded-xl border border-dashed border-violet-400/70 bg-violet-500/10 px-3 py-2.5 text-left shadow-lg"
         role="group"
-        aria-label={`AI suggestion: ${data.node.label}`}
+        aria-label={`AI suggestion: ${proposalName}`}
       >
         <Handle type="target" position={Position.Left} isConnectable={false} className="!border-0 !bg-violet-400" />
         <span className="flex items-start gap-2">
           <Sparkles size={14} className="mt-0.5 shrink-0 text-violet-300" />
           <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold text-violet-100">{data.node.label}</span>
+            <input
+              type="text"
+              value={data.node.label}
+              maxLength={120}
+              onChange={(event) => {
+                data.node.onUpdateProposal?.(
+                  data.node.proposal?.id ?? '',
+                  event.currentTarget.value,
+                );
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="nodrag nowheel block w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-semibold text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50 focus:ring-2 focus:ring-violet-400/25"
+              aria-label={`Edit suggestion ${proposalName} in mind map`}
+              aria-invalid={!data.node.label.trim()}
+            />
             <span className="mt-1 block text-[10px] leading-4 text-violet-200/70">{data.node.proposal.rationale}</span>
           </span>
         </span>
@@ -925,8 +959,9 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
               event.stopPropagation();
               data.node.onAcceptProposal?.(data.node.proposal?.id ?? '');
             }}
-            className="rounded-md px-2 py-1 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/15"
-            aria-label={`Accept suggestion ${data.node.label} in mind map`}
+            disabled={!data.node.label.trim()}
+            className="rounded-md px-2 py-1 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Accept suggestion ${proposalName} in mind map`}
           >
             Accept
           </button>
@@ -937,7 +972,7 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
               data.node.onDismissProposal?.(data.node.proposal?.id ?? '');
             }}
             className="rounded-md px-2 py-1 text-[10px] text-violet-200/70 hover:bg-white/10"
-            aria-label={`Dismiss suggestion ${data.node.label} in mind map`}
+            aria-label={`Dismiss suggestion ${proposalName} in mind map`}
           >
             Dismiss
           </button>
@@ -1086,6 +1121,7 @@ export default function IdeationCanvas() {
     acceptOne,
     acceptAll,
     dismissOne,
+    updateProposal,
   } = useIdeationExpansion(nodes, selected);
 
   const canvasNodes = useMemo<IdeationCanvasNode[]>(() => {
@@ -1107,9 +1143,18 @@ export default function IdeationCanvas() {
         proposal,
         onAcceptProposal: acceptOne,
         onDismissProposal: dismissOne,
+        onUpdateProposal: updateProposal,
       })),
     ];
-  }, [acceptOne, dismissOne, expandSelected, expansion, nodes, selectedNodeId]);
+  }, [
+    acceptOne,
+    dismissOne,
+    expandSelected,
+    expansion,
+    nodes,
+    selectedNodeId,
+    updateProposal,
+  ]);
 
   useEffect(() => {
     document.body.dataset.ideationActive = 'true';
@@ -1178,7 +1223,11 @@ export default function IdeationCanvas() {
         )}
         {expansion.status === 'ready' ? (
           <>
-            <Button size="sm" onClick={acceptAll}>
+            <Button
+              size="sm"
+              onClick={acceptAll}
+              disabled={expansion.proposals.some((proposal) => !proposal.label.trim())}
+            >
               <Check /> Accept all ({expansion.proposals.length})
             </Button>
             <Button size="sm" variant="ghost" onClick={clearExpansion}>

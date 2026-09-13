@@ -193,7 +193,6 @@ describe('MobileSwipeTaskRow haptics', () => {
   });
 
   it.each([
-    ['synced', 'Synced'],
     ['pending_push', 'Pending'],
     ['push_error', 'Failed'],
     ['push_failed', 'Blocked'],
@@ -218,6 +217,29 @@ describe('MobileSwipeTaskRow haptics', () => {
     );
 
     expect(screen.getByRole('status', { name: `GitHub Issues sync state: ${label}` })).toBeVisible();
+    expect(screen.getByText('rsocko/mission-control')).toBeVisible();
+  });
+
+  it('keeps the normal synced connector state implicit', () => {
+    render(
+      <MobileSwipeTaskRow
+        item={{
+          ...item,
+          connectorType: 'github-issues',
+          connectorInstanceId: 'github-work',
+          sourceListName: 'rsocko/mission-control',
+          syncStatus: 'synced',
+        }}
+        onComplete={vi.fn()}
+        onRemoveFromDay={vi.fn()}
+        onTap={vi.fn()}
+        onScheduleTomorrow={vi.fn()}
+        onSchedulePickDay={vi.fn()}
+        onSnooze={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole('status', { name: /sync state/i })).not.toBeInTheDocument();
     expect(screen.getByText('rsocko/mission-control')).toBeVisible();
   });
 });

@@ -186,6 +186,7 @@ export function TaskConnectorSyncState({
   };
 
   if (connectorType === 'local' || connectorType === 'mission-control') return null;
+  if (presentation.state === 'confirmed') return null;
 
   if (compact) {
     return (

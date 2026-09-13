@@ -1083,7 +1083,12 @@ async function applyRemoteUpdate(
     || existingTask.connectorType === 'github-issues'
   ) && remote.status === 'todo' &&
     existingTask.status === 'in_progress';
-  const resolvedStatus = remoteStatusIsDowngrade
+  const remoteCompletedRepresentsCancellation = (
+    remote.connectorType === 'microsoft-todo'
+    || existingTask.connectorType === 'microsoft-todo'
+  ) && remote.status === 'done' &&
+    existingTask.status === 'cancelled';
+  const resolvedStatus = remoteStatusIsDowngrade || remoteCompletedRepresentsCancellation
     ? existingTask.status
     : remote.status;
 
@@ -1118,7 +1123,7 @@ async function applyRemoteUpdate(
     microStatus: connectorOwnsMicroStatus
       ? (remote.microStatus || null)
       : existingTask.microStatus,
-    statusReason: connectorOwnsStatusReason
+    statusReason: connectorOwnsStatusReason && !remoteCompletedRepresentsCancellation
       ? (remote.statusReason || null)
       : existingTask.statusReason,
     priority: indexedTask.priority,

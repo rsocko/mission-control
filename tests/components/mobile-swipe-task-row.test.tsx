@@ -193,7 +193,7 @@ describe('MobileSwipeTaskRow haptics', () => {
   });
 
   it.each([
-    ['synced', 'Confirmed'],
+    ['synced', 'Synced'],
     ['pending_push', 'Pending'],
     ['push_error', 'Failed'],
     ['push_failed', 'Blocked'],

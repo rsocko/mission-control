@@ -195,6 +195,7 @@ export function mapStatus(graphStatus: string): TaskItem['status'] {
 export function statusToGraph(status: TaskItem['status']): string {
   switch (status) {
     case 'done': return 'completed';
+    case 'cancelled': return 'completed';
     case 'in_progress': return 'inProgress';
     case 'todo': return 'notStarted';
     default: return 'notStarted';

@@ -398,6 +398,40 @@ describe('push-manager terminal status override', () => {
     }));
   });
 
+  it('uses a connector cancellation mapping instead of deleting the source task', async () => {
+    mockPendingTasks.push({
+      id: 'todo-cancelled',
+      sourceId: 'list-1:task-1',
+      title: 'Cancelled task',
+      description: '',
+      status: 'cancelled',
+      priority: 'none',
+      effort: null,
+      dueDate: null,
+      syncStatus: 'pending_push',
+      isChecklistItem: false,
+      parentId: null,
+      connectorInstanceId: 'todo-1',
+      metadata: '{}',
+      pushRetryCount: 0,
+    });
+    const cancelTask = vi.fn().mockResolvedValue(undefined);
+    const deleteTask = vi.fn().mockResolvedValue(undefined);
+
+    const result = await pushPendingChanges('todo-1', {
+      type: 'microsoft-todo',
+      cancelTask,
+      deleteTask,
+    } as Partial<IConnector> as IConnector);
+
+    expect(result).toMatchObject({ pushed: 1, errors: [] });
+    expect(cancelTask).toHaveBeenCalledWith('list-1:task-1');
+    expect(deleteTask).not.toHaveBeenCalled();
+    expect(mockUpdateSets.at(-1)?.data).toMatchObject({
+      syncStatus: 'synced',
+    });
+  });
+
   it.each([
     ['update', 'todo', { updateTask: vi.fn().mockResolvedValue({ status: 'todo' }) }],
     ['complete', 'done', { completeTask: vi.fn().mockResolvedValue(undefined) }],

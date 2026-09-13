@@ -129,10 +129,12 @@ export interface IConnector {
   /** Mark a task as complete */
   completeTask?(sourceId: string): Promise<void>;
 
+  /** Represent a local cancellation using the closest non-destructive source state. */
+  cancelTask?(sourceId: string): Promise<void>;
+
   /** Close a task with a specific reason (e.g. not_planned, duplicate) */
   closeTaskWithReason?(sourceId: string, reason: 'completed' | 'not_planned' | 'duplicate'): Promise<void>;
 
-  /** Delete a task */
   /** Delete a task */
   deleteTask?(sourceId: string): Promise<void>;
 

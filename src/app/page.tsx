@@ -243,7 +243,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           <div className="flex flex-wrap gap-2 mb-4 items-start">
             <div className={isCollapsed('one-thing') ? 'flex-shrink-0' : 'w-full'}>
               <OneThingBanner
-                onTaskClick={taskSelection.toggleTask}
+                onTaskClick={taskSelection.selectTask}
                 onRefresh={() => actions.setRefreshTrigger((n) => n + 1)}
                 collapsed={isCollapsed('one-thing')}
                 onToggleCollapse={() => toggleSection('one-thing')}
@@ -262,7 +262,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
 
             <div className={isCollapsed('recent-wins') ? 'flex-shrink-0' : 'w-full'}>
               <RecentWins
-                onTaskClick={taskSelection.toggleTask}
+                onTaskClick={taskSelection.selectTask}
                 collapsed={isCollapsed('recent-wins')}
                 onToggleCollapse={() => toggleSection('recent-wins')}
               />
@@ -652,7 +652,6 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                       {...createTaskRowInteractionHandlers({
                         taskId: task.id,
                         bulkMode: state.bulkMode,
-                        onBeforeClick: taskSelection.cancelPendingDeselect,
                         onSelect: taskSelection.handleTaskClick,
                         onDoubleClick: taskSelection.handleTaskDoubleClick,
                         onModifierClick: (_taskId, e) => {

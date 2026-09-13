@@ -321,7 +321,7 @@ function KanbanPageInner() {
         onFixMappings={() => columnsState.setEditingColumns(true)}
         onDragStart={setDragging}
         onDrop={handleDrop}
-        onTaskClick={(task) => setSelectedTaskId((current) => current === task.id ? null : task.id)}
+        onTaskClick={(task) => setSelectedTaskId(task.id)}
         onStartRename={(id, name) => {
           columnsState.setRenamingColumn(id);
           columnsState.setRenameValue(name);

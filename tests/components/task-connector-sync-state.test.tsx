@@ -7,44 +7,34 @@ afterEach(() => {
 });
 
 describe('TaskConnectorSyncState', () => {
-  it('shows the synced task outcome instead of a generic confirmation', () => {
-    const { rerender } = render(
-      <TaskConnectorSyncState
-        taskStatus="cancelled"
-        syncStatus="synced"
-        connectorType="microsoft-todo"
-      />,
-    );
+  it.each(['todo', 'done', 'cancelled'])(
+    'keeps the normal synced state implicit for %s tasks',
+    (taskStatus) => {
+      const { container } = render(
+        <TaskConnectorSyncState
+          taskStatus={taskStatus}
+          syncStatus="synced"
+          connectorType="microsoft-todo"
+        />,
+      );
 
-    expect(screen.getByText('Cancelled')).toBeVisible();
-    expect(screen.getByText(
-      'Cancelled here and marked complete in Microsoft To Do.',
-    )).toBeVisible();
-    expect(screen.queryByText('Confirmed')).not.toBeInTheDocument();
+      expect(container).toBeEmptyDOMElement();
+    },
+  );
 
-    rerender(
-      <TaskConnectorSyncState
-        taskStatus="done"
-        syncStatus="synced"
-        connectorType="microsoft-todo"
-      />,
-    );
-
-    expect(screen.getByText('Done')).toBeVisible();
-    expect(screen.getByText('Marked done in Microsoft To Do.')).toBeVisible();
-  });
-
-  it('describes a successful non-terminal change as synced', () => {
+  it('still surfaces a sync gap', () => {
     render(
       <TaskConnectorSyncState
         taskStatus="todo"
-        syncStatus="synced"
+        syncStatus="pending_push"
         connectorType="microsoft-todo"
       />,
     );
 
-    expect(screen.getByText('Synced')).toBeVisible();
-    expect(screen.getByText('Changes synced with Microsoft To Do.')).toBeVisible();
+    expect(screen.getByText('Pending')).toBeVisible();
+    expect(screen.getByText(
+      'Saved in Mission Control. Waiting for Microsoft To Do to confirm the change.',
+    )).toBeVisible();
   });
 
   it('prevents duplicate retries and announces a confirmed retry', async () => {

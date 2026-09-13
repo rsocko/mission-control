@@ -92,11 +92,15 @@ export async function executeHomeAssistantProviderAction(
       record(context.notification.metadata),
       context.input,
     );
+    const dismissed = action === 'dismiss_persistent_notification';
     return {
+      ...(dismissed ? { state: 'dismissed' as const } : {}),
       result: {
         type: 'home_assistant_action_accepted',
         action,
-        confirmation: 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
+        confirmation: dismissed
+          ? 'Dismissed in Home Assistant and Mission Control.'
+          : 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
       },
     };
   } catch (error) {

@@ -291,7 +291,13 @@ describe('NavRail', () => {
     fireEvent.mouseEnter(screen.getByRole('navigation', { name: 'Main navigation' }));
     act(() => vi.advanceTimersByTime(300));
 
-    expect(pinButton).toHaveClass('opacity-100');
+    expect(pinButton).toHaveClass(
+      'opacity-0',
+      'group-hover:opacity-100',
+      'group-focus-within:opacity-100',
+      'focus:opacity-100',
+      '[@media(hover:none)]:opacity-100',
+    );
   });
 
   it('renders a static brand mark and reveals its name when expanded', () => {
@@ -315,7 +321,13 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[108px]');
+    expect(brandName.parentElement).toHaveClass(
+      'opacity-100',
+      'max-w-[132px]',
+      'group-hover:max-w-[108px]',
+      'group-focus-within:max-w-[108px]',
+      '[@media(hover:none)]:max-w-[108px]',
+    );
   });
 
   it('reflects active Houston work in the brand subtitle', () => {

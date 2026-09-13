@@ -48,7 +48,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
   const {
     handleGraphTaskSelect,
     selectedTaskId,
-    toggleTask,
+    selectTask,
   } = useProjectPageTaskInteractions();
 
   const pulse = useMemo(() => {
@@ -170,7 +170,7 @@ export function ProjectOverviewTab({ active, onOpenPhase }: ProjectOverviewTabPr
                         'flex min-h-10 items-center justify-between gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-4 py-3 cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
                         selectedTaskId === task.id && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
                       )}
-                      onClick={() => toggleTask(task.id)}
+                      onClick={() => selectTask(task.id)}
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2">

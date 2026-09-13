@@ -84,7 +84,7 @@ export function ProjectTasksTab({
     myDayTaskIds,
     openTaskNotes,
     selectedTaskId,
-    toggleTask,
+    selectTask,
   } = useProjectPageTaskInteractions();
 
   const [taskFilterContext, setTaskFilterContext] = useState<TaskFilterContext>(
@@ -318,7 +318,7 @@ export function ProjectTasksTab({
                     <div
                       role="listitem"
                       className="cursor-pointer"
-                      onClick={() => toggleTask(task.id)}
+                      onClick={() => selectTask(task.id)}
                     >
                       <TaskRow
                         task={task}

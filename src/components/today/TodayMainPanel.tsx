@@ -154,7 +154,6 @@ interface TodayMainPanelProps {
     selectedTaskId: string | null;
     selectTask: (taskId: string | null) => void;
     doubleClickTask?: (taskId: string) => void;
-    cancelPendingTaskSelection?: () => void;
   };
   focus: {
     showTimer: boolean;
@@ -229,7 +228,6 @@ export function TodayMainPanel({
   } = taskActions;
   const {
     selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
-    cancelPendingTaskSelection: onCancelPendingTaskSelection,
   } = selection;
   const {
     showTimer, setShowTimer: onSetShowTimer, focusTask, setFocusTask: onSetFocusTask,
@@ -987,18 +985,12 @@ export function TodayMainPanel({
                                       onRemove={(taskId) => { void onRemoveFromDay(taskId); }}
                                       onSelect={onSelectTask}
                                       onDoubleClick={onDoubleClickTask}
-                                      onModifierClick={(taskId, event) => {
-                                        onCancelPendingTaskSelection?.();
-                                        handleModifierClick(taskId, event);
-                                      }}
+                                      onModifierClick={handleModifierClick}
                                       isSelected={selectedTaskId === item.taskId}
                                       isCompleting={completingIds.has(item.taskId)}
                                       bulkMode={bulk.bulkMode}
                                       bulkSelected={bulk.bulkSelected.has(item.taskId)}
-                                      onBulkToggle={() => {
-                                        onCancelPendingTaskSelection?.();
-                                        bulk.toggleItem(item.taskId);
-                                      }}
+                                      onBulkToggle={() => bulk.toggleItem(item.taskId)}
                                       contextMenuActions={getContextMenuActions({
                                         id: item.taskId,
                                         title: item.title,

@@ -111,10 +111,9 @@ interface ProjectPageTaskInteractionsContextValue {
   notesOpenRequest: TaskNotesOpenRequest | null;
   openTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
   clearTaskNotesRequest: () => void;
-  toggleTask: (taskId: string) => void;
+  selectTask: (taskId: string) => void;
   handleTaskClick: (taskId: string) => void;
   handleTaskDoubleClick: (taskId: string) => void;
-  cancelPendingDeselect: () => void;
   handleGraphTaskSelect: (taskId: string | null) => void;
   allProjects: HubProject[];
   completingIds: Set<string>;
@@ -186,10 +185,9 @@ export function ProjectPageProvider({
   const { setQuickAddFilter, clearQuickAddFilter } = useQuickAddContext();
 
   const {
-    cancelPendingDeselect,
     handleTaskClick,
     handleTaskDoubleClick,
-    toggleTask,
+    selectTask,
   } = useTaskSelection({
     selectedTaskId,
     onSelectionChange: (taskId) => {
@@ -201,14 +199,12 @@ export function ProjectPageProvider({
   });
 
   const handleGraphTaskSelect = useCallback((taskId: string | null) => {
-    cancelPendingDeselect();
     setNotesOpenRequest(null);
     setDetailMode('panel');
     setSelectedTaskId(taskId);
-  }, [cancelPendingDeselect, setSelectedTaskId]);
+  }, [setSelectedTaskId]);
 
   const openTaskNotes = useCallback((taskId: string, mode: 'read' | 'edit') => {
-    cancelPendingDeselect();
     setDetailMode('panel');
     setSelectedTaskId(taskId);
     notesRequestIdRef.current += 1;
@@ -217,7 +213,7 @@ export function ProjectPageProvider({
       taskId,
       mode,
     });
-  }, [cancelPendingDeselect, setSelectedTaskId]);
+  }, [setSelectedTaskId]);
 
   const clearTaskNotesRequest = useCallback(() => {
     setNotesOpenRequest(null);
@@ -585,10 +581,9 @@ export function ProjectPageProvider({
     notesOpenRequest,
     openTaskNotes,
     clearTaskNotesRequest,
-    toggleTask,
+    selectTask,
     handleTaskClick,
     handleTaskDoubleClick,
-    cancelPendingDeselect,
     handleGraphTaskSelect,
     allProjects,
     completingIds: taskActions.completingIds,
@@ -614,8 +609,7 @@ export function ProjectPageProvider({
     taskActions.handleCompleteTask,
     taskActions.handleRemoveFromMyDay,
     taskActions.myDayTaskIds,
-    cancelPendingDeselect,
-    toggleTask,
+    selectTask,
   ]);
 
   return (

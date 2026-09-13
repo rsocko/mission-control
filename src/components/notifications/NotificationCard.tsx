@@ -106,6 +106,8 @@ function NotificationActionConfirmation({
       message={
         action?.actionType === 'install_update'
           ? `Install ${String(metadata.latestVersion || 'this update')} on ${String(metadata.instanceName || 'Home Assistant')}? Home Assistant acceptance will be confirmed on the next poll.`
+          : action?.actionType === 'dismiss_persistent_notification'
+            ? `Dismiss this notification in ${String(metadata.instanceName || 'Home Assistant')} and remove it from Mission Control?`
           : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
       }
       confirmLabel={action?.label || 'Confirm'}

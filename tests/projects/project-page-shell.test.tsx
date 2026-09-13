@@ -141,7 +141,7 @@ describe('project detail shell', () => {
 
     const header = (await screen.findByRole('heading', { name: 'Shell Project' })).closest('section');
     expect(header).toHaveClass(
-      'bg-[color-mix(in_srgb,var(--surface-0)_60%,transparent)]',
+      '[background:var(--context-header)]',
       'backdrop-blur-xl',
     );
   });

@@ -162,9 +162,9 @@ export function ProjectOverviewKpis({
   ];
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-12">
-      <Card className="overflow-hidden border-[var(--border-subtle)] md:col-span-2 xl:col-span-5">
-        <CardContent className="grid h-full gap-5 p-5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.85fr)]">
+      <Card className="overflow-hidden border-[var(--border-subtle)]">
+        <CardContent className="grid h-full gap-6 p-5 sm:grid-cols-[7rem_minmax(0,1fr)] sm:items-center sm:p-6">
           <div
             role="img"
             aria-label={`${progress.percentComplete}% of project tasks complete`}
@@ -182,101 +182,99 @@ export function ProjectOverviewKpis({
           </div>
 
           <div className="min-w-0">
-            <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">Project progress</p>
-            <p className="mt-1 text-sm text-[var(--text-secondary)]">
-              {progress.totalTasks > 0
-                ? `${progress.completedTasks} of ${progress.totalTasks} tasks completed`
-                : 'No tasks assigned yet'}
-            </p>
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">Project progress</p>
+              <p className="text-xs tabular-nums text-[var(--text-tertiary)]">
+                {progress.totalTasks > 0
+                  ? `${progress.completedTasks} of ${progress.totalTasks} complete`
+                  : 'No tasks assigned yet'}
+              </p>
+            </div>
             <div className={cn(
-              'mt-4 grid gap-2',
+              'mt-4 grid gap-x-4 gap-y-3 border-y border-[var(--border-subtle)] py-3',
               taskStates.length === 4 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3',
             )}>
               {taskStates.map((item) => (
-                <div key={item.label} className="min-w-0 rounded-lg bg-[var(--surface-0)] px-3 py-2.5">
+                <div key={item.label} className="min-w-0">
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                     <span className="truncate text-xs font-medium text-[var(--text-muted)]">{item.label}</span>
                   </div>
-                  <p className="mt-1 text-lg font-semibold tabular-nums text-[var(--text-primary)]">{item.value}</p>
+                  <p className="mt-1 text-xl font-semibold tabular-nums text-[var(--text-primary)]">{item.value}</p>
                 </div>
               ))}
             </div>
-          </div>
-        </CardContent>
-      </Card>
 
-      <Card className="border-[var(--border-subtle)] xl:col-span-3">
-        <CardContent className="flex h-full flex-col p-5">
-          <p className="text-xs uppercase tracking-[0.08em] text-[var(--text-tertiary)]">In progress</p>
-          <div className="mt-3 flex items-end justify-between gap-3">
-            <p className="text-3xl font-bold tabular-nums text-[var(--text-primary)]">{progress.inProgressTasks}</p>
-            <p className="pb-1 text-xs tabular-nums text-[var(--text-muted)]">
-              {progress.totalTasks > 0 ? `${Math.round(inProgressPercent)}% of tasks` : 'No tasks'}
-            </p>
-          </div>
-          <div
-            role="img"
-            aria-label={`${progress.inProgressTasks} of ${progress.totalTasks} tasks in progress`}
-            className="mt-4 h-2 overflow-hidden rounded-full bg-[var(--surface-3)]"
-          >
-            <div
-              className="h-full rounded-full bg-[var(--accent-500)]"
-              style={{ width: `${Math.min(100, inProgressPercent)}%` }}
-            />
-          </div>
-          <p className="mt-auto pt-4 text-sm leading-5 text-[var(--text-secondary)]">
-            {progress.inProgressTasks > 0 ? 'Active work is moving through the plan.' : 'No active tasks right now.'}
-          </p>
-        </CardContent>
-      </Card>
-
-      <Card className="border-[var(--border-subtle)] md:col-span-2 xl:col-span-4">
-        <CardContent className="flex h-full flex-col p-5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-[var(--text-primary)]">Project pulse</p>
-              <p className="mt-1 text-xs text-[var(--text-tertiary)]">Inferred from current project signals</p>
+            <div className="mt-4">
+              <div className="flex items-center justify-between gap-3 text-xs">
+                <span className="font-medium text-[var(--text-secondary)]">
+                  {progress.inProgressTasks > 0 ? 'Work in motion' : 'No active tasks right now.'}
+                </span>
+                <span className="tabular-nums text-[var(--text-muted)]">
+                  {progress.totalTasks > 0 ? `${Math.round(inProgressPercent)}% of tasks` : 'No tasks'}
+                </span>
+              </div>
+              <div
+                role="img"
+                aria-label={`${progress.inProgressTasks} of ${progress.totalTasks} tasks in progress`}
+                className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-3)]"
+              >
+                <div
+                  className="h-full rounded-full bg-[var(--accent-500)]"
+                  style={{ width: `${Math.min(100, inProgressPercent)}%` }}
+                />
+              </div>
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="border-[var(--border-subtle)]">
+        <CardContent className="flex h-full flex-col p-5 sm:p-6">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-sm font-semibold text-[var(--text-primary)]">Project pulse</p>
             <PulseBadge state={pulse.state} />
           </div>
 
-          <p className="mt-4 text-sm leading-5 text-[var(--text-secondary)]">{pulse.summary}</p>
+          <p className="mt-4 max-w-[52ch] text-sm leading-6 text-[var(--text-secondary)]">{pulse.summary}</p>
 
-          <dl className="mt-4 grid grid-cols-3 divide-x divide-[var(--border-subtle)] border-y border-[var(--border-subtle)] py-3">
-            <div className="min-w-0 pr-3">
-              <dt className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+          <dl className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-2 border-y border-[var(--border-subtle)] py-3">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <dt className="sr-only">Freshness</dt>
+              <dd
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
+                title={pulse.freshness.label}
+              >
                 <Clock3 size={12} aria-hidden="true" />
-                Freshness
-              </dt>
-              <dd className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]" title={pulse.freshness.label}>
                 {pulse.freshness.state === 'fresh' ? 'Fresh' : pulse.freshness.state === 'aging' ? 'Aging' : pulse.freshness.state === 'stale' ? 'Stale' : 'Unknown'}
               </dd>
             </div>
-            <div className="min-w-0 px-3">
-              <dt className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <dt className="sr-only">Trend</dt>
+              <dd
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
+                title={pulse.trend.label}
+              >
                 <TrendIcon size={12} aria-hidden="true" />
-                Trend
-              </dt>
-              <dd className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]" title={pulse.trend.label}>
                 {pulse.trend.state === 'improving' ? 'Improving' : pulse.trend.state === 'worsening' ? 'Worsening' : pulse.trend.state === 'stable' ? 'Stable' : 'Unknown'}
               </dd>
             </div>
-            <div className="min-w-0 pl-3">
-              <dt className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-muted)]">
+            <div className="flex min-w-0 items-center gap-1.5">
+              <dt className="sr-only">Confidence</dt>
+              <dd
+                className="flex items-center gap-1.5 text-xs font-medium text-[var(--text-secondary)]"
+                title={pulse.confidence.label}
+              >
                 <ShieldCheck size={12} aria-hidden="true" />
-                Confidence
-              </dt>
-              <dd className="mt-1 truncate text-xs font-medium text-[var(--text-secondary)]" title={pulse.confidence.label}>
-                {pulse.confidence.level === 'high' ? 'High' : pulse.confidence.level === 'medium' ? 'Medium' : 'Low'}
+                {pulse.confidence.level === 'high' ? 'High confidence' : pulse.confidence.level === 'medium' ? 'Medium confidence' : 'Low confidence'}
               </dd>
             </div>
           </dl>
 
           {supportingReasons.length > 0 && (
-            <ul className="mt-3 space-y-1.5" aria-label="Pulse reasons">
+            <ul className="mt-4 space-y-2" aria-label="Pulse reasons">
               {supportingReasons.map((reason) => (
-                <li key={reason.code} className="flex gap-2 text-xs leading-5 text-[var(--text-secondary)]">
+                <li key={reason.code} className="flex gap-2 text-xs leading-5 text-[var(--text-tertiary)]">
                   <Activity size={13} className="mt-1 shrink-0" style={{ color: pulseVisual.color }} aria-hidden="true" />
                   <span>{reason.detail}</span>
                 </li>
@@ -285,9 +283,9 @@ export function ProjectOverviewKpis({
           )}
 
           {pulse.suggestion && (
-            <div className="mt-3 flex gap-2 border-t border-[var(--border-subtle)] pt-3 text-xs leading-5 text-[var(--text-primary)]">
+            <div className="mt-auto flex gap-2 pt-5 text-xs leading-5 text-[var(--text-primary)]">
               <Lightbulb size={14} className="mt-0.5 shrink-0 text-[var(--accent-400)]" aria-hidden="true" />
-              <p><span className="font-semibold">Next move:</span> {pulse.suggestion}</p>
+              <p><span className="font-semibold">Next:</span> {pulse.suggestion}</p>
             </div>
           )}
         </CardContent>

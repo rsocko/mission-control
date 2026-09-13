@@ -399,7 +399,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
             }}
             onClick={(event) => event.stopPropagation()}
             onKeyDown={(event) => event.stopPropagation()}
-            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50 focus:ring-2 focus:ring-violet-400/25"
+            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50"
             aria-label={`Edit suggestion ${proposalName} in outline`}
             aria-invalid={!node.data.label.trim()}
           />
@@ -945,7 +945,7 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
               }}
               onPointerDown={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
-              className="nodrag nowheel block w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-semibold text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50 focus:ring-2 focus:ring-violet-400/25"
+              className="nodrag nowheel block w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-semibold text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50"
               aria-label={`Edit suggestion ${proposalName} in mind map`}
               aria-invalid={!data.node.label.trim()}
             />

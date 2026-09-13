@@ -233,7 +233,7 @@ export function ProjectPhasesTab({
     openTaskNotes,
     selectedTaskId,
     setSelectedTaskId,
-    toggleTask,
+    selectTask,
   } = useProjectPageTaskInteractions();
   const prefersReducedMotion = useReducedMotion() ?? false;
 
@@ -2020,7 +2020,7 @@ export function ProjectPhasesTab({
                                 tabIndex={0}
                                 title={`${taskBar.task.title} — ${TASK_STATUS_LABELS[taskBar.task.status]}`}
                                 aria-label={`Task: ${taskBar.task.title}, ${TASK_STATUS_LABELS[taskBar.task.status]}`}
-                                onClick={() => toggleTask(taskBar.task.id)}
+                                onClick={() => selectTask(taskBar.task.id)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();

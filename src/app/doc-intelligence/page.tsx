@@ -465,7 +465,7 @@ export default function DocIntelligencePage() {
                         key={task.id}
                         task={task}
                         isSelected={task.id === selectedTaskId}
-                        onClick={() => taskSelection.toggleTask(task.id)}
+                        onClick={() => taskSelection.selectTask(task.id)}
                       />
                     ))}
                   </div>

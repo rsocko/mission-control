@@ -101,9 +101,9 @@ vi.mock('@/lib/hooks/useQuickAddContext', () => ({
 }));
 vi.mock('@/lib/hooks/useTaskSelection', () => ({
   useTaskSelection: ({ onSelectionChange }: { onSelectionChange: (taskId: string) => void }) => ({
+    selectTask: (taskId: string) => onSelectionChange(taskId),
     handleTaskClick: (taskId: string) => onSelectionChange(taskId),
     handleTaskDoubleClick: vi.fn(),
-    cancelPendingDeselect: vi.fn(),
   }),
 }));
 vi.mock('@/lib/hooks/useMyDayData', () => ({

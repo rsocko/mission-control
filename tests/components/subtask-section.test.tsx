@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 describe('SubtaskSection', () => {
-  it('shows accessible reorder handles and identifies local-only ordering', () => {
+  it('shows concise accessible reorder handles without a persistent ordering notice', () => {
     render(
       <SubtaskSection
         taskId="task-1"
@@ -25,15 +25,14 @@ describe('SubtaskSection', () => {
           { id: 'subtask-2', title: 'Second', status: 'todo' },
         ]}
         onSubtasksChange={vi.fn()}
-        orderIsLocalOnly
       />,
     );
 
     expect(screen.getByRole('button', { name: 'Reorder "First"' })).toHaveAttribute(
       'title',
-      'Order is saved in Mission Control only',
+      'Reorder subtask',
     );
-    expect(screen.getByText('Order is saved in Mission Control only.')).toBeInTheDocument();
+    expect(screen.queryByText(/saved in Mission Control only/i)).not.toBeInTheDocument();
   });
 
   it('hides reorder controls when subtasks are read-only', () => {

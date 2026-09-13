@@ -4,13 +4,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
-import { Circle, ListChecks, Loader2, X } from 'lucide-react';
+import { Circle, Info, ListChecks, Loader2, X } from 'lucide-react';
 import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';
 import { useImagePasteHandler } from './TaskAttachmentSection';
 import { LinkedSourcesSection } from './LinkedSourcesSection';
 import { TaskMoveDialog } from './TaskMoveDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Tooltip } from '@/components/ui/Tooltip';
 import type { TaskField } from '@/types';
 import {
   canEditTaskField,
@@ -994,6 +995,17 @@ export function TaskDetailPanel({
               Subtasks
               {task.subtasks && task.subtasks.length > 0 && ` (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`}
             </h3>
+            {canManageSubtasks && !supportsSubtaskOrderWrite && (task.subtasks?.length ?? 0) > 1 && (
+              <Tooltip content="Subtask order is saved in Mission Control only.">
+                <button
+                  type="button"
+                  aria-label="Subtask order is saved in Mission Control only"
+                  className="rounded-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                >
+                  <Info size={12} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
           </div>
           <SubtaskSection
             key={task.id}
@@ -1004,7 +1016,6 @@ export function TaskDetailPanel({
             canEdit={canManageSubtasks}
             canCreateSubtasks={canManageSubtasks}
             orderRevision={task.subtaskOrderRevision ?? 0}
-            orderIsLocalOnly={!supportsSubtaskOrderWrite}
           />
         </section>
 

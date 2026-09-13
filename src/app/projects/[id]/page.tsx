@@ -510,7 +510,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
       animate="show"
     >
       {/* Compact sticky header */}
-      <motion.section ref={stickyHeaderRef} variants={scaleIn} className="sticky top-0 z-20 bg-[color-mix(in_srgb,var(--surface-0)_90%,transparent)] backdrop-blur-xl">
+      <motion.section ref={stickyHeaderRef} variants={scaleIn} className="sticky top-0 z-20 bg-[color-mix(in_srgb,var(--surface-0)_60%,transparent)] backdrop-blur-xl">
         <div className="border-b border-[var(--border)] px-4 sm:px-6">
           {/* Top row: title + stats */}
           <div className="flex items-center gap-3 py-3">

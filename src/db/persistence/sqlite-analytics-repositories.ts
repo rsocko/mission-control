@@ -15,6 +15,7 @@ import {
   sql,
   type SQL,
 } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/sqlite-core';
 import * as schema from '@/db/schema';
 import {
   connectorConfigs,
@@ -26,6 +27,7 @@ import {
   projectPhases,
   routineCompletions,
   routines,
+  sourceLists,
   tags,
   taskHistoryEvents,
   taskProjects,
@@ -278,6 +280,100 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
         .groupBy(tasks.connectorType)
         .orderBy(sql`count(*) DESC`, asc(tasks.connectorType));
       return rows.map((row) => ({ source: row.source, count: Number(row.count) }));
+    },
+
+    async workActivityIn(range) {
+      const active = sql<number>`sum(case when ${tasks.status} not in ('done', 'cancelled') then 1 else 0 end)`;
+      const closed = sql<number>`sum(case when ${completedIn(range)} then 1 else 0 end)`;
+      const canonicalTags = alias(tags, 'canonical_activity_tags');
+      const listKey = sql<string>`coalesce(
+        ${tasks.connectorInstanceId} || ':' || ${tasks.sourceListId},
+        ${tasks.connectorInstanceId} || ':name:' || ${tasks.sourceListName}
+      )`;
+      const listLabel = sql<string>`coalesce(
+        ${sourceLists.userDisplayName},
+        ${sourceLists.name},
+        ${tasks.sourceListName}
+      )`;
+      const tagKey = sql<string>`coalesce(${canonicalTags.id}, ${tags.id})`;
+      const tagLabel = sql<string>`coalesce(${canonicalTags.name}, ${tags.name})`;
+      const relevant = and(
+        eq(tasks.depth, 0),
+        eq(tasks.isChecklistItem, false),
+        sql`(${OPEN_TASK_CONDITION} or ${completedIn(range)})`,
+      );
+      const [listRows, tagRows, projectRows, sourceRows] = await Promise.all([
+        db.select({
+          key: listKey,
+          label: listLabel,
+          active,
+          closed,
+        })
+          .from(tasks)
+          .leftJoin(sourceLists, and(
+            eq(sourceLists.connectorInstanceId, tasks.connectorInstanceId),
+            eq(sourceLists.sourceId, tasks.sourceListId),
+          ))
+          .where(and(
+            relevant,
+            sql`coalesce(${sourceLists.userDisplayName}, ${sourceLists.name}, ${tasks.sourceListName}) is not null`,
+            sql`coalesce(${sourceLists.userDisplayName}, ${sourceLists.name}, ${tasks.sourceListName}) <> ''`,
+          ))
+          .groupBy(listKey, listLabel),
+        db.select({
+          key: tagKey,
+          label: tagLabel,
+          active,
+          closed,
+        })
+          .from(taskTags)
+          .innerJoin(tags, eq(taskTags.tagId, tags.id))
+          .leftJoin(canonicalTags, eq(tags.unifiedInto, canonicalTags.id))
+          .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+          .where(relevant)
+          .groupBy(tagKey, tagLabel),
+        db.select({
+          key: hubProjects.id,
+          label: hubProjects.name,
+          active,
+          closed,
+        })
+          .from(taskProjects)
+          .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+          .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
+          .where(relevant)
+          .groupBy(hubProjects.id, hubProjects.name),
+        db.select({
+          key: tasks.connectorType,
+          label: tasks.connectorType,
+          active,
+          closed,
+        })
+          .from(tasks)
+          .where(relevant)
+          .groupBy(tasks.connectorType),
+      ]);
+      const normalize = (rows: Array<{
+        key: string | null;
+        label: string | null;
+        active: number;
+        closed: number;
+      }>) => rows.flatMap(row => (
+        row.key && row.label
+          ? [{
+              key: row.key,
+              label: row.label,
+              active: Number(row.active),
+              closed: Number(row.closed),
+            }]
+          : []
+      ));
+      return {
+        lists: normalize(listRows),
+        tags: normalize(tagRows),
+        projects: normalize(projectRows),
+        sources: normalize(sourceRows),
+      };
     },
 
     async listOpenTaskCreatedTimestamps() {

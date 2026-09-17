@@ -15,11 +15,13 @@ const mocks = vi.hoisted(() => ({
   listCreatedTimestampsIn: vi.fn(),
   listCompletionSpansIn: vi.fn(),
   listCompletedTaskTimingsIn: vi.fn(),
+  listTopLevelTaskCompletionsIn: vi.fn(),
   listCompletedTimestampsSince: vi.fn(),
   sourceBreakdownIn: vi.fn(),
   workActivityIn: vi.fn(),
   listOpenTaskCreatedTimestamps: vi.fn(),
   listPlanningFrictionEvents: vi.fn(),
+  listMyDayPlanningEvents: vi.fn(),
   listTaskTagNames: vi.fn(),
   listActiveProjects: vi.fn(),
   countProjectTasksCompletedIn: vi.fn(),
@@ -62,11 +64,13 @@ describe('insights configured-timezone bucketing', () => {
     mocks.listCreatedTimestampsIn.mockResolvedValue([]);
     mocks.listCompletionSpansIn.mockResolvedValue([]);
     mocks.listCompletedTaskTimingsIn.mockResolvedValue([]);
+    mocks.listTopLevelTaskCompletionsIn.mockResolvedValue([]);
     mocks.listCompletedTimestampsSince.mockResolvedValue([]);
     mocks.sourceBreakdownIn.mockResolvedValue([]);
     mocks.workActivityIn.mockResolvedValue({ lists: [], tags: [], projects: [], sources: [] });
     mocks.listOpenTaskCreatedTimestamps.mockResolvedValue([]);
     mocks.listPlanningFrictionEvents.mockResolvedValue([]);
+    mocks.listMyDayPlanningEvents.mockResolvedValue([]);
     mocks.listTaskTagNames.mockResolvedValue([]);
     mocks.listActiveProjects.mockResolvedValue([]);
     mocks.countProjectTasksCompletedIn.mockResolvedValue(0);

@@ -9,6 +9,7 @@ import {
   shouldSuppressNonRecurringDuplicate,
   shouldSuppressRecurringMyDaySuccessor,
 } from '@/lib/sync/recurring-task-reconciliation';
+import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
 
 const dailyIdentity = '{"type":"daily","interval":1,"daysOfWeek":[],"dayOfMonth":null,"month":null}';
 const recurringMetadata = JSON.stringify({ recurrence: 'daily', recurrenceIdentity: dailyIdentity });
@@ -23,6 +24,122 @@ describe('recurring task reconciliation', () => {
         metadata: { recurrence: 'weekly', recurrenceIdentity: '{"type":"weekly","interval":1,"daysOfWeek":["monday"],"dayOfMonth":null,"month":null}' },
       }));
     expect(getRecurringSeriesKey({ ...base, metadata: {} })).toBeNull();
+  });
+
+  it('keeps legacy and canonical Microsoft rows compatible during migration', () => {
+    const canonical = canonicalizeLegacyRecurrence({
+      recurrence: 'daily',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        externalSeriesId: 'derived-series',
+        stability: 'derived',
+      },
+      source: {
+        owner: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        support: { status: 'supported', reasons: [] },
+        raw: {},
+      },
+    });
+    const groups = findOpenRecurringTaskDuplicates([
+      {
+        id: 'legacy',
+        sourceId: 'source-legacy',
+        title: 'Water plants',
+        sourceListId: 'list',
+        dueDate: '2026-08-01',
+        updatedAt: '2026-08-01',
+        metadata: recurringMetadata,
+      },
+      {
+        id: 'canonical',
+        sourceId: 'source-canonical',
+        title: 'Water plants',
+        sourceListId: 'list',
+        dueDate: '2026-08-02',
+        updatedAt: '2026-08-02',
+        metadata: JSON.stringify({
+          recurrence: 'daily',
+          recurrenceIdentity: dailyIdentity,
+          canonicalRecurrence: canonical,
+        }),
+      },
+    ], '2026-08-02');
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].keeper.id).toBe('canonical');
+  });
+
+  it('reconciles canonical occurrences across rule revisions', () => {
+    const seriesIdentity = {
+      kind: 'connector' as const,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      externalSeriesId: 'provider-task-1',
+      stability: 'derived' as const,
+    };
+    const source = {
+      owner: 'connector' as const,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      support: { status: 'supported' as const, reasons: [] as const },
+      raw: {},
+    };
+    const daily = canonicalizeLegacyRecurrence({
+      recurrence: 'daily',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity,
+      source,
+    });
+    const weekly = canonicalizeLegacyRecurrence({
+      recurrence: 'weekly',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity,
+      source,
+    });
+    const groups = findOpenRecurringTaskDuplicates([
+      {
+        id: 'daily',
+        sourceId: 'source-daily',
+        title: 'Water plants',
+        sourceListId: 'list',
+        dueDate: '2026-08-01',
+        updatedAt: '2026-08-01',
+        metadata: {
+          recurrence: 'daily',
+          recurrenceIdentity: dailyIdentity,
+          canonicalRecurrence: daily,
+        },
+      },
+      {
+        id: 'weekly',
+        sourceId: 'source-weekly',
+        title: 'Water plants',
+        sourceListId: 'list',
+        dueDate: '2026-08-02',
+        updatedAt: '2026-08-02',
+        metadata: {
+          recurrence: 'weekly',
+          recurrenceIdentity: '{"type":"weekly","interval":1}',
+          canonicalRecurrence: weekly,
+        },
+      },
+    ], '2026-08-02');
+
+    expect(daily.series.id).toBe(weekly.series.id);
+    expect(daily.revision.id).not.toBe(weekly.revision.id);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].keeper.id).toBe('weekly');
   });
 
   it('keeps the nearest upcoming occurrence and removes stale and later copies', () => {

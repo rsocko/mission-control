@@ -1,6 +1,7 @@
 import type { TaskItem } from '@/types';
 import { randomUUID } from 'crypto';
 import { extractMicroStatusFromTags, isMicroStatusTag } from '@/lib/micro-status';
+import { mapMicrosoftTodoRecurrence } from './recurrence-mapper';
 import type { GraphTodoTask, GraphChecklistItem } from './types';
 
 /**
@@ -21,6 +22,23 @@ export function mapGraphTask(
     ?.match(/\[Mission Control Task ID: ([^\]]+)\]/)?.[1];
   const triageItemId = bodyContent
     ?.match(/\[Mission Control Triage ID: ([^\]]+)\]/)?.[1];
+  const recurrenceLabel = graphTask.recurrence
+    ? parseRecurrencePattern(graphTask.recurrence)
+    : null;
+  const canonicalRecurrence = graphTask.recurrence
+    ? mapMicrosoftTodoRecurrence({
+        recurrence: graphTask.recurrence,
+        connectorType,
+        connectorInstanceId,
+        providerTaskId: graphTask.id,
+        dueDate: graphTask.dueDateTime?.dateTime?.slice(0, 10),
+        createdAt: graphTask.createdDateTime,
+        timezone: graphTask.dueDateTime?.timeZone || 'UTC',
+        localTime: extractProviderLocalTime(graphTask.dueDateTime?.dateTime),
+        legacyLabel: recurrenceLabel!,
+        missionControlSeriesId: missionControlTaskId,
+      })
+    : null;
 
   return {
     id: randomUUID(),
@@ -66,8 +84,9 @@ export function mapGraphTask(
       ...(graphTask.linkedResources
         ? { linkedResources: graphTask.linkedResources }
         : {}),
-      recurrence: graphTask.recurrence ? parseRecurrencePattern(graphTask.recurrence) : null,
+      recurrence: recurrenceLabel,
       recurrenceIdentity: graphTask.recurrence ? getRecurrencePatternIdentity(graphTask.recurrence) : null,
+      ...(canonicalRecurrence ? { canonicalRecurrence } : {}),
       missionControlTaskId,
       triageItemId,
     },
@@ -91,13 +110,30 @@ export function mapSubstrateTask(
 ): TaskItem {
   const status = String(subTask.Status || 'NotStarted').toLowerCase();
   const importance = String(subTask.Importance || 'Normal').toLowerCase();
-  const dueDateTime = subTask.DueDateTime as { DateTime?: string } | null;
+  const dueDateTime = subTask.DueDateTime as { DateTime?: string; TimeZone?: string } | null;
   const body = subTask.Body as { Content?: string } | null;
   const categories = (subTask.Categories || []) as string[];
   const completedDt = subTask.CompletedDateTime as { DateTime?: string } | null;
-  const recurrence = parseSubstrateRecurrence(subTask.Recurrence);
+  const missionControlTaskId = body?.Content
+    ?.match(/\[Mission Control Task ID: ([^\]]+)\]/)?.[1];
+  const substrateRecurrence = normalizeSubstrateRecurrence(subTask.Recurrence);
+  const recurrence = substrateRecurrence ? parseRecurrencePattern(substrateRecurrence) : null;
   const recurrenceIdentity = getSubstrateRecurrenceIdentity(subTask.Recurrence);
   const effectiveCreatedAt = String(subTask.CreatedDateTime || parentCreatedAt || new Date().toISOString());
+  const canonicalRecurrence = substrateRecurrence && recurrence
+    ? mapMicrosoftTodoRecurrence({
+        recurrence: substrateRecurrence,
+        connectorType,
+        connectorInstanceId,
+        providerTaskId: String(subTask.Id),
+        dueDate: dueDateTime?.DateTime?.slice(0, 10),
+        createdAt: effectiveCreatedAt,
+        timezone: dueDateTime?.TimeZone || 'UTC',
+        localTime: extractProviderLocalTime(dueDateTime?.DateTime),
+        legacyLabel: recurrence,
+        missionControlSeriesId: missionControlTaskId,
+      })
+    : null;
 
   return {
     id: randomUUID(),
@@ -135,6 +171,8 @@ export function mapSubstrateTask(
       isHiddenList: true,
       recurrence,
       recurrenceIdentity,
+      ...(canonicalRecurrence ? { canonicalRecurrence } : {}),
+      missionControlTaskId,
     },
     syncStatus: 'synced',
     lastSyncedAt: new Date().toISOString(),
@@ -252,10 +290,8 @@ export function parseRecurrencePattern(recurrence: NonNullable<GraphTodoTask['re
     }
 
     case 'absoluteMonthly':
-    case 'relativeMonthly':
       return pattern.interval === 1 ? 'monthly' : `every ${pattern.interval} months`;
     case 'absoluteYearly':
-    case 'relativeYearly':
       return pattern.interval === 1 ? 'yearly' : `every ${pattern.interval} years`;
     default:
       return 'custom';
@@ -276,6 +312,13 @@ export function getRecurrencePatternIdentity(
 }
 
 export function parseSubstrateRecurrence(value: unknown): string | null {
+  const recurrence = normalizeSubstrateRecurrence(value);
+  return recurrence ? parseRecurrencePattern(recurrence) : null;
+}
+
+function normalizeSubstrateRecurrence(
+  value: unknown,
+): NonNullable<GraphTodoTask['recurrence']> | null {
   if (!value || typeof value !== 'object') return null;
   const recurrence = value as {
     Pattern?: {
@@ -285,24 +328,42 @@ export function parseSubstrateRecurrence(value: unknown): string | null {
       DayOfMonth?: number;
       Month?: number;
     };
-    Range?: { Type?: string; StartDate?: string; EndDate?: string };
+    Range?: {
+      Type?: string;
+      StartDate?: string;
+      EndDate?: string;
+      NumberOfOccurrences?: number;
+    };
   };
   if (!recurrence.Pattern?.Type) return null;
 
-  return parseRecurrencePattern({
+  return {
     pattern: {
       type: recurrence.Pattern.Type,
       interval: recurrence.Pattern.Interval || 1,
-      daysOfWeek: recurrence.Pattern.DaysOfWeek,
-      dayOfMonth: recurrence.Pattern.DayOfMonth,
-      month: recurrence.Pattern.Month,
+      ...(recurrence.Pattern.DaysOfWeek
+        ? { daysOfWeek: recurrence.Pattern.DaysOfWeek }
+        : {}),
+      ...(recurrence.Pattern.DayOfMonth !== undefined
+        ? { dayOfMonth: recurrence.Pattern.DayOfMonth }
+        : {}),
+      ...(recurrence.Pattern.Month !== undefined
+        ? { month: recurrence.Pattern.Month }
+        : {}),
     },
     range: {
       type: recurrence.Range?.Type || 'noEnd',
-      startDate: recurrence.Range?.StartDate,
-      endDate: recurrence.Range?.EndDate,
+      ...(recurrence.Range?.StartDate
+        ? { startDate: recurrence.Range.StartDate }
+        : {}),
+      ...(recurrence.Range?.EndDate
+        ? { endDate: recurrence.Range.EndDate }
+        : {}),
+      ...(recurrence.Range?.NumberOfOccurrences !== undefined
+        ? { numberOfOccurrences: recurrence.Range.NumberOfOccurrences }
+        : {}),
     },
-  });
+  };
 }
 
 export function getSubstrateRecurrenceIdentity(value: unknown): string | null {
@@ -328,6 +389,11 @@ export function getSubstrateRecurrenceIdentity(value: unknown): string | null {
     },
     range: { type: 'noEnd' },
   });
+}
+
+function extractProviderLocalTime(value: string | undefined): string | null {
+  const match = value?.match(/^\d{4}-\d{2}-\d{2}T([0-2]\d:[0-5]\d(?::[0-5]\d)?)/);
+  return match?.[1] ?? null;
 }
 
 function extractHashtags(title: string, body?: string, connectorType?: string): Array<{

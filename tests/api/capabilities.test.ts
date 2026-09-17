@@ -402,7 +402,7 @@ describe('task route capability enforcement', () => {
       dueDate: '2026-08-20',
       effort: 4,
       estimatedDuration: 45,
-      recurrence: 'FREQ=WEEKLY',
+      recurrence: 'weekly',
       reminderAt: '2026-08-19T13:00:00.000Z',
       snoozedUntil: '2026-08-06T13:00:00.000Z',
       microStatus: 'waiting',
@@ -427,7 +427,7 @@ describe('task route capability enforcement', () => {
       },
       schedulePatch: expect.objectContaining({
         estimatedDuration: 45,
-        recurrence: 'FREQ=WEEKLY',
+        recurrence: 'weekly',
       }),
       replaceTagIds: ['tag-new'],
     });

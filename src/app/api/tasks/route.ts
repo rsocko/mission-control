@@ -13,7 +13,11 @@ import {
   type SourceRanking,
 } from '@/lib/smart-score';
 import { getLocalToday } from '@/lib/utils/date';
-import { isDemoMode } from '@/lib/mode';
+import { getTimezone, isDemoMode } from '@/lib/mode';
+import {
+  canonicalizeLegacyRecurrence,
+  extractRecurrenceLocalTime,
+} from '@/lib/recurrence/canonical';
 import type { TaskPriority } from '@/types';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import type { ConnectorCapabilities } from '@/types';
@@ -405,6 +409,28 @@ export async function POST(request: Request) {
       if (capabilities.listSelectionMode === 'required' && !sourceListId) {
         return ApiErrors.badRequest(
           `sourceListId is required for ${resolvedConnectorType} connector`,
+        );
+      }
+    }
+    if (recurrence) {
+      try {
+        metadata.canonicalRecurrence = canonicalizeLegacyRecurrence({
+          recurrence,
+          mode: recurrenceMode,
+          startDate: typeof dueDate === 'string'
+            ? dueDate.slice(0, 10)
+            : getLocalToday(),
+          localTime: extractRecurrenceLocalTime(dueDate, getTimezone()),
+          timezone: getTimezone(),
+          seriesIdentity: {
+            kind: 'mission-control',
+            stableId: id,
+            ...(isRemote ? { connectorInstanceId } : {}),
+          },
+        });
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid recurrence',
         );
       }
     }

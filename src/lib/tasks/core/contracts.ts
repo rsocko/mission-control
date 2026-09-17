@@ -14,6 +14,7 @@
  */
 
 import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
+import type { TaskMetadata } from '@/lib/recurrence/canonical';
 import type {
   QuickSortBeforeSnapshot,
   QuickSortTaskSnapshot,
@@ -499,7 +500,7 @@ export interface TaskCoreTaskRow {
   readonly assignee: string | null;
   readonly microStatus: string | null;
   readonly statusReason: string | null;
-  readonly metadata: Record<string, unknown>;
+  readonly metadata: TaskMetadata;
   readonly syncStatus: string;
   readonly lastSyncedAt: string;
   readonly pushRetryCount: number;

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
 
 vi.mock('@/lib/semantic-index/publication-service', () => ({
   publishSemanticEntityDelete: vi.fn(async () => undefined),
@@ -97,11 +98,13 @@ describe('completion-anchored task recurrence', () => {
 
     const occurrences = sqlite.prepare('SELECT * FROM tasks ORDER BY created_at').all() as Array<Record<string, unknown>>;
     expect(occurrences).toHaveLength(2);
-    expect(occurrences.find((task) => task.id === id)).toMatchObject({
+    const completedOccurrence = occurrences.find((task) => task.id === id);
+    const nextOccurrence = occurrences.find((task) => task.id === first.recurrenceNextTaskId);
+    expect(completedOccurrence).toMatchObject({
       status: 'done',
       description: 'Use the rain barrel',
     });
-    expect(occurrences.find((task) => task.id === first.recurrenceNextTaskId)).toMatchObject({
+    expect(nextOccurrence).toMatchObject({
       status: 'todo',
       title: 'Water plants',
       description: 'Use the rain barrel',
@@ -110,6 +113,29 @@ describe('completion-anchored task recurrence', () => {
       reminder_relative: '1_day_before',
       reminder_due_time: '09:00',
     });
+    const completedMetadata = parseTaskMetadataCompat(
+      completedOccurrence?.metadata,
+    ).metadata as {
+      canonicalRecurrence: {
+        series: { id: string };
+        revision: { id: string };
+        semantics: { mode: string; timezone: { dstPolicy: string } };
+      };
+    };
+    const nextMetadata = parseTaskMetadataCompat(nextOccurrence?.metadata)
+      .metadata as typeof completedMetadata;
+    expect(completedMetadata.canonicalRecurrence).toMatchObject({
+      semantics: {
+        mode: 'completion',
+        timezone: { dstPolicy: 'preserve-wall-clock' },
+      },
+    });
+    expect(nextMetadata.canonicalRecurrence.series.id).toBe(
+      completedMetadata.canonicalRecurrence.series.id,
+    );
+    expect(nextMetadata.canonicalRecurrence.revision.id).toBe(
+      completedMetadata.canonicalRecurrence.revision.id,
+    );
     expect(sqlite.prepare('SELECT * FROM task_tags WHERE task_id = ?')
       .all(first.recurrenceNextTaskId)).toHaveLength(1);
     expect(sqlite.prepare('SELECT * FROM task_projects WHERE task_id = ?')
@@ -129,6 +155,53 @@ describe('completion-anchored task recurrence', () => {
     }), { params: Promise.resolve({ id }) });
     expect(reopenResponse.status).toBe(200);
     expect(sqlite.prepare('SELECT id FROM tasks').all()).toHaveLength(2);
+  });
+
+  it('persists the shifted wall time for a successor in a DST gap', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-07T07:30:00.000Z'));
+    try {
+      const createResponse = await createTask(new Request('http://localhost/api/tasks', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: 'DST gap task',
+          connectorType: 'local',
+          dueDate: '2026-03-07T07:30:00.000Z',
+          recurrence: 'daily',
+          recurrenceMode: 'completion',
+        }),
+      }));
+      expect(createResponse.status).toBe(201);
+      const { id } = await createResponse.json() as { id: string };
+
+      const response = await patchTask(new Request(`http://localhost/api/tasks/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'done' }),
+      }), { params: Promise.resolve({ id }) });
+      expect(response.status).toBe(200);
+      const { recurrenceNextTaskId } = await response.json() as {
+        recurrenceNextTaskId: string;
+      };
+      const successor = sqlite.prepare(
+        'SELECT due_date FROM tasks WHERE id = ?',
+      ).get(recurrenceNextTaskId) as { due_date: string };
+      const schedule = sqlite.prepare(
+        'SELECT scheduled_date, scheduled_time FROM task_schedules WHERE task_id = ?',
+      ).get(recurrenceNextTaskId) as {
+        scheduled_date: string;
+        scheduled_time: string;
+      };
+
+      expect(successor.due_date).toBe('2026-03-08T07:30:00.000Z');
+      expect(schedule).toEqual({
+        scheduled_date: '2026-03-08',
+        scheduled_time: '03:30',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('rejects completion anchoring for connector-owned tasks', async () => {
@@ -153,6 +226,64 @@ describe('completion-anchored task recurrence', () => {
         title: 'Incomplete recurrence',
         connectorType: 'local',
         recurrenceMode: 'completion',
+      }),
+    }));
+
+    expect(response.status).toBe(400);
+  });
+
+  it('preserves series identity and creates a new rule revision when cadence changes', async () => {
+    const createResponse = await createTask(new Request('http://localhost/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Review goals',
+        connectorType: 'local',
+        dueDate: '2026-08-03',
+        recurrence: 'daily',
+      }),
+    }));
+    expect(createResponse.status).toBe(201);
+    const { id } = await createResponse.json() as { id: string };
+    const readRule = () => {
+      const row = sqlite.prepare('SELECT metadata FROM tasks WHERE id = ?')
+        .get(id) as { metadata: unknown };
+      return (parseTaskMetadataCompat(row.metadata).metadata as {
+        canonicalRecurrence: {
+          series: { id: string };
+          revision: { id: string };
+          semantics: { pattern: unknown };
+        };
+      }).canonicalRecurrence;
+    };
+    const original = readRule();
+
+    const updateResponse = await patchTask(new Request(`http://localhost/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recurrence: 'weekly' }),
+    }), { params: Promise.resolve({ id }) });
+    expect(updateResponse.status).toBe(200);
+    const revised = readRule();
+
+    expect(revised.series.id).toBe(original.series.id);
+    expect(revised.revision.id).not.toBe(original.revision.id);
+    expect(revised.semantics.pattern).toEqual({
+      type: 'weekly',
+      interval: 1,
+      daysOfWeek: ['monday'],
+    });
+  });
+
+  it('rejects unsupported local recurrence strings instead of approximating them', async () => {
+    const response = await createTask(new Request('http://localhost/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Ambiguous recurrence',
+        connectorType: 'local',
+        dueDate: '2026-08-03',
+        recurrence: 'sometimes',
       }),
     }));
 

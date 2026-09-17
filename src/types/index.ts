@@ -1,4 +1,5 @@
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { TaskMetadata } from '@/lib/recurrence/canonical';
 
 // ─── CORE TYPES ─────────────────────────────────────────────────────────────
 
@@ -136,7 +137,7 @@ export interface TaskItem {
 
   assignee?: string;
 
-  metadata: Record<string, unknown>;
+  metadata: TaskMetadata;
   /** Non-public connector evidence consumed after legacy source identity resolution. */
   externalIdentity?: ExternalIdentityEvidence;
   /** Non-public parent endpoint evidence used only for relationship identity comparison. */

@@ -63,6 +63,21 @@ export interface SavedView {
   iconColor?: string;
   filters: Record<string, string>;
   filterContext?: TaskFilterContext;
+  presentation?: {
+    sortBy: string;
+    sortDirection: 'asc' | 'desc';
+    groupBy: string;
+    viewDensity: 'compact' | 'comfortable';
+  };
+}
+
+export interface SavedQuickFilter {
+  id: string;
+  name: string;
+  icon: string;
+  iconColor?: string;
+  filters: Record<string, string>;
+  filterContext?: TaskFilterContext;
 }
 
 export interface ConnectorCaps {

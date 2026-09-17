@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Image from 'next/image';
-import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Pencil, Trash2 } from 'lucide-react';
+import { Check, Globe, CheckCircle2, PanelLeftClose, PanelLeftOpen, Search, ChevronRight, Sun, ChevronsUpDown, ChevronsDownUp, FolderOpen, List, Flame, Star, Clock, User, Tag, Bookmark, Sparkles, Settings2, Eye, EyeOff, X, Hourglass, Inbox, CalendarDays, CalendarX2, Filter, Pencil, Plus, Trash2 } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { ConnectorIcon, SourceListIcon } from '@/components/sources/SourceIcons';
@@ -20,6 +20,7 @@ import type {
   DashboardTaskTagViewModel as TaskTag,
   EnabledSource,
   ListGroup,
+  SavedQuickFilter,
   SavedView,
   SourceList,
 } from '@/types/dashboard';
@@ -53,6 +54,7 @@ interface SidebarFiltersProps {
     allTags: TaskTag[];
     projects: HubProject[];
     savedViews: SavedView[];
+    savedQuickFilters?: SavedQuickFilter[];
     allSourceCounts: Record<string, number>;
     loading: boolean;
     quickFilterCountsAvailable?: boolean;
@@ -68,6 +70,7 @@ interface SidebarFiltersProps {
     statusFilter: string[];
     hiddenQuickFilters: string[];
     quickFilterVisibility: Record<string, QuickFilterVisibility>;
+    activeSavedQuickFilterId?: string | null;
   };
   sidebar: {
     sidebarExpanded: boolean;
@@ -99,6 +102,11 @@ interface SidebarFiltersProps {
     applyView: (view: SavedView) => void;
     editView?: (view: SavedView) => void;
     deleteView?: (id: string) => void;
+    startNewQuickFilter?: () => void;
+    applyQuickFilter?: (filter: SavedQuickFilter) => void;
+    clearSavedQuickFilter?: () => void;
+    editQuickFilter?: (filter: SavedQuickFilter) => void;
+    deleteQuickFilter?: (id: string) => void;
     setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
   };
   computed: {
@@ -111,13 +119,13 @@ interface SidebarFiltersProps {
 export function SidebarFilters({ data, filters, sidebar, actions, computed }: SidebarFiltersProps) {
   const {
     taskResponse, enabledSources, sourceLists, listGroups, allTags,
-    projects, savedViews, allSourceCounts, loading,
+    projects, savedViews, savedQuickFilters = [], allSourceCounts, loading,
     quickFilterCountsAvailable = true,
   } = data;
   const {
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter,
-    hiddenQuickFilters, quickFilterVisibility,
+    hiddenQuickFilters, quickFilterVisibility, activeSavedQuickFilterId,
   } = filters;
   const {
     sidebarExpanded, sidebarMode, collapsedSections, expandedSourceLists, collapsedListGroups,
@@ -128,6 +136,8 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
     setPriorityFilter, setStatusFilter,
     setSidebarExpanded, setSidebarMode, toggleSection, setExpandedSourceLists, setCollapsedListGroups,
     setListSearch, setTagSearch, setTagsExpanded, applyView, editView, deleteView,
+    startNewQuickFilter, applyQuickFilter, clearSavedQuickFilter,
+    editQuickFilter, deleteQuickFilter,
     setQuickFilterVisibility,
   } = actions;
   const {
@@ -395,6 +405,17 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           >
             <Settings2 size={11} />
           </button>
+          {startNewQuickFilter ? (
+            <button
+              type="button"
+              onClick={startNewQuickFilter}
+              className="rounded p-0.5 text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
+              title="Save current filters as a quick filter"
+              aria-label="Save current filters as a quick filter"
+            >
+              <Plus size={12} />
+            </button>
+          ) : null}
         </div>
         {showFilterSettings && (
           <div className="mb-2 p-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
@@ -444,6 +465,50 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
               onClick={() => setQuickFilter(quickFilter === filter.id ? null : filter.id)}
             />
           ))}
+          {savedQuickFilters.map((filter) => {
+            const active = activeSavedQuickFilterId === filter.id;
+            return (
+              <div key={filter.id} className="group flex items-center">
+                <div className="min-w-0 flex-1">
+                  <SidebarNavItem
+                    icon={(
+                      <IconRenderer
+                        value={filter.icon}
+                        size={14}
+                        color={filter.iconColor}
+                        fallback={<Filter size={14} />}
+                      />
+                    )}
+                    label={filter.name}
+                    count={0}
+                    active={active}
+                    onClick={() => {
+                      if (active) clearSavedQuickFilter?.();
+                      else applyQuickFilter?.(filter);
+                    }}
+                  />
+                </div>
+                {editQuickFilter ? <button
+                  type="button"
+                  onClick={() => editQuickFilter(filter)}
+                  className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-[color,opacity] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label={`Edit ${filter.name}`}
+                  title={`Edit ${filter.name}`}
+                >
+                  <Pencil size={12} />
+                </button> : null}
+                {deleteQuickFilter ? <button
+                  type="button"
+                  onClick={() => deleteQuickFilter(filter.id)}
+                  className="rounded p-1 text-[var(--text-muted)] opacity-0 transition-[color,opacity] hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label={`Delete ${filter.name}`}
+                  title={`Delete ${filter.name}`}
+                >
+                  <Trash2 size={12} />
+                </button> : null}
+              </div>
+            );
+          })}
         </div>
         )}
       </div>

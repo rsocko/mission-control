@@ -8,13 +8,14 @@ Replace the card-filled Matrix with one **density-aware scatter renderer** that 
 
 | Preset | X-axis | Y-axis | Default size | Default color | Primary question |
 |---|---|---|---|---|---|
-| Priority x Urgency | Urgency | Priority | Smart Score | Project | What deserves attention now? |
+| Priority x Urgency | Due-date urgency | Priority | Smart Score | Project | What deserves attention now? |
 | Priority x Effort | Effort | Priority | Smart Score | Urgency | What work provides the best return? |
+| Priority x Horizon | Horizon | Priority | Smart Score | Urgency | What have I committed to next? |
 
 Users can change the visual channels independently:
 
 - **Size:** Smart Score, Effort, Urgency, or Uniform
-- **Color:** Project, Urgency, Status, or Priority
+- **Color:** Project, Urgency, Status, Priority, Horizon, or Tag
 
 Changing a visual channel must not change task position. Persist axis, size, and color selections as view preferences.
 
@@ -92,6 +93,8 @@ Overdue tasks share an urgency value of 100 and receive an additional overdue ri
 
 This curve is intentionally independent of the current binary `<= 3 days` classifier. The quadrant split for Priority x Urgency remains at urgency `50`, roughly distinguishing near-term work from later work.
 
+Horizon never supplies a synthetic urgency value. An undated task remains at urgency `0` even when its Horizon is `Next`; planning intent and deadline pressure stay independently visible.
+
 ### Effort
 
 Mission Control already stores effort as an optional integer from 1 to 5. Normalize it with:
@@ -133,6 +136,17 @@ Use the existing configured effort labels in tooltips and axis ticks. Do not der
 
 The dividing line between high and low priority sits between Medium and High. The effort split sits between values 3 and 4.
 
+### Priority x Horizon
+
+Priority x Horizon is categorical rather than continuous. Render four equal columns ordered **Someday → Later → Soon → Next** and retain the existing priority bands. Tasks without a Horizon appear under Needs data for this preset instead of being assigned a position.
+
+Flag material mismatches without relying on color:
+
+- `Later` or `Someday` with a deadline three days away or already overdue;
+- `Next` with a deadline at least 30 days away.
+
+Each warning opens the existing task detail workflow so the user can reconcile the deadline or Horizon.
+
 ## Visual encoding
 
 ### Dot size
@@ -160,6 +174,8 @@ The base diameter remains between 8 and 18 CSS pixels. Scale that range up to 1.
 - **Urgency:** `0..19` slate, `20..49` blue, `50..64` amber, `65..94` orange, `95..100` red.
 - **Status:** existing status colors.
 - **Priority:** existing priority colors.
+- **Horizon:** existing Horizon colors.
+- **Tag:** stable tag colors; multi-tag tasks use the same segmented-marker treatment as multi-project tasks.
 
 Priority x Urgency defaults to Project because urgency is already encoded by position. Priority x Effort defaults to Urgency because urgency is absent from the axes. An overdue ring reinforces overdue state without relying on color alone.
 
@@ -227,9 +243,9 @@ Both cluster inspection and zoom are part of the replacement release:
 
 The implementation toolbar contains:
 
-1. Axis preset segmented control: Priority x Urgency / Priority x Effort
+1. Axis preset control: Priority x Urgency / Priority x Effort / Priority x Horizon
 2. Size select: Smart Score / Effort / Urgency / Uniform
-3. Color select: Project / Urgency / Status / Priority
+3. Color select: Project / Urgency / Status / Priority / Horizon / Tag
 4. Table/Matrix toggle
 5. Zoom slider and Reset controls
 

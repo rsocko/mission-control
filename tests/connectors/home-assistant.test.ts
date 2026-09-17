@@ -693,6 +693,29 @@ describe('Home Assistant REST client', () => {
       'Home Assistant request failed: HTTP 400: Entity update.router does not support installation',
     );
   });
+
+  it('accepts an update install timeout after Home Assistant starts the service call', async () => {
+    const timeout = new DOMException('The operation was aborted due to timeout', 'TimeoutError');
+    globalThis.fetch = vi.fn(async () => {
+      throw timeout;
+    });
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.callService(
+      'update',
+      'install',
+      { entity_id: 'update.router' },
+      { acceptOnTimeout: true },
+    )).resolves.toBeUndefined();
+    await expect(client.callService(
+      'update',
+      'skip',
+      { entity_id: 'update.router' },
+    )).rejects.toBe(timeout);
+  });
 });
 
 describe('HomeAssistantConnector', () => {
@@ -858,6 +881,11 @@ describe('HomeAssistantConnector', () => {
 
   it('uses only stored notification metadata for an update action target', async () => {
     const calls: Array<{ domain: string; service: string; data: Record<string, unknown> }> = [];
+    const callService = vi.fn(
+      async (domain: string, service: string, data: Record<string, unknown>) => {
+        calls.push({ domain, service, data });
+      },
+    );
     const connector = new HomeAssistantConnector();
     await connector.initialize(config);
     Object.assign(connector, {
@@ -870,9 +898,7 @@ describe('HomeAssistantConnector', () => {
             supported_features: 9,
           },
         }],
-        callService: async (domain: string, service: string, data: Record<string, unknown>) => {
-          calls.push({ domain, service, data });
-        },
+        callService,
       },
     });
 
@@ -886,6 +912,12 @@ describe('HomeAssistantConnector', () => {
       service: 'install',
       data: { entity_id: 'update.router', backup: true },
     }]);
+    expect(callService).toHaveBeenCalledWith(
+      'update',
+      'install',
+      { entity_id: 'update.router', backup: true },
+      { acceptOnTimeout: true, timeoutMs: 5_000 },
+    );
   });
 
   it('skips an available update through the update service', async () => {

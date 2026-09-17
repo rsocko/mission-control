@@ -137,6 +137,8 @@ describe.skipIf(!connectionString)('PostgreSQL analytics runtime behaviour', () 
         repository.insights.listCompletionSpansIn(range),
         repository.insights.listCompletedTimestampsSince(range.startInclusive),
         repository.insights.sourceBreakdownIn(range),
+        repository.insights.countCurrentTasksByPriority(),
+        repository.insights.countCurrentTasksByStatus(),
         repository.insights.listOpenTaskCreatedTimestamps(),
         repository.insights.listPlanningFrictionEvents(['due_date_pushed'], range),
         repository.insights.listActiveProjects(),

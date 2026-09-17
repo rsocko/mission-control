@@ -16,6 +16,10 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
     },
     trends: [],
     sourceBreakdown: [],
+    taskBreakdown: {
+      byPriority: [],
+      byStatus: [],
+    },
     taskAge: [
       { label: '< 1 day', count: 2, minDays: 0, maxDays: 1 },
       { label: '1–7 days', count: 5, minDays: 1, maxDays: 7 },

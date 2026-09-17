@@ -91,6 +91,17 @@ export interface SourceBreakdownItem {
   percentage: number;
 }
 
+export interface TaskBreakdownItem {
+  value: string;
+  count: number;
+  percentage: number;
+}
+
+export interface TaskBreakdown {
+  byPriority: TaskBreakdownItem[];
+  byStatus: TaskBreakdownItem[];
+}
+
 export interface ProjectActivityItem {
   projectId: string;
   projectName: string;
@@ -159,6 +170,7 @@ export interface InsightsSnapshot {
   };
   trends: TrendDataPoint[];
   sourceBreakdown: SourceBreakdownItem[];
+  taskBreakdown: TaskBreakdown;
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
   projectActivity: ProjectActivityItem[];
@@ -193,6 +205,7 @@ export interface InsightsSummarySection {
   kpis: InsightsSnapshot['kpis'];
   trends: TrendDataPoint[];
   sourceBreakdown: SourceBreakdownItem[];
+  taskBreakdown: TaskBreakdown;
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
 }
@@ -331,6 +344,35 @@ export async function getSourceBreakdown(
     count: Number(r.count),
     percentage: total > 0 ? Math.round((Number(r.count) / total) * 100) : 0,
   }));
+}
+
+function buildTaskBreakdown(
+  rows: Array<{ value: string; count: number }>,
+  values: readonly string[],
+): TaskBreakdownItem[] {
+  const counts = new Map(rows.map((row) => [row.value, Number(row.count)]));
+  const total = values.reduce((sum, value) => sum + (counts.get(value) ?? 0), 0);
+  return values.map((value) => {
+    const count = counts.get(value) ?? 0;
+    return {
+      value,
+      count,
+      percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+    };
+  });
+}
+
+async function getTaskBreakdown(
+  repository: InsightsAnalyticsRepository,
+): Promise<TaskBreakdown> {
+  const [priorityRows, statusRows] = await Promise.all([
+    repository.countCurrentTasksByPriority(),
+    repository.countCurrentTasksByStatus(),
+  ]);
+  return {
+    byPriority: buildTaskBreakdown(priorityRows, ['critical', 'high', 'medium', 'low', 'none']),
+    byStatus: buildTaskBreakdown(statusRows, ['todo', 'in_progress', 'done', 'cancelled']),
+  };
 }
 
 async function getTaskAgeDistribution(
@@ -754,6 +796,7 @@ export async function computeInsightsSection(
       streak,
       trends,
       sourceBreakdown,
+      taskBreakdown,
       taskAge,
       planningFriction,
     ] = await Promise.all([
@@ -766,6 +809,7 @@ export async function computeInsightsSection(
       getStreak(repository),
       getCompletionTrends(repository, periodStart, periodEnd),
       getSourceBreakdown(periodStart, periodEnd),
+      getTaskBreakdown(repository),
       getTaskAgeDistribution(repository),
       getPlanningFriction(repository, periodStart, periodEnd),
     ]);
@@ -810,6 +854,7 @@ export async function computeInsightsSection(
       },
       trends,
       sourceBreakdown,
+      taskBreakdown,
       taskAge,
       planningFriction,
     };
@@ -915,6 +960,7 @@ export async function computeInsights(
     kpis: summary.kpis,
     trends: summary.trends,
     sourceBreakdown: summary.sourceBreakdown,
+    taskBreakdown: summary.taskBreakdown,
     taskAge: summary.taskAge,
     planningFriction: summary.planningFriction,
     projectActivity: activity.projectActivity,

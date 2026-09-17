@@ -74,6 +74,9 @@ vi.mock('@/components/insights/LeadTimeChart', () => ({
 vi.mock('@/components/insights/ActivityHeatmap', () => ({
   ActivityHeatmap: () => <div data-testid="activity-heatmap" />,
 }));
+vi.mock('@/components/insights/TaskBreakdownChart', () => ({
+  TaskBreakdownChart: () => <div data-testid="task-breakdown-chart" />,
+}));
 vi.mock('@/components/insights/FlowInsightsSection', () => ({
   FlowInsightsSection: () => <section aria-label="Flow reports">Flow reports</section>,
 }));
@@ -97,6 +100,10 @@ const insightsPayload = {
   },
   trends: [],
   sourceBreakdown: [],
+  taskBreakdown: {
+    byPriority: [{ value: 'high', count: 3, percentage: 100 }],
+    byStatus: [{ value: 'todo', count: 3, percentage: 100 }],
+  },
   taskAge: [],
   planningFriction: {
     signalsInPeriod: 5,
@@ -255,6 +262,8 @@ describe('InsightsPage', () => {
     expect(latestInsightsRequest().searchParams.get('interval')).toBe('week');
     expect(fetchSpy).toHaveBeenCalledWith('/api/insights/observations?period=7');
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
+    expect(screen.getByTestId('task-breakdown-chart')).toBeInTheDocument();
+    expect(screen.getByText('Current task mix')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText('Planning friction')).toBeInTheDocument();

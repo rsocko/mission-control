@@ -90,6 +90,10 @@ const snapshot = {
   },
   trends: [],
   sourceBreakdown: [],
+  taskBreakdown: {
+    byPriority: [],
+    byStatus: [],
+  },
   taskAge: [],
   planningFriction: {
     signalsInPeriod: 0,

@@ -67,6 +67,11 @@ export interface AnalyticsSourceCount {
   count: number;
 }
 
+export interface AnalyticsDimensionCount {
+  value: string;
+  count: number;
+}
+
 export interface AnalyticsProject {
   id: string;
   name: string;
@@ -213,6 +218,8 @@ export interface InsightsAnalyticsRepository {
     startInclusive: AnalyticsInstant,
   ): Promise<Array<AnalyticsInstant | null>>;
   sourceBreakdownIn(range: AnalyticsInstantRange): Promise<AnalyticsSourceCount[]>;
+  countCurrentTasksByPriority(): Promise<AnalyticsDimensionCount[]>;
+  countCurrentTasksByStatus(): Promise<AnalyticsDimensionCount[]>;
   listOpenTaskCreatedTimestamps(): Promise<AnalyticsInstant[]>;
   listPlanningFrictionEvents(
     eventTypes: readonly string[],

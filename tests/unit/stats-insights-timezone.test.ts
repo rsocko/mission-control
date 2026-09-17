@@ -18,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   listTopLevelTaskCompletionsIn: vi.fn(),
   listCompletedTimestampsSince: vi.fn(),
   sourceBreakdownIn: vi.fn(),
+  countCurrentTasksByPriority: vi.fn(),
+  countCurrentTasksByStatus: vi.fn(),
   workActivityIn: vi.fn(),
   listOpenTaskCreatedTimestamps: vi.fn(),
   listPlanningFrictionEvents: vi.fn(),
@@ -67,6 +69,8 @@ describe('insights configured-timezone bucketing', () => {
     mocks.listTopLevelTaskCompletionsIn.mockResolvedValue([]);
     mocks.listCompletedTimestampsSince.mockResolvedValue([]);
     mocks.sourceBreakdownIn.mockResolvedValue([]);
+    mocks.countCurrentTasksByPriority.mockResolvedValue([]);
+    mocks.countCurrentTasksByStatus.mockResolvedValue([]);
     mocks.workActivityIn.mockResolvedValue({ lists: [], tags: [], projects: [], sources: [] });
     mocks.listOpenTaskCreatedTimestamps.mockResolvedValue([]);
     mocks.listPlanningFrictionEvents.mockResolvedValue([]);
@@ -81,6 +85,34 @@ describe('insights configured-timezone bucketing', () => {
     mocks.listRoutineCompletionsInHalfOpenRange.mockResolvedValue([]);
     mocks.countRoutineCompletionsByDate.mockResolvedValue([]);
   });
+
+  it('fills missing priority and status buckets with zero counts', async () => {
+    mocks.countCurrentTasksByPriority.mockResolvedValue([
+      { value: 'high', count: 3 },
+      { value: 'none', count: 1 },
+    ]);
+    mocks.countCurrentTasksByStatus.mockResolvedValue([
+      { value: 'todo', count: 2 },
+      { value: 'done', count: 2 },
+    ]);
+    const { computeInsightsSection } = await import('@/lib/stats/insights');
+
+    const result = await computeInsightsSection('summary', 7);
+
+    expect(result.taskBreakdown.byPriority).toEqual([
+      { value: 'critical', count: 0, percentage: 0 },
+      { value: 'high', count: 3, percentage: 75 },
+      { value: 'medium', count: 0, percentage: 0 },
+      { value: 'low', count: 0, percentage: 0 },
+      { value: 'none', count: 1, percentage: 25 },
+    ]);
+    expect(result.taskBreakdown.byStatus).toEqual([
+      { value: 'todo', count: 2, percentage: 50 },
+      { value: 'in_progress', count: 0, percentage: 0 },
+      { value: 'done', count: 2, percentage: 50 },
+      { value: 'cancelled', count: 0, percentage: 0 },
+    ]);
+  }, 10_000);
 
   it('uses configured today and buckets bare UTC timestamps into local dates', async () => {
     mocks.countTasksCompletedIn.mockResolvedValue(1);

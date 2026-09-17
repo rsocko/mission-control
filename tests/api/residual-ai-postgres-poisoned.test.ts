@@ -96,6 +96,10 @@ const snapshot = {
     commitmentRate: 0,
   },
   sourceBreakdown: [],
+  taskBreakdown: {
+    byPriority: [],
+    byStatus: [],
+  },
   taskAge: [],
   planningFriction: {
     signalsInPeriod: 0,

@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { PullToRefreshIndicator } from '@/components/ui/PullToRefreshIndicator';
 import { ActivityHeatmap } from '@/components/insights/ActivityHeatmap';
+import { TaskBreakdownChart } from '@/components/insights/TaskBreakdownChart';
 import { ProductivityPatterns } from '@/components/insights/ProductivityPatterns';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
@@ -526,6 +527,16 @@ export function MobileInsightsScreen({ onBack }: MobileInsightsScreenProps) {
                 <motion.div variants={fadeSlideUp} className="mt-3">
                   <ProductivityPatterns data={snapshot.productivity} className="mb-0" />
                 </motion.div>
+
+                <motion.section variants={fadeSlideUp} className="mt-3 rounded-[22px] p-4" style={GLASS_STYLE}>
+                  <div className="mb-4">
+                    <p className="text-sm font-semibold text-white">Current task mix</p>
+                    <p className="mt-1 text-xs text-[var(--text-muted)]">
+                      Priority and status across active top-level tasks
+                    </p>
+                  </div>
+                  <TaskBreakdownChart data={snapshot.taskBreakdown} compact />
+                </motion.section>
 
                 <motion.section variants={fadeSlideUp} className="mt-3 rounded-[22px] p-4" style={GLASS_STYLE}>
                   <div className="mb-3 flex items-center justify-between gap-3">

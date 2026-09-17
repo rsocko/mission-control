@@ -18,6 +18,7 @@ import { WorkActivityChart } from '@/components/insights/WorkActivityChart';
 import { DeliveryTrendChart } from '@/components/insights/DeliveryTrendChart';
 import { LeadTimeChart } from '@/components/insights/LeadTimeChart';
 import { ActivityHeatmap } from '@/components/insights/ActivityHeatmap';
+import { TaskBreakdownChart } from '@/components/insights/TaskBreakdownChart';
 import { ProductivityPatterns } from '@/components/insights/ProductivityPatterns';
 import type {
   DeliveryInterval,
@@ -457,6 +458,24 @@ function InsightsPageContent() {
             ) : null}
 
             {sectionLoading.summary ? (
+              <GroupSkeleton label="Loading task breakdown" className="mb-6 h-56" />
+            ) : summary ? (
+              <motion.section
+                variants={fadeSlideUp}
+                className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
+                aria-labelledby="task-breakdown-heading"
+              >
+                <div className="mb-5">
+                  <h3 id="task-breakdown-heading" className="text-base font-semibold">Current task mix</h3>
+                  <p className="mt-1 text-xs text-slate-400">
+                    A present-tense inventory snapshot. Priority excludes completed and cancelled work.
+                  </p>
+                </div>
+                <TaskBreakdownChart data={summary.taskBreakdown} />
+              </motion.section>
+            ) : null}
+
+            {sectionLoading.summary ? (
               <GroupSkeleton label="Loading planning friction insights" className="mb-6 h-64" />
             ) : summary ? (
               <PlanningFrictionSection
@@ -533,7 +552,7 @@ function InsightsPageContent() {
                 </div>
               </div>
 
-              <p className="mb-3 text-[0.7rem] text-slate-500">
+              <p className="mb-3 text-xs text-slate-500">
                 {delivery.deliverySemantics.intervals} {delivery.deliverySemantics.exclusions}
               </p>
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -545,7 +564,7 @@ function InsightsPageContent() {
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-semibold tabular-nums text-emerald-400">{delivery.delivery.throughput.total}</div>
-                      <div className="text-[0.65rem] text-slate-500">
+                      <div className="text-xs text-slate-500">
                         {delivery.delivery.throughput.averagePerInterval} average / {interval}
                       </div>
                     </div>
@@ -977,7 +996,7 @@ function ObservationCard({ observation }: { observation: AIObservation }) {
 
   return (
     <div className="rounded-xl bg-slate-800 border border-slate-700/70 p-4 hover:border-blue-500/20 transition-colors">
-      <div className={cn('text-[0.6rem] font-bold uppercase tracking-widest mb-2', config.color)}>
+      <div className={cn('mb-2 text-xs font-bold uppercase tracking-widest', config.color)}>
         {config.label}
       </div>
       <h4 className="text-sm font-semibold">{observation.title}</h4>

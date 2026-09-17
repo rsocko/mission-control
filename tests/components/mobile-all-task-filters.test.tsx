@@ -122,4 +122,20 @@ describe('MobileTaskFilters', () => {
     fireEvent.click(screen.getByRole('button', { name: /Any horizon/ }));
     expect(props.onPlanningHorizonClear).toHaveBeenCalledTimes(1);
   });
+
+  it('virtualizes source-list pickers above 50 lists', () => {
+    const manyLists = Array.from({ length: 51 }, (_, index) => ({
+      id: `list-${index}`,
+      sourceId: `source-list-${index}`,
+      connectorInstanceId: 'github-connector',
+      name: `List ${index}`,
+      taskCount: index,
+      groupId: null,
+    }));
+
+    renderFilters({ sourceLists: manyLists });
+
+    expect(document.querySelector('[data-virtualized="true"]')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /List 50/ })).not.toBeInTheDocument();
+  });
 });

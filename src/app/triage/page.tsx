@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, Clock, Grid3x3, Inbox, List, Loader2, Maximize2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
@@ -33,6 +34,7 @@ import { cn } from '@/lib/utils/cn';
 import { buildActionTitle } from '@/lib/triage/actions/build-task-title';
 import { toast } from 'sonner';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {
   TriageActionRecord,
   TriageActionType,
@@ -208,6 +210,14 @@ export default function TriagePage() {
     if (actionTypeFilter) result = result.filter((item) => !isInboxTask(item) && item.actionsTaken.some((a) => a.actionType === actionTypeFilter));
     return result;
   }, [items, contentTypeFilter, actionTypeFilter]);
+  const virtualizeStream = viewMode === 'stream' && shouldVirtualizeList(filteredItems.length);
+  const streamVirtualizer = useVirtualizer({
+    count: virtualizeStream ? filteredItems.length : 0,
+    getScrollElement: () => triagePullRef.current,
+    getItemKey: (index) => filteredItems[index]?.id ?? index,
+    estimateSize: () => 280,
+    overscan: 4,
+  });
 
   const contentTypeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -763,7 +773,7 @@ export default function TriagePage() {
           ) : null}
 
           {/* Scrollable queue content */}
-          <div className="relative flex-1 overflow-auto p-3" ref={triagePullRef} {...triagePullProps}>
+          <div className="relative flex-1 overflow-auto p-3" ref={triagePullRef} data-triage-scroll {...triagePullProps}>
             {/* Pull-to-refresh indicator — absolutely positioned */}
             {triagePullDistance > 0 && (
               <div className="absolute left-0 right-0 top-0 z-50 flex items-center justify-center pointer-events-none sm:hidden" style={{ height: `${triagePullDistance}px` }}>
@@ -778,7 +788,7 @@ export default function TriagePage() {
               </div>
             ) : null}
             {viewMode === 'gallery' ? (
-              <TriageGalleryView items={filteredItems} selectedId={selectedId} onSelect={setSelectedId} onAction={(id, actionType) => void handleItemAction(id, actionType)} busyAction={busyAction} loading={loading} density={galleryDensity} onDensityChange={updateDensity} />
+              <TriageGalleryView items={filteredItems} selectedId={selectedId} onSelect={setSelectedId} onAction={(id, actionType) => void handleItemAction(id, actionType)} busyAction={busyAction} loading={loading} density={galleryDensity} onDensityChange={updateDensity} scrollRef={triagePullRef} />
             ) : viewMode === 'focus' ? (
               <FocusView items={filteredItems} selectedId={selectedId} onSelect={setSelectedId} onAction={(id, actionType) => void handleItemAction(id, actionType)} busyAction={busyAction} loading={loading} embedsEnabled={embedsEnabled} />
             ) : loading ? (
@@ -786,8 +796,30 @@ export default function TriagePage() {
             ) : filteredItems.length === 0 ? (
               <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center"><Inbox size={24} className="text-[var(--text-tertiary)]" /><div className="text-sm font-medium text-[var(--text-primary)]">No inbox items match these filters.</div><div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture something new.</div></div>
             ) : (
-              <div ref={triageListRef} className="space-y-3">
-                {filteredItems.map((item) => (
+              <div ref={virtualizeStream ? undefined : triageListRef} className={virtualizeStream ? '' : 'space-y-3'}>
+                {virtualizeStream ? (
+                  <div
+                    role="presentation"
+                    data-virtualized="true"
+                    className="relative w-full"
+                    style={{ height: `${streamVirtualizer.getTotalSize()}px` }}
+                  >
+                    {streamVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const item = filteredItems[virtualRow.index];
+                      return (
+                        <div
+                          key={virtualRow.key}
+                          ref={streamVirtualizer.measureElement}
+                          data-index={virtualRow.index}
+                          className="absolute left-0 top-0 w-full pb-3"
+                          style={{ transform: `translateY(${virtualRow.start}px)` }}
+                        >
+                          <TriageStreamItem item={item} isSelected={selectedItem?.id === item.id} isBulkSelected={bulk.bulkSelected.has(item.id)} bulkMode={bulk.bulkMode} onSelect={() => setSelectedId(item.id)} onBulkToggle={() => bulk.toggleItem(item.id)} onAction={(id, actionType) => void handleItemAction(id, actionType)} embedsEnabled={embedsEnabled} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : filteredItems.map((item) => (
                   <TriageStreamItem key={item.id} item={item} isSelected={selectedItem?.id === item.id} isBulkSelected={bulk.bulkSelected.has(item.id)} bulkMode={bulk.bulkMode} onSelect={() => setSelectedId(item.id)} onBulkToggle={() => bulk.toggleItem(item.id)} onAction={(id, actionType) => void handleItemAction(id, actionType)} embedsEnabled={embedsEnabled} />
                 ))}
                 {canLoadMore ? (

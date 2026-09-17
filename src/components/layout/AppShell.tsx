@@ -87,10 +87,12 @@ export function ConnectorHealthIssue({
 }
 
 function ToolbarRow({
+  features,
   health,
   showHealthTooltip,
   setShowHealthTooltip,
 }: {
+  features: FeatureFlags | null;
   health: HealthData | null;
   showHealthTooltip: boolean;
   setShowHealthTooltip: (v: boolean) => void;
@@ -113,7 +115,7 @@ function ToolbarRow({
       <div className={`${widthClass} flex flex-shrink-0 items-center gap-2 pl-4 transition-[width] duration-200`}>
         <AppHistoryControls />
         <div className="min-w-0 flex-1">
-          <SearchCommand />
+          <SearchCommand features={features} />
         </div>
       </div>
       {/* Center: QuickAddBar */}
@@ -377,6 +379,7 @@ function AppShellInner({
         {features?.taskCreation !== false && (
           <div className="relative z-40 hidden sm:block">
             <ToolbarRow
+              features={features}
               health={health}
               showHealthTooltip={showHealthTooltip}
               setShowHealthTooltip={setShowHealthTooltip}

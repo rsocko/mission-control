@@ -69,7 +69,7 @@ async function queueHomeAssistantReconciliation(
       err: error,
       connectorId,
       notificationId,
-    }, 'Failed to queue Home Assistant dismissal reconciliation');
+    }, 'Failed to queue Home Assistant action reconciliation');
   }
 }
 
@@ -176,7 +176,7 @@ export async function POST(
         });
       }
       if (
-        action.actionType === 'dismiss_persistent_notification'
+        HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
         && notification.connectorInstanceId
       ) {
         await queueHomeAssistantReconciliation(notification.connectorInstanceId, id);

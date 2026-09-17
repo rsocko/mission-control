@@ -114,7 +114,7 @@ export const useDashboardViewStore = create<DashboardViewState>()(
         matrixAxisMode: v,
         matrixColorMode: get().matrixColorCustomized
           ? get().matrixColorMode
-          : (v === 'priority-effort' ? 'urgency' : 'project'),
+          : (v === 'priority-urgency' ? 'project' : 'urgency'),
       }),
       setMatrixSizeMode: (v) => set({ matrixSizeMode: v }),
       setMatrixColorMode: (v) => set({ matrixColorMode: v, matrixColorCustomized: true }),

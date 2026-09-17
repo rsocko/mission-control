@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { GripVertical, Pin, PinOff, Plus, X } from 'lucide-react';
 import {
   DndContext, closestCenter, KeyboardSensor, PointerSensor,
@@ -15,7 +15,12 @@ import { toast } from 'sonner';
 import {
   KPI_REGISTRY, KPI_PRESETS, MAX_KPI_CARDS,
 } from '@/lib/kpi/registry';
-import { getStoredConfig, saveConfig, type KpiBarConfig } from '@/components/kpi/KpiBar';
+import {
+  getStoredConfig,
+  normalizeConfig,
+  saveConfig,
+  type KpiBarConfig,
+} from '@/components/kpi/KpiBar';
 import {
   Select,
   SelectTrigger,
@@ -52,12 +57,19 @@ function SortableKpiItem({ slug, isPinned, onTogglePin, onRemove }: {
       style={style}
       className="flex items-center gap-3 px-3 py-2.5 bg-[var(--surface-1)] border border-[var(--border)] rounded-lg group"
     >
-      <button {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-secondary)]">
+      <button
+        type="button"
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+        aria-label={`Reorder ${def.label}`}
+      >
         <GripVertical size={16} />
       </button>
       <span className="flex-1 text-sm text-[var(--text-primary)]">{def.label}</span>
       <span className="text-xs text-[var(--text-muted)] capitalize">{def.category.replace('_', ' ')}</span>
       <button
+        type="button"
         onClick={onTogglePin}
         className={`p-1 rounded transition-colors ${
           isPinned
@@ -69,6 +81,7 @@ function SortableKpiItem({ slug, isPinned, onTogglePin, onRemove }: {
         {isPinned ? <Pin size={14} /> : <PinOff size={14} />}
       </button>
       <button
+        type="button"
         onClick={onRemove}
         className="p-1 rounded text-[var(--text-muted)] hover:text-red-400 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus:opacity-100 transition-opacity"
         title="Remove card"
@@ -87,6 +100,7 @@ function AddKpiButton({ selectedSlugs, onAdd }: { selectedSlugs: string[]; onAdd
 
   const categories = {
     task_counts: available.filter(d => d.category === 'task_counts'),
+    planning: available.filter(d => d.category === 'planning'),
     progress: available.filter(d => d.category === 'progress'),
     integrations: available.filter(d => d.category === 'integrations'),
   };
@@ -96,21 +110,54 @@ function AddKpiButton({ selectedSlugs, onAdd }: { selectedSlugs: string[]; onAdd
   return (
     <div className="relative">
       <button
+        type="button"
         onClick={() => setOpen(!open)}
         className="flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors"
+        aria-expanded={open}
       >
         <Plus size={14} /> Add KPI
       </button>
       {open && (
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
-          <div className="absolute top-full left-0 mt-2 z-50 bg-[var(--surface-2)] border border-[var(--border)] rounded-lg shadow-xl p-3 w-72">
+          <div className="absolute top-full left-0 mt-2 z-50 max-h-[min(32rem,70vh)] w-72 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-3 shadow-xl">
             <p className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2">Add KPI Card</p>
             {categories.task_counts.length > 0 && (
               <>
                 <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mt-2 mb-1">Task Counts</p>
                 {categories.task_counts.map(def => (
                   <button
+                    type="button"
+                    key={def.slug}
+                    onClick={() => { onAdd(def.slug); setOpen(false); }}
+                    className="w-full text-left flex items-center gap-2 px-2 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-1)] rounded transition-colors"
+                  >
+                    {def.label}
+                  </button>
+                ))}
+              </>
+            )}
+            {categories.planning.length > 0 && (
+              <>
+                <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mt-2 mb-1">Planning</p>
+                {categories.planning.map(def => (
+                  <button
+                    type="button"
+                    key={def.slug}
+                    onClick={() => { onAdd(def.slug); setOpen(false); }}
+                    className="w-full text-left flex items-center gap-2 px-2 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-1)] rounded transition-colors"
+                  >
+                    {def.label}
+                  </button>
+                ))}
+              </>
+            )}
+            {categories.integrations.length > 0 && (
+              <>
+                <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mt-2 mb-1">Integrations</p>
+                {categories.integrations.map(def => (
+                  <button
+                    type="button"
                     key={def.slug}
                     onClick={() => { onAdd(def.slug); setOpen(false); }}
                     className="w-full text-left flex items-center gap-2 px-2 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-1)] rounded transition-colors"
@@ -125,6 +172,7 @@ function AddKpiButton({ selectedSlugs, onAdd }: { selectedSlugs: string[]; onAdd
                 <p className="text-xs font-semibold text-[var(--text-muted)] uppercase mt-2 mb-1">Progress & Habits</p>
                 {categories.progress.map(def => (
                   <button
+                    type="button"
                     key={def.slug}
                     onClick={() => { onAdd(def.slug); setOpen(false); }}
                     className="w-full text-left flex items-center gap-2 px-2 py-1.5 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-1)] rounded transition-colors"
@@ -145,30 +193,27 @@ function AddKpiButton({ selectedSlugs, onAdd }: { selectedSlugs: string[]; onAdd
 
 export function DashboardKpiSettings() {
   const [config, setConfigState] = useState<KpiBarConfig>(getStoredConfig);
-  const [currentPreset, setCurrentPreset] = useState<string>('custom');
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
 
-  // Detect current preset
-  useEffect(() => {
+  const currentPreset = useMemo(() => {
     for (const [key, preset] of Object.entries(KPI_PRESETS)) {
       if (
         config.cards.length === preset.slugs.length &&
         config.cards.every((s, i) => s === preset.slugs[i])
       ) {
-        setCurrentPreset(key);
-        return;
+        return key;
       }
     }
-    setCurrentPreset('custom');
+    return 'custom';
   }, [config.cards]);
 
   const updateConfig = useCallback((update: Partial<KpiBarConfig>) => {
     setConfigState(prev => {
-      const next = { ...prev, ...update };
+      const next = normalizeConfig({ ...prev, ...update });
       saveConfig(next);
       return next;
     });
@@ -194,17 +239,29 @@ export function DashboardKpiSettings() {
   }, [updateConfig]);
 
   const togglePin = useCallback((slug: string) => {
-    const pinned = config.pinned.includes(slug)
-      ? config.pinned.filter(s => s !== slug)
-      : [...config.pinned, slug];
-    updateConfig({ pinned });
-  }, [config.pinned, updateConfig]);
+    if (config.pinned.includes(slug)) {
+      updateConfig({ pinned: config.pinned.filter(s => s !== slug) });
+      return;
+    }
+    if (config.pinned.length >= MAX_KPI_CARDS) {
+      toast.error(`You can pin up to ${MAX_KPI_CARDS} KPIs`);
+      return;
+    }
+    updateConfig({
+      pinned: [...config.pinned, slug],
+      visibleSlots: Math.max(config.visibleSlots, config.pinned.length + 1),
+    });
+  }, [config.pinned, config.visibleSlots, updateConfig]);
 
   const removeCard = useCallback((slug: string) => {
+    if (config.cards.length === 1) {
+      toast.error('Keep at least one dashboard KPI');
+      return;
+    }
     updateConfig({
       cards: config.cards.filter(s => s !== slug),
       pinned: config.pinned.filter(s => s !== slug),
-      visibleSlots: Math.max(1, Math.min(config.visibleSlots, config.cards.length - 1)),
+      visibleSlots: Math.max(3, Math.min(config.visibleSlots, config.cards.length - 1)),
     });
   }, [config, updateConfig]);
 
@@ -218,7 +275,7 @@ export function DashboardKpiSettings() {
       <div>
         <h2 className="text-lg font-semibold text-[var(--text-primary)]">Dashboard KPIs</h2>
         <p className="text-sm text-[var(--text-tertiary)] mt-1">
-          Drag to reorder. Max {MAX_KPI_CARDS} cards.
+          Choose and reorder your KPI pool. Up to {MAX_KPI_CARDS} cards are visible at once; extras rotate in.
         </p>
       </div>
 

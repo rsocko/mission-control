@@ -203,6 +203,33 @@ describe('Home Assistant source transformers', () => {
       });
   });
 
+  it('does not show installation progress when Home Assistant reports no percentage', () => {
+    const [notification] = buildUpdateNotifications({
+      ...common,
+      states: [{
+        entity_id: 'update.influxdb_update',
+        state: 'on',
+        attributes: {
+          friendly_name: 'InfluxDB',
+          installed_version: '5.0.2',
+          latest_version: '6.0.0',
+          update_percentage: null,
+          supported_features: 1,
+        },
+      }],
+      criticalEntityPatterns: [],
+      updatePush: 'daily_summary',
+      immediateCriticalUpdates: true,
+    });
+
+    expect(notification.metadata).toMatchObject({
+      inProgress: false,
+      updatePercentage: null,
+    });
+    expect(homeAssistantNotificationProvider.signatures[0].present(notification)
+      .presentation?.richContent?.progress).toBeUndefined();
+  });
+
   it('identifies Supervisor add-on updates as app updates', () => {
     const notifications = buildUpdateNotifications({
       ...common,

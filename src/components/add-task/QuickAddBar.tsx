@@ -41,7 +41,7 @@ import {
 } from '@/lib/quick-add-preferences';
 import type { QuickAddProject } from '@/lib/parse-task-input';
 import { DestinationPicker } from './DestinationPicker';
-import type { QuickAddPendingTask } from './quick-add-types';
+import type { QuickAddDestination, QuickAddPendingTask } from './quick-add-types';
 import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
 import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
 import { getLocalToday } from '@/lib/utils/client-date';
@@ -140,6 +140,37 @@ export function scrollListTypeaheadSelectionIntoView(
   container
     ?.querySelector<HTMLElement>(`[data-list-typeahead-index="${index}"]`)
     ?.scrollIntoView({ block: 'nearest' });
+}
+
+export function getQuickAddSlashDestinations(
+  destinations: QuickAddDestination[],
+  query: string,
+): QuickAddDestination[] {
+  const normalizedQuery = query.toLowerCase().trim();
+  if (normalizedQuery.includes(':')) return [];
+
+  return destinations
+    .filter((destination) =>
+      Boolean(destination.listId) || destination.listSelectionMode !== 'required'
+    )
+    .filter((destination) => {
+      if (!normalizedQuery) return true;
+      return [
+        destination.listName,
+        destination.shortLabel,
+        destination.label,
+        destination.groupName,
+        destination.connectorType,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedQuery);
+    })
+    .sort((a, b) => {
+      if (Boolean(a.listId) !== Boolean(b.listId)) return a.listId ? -1 : 1;
+      return (a.shortLabel ?? a.label).localeCompare(b.shortLabel ?? b.label);
+    });
 }
 
 function isPendingSubtask(task: PendingTask): boolean {
@@ -305,7 +336,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     ...quickAddPreferences,
     projects: cachedProjects,
   }), [quickAddPreferences, cachedProjects]);
-  const modalInput = input.replace(/^\/\S+\s/, '');
+  const modalInput = input;
   const parsedInputForModal = useMemo(
     () => modalInput.trim() ? parseInputForSubmit(modalInput) : null,
     [modalInput, parseInputForSubmit],
@@ -336,23 +367,12 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     contextProjectIdRef.current = nextProjectId;
   }, [visibleContextProject?.id]);
 
-  // Derive typeahead state from input — active when typing `/query` (at start or after a space, no space after it yet)
+  // Derive destination typeahead state from `/query`.
   const listTypeahead = (() => {
-    const match = input.match(/(?:^|\s)\/(\S*)$/); // typing /... at start or after space, no trailing space
+    const match = input.match(/(?:^|\s)\/(\S*)$/);
     if (!match) return null;
     const query = match[1].toLowerCase();
-    const listDests = destinations.filter(d => d.listName);
-    if (listDests.length === 0) return null;
-
-    // Substring match: /ideation → acme/ideation, /shop → Shopping
-    const matches = query
-      ? listDests.filter(d => {
-          const name = d.listName!.toLowerCase();
-          // Match anywhere in the name, or match each segment individually
-          return name.includes(query)
-            || name.replace(/[\s/]/g, '-').includes(query);
-        })
-      : listDests; // Show all lists when just `/` is typed
+    const matches = getQuickAddSlashDestinations(destinations, query);
     return matches.length > 0 ? { query, matches } : null;
   })();
 
@@ -551,7 +571,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     scrollListTypeaheadSelectionIntoView(listTypeaheadScrollRef.current, listTypeaheadIndex);
   }, [listTypeaheadIndex, listTypeahead?.query]);
 
-  // Accept a typeahead list selection: set destination pill and strip the /query from input
+  // Accept a destination selection: set the pill and strip /query from the input.
   const acceptListTypeahead = useCallback((dest: (typeof destinations)[number]) => {
     // Animate the token "flying" from the input to the destination pill
     const editorEl = barRef.current?.querySelector('[data-lexical-editor]');
@@ -581,20 +601,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       const result = parseInput(input);
       setParsed(result);
 
-      // Check for /listname to quick-select a list (only after space = selection finalized)
-      // Supports /listname at start or mid-text (e.g., "buy milk /garage stuff")
+      // Check for a finalized /destination token.
       const slashMatch = input.match(/(?:^|\s)\/(\S+)\s/);
       if (slashMatch) {
         const listQuery = slashMatch[1].toLowerCase();
-        // Substring match: /ideation → acme/ideation
-        const listDest = destinations.find(d =>
-          d.listName && (
-            d.listName.toLowerCase().includes(listQuery)
-            || d.listName.toLowerCase().replace(/[\s/]/g, '-').includes(listQuery)
-          )
-        );
-        if (listDest) {
-          selectDestination(listDest, { manual: true });
+        const slashDestination = getQuickAddSlashDestinations(destinations, listQuery)[0];
+        if (slashDestination) {
+          selectDestination(slashDestination, { manual: true });
           // Remove the /slug portion, keep text before and after it
           const cleaned = input.replace(/(?:^|\s)\/\S+\s/, ' ').trim();
           setInput(cleaned);
@@ -607,17 +620,6 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         }
       }
 
-      // Auto-detect destination from parsed result
-      if (result.destination === 'work') {
-        const workDest = destinations.find(d => d.account === 'work');
-        if (workDest) selectDestination(workDest, { manual: true });
-      } else if (result.destination === 'github') {
-        const ghDest = destinations.find(d => d.connectorType === 'github-issues');
-        if (ghDest) selectDestination(ghDest, { manual: true });
-      } else if (result.destination === 'personal') {
-        const personalDest = destinations.find(d => d.account === 'personal');
-        if (personalDest) selectDestination(personalDest, { manual: true });
-      }
     } else {
       setParsed(null);
     }
@@ -764,6 +766,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         },
         onMyDayAddFailed: (taskId, status) => {
           taskLogger.error('Failed to add task to My Day', { taskId, status });
+          toast.error('Task created, but it could not be added to My Day.');
         },
       }, {
         plan,
@@ -785,7 +788,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         setPendingTasks([]);
         setParsed(null);
         setCompoundSplitHint(null);
-        const myDaySuffix = myDayActive ? ' · ☀️ My Day' : '';
+        const myDaySuffix = myDayActive || result.singleTaskMeta?.addToMyDay ? ' · My Day' : '';
         const toastDestSuffix = `${destination.account ? ` · ${destination.account}` : ''}${myDaySuffix}`;
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
         setInlineToast({
@@ -892,7 +895,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   }, [listTypeahead, handleSubmit]);
 
   const commitCurrentInputToPending = useCallback(() => {
-    const normalized = normalizePendingTaskText(input.replace(/^\/\S+\s/, ''));
+    const normalized = normalizePendingTaskText(input);
     if (!normalized) return false;
     setPendingTasks(prev => [...prev, {
       id: `pending-task-${nextPendingTaskIdRef.current++}`,
@@ -1589,7 +1592,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         </AnimatePresence>
 
         {/* Parse preview chips (hidden during list/template typeahead) */}
-        {isFocused && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && parsed && (parsed.dueDate || parsed.dateSuggestion || parsed.priority || parsed.tags.length > 0 || parsed.project || parsed.estimatedDuration || parsed.recurrence) && (
+        {isFocused && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && parsed && (parsed.dueDate || parsed.dateSuggestion || parsed.priority || parsed.tags.length > 0 || parsed.project || parsed.addToMyDay || parsed.estimatedDuration || parsed.recurrence) && (
           <div className="flex items-center gap-2 mt-1.5 px-3 text-xs">
             <Sparkles size={12} className="text-blue-400" />
             {parsed.dueDateLabel && (
@@ -1635,6 +1638,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 /{parsed.project}
               </span>
             )}
+            {parsed.addToMyDay && (
+              <span className="inline-flex items-center gap-1 rounded border border-amber-800/30 bg-amber-900/30 px-2 py-0.5 text-amber-300">
+                <Sun size={11} /> My Day
+              </span>
+            )}
           </div>
         )}
 
@@ -1662,7 +1670,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               exit="exit"
             >
               <div className="px-3 pt-2 pb-1 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider flex items-center justify-between">
-                <span>Select a list</span>
+                <span>Select a destination</span>
                 <span className="normal-case tracking-normal font-normal">↑↓ navigate · ↵ select</span>
               </div>
               <div ref={listTypeaheadScrollRef} className="max-h-48 overflow-y-auto">
@@ -1695,13 +1703,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                             </>
                           ) : name}
                         </span>
-                        {(dest.groupName || dest.label !== dest.shortLabel) && (
-                          <span className="block text-xs text-[var(--text-muted)] truncate">
-                            {dest.groupName
+                        <span className="block text-xs text-[var(--text-muted)] truncate">
+                          {dest.listId
+                            ? dest.groupName
                               ? `${dest.label} › ${dest.groupName}`
-                              : dest.label}
-                          </span>
-                        )}
+                              : dest.label
+                            : 'Use source default'}
+                        </span>
                       </span>
                     </button>
                   );

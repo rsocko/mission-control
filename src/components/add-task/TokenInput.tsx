@@ -29,11 +29,10 @@ import { taskLogger } from '@/lib/client-logger';
 // ─── Token Node ─────────────────────────────────────────────────────────────
 // A custom TextNode subclass that renders with colored styles based on token type.
 
-type TokenType = 'slash' | 'destination' | 'priority-critical' | 'priority-high' | 'priority-medium' | 'priority-low' | 'tag' | 'project' | 'duration' | 'horizon' | 'date' | 'effort';
+type TokenType = 'slash' | 'priority-critical' | 'priority-high' | 'priority-medium' | 'priority-low' | 'tag' | 'project' | 'duration' | 'horizon' | 'date' | 'effort' | 'my-day';
 
 const TOKEN_STYLES: Record<TokenType, { color: string; fontWeight: string }> = {
   slash: { color: 'var(--accent)', fontWeight: '500' },
-  destination: { color: '#60a5fa', fontWeight: '500' },
   'priority-critical': { color: '#fb7185', fontWeight: '600' },
   'priority-high': { color: '#fb923c', fontWeight: '500' },
   'priority-medium': { color: '#fcd34d', fontWeight: '500' },
@@ -44,6 +43,7 @@ const TOKEN_STYLES: Record<TokenType, { color: string; fontWeight: string }> = {
   horizon: { color: 'var(--success)', fontWeight: '600' },
   date: { color: '#4ade80', fontWeight: '500' },
   effort: { color: '#a78bfa', fontWeight: '500' },
+  'my-day': { color: '#fbbf24', fontWeight: '600' },
 };
 
 class TokenNode extends TextNode {
@@ -109,18 +109,13 @@ interface TokenMatch {
 function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
   const tokens: TokenMatch[] = [];
 
-  // /listname at start
+  // /destination or explicit slash command at start
   const slashMatch = text.match(/^\/\S+/);
   if (slashMatch) {
     tokens.push({ start: 0, end: slashMatch[0].length, type: 'slash' });
   }
 
-  // @destination (not escaped with \)
-  const destRegex = /(?<!\\)@(work|personal|github|todo)\b/gi;
   let m: RegExpExecArray | null;
-  while ((m = destRegex.exec(text)) !== null) {
-    tokens.push({ start: m.index, end: m.index + m[0].length, type: 'destination' });
-  }
 
   // !priority (not escaped with \)
   const priRegex = /(?<!\\)!(critical|high|medium|low)\b/gi;
@@ -156,6 +151,12 @@ function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
   const effortRegex = /(?<!\\)\^[1-5]\b/g;
   while ((m = effortRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'effort' });
+  }
+
+  const myDayRegex = /(?<!\\)(^|\s)\*(?=\s|$)/g;
+  while ((m = myDayRegex.exec(text)) !== null) {
+    const start = m.index + m[1].length;
+    tokens.push({ start, end: start + 1, type: 'my-day' });
   }
 
   // NLP date detection via chrono-node

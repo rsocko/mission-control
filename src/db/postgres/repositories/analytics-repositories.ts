@@ -22,6 +22,7 @@ import type {
   AnalyticsTaskTagLink,
   AnalyticsTaskTagName,
   AnalyticsTaskTransition,
+  AnalyticsWorkActivityItem,
   AnalyticsWordInsightTask,
   FlowAnalyticsRepository,
   InsightsAnalyticsRepository,
@@ -398,6 +399,101 @@ function createInsightsRepository(pool: Pool): InsightsAnalyticsRepository {
         source: row.source,
         count: Number(row.count),
       }));
+    },
+
+    async workActivityIn({ startInclusive, endExclusive }) {
+      const params = [startInclusive, endExclusive];
+      const relevant = `task.depth = 0 AND task.is_checklist_item = false
+        AND (task.${OPEN_TASK_CONDITION}
+          OR (task.status = 'done' AND ${withinInstantRange('task.completed_at', 1, 2)}))`;
+      const counts = `count(*) FILTER (WHERE task.${OPEN_TASK_CONDITION})::int AS active,
+        count(*) FILTER (
+          WHERE task.status = 'done' AND ${withinInstantRange('task.completed_at', 1, 2)}
+        )::int AS closed`;
+      const mapRows = (rows: Array<{
+        key: string;
+        label: string;
+        active: number;
+        closed: number;
+      }>): AnalyticsWorkActivityItem[] => rows.map(row => ({
+        key: row.key,
+        label: row.label,
+        active: Number(row.active),
+        closed: Number(row.closed),
+      }));
+      const [lists, tags, projects, sources] = await Promise.all([
+        pool.query<{
+          key: string;
+          label: string;
+          active: number;
+          closed: number;
+        }>(
+          `SELECT coalesce(
+                    task.connector_instance_id || ':' || task.source_list_id,
+                    task.connector_instance_id || ':name:' || task.source_list_name
+                  ) AS key,
+                  coalesce(list.user_display_name, list.name, task.source_list_name) AS label,
+                  ${counts}
+           FROM tasks task
+           LEFT JOIN source_lists list
+             ON list.connector_instance_id = task.connector_instance_id
+            AND list.source_id = task.source_list_id
+           WHERE ${relevant}
+             AND coalesce(list.user_display_name, list.name, task.source_list_name) IS NOT NULL
+             AND coalesce(list.user_display_name, list.name, task.source_list_name) <> ''
+           GROUP BY key, label`,
+          params,
+        ),
+        pool.query<{
+          key: string;
+          label: string;
+          active: number;
+          closed: number;
+        }>(
+          `SELECT coalesce(canonical.id, tag.id) AS key,
+                  coalesce(canonical.name, tag.name) AS label,
+                  ${counts}
+           FROM task_tags link
+           INNER JOIN tags tag ON link.tag_id = tag.id
+           LEFT JOIN tags canonical ON tag.unified_into = canonical.id
+           INNER JOIN tasks task ON link.task_id = task.id
+           WHERE ${relevant}
+           GROUP BY key, label`,
+          params,
+        ),
+        pool.query<{
+          key: string;
+          label: string;
+          active: number;
+          closed: number;
+        }>(
+          `SELECT project.id AS key, project.name AS label, ${counts}
+           FROM task_projects membership
+           INNER JOIN hub_projects project ON membership.project_id = project.id
+           INNER JOIN tasks task ON membership.task_id = task.id
+           WHERE ${relevant}
+           GROUP BY project.id, project.name`,
+          params,
+        ),
+        pool.query<{
+          key: string;
+          label: string;
+          active: number;
+          closed: number;
+        }>(
+          `SELECT task.connector_type AS key, task.connector_type AS label, ${counts}
+           FROM tasks task
+           WHERE ${relevant}
+           GROUP BY task.connector_type`,
+          params,
+        ),
+      ]);
+      return {
+        lists: mapRows(lists.rows),
+        tags: mapRows(tags.rows),
+        projects: mapRows(projects.rows),
+        sources: mapRows(sources.rows),
+      };
     },
 
     async listOpenTaskCreatedTimestamps() {

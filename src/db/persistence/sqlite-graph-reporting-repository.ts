@@ -572,7 +572,7 @@ export function createSqliteGraphReportingRepository(
         const projects = await db.select().from(hubProjects)
           .where(eq(hubProjects.hidden, false))
           .orderBy(asc(hubProjects.name), asc(hubProjects.id));
-        if (!projects.length) return { projects: [], memberships: [], tasks: [], tags: [] };
+        if (!projects.length) return { projects: [], memberships: [], tasks: [], phases: [], phaseItems: [], tags: [] };
         const projectIds = projects.map(({ id }) => id);
         const memberships = await db.select({
           projectId: taskProjects.projectId,
@@ -590,6 +590,28 @@ export function createSqliteGraphReportingRepository(
               updatedAt: tasks.updatedAt,
               completedAt: tasks.completedAt,
             }).from(tasks).where(inArray(tasks.id, taskIds)).orderBy(asc(tasks.id))
+          : [];
+        const phaseRows = await db.select({
+          id: projectPhases.id,
+          projectId: projectPhases.projectId,
+          name: projectPhases.name,
+          status: projectPhases.status,
+          color: projectPhases.color,
+          sortOrder: projectPhases.sortOrder,
+        }).from(projectPhases)
+          .where(inArray(projectPhases.projectId, projectIds))
+          .orderBy(asc(projectPhases.projectId), asc(projectPhases.sortOrder), asc(projectPhases.id));
+        const phaseIds = phaseRows.map(({ id }) => id);
+        const phaseItemRows = phaseIds.length
+          ? await db.select({
+              phaseId: projectPhaseItems.phaseId,
+              taskId: projectPhaseItems.taskId,
+            }).from(projectPhaseItems)
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                eq(projectPhaseItems.isProposed, false),
+              ))
+              .orderBy(asc(projectPhaseItems.phaseId), asc(projectPhaseItems.sortOrder), asc(projectPhaseItems.id))
           : [];
         const tagRows = await db.select({
           projectId: projectTags.projectId,
@@ -615,6 +637,8 @@ export function createSqliteGraphReportingRepository(
           })),
           memberships,
           tasks: taskRows,
+          phases: phaseRows.map(phase => ({ ...phase, projectId: phase.projectId! })),
+          phaseItems: phaseItemRows,
           tags: tagRows,
         };
       },

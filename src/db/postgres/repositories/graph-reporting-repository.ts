@@ -618,7 +618,7 @@ export function createPostgresGraphReportingRepository(
         const projects = await db.select().from(hubProjects)
           .where(eq(hubProjects.hidden, false))
           .orderBy(asc(byteOrder(hubProjects.name)), asc(byteOrder(hubProjects.id)));
-        if (!projects.length) return { projects: [], memberships: [], tasks: [], tags: [] };
+        if (!projects.length) return { projects: [], memberships: [], tasks: [], phases: [], phaseItems: [], tags: [] };
         const projectIds = projects.map(({ id }) => id);
         const memberships = await db.select({
           projectId: taskProjects.projectId,
@@ -640,6 +640,32 @@ export function createPostgresGraphReportingRepository(
               completedAt: tasks.completedAt,
             }).from(tasks).where(inArray(tasks.id, taskIds))
               .orderBy(asc(byteOrder(tasks.id)))
+          : [];
+        const phaseRows = await db.select({
+          id: projectPhases.id,
+          projectId: projectPhases.projectId,
+          name: projectPhases.name,
+          status: projectPhases.status,
+          color: projectPhases.color,
+          sortOrder: projectPhases.sortOrder,
+        }).from(projectPhases)
+          .where(inArray(projectPhases.projectId, projectIds))
+          .orderBy(asc(byteOrder(projectPhases.projectId)), asc(projectPhases.sortOrder), asc(byteOrder(projectPhases.id)));
+        const phaseIds = phaseRows.map(({ id }) => id);
+        const phaseItemRows = phaseIds.length
+          ? await db.select({
+              phaseId: projectPhaseItems.phaseId,
+              taskId: projectPhaseItems.taskId,
+            }).from(projectPhaseItems)
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                eq(projectPhaseItems.isProposed, false),
+              ))
+              .orderBy(
+                asc(byteOrder(projectPhaseItems.phaseId)),
+                asc(projectPhaseItems.sortOrder),
+                asc(byteOrder(projectPhaseItems.id)),
+              )
           : [];
         const tagRows = await db.select({
           projectId: projectTags.projectId,
@@ -668,6 +694,8 @@ export function createPostgresGraphReportingRepository(
           })),
           memberships,
           tasks: taskRows,
+          phases: phaseRows.map(phase => ({ ...phase, projectId: phase.projectId! })),
+          phaseItems: phaseItemRows,
           tags: tagRows,
         };
       },

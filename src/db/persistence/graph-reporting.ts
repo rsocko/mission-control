@@ -246,6 +246,15 @@ export interface ProjectsOverviewRows {
   projects: OverviewProjectRow[];
   memberships: Array<{ projectId: string; taskId: string }>;
   tasks: OverviewTaskRow[];
+  phases: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+    status: string;
+    color: string | null;
+    sortOrder: number;
+  }>;
+  phaseItems: Array<{ phaseId: string; taskId: string }>;
   tags: Array<{
     projectId: string;
     id: string;

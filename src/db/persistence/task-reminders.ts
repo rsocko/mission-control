@@ -109,6 +109,8 @@ export interface TaskReminderDeliveryPlan {
   policySnapshot: Record<string, unknown>;
   payloadSnapshot: {
     notificationId: string;
+    deliveryId?: string;
+    collapseId?: string;
     title: string;
     body?: string;
     tag: string;

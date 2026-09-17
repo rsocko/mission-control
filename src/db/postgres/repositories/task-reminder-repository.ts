@@ -39,6 +39,8 @@ interface TaskRow {
   id: string;
   title: string;
   status: string;
+  deleted_at: string | null;
+  connector_deleted: boolean;
   reminder_at: string | null;
   reminder_nag_interval: number | null;
   reminder_nag_stop_at: string | null;
@@ -202,6 +204,13 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
                 OR task.reminder_at IS NULL
                 OR task.reminder_at <> occurrence.scheduled_at
                 OR task.status IN ('done', 'cancelled')
+                OR task.deleted_at IS NOT NULL
+                OR EXISTS (
+                  SELECT 1
+                  FROM connector_configs connector
+                  WHERE connector.id = task.connector_instance_id
+                    AND connector.deleted_at IS NOT NULL
+                )
               )
             ORDER BY occurrence.updated_at, occurrence.id
             FOR UPDATE OF occurrence SKIP LOCKED
@@ -233,6 +242,13 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             FROM tasks task
             WHERE task.reminder_at IS NOT NULL
               AND task.status NOT IN ('done', 'cancelled')
+              AND task.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM connector_configs connector
+                WHERE connector.id = task.connector_instance_id
+                  AND connector.deleted_at IS NOT NULL
+              )
               AND NOT (
                 task.reminder_at ~ $1
                 AND pg_input_is_valid(task.reminder_at, 'timestamp with time zone')
@@ -315,6 +331,13 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
              AND occurrence.scheduled_at = task.reminder_at
             WHERE task.reminder_at IS NOT NULL
               AND task.status NOT IN ('done', 'cancelled')
+              AND task.deleted_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM connector_configs connector
+                WHERE connector.id = task.connector_instance_id
+                  AND connector.deleted_at IS NOT NULL
+              )
               AND (
                 CASE
                   WHEN task.reminder_at ~ $2
@@ -465,9 +488,17 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
         await client.query('BEGIN');
         const taskResult = await client.query<TaskRow>(
           `
-            SELECT id, title, status, reminder_at, reminder_nag_interval,
-                   reminder_nag_stop_at, reminder_nag_series_id, reminder_nag_sequence
-            FROM tasks WHERE id = $1
+            SELECT task.id, task.title, task.status, task.deleted_at,
+                   EXISTS (
+                     SELECT 1
+                     FROM connector_configs connector
+                     WHERE connector.id = task.connector_instance_id
+                       AND connector.deleted_at IS NOT NULL
+                   ) AS connector_deleted,
+                   task.reminder_at, task.reminder_nag_interval,
+                   task.reminder_nag_stop_at, task.reminder_nag_series_id,
+                   task.reminder_nag_sequence
+            FROM tasks task WHERE task.id = $1
             FOR UPDATE
           `,
           [claim.taskId],
@@ -489,6 +520,8 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
         if (
           !task
           || task.reminder_at !== claim.scheduledAt
+          || task.deleted_at !== null
+          || task.connector_deleted
           || ['done', 'cancelled'].includes(task.status)
           || !isDue(task.reminder_at, input.now)
         ) {
@@ -634,6 +667,14 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
           persistentReminder: isNag,
         });
         for (const plan of plans) {
+          const deliveryEventId = randomUUID();
+          const payloadSnapshot = plan.channel === 'apns'
+            ? {
+                ...plan.payloadSnapshot,
+                deliveryId: deliveryEventId,
+                collapseId: plan.payloadSnapshot.tag,
+              }
+            : plan.payloadSnapshot;
           await client.query(
             `
               INSERT INTO notification_delivery_events (
@@ -648,14 +689,14 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
               ON CONFLICT(dedupe_key) DO NOTHING
             `,
             [
-              randomUUID(),
+              deliveryEventId,
               notification.id,
               plan.channel,
               `${plan.channel}:${notification.id}:${claim.seriesId ?? claim.scheduledAt}:${claim.sequence ?? 0}`,
               plan.status,
               plan.suppressionReason,
               JSON.stringify(plan.policySnapshot),
-              JSON.stringify(plan.payloadSnapshot),
+              JSON.stringify(payloadSnapshot),
               plan.status === 'pending' ? nowIso : null,
               nowIso,
             ],

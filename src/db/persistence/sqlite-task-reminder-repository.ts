@@ -39,6 +39,8 @@ interface TaskRow {
   id: string;
   title: string;
   status: string;
+  deleted_at: string | null;
+  connector_deleted: number;
   reminder_at: string | null;
   reminder_nag_interval: number | null;
   reminder_nag_stop_at: string | null;
@@ -201,6 +203,13 @@ export function createSqliteTaskReminderRepository(
               OR task.reminder_at IS NULL
               OR task.reminder_at <> occurrence.scheduled_at
               OR task.status IN ('done', 'cancelled')
+              OR task.deleted_at IS NOT NULL
+              OR EXISTS (
+                SELECT 1
+                FROM connector_configs connector
+                WHERE connector.id = task.connector_instance_id
+                  AND connector.deleted_at IS NOT NULL
+              )
             )
           ORDER BY occurrence.updated_at, occurrence.id
           LIMIT ?
@@ -223,6 +232,13 @@ export function createSqliteTaskReminderRepository(
           FROM tasks task
           WHERE task.reminder_at IS NOT NULL
             AND task.status NOT IN ('done', 'cancelled')
+            AND task.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM connector_configs connector
+              WHERE connector.id = task.connector_instance_id
+                AND connector.deleted_at IS NOT NULL
+            )
             AND mc_valid_offset_timestamp(task.reminder_at) = 0
             AND NOT EXISTS (
               SELECT 1 FROM task_reminder_occurrences occurrence
@@ -282,6 +298,13 @@ export function createSqliteTaskReminderRepository(
            AND occurrence.scheduled_at = task.reminder_at
           WHERE task.reminder_at IS NOT NULL
             AND task.status NOT IN ('done', 'cancelled')
+            AND task.deleted_at IS NULL
+            AND NOT EXISTS (
+              SELECT 1
+              FROM connector_configs connector
+              WHERE connector.id = task.connector_instance_id
+                AND connector.deleted_at IS NOT NULL
+            )
             AND mc_valid_offset_timestamp(task.reminder_at) = 1
             AND julianday(task.reminder_at) <= julianday(?)
             AND (
@@ -402,13 +425,23 @@ export function createSqliteTaskReminderRepository(
         if (!occurrence) return { outcome: 'lost' as const, pendingDelivery: false };
 
         const task = sqlite.prepare(`
-          SELECT id, title, status, reminder_at, reminder_nag_interval,
-                 reminder_nag_stop_at, reminder_nag_series_id, reminder_nag_sequence
-          FROM tasks WHERE id = ?
+          SELECT task.id, task.title, task.status, task.deleted_at,
+                 EXISTS (
+                   SELECT 1
+                   FROM connector_configs connector
+                   WHERE connector.id = task.connector_instance_id
+                     AND connector.deleted_at IS NOT NULL
+                 ) AS connector_deleted,
+                 task.reminder_at, task.reminder_nag_interval,
+                 task.reminder_nag_stop_at, task.reminder_nag_series_id,
+                 task.reminder_nag_sequence
+          FROM tasks task WHERE task.id = ?
         `).get(claim.taskId) as TaskRow | undefined;
         if (
           !task
           || task.reminder_at !== claim.scheduledAt
+          || task.deleted_at !== null
+          || task.connector_deleted === 1
           || TERMINAL_TASK_STATUSES.includes(
             task.status as typeof TERMINAL_TASK_STATUSES[number],
           )
@@ -565,15 +598,23 @@ export function createSqliteTaskReminderRepository(
           ON CONFLICT(dedupe_key) DO NOTHING
         `);
         for (const plan of plans) {
+          const deliveryEventId = randomUUID();
+          const payloadSnapshot = plan.channel === 'apns'
+            ? {
+                ...plan.payloadSnapshot,
+                deliveryId: deliveryEventId,
+                collapseId: plan.payloadSnapshot.tag,
+              }
+            : plan.payloadSnapshot;
           insertDelivery.run(
-            randomUUID(),
+            deliveryEventId,
             notification.id,
             plan.channel,
             `${plan.channel}:${notification.id}:${claim.seriesId ?? claim.scheduledAt}:${claim.sequence ?? 0}`,
             plan.status,
             plan.suppressionReason,
             JSON.stringify(plan.policySnapshot),
-            JSON.stringify(plan.payloadSnapshot),
+            JSON.stringify(payloadSnapshot),
             plan.status === 'pending' ? nowIso : null,
             nowIso,
           );

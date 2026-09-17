@@ -27,6 +27,8 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
         DELETE FROM task_schedules;
         DELETE FROM task_reminder_occurrences;
         DELETE FROM tasks;
+        DELETE FROM connector_configs
+        WHERE id IN ('deleted-reminder-connector', 'connector-delete-race');
         DELETE FROM push_subscriptions;
         DELETE FROM apns_registrations;
         DELETE FROM push_preferences;
@@ -40,16 +42,18 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
         INSERT INTO tasks (
           id, source_id, connector_type, connector_instance_id, title, status,
           priority, reminder_at, reminder_relative, reminder_due_time,
-          created_at, updated_at, last_synced_at
-        ) VALUES (?, ?, 'local', 'local', ?, ?, 'none', ?, ?, ?, ?, ?, ?)
+          deleted_at, created_at, updated_at, last_synced_at
+        ) VALUES (?, ?, 'local', ?, ?, ?, 'none', ?, ?, ?, ?, ?, ?, ?)
       `).run(
         input.id,
         `local:${input.id}`,
+        input.connectorInstanceId ?? 'local',
         `Task ${input.id}`,
         input.status ?? 'todo',
         input.reminderAt,
         input.reminderRelative ?? null,
         input.reminderDueTime ?? null,
+        input.deletedAt ?? null,
         now,
         now,
         now,
@@ -60,6 +64,19 @@ async function createHarness(): Promise<TaskReminderContractHarness> {
           VALUES (?, '2026-09-01', ?)
         `).run(input.id, input.recurrence);
       }
+    },
+    async seedConnector(id, deletedAt = null) {
+      const now = TASK_REMINDER_BASE_TIME.toISOString();
+      sqlite.prepare(`
+        INSERT INTO connector_configs (
+          id, type, name, enabled, sync_mode, capabilities, credentials,
+          settings, synced_lists, created_at, updated_at, deleted_at
+        ) VALUES (?, 'test', ?, 1, 'poll', '{}', '{}', '{}', '[]', ?, ?, ?)
+      `).run(id, id, now, now, deletedAt);
+    },
+    async setConnectorDeleted(id, deletedAt) {
+      sqlite.prepare(`UPDATE connector_configs SET deleted_at = ? WHERE id = ?`)
+        .run(deletedAt, id);
     },
     async seedOccurrence(input) {
       const now = TASK_REMINDER_BASE_TIME.toISOString();
@@ -233,6 +250,23 @@ describe('SQLite task reminder repository', () => {
       SELECT COUNT(*) AS count FROM task_reminder_occurrences
       WHERE series_id = 'series-1'
     `).get()).toEqual({ count: 2 });
+    const apnsDeliveries = sqlite.prepare(`
+      SELECT id, payload_snapshot
+      FROM notification_delivery_events
+      WHERE channel = 'apns'
+      ORDER BY created_at, id
+    `).all() as Array<{ id: string; payload_snapshot: unknown }>;
+    expect(apnsDeliveries).toHaveLength(2);
+    for (const delivery of apnsDeliveries) {
+      expect(parseJson(delivery.payload_snapshot)).toMatchObject({
+        deliveryId: delivery.id,
+        collapseId: expect.stringMatching(/^mc:/),
+        kind: 'task_reminder',
+      });
+    }
+    expect(new Set(apnsDeliveries.map((delivery) => (
+      (parseJson(delivery.payload_snapshot) as { collapseId: string }).collapseId
+    ))).size).toBe(1);
   });
 
   it('revives a cancelled occurrence under the task current series identity', async () => {

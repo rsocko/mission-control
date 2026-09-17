@@ -367,6 +367,78 @@ export function describeAnalyticsRepositoriesContract(
       expect(typeof rows[0].count).toBe('number');
     });
 
+    it('compares active and period-closed top-level work across organization dimensions', async () => {
+      const completedAt = '2026-03-10T01:00:00.000Z';
+      await insert('hub_projects', {
+        id: 'p-1', name: 'Launch', color: '#3b82f6', status: 'active', hidden: false,
+        created_at: NOW, updated_at: NOW,
+      });
+      await insert('tags', {
+        id: 'tag-1', name: 'Planning', slug: 'planning', type: 'hub', color: '#3b82f6',
+        created_at: NOW,
+      });
+      await insert('tags', {
+        id: 'tag-alias', name: 'Plan', slug: 'plan-source', type: 'source', color: '#3b82f6',
+        unified_into: 'tag-1', created_at: NOW,
+      });
+      await insert('source_lists', {
+        id: 'list-1', connector_instance_id: 'connector-live', source_id: 'remote-work',
+        name: 'Work old name', type: 'list', user_display_name: 'Work',
+      });
+      await insert('connector_configs', {
+        id: 'connector-two',
+        type: 'local',
+        name: 'Second',
+        capabilities: '{}',
+        created_at: NOW,
+        updated_at: NOW,
+      });
+      await insert('source_lists', {
+        id: 'list-2', connector_instance_id: 'connector-two', source_id: 'remote-work',
+        name: 'Work', type: 'list',
+      });
+      await insert('tasks', task('active-1', {
+        status: 'todo', connector_type: 'github', source_list_id: 'remote-work',
+        source_list_name: 'Stale Work',
+      }));
+      await insert('tasks', task('closed-1', {
+        status: 'done', completed_at: completedAt, connector_type: 'github',
+        source_list_id: 'remote-work', source_list_name: 'Stale Work',
+      }));
+      await insert('tasks', task('second-list', {
+        status: 'todo', connector_type: 'local', connector_instance_id: 'connector-two',
+        source_list_id: 'remote-work', source_list_name: 'Work',
+      }));
+      await insert('tasks', task('old-closed', {
+        status: 'done', completed_at: '2026-03-01T01:00:00.000Z', connector_type: 'github',
+        source_list_id: 'remote-work', source_list_name: 'Stale Work',
+      }));
+      await insert('tasks', task('cancelled-1', {
+        status: 'cancelled', connector_type: 'github', source_list_id: 'remote-work',
+        source_list_name: 'Stale Work',
+      }));
+      await insert('task_tags', { task_id: 'active-1', tag_id: 'tag-alias' });
+      await insert('task_tags', { task_id: 'closed-1', tag_id: 'tag-1' });
+      await insert('task_projects', { task_id: 'active-1', project_id: 'p-1' });
+      await insert('task_projects', { task_id: 'closed-1', project_id: 'p-1' });
+
+      const rows = await harness.repository.insights.workActivityIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      });
+
+      expect([...rows.lists].sort((a, b) => a.key.localeCompare(b.key))).toEqual([
+        { key: 'connector-live:remote-work', label: 'Work', active: 1, closed: 1 },
+        { key: 'connector-two:remote-work', label: 'Work', active: 1, closed: 0 },
+      ]);
+      expect(rows.tags).toEqual([{ key: 'tag-1', label: 'Planning', active: 1, closed: 1 }]);
+      expect(rows.projects).toEqual([{ key: 'p-1', label: 'Launch', active: 1, closed: 1 }]);
+      expect([...rows.sources].sort((a, b) => a.key.localeCompare(b.key))).toEqual([
+        { key: 'github', label: 'github', active: 1, closed: 1 },
+        { key: 'local', label: 'local', active: 1, closed: 0 },
+      ]);
+    });
+
     it('joins planning-friction signals to their top-level task', async () => {
       await insert('tasks', task('task-1', { title: 'Plan launch', due_date: '2026-03-20', source_list_name: 'Work' }));
       await insert('tasks', task('task-sub', { depth: 1 }));
@@ -522,11 +594,72 @@ export function describeAnalyticsRepositoriesContract(
         startInclusive: '2026-03-10T00:00:00.000Z',
         endExclusive: '2026-03-11T00:00:00.000Z',
       })).toEqual([{
+        id: 'done-1',
         createdAt: '2026-03-08T00:00:00.000Z',
         completedAt: '2026-03-10T00:00:00.000Z',
       }]);
       expect(await insights.listCompletedTimestampsSince('2026-03-09T00:00:00.000Z'))
         .toEqual(['2026-03-10T00:00:00.000Z']);
+      expect(await insights.listTopLevelTaskCompletionsIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      })).toEqual([{
+        id: 'done-1',
+        completedAt: '2026-03-10T00:00:00.000Z',
+      }]);
+    });
+
+    it('excludes subtasks and checklist items from plan-alignment completions', async () => {
+      const completedAt = '2026-03-10T00:00:00.000Z';
+      await insert('tasks', task('done-root', { status: 'done', completed_at: completedAt }));
+      await insert('tasks', task('done-subtask', {
+        status: 'done',
+        depth: 1,
+        completed_at: completedAt,
+      }));
+      await insert('tasks', task('done-checklist', {
+        status: 'done',
+        is_checklist_item: true,
+        completed_at: completedAt,
+      }));
+
+      expect(await harness.repository.insights.listTopLevelTaskCompletionsIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      })).toEqual([{ id: 'done-root', completedAt }]);
+    });
+
+    it('lists My Day planning events by planning date in deterministic order', async () => {
+      await insert('tasks', task('planned'));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_withdrawn',
+        new_value: '2026-03-10',
+        occurred_at: '2026-03-09T20:00:00.000Z',
+      }));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_committed',
+        new_value: '2026-03-10',
+        occurred_at: '2026-03-09T19:00:00.000Z',
+      }));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_committed',
+        new_value: '2026-03-12',
+        occurred_at: '2026-03-09T18:00:00.000Z',
+      }));
+
+      const rows = await harness.repository.insights.listMyDayPlanningEvents({
+        from: '2026-03-10',
+        to: '2026-03-11',
+      });
+
+      expect(rows.map(row => [row.eventType, row.date, row.occurredAt])).toEqual([
+        ['my_day_committed', '2026-03-10', '2026-03-09T19:00:00.000Z'],
+        ['my_day_withdrawn', '2026-03-10', '2026-03-09T20:00:00.000Z'],
+      ]);
+      expect(rows.every(row => typeof row.id === 'number')).toBe(true);
     });
 
     // ─── Flow ─────────────────────────────────────────────────────────────

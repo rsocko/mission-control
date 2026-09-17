@@ -15,6 +15,12 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       streak: { label: 'Streak', value: 3, unit: 'days' },
     },
     trends: [],
+    planAlignment: {
+      points: [],
+      totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+      planCoverage: 0,
+      commitmentRate: 0,
+    },
     sourceBreakdown: [],
     taskAge: [
       { label: '< 1 day', count: 2, minDays: 0, maxDays: 1 },
@@ -40,6 +46,7 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       topTags: [],
     },
     projectActivity: [],
+    workActivity: { lists: [], tags: [], projects: [], sources: [] },
     routineHeatmap: [],
     delivery: {
       throughput: { interval: 'week', total: 0, averagePerInterval: 0, points: [] },

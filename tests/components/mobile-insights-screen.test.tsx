@@ -99,6 +99,7 @@ const mockSnapshot = {
   sourceBreakdown: [],
   taskAge: [],
   projectActivity: [],
+  workActivity: { lists: [], tags: [], projects: [], sources: [] },
   routineHeatmap: [],
   activityHeatmap: [
     { date: '2026-07-29', taskCompletions: 2, routineCompletions: 1 },

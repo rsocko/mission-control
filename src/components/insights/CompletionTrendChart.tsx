@@ -1,79 +1,101 @@
 'use client';
 
-import { useMemo } from 'react';
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
-import type { TrendDataPoint, InsightsPeriod } from '@/lib/stats/insights';
+import { useId, useMemo } from 'react';
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts';
+import type { TrendDataPoint } from '@/lib/stats/insights';
 
 interface Props {
   data: TrendDataPoint[];
-  period: InsightsPeriod;
 }
 
-export function CompletionTrendChart({ data, period }: Props) {
-  const chartData = useMemo(() => {
-    if (period === 7) {
-      return data.map(d => ({
-        ...d,
-        label: new Date(d.date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short' }),
-      }));
-    }
-    // For 30/90 days, aggregate by week
-    if (period >= 30) {
-      const weeks: { label: string; completed: number; created: number }[] = [];
-      let weekCompleted = 0;
-      let weekCreated = 0;
-      let weekStart = '';
+function formatChartDate(date: string, weekday: boolean) {
+  return new Date(`${date}T12:00:00`).toLocaleDateString(undefined, weekday
+    ? { weekday: 'short' }
+    : { month: 'short', day: 'numeric' });
+}
 
-      for (let i = 0; i < data.length; i++) {
-        if (i % 7 === 0) {
-          if (i > 0) {
-            weeks.push({ label: weekStart, completed: weekCompleted, created: weekCreated });
-          }
-          weekStart = new Date(data[i].date + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-          weekCompleted = 0;
-          weekCreated = 0;
-        }
-        weekCompleted += data[i].completed;
-        weekCreated += data[i].created;
-      }
-      if (weekCompleted > 0 || weekCreated > 0) {
-        weeks.push({ label: weekStart, completed: weekCompleted, created: weekCreated });
-      }
-      return weeks;
-    }
-    return data.map(d => ({ ...d, label: d.date.slice(5) }));
-  }, [data, period]);
+export function CompletionTrendChart({ data }: Props) {
+  const titleId = useId();
+  const chartData = useMemo(() => data.map(point => ({
+    ...point,
+    label: formatChartDate(point.date, data.length <= 7),
+  })), [data]);
+  const hasActivity = data.some(point => point.completed > 0 || point.created > 0);
+  const tickInterval = Math.max(0, Math.ceil(data.length / 7) - 1);
 
-  if (chartData.length === 0) {
-    return <div className="h-[140px] flex items-center justify-center text-sm text-slate-500">No data yet</div>;
+  if (!hasActivity) {
+    return (
+      <div className="flex h-[180px] items-center justify-center text-center text-sm text-slate-500">
+        No tasks created or completed in this period.
+      </div>
+    );
   }
 
   return (
-    <ResponsiveContainer width="100%" height={140}>
-      <BarChart data={chartData} barGap={2}>
-        <XAxis
-          dataKey="label"
-          tick={{ fontSize: 10, fill: '#64748b' }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <YAxis hide />
-        <Tooltip
-          contentStyle={{
-            backgroundColor: '#1e293b',
-            border: '1px solid #334155',
-            borderRadius: 8,
-            fontSize: 12,
-          }}
-          labelStyle={{ color: '#94a3b8' }}
-          formatter={(value, name) => [
-            Number(value ?? 0).toLocaleString(),
-            name === 'completed' ? 'Completed' : 'Created',
-          ]}
-        />
-        <Bar dataKey="completed" fill="#10b981" radius={[3, 3, 0, 0]} />
-        <Bar dataKey="created" fill="rgba(59,130,246,0.4)" radius={[3, 3, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
+    <figure aria-labelledby={titleId}>
+      <figcaption id={titleId} className="sr-only">
+        Daily task activity. Green bars show completed tasks and blue bars show created tasks.
+      </figcaption>
+      <div className="h-[180px] w-full" role="img" aria-label="Daily completed and created task chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart
+            data={chartData}
+            barCategoryGap={data.length > 31 ? '20%' : '28%'}
+            barGap={1}
+            margin={{ top: 8, right: 0, left: -24, bottom: 0 }}
+          >
+            <CartesianGrid stroke="#1e293b" strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              dataKey="label"
+              interval={tickInterval}
+              minTickGap={12}
+              tick={{ fontSize: 10, fill: '#94a3b8' }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <YAxis
+              allowDecimals={false}
+              tick={{ fontSize: 10, fill: '#8190a6' }}
+              axisLine={false}
+              tickLine={false}
+            />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: '#1e293b',
+                border: '1px solid #334155',
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              labelStyle={{ color: '#94a3b8' }}
+              labelFormatter={(_label, payload) => {
+                const point = payload?.[0]?.payload as TrendDataPoint | undefined;
+                return point?.date ? formatChartDate(point.date, false) : '';
+              }}
+              formatter={(value, name) => [
+                Number(value ?? 0).toLocaleString(),
+                name === 'completed' ? 'Completed' : 'Created',
+              ]}
+            />
+            <Bar dataKey="completed" name="completed" fill="#10b981" radius={[3, 3, 0, 0]} />
+            <Bar dataKey="created" name="created" fill="#3b82f6" fillOpacity={0.55} radius={[3, 3, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <table className="sr-only">
+        <caption>Daily completed and created task counts</caption>
+        <thead>
+          <tr><th>Date</th><th>Completed</th><th>Created</th></tr>
+        </thead>
+        <tbody>
+          {data.map(point => (
+            <tr key={point.date}>
+              <td>{point.date}</td>
+              <td>{point.completed}</td>
+              <td>{point.created}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </figure>
   );
 }

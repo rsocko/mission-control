@@ -9,10 +9,12 @@ import { fadeSlideUp } from '@/lib/motion';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CompletionTrendChart } from '@/components/insights/CompletionTrendChart';
+import { PlanAlignmentChart } from '@/components/insights/PlanAlignmentChart';
 import { SourceBreakdownChart } from '@/components/insights/SourceBreakdownChart';
 import { TaskAgeChart } from '@/components/insights/TaskAgeChart';
 import { RoutineHeatmap } from '@/components/insights/RoutineHeatmap';
 import { ProjectActivity } from '@/components/insights/ProjectActivity';
+import { WorkActivityChart } from '@/components/insights/WorkActivityChart';
 import { DeliveryTrendChart } from '@/components/insights/DeliveryTrendChart';
 import { LeadTimeChart } from '@/components/insights/LeadTimeChart';
 import { ActivityHeatmap } from '@/components/insights/ActivityHeatmap';
@@ -578,9 +580,16 @@ function InsightsPageContent() {
             ) : summary ? (
             <motion.div variants={fadeSlideUp} className="grid grid-cols-1 gap-5 mb-6 lg:grid-cols-3">
               <div className="lg:col-span-2 rounded-2xl bg-slate-900 border border-slate-800 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold">Completion Trend</h3>
-                  <div className="flex items-center gap-4 text-xs">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">Completion Trend</h3>
+                    <p className="mt-1 text-xs text-slate-500">Daily task flow for the selected period.</p>
+                  </div>
+                  <div
+                    className="flex items-center gap-4 text-xs text-slate-300"
+                    role="group"
+                    aria-label="Chart legend"
+                  >
                     <span className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Completed
                     </span>
@@ -589,7 +598,7 @@ function InsightsPageContent() {
                     </span>
                   </div>
                 </div>
-                <CompletionTrendChart data={summary.trends} period={period === 'custom' ? 30 : period} />
+                <CompletionTrendChart data={summary.trends} />
               </div>
               <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
                 <h3 className="text-sm font-semibold mb-4">Completions by Source</h3>
@@ -599,6 +608,17 @@ function InsightsPageContent() {
                 />
               </div>
             </motion.div>
+            ) : null}
+
+            {sectionLoading.summary ? (
+              <GroupSkeleton label="Loading plan alignment insights" className="mb-6 h-80" />
+            ) : summary ? (
+              <motion.div
+                variants={fadeSlideUp}
+                className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
+              >
+                <PlanAlignmentChart data={summary.planAlignment} />
+              </motion.div>
             ) : null}
 
             {sectionLoading.flow ? (
@@ -675,18 +695,21 @@ function InsightsPageContent() {
               </div>
             </motion.div>
 
-            {/* Routine Heatmap + Project Activity */}
+            {/* Work mix + Routine Heatmap + Project Activity */}
             {sectionLoading.activity ? (
               <GroupSkeleton label="Loading routine and project activity" className="h-64" />
             ) : activity ? (
-            <motion.div variants={fadeSlideUp} className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
-                <h3 className="text-sm font-semibold mb-4">Routine Completion (This Week)</h3>
-                <RoutineHeatmap data={activity.routineHeatmap} />
-              </div>
-              <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
-                <h3 className="text-sm font-semibold mb-4">Project Activity</h3>
-                <ProjectActivity data={activity.projectActivity} />
+            <motion.div variants={fadeSlideUp} className="space-y-5">
+              <WorkActivityChart data={activity.workActivity} />
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
+                  <h3 className="text-sm font-semibold mb-4">Routine Completion (This Week)</h3>
+                  <RoutineHeatmap data={activity.routineHeatmap} />
+                </div>
+                <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
+                  <h3 className="text-sm font-semibold mb-4">Project Activity</h3>
+                  <ProjectActivity data={activity.projectActivity} />
+                </div>
               </div>
             </motion.div>
             ) : null}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildProjectPhaseSummaries,
   buildPortfolioPulse,
   sortProjectsAlphabetically,
   topLevelProjectTasks,
@@ -22,6 +23,7 @@ function makeProject(overrides: Partial<OverviewProject>): OverviewProject {
     tags: [],
     createdAt: '2026-07-01T12:00:00.000Z',
     updatedAt: '2026-07-20T12:00:00.000Z',
+    phases: [],
     progress: {
       totalTasks: 0,
       completedTasks: 0,
@@ -72,6 +74,52 @@ describe('buildPortfolioPulse', () => {
       makeTask({ id: 'parent' }),
       makeTask({ id: 'child', parentId: 'parent' }),
     ]).map(task => task.id)).toEqual(['parent']);
+  });
+
+  describe('buildProjectPhaseSummaries', () => {
+    it('computes phase progress from the batched overview task map', () => {
+      const taskMap = new Map<string, OverviewTask>([
+        ['done', makeTask({ id: 'done', status: 'done' })],
+        ['active', makeTask({ id: 'active', status: 'in_progress' })],
+        ['todo', makeTask({ id: 'todo', status: 'todo' })],
+      ]);
+
+      const result = buildProjectPhaseSummaries(
+        [
+          { id: 'phase-1', projectId: 'project-1', name: 'Build', status: 'in_progress', color: '#3b82f6' },
+          { id: 'phase-2', projectId: 'project-1', name: 'Ship', status: 'pending', color: null },
+        ],
+        [
+          { phaseId: 'phase-1', taskId: 'done' },
+          { phaseId: 'phase-1', taskId: 'active' },
+          { phaseId: 'phase-1', taskId: 'todo' },
+        ],
+        taskMap,
+      );
+
+      expect(result.get('project-1')).toEqual([
+        {
+          id: 'phase-1',
+          name: 'Build',
+          status: 'in_progress',
+          color: '#3b82f6',
+          totalTasks: 3,
+          completedTasks: 1,
+          inProgressTasks: 1,
+          percentComplete: 33,
+        },
+        {
+          id: 'phase-2',
+          name: 'Ship',
+          status: 'pending',
+          color: null,
+          totalTasks: 0,
+          completedTasks: 0,
+          inProgressTasks: 0,
+          percentComplete: 0,
+        },
+      ]);
+    });
   });
 
   it('computes unique task totals and current-week completions', () => {

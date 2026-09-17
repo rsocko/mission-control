@@ -53,6 +53,9 @@ vi.mock('lucide-react', () => ({
 vi.mock('@/components/insights/CompletionTrendChart', () => ({
   CompletionTrendChart: () => <div data-testid="completion-trend-chart" />,
 }));
+vi.mock('@/components/insights/PlanAlignmentChart', () => ({
+  PlanAlignmentChart: () => <div data-testid="plan-alignment-chart" />,
+}));
 vi.mock('@/components/insights/SourceBreakdownChart', () => ({
   SourceBreakdownChart: () => <div data-testid="source-breakdown-chart" />,
 }));
@@ -99,6 +102,12 @@ const insightsPayload = {
     streak: { value: 2, delta: 0 },
   },
   trends: [],
+  planAlignment: {
+    points: [],
+    totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+    planCoverage: 0,
+    commitmentRate: 0,
+  },
   sourceBreakdown: [],
   taskAge: [],
   planningFriction: {
@@ -259,6 +268,7 @@ describe('InsightsPage', () => {
     expect(latestInsightsRequest().searchParams.get('interval')).toBe('week');
     expect(fetchSpy).toHaveBeenCalledWith('/api/insights/observations?period=7');
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-alignment-chart')).toBeInTheDocument();
     expect(screen.getByTestId('work-activity-chart')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');

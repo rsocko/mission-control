@@ -548,11 +548,72 @@ export function describeAnalyticsRepositoriesContract(
         startInclusive: '2026-03-10T00:00:00.000Z',
         endExclusive: '2026-03-11T00:00:00.000Z',
       })).toEqual([{
+        id: 'done-1',
         createdAt: '2026-03-08T00:00:00.000Z',
         completedAt: '2026-03-10T00:00:00.000Z',
       }]);
       expect(await insights.listCompletedTimestampsSince('2026-03-09T00:00:00.000Z'))
         .toEqual(['2026-03-10T00:00:00.000Z']);
+      expect(await insights.listTopLevelTaskCompletionsIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      })).toEqual([{
+        id: 'done-1',
+        completedAt: '2026-03-10T00:00:00.000Z',
+      }]);
+    });
+
+    it('excludes subtasks and checklist items from plan-alignment completions', async () => {
+      const completedAt = '2026-03-10T00:00:00.000Z';
+      await insert('tasks', task('done-root', { status: 'done', completed_at: completedAt }));
+      await insert('tasks', task('done-subtask', {
+        status: 'done',
+        depth: 1,
+        completed_at: completedAt,
+      }));
+      await insert('tasks', task('done-checklist', {
+        status: 'done',
+        is_checklist_item: true,
+        completed_at: completedAt,
+      }));
+
+      expect(await harness.repository.insights.listTopLevelTaskCompletionsIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      })).toEqual([{ id: 'done-root', completedAt }]);
+    });
+
+    it('lists My Day planning events by planning date in deterministic order', async () => {
+      await insert('tasks', task('planned'));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_withdrawn',
+        new_value: '2026-03-10',
+        occurred_at: '2026-03-09T20:00:00.000Z',
+      }));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_committed',
+        new_value: '2026-03-10',
+        occurred_at: '2026-03-09T19:00:00.000Z',
+      }));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_committed',
+        new_value: '2026-03-12',
+        occurred_at: '2026-03-09T18:00:00.000Z',
+      }));
+
+      const rows = await harness.repository.insights.listMyDayPlanningEvents({
+        from: '2026-03-10',
+        to: '2026-03-11',
+      });
+
+      expect(rows.map(row => [row.eventType, row.date, row.occurredAt])).toEqual([
+        ['my_day_committed', '2026-03-10', '2026-03-09T19:00:00.000Z'],
+        ['my_day_withdrawn', '2026-03-10', '2026-03-09T20:00:00.000Z'],
+      ]);
+      expect(rows.every(row => typeof row.id === 'number')).toBe(true);
     });
 
     // ─── Flow ─────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, ChevronRight, Crosshair, Flame, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { cn } from '@/lib/utils/cn';
@@ -8,6 +9,7 @@ import type { TriageItem, TriageSourcePlatform } from '@/types';
 import { CONTENT_TYPE_OPTIONS, SOURCE_OPTIONS } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
 import { getInboxTaskMetadata, type InboxGroup } from '@/lib/inbox/items';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 
 interface MobileTriageStreamProps {
   items: TriageItem[];
@@ -119,6 +121,8 @@ export default function MobileTriageStream({
 }: MobileTriageStreamProps) {
   const [activePriorityFilter, setActivePriorityFilter] = useState<PriorityFilter>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const listStartRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
 
   const handleRefresh = useCallback(async () => {
     await onRefresh?.();
@@ -147,6 +151,27 @@ export default function MobileTriageStream({
       return true;
     });
   }, [activePriorityFilter, activeSourceFilter, activeTypeFilter, items]);
+  const virtualizeItems = shouldVirtualizeList(filteredItems.length);
+  const itemVirtualizer = useVirtualizer({
+    count: virtualizeItems ? filteredItems.length : 0,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => filteredItems[index]?.id ?? index,
+    estimateSize: () => 280,
+    overscan: 4,
+    scrollMargin,
+  });
+
+  useLayoutEffect(() => {
+    if (!virtualizeItems) return;
+    setScrollMargin(listStartRef.current?.offsetTop ?? 0);
+  }, [filtersExpanded, virtualizeItems]);
+
+  const renderedItems = virtualizeItems
+    ? itemVirtualizer.getVirtualItems().map((virtualRow) => ({
+        item: filteredItems[virtualRow.index],
+        virtualRow,
+      }))
+    : filteredItems.map((item) => ({ item, virtualRow: null }));
 
   return (
     <div
@@ -335,8 +360,13 @@ export default function MobileTriageStream({
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {filteredItems.map((item) => {
+          <div
+            ref={listStartRef}
+            data-virtualized={virtualizeItems || undefined}
+            className={cn(virtualizeItems ? 'relative' : 'space-y-3')}
+            style={virtualizeItems ? { height: `${itemVirtualizer.getTotalSize()}px` } : undefined}
+          >
+            {renderedItems.map(({ item, virtualRow }) => {
               const sourceBrand = SOURCE_BRAND[item.sourcePlatform] || SOURCE_BRAND.web;
               const task = getInboxTaskMetadata(item);
               const preview = task
@@ -344,59 +374,68 @@ export default function MobileTriageStream({
                 : item.aiSummary || item.description || 'No preview available yet.';
 
               return (
-                <button
+                <div
                   key={item.id}
-                  type="button"
-                  onClick={() => onItemTap(item.id)}
-                  className={cn(
-                    'w-full rounded-2xl bg-white/[0.04] p-4 text-left backdrop-blur-xl ring-1 ring-white/5 transition active:scale-[0.99]',
-                    'hover:bg-white/[0.06]',
-                  )}
+                  ref={virtualRow ? itemVirtualizer.measureElement : undefined}
+                  data-index={virtualRow?.index}
+                  className={virtualRow ? 'absolute left-0 top-0 w-full pb-3' : undefined}
+                  style={virtualRow
+                    ? { transform: `translateY(${virtualRow.start - scrollMargin}px)` }
+                    : undefined}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={cn('inline-flex h-9 w-9 items-center justify-center rounded-full ring-1', sourceBrand.bg, sourceBrand.ring)}>
-                      <TriageSourceIcon source={item.sourcePlatform} size={16} className="shrink-0" />
-                    </div>
-
-                    <div className="flex items-center gap-2 pl-2">
-                      {!task ? (
-                        <span className="text-sm font-semibold text-sky-300 [font-variant-numeric:tabular-nums]">
-                          {item.aiRelevanceScore}
-                        </span>
-                      ) : null}
-                      <ChevronRight size={16} className="text-[var(--text-muted)]" />
-                    </div>
-                  </div>
-
-                  <h3 className="mt-3 line-clamp-2 text-base font-semibold text-white">
-                    {item.title}
-                  </h3>
-
-                  {item.thumbnailUrl && (
-                    <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-white/10">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={item.thumbnailUrl}
-                        alt=""
-                        className="h-32 w-full bg-slate-900 object-cover"
-                        loading="lazy"
-                      />
-                    </div>
-                  )}
-
-                  <p className="mt-2 line-clamp-2 text-sm text-slate-400">
-                    {preview}
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                    <span>{formatTimeAgo(item.capturedAt || item.ingestedAt)}</span>
-                    {item.aiUrgency !== 'evergreen' && (
-                      <span className={cn('inline-flex items-center rounded-full border px-2 py-1 font-medium', getUrgencyClasses(item.aiUrgency))}>
-                        {getUrgencyLabel(item.aiUrgency)}
-                      </span>
+                  <button
+                    type="button"
+                    onClick={() => onItemTap(item.id)}
+                    className={cn(
+                      'w-full rounded-2xl bg-white/[0.04] p-4 text-left backdrop-blur-xl ring-1 ring-white/5 transition active:scale-[0.99]',
+                      'hover:bg-white/[0.06]',
                     )}
-                  </div>
-                </button>
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={cn('inline-flex h-9 w-9 items-center justify-center rounded-full ring-1', sourceBrand.bg, sourceBrand.ring)}>
+                        <TriageSourceIcon source={item.sourcePlatform} size={16} className="shrink-0" />
+                      </div>
+
+                      <div className="flex items-center gap-2 pl-2">
+                        {!task ? (
+                          <span className="text-sm font-semibold text-sky-300 [font-variant-numeric:tabular-nums]">
+                            {item.aiRelevanceScore}
+                          </span>
+                        ) : null}
+                        <ChevronRight size={16} className="text-[var(--text-muted)]" />
+                      </div>
+                    </div>
+
+                    <h3 className="mt-3 line-clamp-2 text-base font-semibold text-white">
+                      {item.title}
+                    </h3>
+
+                    {item.thumbnailUrl && (
+                      <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-white/10">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.thumbnailUrl}
+                          alt=""
+                          className="h-32 w-full bg-slate-900 object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
+
+                    <p className="mt-2 line-clamp-2 text-sm text-slate-400">
+                      {preview}
+                    </p>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                      <span>{formatTimeAgo(item.capturedAt || item.ingestedAt)}</span>
+                      {item.aiUrgency !== 'evergreen' && (
+                        <span className={cn('inline-flex items-center rounded-full border px-2 py-1 font-medium', getUrgencyClasses(item.aiUrgency))}>
+                          {getUrgencyLabel(item.aiUrgency)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                </div>
               );
             })}
           </div>

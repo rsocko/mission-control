@@ -14,10 +14,12 @@ const mocks = vi.hoisted(() => ({
   listCompletedTimestampsIn: vi.fn(),
   listCreatedTimestampsIn: vi.fn(),
   listCompletionSpansIn: vi.fn(),
+  listTopLevelTaskCompletionsIn: vi.fn(),
   listCompletedTimestampsSince: vi.fn(),
   sourceBreakdownIn: vi.fn(),
   listOpenTaskCreatedTimestamps: vi.fn(),
   listPlanningFrictionEvents: vi.fn(),
+  listMyDayPlanningEvents: vi.fn(),
   listTaskTagNames: vi.fn(),
 }));
 
@@ -51,10 +53,12 @@ describe('insights configured-timezone bucketing', () => {
     mocks.listCompletedTimestampsIn.mockResolvedValue([]);
     mocks.listCreatedTimestampsIn.mockResolvedValue([]);
     mocks.listCompletionSpansIn.mockResolvedValue([]);
+    mocks.listTopLevelTaskCompletionsIn.mockResolvedValue([]);
     mocks.listCompletedTimestampsSince.mockResolvedValue([]);
     mocks.sourceBreakdownIn.mockResolvedValue([]);
     mocks.listOpenTaskCreatedTimestamps.mockResolvedValue([]);
     mocks.listPlanningFrictionEvents.mockResolvedValue([]);
+    mocks.listMyDayPlanningEvents.mockResolvedValue([]);
     mocks.listTaskTagNames.mockResolvedValue([]);
   });
 

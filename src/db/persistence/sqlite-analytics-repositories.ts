@@ -238,9 +238,23 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
     },
 
     async listCompletionSpansIn(range) {
-      return db.select({ createdAt: tasks.createdAt, completedAt: tasks.completedAt })
+      return db.select({ id: tasks.id, createdAt: tasks.createdAt, completedAt: tasks.completedAt })
         .from(tasks)
         .where(completedIn(range));
+    },
+
+    async listTopLevelTaskCompletionsIn(range) {
+      const rows = await db.select({ id: tasks.id, completedAt: tasks.completedAt })
+        .from(tasks)
+        .where(and(
+          completedIn(range),
+          eq(tasks.depth, 0),
+          eq(tasks.isChecklistItem, false),
+          isNotNull(tasks.completedAt),
+        ));
+      return rows.flatMap(row => (
+        row.completedAt ? [{ id: row.id, completedAt: row.completedAt }] : []
+      ));
     },
 
     async listCompletedTimestampsSince(startInclusive) {
@@ -293,6 +307,50 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
           eq(tasks.depth, 0),
           eq(tasks.isChecklistItem, false),
         ));
+    },
+
+    async listMyDayPlanningEvents({ from, to }) {
+      const rows = await db.select({
+        id: taskHistoryEvents.id,
+        taskId: taskHistoryEvents.taskId,
+        eventType: taskHistoryEvents.eventType,
+        date: taskHistoryEvents.newValue,
+        occurredAt: taskHistoryEvents.occurredAt,
+      })
+        .from(taskHistoryEvents)
+        .innerJoin(tasks, eq(taskHistoryEvents.taskId, tasks.id))
+        .where(and(
+          inArray(taskHistoryEvents.eventType, [
+            'my_day_committed',
+            'my_day_withdrawn',
+            'my_day_missed',
+          ]),
+          gte(taskHistoryEvents.newValue, from),
+          lte(taskHistoryEvents.newValue, to),
+          eq(tasks.depth, 0),
+          eq(tasks.isChecklistItem, false),
+        ))
+        .orderBy(
+          asc(taskHistoryEvents.newValue),
+          asc(taskHistoryEvents.occurredAt),
+          asc(taskHistoryEvents.id),
+        );
+      return rows.flatMap(row => (
+        row.date
+        && (
+          row.eventType === 'my_day_committed'
+          || row.eventType === 'my_day_withdrawn'
+          || row.eventType === 'my_day_missed'
+        )
+          ? [{
+            id: row.id,
+            taskId: row.taskId,
+            eventType: row.eventType,
+            date: row.date,
+            occurredAt: row.occurredAt,
+          }]
+          : []
+      ));
     },
 
     async listTaskTagNames(taskIds) {

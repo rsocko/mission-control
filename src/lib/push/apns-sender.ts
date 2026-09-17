@@ -139,6 +139,8 @@ export function buildApnsPayload(
     version: 1,
     notificationId: payload.notificationId,
   };
+  if (payload.deliveryId) nativeMetadata.deliveryId = payload.deliveryId;
+  if (payload.collapseId) nativeMetadata.collapseId = payload.collapseId;
   if (deepLink) nativeMetadata.deepLink = deepLink;
   return {
     aps: {
@@ -162,6 +164,12 @@ export function buildApnsRequestHeaders(
   const notificationId = payload.mc && typeof payload.mc === 'object'
     ? String((payload.mc as Record<string, unknown>).notificationId)
     : '';
+  const deliveryId = payload.mc && typeof payload.mc === 'object'
+    ? String((payload.mc as Record<string, unknown>).deliveryId ?? '')
+    : '';
+  const collapseId = payload.mc && typeof payload.mc === 'object'
+    ? String((payload.mc as Record<string, unknown>).collapseId ?? '')
+    : '';
   const headers: Record<string, string> = {
     [constants.HTTP2_HEADER_METHOD]: 'POST',
     [constants.HTTP2_HEADER_PATH]: `/3/device/${deviceToken}`,
@@ -170,7 +178,11 @@ export function buildApnsRequestHeaders(
     'apns-push-type': 'alert',
     'apns-priority': '10',
   };
-  if (UUID_PATTERN.test(notificationId)) headers['apns-id'] = notificationId;
+  if (UUID_PATTERN.test(deliveryId)) headers['apns-id'] = deliveryId;
+  else if (UUID_PATTERN.test(notificationId)) headers['apns-id'] = notificationId;
+  if (collapseId && Buffer.byteLength(collapseId, 'utf8') <= 64) {
+    headers['apns-collapse-id'] = collapseId;
+  }
   return headers;
 }
 

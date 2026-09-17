@@ -255,7 +255,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(10);
+    expect(migrations).toHaveLength(11);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -271,6 +271,17 @@ describe('PostgreSQL schema', () => {
     expect(sql).toContain('"search_vector" "tsvector" GENERATED ALWAYS AS');
     expect(sql).toContain('USING gin ("search_vector")');
     expect(sql).not.toContain('AUTOINCREMENT');
+
+    const persistentRemindersSql = readFileSync(
+      resolve(migrationDirectory, migrations.at(-1)!),
+      'utf8',
+    );
+    expect(persistentRemindersSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "reminder_nag_interval" integer',
+    );
+    expect(persistentRemindersSql).toContain(
+      'CREATE INDEX "idx_task_reminder_occurrences_series_sequence"',
+    );
 
     const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');
     expect(enrichmentSql).toContain('CREATE TABLE "notification_enrichment_jobs"');

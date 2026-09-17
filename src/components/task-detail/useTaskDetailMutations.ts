@@ -569,6 +569,8 @@ export function useTaskDetailMutations({
     reminderAt?: string | null;
     reminderRelative?: TaskDetail['reminderRelative'];
     reminderDueTime?: string | null;
+    reminderNagInterval?: TaskDetail['reminderNagInterval'];
+    reminderNagStopAt?: string | null;
   }) => {
     if (!ensureFieldsEditable('reminderAt') || reminderSaving) return false;
     setReminderSaving(true);
@@ -583,6 +585,8 @@ export function useTaskDetailMutations({
       const reminder = result.data.reminder as Pick<
         TaskDetail,
         'reminderAt' | 'reminderRelative' | 'reminderDueTime'
+        | 'reminderNagInterval' | 'reminderNagStopAt'
+        | 'reminderNagSeriesId' | 'reminderNagSequence'
       > | undefined;
       if (reminder) {
         setTask((prev) => prev ? { ...prev, ...reminder } : prev);

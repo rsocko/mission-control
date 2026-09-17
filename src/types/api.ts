@@ -60,6 +60,10 @@ export type TaskListItemDto = TaskListDomainFields & {
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   hubProjectIds?: string[];
   projectPhaseMemberships?: Array<{
     projectId: string;

@@ -72,6 +72,20 @@ export interface AnalyticsDimensionCount {
   count: number;
 }
 
+export interface AnalyticsWorkActivityItem {
+  key: string;
+  label: string;
+  active: number;
+  closed: number;
+}
+
+export interface AnalyticsWorkActivity {
+  lists: AnalyticsWorkActivityItem[];
+  tags: AnalyticsWorkActivityItem[];
+  projects: AnalyticsWorkActivityItem[];
+  sources: AnalyticsWorkActivityItem[];
+}
+
 export interface AnalyticsProject {
   id: string;
   name: string;
@@ -220,6 +234,7 @@ export interface InsightsAnalyticsRepository {
   sourceBreakdownIn(range: AnalyticsInstantRange): Promise<AnalyticsSourceCount[]>;
   countCurrentTasksByPriority(): Promise<AnalyticsDimensionCount[]>;
   countCurrentTasksByStatus(): Promise<AnalyticsDimensionCount[]>;
+  workActivityIn(range: AnalyticsInstantRange): Promise<AnalyticsWorkActivity>;
   listOpenTaskCreatedTimestamps(): Promise<AnalyticsInstant[]>;
   listPlanningFrictionEvents(
     eventTypes: readonly string[],

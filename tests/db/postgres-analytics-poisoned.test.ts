@@ -74,6 +74,7 @@ const repository: AnalyticsPersistence = {
     sourceBreakdownIn: empty,
     countCurrentTasksByPriority: empty,
     countCurrentTasksByStatus: empty,
+    workActivityIn: async () => ({ lists: [], tags: [], projects: [], sources: [] }),
     listOpenTaskCreatedTimestamps: empty,
     listPlanningFrictionEvents: empty,
     listTaskTagNames: empty,

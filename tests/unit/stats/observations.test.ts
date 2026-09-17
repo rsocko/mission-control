@@ -44,6 +44,7 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       topTags: [],
     },
     projectActivity: [],
+    workActivity: { lists: [], tags: [], projects: [], sources: [] },
     routineHeatmap: [],
     delivery: {
       throughput: { interval: 'week', total: 0, averagePerInterval: 0, points: [] },

@@ -37,7 +37,12 @@ import {
 } from '@/db/schema';
 import { getTaskTransitionsInRange, type TaskHistoryEventType } from '@/db/task-history';
 import { notificationNeedsAttention } from '@/lib/notifications/lifecycle-sql';
+import {
+  enabledGitHubConnectorCondition,
+  getAssignedFilterCondition,
+} from '@/db/persistence/sqlite-task-filter';
 import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
+import { decodeLenientJsonObject } from './value-codecs';
 import type {
   AnalyticsInstantRange,
   AnalyticsLocalDateRange,
@@ -85,7 +90,22 @@ function createKpiRepository(db: AnalyticsDatabase): KpiAnalyticsRepository {
     countOpenTasksWithPriorities: (priorities) => countOpen(
       inArray(tasks.priority, [...priorities]),
     ),
-    countOpenTasksWithAssignee: () => countOpen(isNotNull(tasks.assignee)),
+    async countOpenTasksAssignedToMe() {
+      const rows = await db.select({ settings: connectorConfigs.settings })
+        .from(connectorConfigs)
+        .where(enabledGitHubConnectorCondition());
+      const githubUsernames = rows.flatMap(({ settings }) => {
+        const authenticatedUser = decodeLenientJsonObject(settings).authenticatedUser;
+        return typeof authenticatedUser === 'string' && authenticatedUser
+          ? [authenticatedUser]
+          : [];
+      });
+      return countOpen(getAssignedFilterCondition(githubUsernames));
+    },
+    countOpenTasksWithPlanningHorizons: (horizons) => countOpen(
+      inArray(tasks.planningHorizon, [...horizons]),
+    ),
+    countOpenTasksWithoutPlanningHorizon: () => countOpen(isNull(tasks.planningHorizon)),
     countOpenTasksByConnectorType: (connectorType) => countOpen(
       eq(tasks.connectorType, connectorType),
     ),

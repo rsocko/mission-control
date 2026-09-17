@@ -19,6 +19,7 @@ import type { FlowHistoryEventInput, FlowTaskInput } from '@/lib/stats/flow';
 
 /** A local calendar date, `YYYY-MM-DD`. */
 export type AnalyticsLocalDate = string;
+export type AnalyticsPlanningHorizon = 'next' | 'soon' | 'later' | 'someday';
 /** An absolute instant serialized as an ISO-8601 timestamp. */
 export type AnalyticsInstant = string;
 
@@ -204,7 +205,11 @@ export interface KpiAnalyticsRepository {
   countOpenTasksDueBetween(range: AnalyticsLocalDateRange): Promise<number>;
   countOpenTasksInIds(taskIds: readonly string[]): Promise<number>;
   countOpenTasksWithPriorities(priorities: readonly string[]): Promise<number>;
-  countOpenTasksWithAssignee(): Promise<number>;
+  countOpenTasksAssignedToMe(): Promise<number>;
+  countOpenTasksWithPlanningHorizons(
+    horizons: readonly AnalyticsPlanningHorizon[],
+  ): Promise<number>;
+  countOpenTasksWithoutPlanningHorizon(): Promise<number>;
   countOpenTasksByConnectorType(connectorType: string): Promise<number>;
   /** Uses the shared notification "needs attention" lifecycle predicate. */
   countNotificationsNeedingAttention(): Promise<number>;

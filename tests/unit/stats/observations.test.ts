@@ -68,6 +68,15 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       unsupportedMeasures: '',
     },
     activityHeatmap: [],
+    productivity: {
+      periodStart: '2026-06-24',
+      periodEnd: '2026-07-23',
+      timeZone: 'UTC',
+      hourly: [],
+      weekdays: [],
+      timeliness: { onTime: 0, late: 0, withoutDueDate: 0, onTimeRate: null },
+      comparisons: [],
+    },
     flow: {
       start: '2026-01-01T00:00:00.000Z',
       end: '2026-01-08T00:00:00.000Z',

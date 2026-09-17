@@ -197,7 +197,11 @@ export function describeAnalyticsRepositoriesContract(
     // ─── Instant comparison parity ────────────────────────────────────────
 
     it('compares stored timestamps by instant and drops unparsable text', async () => {
-      await insert('tasks', task('in-utc', { status: 'done', completed_at: '2026-03-10T01:00:00.000Z' }));
+      await insert('tasks', task('in-utc', {
+        status: 'done',
+        completed_at: '2026-03-10T01:00:00.000Z',
+        due_date: '2026-03-09',
+      }));
       await insert('tasks', task('in-precise', { status: 'done', completed_at: '2026-03-10T01:00:00.1234567Z' }));
       await insert('tasks', task('in-offsetless', { status: 'done', completed_at: '2026-03-10T02:00:00' }));
       await insert('tasks', task('in-offset', { status: 'done', completed_at: '2026-03-10T08:00:00+05:00' }));
@@ -214,6 +218,12 @@ export function describeAnalyticsRepositoriesContract(
       expect(await harness.repository.kpis.countTasksCompletedIn(range)).toBe(5);
       expect(await harness.repository.insights.countTasksCompletedIn(range)).toBe(5);
       expect(await harness.repository.insights.listCompletedTimestampsIn(range)).toHaveLength(5);
+      const timings = await harness.repository.insights.listCompletedTaskTimingsIn(range);
+      expect(timings).toHaveLength(5);
+      expect(timings).toContainEqual({
+        completedAt: '2026-03-10T01:00:00.000Z',
+        dueDate: '2026-03-09',
+      });
     });
 
     it('treats the instant range as half open at both ends', async () => {

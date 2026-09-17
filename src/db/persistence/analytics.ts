@@ -83,6 +83,11 @@ export interface AnalyticsCompletionSpan {
   completedAt: AnalyticsInstant | null;
 }
 
+export interface AnalyticsCompletedTaskTiming {
+  completedAt: AnalyticsInstant | null;
+  dueDate: AnalyticsLocalDate | null;
+}
+
 export interface AnalyticsPlanningFrictionEvent {
   taskId: string;
   eventType: string;
@@ -209,6 +214,9 @@ export interface InsightsAnalyticsRepository {
   ): Promise<Array<AnalyticsInstant | null>>;
   listCreatedTimestampsIn(range: AnalyticsInstantRange): Promise<AnalyticsInstant[]>;
   listCompletionSpansIn(range: AnalyticsInstantRange): Promise<AnalyticsCompletionSpan[]>;
+  listCompletedTaskTimingsIn(
+    range: AnalyticsInstantRange,
+  ): Promise<AnalyticsCompletedTaskTiming[]>;
   listCompletedTimestampsSince(
     startInclusive: AnalyticsInstant,
   ): Promise<Array<AnalyticsInstant | null>>;

@@ -14,11 +14,17 @@ const mocks = vi.hoisted(() => ({
   listCompletedTimestampsIn: vi.fn(),
   listCreatedTimestampsIn: vi.fn(),
   listCompletionSpansIn: vi.fn(),
+  listCompletedTaskTimingsIn: vi.fn(),
   listCompletedTimestampsSince: vi.fn(),
   sourceBreakdownIn: vi.fn(),
   listOpenTaskCreatedTimestamps: vi.fn(),
   listPlanningFrictionEvents: vi.fn(),
   listTaskTagNames: vi.fn(),
+  listActiveProjects: vi.fn(),
+  listActiveRoutines: vi.fn(),
+  listRoutineCompletionsBetween: vi.fn(),
+  listRoutineCompletionsInHalfOpenRange: vi.fn(),
+  countRoutineCompletionsByDate: vi.fn(),
 }));
 
 const insights = mocks as unknown as InsightsAnalyticsRepository;
@@ -51,11 +57,17 @@ describe('insights configured-timezone bucketing', () => {
     mocks.listCompletedTimestampsIn.mockResolvedValue([]);
     mocks.listCreatedTimestampsIn.mockResolvedValue([]);
     mocks.listCompletionSpansIn.mockResolvedValue([]);
+    mocks.listCompletedTaskTimingsIn.mockResolvedValue([]);
     mocks.listCompletedTimestampsSince.mockResolvedValue([]);
     mocks.sourceBreakdownIn.mockResolvedValue([]);
     mocks.listOpenTaskCreatedTimestamps.mockResolvedValue([]);
     mocks.listPlanningFrictionEvents.mockResolvedValue([]);
     mocks.listTaskTagNames.mockResolvedValue([]);
+    mocks.listActiveProjects.mockResolvedValue([]);
+    mocks.listActiveRoutines.mockResolvedValue([]);
+    mocks.listRoutineCompletionsBetween.mockResolvedValue([]);
+    mocks.listRoutineCompletionsInHalfOpenRange.mockResolvedValue([]);
+    mocks.countRoutineCompletionsByDate.mockResolvedValue([]);
   });
 
   it('uses configured today and buckets bare UTC timestamps into local dates', async () => {
@@ -124,5 +136,54 @@ describe('insights configured-timezone bucketing', () => {
       topLists: [{ label: 'Work', count: 2 }],
       topTags: [{ label: 'planning', count: 2 }],
     });
+  });
+
+  it('builds timezone-aware hourly, weekday, and due-date productivity patterns', async () => {
+    mocks.listCompletedTaskTimingsIn.mockResolvedValue([
+      {
+        completedAt: '2026-08-10T13:30:00.000Z',
+        dueDate: '2026-08-10',
+      },
+      {
+        completedAt: '2026-08-11T02:00:00.000Z',
+        dueDate: '2026-08-09',
+      },
+      {
+        completedAt: '2026-08-12T16:00:00.000Z',
+        dueDate: null,
+      },
+    ]);
+    mocks.countRoutineCompletionsByDate.mockImplementation(async ({ from, to }) => (
+      from === '2026-08-10' && to === '2026-08-16'
+        ? [
+            { date: '2026-08-10', count: 2 },
+            { date: '2026-08-11', count: 1 },
+          ]
+        : []
+    ));
+    const { computeInsightsSection } = await import('@/lib/stats/insights');
+
+    const result = await computeInsightsSection(
+      'activity',
+      7,
+      { timeZone: 'America/New_York' },
+      new Date('2026-08-16T12:00:00.000Z'),
+    );
+
+    expect(result.productivity.hourly.find(entry => entry.hour === 9)?.taskCompletions).toBe(1);
+    expect(result.productivity.hourly.find(entry => entry.hour === 22)?.taskCompletions).toBe(1);
+    expect(result.productivity.hourly.find(entry => entry.hour === 12)?.taskCompletions).toBe(1);
+    expect(result.productivity.weekdays.find(entry => entry.label === 'Mon')).toMatchObject({
+      taskCompletions: 2,
+      routineCompletions: 2,
+      total: 4,
+    });
+    expect(result.productivity.timeliness).toEqual({
+      onTime: 1,
+      late: 1,
+      withoutDueDate: 1,
+      onTimeRate: 50,
+    });
+    expect(result.productivity.timeZone).toBe('America/New_York');
   });
 });

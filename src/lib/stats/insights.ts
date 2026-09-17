@@ -114,6 +114,49 @@ export interface ActivityHeatmapEntry {
   routineCompletions: number;
 }
 
+export interface HourlyProductivityEntry {
+  hour: number;
+  taskCompletions: number;
+}
+
+export interface WeekdayProductivityEntry {
+  day: number;
+  label: string;
+  taskCompletions: number;
+  routineCompletions: number;
+  total: number;
+}
+
+export interface CompletionTimeliness {
+  onTime: number;
+  late: number;
+  withoutDueDate: number;
+  onTimeRate: number | null;
+}
+
+export interface ProductivityActivityTotals {
+  tasks: number;
+  routines: number;
+  total: number;
+}
+
+export interface ProductivityPeriodComparison {
+  period: 'week' | 'month';
+  current: ProductivityActivityTotals;
+  previous: ProductivityActivityTotals;
+  changePercent: number | null;
+}
+
+export interface ProductivityInsights {
+  periodStart: string;
+  periodEnd: string;
+  timeZone: string;
+  hourly: HourlyProductivityEntry[];
+  weekdays: WeekdayProductivityEntry[];
+  timeliness: CompletionTimeliness;
+  comparisons: ProductivityPeriodComparison[];
+}
+
 export interface PlanningFrictionCategory {
   label: string;
   count: number;
@@ -180,6 +223,7 @@ export interface InsightsSnapshot {
     unsupportedMeasures: string;
   };
   activityHeatmap: ActivityHeatmapEntry[];
+  productivity: ProductivityInsights;
   flow: FlowInsightsResult | null;
 }
 
@@ -217,6 +261,7 @@ export interface InsightsActivitySection {
   projectActivity: ProjectActivityItem[];
   routineHeatmap: RoutineHeatmapEntry[];
   activityHeatmap: ActivityHeatmapEntry[];
+  productivity: ProductivityInsights;
 }
 
 export type InsightsSectionSnapshot =
@@ -591,6 +636,213 @@ async function getActivityHeatmap(
   return entries;
 }
 
+const WEEKDAYS = [
+  { day: 1, label: 'Mon' },
+  { day: 2, label: 'Tue' },
+  { day: 3, label: 'Wed' },
+  { day: 4, label: 'Thu' },
+  { day: 5, label: 'Fri' },
+  { day: 6, label: 'Sat' },
+  { day: 0, label: 'Sun' },
+] as const;
+
+function getRangeBoundsInTimeZone(start: string, end: string, timeZone: string) {
+  return {
+    startInclusive: fromZonedTime(`${start}T00:00:00`, timeZone).toISOString(),
+    endExclusive: fromZonedTime(
+      `${addCalendarDays(end, 1)}T00:00:00`,
+      timeZone,
+    ).toISOString(),
+  };
+}
+
+function completedDateInTimeZone(timestamp: string, timeZone: string): string | null {
+  const parsed = parseStoredTimestamp(timestamp);
+  if (!Number.isFinite(parsed)) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(parsed));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function completedHourInTimeZone(timestamp: string, timeZone: string): number | null {
+  const parsed = parseStoredTimestamp(timestamp);
+  if (!Number.isFinite(parsed)) return null;
+  const hour = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(parsed)).find(part => part.type === 'hour')?.value);
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
+}
+
+function startOfWeekMonday(date: string): string {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return addCalendarDays(date, day === 0 ? -6 : 1 - day);
+}
+
+function previousMonthToDate(today: string): { start: string; end: string } {
+  const [year, month, day] = today.split('-').map(Number);
+  const previousStartDate = new Date(Date.UTC(year, month - 2, 1));
+  const previousYear = previousStartDate.getUTCFullYear();
+  const previousMonth = previousStartDate.getUTCMonth() + 1;
+  const previousMonthLastDay = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+  const comparableDay = Math.min(day, previousMonthLastDay);
+  const prefix = `${previousYear}-${String(previousMonth).padStart(2, '0')}`;
+  return {
+    start: `${prefix}-01`,
+    end: `${prefix}-${String(comparableDay).padStart(2, '0')}`,
+  };
+}
+
+function activityTotals(tasks: number, routines: number): ProductivityActivityTotals {
+  return { tasks, routines, total: tasks + routines };
+}
+
+async function getProductivityInsights(
+  repository: InsightsAnalyticsRepository,
+  periodStart: string,
+  periodEnd: string,
+  today: string,
+  timeZone: string,
+): Promise<ProductivityInsights> {
+  const [completedTasks, routineRows] = await Promise.all([
+    repository.listCompletedTaskTimingsIn(
+      getRangeBoundsInTimeZone(periodStart, periodEnd, timeZone),
+    ),
+    repository.countRoutineCompletionsByDate({ from: periodStart, to: periodEnd }),
+  ]);
+
+  const hourly = Array.from(
+    { length: 24 },
+    (_, hour): HourlyProductivityEntry => ({ hour, taskCompletions: 0 }),
+  );
+  const weekdays = WEEKDAYS.map(
+    ({ day, label }): WeekdayProductivityEntry => ({
+      day,
+      label,
+      taskCompletions: 0,
+      routineCompletions: 0,
+      total: 0,
+    }),
+  );
+  const weekdaysByDay = new Map(weekdays.map(entry => [entry.day, entry]));
+  let onTime = 0;
+  let late = 0;
+  let withoutDueDate = 0;
+
+  for (const task of completedTasks) {
+    if (!task.completedAt) continue;
+    const completedDate = completedDateInTimeZone(task.completedAt, timeZone);
+    const completedHour = completedHourInTimeZone(task.completedAt, timeZone);
+    if (!completedDate || completedHour === null) continue;
+
+    hourly[completedHour].taskCompletions += 1;
+    const weekday = new Date(`${completedDate}T00:00:00Z`).getUTCDay();
+    const weekdayEntry = weekdaysByDay.get(weekday);
+    if (weekdayEntry) weekdayEntry.taskCompletions += 1;
+
+    const dueDate = task.dueDate?.slice(0, 10);
+    if (!dueDate) withoutDueDate += 1;
+    else if (completedDate <= dueDate) onTime += 1;
+    else late += 1;
+  }
+
+  for (const row of routineRows) {
+    const weekday = new Date(`${row.date}T00:00:00Z`).getUTCDay();
+    const weekdayEntry = weekdaysByDay.get(weekday);
+    if (weekdayEntry) weekdayEntry.routineCompletions += Number(row.count);
+  }
+  for (const weekday of weekdays) {
+    weekday.total = weekday.taskCompletions + weekday.routineCompletions;
+  }
+
+  const currentWeekStart = startOfWeekMonday(today);
+  const previousWeekStart = addCalendarDays(currentWeekStart, -7);
+  const previousWeekEnd = addCalendarDays(today, -7);
+  const currentMonthStart = `${today.slice(0, 7)}-01`;
+  const previousMonth = previousMonthToDate(today);
+  const comparisonRanges = [
+    {
+      period: 'week' as const,
+      currentStart: currentWeekStart,
+      currentEnd: today,
+      previousStart: previousWeekStart,
+      previousEnd: previousWeekEnd,
+    },
+    {
+      period: 'month' as const,
+      currentStart: currentMonthStart,
+      currentEnd: today,
+      previousStart: previousMonth.start,
+      previousEnd: previousMonth.end,
+    },
+  ];
+  const comparisons = await Promise.all(comparisonRanges.map(async range => {
+    const [
+      currentTasks,
+      previousTasks,
+      currentRoutinesByDate,
+      previousRoutinesByDate,
+    ] = await Promise.all([
+      repository.countTasksCompletedIn(
+        getRangeBoundsInTimeZone(range.currentStart, range.currentEnd, timeZone),
+      ),
+      repository.countTasksCompletedIn(
+        getRangeBoundsInTimeZone(range.previousStart, range.previousEnd, timeZone),
+      ),
+      repository.countRoutineCompletionsByDate({
+        from: range.currentStart,
+        to: range.currentEnd,
+      }),
+      repository.countRoutineCompletionsByDate({
+        from: range.previousStart,
+        to: range.previousEnd,
+      }),
+    ]);
+    const currentRoutines = currentRoutinesByDate.reduce(
+      (sum, row) => sum + Number(row.count),
+      0,
+    );
+    const previousRoutines = previousRoutinesByDate.reduce(
+      (sum, row) => sum + Number(row.count),
+      0,
+    );
+    const current = activityTotals(currentTasks, currentRoutines);
+    const previous = activityTotals(previousTasks, previousRoutines);
+    return {
+      period: range.period,
+      current,
+      previous,
+      changePercent: previous.total > 0
+        ? Math.round(((current.total - previous.total) / previous.total) * 100)
+        : current.total === 0 ? 0 : null,
+    };
+  }));
+
+  const completionsWithDueDate = onTime + late;
+  return {
+    periodStart,
+    periodEnd,
+    timeZone,
+    hourly,
+    weekdays,
+    timeliness: {
+      onTime,
+      late,
+      withoutDueDate,
+      onTimeRate: completionsWithDueDate > 0
+        ? Math.round((onTime / completionsWithDueDate) * 100)
+        : null,
+    },
+    comparisons,
+  };
+}
+
 async function getAvgTaskAge(
   repository: InsightsAnalyticsRepository,
   start: string,
@@ -879,10 +1131,19 @@ export async function computeInsightsSection(
   const repository = await insightsRepository();
   const { today: activityToday, weekMonday } = getRoutineWeekContext(now, timeZone);
   const activityStart = fmtDate(addDays(subYears(new Date(activityToday + 'T12:00:00'), 1), 1));
-  const [projectActivity, routineHeatmap, activityHeatmap] = await Promise.all([
+  const productivityStart = options.startDate ?? daysAgo(activityToday, period - 1);
+  const productivityEnd = options.endDate ?? activityToday;
+  const [projectActivity, routineHeatmap, activityHeatmap, productivity] = await Promise.all([
     getProjectActivity(repository, periodStart, periodEnd),
     getRoutineHeatmap(repository, weekMonday, activityToday),
     getActivityHeatmap(repository, activityStart, activityToday),
+    getProductivityInsights(
+      repository,
+      productivityStart,
+      productivityEnd,
+      activityToday,
+      timeZone,
+    ),
   ]);
 
   return {
@@ -891,6 +1152,7 @@ export async function computeInsightsSection(
     projectActivity,
     routineHeatmap,
     activityHeatmap,
+    productivity,
   };
 }
 
@@ -923,6 +1185,7 @@ export async function computeInsights(
     deliveryFilters: delivery.deliveryFilters,
     deliverySemantics: delivery.deliverySemantics,
     activityHeatmap: activity.activityHeatmap,
+    productivity: activity.productivity,
     flow: flow.flow,
   };
 }

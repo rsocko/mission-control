@@ -1,9 +1,10 @@
-import { beforeAll, describe } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { createSqliteTaskReminderRepository } from '@/db/persistence/sqlite-task-reminder-repository';
 import {
   describeTaskReminderRepositoryContract,
   TASK_REMINDER_BASE_TIME,
+  TASK_REMINDER_DELIVERY_CONTEXT,
   type TaskReminderContractHarness,
 } from '../contracts/task-reminder-repository.contract';
 
@@ -169,4 +170,107 @@ beforeAll(async () => {
 
 describe('SQLite task reminder repository', () => {
   describeTaskReminderRepositoryContract(createHarness);
+
+  it('advances a persistent reminder and updates one grouped notification', async () => {
+    const harness = await createHarness();
+    await harness.reset();
+    const scheduledAt = '2026-08-31T11:55:00.000Z';
+    sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, status,
+        priority, reminder_at, reminder_nag_interval, reminder_nag_series_id,
+        reminder_nag_sequence, created_at, updated_at, last_synced_at
+      ) VALUES (
+        'nag-task', 'local:nag-task', 'local', 'local', 'Submit permit', 'todo',
+        'none', ?, 5, 'series-1', 0, ?, ?, ?
+      )
+    `).run(
+      scheduledAt,
+      TASK_REMINDER_BASE_TIME.toISOString(),
+      TASK_REMINDER_BASE_TIME.toISOString(),
+      TASK_REMINDER_BASE_TIME.toISOString(),
+    );
+
+    const firstClaim = await harness.repository.claimNext({
+      now: TASK_REMINDER_BASE_TIME,
+      leaseMs: 300_000,
+      maxAttempts: 5,
+    });
+    expect(firstClaim).toMatchObject({ seriesId: 'series-1', sequence: 0 });
+    await harness.repository.fire(firstClaim!, {
+      now: TASK_REMINDER_BASE_TIME,
+      delivery: TASK_REMINDER_DELIVERY_CONTEXT,
+    });
+
+    const nextAt = '2026-08-31T12:05:00.000Z';
+    expect(sqlite.prepare(`
+      SELECT reminder_at, reminder_nag_sequence FROM tasks WHERE id = 'nag-task'
+    `).get()).toMatchObject({
+      reminder_at: nextAt,
+      reminder_nag_sequence: 1,
+    });
+
+    const secondNow = new Date(nextAt);
+    const secondClaim = await harness.repository.claimNext({
+      now: secondNow,
+      leaseMs: 300_000,
+      maxAttempts: 5,
+    });
+    expect(secondClaim).toMatchObject({ seriesId: 'series-1', sequence: 1 });
+    await harness.repository.fire(secondClaim!, {
+      now: secondNow,
+      delivery: TASK_REMINDER_DELIVERY_CONTEXT,
+    });
+
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM notifications
+      WHERE source_id = 'task-reminder:series:series-1'
+    `).get()).toEqual({ count: 1 });
+    expect(sqlite.prepare(`
+      SELECT body FROM notifications WHERE source_id = 'task-reminder:series:series-1'
+    `).get()).toEqual({ body: 'Still pending · alerted 2 times.' });
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM task_reminder_occurrences
+      WHERE series_id = 'series-1'
+    `).get()).toEqual({ count: 2 });
+  });
+
+  it('revives a cancelled occurrence under the task current series identity', async () => {
+    const harness = await createHarness();
+    await harness.reset();
+    const scheduledAt = '2026-08-31T11:55:00.000Z';
+    const now = TASK_REMINDER_BASE_TIME.toISOString();
+    sqlite.prepare(`
+      INSERT INTO tasks (
+        id, source_id, connector_type, connector_instance_id, title, status,
+        priority, reminder_at, reminder_nag_interval, reminder_nag_series_id,
+        reminder_nag_sequence, created_at, updated_at, last_synced_at
+      ) VALUES (
+        'revived-task', 'local:revived-task', 'local', 'local', 'Submit permit',
+        'todo', 'none', ?, 5, 'series-current', 3, ?, ?, ?
+      )
+    `).run(scheduledAt, now, now, now);
+    sqlite.prepare(`
+      INSERT INTO task_reminder_occurrences (
+        id, task_id, scheduled_at, series_id, sequence, state, attempt_count,
+        cancelled_at, created_at, updated_at
+      ) VALUES (
+        'cancelled-occurrence', 'revived-task', ?, 'series-old', 1, 'cancelled',
+        1, ?, ?, ?
+      )
+    `).run(scheduledAt, now, now, now);
+
+    const claim = await harness.repository.claimNext({
+      now: TASK_REMINDER_BASE_TIME,
+      leaseMs: 300_000,
+      maxAttempts: 5,
+    });
+
+    expect(claim).toMatchObject({
+      id: 'cancelled-occurrence',
+      seriesId: 'series-current',
+      sequence: 3,
+      attemptCount: 1,
+    });
+  });
 });

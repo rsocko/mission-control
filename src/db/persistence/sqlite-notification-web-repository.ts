@@ -1275,11 +1275,14 @@ export function createSqliteNotificationWebRepository(
           metadata: unknown;
         } | undefined;
         const task = sqlite.prepare(`
-          SELECT id, status, reminder_at AS reminderAt FROM tasks WHERE id = ?
+          SELECT id, status, reminder_at AS reminderAt,
+                 reminder_nag_series_id AS reminderNagSeriesId
+          FROM tasks WHERE id = ?
         `).get(input.taskId) as {
           id: string;
           status: string;
           reminderAt: string | null;
+          reminderNagSeriesId: string | null;
         } | undefined;
         if (!notification || !task) return { applied: false, conflict: 'missing' } as const;
         if (notification.disposition !== 'inbox' || notification.sourceState !== 'active') {
@@ -1291,7 +1294,28 @@ export function createSqliteNotificationWebRepository(
         ) {
           return { applied: false, conflict: 'task_terminal' } as const;
         }
-        if (input.actionType === 'remind_later' && task.reminderAt !== null) {
+        const metadata = parseJson(notification.metadata);
+        const notificationMetadata = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+          ? metadata as Record<string, unknown>
+          : null;
+        const notificationSeriesId = notificationMetadata
+          && typeof notificationMetadata.reminderNagSeriesId === 'string'
+          ? notificationMetadata.reminderNagSeriesId
+          : null;
+        const persistentSeriesMatches = notificationSeriesId !== null
+          && notificationSeriesId === task.reminderNagSeriesId;
+        if (
+          input.actionType === 'remind_later'
+          && task.reminderAt !== null
+          && !persistentSeriesMatches
+        ) {
+          return { applied: false, conflict: 'reminder_changed' } as const;
+        }
+        if (
+          input.actionType === 'dismiss_reminder'
+          && notificationSeriesId !== null
+          && !persistentSeriesMatches
+        ) {
           return { applied: false, conflict: 'reminder_changed' } as const;
         }
 
@@ -1308,8 +1332,10 @@ export function createSqliteNotificationWebRepository(
           const scheduled = sqlite.prepare(`
             UPDATE tasks
             SET reminder_at = ?, updated_at = ?
-            WHERE id = ? AND reminder_at IS NULL AND status NOT IN ('done', 'cancelled')
-          `).run(input.reminderAt, input.now, input.taskId);
+            WHERE id = ?
+              AND (reminder_at IS NULL OR reminder_nag_series_id = ?)
+              AND status NOT IN ('done', 'cancelled')
+          `).run(input.reminderAt, input.now, input.taskId, notificationSeriesId);
           if (scheduled.changes !== 1) {
             return { applied: false, conflict: 'reminder_changed' } as const;
           }
@@ -1317,12 +1343,13 @@ export function createSqliteNotificationWebRepository(
           sqlite.prepare(`
             UPDATE tasks
             SET reminder_at = NULL, reminder_relative = NULL,
-                reminder_due_time = NULL, updated_at = ?
+                reminder_due_time = NULL, reminder_nag_interval = NULL,
+                reminder_nag_stop_at = NULL, reminder_nag_series_id = NULL,
+                reminder_nag_sequence = 0, updated_at = ?
             WHERE id = ?
           `).run(input.now, input.taskId);
         }
 
-        const metadata = parseJson(notification.metadata);
         const patch = legacyStateMutationPatch(
           notification,
           input.actionType === 'dismiss_reminder' ? 'dismissed' : 'archived',

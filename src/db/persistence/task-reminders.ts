@@ -9,8 +9,31 @@ export interface ClaimedTaskReminder {
   id: string;
   taskId: string;
   scheduledAt: string;
+  seriesId?: string | null;
+  sequence?: number | null;
   attemptCount: number;
   claimToken: string;
+}
+
+export function calculateNextNagAt(input: {
+  scheduledAt: string;
+  now: Date;
+  intervalMinutes: number;
+  stopAt: string | null;
+}): string | null {
+  const intervalMs = input.intervalMinutes * 60_000;
+  const scheduledMs = Date.parse(input.scheduledAt);
+  if (!Number.isFinite(scheduledMs) || intervalMs <= 0) return null;
+  const elapsedIntervals = Math.max(
+    1,
+    Math.floor((input.now.getTime() - scheduledMs) / intervalMs) + 1,
+  );
+  const next = scheduledMs + elapsedIntervals * intervalMs;
+  if (input.stopAt) {
+    const stopAt = Date.parse(input.stopAt);
+    if (!Number.isFinite(stopAt) || next > stopAt) return null;
+  }
+  return new Date(next).toISOString();
 }
 
 export interface TaskReminderDeliveryContext {
@@ -70,6 +93,7 @@ export interface TaskReminderPushRule {
 
 export interface TaskReminderDeliveryState {
   channelEnabled: boolean;
+  persistentRemindersEnabled: boolean;
   doNotDisturb: boolean;
   quietHours: boolean;
   webPushSubscriptions: boolean;
@@ -150,6 +174,7 @@ export function createTaskReminderDeliveryPlans(input: {
   rule: TaskReminderPushRule | null;
   state: TaskReminderDeliveryState;
   context: TaskReminderDeliveryContext;
+  persistentReminder: boolean;
 }): TaskReminderDeliveryPlan[] {
   const rule = input.rule ?? {
     templateKey: TASK_REMINDER_TEMPLATE_KEY,
@@ -181,8 +206,10 @@ export function createTaskReminderDeliveryPlans(input: {
     const hasSubscriptions = channel === 'web_push'
       ? input.state.webPushSubscriptions
       : input.state.apnsRegistrations;
+    const persistentRemindersAllowed = !input.persistentReminder
+      || input.state.persistentRemindersEnabled;
     const gates = {
-      channelEnabled: input.state.channelEnabled,
+      channelEnabled: input.state.channelEnabled && persistentRemindersAllowed,
       channelConfigured,
       dnd: input.state.doNotDisturb,
       quietHours: input.state.quietHours,
@@ -190,24 +217,26 @@ export function createTaskReminderDeliveryPlans(input: {
     };
     const suppressionReason = !input.state.channelEnabled
       ? 'channel_disabled'
-      : !channelConfigured
-        ? 'channel_unconfigured'
-        : input.state.doNotDisturb
-          ? 'dnd'
-          : input.state.quietHours
-            ? 'quiet_hours'
-            : !rule.enabled
-              ? 'rule_disabled'
-              : !shouldPush
-                ? 'below_minimum_level'
-                : !hasSubscriptions
-                  ? 'no_subscription'
-                  : input.state.globalActiveCount >= input.context.globalMaxPerHour
-                    ? 'rate_limited'
-                    : rule.maxPerHour !== null
-                      && input.state.ruleActiveCount >= rule.maxPerHour
+      : !persistentRemindersAllowed
+        ? 'persistent_reminders_paused'
+        : !channelConfigured
+          ? 'channel_unconfigured'
+          : input.state.doNotDisturb
+            ? 'dnd'
+            : input.state.quietHours
+              ? 'quiet_hours'
+              : !rule.enabled
+                ? 'rule_disabled'
+                : !shouldPush
+                  ? 'below_minimum_level'
+                  : !hasSubscriptions
+                    ? 'no_subscription'
+                    : input.state.globalActiveCount >= input.context.globalMaxPerHour
                       ? 'rate_limited'
-                      : null;
+                      : rule.maxPerHour !== null
+                        && input.state.ruleActiveCount >= rule.maxPerHour
+                        ? 'rate_limited'
+                        : null;
     const status = suppressionReason ? 'suppressed' as const : 'pending' as const;
     return {
       channel,

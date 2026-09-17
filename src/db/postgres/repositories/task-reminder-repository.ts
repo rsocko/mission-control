@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Pool, PoolClient } from 'pg';
 import {
   createTaskReminderDeliveryPlans,
+  calculateNextNagAt,
   TASK_REMINDER_CONNECTOR_ID,
   TASK_REMINDER_CONNECTOR_TYPE,
   TASK_REMINDER_OFFSET_TIMESTAMP_PATTERN,
@@ -20,12 +21,16 @@ const ACTIVE_DELIVERY_STATUSES = ['pending', 'sending', 'sent', 'partial'] as co
 interface CandidateRow {
   task_id: string;
   scheduled_at: string;
+  series_id: string | null;
+  sequence: number | null;
 }
 
 interface OccurrenceRow {
   id: string;
   task_id: string;
   scheduled_at: string;
+  series_id: string | null;
+  sequence: number | null;
   attempt_count: number;
   claim_token: string;
 }
@@ -35,6 +40,10 @@ interface TaskRow {
   title: string;
   status: string;
   reminder_at: string | null;
+  reminder_nag_interval: number | null;
+  reminder_nag_stop_at: string | null;
+  reminder_nag_series_id: string | null;
+  reminder_nag_sequence: number;
 }
 
 async function rollback(client: PoolClient): Promise<void> {
@@ -93,6 +102,9 @@ async function getDeliveryState(
   const setting = await client.query<{ value: unknown }>(
     `SELECT value FROM app_settings WHERE key = 'push_delivery_enabled'`,
   );
+  const persistentSetting = await client.query<{ value: unknown }>(
+    `SELECT value FROM app_settings WHERE key = 'persistent_reminders_enabled'`,
+  );
   const preferences = await client.query<{
     do_not_disturb: boolean;
     quiet_start: number | null;
@@ -117,7 +129,7 @@ async function getDeliveryState(
   const since = new Date(now.getTime() - 60 * 60 * 1_000).toISOString();
   const globalCount = await client.query<{ count: string }>(
     `
-      SELECT COUNT(DISTINCT notification_id) AS count
+      SELECT COUNT(DISTINCT regexp_replace(dedupe_key, '^[^:]+:', '')) AS count
       FROM notification_delivery_events
       WHERE created_at >= $1 AND status = ANY($2::text[])
     `,
@@ -125,7 +137,7 @@ async function getDeliveryState(
   );
   const ruleCount = await client.query<{ count: string }>(
     `
-      SELECT COUNT(DISTINCT delivery.notification_id) AS count
+      SELECT COUNT(DISTINCT regexp_replace(delivery.dedupe_key, '^[^:]+:', '')) AS count
       FROM notification_delivery_events delivery
       INNER JOIN notifications notification ON notification.id = delivery.notification_id
       WHERE delivery.created_at >= $1
@@ -143,6 +155,9 @@ async function getDeliveryState(
   const preference = preferences.rows[0];
   return {
     channelEnabled: setting.rows[0] ? parseBooleanSetting(setting.rows[0].value) : true,
+    persistentRemindersEnabled: persistentSetting.rows[0]
+      ? parseBooleanSetting(persistentSetting.rows[0].value)
+      : true,
     doNotDisturb: preference?.do_not_disturb ?? false,
     quietHours: preference
       ? isQuietHour(currentHour, preference.quiet_start, preference.quiet_end)
@@ -291,7 +306,9 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
         );
         const candidate = await client.query<CandidateRow>(
           `
-            SELECT task.id AS task_id, task.reminder_at AS scheduled_at
+            SELECT task.id AS task_id, task.reminder_at AS scheduled_at,
+                   task.reminder_nag_series_id AS series_id,
+                   task.reminder_nag_sequence AS sequence
             FROM tasks task
             LEFT JOIN task_reminder_occurrences occurrence
               ON occurrence.task_id = task.id
@@ -356,11 +373,21 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
         await client.query(
           `
             INSERT INTO task_reminder_occurrences (
-              id, task_id, scheduled_at, state, created_at, updated_at
-            ) VALUES ($1, $2, $3, 'pending', $4, $4)
-            ON CONFLICT(task_id, scheduled_at) DO NOTHING
+              id, task_id, scheduled_at, series_id, sequence, state, created_at, updated_at
+            ) VALUES ($1, $2, $3, $4, $5, 'pending', $6, $6)
+            ON CONFLICT(task_id, scheduled_at) DO UPDATE SET
+              series_id = EXCLUDED.series_id,
+              sequence = EXCLUDED.sequence,
+              updated_at = EXCLUDED.updated_at
           `,
-          [randomUUID(), selected.task_id, selected.scheduled_at, nowIso],
+          [
+            randomUUID(),
+            selected.task_id,
+            selected.scheduled_at,
+            selected.series_id,
+            selected.sequence,
+            nowIso,
+          ],
         );
         const claimToken = randomUUID();
         const claimed = await client.query<OccurrenceRow>(
@@ -368,10 +395,11 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             UPDATE task_reminder_occurrences
             SET state = 'processing', claim_token = $1, claimed_at = $2,
                 lease_expires_at = $3,
+                series_id = $6, sequence = $7,
                 attempt_count = CASE WHEN state = 'cancelled' THEN 1 ELSE attempt_count + 1 END,
                 last_error = NULL, next_attempt_at = NULL, cancelled_at = NULL, updated_at = $2
             WHERE task_id = $4 AND scheduled_at = $5
-              AND (state = 'cancelled' OR attempt_count < $6)
+              AND (state = 'cancelled' OR attempt_count < $8)
               AND (
                 state IN ('pending', 'cancelled')
                 OR (state = 'failed' AND (next_attempt_at IS NULL OR next_attempt_at <= $2))
@@ -380,7 +408,7 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
                   AND (lease_expires_at IS NULL OR lease_expires_at <= $2)
                 )
               )
-            RETURNING id, task_id, scheduled_at, attempt_count, claim_token
+            RETURNING id, task_id, scheduled_at, series_id, sequence, attempt_count, claim_token
           `,
           [
             claimToken,
@@ -388,6 +416,8 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             new Date(input.now.getTime() + input.leaseMs).toISOString(),
             selected.task_id,
             selected.scheduled_at,
+            selected.series_id,
+            selected.sequence,
             input.maxAttempts,
           ],
         );
@@ -397,6 +427,8 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
           id: row.id,
           taskId: row.task_id,
           scheduledAt: row.scheduled_at,
+          seriesId: row.series_id,
+          sequence: row.sequence,
           attemptCount: row.attempt_count,
           claimToken: row.claim_token,
         } : null;
@@ -433,7 +465,8 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
         await client.query('BEGIN');
         const taskResult = await client.query<TaskRow>(
           `
-            SELECT id, title, status, reminder_at
+            SELECT id, title, status, reminder_at, reminder_nag_interval,
+                   reminder_nag_stop_at, reminder_nag_series_id, reminder_nag_sequence
             FROM tasks WHERE id = $1
             FOR UPDATE
           `,
@@ -469,8 +502,19 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
           return { outcome, pendingDelivery: false };
         }
 
-        const sourceId = `${TASK_REMINDER_SOURCE_PREFIX}:${task.id}:${claim.scheduledAt}`;
+        const isNag = Boolean(
+          task.reminder_nag_interval
+          && task.reminder_nag_series_id
+          && task.reminder_nag_series_id === claim.seriesId,
+        );
+        const alertCount = isNag ? task.reminder_nag_sequence + 1 : 1;
+        const sourceId = isNag
+          ? `${TASK_REMINDER_SOURCE_PREFIX}:series:${task.reminder_nag_series_id}`
+          : `${TASK_REMINDER_SOURCE_PREFIX}:${task.id}:${claim.scheduledAt}`;
         const navigationTarget = `/today?taskId=${encodeURIComponent(task.id)}`;
+        const notificationBody = isNag && alertCount > 1
+          ? `Still pending · alerted ${alertCount} times.`
+          : 'This task is ready for your attention.';
         await client.query(
           `
             INSERT INTO notifications (
@@ -485,7 +529,20 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
               'inbox', 'active', 'synced', $8, $8, true, $8, $8, $2,
               $9, 'task', $9, $10, $11::jsonb, '{}'::jsonb
             )
-            ON CONFLICT(source_id) DO NOTHING
+            ON CONFLICT(source_id) DO UPDATE SET
+              title = EXCLUDED.title,
+              body = EXCLUDED.body,
+              state = 'unread',
+              read_state = 'unread',
+              disposition = 'inbox',
+              read_at = NULL,
+              handled_at = NULL,
+              dismissed_at = NULL,
+              archived_at = NULL,
+              is_actionable = true,
+              received_at = EXCLUDED.received_at,
+              sort_at = EXCLUDED.sort_at,
+              metadata = EXCLUDED.metadata
           `,
           [
             randomUUID(),
@@ -493,7 +550,7 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             TASK_REMINDER_CONNECTOR_TYPE,
             TASK_REMINDER_CONNECTOR_ID,
             `Reminder: ${task.title}`,
-            'This task is ready for your attention.',
+            notificationBody,
             TASK_REMINDER_TEMPLATE_KEY,
             nowIso,
             task.id,
@@ -501,6 +558,11 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             JSON.stringify({
               scheduledAt: claim.scheduledAt,
               reminderOccurrenceId: claim.id,
+              ...(isNag ? {
+                reminderNagSeriesId: claim.seriesId,
+                reminderNagSequence: claim.sequence,
+                alertCount,
+              } : {}),
             }),
           ],
         );
@@ -529,7 +591,7 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
             JSON.stringify({ target: navigationTarget })],
           ['remind-later', 'remind_later', 'Remind later', 'clock', 'secondary', false, 1, '{}'],
           ['complete', 'complete_task', 'Complete task', 'check-circle', 'secondary', false, 2, '{}'],
-          ['dismiss', 'dismiss_reminder', 'Dismiss reminder', 'x', 'danger', false, 3, '{}'],
+          ['dismiss', 'dismiss_reminder', isNag ? 'Stop alerts' : 'Dismiss reminder', 'x', 'danger', false, 3, '{}'],
         ] as const;
         for (const action of actions) {
           await client.query(
@@ -538,7 +600,12 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
                 id, notification_id, action_type, label, icon, variant,
                 is_primary, sort_order, payload, created_by
               ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, 'system')
-              ON CONFLICT(id) DO NOTHING
+              ON CONFLICT(id) DO UPDATE SET
+                label = EXCLUDED.label,
+                execution_state = 'pending',
+                claimed_at = NULL,
+                completed_at = NULL,
+                last_error = NULL
             `,
             [`${notification.id}:${action[0]}`, notification.id, ...action.slice(1)],
           );
@@ -559,11 +626,12 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
         const plans = createTaskReminderDeliveryPlans({
           notificationId: notification.id,
           title: `Reminder: ${task.title}`,
-          body: 'This task is ready for your attention.',
+          body: notificationBody,
           navigationTarget,
           rule,
           state,
           context: input.delivery,
+          persistentReminder: isNag,
         });
         for (const plan of plans) {
           await client.query(
@@ -583,7 +651,7 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
               randomUUID(),
               notification.id,
               plan.channel,
-              `${plan.channel}:${notification.id}:${claim.scheduledAt}`,
+              `${plan.channel}:${notification.id}:${claim.seriesId ?? claim.scheduledAt}:${claim.sequence ?? 0}`,
               plan.status,
               plan.suppressionReason,
               JSON.stringify(plan.policySnapshot),
@@ -612,16 +680,28 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
           [task.id],
         );
         const recurring = Boolean(recurrence.rows[0]?.recurrence);
+        const nextNagAt = isNag
+          ? calculateNextNagAt({
+              scheduledAt: claim.scheduledAt,
+              now: input.now,
+              intervalMinutes: task.reminder_nag_interval!,
+              stopAt: task.reminder_nag_stop_at,
+            })
+          : null;
         await client.query(
           `
             UPDATE tasks
-            SET reminder_at = NULL,
-                reminder_relative = CASE WHEN $1 THEN reminder_relative ELSE NULL END,
-                reminder_due_time = CASE WHEN $1 THEN reminder_due_time ELSE NULL END,
-                updated_at = $2
-            WHERE id = $3 AND reminder_at = $4
+            SET reminder_at = $1,
+                reminder_nag_sequence = CASE WHEN $1 IS NOT NULL THEN reminder_nag_sequence + 1 ELSE 0 END,
+                reminder_nag_interval = CASE WHEN $1 IS NOT NULL THEN reminder_nag_interval ELSE NULL END,
+                reminder_nag_stop_at = CASE WHEN $1 IS NOT NULL THEN reminder_nag_stop_at ELSE NULL END,
+                reminder_nag_series_id = CASE WHEN $1 IS NOT NULL THEN reminder_nag_series_id ELSE NULL END,
+                reminder_relative = CASE WHEN $2 THEN reminder_relative ELSE NULL END,
+                reminder_due_time = CASE WHEN $2 THEN reminder_due_time ELSE NULL END,
+                updated_at = $3
+            WHERE id = $4 AND reminder_at = $5
           `,
-          [recurring, nowIso, task.id, claim.scheduledAt],
+          [nextNagAt, recurring, nowIso, task.id, claim.scheduledAt],
         );
         const pending = await client.query(
           `

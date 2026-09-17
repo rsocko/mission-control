@@ -821,6 +821,13 @@ export function createPostgresNotificationWebRepository(
       const client = await pool.connect();
       try {
         await client.query('BEGIN');
+        const taskResult = await client.query(`
+          SELECT id, status, reminder_at AS "reminderAt",
+                 reminder_nag_series_id AS "reminderNagSeriesId"
+          FROM tasks
+          WHERE id = $1
+          FOR UPDATE
+        `, [input.taskId]);
         const notificationResult = await client.query(`
           SELECT read_state AS "readState", disposition, source_state AS "sourceState",
                  last_source_activity_at AS "lastSourceActivityAt",
@@ -829,12 +836,6 @@ export function createPostgresNotificationWebRepository(
           WHERE id = $1
           FOR UPDATE
         `, [input.notificationId]);
-        const taskResult = await client.query(`
-          SELECT id, status, reminder_at AS "reminderAt"
-          FROM tasks
-          WHERE id = $1
-          FOR UPDATE
-        `, [input.taskId]);
         const notification = notificationResult.rows[0];
         const task = taskResult.rows[0];
         if (!notification || !task) {
@@ -852,7 +853,29 @@ export function createPostgresNotificationWebRepository(
           await client.query('ROLLBACK');
           return { applied: false, conflict: 'task_terminal' };
         }
-        if (input.actionType === 'remind_later' && task.reminderAt !== null) {
+        const metadata = notification.metadata !== null
+          && typeof notification.metadata === 'object'
+          && !Array.isArray(notification.metadata)
+          ? notification.metadata as Record<string, unknown>
+          : {};
+        const notificationSeriesId = typeof metadata.reminderNagSeriesId === 'string'
+          ? metadata.reminderNagSeriesId
+          : null;
+        const persistentSeriesMatches = notificationSeriesId !== null
+          && notificationSeriesId === task.reminderNagSeriesId;
+        if (
+          input.actionType === 'remind_later'
+          && task.reminderAt !== null
+          && !persistentSeriesMatches
+        ) {
+          await client.query('ROLLBACK');
+          return { applied: false, conflict: 'reminder_changed' };
+        }
+        if (
+          input.actionType === 'dismiss_reminder'
+          && notificationSeriesId !== null
+          && !persistentSeriesMatches
+        ) {
           await client.query('ROLLBACK');
           return { applied: false, conflict: 'reminder_changed' };
         }
@@ -871,8 +894,10 @@ export function createPostgresNotificationWebRepository(
           const scheduled = await client.query(`
             UPDATE tasks
             SET reminder_at = $1, updated_at = $2
-            WHERE id = $3 AND reminder_at IS NULL AND status NOT IN ('done', 'cancelled')
-          `, [input.reminderAt, input.now, input.taskId]);
+            WHERE id = $3
+              AND (reminder_at IS NULL OR reminder_nag_series_id = $4)
+              AND status NOT IN ('done', 'cancelled')
+          `, [input.reminderAt, input.now, input.taskId, notificationSeriesId]);
           if (scheduled.rowCount !== 1) {
             await client.query('ROLLBACK');
             return { applied: false, conflict: 'reminder_changed' };
@@ -881,7 +906,9 @@ export function createPostgresNotificationWebRepository(
           await client.query(`
             UPDATE tasks
             SET reminder_at = NULL, reminder_relative = NULL,
-                reminder_due_time = NULL, updated_at = $1
+                reminder_due_time = NULL, reminder_nag_interval = NULL,
+                reminder_nag_stop_at = NULL, reminder_nag_series_id = NULL,
+                reminder_nag_sequence = 0, updated_at = $1
             WHERE id = $2
           `, [input.now, input.taskId]);
         }
@@ -891,11 +918,6 @@ export function createPostgresNotificationWebRepository(
           input.actionType === 'dismiss_reminder' ? 'dismissed' : 'archived',
           input.now,
         );
-        const metadata = notification.metadata !== null
-          && typeof notification.metadata === 'object'
-          && !Array.isArray(notification.metadata)
-          ? notification.metadata as Record<string, unknown>
-          : {};
         await client.query(`
           UPDATE notifications
           SET state = $1, read_state = COALESCE($2, read_state),

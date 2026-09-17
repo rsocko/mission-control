@@ -1875,6 +1875,10 @@ const MOVE_TASK_COLUMNS = {
   reminderAt: tasks.reminderAt,
   reminderRelative: tasks.reminderRelative,
   reminderDueTime: tasks.reminderDueTime,
+  reminderNagInterval: tasks.reminderNagInterval,
+  reminderNagStopAt: tasks.reminderNagStopAt,
+  reminderNagSeriesId: tasks.reminderNagSeriesId,
+  reminderNagSequence: tasks.reminderNagSequence,
   effort: tasks.effort,
   isBulkImport: tasks.isBulkImport,
 };
@@ -3193,6 +3197,10 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
           lastSyncedAt: request.now,
           pushRetryCount: 0,
           reminderAt: successor.reminderAt,
+          reminderNagInterval: successor.reminderNagInterval,
+          reminderNagStopAt: successor.reminderNagStopAt,
+          reminderNagSeriesId: successor.reminderNagSeriesId,
+          reminderNagSequence: 0,
           isBulkImport: false,
         })).onConflictDoNothing().returning({ id: tasks.id });
         if (inserted.length) {

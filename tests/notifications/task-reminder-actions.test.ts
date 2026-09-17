@@ -90,6 +90,23 @@ function postAction(
   });
 }
 
+function configurePersistentReminder() {
+  db.update(schema.tasks).set({
+    reminderAt: '2026-08-21T19:05:00.000Z',
+    reminderNagInterval: 5,
+    reminderNagStopAt: '2026-08-21T21:00:00.000Z',
+    reminderNagSeriesId: 'series-1',
+    reminderNagSequence: 1,
+  }).where(eq(schema.tasks.id, 'task-1')).run();
+  db.update(schema.notifications).set({
+    sourceId: 'task-reminder:series:series-1',
+    metadata: {
+      reminderNagSeriesId: 'series-1',
+      reminderNagSequence: 0,
+    },
+  }).where(eq(schema.notifications.id, 'notification-1')).run();
+}
+
 describe('task reminder actions', () => {
   it('computes tomorrow morning in the configured timezone', () => {
     expect(getRemindLaterTarget(
@@ -136,6 +153,20 @@ describe('task reminder actions', () => {
       .toBe('2026-08-22T15:00:00.000Z');
   });
 
+  it('reschedules the active persistent series while its next alert is pending', async () => {
+    addReminder('remind_later');
+    configurePersistentReminder();
+
+    expect((await postAction('remind_later', { duration: '15m' })).status).toBe(200);
+    expect(db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get())
+      .toMatchObject({
+        reminderNagInterval: 5,
+        reminderNagStopAt: '2026-08-21T21:00:00.000Z',
+        reminderNagSeriesId: 'series-1',
+        reminderNagSequence: 1,
+      });
+  });
+
   it('dismisses the reminder and clears all reminder intent', async () => {
     addReminder('dismiss_reminder');
 
@@ -146,10 +177,42 @@ describe('task reminder actions', () => {
         reminderRelative: null,
         reminderDueTime: null,
       });
+
     expect(db.select().from(schema.notifications)
       .where(eq(schema.notifications.id, 'notification-1')).get()).toMatchObject({
         disposition: 'dismissed',
         isActionable: false,
+      });
+  });
+
+  it('stops every future alert in a persistent series', async () => {
+    addReminder('dismiss_reminder');
+    configurePersistentReminder();
+
+    expect((await postAction('dismiss_reminder')).status).toBe(200);
+    expect(db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get())
+      .toMatchObject({
+        reminderAt: null,
+        reminderRelative: null,
+        reminderDueTime: null,
+        reminderNagInterval: null,
+        reminderNagStopAt: null,
+        reminderNagSeriesId: null,
+        reminderNagSequence: 0,
+      });
+  });
+
+  it('does not let a stale persistent notification stop a newer series', async () => {
+    addReminder('dismiss_reminder');
+    configurePersistentReminder();
+    db.update(schema.tasks).set({ reminderNagSeriesId: 'series-new' })
+      .where(eq(schema.tasks.id, 'task-1')).run();
+
+    expect((await postAction('dismiss_reminder')).status).toBe(409);
+    expect(db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get())
+      .toMatchObject({
+        reminderAt: '2026-08-21T19:05:00.000Z',
+        reminderNagSeriesId: 'series-new',
       });
   });
 

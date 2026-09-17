@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import {
   createTaskReminderDeliveryPlans,
+  calculateNextNagAt,
   TASK_REMINDER_CONNECTOR_ID,
   TASK_REMINDER_CONNECTOR_TYPE,
   isValidTaskReminderTimestamp,
@@ -20,12 +21,16 @@ const ACTIVE_DELIVERY_STATUSES = ['pending', 'sending', 'sent', 'partial'] as co
 interface CandidateRow {
   task_id: string;
   scheduled_at: string;
+  series_id: string | null;
+  sequence: number | null;
 }
 
 interface OccurrenceRow {
   id: string;
   task_id: string;
   scheduled_at: string;
+  series_id: string | null;
+  sequence: number | null;
   attempt_count: number;
   claim_token: string;
 }
@@ -35,6 +40,10 @@ interface TaskRow {
   title: string;
   status: string;
   reminder_at: string | null;
+  reminder_nag_interval: number | null;
+  reminder_nag_stop_at: string | null;
+  reminder_nag_series_id: string | null;
+  reminder_nag_sequence: number;
 }
 
 function parseBooleanSetting(value: unknown): boolean {
@@ -97,6 +106,9 @@ function getDeliveryState(
   const setting = sqlite.prepare(
     `SELECT value FROM app_settings WHERE key = 'push_delivery_enabled'`,
   ).get() as { value: unknown } | undefined;
+  const persistentSetting = sqlite.prepare(
+    `SELECT value FROM app_settings WHERE key = 'persistent_reminders_enabled'`,
+  ).get() as { value: unknown } | undefined;
   const preferences = sqlite.prepare(`
     SELECT do_not_disturb, quiet_start, quiet_end
     FROM push_preferences WHERE id = 'default'
@@ -107,12 +119,12 @@ function getDeliveryState(
   } | undefined;
   const since = new Date(now.getTime() - 60 * 60 * 1_000).toISOString();
   const globalCount = sqlite.prepare(`
-    SELECT COUNT(DISTINCT notification_id) AS count
+    SELECT COUNT(DISTINCT substr(dedupe_key, instr(dedupe_key, ':') + 1)) AS count
     FROM notification_delivery_events
     WHERE created_at >= ? AND status IN (${ACTIVE_DELIVERY_STATUSES.map(() => '?').join(', ')})
   `).get(since, ...ACTIVE_DELIVERY_STATUSES) as { count: number };
   const ruleCount = sqlite.prepare(`
-    SELECT COUNT(DISTINCT delivery.notification_id) AS count
+    SELECT COUNT(DISTINCT substr(delivery.dedupe_key, instr(delivery.dedupe_key, ':') + 1)) AS count
     FROM notification_delivery_events delivery
     INNER JOIN notifications notification ON notification.id = delivery.notification_id
     WHERE delivery.created_at >= ?
@@ -127,6 +139,9 @@ function getDeliveryState(
   ) as { count: number };
   return {
     channelEnabled: setting ? parseBooleanSetting(setting.value) : true,
+    persistentRemindersEnabled: persistentSetting
+      ? parseBooleanSetting(persistentSetting.value)
+      : true,
     doNotDisturb: preferences?.do_not_disturb === 1,
     quietHours: preferences
       ? isQuietHour(currentHour, preferences.quiet_start, preferences.quiet_end)
@@ -258,7 +273,9 @@ export function createSqliteTaskReminderRepository(
           )
         `).run(nowIso, input.maxAttempts, nowIso);
         const candidate = sqlite.prepare(`
-          SELECT task.id AS task_id, task.reminder_at AS scheduled_at
+          SELECT task.id AS task_id, task.reminder_at AS scheduled_at,
+                 task.reminder_nag_series_id AS series_id,
+                 task.reminder_nag_sequence AS sequence
           FROM tasks task
           LEFT JOIN task_reminder_occurrences occurrence
             ON occurrence.task_id = task.id
@@ -298,15 +315,27 @@ export function createSqliteTaskReminderRepository(
 
         sqlite.prepare(`
           INSERT INTO task_reminder_occurrences (
-            id, task_id, scheduled_at, state, created_at, updated_at
-          ) VALUES (?, ?, ?, 'pending', ?, ?)
-          ON CONFLICT(task_id, scheduled_at) DO NOTHING
-        `).run(randomUUID(), candidate.task_id, candidate.scheduled_at, nowIso, nowIso);
+            id, task_id, scheduled_at, series_id, sequence, state, created_at, updated_at
+          ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+          ON CONFLICT(task_id, scheduled_at) DO UPDATE SET
+            series_id = excluded.series_id,
+            sequence = excluded.sequence,
+            updated_at = excluded.updated_at
+        `).run(
+          randomUUID(),
+          candidate.task_id,
+          candidate.scheduled_at,
+          candidate.series_id,
+          candidate.sequence,
+          nowIso,
+          nowIso,
+        );
 
         const claimToken = randomUUID();
         const row = sqlite.prepare(`
           UPDATE task_reminder_occurrences
           SET state = 'processing', claim_token = ?, claimed_at = ?, lease_expires_at = ?,
+              series_id = ?, sequence = ?,
               attempt_count = CASE WHEN state = 'cancelled' THEN 1 ELSE attempt_count + 1 END,
               last_error = NULL, next_attempt_at = NULL, cancelled_at = NULL, updated_at = ?
           WHERE task_id = ? AND scheduled_at = ?
@@ -319,11 +348,13 @@ export function createSqliteTaskReminderRepository(
                 AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
               )
             )
-          RETURNING id, task_id, scheduled_at, attempt_count, claim_token
+          RETURNING id, task_id, scheduled_at, series_id, sequence, attempt_count, claim_token
         `).get(
           claimToken,
           nowIso,
           leaseExpiresAt,
+          candidate.series_id,
+          candidate.sequence,
           nowIso,
           candidate.task_id,
           candidate.scheduled_at,
@@ -335,6 +366,8 @@ export function createSqliteTaskReminderRepository(
           id: row.id,
           taskId: row.task_id,
           scheduledAt: row.scheduled_at,
+          seriesId: row.series_id,
+          sequence: row.sequence,
           attemptCount: row.attempt_count,
           claimToken: row.claim_token,
         } : null;
@@ -369,7 +402,8 @@ export function createSqliteTaskReminderRepository(
         if (!occurrence) return { outcome: 'lost' as const, pendingDelivery: false };
 
         const task = sqlite.prepare(`
-          SELECT id, title, status, reminder_at
+          SELECT id, title, status, reminder_at, reminder_nag_interval,
+                 reminder_nag_stop_at, reminder_nag_series_id, reminder_nag_sequence
           FROM tasks WHERE id = ?
         `).get(claim.taskId) as TaskRow | undefined;
         if (
@@ -391,9 +425,20 @@ export function createSqliteTaskReminderRepository(
           };
         }
 
-        const sourceId = `${TASK_REMINDER_SOURCE_PREFIX}:${task.id}:${claim.scheduledAt}`;
+        const isNag = Boolean(
+          task.reminder_nag_interval
+          && task.reminder_nag_series_id
+          && task.reminder_nag_series_id === claim.seriesId,
+        );
+        const alertCount = isNag ? task.reminder_nag_sequence + 1 : 1;
+        const sourceId = isNag
+          ? `${TASK_REMINDER_SOURCE_PREFIX}:series:${task.reminder_nag_series_id}`
+          : `${TASK_REMINDER_SOURCE_PREFIX}:${task.id}:${claim.scheduledAt}`;
         const navigationTarget = `/today?taskId=${encodeURIComponent(task.id)}`;
         const notificationId = randomUUID();
+        const notificationBody = isNag && alertCount > 1
+          ? `Still pending · alerted ${alertCount} times.`
+          : 'This task is ready for your attention.';
         sqlite.prepare(`
           INSERT INTO notifications (
             id, source_id, connector_type, connector_instance_id, title, body,
@@ -406,14 +451,27 @@ export function createSqliteTaskReminderRepository(
             ?, ?, ?, ?, ?, ?, 'heads_up', 2, 'tasks', ?, 'unread', 'unread',
             'inbox', 'active', 'synced', ?, ?, 1, ?, ?, ?, ?, 'task', ?, ?, ?, '{}'
           )
-          ON CONFLICT(source_id) DO NOTHING
+          ON CONFLICT(source_id) DO UPDATE SET
+            title = excluded.title,
+            body = excluded.body,
+            state = 'unread',
+            read_state = 'unread',
+            disposition = 'inbox',
+            read_at = NULL,
+            handled_at = NULL,
+            dismissed_at = NULL,
+            archived_at = NULL,
+            is_actionable = 1,
+            received_at = excluded.received_at,
+            sort_at = excluded.sort_at,
+            metadata = excluded.metadata
         `).run(
           notificationId,
           sourceId,
           TASK_REMINDER_CONNECTOR_TYPE,
           TASK_REMINDER_CONNECTOR_ID,
           `Reminder: ${task.title}`,
-          'This task is ready for your attention.',
+          notificationBody,
           TASK_REMINDER_TEMPLATE_KEY,
           nowIso,
           nowIso,
@@ -426,6 +484,11 @@ export function createSqliteTaskReminderRepository(
           JSON.stringify({
             scheduledAt: claim.scheduledAt,
             reminderOccurrenceId: claim.id,
+            ...(isNag ? {
+              reminderNagSeriesId: claim.seriesId,
+              reminderNagSequence: claim.sequence,
+              alertCount,
+            } : {}),
           }),
         );
         const notification = sqlite.prepare(`
@@ -449,14 +512,19 @@ export function createSqliteTaskReminderRepository(
             JSON.stringify({ target: navigationTarget })],
           ['remind-later', 'remind_later', 'Remind later', 'clock', 'secondary', 0, 1, '{}'],
           ['complete', 'complete_task', 'Complete task', 'check-circle', 'secondary', 0, 2, '{}'],
-          ['dismiss', 'dismiss_reminder', 'Dismiss reminder', 'x', 'danger', 0, 3, '{}'],
+          ['dismiss', 'dismiss_reminder', isNag ? 'Stop alerts' : 'Dismiss reminder', 'x', 'danger', 0, 3, '{}'],
         ] as const;
         const insertAction = sqlite.prepare(`
           INSERT INTO notification_actions (
             id, notification_id, action_type, label, icon, variant,
             is_primary, sort_order, payload, created_by
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'system')
-          ON CONFLICT(id) DO NOTHING
+          ON CONFLICT(id) DO UPDATE SET
+            label = excluded.label,
+            execution_state = 'pending',
+            claimed_at = NULL,
+            completed_at = NULL,
+            last_error = NULL
         `);
         for (const action of actions) {
           insertAction.run(
@@ -480,11 +548,12 @@ export function createSqliteTaskReminderRepository(
         const plans = createTaskReminderDeliveryPlans({
           notificationId: notification.id,
           title: `Reminder: ${task.title}`,
-          body: 'This task is ready for your attention.',
+          body: notificationBody,
           navigationTarget,
           rule,
           state,
           context: input.delivery,
+          persistentReminder: isNag,
         });
         const insertDelivery = sqlite.prepare(`
           INSERT INTO notification_delivery_events (
@@ -500,7 +569,7 @@ export function createSqliteTaskReminderRepository(
             randomUUID(),
             notification.id,
             plan.channel,
-            `${plan.channel}:${notification.id}:${claim.scheduledAt}`,
+            `${plan.channel}:${notification.id}:${claim.seriesId ?? claim.scheduledAt}:${claim.sequence ?? 0}`,
             plan.status,
             plan.suppressionReason,
             JSON.stringify(plan.policySnapshot),
@@ -524,14 +593,31 @@ export function createSqliteTaskReminderRepository(
         const recurrence = sqlite.prepare(`
           SELECT recurrence FROM task_schedules WHERE task_id = ?
         `).get(task.id) as { recurrence: string | null } | undefined;
+        const nextNagAt = isNag
+          ? calculateNextNagAt({
+              scheduledAt: claim.scheduledAt,
+              now: input.now,
+              intervalMinutes: task.reminder_nag_interval!,
+              stopAt: task.reminder_nag_stop_at,
+            })
+          : null;
         sqlite.prepare(`
           UPDATE tasks
-          SET reminder_at = NULL,
+          SET reminder_at = ?,
+              reminder_nag_sequence = CASE WHEN ? IS NOT NULL THEN reminder_nag_sequence + 1 ELSE 0 END,
+              reminder_nag_interval = CASE WHEN ? IS NOT NULL THEN reminder_nag_interval ELSE NULL END,
+              reminder_nag_stop_at = CASE WHEN ? IS NOT NULL THEN reminder_nag_stop_at ELSE NULL END,
+              reminder_nag_series_id = CASE WHEN ? IS NOT NULL THEN reminder_nag_series_id ELSE NULL END,
               reminder_relative = CASE WHEN ? THEN reminder_relative ELSE NULL END,
               reminder_due_time = CASE WHEN ? THEN reminder_due_time ELSE NULL END,
               updated_at = ?
           WHERE id = ? AND reminder_at = ?
         `).run(
+          nextNagAt,
+          nextNagAt,
+          nextNagAt,
+          nextNagAt,
+          nextNagAt,
           recurrence?.recurrence ? 1 : 0,
           recurrence?.recurrence ? 1 : 0,
           nowIso,

@@ -15,6 +15,12 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       streak: { label: 'Streak', value: 3, unit: 'days' },
     },
     trends: [],
+    planAlignment: {
+      points: [],
+      totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+      planCoverage: 0,
+      commitmentRate: 0,
+    },
     sourceBreakdown: [],
     taskBreakdown: {
       byPriority: [],

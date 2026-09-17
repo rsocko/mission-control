@@ -98,8 +98,22 @@ export interface AnalyticsFilterOptions {
 }
 
 export interface AnalyticsCompletionSpan {
+  id: string;
   createdAt: AnalyticsInstant;
   completedAt: AnalyticsInstant | null;
+}
+
+export interface AnalyticsTaskCompletion {
+  id: string;
+  completedAt: AnalyticsInstant;
+}
+
+export interface AnalyticsMyDayPlanningEvent {
+  id: number;
+  taskId: string;
+  eventType: 'my_day_committed' | 'my_day_withdrawn' | 'my_day_missed';
+  date: AnalyticsLocalDate;
+  occurredAt: AnalyticsInstant;
 }
 
 export interface AnalyticsPlanningFrictionEvent {
@@ -228,6 +242,9 @@ export interface InsightsAnalyticsRepository {
   ): Promise<Array<AnalyticsInstant | null>>;
   listCreatedTimestampsIn(range: AnalyticsInstantRange): Promise<AnalyticsInstant[]>;
   listCompletionSpansIn(range: AnalyticsInstantRange): Promise<AnalyticsCompletionSpan[]>;
+  listTopLevelTaskCompletionsIn(
+    range: AnalyticsInstantRange,
+  ): Promise<AnalyticsTaskCompletion[]>;
   listCompletedTimestampsSince(
     startInclusive: AnalyticsInstant,
   ): Promise<Array<AnalyticsInstant | null>>;
@@ -240,6 +257,9 @@ export interface InsightsAnalyticsRepository {
     eventTypes: readonly string[],
     range: AnalyticsInstantRange,
   ): Promise<AnalyticsPlanningFrictionEvent[]>;
+  listMyDayPlanningEvents(
+    range: AnalyticsLocalDateRange,
+  ): Promise<AnalyticsMyDayPlanningEvent[]>;
   listTaskTagNames(taskIds: readonly string[]): Promise<AnalyticsTaskTagName[]>;
   listActiveProjects(): Promise<AnalyticsProject[]>;
   countProjectTasksCompletedIn(projectId: string, range: AnalyticsInstantRange): Promise<number>;

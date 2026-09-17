@@ -15,7 +15,7 @@ export interface KpiCardDefinition {
   accent: string;
   subtitle?: string;
   clickAction?: { type: 'navigate'; path: string } | { type: 'filter'; key: string };
-  category: 'task_counts' | 'progress' | 'integrations';
+  category: 'task_counts' | 'planning' | 'progress' | 'integrations';
 }
 
 export interface KpiCardData {
@@ -85,6 +85,15 @@ export const KPI_REGISTRY: Record<string, KpiCardDefinition> = {
     clickAction: { type: 'filter', key: 'high' },
     category: 'task_counts',
   },
+  'assigned-to-me': {
+    slug: 'assigned-to-me',
+    label: 'Assigned to Me',
+    visualType: 'counter',
+    icon: 'UserRoundCheck',
+    accent: 'indigo',
+    clickAction: { type: 'filter', key: 'assigned' },
+    category: 'task_counts',
+  },
   'completed-today': {
     slug: 'completed-today',
     label: 'Done Today',
@@ -92,6 +101,33 @@ export const KPI_REGISTRY: Record<string, KpiCardDefinition> = {
     icon: 'CheckCircle2',
     accent: 'green',
     category: 'task_counts',
+  },
+  'horizon-next': {
+    slug: 'horizon-next',
+    label: 'Next Horizon',
+    visualType: 'counter',
+    icon: 'Telescope',
+    accent: 'emerald',
+    subtitle: 'planned next',
+    category: 'planning',
+  },
+  'horizon-soon': {
+    slug: 'horizon-soon',
+    label: 'Soon Horizon',
+    visualType: 'counter',
+    icon: 'Telescope',
+    accent: 'blue',
+    subtitle: 'planned soon',
+    category: 'planning',
+  },
+  'needs-horizon': {
+    slug: 'needs-horizon',
+    label: 'Needs Horizon',
+    visualType: 'counter',
+    icon: 'CircleHelp',
+    accent: 'amber',
+    subtitle: 'not yet planned',
+    category: 'planning',
   },
   'this-week-progress': {
     slug: 'this-week-progress',
@@ -199,7 +235,17 @@ export const KPI_PRESETS: Record<string, { label: string; slugs: string[] }> = {
   },
   operations: {
     label: 'Operations',
-    slugs: ['total-open', 'overdue', 'my-day', 'high-priority', 'triage-pending', 'doc-actions-pending', 'unread-notifications'],
+    slugs: [
+      'total-open',
+      'overdue',
+      'my-day',
+      'high-priority',
+      'assigned-to-me',
+      'needs-horizon',
+      'triage-pending',
+      'doc-actions-pending',
+      'unread-notifications',
+    ],
   },
 };
 

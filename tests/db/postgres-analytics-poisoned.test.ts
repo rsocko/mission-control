@@ -34,6 +34,10 @@ vi.mock('@/lib/stats/observations', () => observations);
 
 const calls = vi.hoisted(() => ({
   countOpenTasks: vi.fn(async () => 4),
+  countOpenTasksWithPlanningHorizons: vi.fn(async (horizons: readonly string[]) => (
+    horizons.includes('next') ? 3 : 2
+  )),
+  countOpenTasksWithoutPlanningHorizon: vi.fn(async () => 5),
   listDeliveryRecords: vi.fn(async () => []),
   listFlowTasks: vi.fn(async () => []),
   listSyntheticTagCandidates: vi.fn(async () => []),
@@ -50,7 +54,9 @@ const repository: AnalyticsPersistence = {
     countOpenTasksDueBetween: zero,
     countOpenTasksInIds: zero,
     countOpenTasksWithPriorities: zero,
-    countOpenTasksWithAssignee: zero,
+    countOpenTasksAssignedToMe: zero,
+    countOpenTasksWithPlanningHorizons: calls.countOpenTasksWithPlanningHorizons,
+    countOpenTasksWithoutPlanningHorizon: calls.countOpenTasksWithoutPlanningHorizon,
     countOpenTasksByConnectorType: zero,
     countNotificationsNeedingAttention: zero,
     countNotificationsNeedingAttentionInCategory: zero,
@@ -137,6 +143,16 @@ describe('poisoned-SQLite analytics web surface', () => {
       value: 4,
     })]);
     expect(calls.countOpenTasks).toHaveBeenCalled();
+
+    const planningCards = await kpis.GET(request(
+      '/api/dashboard/kpis?slugs=horizon-next,horizon-soon,needs-horizon',
+    ));
+    expect(planningCards.status).toBe(200);
+    expect((await planningCards.json()).cards).toEqual([
+      expect.objectContaining({ slug: 'horizon-next', value: 3 }),
+      expect.objectContaining({ slug: 'horizon-soon', value: 2 }),
+      expect.objectContaining({ slug: 'needs-horizon', value: 5 }),
+    ]);
   });
 
   it('serves every insights section from the composed repository', async () => {

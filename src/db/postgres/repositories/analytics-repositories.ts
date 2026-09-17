@@ -31,6 +31,7 @@ import type {
   TagInsightsAnalyticsRepository,
   WordInsightsAnalyticsRepository,
 } from '@/db/persistence/analytics';
+import { SELF_ASSIGNED_CONNECTOR_TYPES } from '@/lib/tasks/core/contracts';
 
 /**
  * PostgreSQL adapter for the L17 derived-analytics read boundary.
@@ -178,7 +179,35 @@ function createKpiRepository(pool: Pool): KpiAnalyticsRepository {
       ' AND priority = ANY($1::text[])',
       [[...priorities]],
     ),
-    countOpenTasksWithAssignee: () => countOpen(' AND assignee IS NOT NULL'),
+    countOpenTasksAssignedToMe: () => countOpen(
+      ` AND (
+        connector_type = ANY($1::text[])
+        OR (
+          connector_type = 'github-issues'
+          AND assignee IN (
+            SELECT settings->>'authenticatedUser'
+            FROM connector_configs
+            WHERE type = 'github-issues'
+              AND enabled = true
+              AND deleted_at IS NULL
+              AND settings->>'authenticatedUser' IS NOT NULL
+          )
+        )
+        OR (
+          connector_type <> ALL($2::text[])
+          AND assignee IS NOT NULL
+        )
+      )`,
+      [
+        [...SELF_ASSIGNED_CONNECTOR_TYPES],
+        [...SELF_ASSIGNED_CONNECTOR_TYPES, 'github-issues'],
+      ],
+    ),
+    countOpenTasksWithPlanningHorizons: (horizons) => countOpen(
+      ' AND planning_horizon = ANY($1::text[])',
+      [[...horizons]],
+    ),
+    countOpenTasksWithoutPlanningHorizon: () => countOpen(' AND planning_horizon IS NULL'),
     countOpenTasksByConnectorType: (connectorType) => countOpen(
       ' AND connector_type = $1',
       [connectorType],

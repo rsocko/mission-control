@@ -125,21 +125,6 @@ function ConnectorIconImg({ type, size = 14 }: { type: string; size?: number }) 
   return <ClipboardList aria-hidden="true" size={size} className="flex-shrink-0 text-[var(--text-muted)]" />;
 }
 
-function findSemanticDestination(
-  token: ParsedTask['destination'],
-  destinations: QuickAddDestination[],
-): QuickAddDestination | undefined {
-  return destinations.find((candidate) => {
-    if (token === 'work' || token === 'personal') {
-      return candidate.account === token;
-    }
-    if (token === 'github') {
-      return candidate.connectorType === 'github-issues';
-    }
-    return token === 'todo' && candidate.connectorType === 'microsoft-todo';
-  });
-}
-
 export function AddTaskModal({
   initialInput,
   initialParsed,
@@ -209,11 +194,7 @@ export function AddTaskModal({
       projects,
     });
   }, [enableQuickAddSemantics, projects, quickAddPreferences, title]);
-  const activeDestination = (
-    enableQuickAddSemantics && !destinationManuallySelected
-      ? findSemanticDestination(captureSemantics?.destination ?? null, destinations)
-      : undefined
-  ) ?? destination;
+  const activeDestination = destination;
 
   // Load lists for the selected connector
   useEffect(() => {
@@ -335,7 +316,6 @@ export function AddTaskModal({
       captureSemantics.dueDateLabel,
       captureSemantics.priority ? `!${captureSemantics.priority}` : null,
       ...captureSemantics.tags.map(tag => `#${tag}`),
-      captureSemantics.destination ? `@${captureSemantics.destination}` : null,
       captureSemantics.project ? `+${captureSemantics.project}` : null,
       captureSemantics.planningHorizon ? `~${captureSemantics.planningHorizon}` : null,
       captureSemantics.estimatedDuration ? formatDurationLabel(captureSemantics.estimatedDuration) : null,

@@ -58,7 +58,7 @@ describe('AddTaskModal submission guard', () => {
         <AddTaskModal
           initialInput=""
           initialParsed={null}
-          initialDestination={localDestination}
+          initialDestination={workDestination}
           destinations={[localDestination, workDestination]}
           enableQuickAddSemantics
           onClose={vi.fn()}
@@ -69,7 +69,7 @@ describe('AddTaskModal submission guard', () => {
 
     const titleInput = screen.getByPlaceholderText('Task, date, #tag, !priority…');
     fireEvent.change(titleInput, {
-      target: { value: 'Ship release !high #ops +Launch ^3 ~soon ~30m weekly @work' },
+      target: { value: 'Ship release !high #ops +Launch ^3 ~soon ~30m weekly' },
     });
 
     await screen.findByText('#ops');

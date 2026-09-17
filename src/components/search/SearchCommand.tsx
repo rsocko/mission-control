@@ -26,6 +26,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Sun,
   Target,
   X,
   Zap,
@@ -51,6 +52,7 @@ import {
   useDebouncedSearchQuery,
 } from '@/lib/hooks/useDebouncedSearchQuery';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { getLocalToday } from '@/lib/utils/client-date';
 import type { HubProjectSummaryDto } from '@/types/api';
 import type { SourceList } from '@/types/dashboard';
 import {
@@ -530,6 +532,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
     }
     setCreatingTask(true);
     try {
+      let myDayAssignmentFailed = false;
       const response = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -548,8 +551,43 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
       if (!response.ok) {
         throw new Error(await response.text() || `Failed to create task (${response.status})`);
       }
+      const createdTask = await response.json() as {
+        id: string;
+        editPolicy?: { sourceModel?: string };
+      };
+      if (taskToCreate.addToMyDay) {
+        const myDayResponse = await fetch('/api/my-day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: createdTask.id, date: getLocalToday() }),
+        });
+        if (myDayResponse.ok) {
+          window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
+            detail: {
+              taskId: createdTask.id,
+              title: taskToCreate.title,
+              priority: taskToCreate.priority || 'none',
+              dueDate: taskToCreate.dueDate,
+              connectorType: 'local',
+              sourceListName: null,
+              status: 'todo',
+              editPolicy: createdTask.editPolicy,
+            },
+          }));
+        } else {
+          myDayAssignmentFailed = true;
+          taskLogger.error('Command palette task created but My Day assignment failed', {
+            taskId: createdTask.id,
+            status: myDayResponse.status,
+          });
+        }
+      }
       window.dispatchEvent(new CustomEvent('mission-control:task-added'));
-      toast.success(`Created “${taskToCreate.title}”`);
+      if (myDayAssignmentFailed) {
+        toast.error(`Created “${taskToCreate.title}”, but it could not be added to My Day.`);
+      } else {
+        toast.success(`Created “${taskToCreate.title}”${taskToCreate.addToMyDay ? ' · My Day' : ''}`);
+      }
       setQuery('');
       handleOpenChange(false);
     } catch (error) {
@@ -903,6 +941,11 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
                               {parsedCreateTask.tags.map(tag => <span key={tag}>#{tag}</span>)}
                               {parsedCreateTask.project && <span>+{parsedCreateTask.project}</span>}
                               {parsedCreateTask.dueDateLabel && <span>{parsedCreateTask.dueDateLabel}</span>}
+                              {parsedCreateTask.addToMyDay && (
+                                <span className="inline-flex items-center gap-1">
+                                  <Sun size={10} /> My Day
+                                </span>
+                              )}
                             </span>
                           </span>
                         </button>

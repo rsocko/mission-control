@@ -59,6 +59,7 @@ vi.mock('@/lib/client-logger', () => ({
 }));
 
 import { SearchCommand } from '@/components/search/SearchCommand';
+import { toast } from 'sonner';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -117,8 +118,82 @@ function connectorResponse() {
 describe('SearchCommand', () => {
   beforeEach(() => {
     navigation.push.mockReset();
+    vi.mocked(toast.error).mockReset();
+    vi.mocked(toast.success).mockReset();
     localStorage.clear();
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+  });
+
+  it('creates a starred task and adds it to My Day', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
+      if (url === '/api/tasks' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 'task-starred', editPolicy: { sourceModel: 'mc-owned' } }, 201));
+      }
+      if (url === '/api/my-day' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 'my-day-starred' }, 201));
+      }
+      if (url.includes('__status_check__')) {
+        return Promise.resolve(jsonResponse({
+          semanticEnabled: false,
+          semanticAvailable: false,
+          results: [],
+        }));
+      }
+      if (url.includes('/api/ai/search')) return Promise.resolve(jsonResponse({ results: [] }));
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<SearchCommand />);
+    fireEvent.change(openSearch(), { target: { value: 'Plan the day *' } });
+    fireEvent.click(await screen.findByRole('button', { name: /create task.*plan the day/i }));
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledWith('/api/my-day', expect.objectContaining({
+        method: 'POST',
+      }));
+    });
+    const taskRequest = fetchSpy.mock.calls.find(([url]) => String(url) === '/api/tasks');
+    expect(JSON.parse(String(taskRequest?.[1]?.body))).toMatchObject({ title: 'Plan the day' });
+    const myDayRequest = fetchSpy.mock.calls.find(([url]) => String(url) === '/api/my-day');
+    expect(JSON.parse(String(myDayRequest?.[1]?.body))).toMatchObject({ taskId: 'task-starred' });
+    expect(toast.success).toHaveBeenCalledWith('Created “Plan the day” · My Day');
+  });
+
+  it('reports partial success when My Day assignment fails', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
+      const url = String(input);
+      if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
+      if (url === '/api/tasks' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ id: 'task-starred' }, 201));
+      }
+      if (url === '/api/my-day' && init?.method === 'POST') {
+        return Promise.resolve(jsonResponse({ error: 'Unavailable' }, 503));
+      }
+      if (url.includes('__status_check__')) {
+        return Promise.resolve(jsonResponse({
+          semanticEnabled: false,
+          semanticAvailable: false,
+          results: [],
+        }));
+      }
+      if (url.includes('/api/ai/search')) return Promise.resolve(jsonResponse({ results: [] }));
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<SearchCommand />);
+    fireEvent.change(openSearch(), { target: { value: 'Plan the day *' } });
+    fireEvent.click(await screen.findByRole('button', { name: /create task.*plan the day/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        'Created “Plan the day”, but it could not be added to My Day.',
+      );
+    });
+    expect(toast.success).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

@@ -19,6 +19,7 @@ import { DeliveryTrendChart } from '@/components/insights/DeliveryTrendChart';
 import { LeadTimeChart } from '@/components/insights/LeadTimeChart';
 import { ActivityHeatmap } from '@/components/insights/ActivityHeatmap';
 import { TaskBreakdownChart } from '@/components/insights/TaskBreakdownChart';
+import { ProductivityPatterns } from '@/components/insights/ProductivityPatterns';
 import type {
   DeliveryInterval,
   InsightsActivitySection,
@@ -590,6 +591,14 @@ function InsightsPageContent() {
             ) : activity ? (
               <motion.div variants={fadeSlideUp} className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5">
                 <ActivityHeatmap data={activity.activityHeatmap} />
+              </motion.div>
+            ) : null}
+
+            {sectionLoading.activity ? (
+              <GroupSkeleton label="Loading productivity patterns" className="mb-6 h-96" />
+            ) : activity ? (
+              <motion.div variants={fadeSlideUp}>
+                <ProductivityPatterns data={activity.productivity} />
               </motion.div>
             ) : null}
 

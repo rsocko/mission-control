@@ -79,6 +79,9 @@ vi.mock('@/components/insights/TaskBreakdownChart', () => ({
     <div data-testid="task-breakdown-chart" data-compact={compact ? 'true' : 'false'} />
   ),
 }));
+vi.mock('@/components/insights/ProductivityPatterns', () => ({
+  ProductivityPatterns: () => <div data-testid="productivity-patterns" />,
+}));
 vi.mock('@/lib/stats/insights', () => ({}));
 
 const mockSnapshot = {
@@ -113,6 +116,15 @@ const mockSnapshot = {
   activityHeatmap: [
     { date: '2026-07-29', taskCompletions: 2, routineCompletions: 1 },
   ],
+  productivity: {
+    periodStart: '2026-07-23',
+    periodEnd: '2026-07-29',
+    timeZone: 'UTC',
+    hourly: [],
+    weekdays: [],
+    timeliness: { onTime: 0, late: 0, withoutDueDate: 0, onTimeRate: null },
+    comparisons: [],
+  },
 };
 
 const mockObservations = {
@@ -193,6 +205,7 @@ describe('MobileInsightsScreen', () => {
       expect(screen.getByTestId('activity-heatmap')).toHaveAttribute('data-compact', 'true');
       expect(screen.getByTestId('task-breakdown-chart')).toHaveAttribute('data-compact', 'true');
       expect(screen.getByText('Current task mix')).toBeInTheDocument();
+      expect(screen.getByTestId('productivity-patterns')).toBeInTheDocument();
     });
   });
 

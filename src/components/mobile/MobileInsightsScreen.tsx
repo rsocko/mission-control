@@ -16,6 +16,7 @@ import {
 import { PullToRefreshIndicator } from '@/components/ui/PullToRefreshIndicator';
 import { ActivityHeatmap } from '@/components/insights/ActivityHeatmap';
 import { TaskBreakdownChart } from '@/components/insights/TaskBreakdownChart';
+import { ProductivityPatterns } from '@/components/insights/ProductivityPatterns';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
 import type { InsightsPeriod, InsightsSnapshot, PeriodKpi, TrendDataPoint } from '@/lib/stats/insights';
@@ -522,6 +523,10 @@ export function MobileInsightsScreen({ onBack }: MobileInsightsScreenProps) {
                 <motion.section variants={fadeSlideUp} className="mt-3 rounded-[22px] p-4" style={GLASS_STYLE}>
                   <ActivityHeatmap data={snapshot.activityHeatmap} compact />
                 </motion.section>
+
+                <motion.div variants={fadeSlideUp} className="mt-3">
+                  <ProductivityPatterns data={snapshot.productivity} className="mb-0" />
+                </motion.div>
 
                 <motion.section variants={fadeSlideUp} className="mt-3 rounded-[22px] p-4" style={GLASS_STYLE}>
                   <div className="mb-4">

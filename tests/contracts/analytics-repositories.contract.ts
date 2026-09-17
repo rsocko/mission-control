@@ -99,9 +99,19 @@ export function describeAnalyticsRepositoriesContract(
 
     // ─── KPI counts ───────────────────────────────────────────────────────
 
-    it('counts open work by status, due window, priority, assignee, and source', async () => {
-      await insert('tasks', task('open-1', { status: 'todo', due_date: '2026-03-01', priority: 'high' }));
-      await insert('tasks', task('open-2', { status: 'in_progress', due_date: '2026-03-12', assignee: 'me' }));
+    it('counts open work by status, due window, priority, assignee, horizon, and source', async () => {
+      await insert('tasks', task('open-1', {
+        status: 'todo',
+        due_date: '2026-03-01',
+        priority: 'high',
+        planning_horizon: 'next',
+      }));
+      await insert('tasks', task('open-2', {
+        status: 'in_progress',
+        due_date: '2026-03-12',
+        assignee: 'me',
+        planning_horizon: 'soon',
+      }));
       await insert('tasks', task('done-1', { status: 'done', due_date: '2026-03-01' }));
       await insert('tasks', task('cancelled-1', { status: 'cancelled', due_date: '2026-03-01' }));
       await insert('tasks', task('doc-1', { status: 'todo', connector_type: 'document-intelligence' }));
@@ -111,7 +121,10 @@ export function describeAnalyticsRepositoriesContract(
       expect(await kpis.countOpenTasksDueBefore('2026-03-10')).toBe(1);
       expect(await kpis.countOpenTasksDueBetween({ from: '2026-03-10', to: '2026-03-20' })).toBe(1);
       expect(await kpis.countOpenTasksWithPriorities(['high', 'critical'])).toBe(1);
-      expect(await kpis.countOpenTasksWithAssignee()).toBe(1);
+      expect(await kpis.countOpenTasksAssignedToMe()).toBe(2);
+      expect(await kpis.countOpenTasksWithPlanningHorizons(['next'])).toBe(1);
+      expect(await kpis.countOpenTasksWithPlanningHorizons(['next', 'soon'])).toBe(2);
+      expect(await kpis.countOpenTasksWithoutPlanningHorizon()).toBe(1);
       expect(await kpis.countOpenTasksByConnectorType('document-intelligence')).toBe(1);
       expect(typeof await kpis.countOpenTasks()).toBe('number');
     });
@@ -137,6 +150,39 @@ export function describeAnalyticsRepositoriesContract(
       const focus = await kpis.listFocusItemStatuses('today', '2026-03-10');
       expect(focus.map((item) => item.id).sort()).toEqual(['focus-1', 'focus-2']);
       expect(focus.filter((item) => item.status === 'done')).toHaveLength(1);
+    });
+
+    it('matches Assigned to Me against enabled GitHub identity evidence', async () => {
+      await insert('connector_configs', {
+        id: 'github-live',
+        type: 'github-issues',
+        name: 'GitHub',
+        capabilities: '{}',
+        settings: JSON.stringify({ authenticatedUser: 'octocat' }),
+        enabled: true,
+        deleted_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      });
+      await insert('tasks', task('github-mine', {
+        connector_type: 'github-issues',
+        connector_instance_id: 'github-live',
+        status: 'todo',
+        assignee: 'octocat',
+      }));
+      await insert('tasks', task('github-theirs', {
+        connector_type: 'github-issues',
+        connector_instance_id: 'github-live',
+        status: 'todo',
+        assignee: 'hubot',
+      }));
+      await insert('tasks', task('github-unassigned', {
+        connector_type: 'github-issues',
+        connector_instance_id: 'github-live',
+        status: 'todo',
+      }));
+
+      expect(await harness.repository.kpis.countOpenTasksAssignedToMe()).toBe(1);
     });
 
     it('counts triage backlog and staleness by captured text order', async () => {
@@ -197,7 +243,11 @@ export function describeAnalyticsRepositoriesContract(
     // ─── Instant comparison parity ────────────────────────────────────────
 
     it('compares stored timestamps by instant and drops unparsable text', async () => {
-      await insert('tasks', task('in-utc', { status: 'done', completed_at: '2026-03-10T01:00:00.000Z' }));
+      await insert('tasks', task('in-utc', {
+        status: 'done',
+        completed_at: '2026-03-10T01:00:00.000Z',
+        due_date: '2026-03-09',
+      }));
       await insert('tasks', task('in-precise', { status: 'done', completed_at: '2026-03-10T01:00:00.1234567Z' }));
       await insert('tasks', task('in-offsetless', { status: 'done', completed_at: '2026-03-10T02:00:00' }));
       await insert('tasks', task('in-offset', { status: 'done', completed_at: '2026-03-10T08:00:00+05:00' }));
@@ -214,6 +264,12 @@ export function describeAnalyticsRepositoriesContract(
       expect(await harness.repository.kpis.countTasksCompletedIn(range)).toBe(5);
       expect(await harness.repository.insights.countTasksCompletedIn(range)).toBe(5);
       expect(await harness.repository.insights.listCompletedTimestampsIn(range)).toHaveLength(5);
+      const timings = await harness.repository.insights.listCompletedTaskTimingsIn(range);
+      expect(timings).toHaveLength(5);
+      expect(timings).toContainEqual({
+        completedAt: '2026-03-10T01:00:00.000Z',
+        dueDate: '2026-03-09',
+      });
     });
 
     it('treats the instant range as half open at both ends', async () => {

@@ -17,6 +17,8 @@ export interface TaskPlanningSectionProps {
   reminderAt: string | null;
   reminderRelative: ReminderRelativeRule | null;
   reminderDueTime: string | null;
+  reminderNagInterval: 1 | 5 | 15 | null;
+  reminderNagStopAt: string | null;
   reminderTimezone: string;
   dueDate: string | null;
   reminderSaving: boolean;
@@ -52,6 +54,8 @@ export function TaskPlanningSection({
   reminderAt,
   reminderRelative,
   reminderDueTime,
+  reminderNagInterval,
+  reminderNagStopAt,
   reminderTimezone,
   dueDate,
   reminderSaving,
@@ -104,6 +108,8 @@ export function TaskPlanningSection({
             relativeRule={reminderRelative}
             dueDate={dueDate}
             dueTime={reminderDueTime}
+            nagInterval={reminderNagInterval}
+            nagStopAt={reminderNagStopAt}
             timezone={reminderTimezone}
             saving={reminderSaving}
             onChange={canEditReminder ? onReminderChange : () => false}
@@ -148,7 +154,7 @@ export function TaskPlanningSection({
                 >
                   <FastForward size={12} aria-hidden="true" />
                   Skip to current
-                  <span className="ml-auto text-[10px] font-normal text-[var(--text-muted)]">
+                  <span className="ml-auto text-xs font-normal text-[var(--text-muted)]">
                     Next: {formatShortDate(skipToCurrentDate)}
                   </span>
                 </button>

@@ -285,10 +285,57 @@ export async function PATCH(
       }
       Object.assign(updates, reminderMutation.updates);
     }
+    const resultingReminderAt = updates.reminderAt !== undefined
+      ? updates.reminderAt as string | null
+      : currentTask.reminderAt;
+    const nagConfigurationChanged = input.reminderNagInterval !== undefined
+      || input.reminderNagStopAt !== undefined;
+    const reminderScheduleChanged = updates.reminderAt !== undefined
+      && updates.reminderAt !== currentTask.reminderAt;
+    if (input.reminderNagInterval !== undefined
+      && input.reminderNagInterval !== null
+      && !resultingReminderAt) {
+      return ApiErrors.badRequest('Set a reminder time before enabling Repeat until done');
+    }
+    if (!resultingReminderAt && (nagConfigurationChanged || reminderScheduleChanged)) {
+      updates.reminderNagInterval = null;
+      updates.reminderNagStopAt = null;
+      updates.reminderNagSeriesId = null;
+      updates.reminderNagSequence = 0;
+    } else if (
+      resultingReminderAt
+      && (nagConfigurationChanged || (reminderScheduleChanged && currentTask.reminderNagInterval))
+    ) {
+      const interval = input.reminderNagInterval !== undefined
+        ? input.reminderNagInterval
+        : currentTask.reminderNagInterval ?? null;
+      const stopAt = input.reminderNagStopAt !== undefined
+        ? input.reminderNagStopAt
+        : currentTask.reminderNagStopAt ?? null;
+      if (interval !== null && stopAt && Date.parse(stopAt) <= Date.parse(resultingReminderAt)) {
+        return ApiErrors.badRequest('Repeat-until-done stop time must be after the reminder');
+      }
+      const startsNewSeries = interval !== null
+        && (currentTask.reminderNagInterval === null || !currentTask.reminderNagSeriesId);
+      updates.reminderNagInterval = interval;
+      updates.reminderNagStopAt = interval === null ? null : stopAt;
+      updates.reminderNagSeriesId = interval === null
+        ? null
+        : startsNewSeries
+          ? randomUUID()
+          : currentTask.reminderNagSeriesId;
+      updates.reminderNagSequence = interval === null || startsNewSeries
+        ? 0
+        : currentTask.reminderNagSequence;
+    }
     if (input.status === 'done' || input.status === 'cancelled') {
       updates.microStatus = null;
       updates.snoozedUntil = null;
       updates.reminderAt = null;
+      updates.reminderNagInterval = null;
+      updates.reminderNagStopAt = null;
+      updates.reminderNagSeriesId = null;
+      updates.reminderNagSequence = 0;
       if (!currentSchedule?.recurrence) {
         updates.reminderRelative = null;
         updates.reminderDueTime = null;
@@ -438,6 +485,16 @@ export async function PATCH(
         scheduledDate: nextScheduledDate,
         scheduledTime: nextScheduledTime,
         reminderAt: nextReminderAt,
+        reminderNagInterval: nextReminderAt ? currentTask.reminderNagInterval ?? null : null,
+        reminderNagStopAt: nextReminderAt && currentTask.reminderNagStopAt && currentTask.reminderAt
+          ? new Date(
+              Date.parse(nextReminderAt)
+              + Math.max(0, Date.parse(currentTask.reminderNagStopAt) - Date.parse(currentTask.reminderAt)),
+            ).toISOString()
+          : null,
+        reminderNagSeriesId: nextReminderAt && currentTask.reminderNagInterval
+          ? randomUUID()
+          : null,
         metadata,
       };
     }
@@ -567,6 +624,8 @@ export async function PATCH(
       || input.reminderAt !== undefined
       || input.reminderRelative !== undefined
       || input.reminderDueTime !== undefined
+      || input.reminderNagInterval !== undefined
+      || input.reminderNagStopAt !== undefined
       || input.status === 'done'
       || input.status === 'cancelled'
     );
@@ -580,6 +639,18 @@ export async function PATCH(
       reminderDueTime: updates.reminderDueTime !== undefined
         ? updates.reminderDueTime
         : currentTask.reminderDueTime ?? null,
+      reminderNagInterval: updates.reminderNagInterval !== undefined
+        ? updates.reminderNagInterval
+        : currentTask.reminderNagInterval,
+      reminderNagStopAt: updates.reminderNagStopAt !== undefined
+        ? updates.reminderNagStopAt
+        : currentTask.reminderNagStopAt,
+      reminderNagSeriesId: updates.reminderNagSeriesId !== undefined
+        ? updates.reminderNagSeriesId
+        : currentTask.reminderNagSeriesId,
+      reminderNagSequence: updates.reminderNagSequence !== undefined
+        ? updates.reminderNagSequence
+        : currentTask.reminderNagSequence,
     } : undefined;
 
     return NextResponse.json({

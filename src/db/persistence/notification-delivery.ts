@@ -371,11 +371,21 @@ export function parseNotificationDeliveryPayload(value: unknown): MissionControl
     || !normalizeInternalNavigationTarget(payload.url)
     || (payload.body !== undefined && typeof payload.body !== 'string')
     || (payload.kind !== undefined && payload.kind !== 'task_reminder')
+    || (payload.deliveryId !== undefined && (
+      typeof payload.deliveryId !== 'string' || !payload.deliveryId
+    ))
+    || (payload.collapseId !== undefined && (
+      typeof payload.collapseId !== 'string'
+      || !payload.collapseId
+      || Buffer.byteLength(payload.collapseId, 'utf8') > 64
+    ))
   ) {
     throw new Error('Stored push payload is invalid');
   }
   return {
     notificationId: payload.notificationId,
+    ...(typeof payload.deliveryId === 'string' ? { deliveryId: payload.deliveryId } : {}),
+    ...(typeof payload.collapseId === 'string' ? { collapseId: payload.collapseId } : {}),
     title: payload.title,
     ...(typeof payload.body === 'string' ? { body: payload.body } : {}),
     tag: payload.tag,

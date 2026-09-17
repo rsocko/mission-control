@@ -510,6 +510,10 @@ export interface TaskCoreTaskRow {
   readonly reminderAt: string | null;
   readonly reminderRelative: string | null;
   readonly reminderDueTime: string | null;
+  readonly reminderNagInterval?: number | null;
+  readonly reminderNagStopAt?: string | null;
+  readonly reminderNagSeriesId?: string | null;
+  readonly reminderNagSequence?: number;
   readonly effort: number | null;
   readonly isBulkImport: boolean;
 }
@@ -725,6 +729,10 @@ export interface TaskCoreTaskPatch {
   readonly reminderAt?: string | null;
   readonly reminderRelative?: string | null;
   readonly reminderDueTime?: string | null;
+  readonly reminderNagInterval?: number | null;
+  readonly reminderNagStopAt?: string | null;
+  readonly reminderNagSeriesId?: string | null;
+  readonly reminderNagSequence?: number;
   readonly effort?: number | null;
   readonly metadata?: Record<string, unknown>;
   readonly syncStatus?: string;
@@ -737,6 +745,9 @@ export interface TaskRecurrenceSuccessorMutation {
   readonly scheduledDate: string;
   readonly scheduledTime: string | null;
   readonly reminderAt: string | null;
+  readonly reminderNagInterval: number | null;
+  readonly reminderNagStopAt: string | null;
+  readonly reminderNagSeriesId: string | null;
   readonly metadata: Record<string, unknown>;
 }
 

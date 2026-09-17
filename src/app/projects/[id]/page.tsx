@@ -121,6 +121,7 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
   const searchParams = useSearchParams();
   const prefersReducedMotion = useReducedMotion() ?? false;
   const initialTab = searchParams.get('tab') as ProjectTab | null;
+  const initialPhaseId = searchParams.get('phase');
   const initialAction = searchParams.get('action');
   const {
     error,
@@ -156,9 +157,9 @@ function ProjectDetailContent({ projectId }: { projectId: string }) {
     }
   }, [projectId]);
 
-  const [activeTab, setActiveTab] = useState<ProjectTab>(initialTab || 'overview');
+  const [activeTab, setActiveTab] = useState<ProjectTab>(initialTab || (initialPhaseId ? 'phases' : 'overview'));
   const [phasesGraphView, setPhasesGraphView] = useState(false);
-  const [revealPhaseId, setRevealPhaseId] = useState<string | null>(null);
+  const [revealPhaseId, setRevealPhaseId] = useState<string | null>(initialPhaseId);
   const [confirmation, setConfirmation] = useState<{ open: boolean; request: ConfirmationRequest }>(
     { open: false, request: EMPTY_CONFIRMATION },
   );

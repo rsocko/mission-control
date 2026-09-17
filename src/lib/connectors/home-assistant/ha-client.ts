@@ -2,6 +2,8 @@
  * Home Assistant REST and bounded WebSocket API client.
  */
 
+import { connectorLogger } from '@/lib/logger';
+
 export interface HomeAssistantState {
   entity_id: string;
   state: string;
@@ -73,7 +75,12 @@ export interface HAClient {
   fetchWebSocketSources(
     sources: Array<'persistentNotifications' | 'repairs'>,
   ): Promise<HAWebSocketSourceResult>;
-  callService(domain: string, service: string, data: Record<string, unknown>): Promise<void>;
+  callService(
+    domain: string,
+    service: string,
+    data: Record<string, unknown>,
+    options?: { acceptOnTimeout?: boolean; timeoutMs?: number },
+  ): Promise<void>;
   ignoreRepair(domain: string, issueId: string): Promise<void>;
   testConnection(): Promise<HomeAssistantConnectionResult>;
 }
@@ -230,6 +237,13 @@ async function responseError(response: Response): Promise<string> {
   return normalized ? `${fallback}: ${normalized}` : fallback;
 }
 
+function isTimeoutError(error: unknown): boolean {
+  return error instanceof Error && (
+    error.name === 'TimeoutError'
+    || error.message.toLowerCase().includes('aborted due to timeout')
+  );
+}
+
 export function createHAClient(options: HAClientOptions): HAClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
 
@@ -327,11 +341,25 @@ export function createHAClient(options: HAClientOptions): HAClient {
       };
     },
 
-    async callService(domain, service, data): Promise<void> {
-      await fetchJson(`/api/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, {
-        method: 'POST',
-        body: JSON.stringify(data),
-      });
+    async callService(domain, service, data, callOptions): Promise<void> {
+      try {
+        await fetchJson(`/api/services/${encodeURIComponent(domain)}/${encodeURIComponent(service)}`, {
+          method: 'POST',
+          body: JSON.stringify(data),
+          signal: callOptions?.timeoutMs
+            ? AbortSignal.timeout(callOptions.timeoutMs)
+            : undefined,
+        });
+      } catch (error) {
+        if (callOptions?.acceptOnTimeout && isTimeoutError(error)) {
+          connectorLogger.info(
+            { domain, service, timeoutMs: callOptions.timeoutMs ?? 15_000 },
+            'Home Assistant service call exceeded the response window; reconciling source state',
+          );
+          return;
+        }
+        throw error;
+      }
     },
 
     async ignoreRepair(domain, issueId): Promise<void> {

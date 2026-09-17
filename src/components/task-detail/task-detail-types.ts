@@ -67,6 +67,10 @@ export interface TaskDetail {
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   reminderTimezone?: string;
   snoozedUntil?: string | null;
   isInMyDay?: boolean;

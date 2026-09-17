@@ -606,7 +606,12 @@ export class HomeAssistantConnector implements IConnector {
           }
           serviceData.backup = true;
         }
-        await this.client!.callService('update', 'install', serviceData);
+        // Some update integrations keep the service request open until the
+        // installation finishes even though Home Assistant already started it.
+        await this.client!.callService('update', 'install', serviceData, {
+          acceptOnTimeout: true,
+          timeoutMs: 5_000,
+        });
         return;
       }
 

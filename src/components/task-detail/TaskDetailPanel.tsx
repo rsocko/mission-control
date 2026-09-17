@@ -954,6 +954,8 @@ export function TaskDetailPanel({
           reminderAt={task.reminderAt ?? null}
           reminderRelative={task.reminderRelative ?? null}
           reminderDueTime={task.reminderDueTime ?? null}
+          reminderNagInterval={task.reminderNagInterval ?? null}
+          reminderNagStopAt={task.reminderNagStopAt ?? null}
           reminderTimezone={task.reminderTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
           dueDate={taskDueDateOnly}
           reminderSaving={mutations.reminderSaving}

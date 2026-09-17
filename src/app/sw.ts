@@ -302,11 +302,13 @@ self.addEventListener("push", (event: PushEvent) => {
     : reminderActions.length;
   const options: NotificationOptions & {
     actions?: Array<{ action: string; title: string }>;
+    renotify?: boolean;
   } = {
     body: data.body || "",
     icon: "/icon-v4-192.png",
     badge: "/icon-v4-192.png",
     tag: data.tag || "mc-notification",
+    renotify: data.kind === "task_reminder",
     data: {
       url: data.url || "/",
       notificationId: data.notificationId,

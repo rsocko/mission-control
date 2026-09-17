@@ -78,6 +78,10 @@ export const tasks = pgTable('tasks', {
   reminderAt: text('reminder_at'),
   reminderRelative: text('reminder_relative'),
   reminderDueTime: text('reminder_due_time'),
+  reminderNagInterval: integer('reminder_nag_interval'),
+  reminderNagStopAt: text('reminder_nag_stop_at'),
+  reminderNagSeriesId: text('reminder_nag_series_id'),
+  reminderNagSequence: integer('reminder_nag_sequence').notNull().default(0),
 
   // Effort level (1–5, nullable — purely optional)
   effort: integer('effort'),
@@ -110,6 +114,8 @@ export const taskReminderOccurrences = pgTable('task_reminder_occurrences', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   scheduledAt: text('scheduled_at').notNull(),
+  seriesId: text('series_id'),
+  sequence: integer('sequence'),
   state: text('state')
     .$type<'pending' | 'processing' | 'fired' | 'cancelled' | 'failed'>()
     .notNull()
@@ -128,6 +134,9 @@ export const taskReminderOccurrences = pgTable('task_reminder_occurrences', {
 }, (table) => [
   uniqueIndex('idx_task_reminder_occurrences_task_schedule')
     .on(table.taskId, table.scheduledAt),
+  index('idx_task_reminder_occurrences_series_sequence')
+    .on(table.seriesId, table.sequence)
+    .where(sql`${table.seriesId} IS NOT NULL`),
   index('idx_task_reminder_occurrences_claim')
     .on(table.state, table.nextAttemptAt, table.leaseExpiresAt),
 ]);

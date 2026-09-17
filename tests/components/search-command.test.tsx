@@ -104,11 +104,15 @@ function result(
 
 function openSearch() {
   fireEvent.click(screen.getByRole('button', { name: /search ctrl k/i }));
-  return screen.getByRole('textbox', { name: 'Search tasks and notifications' });
+  return screen.getByRole('textbox', { name: 'Search Mission Control' });
 }
 
 function projectResponse() {
   return jsonResponse({ projects: [] });
+}
+
+function connectorResponse() {
+  return jsonResponse({ connectors: [], sourceLists: [] });
 }
 
 describe('SearchCommand', () => {
@@ -124,6 +128,7 @@ describe('SearchCommand', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url === '/api/tasks' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'task-starred', editPolicy: { sourceModel: 'mc-owned' } }, 201));
       }
@@ -137,7 +142,7 @@ describe('SearchCommand', () => {
           results: [],
         }));
       }
-      if (url.includes('/api/search')) return Promise.resolve(jsonResponse({ results: [] }));
+      if (url.includes('/api/ai/search')) return Promise.resolve(jsonResponse({ results: [] }));
       throw new Error(`Unexpected URL: ${url}`);
     });
 
@@ -161,6 +166,7 @@ describe('SearchCommand', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input, init) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url === '/api/tasks' && init?.method === 'POST') {
         return Promise.resolve(jsonResponse({ id: 'task-starred' }, 201));
       }
@@ -174,7 +180,7 @@ describe('SearchCommand', () => {
           results: [],
         }));
       }
-      if (url.includes('/api/search')) return Promise.resolve(jsonResponse({ results: [] }));
+      if (url.includes('/api/ai/search')) return Promise.resolve(jsonResponse({ results: [] }));
       throw new Error(`Unexpected URL: ${url}`);
     });
 
@@ -199,6 +205,7 @@ describe('SearchCommand', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url.includes('__status_check__')) return status.promise;
       if (url.includes('mode=keyword')) {
         return Promise.resolve(jsonResponse({
@@ -227,11 +234,103 @@ describe('SearchCommand', () => {
     });
   });
 
+  it('opens a matching application destination without waiting for content search', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
+      if (url.includes('__status_check__')) {
+        return Promise.resolve(jsonResponse({
+          semanticEnabled: false,
+          semanticAvailable: false,
+          results: [],
+        }));
+      }
+      if (url.includes('mode=keyword')) {
+        return Promise.resolve(jsonResponse({ results: [], durationMs: 2 }));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<SearchCommand />);
+    const input = openSearch();
+    fireEvent.change(input, { target: { value: 'kanban' } });
+
+    expect(screen.getByRole('option', { name: /kanban/i })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    expect(navigation.push).toHaveBeenCalledWith('/kanban');
+  });
+
+  it('navigates to projects and source lists returned by local providers', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
+      const url = String(input);
+      if (url === '/api/hub-projects') {
+        return Promise.resolve(jsonResponse({
+          projects: [{
+            id: 'project-one',
+            name: 'Workshop plan',
+            color: '#2563eb',
+            appearance: null,
+            icon: null,
+            category: 'Home',
+          }],
+        }));
+      }
+      if (url === '/api/connectors') {
+        return Promise.resolve(jsonResponse({
+          connectors: [{
+            id: 'todo-work',
+            type: 'microsoft-todo',
+            name: 'Microsoft To Do',
+            enabled: true,
+          }],
+          sourceLists: [{
+            id: 'list-one',
+            sourceId: 'home/list',
+            connectorInstanceId: 'todo-work',
+            name: 'Home projects',
+            taskCount: 9,
+            groupId: null,
+          }],
+        }));
+      }
+      if (url.includes('__status_check__')) {
+        return Promise.resolve(jsonResponse({
+          semanticEnabled: false,
+          semanticAvailable: false,
+          results: [],
+        }));
+      }
+      if (url.includes('mode=keyword')) {
+        return Promise.resolve(jsonResponse({ results: [], durationMs: 2 }));
+      }
+      throw new Error(`Unexpected URL: ${url}`);
+    });
+
+    render(<SearchCommand />);
+    const input = openSearch();
+
+    fireEvent.change(input, { target: { value: 'workshop' } });
+    fireEvent.click(await screen.findByRole('option', { name: /workshop plan/i }));
+    expect(navigation.push).toHaveBeenLastCalledWith('/projects/project-one');
+
+    fireEvent.click(screen.getByRole('button', { name: /search ctrl k/i }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search Mission Control' }), {
+      target: { value: 'home projects' },
+    });
+    fireEvent.click(await screen.findByRole('option', { name: /home projects/i }));
+    expect(navigation.push).toHaveBeenLastCalledWith(
+      '/all-tasks?source=microsoft-todo&listId=todo-work%3Ahome%2Flist',
+    );
+  });
+
   it('appends semantic results without disturbing keyword order, selection, or preview', async () => {
     const semantic = deferred<Response>();
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url.includes('__status_check__')) {
         return Promise.resolve(jsonResponse({
           semanticEnabled: true,
@@ -295,6 +394,7 @@ describe('SearchCommand', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url.includes('__status_check__')) {
         return Promise.resolve(jsonResponse({
           semanticEnabled: false,
@@ -340,6 +440,7 @@ describe('SearchCommand', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url.includes('__status_check__')) {
         return Promise.resolve(jsonResponse({
           semanticEnabled: true,
@@ -375,6 +476,7 @@ describe('SearchCommand', () => {
     const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url.includes('__status_check__')) {
         return Promise.resolve(jsonResponse({
           semanticEnabled: false,
@@ -423,6 +525,7 @@ describe('SearchCommand', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation((input) => {
       const url = String(input);
       if (url === '/api/hub-projects') return Promise.resolve(projectResponse());
+      if (url === '/api/connectors') return Promise.resolve(connectorResponse());
       if (url.includes('__status_check__')) {
         return Promise.resolve(jsonResponse({
           semanticEnabled: false,

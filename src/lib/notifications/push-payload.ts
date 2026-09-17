@@ -2,6 +2,8 @@ export type NotificationDeliveryChannel = 'web_push' | 'apns';
 
 export interface MissionControlPushPayload {
   notificationId: string;
+  deliveryId?: string;
+  collapseId?: string;
   title: string;
   body?: string;
   tag: string;

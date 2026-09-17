@@ -1,6 +1,7 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import Image from 'next/image';
 import { Check, Filter, ListChecks, Loader2, Search } from 'lucide-react';
 import { MobileSwipeTaskRow } from '@/components/today/MobileSwipeTaskRow';
@@ -33,6 +34,7 @@ import {
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { TaskListStatsDto } from '@/types/api';
 import { cn } from '@/lib/utils';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {
   DashboardTaskViewModel as Task,
   EnabledSource,
@@ -48,6 +50,10 @@ interface TaskGroup {
   label: string;
   items: MyDayItem[];
 }
+
+type MobileTaskListRow =
+  | { type: 'header'; group: TaskGroup }
+  | { type: 'task'; item: MyDayItem };
 
 /** Convert a Task from dashboard data into a MyDayItem shape for swipe rows */
 function taskToMyDayItem(task: Task): MyDayItem {
@@ -99,19 +105,6 @@ export function MobileAllTasksList() {
   const activeFilter = getQuickFilterDefinition(state.quickFilter)?.id ?? 'all';
   const [activeScheduleTrayId, setActiveScheduleTrayId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const filterHeaderRef = useRef<HTMLDivElement>(null);
-  const [filterHeaderHeight, setFilterHeaderHeight] = useState(0);
-
-  useEffect(() => {
-    const header = filterHeaderRef.current;
-    if (!header) return;
-
-    const observer = new ResizeObserver(() => {
-      setFilterHeaderHeight(header.offsetHeight);
-    });
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, [state.loading]);
 
   const today = getLocalToday();
   const tomorrow = getLocalTomorrow();
@@ -178,6 +171,24 @@ export function MobileAllTasksList() {
       : filteredTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
     [activeFilter, filteredTasks],
   );
+  const taskRows = useMemo<MobileTaskListRow[]>(
+    () => groups.flatMap((group) => [
+      { type: 'header' as const, group },
+      ...group.items.map((item) => ({ type: 'task' as const, item })),
+    ]),
+    [groups],
+  );
+  const virtualizeTaskRows = shouldVirtualizeList(totalActive);
+  const taskRowVirtualizer = useVirtualizer({
+    count: virtualizeTaskRows ? taskRows.length : 0,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => {
+      const row = taskRows[index];
+      return row?.type === 'header' ? `header-${row.group.key}` : row?.item.id ?? index;
+    },
+    estimateSize: (index) => taskRows[index]?.type === 'header' ? 34 : 76,
+    overscan: 8,
+  });
 
   // Task actions
   const handleSetDueDate = useCallback(async (taskId: string, date: string) => {
@@ -246,21 +257,8 @@ export function MobileAllTasksList() {
   }
 
   return (
-    <div className={`relative h-full overscroll-y-contain ${isSheetOpen ? 'overflow-hidden' : 'overflow-y-auto'}`} ref={containerRef} {...containerProps}>
-      {/* Pull-to-refresh indicator — absolutely positioned */}
-      {(pullDistance > 0 || isRefreshing) && (
-        <div className="absolute left-0 right-0 top-0 z-50 flex items-center justify-center pointer-events-none" style={{ height: `${pullDistance}px` }}>
-          <Loader2
-            size={18}
-            className={`text-[var(--accent-400)] ${isRefreshing ? 'animate-spin' : ''}`}
-            style={{ opacity: Math.min(pullDistance / 32, 1), transform: `rotate(${pullDistance * 3}deg)` }}
-          />
-        </div>
-      )}
-
-      <div style={contentStyle}>
-      {/* Compact filter bar */}
-      <div ref={filterHeaderRef} className="sticky top-0 z-20 flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-2.5">
+    <div className="relative flex h-full flex-col overflow-hidden">
+      <div className="z-20 flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-2.5">
         <button
           type="button"
           onClick={() => setShowFilters(true)}
@@ -292,6 +290,24 @@ export function MobileAllTasksList() {
         </span>
       </div>
 
+      <div
+        className={`relative min-h-0 flex-1 overscroll-y-contain ${isSheetOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
+        ref={containerRef}
+        data-virtualized={virtualizeTaskRows || undefined}
+        {...containerProps}
+      >
+      {/* Pull-to-refresh indicator — absolutely positioned */}
+      {(pullDistance > 0 || isRefreshing) && (
+        <div className="absolute left-0 right-0 top-0 z-50 flex items-center justify-center pointer-events-none" style={{ height: `${pullDistance}px` }}>
+          <Loader2
+            size={18}
+            className={`text-[var(--accent-400)] ${isRefreshing ? 'animate-spin' : ''}`}
+            style={{ opacity: Math.min(pullDistance / 32, 1), transform: `rotate(${pullDistance * 3}deg)` }}
+          />
+        </div>
+      )}
+
+      <div style={contentStyle}>
       {totalActive === 0 ? (
         <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
           <div className="w-16 h-16 rounded-full bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center mb-5">
@@ -312,42 +328,61 @@ export function MobileAllTasksList() {
             </button>
           )}
         </div>
+      ) : virtualizeTaskRows ? (
+        <div
+          className="relative w-full"
+          style={{ height: `${taskRowVirtualizer.getTotalSize() + 96}px` }}
+        >
+          {taskRowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const row = taskRows[virtualRow.index];
+            return (
+              <div
+                key={virtualRow.key}
+                ref={taskRowVirtualizer.measureElement}
+                data-index={virtualRow.index}
+                className="absolute left-0 top-0 w-full"
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                {row.type === 'header' ? (
+                  <TaskGroupHeader group={row.group} />
+                ) : (
+                  <MobileAllTasksRow
+                    item={row.item}
+                    actions={actions}
+                    projects={state.projects}
+                    completingIds={state.completingIds}
+                    activeScheduleTrayId={activeScheduleTrayId}
+                    setActiveScheduleTrayId={setActiveScheduleTrayId}
+                    setSelectedTaskId={setSelectedTaskId}
+                    handleSnooze={handleSnooze}
+                    handleScheduleTomorrow={handleScheduleTomorrow}
+                    handleSchedulePickDay={handleSchedulePickDay}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="pb-24">
           {groups.map((group) => (
             <section key={group.key} className="mb-1">
-              {/* Section header */}
-              <div className="sticky z-10 bg-[var(--surface-0)]/95 backdrop-blur-sm px-4 py-2 border-b border-[var(--border-subtle)]" style={{ top: filterHeaderHeight }}>
-                <h3 className={`text-xs font-semibold uppercase tracking-wide ${
-                  group.key === 'overdue' ? 'text-red-400' :
-                  group.key === 'due-today' ? 'text-amber-400' :
-                  group.key === 'upcoming' ? 'text-blue-400' :
-                  'text-[var(--text-muted)]'
-                }`}>
-                  {group.label}
-                  <span className="ml-1.5 text-[var(--text-muted)] font-normal">({group.items.length})</span>
-                </h3>
-              </div>
+              <TaskGroupHeader group={group} sticky />
 
               {/* Task rows */}
               {group.items.map((item) => (
-                <MobileSwipeTaskRow
+                <MobileAllTasksRow
                   key={item.id}
                   item={item}
-                  onComplete={(taskId) => { void actions.completeTask(taskId); }}
-                  onRemoveFromDay={(taskId) => { handleSnooze(taskId); }}
-                  onSetLocalDisposition={(taskId, disposition) => {
-                    void actions.setTaskLocalDisposition(taskId, disposition);
-                  }}
-                  onTap={(tappedItem) => { setActiveScheduleTrayId(null); setSelectedTaskId(tappedItem.taskId); }}
-                  onScheduleTomorrow={handleScheduleTomorrow}
-                  onSchedulePickDay={handleSchedulePickDay}
-                  onSnooze={(taskId) => handleSnooze(taskId)}
-                  isCompleting={state.completingIds.has(item.taskId)}
-                  showAiChip={item.priority === 'critical' || item.priority === 'high'}
+                  actions={actions}
                   projects={state.projects}
-                  scheduleTrayOpen={activeScheduleTrayId === item.taskId}
-                  onScheduleTrayChange={(open) => setActiveScheduleTrayId(open ? item.taskId : null)}
+                  completingIds={state.completingIds}
+                  activeScheduleTrayId={activeScheduleTrayId}
+                  setActiveScheduleTrayId={setActiveScheduleTrayId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  handleSnooze={handleSnooze}
+                  handleScheduleTomorrow={handleScheduleTomorrow}
+                  handleSchedulePickDay={handleSchedulePickDay}
                 />
               ))}
             </section>
@@ -356,6 +391,7 @@ export function MobileAllTasksList() {
       )}
 
       {/* Task detail bottom sheet */}
+      </div>
       </div>
       <MobileSheet
         isOpen={!!selectedTaskId}
@@ -419,6 +455,73 @@ export function MobileAllTasksList() {
   );
 }
 
+function TaskGroupHeader({ group, sticky = false }: { group: TaskGroup; sticky?: boolean }) {
+  return (
+    <div className={cn(
+      'z-10 border-b border-[var(--border-subtle)] bg-[var(--surface-0)]/95 px-4 py-2 backdrop-blur-sm',
+      sticky && 'sticky top-0',
+    )}>
+      <h3 className={cn(
+        'text-xs font-semibold uppercase tracking-wide',
+        group.key === 'overdue' && 'text-red-400',
+        group.key === 'due-today' && 'text-amber-400',
+        group.key === 'upcoming' && 'text-blue-400',
+        !['overdue', 'due-today', 'upcoming'].includes(group.key) && 'text-[var(--text-muted)]',
+      )}>
+        {group.label}
+        <span className="ml-1.5 font-normal text-[var(--text-muted)]">({group.items.length})</span>
+      </h3>
+    </div>
+  );
+}
+
+function MobileAllTasksRow({
+  item,
+  actions,
+  projects,
+  completingIds,
+  activeScheduleTrayId,
+  setActiveScheduleTrayId,
+  setSelectedTaskId,
+  handleSnooze,
+  handleScheduleTomorrow,
+  handleSchedulePickDay,
+}: {
+  item: MyDayItem;
+  actions: ReturnType<typeof useDashboardData>['actions'];
+  projects: ReturnType<typeof useDashboardData>['state']['projects'];
+  completingIds: ReturnType<typeof useDashboardData>['state']['completingIds'];
+  activeScheduleTrayId: string | null;
+  setActiveScheduleTrayId: (id: string | null) => void;
+  setSelectedTaskId: (id: string | null) => void;
+  handleSnooze: (taskId: string) => void;
+  handleScheduleTomorrow: (taskId: string) => void;
+  handleSchedulePickDay: (taskId: string) => void;
+}) {
+  return (
+    <MobileSwipeTaskRow
+      item={item}
+      onComplete={(taskId) => { void actions.completeTask(taskId); }}
+      onRemoveFromDay={handleSnooze}
+      onSetLocalDisposition={(taskId, disposition) => {
+        void actions.setTaskLocalDisposition(taskId, disposition);
+      }}
+      onTap={(tappedItem) => {
+        setActiveScheduleTrayId(null);
+        setSelectedTaskId(tappedItem.taskId);
+      }}
+      onScheduleTomorrow={handleScheduleTomorrow}
+      onSchedulePickDay={handleSchedulePickDay}
+      onSnooze={handleSnooze}
+      isCompleting={completingIds.has(item.taskId)}
+      showAiChip={item.priority === 'critical' || item.priority === 'high'}
+      projects={projects}
+      scheduleTrayOpen={activeScheduleTrayId === item.taskId}
+      onScheduleTrayChange={(open) => setActiveScheduleTrayId(open ? item.taskId : null)}
+    />
+  );
+}
+
 interface MobileTaskFiltersProps {
   activeFilter: string;
   sourceFilter: string | null;
@@ -463,6 +566,7 @@ export function MobileTaskFilters({
   onClear,
 }: MobileTaskFiltersProps) {
   const [search, setSearch] = useState('');
+  const listOptionsRef = useRef<HTMLDivElement>(null);
   const normalizedSearch = search.trim().toLowerCase();
   const availableSources = useMemo(
     () => [...new Map(
@@ -483,7 +587,7 @@ export function MobileTaskFilters({
   const filteredSources = availableSources.filter((source) =>
     !normalizedSearch || source.name.toLowerCase().includes(normalizedSearch)
   );
-  const filteredLists = sourceLists
+  const filteredLists = useMemo(() => sourceLists
     .filter((list) => !list.hidden)
     .filter((list) => {
       const sourceType = sourceTypeByConnector.get(list.connectorInstanceId);
@@ -498,7 +602,15 @@ export function MobileTaskFilters({
       return sourceA.localeCompare(sourceB)
         || (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
         || a.name.localeCompare(b.name);
-    });
+    }), [normalizedSearch, sourceLists, sourceNameByType, sourceTypeByConnector]);
+  const virtualizeLists = shouldVirtualizeList(filteredLists.length);
+  const listOptionVirtualizer = useVirtualizer({
+    count: virtualizeLists ? filteredLists.length : 0,
+    getScrollElement: () => listOptionsRef.current,
+    getItemKey: (index) => filteredLists[index]?.id ?? index,
+    estimateSize: () => 52,
+    overscan: 6,
+  });
   const hasActiveFilters = activeFilter !== 'all'
     || Boolean(sourceFilter)
     || Boolean(listFilter)
@@ -513,6 +625,22 @@ export function MobileTaskFilters({
       legacyHiddenFilters: hiddenQuickFilters,
     },
   ));
+  const renderListOption = (list: SourceList) => {
+    const sourceType = sourceTypeByConnector.get(list.connectorInstanceId) ?? null;
+    const sourceName = sourceType ? sourceNameByType.get(sourceType) : null;
+    return (
+      <FilterOptionButton
+        key={list.id}
+        active={matchesSourceListFilter(list, listFilter)}
+        label={list.name}
+        detail={`${sourceName ? `${sourceName} · ` : ''}${list.taskCount} tasks`}
+        onClick={() => onListFilterChange(
+          matchesSourceListFilter(list, listFilter) ? null : list.sourceId,
+          sourceType
+        )}
+      />
+    );
+  };
 
   return (
     <div className="px-4 pb-6">
@@ -643,22 +771,30 @@ export function MobileTaskFilters({
             onClick={() => onListFilterChange(null, sourceFilter)}
           />
         )}
-        {filteredLists.map((list) => {
-          const sourceType = sourceTypeByConnector.get(list.connectorInstanceId) ?? null;
-          const sourceName = sourceType ? sourceNameByType.get(sourceType) : null;
-          return (
-            <FilterOptionButton
-              key={list.id}
-              active={matchesSourceListFilter(list, listFilter)}
-              label={list.name}
-              detail={`${sourceName ? `${sourceName} · ` : ''}${list.taskCount} tasks`}
-              onClick={() => onListFilterChange(
-                matchesSourceListFilter(list, listFilter) ? null : list.sourceId,
-                sourceType
-              )}
-            />
-          );
-        })}
+        {virtualizeLists ? (
+          <div
+            ref={listOptionsRef}
+            data-virtualized="true"
+            className="max-h-96 overflow-y-auto overscroll-y-contain"
+          >
+            <div
+              className="relative w-full"
+              style={{ height: `${listOptionVirtualizer.getTotalSize()}px` }}
+            >
+              {listOptionVirtualizer.getVirtualItems().map((virtualRow) => (
+                <div
+                  key={virtualRow.key}
+                  ref={listOptionVirtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="absolute left-0 top-0 w-full pb-1"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  {renderListOption(filteredLists[virtualRow.index])}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : filteredLists.map(renderListOption)}
       </FilterSection>
 
       {normalizedSearch && filteredSources.length === 0 && filteredLists.length === 0 && (

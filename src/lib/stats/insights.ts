@@ -14,7 +14,11 @@
  * multi-query composites below stay deliberately non-atomic on both backends.
  */
 
-import type { InsightsAnalyticsRepository } from '@/db/persistence/analytics';
+import type {
+  AnalyticsMyDayPlanningEvent,
+  AnalyticsTaskCompletion,
+  InsightsAnalyticsRepository,
+} from '@/db/persistence/analytics';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   addCalendarDays,
@@ -83,6 +87,21 @@ export interface TrendDataPoint {
   date: string; // YYYY-MM-DD
   completed: number;
   created: number;
+}
+
+export interface PlanAlignmentPoint {
+  date: string;
+  committed: number;
+  plannedCompleted: number;
+  unplannedCompleted: number;
+  carryover: number;
+}
+
+export interface PlanAlignmentInsights {
+  points: PlanAlignmentPoint[];
+  totals: Omit<PlanAlignmentPoint, 'date'>;
+  planCoverage: number;
+  commitmentRate: number;
 }
 
 export interface SourceBreakdownItem {
@@ -169,6 +188,7 @@ export interface InsightsSnapshot {
     streak: PeriodKpi;
   };
   trends: TrendDataPoint[];
+  planAlignment: PlanAlignmentInsights;
   sourceBreakdown: SourceBreakdownItem[];
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
@@ -204,6 +224,7 @@ export interface InsightsSummarySection {
   periodEnd: string;
   kpis: InsightsSnapshot['kpis'];
   trends: TrendDataPoint[];
+  planAlignment: PlanAlignmentInsights;
   sourceBreakdown: SourceBreakdownItem[];
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
@@ -330,6 +351,119 @@ async function getCompletionTrends(
   }
 
   return points;
+}
+
+function planningEventTime(event: AnalyticsMyDayPlanningEvent): number {
+  return parseStoredTimestamp(event.occurredAt);
+}
+
+export function buildPlanAlignment(
+  completions: AnalyticsTaskCompletion[],
+  events: AnalyticsMyDayPlanningEvent[],
+  start: string,
+  end: string,
+): PlanAlignmentInsights {
+  const eventsByDate = new Map<string, Map<string, AnalyticsMyDayPlanningEvent[]>>();
+  for (const event of events) {
+    const tasksForDate = eventsByDate.get(event.date)
+      ?? new Map<string, AnalyticsMyDayPlanningEvent[]>();
+    const taskEvents = tasksForDate.get(event.taskId) ?? [];
+    taskEvents.push(event);
+    tasksForDate.set(event.taskId, taskEvents);
+    eventsByDate.set(event.date, tasksForDate);
+  }
+  for (const tasksForDate of eventsByDate.values()) {
+    for (const taskEvents of tasksForDate.values()) {
+      taskEvents.sort((a, b) => planningEventTime(a) - planningEventTime(b) || a.id - b.id);
+    }
+  }
+
+  const completionsByDate = new Map<string, AnalyticsTaskCompletion[]>();
+  for (const completion of completions) {
+    if (!completion.completedAt) continue;
+    const date = formatDateInLocalTimezone(
+      new Date(parseStoredTimestamp(completion.completedAt)),
+    );
+    const dayCompletions = completionsByDate.get(date) ?? [];
+    dayCompletions.push(completion);
+    completionsByDate.set(date, dayCompletions);
+  }
+
+  const points: PlanAlignmentPoint[] = [];
+  const current = new Date(`${start}T12:00:00`);
+  const endDate = new Date(`${end}T12:00:00`);
+  while (current <= endDate) {
+    const date = fmtDate(current);
+    const tasksForDate = eventsByDate.get(date)
+      ?? new Map<string, AnalyticsMyDayPlanningEvent[]>();
+    const activeCommittedTaskIds = new Set<string>();
+    let plannedCompleted = 0;
+    let unplannedCompleted = 0;
+
+    for (const completion of completionsByDate.get(date) ?? []) {
+      const completedAt = parseStoredTimestamp(completion.completedAt);
+      const stateAtCompletion = (tasksForDate.get(completion.id) ?? [])
+        .filter(event => event.eventType !== 'my_day_missed')
+        .filter(event => planningEventTime(event) <= completedAt)
+        .at(-1)?.eventType;
+      if (stateAtCompletion === 'my_day_committed') {
+        plannedCompleted++;
+        activeCommittedTaskIds.add(completion.id);
+      } else {
+        unplannedCompleted++;
+      }
+    }
+
+    for (const [taskId, taskEvents] of tasksForDate) {
+      const finalPlanningState = taskEvents
+        .filter(event => event.eventType !== 'my_day_missed')
+        .at(-1)?.eventType;
+      if (finalPlanningState === 'my_day_committed') activeCommittedTaskIds.add(taskId);
+    }
+    const carryover = [...tasksForDate.values()].filter(taskEvents => (
+      taskEvents.some(event => event.eventType === 'my_day_missed')
+    )).length;
+
+    points.push({
+      date,
+      committed: activeCommittedTaskIds.size,
+      plannedCompleted,
+      unplannedCompleted,
+      carryover,
+    });
+    current.setDate(current.getDate() + 1);
+  }
+
+  const totals = points.reduce<Omit<PlanAlignmentPoint, 'date'>>((sum, point) => ({
+    committed: sum.committed + point.committed,
+    plannedCompleted: sum.plannedCompleted + point.plannedCompleted,
+    unplannedCompleted: sum.unplannedCompleted + point.unplannedCompleted,
+    carryover: sum.carryover + point.carryover,
+  }), { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 });
+  const totalCompleted = totals.plannedCompleted + totals.unplannedCompleted;
+
+  return {
+    points,
+    totals,
+    planCoverage: totalCompleted > 0
+      ? Math.round((totals.plannedCompleted / totalCompleted) * 100)
+      : 0,
+    commitmentRate: totals.committed > 0
+      ? Math.round((totals.plannedCompleted / totals.committed) * 100)
+      : 0,
+  };
+}
+
+async function getPlanAlignment(
+  repository: InsightsAnalyticsRepository,
+  start: string,
+  end: string,
+): Promise<PlanAlignmentInsights> {
+  const [completions, events] = await Promise.all([
+    repository.listTopLevelTaskCompletionsIn(getRangeBounds(start, end)),
+    repository.listMyDayPlanningEvents({ from: start, to: end }),
+  ]);
+  return buildPlanAlignment(completions, events, start, end);
 }
 
 export async function getSourceBreakdown(
@@ -799,6 +933,7 @@ export async function computeInsightsSection(
       prevAvgAge,
       streak,
       trends,
+      planAlignment,
       sourceBreakdown,
       taskAge,
       planningFriction,
@@ -811,6 +946,7 @@ export async function computeInsightsSection(
       getAvgTaskAge(repository, prevPeriodStart, prevPeriodEnd),
       getStreak(repository),
       getCompletionTrends(repository, periodStart, periodEnd),
+      getPlanAlignment(repository, periodStart, periodEnd),
       getSourceBreakdown(periodStart, periodEnd),
       getTaskAgeDistribution(repository),
       getPlanningFriction(repository, periodStart, periodEnd),
@@ -855,6 +991,7 @@ export async function computeInsightsSection(
         },
       },
       trends,
+      planAlignment,
       sourceBreakdown,
       taskAge,
       planningFriction,
@@ -962,6 +1099,7 @@ export async function computeInsights(
     periodEnd: summary.periodEnd,
     kpis: summary.kpis,
     trends: summary.trends,
+    planAlignment: summary.planAlignment,
     sourceBreakdown: summary.sourceBreakdown,
     taskAge: summary.taskAge,
     planningFriction: summary.planningFriction,

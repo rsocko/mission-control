@@ -1,3 +1,5 @@
+import { readRecurrenceMetadata } from '@/lib/recurrence/canonical';
+
 interface RecurringTaskCandidate {
   id: string;
   sourceId: string;
@@ -40,11 +42,29 @@ function parseMetadata(metadata: RecurringTaskCandidate['metadata']): Record<str
   }
 }
 
-function getRecurrenceIdentity(metadata: unknown): string | null {
-  const recurrenceIdentity = parseMetadata(metadata).recurrenceIdentity;
+function getCanonicalSeriesId(metadata: unknown): string | null {
+  const parsedMetadata = parseMetadata(metadata);
+  const canonical = readRecurrenceMetadata(parsedMetadata);
+  return canonical.rule?.series.id ?? null;
+}
+
+function getLegacyRecurrenceIdentity(metadata: unknown): string | null {
+  const parsedMetadata = parseMetadata(metadata);
+  const recurrenceIdentity = parsedMetadata.recurrenceIdentity;
   return typeof recurrenceIdentity === 'string' && recurrenceIdentity.length > 0
     ? recurrenceIdentity
     : null;
+}
+
+function getRecurrenceIdentities(metadata: unknown): string[] {
+  return [
+    getCanonicalSeriesId(metadata),
+    getLegacyRecurrenceIdentity(metadata),
+  ].filter((value): value is string => value !== null);
+}
+
+function getRecurrenceIdentity(metadata: unknown): string | null {
+  return getRecurrenceIdentities(metadata)[0] ?? null;
 }
 
 function getRecurrenceLabel(metadata: unknown): string | null {
@@ -173,17 +193,29 @@ export function findOpenRecurringTaskDuplicates(
 
     const identityTasks = group.filter(hasRecurringIdentity);
     const recurrenceTasks = group.filter(hasRecurrenceEvidence);
-    const recurrenceIdentities = new Set(
-      identityTasks.flatMap(task => getRecurrenceIdentity(task.metadata) ?? []),
+    const canonicalSeriesIds = new Set(
+      identityTasks.flatMap(task => getCanonicalSeriesId(task.metadata) ?? []),
+    );
+    const legacyRecurrenceIdentities = new Set(
+      identityTasks.flatMap(task => getLegacyRecurrenceIdentity(task.metadata) ?? []),
     );
     const recurrenceLabels = new Set(
       recurrenceTasks.flatMap(task => getRecurrenceLabel(task.metadata) ?? []),
     );
 
-    if (recurrenceIdentities.size > 1) continue;
-    if (recurrenceIdentities.size === 0 && recurrenceLabels.size > 1) continue;
+    if (canonicalSeriesIds.size > 1) continue;
     if (
-      recurrenceIdentities.size === 0
+      canonicalSeriesIds.size === 0
+      && legacyRecurrenceIdentities.size > 1
+    ) continue;
+    if (
+      canonicalSeriesIds.size === 0
+      && legacyRecurrenceIdentities.size === 0
+      && recurrenceLabels.size > 1
+    ) continue;
+    if (
+      canonicalSeriesIds.size === 0
+      && legacyRecurrenceIdentities.size === 0
       && recurrenceLabels.size === 0
       && !knownRecurringTitleKeys.has(key)
     ) continue;
@@ -205,8 +237,11 @@ export function findOpenRecurringTaskDuplicates(
   return duplicateGroups;
 }
 
-function recurrenceSeriesId(task: { metadata: unknown }): string | null {
-  return getRecurrenceIdentity(task.metadata) ?? getRecurrenceLabel(task.metadata);
+function recurrenceSeriesIds(task: { metadata: unknown }): string[] {
+  const identities = getRecurrenceIdentities(task.metadata);
+  if (identities.length > 0) return identities;
+  const label = getRecurrenceLabel(task.metadata);
+  return label ? [label] : [];
 }
 
 /**
@@ -226,22 +261,25 @@ export function findOrphanedRecurringTasks(
   const latestCompletionBySeriesKey = new Map<string, string>();
   for (const task of historyTasks) {
     if (task.status !== 'done' || !task.completedAt) continue;
-    const seriesId = recurrenceSeriesId(task);
-    if (!seriesId) continue;
-    const key = `${getRecurringTitleKey(task)}::${seriesId}`;
-    const existing = latestCompletionBySeriesKey.get(key);
-    if (!existing || task.completedAt > existing) {
-      latestCompletionBySeriesKey.set(key, task.completedAt);
+    for (const seriesId of recurrenceSeriesIds(task)) {
+      const key = `${getRecurringTitleKey(task)}::${seriesId}`;
+      const existing = latestCompletionBySeriesKey.get(key);
+      if (!existing || task.completedAt > existing) {
+        latestCompletionBySeriesKey.set(key, task.completedAt);
+      }
     }
   }
 
   const orphaned: RecurringTaskCandidate[] = [];
   for (const task of openTasks) {
     if (!task.dueDate) continue;
-    const seriesId = recurrenceSeriesId(task);
-    if (!seriesId) continue;
-    const key = `${getRecurringTitleKey(task)}::${seriesId}`;
-    const latestCompletion = latestCompletionBySeriesKey.get(key);
+    const latestCompletion = recurrenceSeriesIds(task)
+      .map(seriesId => latestCompletionBySeriesKey.get(
+        `${getRecurringTitleKey(task)}::${seriesId}`,
+      ))
+      .filter((value): value is string => value !== undefined)
+      .sort()
+      .at(-1);
     if (latestCompletion && latestCompletion.slice(0, 10) > task.dueDate) {
       orphaned.push(task);
     }

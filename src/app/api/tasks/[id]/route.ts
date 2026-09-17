@@ -39,6 +39,12 @@ import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
 import { computeRelativeReminderAt, isReminderRelativeRule } from '@/lib/tasks/relative-reminder';
 import { getCompletionAnchoredDueDate } from '@/lib/utils/recurrence';
 import {
+  canonicalizeLegacyRecurrence,
+  extractRecurrenceLocalTime,
+  readRecurrenceMetadata,
+  writeRecurrenceMetadata,
+} from '@/lib/recurrence/canonical';
+import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
@@ -312,15 +318,62 @@ export async function PATCH(
         };
       }
     }
-    if (input.recurrence !== undefined) {
+    if (
+      input.recurrence !== undefined
+      || input.recurrenceMode !== undefined
+      || (input.dueDate !== undefined && Boolean(currentSchedule?.recurrence))
+    ) {
       const parsedMetadata = parseTaskMetadataCompat(currentTask.metadata);
       if (
-        !parsedMetadata.recoveredLegacy
+        input.recurrence !== undefined
+        && !parsedMetadata.recoveredLegacy
         && Object.prototype.hasOwnProperty.call(parsedMetadata.metadata, 'recurrence')
       ) {
         const metadata = { ...parsedMetadata.metadata };
         delete metadata.recurrence;
         updates.metadata = metadata;
+      }
+      const currentCanonical = readRecurrenceMetadata(parsedMetadata.metadata);
+      const nextMetadata = (updates.metadata ?? parsedMetadata.metadata) as Record<string, unknown>;
+      const nextRecurrence = input.recurrence === undefined
+        ? currentSchedule?.recurrence ?? null
+        : input.recurrence;
+      if (nextRecurrence === null) {
+        updates.metadata = writeRecurrenceMetadata(nextMetadata, null);
+      } else {
+        try {
+          updates.metadata = writeRecurrenceMetadata(
+            nextMetadata,
+            canonicalizeLegacyRecurrence({
+              recurrence: nextRecurrence,
+              mode: input.recurrenceMode
+                ?? currentSchedule?.recurrenceMode
+                ?? 'schedule',
+              startDate: (
+                input.dueDate
+                ?? currentTask.dueDate
+                ?? currentSchedule?.scheduledDate
+                ?? getLocalToday()
+              ).slice(0, 10),
+              localTime: extractRecurrenceLocalTime(
+                input.dueDate ?? currentTask.dueDate,
+                getTimezone(),
+              ),
+              timezone: getTimezone(),
+              seriesIdentity: currentCanonical.rule?.series.identity ?? {
+                kind: 'mission-control',
+                stableId: currentTask.id,
+                ...(localIdentity
+                  ? {}
+                  : { connectorInstanceId: currentTask.connectorInstanceId }),
+              },
+            }),
+          );
+        } catch (error) {
+          return ApiErrors.badRequest(
+            error instanceof Error ? error.message : 'Invalid recurrence',
+          );
+        }
       }
     }
 
@@ -361,7 +414,7 @@ export async function PATCH(
         ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'yyyy-MM-dd')
         : nextDueDate;
       const nextScheduledTime = includeCompletionTime
-        ? formatInTimeZone(now, recurrenceTimezone, 'HH:mm')
+        ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'HH:mm')
         : null;
       const metadata = { ...parseTaskMetadataCompat(currentTask.metadata).metadata };
       delete metadata.workTodoDirtyFields;

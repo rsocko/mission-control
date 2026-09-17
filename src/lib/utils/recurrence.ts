@@ -1,4 +1,4 @@
-import { fromZonedTime } from 'date-fns-tz';
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
 
 /**
  * Maximum number of recurrence iterations when advancing past overdue dates.
@@ -190,8 +190,16 @@ export function getCompletionAnchoredDueDate(
   const nextDate = formatDateYMD(date);
   if (!includeTime) return nextDate;
 
-  return fromZonedTime(
-    `${nextDate}T${parts.hour}:${parts.minute}:${parts.second}`,
-    timezone,
-  ).toISOString();
+  const targetWallTime = `${nextDate}T${parts.hour}:${parts.minute}:${parts.second}`;
+  const initial = fromZonedTime(targetWallTime, timezone);
+  const renderedWallTime = formatInTimeZone(initial, timezone, "yyyy-MM-dd'T'HH:mm:ss");
+  if (renderedWallTime === targetWallTime) return initial.toISOString();
+
+  // date-fns-tz resolves spring-forward gaps with the post-transition offset,
+  // which renders before the requested local time. Shift by the gap so a
+  // nonexistent 02:30 becomes 03:30; overlap resolution already selects the
+  // earlier matching offset and reaches the exact-match return above.
+  const requestedAsUtc = new Date(`${targetWallTime}Z`).getTime();
+  const renderedAsUtc = new Date(`${renderedWallTime}Z`).getTime();
+  return new Date(initial.getTime() + Math.abs(requestedAsUtc - renderedAsUtc)).toISOString();
 }

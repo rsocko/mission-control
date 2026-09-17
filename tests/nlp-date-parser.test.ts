@@ -139,42 +139,45 @@ describe('parseTaskInput – chrono-node integration', () => {
     expect(r.title).toBe('meeting tomorrow and report friday');
   });
 
-  it('removes only the trailing date on submission when the title contains multiple dates', () => {
+  it('does not silently apply the trailing date on submission', () => {
     const r = parseTaskInputForSubmission('meeting tomorrow and report friday');
-    expect(r.dueDate).toBe('2026-07-17');
-    expect(r.dateSuggestion).toBeNull();
-    expect(r.title).toBe('meeting tomorrow and report');
+    expect(r.dueDate).toBeNull();
+    expect(r.dateSuggestion?.date).toBe('2026-07-17');
+    expect(r.title).toBe('meeting tomorrow and report friday');
   });
 
   it.each([
-    ['buy milk today', '2026-07-15', 'buy milk'],
-    ['buy milk tomorrow', '2026-07-16', 'buy milk'],
-    ['submit report next friday', '2026-07-24', 'submit report'],
-    ['plan party aug 15', '2026-08-15', 'plan party'],
-  ])('applies a trailing date when submitting "%s"', (input, dueDate, title) => {
+    ['buy milk today', '2026-07-15'],
+    ['buy milk tomorrow', '2026-07-16'],
+    ['submit report next friday', '2026-07-24'],
+    ['plan party aug 15', '2026-08-15'],
+  ])('keeps a trailing date as a suggestion when submitting "%s"', (input, suggestedDate) => {
     const r = parseTaskInputForSubmission(input);
-    expect(r.dueDate).toBe(dueDate);
-    expect(r.title).toBe(title);
-    expect(r.dateSuggestion).toBeNull();
+    expect(r.dueDate).toBeNull();
+    expect(r.title).toBe(input);
+    expect(r.dateSuggestion?.date).toBe(suggestedDate);
   });
 
-  it('applies a trailing date after other parsed tokens are removed', () => {
+  it('parses metadata without silently applying a trailing date', () => {
     const r = parseTaskInputForSubmission('fix bug today !high #urgent');
-    expect(r.dueDate).toBe('2026-07-15');
+    expect(r.dueDate).toBeNull();
+    expect(r.dateSuggestion?.date).toBe('2026-07-15');
     expect(r.priority).toBe('high');
     expect(r.tags).toEqual(['urgent']);
-    expect(r.title).toBe('fix bug');
+    expect(r.title).toBe('fix bug today');
   });
 
   it('keeps a trailing date in the submitted title when token preservation is enabled', () => {
     const r = parseTaskInputForSubmission('buy milk today', { preserveText: true });
-    expect(r.dueDate).toBe('2026-07-15');
+    expect(r.dueDate).toBeNull();
+    expect(r.dateSuggestion?.date).toBe('2026-07-15');
     expect(r.title).toBe('buy milk today');
   });
 
-  it('retains date-only input as the title', () => {
+  it('retains date-only input as a suggestion and title', () => {
     const r = parseTaskInputForSubmission('today');
-    expect(r.dueDate).toBe('2026-07-15');
+    expect(r.dueDate).toBeNull();
+    expect(r.dateSuggestion?.date).toBe('2026-07-15');
     expect(r.title).toBe('today');
   });
 

@@ -268,7 +268,7 @@ export async function createQuickAddTask(
     }
   }
 
-  if (input.addToMyDay) {
+  if (input.addToMyDay || taskData.addToMyDay) {
     const myDayResponse = await fetcher('/api/my-day', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -361,6 +361,7 @@ export interface QuickAddSubmissionResult {
     priority: string | null;
     dueDate: string | null;
     dueDateLabel: string | null;
+    addToMyDay: boolean;
   };
 }
 
@@ -452,6 +453,7 @@ export async function submitQuickAdd(
       priority: taskData.priority,
       dueDate: taskData.dueDate,
       dueDateLabel: taskData.dueDateLabel,
+      addToMyDay: taskData.addToMyDay,
     };
   }
 

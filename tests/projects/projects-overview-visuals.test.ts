@@ -90,4 +90,53 @@ describe('project portfolio visuals', () => {
       3,
     )).toHaveLength(3);
   });
+
+  it('prioritizes categories needing attention, then recent activity', () => {
+    const rows = buildCategoryPortfolioRows(
+      [
+        {
+          category: 'Quiet',
+          projects: [makeProject({
+            id: 'quiet',
+            progress: {
+              totalTasks: 4,
+              completedTasks: 2,
+              percentComplete: 50,
+              health: 'on_track',
+              lastActivity: '2026-08-10T12:00:00.000Z',
+            },
+          })],
+        },
+        {
+          category: 'Risk',
+          projects: [makeProject({
+            id: 'risk',
+            progress: {
+              totalTasks: 4,
+              completedTasks: 1,
+              percentComplete: 25,
+              health: 'at_risk',
+              lastActivity: '2026-08-01T12:00:00.000Z',
+            },
+          })],
+        },
+        {
+          category: 'Recent',
+          projects: [makeProject({
+            id: 'recent',
+            progress: {
+              totalTasks: 4,
+              completedTasks: 3,
+              percentComplete: 75,
+              health: 'on_track',
+              lastActivity: '2026-08-12T12:00:00.000Z',
+            },
+          })],
+        },
+      ],
+      [],
+    );
+
+    expect(rows.map(row => row.category)).toEqual(['Risk', 'Recent', 'Quiet']);
+  });
 });

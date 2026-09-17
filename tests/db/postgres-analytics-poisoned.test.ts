@@ -70,6 +70,7 @@ const repository: AnalyticsPersistence = {
     listCompletedTimestampsIn: empty,
     listCreatedTimestampsIn: empty,
     listCompletionSpansIn: empty,
+    listCompletedTaskTimingsIn: empty,
     listTopLevelTaskCompletionsIn: empty,
     listCompletedTimestampsSince: empty,
     sourceBreakdownIn: empty,

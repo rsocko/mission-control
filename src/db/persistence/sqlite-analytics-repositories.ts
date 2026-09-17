@@ -245,6 +245,12 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
         .where(completedIn(range));
     },
 
+    async listCompletedTaskTimingsIn(range) {
+      return db.select({ completedAt: tasks.completedAt, dueDate: tasks.dueDate })
+        .from(tasks)
+        .where(completedIn(range));
+    },
+
     async listTopLevelTaskCompletionsIn(range) {
       const rows = await db.select({ id: tasks.id, completedAt: tasks.completedAt })
         .from(tasks)

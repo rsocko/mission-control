@@ -368,6 +368,77 @@ async function applyMutations(
         );
         break;
       }
+      case 'insert_phase': {
+        const inserted = await client.query(`
+          INSERT INTO project_phases (
+            id, project_id, name, description, status, color, estimated_days,
+            target_start, target_end, start_after_phase_id, sort_order,
+            completed_at, created_at, updated_at
+          ) VALUES (
+            $1, $2, $3, $4, $5, $6, $7,
+            $8, $9, $10, $11, $12, $13, $14
+          )
+          ON CONFLICT (id) DO NOTHING
+        `, [
+          mutation.phase.id,
+          mutation.phase.projectId,
+          mutation.phase.name,
+          mutation.phase.description,
+          mutation.phase.status,
+          mutation.phase.color,
+          mutation.phase.estimatedDays,
+          mutation.phase.targetStart,
+          mutation.phase.targetEnd,
+          mutation.phase.startAfterPhaseId,
+          mutation.phase.sortOrder,
+          mutation.phase.completedAt,
+          mutation.phase.createdAt,
+          mutation.phase.updatedAt,
+        ]);
+        if (inserted.rowCount !== 1) {
+          throw new ProjectHierarchyServiceError(
+            'Phase ID already exists',
+            409,
+            'PHASE_ID_CONFLICT',
+          );
+        }
+        break;
+      }
+      case 'update_phase':
+        await client.query(`
+          UPDATE project_phases SET
+            name = $1, description = $2, status = $3, color = $4,
+            estimated_days = $5, target_start = $6, target_end = $7,
+            start_after_phase_id = $8, sort_order = $9, completed_at = $10,
+            updated_at = $11
+          WHERE id = $12 AND project_id = $13
+        `, [
+          mutation.phase.name,
+          mutation.phase.description,
+          mutation.phase.status,
+          mutation.phase.color,
+          mutation.phase.estimatedDays,
+          mutation.phase.targetStart,
+          mutation.phase.targetEnd,
+          mutation.phase.startAfterPhaseId,
+          mutation.phase.sortOrder,
+          mutation.phase.completedAt,
+          mutation.phase.updatedAt,
+          mutation.phase.id,
+          projectId,
+        ]);
+        break;
+      case 'delete_phase':
+        await client.query(`
+          UPDATE project_phases
+          SET start_after_phase_id = NULL, updated_at = $1
+          WHERE project_id = $2 AND start_after_phase_id = $3
+        `, [mutation.updatedAt, projectId, mutation.phaseId]);
+        await client.query(
+          'DELETE FROM project_phases WHERE id = $1 AND project_id = $2',
+          [mutation.phaseId, projectId],
+        );
+        break;
       case 'set_phase_sort_order':
         await client.query(`
           UPDATE project_phases SET sort_order = $1, updated_at = $2 WHERE id = $3

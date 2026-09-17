@@ -308,7 +308,6 @@ export default function TodayPage() {
             else taskSelection.handleTaskClick(taskId);
           },
           doubleClickTask: taskSelection.handleTaskDoubleClick,
-          cancelPendingTaskSelection: taskSelection.cancelPendingDeselect,
         }}
         focus={{
           showTimer: actions.showTimer,
@@ -455,13 +454,10 @@ export default function TodayPage() {
         }}
         completingIds={actions.completingIds}
         onSelectTask={(taskId) => {
-          const isClosing = selectedTaskId === taskId;
           setDetailSurface('desktop');
           setDetailMode('panel');
-          taskSelection.toggleTask(taskId);
-          if (!isClosing) {
-            setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
-          }
+          taskSelection.selectTask(taskId);
+          setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
         }}
         getContextMenuActions={getSuggestionContextMenuActions}
         sourceLists={sourceLists}

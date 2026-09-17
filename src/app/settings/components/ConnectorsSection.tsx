@@ -50,6 +50,7 @@ import {
   currencySchema,
   supportedCurrencyCodes,
 } from '@/lib/finance/currency';
+import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
 
 const SYNC_MODE_OPTIONS = [
   { value: 'poll', label: 'Polling' },
@@ -928,7 +929,7 @@ function HomeAssistantConnectorEditPanel({
         <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Notification sources</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
           {([
-            ['entityAlerts', 'Device alerts'],
+            ['entityAlerts', 'Polled device rules'],
             ['updates', 'Updates'],
             ['persistentNotifications', 'Persistent'],
             ['repairs', 'Repairs'],
@@ -946,7 +947,7 @@ function HomeAssistantConnectorEditPanel({
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {([
-            ['entityAlerts', 'entity-alerts', 'Device alerts'],
+            ['entityAlerts', 'entity-alerts', 'Polled device rules'],
             ['updates', 'updates', 'Updates'],
             ['persistentNotifications', 'persistent-notifications', 'Persistent notifications'],
             ['repairs', 'repairs', 'Repairs'],
@@ -1093,8 +1094,9 @@ function HomeAssistantConnectorEditPanel({
 }
 
 function ConnectorEditPanel(props: ConnectorEditPanelProps) {
+  let panel: React.ReactNode;
   if (props.connector.type === 'scout') {
-    return (
+    panel = (
       <ScoutEditPanel
         connector={props.connector}
         sourceLists={props.sourceLists}
@@ -1104,9 +1106,8 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
         setConfirmDelete={props.setConfirmDelete}
       />
     );
-  }
-  if (props.connector.type === 'microsoft-todo-work') {
-    return (
+  } else if (props.connector.type === 'microsoft-todo-work') {
+    panel = (
       <WorkTodoBridgePanel
         connector={props.connector}
         sourceLists={props.sourceLists}
@@ -1114,21 +1115,26 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
         onDelete={props.onDelete}
       />
     );
-  }
-  if (props.connector.type === 'github-issues') {
-    return <GitHubConnectorEditPanel {...props} />;
-  }
-  if (isFinanceConnectorType(props.connector.type)) {
-    return <FinanceConnectorEditPanel {...props} />;
-  }
-  if (props.connector.type === 'document-intelligence') {
-    return <DocumentIntelligenceConnectorEditPanel {...props} />;
-  }
-  if (props.connector.type === 'home-assistant') {
-    return <HomeAssistantConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'github-issues') {
+    panel = <GitHubConnectorEditPanel {...props} />;
+  } else if (isFinanceConnectorType(props.connector.type)) {
+    panel = <FinanceConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'document-intelligence') {
+    panel = <DocumentIntelligenceConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'home-assistant') {
+    panel = <HomeAssistantConnectorEditPanel {...props} />;
+  } else {
+    panel = <DefaultConnectorEditPanel {...props} />;
   }
 
-  return <DefaultConnectorEditPanel {...props} />;
+  return (
+    <>
+      {panel}
+      <div className="border-t border-[var(--border)] px-4 pb-4">
+        <ConnectorPushRules connectorInstanceId={props.connector.id} />
+      </div>
+    </>
+  );
 }
 
 function DefaultConnectorEditPanel({

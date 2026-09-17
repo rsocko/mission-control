@@ -160,6 +160,41 @@ export const TRUSTED_TASK_COLUMN_APPEND_EVENTS = {
       sourceMarkers: ['ALTER TABLE tasks ADD COLUMN planning_horizon TEXT'],
     },
   },
+  deletedAtMigration: {
+    columns: ['deleted_at'],
+    provenance: {
+      kind: 'migration',
+      tag: '0131_gigantic_toxin',
+      path: 'drizzle/0131_gigantic_toxin.sql',
+      sha256: '1c8f6684c77c141582de6871a41b1cd5470110b9f04b7c2cf000b6c1cf2cffc7',
+      firstReachableCommit: '11336db7cfcf1d613309c1c0f636215eb8ac2cb1',
+    },
+  },
+  subtaskOrderMigration: {
+    columns: ['sibling_order', 'subtask_order_revision'],
+    provenance: {
+      kind: 'migration',
+      tag: '0132_nosy_otto_octavius',
+      path: 'drizzle/0132_nosy_otto_octavius.sql',
+      sha256: 'bca47755da4ddef636376069b36ff66b3bc9c2d36598f69f1b0e3d9e6f9faabd',
+      firstReachableCommit: '99d6922f97e1fbb204c7b276b189195eabde5ba2',
+    },
+  },
+  persistentRemindersMigration: {
+    columns: [
+      'reminder_nag_interval',
+      'reminder_nag_stop_at',
+      'reminder_nag_series_id',
+      'reminder_nag_sequence',
+    ],
+    provenance: {
+      kind: 'migration',
+      tag: '0134_low_next_avengers',
+      path: 'drizzle/0134_low_next_avengers.sql',
+      sha256: '17663f924c30e22f47247f7d837e26a0c8617ad1f9fe1d0a6f84bd779696d2b0',
+      firstReachableCommit: '0bb240d16e42305ecea944bec9fea3c8fce3ee07',
+    },
+  },
 } as const satisfies Readonly<Record<string, TaskColumnAppendEvent>>;
 
 export const TRUSTED_TASK_APPEND_COLUMNS = [
@@ -196,6 +231,9 @@ const ORDERED_MIGRATION_EVENTS = [
   'relativeRemindersMigration',
   'recurrenceMigration',
   'planningHorizonMigration',
+  'deletedAtMigration',
+  'subtaskOrderMigration',
+  'persistentRemindersMigration',
 ] as const satisfies readonly (keyof typeof TRUSTED_TASK_COLUMN_APPEND_EVENTS)[];
 
 const STATUS_RUNTIME_BOUNDARIES = [
@@ -229,7 +267,7 @@ const STATUS_RUNTIME_BOUNDARIES = [
   },
   {
     id: 'fresh',
-    afterTag: '0118_add_planning_horizon',
+    afterTag: '0134_low_next_avengers',
   },
 ] as const;
 
@@ -237,11 +275,16 @@ const migrationBoundaryChronologies = STATUS_RUNTIME_BOUNDARIES.map(
   ({ id, afterTag }, boundaryIndex): TrustedTasksChronology => ({
     id,
     origin: `status/retry runtime after ${afterTag}`,
-    checkpointTags: [afterTag, '0118_add_planning_horizon'],
+    checkpointTags: [...new Set([afterTag, '0134_low_next_avengers'])],
     events: [
-      ...ORDERED_MIGRATION_EVENTS.slice(0, boundaryIndex),
+      ...ORDERED_MIGRATION_EVENTS.slice(
+        0,
+        id === 'fresh' ? ORDERED_MIGRATION_EVENTS.length : boundaryIndex,
+      ),
       'statusAndRetryRuntime',
-      ...ORDERED_MIGRATION_EVENTS.slice(boundaryIndex),
+      ...ORDERED_MIGRATION_EVENTS.slice(
+        id === 'fresh' ? ORDERED_MIGRATION_EVENTS.length : boundaryIndex,
+      ),
     ],
   }),
 );
@@ -261,6 +304,9 @@ export const TRUSTED_TASKS_CHRONOLOGIES: readonly TrustedTasksChronology[] = [
       'planningHorizonRuntime',
       'delayInsightsMigration',
       'relativeRemindersMigration',
+      'deletedAtMigration',
+      'subtaskOrderMigration',
+      'persistentRemindersMigration',
     ],
   },
 ] as const;

@@ -374,7 +374,7 @@ export function describeSqliteGraphReportingRepositoryContract(): void {
         status TEXT NOT NULL DEFAULT 'todo', local_disposition TEXT NOT NULL DEFAULT 'active',
         priority TEXT NOT NULL DEFAULT 'none', planning_horizon TEXT, due_date TEXT,
         push_count INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-        completed_at TEXT, recurrence_generated_from_task_id TEXT, parent_id TEXT,
+        completed_at TEXT, deleted_at TEXT, recurrence_generated_from_task_id TEXT, parent_id TEXT,
         depth INTEGER NOT NULL DEFAULT 0, is_checklist_item INTEGER NOT NULL DEFAULT 0,
         source_list_id TEXT, source_list_name TEXT, assignee TEXT, micro_status TEXT,
         status_reason TEXT, metadata TEXT NOT NULL DEFAULT '{}', sync_status TEXT NOT NULL DEFAULT 'synced',
@@ -392,6 +392,7 @@ export function describeSqliteGraphReportingRepositoryContract(): void {
       CREATE TABLE hub_projects (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT,
         color TEXT NOT NULL DEFAULT '#3b82f6', icon TEXT, icon_color TEXT,
+        appearance TEXT,
         source_bindings TEXT NOT NULL DEFAULT '[]', auto_include_rules TEXT NOT NULL DEFAULT '[]',
         kanban_columns TEXT NOT NULL DEFAULT '[]', default_view TEXT NOT NULL DEFAULT 'list',
         default_filters TEXT, status TEXT NOT NULL DEFAULT 'active', status_override TEXT,

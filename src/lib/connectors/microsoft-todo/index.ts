@@ -77,6 +77,8 @@ export class MicrosoftTodoConnector implements IConnector {
     delete: true,
     sync: true,
     subtasks: true,
+    subtaskOrderRead: false,
+    subtaskOrderWrite: false,
     lists: true,
     tags: true,
     tagWriteBack: true,
@@ -446,6 +448,10 @@ export class MicrosoftTodoConnector implements IConnector {
     });
     if (res.status === 404) return; // Task already deleted remotely — treat as success
     if (!res.ok) throw new Error(`Failed to complete task: ${res.status}`);
+  }
+
+  async cancelTask(sourceId: string): Promise<void> {
+    await this.completeTask(sourceId);
   }
 
   private async getCategoriesWithMicroStatus(

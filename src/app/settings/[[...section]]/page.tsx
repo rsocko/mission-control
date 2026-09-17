@@ -7,6 +7,7 @@ import {
   Plug, RefreshCw, Tag, FlaskConical, Inbox, Layers,
   FolderTree, Settings2, Brain, Activity, Database, Star, Puzzle, HardDrive, Smartphone, Search, X,
   Info,
+  Palette,
 } from 'lucide-react';
 import dynamic from 'next/dynamic';
 
@@ -43,6 +44,7 @@ import { ShortcutsSection } from '../components/ShortcutsSection';
 import { NotificationEnrichmentSection } from '../components/NotificationEnrichmentSection';
 import { RuntimeTelemetrySection } from '../components/RuntimeTelemetrySection';
 import { AboutSection } from '../components/AboutSection';
+import { ContextThemesSection } from '../components/ContextThemesSection';
 import { PushNotificationSettings } from '@/components/settings/PushNotificationSettings';
 import { PriorityEntitiesPanel } from '@/components/smart-score';
 import { SETTINGS_SECTION_NAMES, type SettingsSection } from '../settings-search';
@@ -62,6 +64,7 @@ const SLUG_TO_SECTION: Record<string, ActiveSection> = {
   'triage-sources': 'triageSources',
   'priority-entities': 'priorityEntities',
   'dashboard': 'dashboard',
+  'context-themes': 'contextThemes',
   'shortcuts': 'shortcuts',
   'ai-provider': 'ai',
   'storage': 'storage',
@@ -102,6 +105,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'Appearance',
     items: [
+      { id: 'contextThemes', icon: Palette, label: 'Context Themes' },
       { id: 'dashboard', icon: Activity, label: 'Dashboard' },
       { id: 'shortcuts', icon: Smartphone, label: 'Taskbar Shortcuts' },
     ],
@@ -138,6 +142,7 @@ export default function SettingsPage() {
     permanentlyDeleteConnector, updateConnector, purgeRetainedSourceList,
     handleRenameList, triggerSync, createListGroup, updateListGroup,
     deleteListGroup, assignSourceListToGroup,
+    updateSourceListAppearance,
   } = useSettingsAdministration();
 
   const navigateToSearchResult = useCallback((section: SettingsSection, target: string) => {
@@ -284,6 +289,11 @@ export default function SettingsPage() {
                 <DashboardKpiSettings />
               </motion.div>
             )}
+            {activeSection === 'contextThemes' && (
+              <motion.div key="context-themes" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                <ContextThemesSection />
+              </motion.div>
+            )}
             {activeSection === 'general' && (
               <motion.div key="general" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
                 <GeneralSettingsSection />
@@ -334,6 +344,7 @@ export default function SettingsPage() {
                   onAssignList={assignSourceListToGroup}
                   onRefresh={fetchData}
                   onRenameList={handleRenameList}
+                  onUpdateAppearance={updateSourceListAppearance}
                 />
               </motion.div>
             )}

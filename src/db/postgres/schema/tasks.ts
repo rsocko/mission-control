@@ -39,11 +39,14 @@ export const tasks = pgTable('tasks', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
+  deletedAt: text('deleted_at'),
   // Set only on locally generated recurring occurrences. One successor per occurrence.
   recurrenceGeneratedFromTaskId: text('recurrence_generated_from_task_id'),
 
   // Hierarchy
   parentId: text('parent_id'),
+  siblingOrder: integer('sibling_order'),
+  subtaskOrderRevision: integer('subtask_order_revision').notNull().default(0),
   depth: integer('depth').notNull().default(0),
   isChecklistItem: boolean('is_checklist_item').notNull().default(false),
 
@@ -75,6 +78,10 @@ export const tasks = pgTable('tasks', {
   reminderAt: text('reminder_at'),
   reminderRelative: text('reminder_relative'),
   reminderDueTime: text('reminder_due_time'),
+  reminderNagInterval: integer('reminder_nag_interval'),
+  reminderNagStopAt: text('reminder_nag_stop_at'),
+  reminderNagSeriesId: text('reminder_nag_series_id'),
+  reminderNagSequence: integer('reminder_nag_sequence').notNull().default(0),
 
   // Effort level (1–5, nullable — purely optional)
   effort: integer('effort'),
@@ -84,7 +91,9 @@ export const tasks = pgTable('tasks', {
 }, (table) => [
   index('idx_tasks_search_vector').using('gin', table.searchVector),
   uniqueIndex('idx_tasks_source_connector').on(table.sourceId, table.connectorInstanceId),
+  index('idx_tasks_parent_sibling_order').on(table.parentId, table.siblingOrder),
   index('idx_tasks_local_disposition').on(table.localDisposition),
+  index('idx_tasks_deleted_at').on(table.deletedAt),
   index('idx_tasks_planning_horizon').on(table.planningHorizon),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),
@@ -105,6 +114,8 @@ export const taskReminderOccurrences = pgTable('task_reminder_occurrences', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
   scheduledAt: text('scheduled_at').notNull(),
+  seriesId: text('series_id'),
+  sequence: integer('sequence'),
   state: text('state')
     .$type<'pending' | 'processing' | 'fired' | 'cancelled' | 'failed'>()
     .notNull()
@@ -123,6 +134,9 @@ export const taskReminderOccurrences = pgTable('task_reminder_occurrences', {
 }, (table) => [
   uniqueIndex('idx_task_reminder_occurrences_task_schedule')
     .on(table.taskId, table.scheduledAt),
+  index('idx_task_reminder_occurrences_series_sequence')
+    .on(table.seriesId, table.sequence)
+    .where(sql`${table.seriesId} IS NOT NULL`),
   index('idx_task_reminder_occurrences_claim')
     .on(table.state, table.nextAttemptAt, table.leaseExpiresAt),
 ]);

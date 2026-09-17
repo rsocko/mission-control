@@ -145,6 +145,10 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
     ) return;
     const proposal = expansion.proposals.find((candidate) => candidate.id === proposalId);
     if (!proposal) return;
+    if (!proposal.label.trim()) {
+      toast.error('Add a title before accepting this suggestion.');
+      return;
+    }
     const accepted = acceptProposals(expansion.parentId, [{ label: proposal.label }]);
     if (accepted === null) return;
     if (!accepted.length) {
@@ -172,6 +176,20 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
       proposals: remaining,
     } : EMPTY_IDEATION_EXPANSION);
   }, [acceptProposals, currentContextVersion, expansion]);
+
+  const updateProposal = useCallback((proposalId: string, label: string) => {
+    setExpansion((state) => {
+      if (state.status !== 'ready') return state;
+      return {
+        ...state,
+        proposals: state.proposals.map((proposal) => (
+          proposal.id === proposalId
+            ? { ...proposal, label: label.slice(0, 120) }
+            : proposal
+        )),
+      };
+    });
+  }, []);
 
   const acceptAll = useCallback(() => {
     if (
@@ -228,5 +246,14 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
     acceptOne,
     acceptAll,
     dismissOne,
-  }), [acceptAll, acceptOne, clearExpansion, dismissOne, expandSelected, expansion]);
+    updateProposal,
+  }), [
+    acceptAll,
+    acceptOne,
+    clearExpansion,
+    dismissOne,
+    expandSelected,
+    expansion,
+    updateProposal,
+  ]);
 }

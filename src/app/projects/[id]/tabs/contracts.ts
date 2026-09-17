@@ -39,6 +39,8 @@ export type RequestConfirmation = (request: ConfirmationRequest) => void;
 export interface ProjectProposalActions {
   generate: (guidance?: string) => void;
   refine: (guidance?: string) => void;
+  reorganize: (phaseId: string, guidance?: string) => void;
   isGenerating: boolean;
   isRefining: boolean;
+  isReorganizing: boolean;
 }

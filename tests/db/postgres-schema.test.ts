@@ -255,7 +255,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(7);
+    expect(migrations).toHaveLength(11);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -271,6 +271,17 @@ describe('PostgreSQL schema', () => {
     expect(sql).toContain('"search_vector" "tsvector" GENERATED ALWAYS AS');
     expect(sql).toContain('USING gin ("search_vector")');
     expect(sql).not.toContain('AUTOINCREMENT');
+
+    const persistentRemindersSql = readFileSync(
+      resolve(migrationDirectory, migrations.at(-1)!),
+      'utf8',
+    );
+    expect(persistentRemindersSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "reminder_nag_interval" integer',
+    );
+    expect(persistentRemindersSql).toContain(
+      'CREATE INDEX "idx_task_reminder_occurrences_series_sequence"',
+    );
 
     const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');
     expect(enrichmentSql).toContain('CREATE TABLE "notification_enrichment_jobs"');
@@ -342,6 +353,37 @@ describe('PostgreSQL schema', () => {
     const sourceHealthSql = readFileSync(resolve(migrationDirectory, migrations[5]), 'utf8');
     expect(sourceHealthSql).toContain(
       'ALTER TABLE "source_lists" ADD COLUMN "health_status" text',
+    );
+
+    const taskSoftDeleteSql = readFileSync(resolve(migrationDirectory, migrations[7]), 'utf8');
+    expect(taskSoftDeleteSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "deleted_at" text',
+    );
+    expect(taskSoftDeleteSql).toContain(
+      'CREATE INDEX "idx_tasks_deleted_at" ON "tasks"',
+    );
+    const subtaskOrderingSql = readFileSync(
+      resolve(migrationDirectory, migrations[8]),
+      'utf8',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "sibling_order" integer',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "subtask_order_revision" integer DEFAULT 0 NOT NULL',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'CREATE INDEX "idx_tasks_parent_sibling_order" ON "tasks" USING btree ("parent_id","sibling_order")',
+    );
+    const contextAppearanceSql = readFileSync(
+      resolve(migrationDirectory, migrations[9]),
+      'utf8',
+    );
+    expect(contextAppearanceSql).toContain(
+      'ALTER TABLE "hub_projects" ADD COLUMN "appearance" jsonb',
+    );
+    expect(contextAppearanceSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "appearance" jsonb',
     );
     expect(sourceHealthSql).toContain(
       'ALTER TABLE "source_lists" ADD COLUMN "health_error" text',

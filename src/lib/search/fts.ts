@@ -17,8 +17,13 @@ export const warmUpFTS = async () => getKeywordSearchRepository().warmUp();
 export const searchFTS = async (
   ...args: Parameters<KeywordSearchRepository['search']>
 ) => getKeywordSearchRepository().search(...args);
+export const searchFTSFacets = async (
+  ...args: Parameters<KeywordSearchRepository['facets']>
+) => getKeywordSearchRepository().facets(...args);
 
 export type {
+  SearchFacet,
+  SearchFacets,
   SearchFilters,
   SearchOptions,
   SearchResult,

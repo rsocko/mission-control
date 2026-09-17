@@ -26,6 +26,7 @@ const destinations: QuickAddDestination[] = [
     connectorType: 'microsoft-todo',
     account: 'work',
     color: '#000',
+    listSelectionMode: 'optional',
   },
   {
     id: 'todo',
@@ -50,6 +51,16 @@ const destinations: QuickAddDestination[] = [
     listName: 'Today',
   },
 ];
+
+const requiredSource: QuickAddDestination = {
+  id: 'github',
+  label: 'GitHub',
+  shortLabel: 'GitHub',
+  connectorType: 'github-issues',
+  account: 'work',
+  color: '#000',
+  listSelectionMode: 'required',
+};
 
 const templates: TaskTemplate[] = [
   {
@@ -81,7 +92,7 @@ describe('Quick Add destination picker', () => {
   });
 
   it('groups sources, named groups, and ungrouped lists predictably', () => {
-    expect(groupQuickAddDestinations(destinations, '').map((group) => ({
+    expect(groupQuickAddDestinations([...destinations, requiredSource], '').map((group) => ({
       label: group.label,
       destinations: group.destinations.map((destination) => destination.listName
         ?? destination.shortLabel),

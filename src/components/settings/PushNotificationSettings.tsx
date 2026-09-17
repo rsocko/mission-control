@@ -18,6 +18,7 @@ import {
   Sunset,
   RefreshCw,
   Power,
+  Repeat2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -28,11 +29,13 @@ import {
   requestMCNativeBridge,
   type NativeBridgeWindow,
 } from '@/lib/native/bridge';
+import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
 
 /* ─────── Types ─────── */
 
 interface PushPreferences {
   pushDeliveryEnabled: boolean;
+  persistentRemindersEnabled: boolean;
   morningEnabled: boolean;
   morningHour: number;
   triageNudgeEnabled: boolean;
@@ -60,6 +63,7 @@ interface SchedulerStatus {
 
 const DEFAULT_PREFS: PushPreferences = {
   pushDeliveryEnabled: true,
+  persistentRemindersEnabled: true,
   morningEnabled: true,
   morningHour: 8,
   triageNudgeEnabled: true,
@@ -119,7 +123,7 @@ function SettingRow({
         <div className="min-w-0">
           <p className="text-sm text-[var(--text-primary)]">{label}</p>
           {description && (
-            <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{description}</p>
+            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{description}</p>
           )}
         </div>
       </div>
@@ -311,7 +315,7 @@ export function PushNotificationSettings() {
                   <p
                     role="status"
                     aria-live="polite"
-                    className="text-[11px] text-[var(--text-tertiary)] mt-1"
+                    className="text-xs text-[var(--text-tertiary)] mt-1"
                   >
                     {nativePushDescription}
                   </p>
@@ -384,6 +388,18 @@ export function PushNotificationSettings() {
               enabled={prefs.doNotDisturb}
               onChange={(v) => update({ doNotDisturb: v })}
               label="Do Not Disturb"
+            />
+          }
+        />
+        <SettingRow
+          icon={<Repeat2 size={14} />}
+          label="Persistent Reminders"
+          description="Emergency stop for all Repeat until done alerts"
+          trailing={
+            <Toggle
+              enabled={prefs.persistentRemindersEnabled}
+              onChange={(v) => update({ persistentRemindersEnabled: v })}
+              label="Persistent Reminders"
             />
           }
         />
@@ -535,13 +551,13 @@ export function PushNotificationSettings() {
               >
                 <div className="min-w-0">
                   <p className="text-sm text-[var(--text-primary)] capitalize">{job.name.replace(/-/g, ' ')}</p>
-                  <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 font-mono">{job.schedule}</p>
+                  <p className="text-xs text-[var(--text-tertiary)] mt-0.5 font-mono">{job.schedule}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   {job.lastRun ? (
                     <>
                       <p className={cn(
-                        'text-[11px]',
+                        'text-xs',
                         job.lastResult === 'sent' ? 'text-emerald-400' :
                         job.lastResult === 'error' ? 'text-red-400' :
                         'text-[var(--text-tertiary)]'
@@ -550,12 +566,12 @@ export function PushNotificationSettings() {
                          job.lastResult === 'error' ? '✗ Error' :
                          '— Skipped'}
                       </p>
-                      <p className="text-[10px] text-[var(--text-muted)]">
+                      <p className="text-xs text-[var(--text-muted)]">
                         {formatRelativeTime(job.lastRun)}
                       </p>
                     </>
                   ) : (
-                    <p className="text-[11px] text-[var(--text-muted)]">Not run yet</p>
+                    <p className="text-xs text-[var(--text-muted)]">Not run yet</p>
                   )}
                 </div>
               </div>
@@ -565,10 +581,12 @@ export function PushNotificationSettings() {
       )}
 
       {saving && (
-        <p className="text-center text-[11px] text-[var(--text-muted)] mt-2">
+        <p className="text-center text-xs text-[var(--text-muted)] mt-2">
           Saving...
         </p>
       )}
+
+      <ConnectorPushRules />
     </div>
   );
 }

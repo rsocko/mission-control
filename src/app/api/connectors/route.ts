@@ -496,10 +496,14 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ success: true, mode: 'permanent' });
     }
 
-    // Soft delete — mark as deleted, disable sync
+    // Soft delete shares the retention lease with rule edits so a concurrent
+    // settings save cannot land after the connector becomes inactive.
     const now = new Date().toISOString();
-    const affected = await persistence.softDeleteConnector(id, now);
-    await syncScheduler.reconcileScheduleFromDb(id);
+    const affected = await runWithConnectorOperationLease(id, 'retention', async () => {
+      const result = await persistence.softDeleteConnector(id, now);
+      await syncScheduler.reconcileScheduleFromDb(id);
+      return result;
+    });
 
     return NextResponse.json({
       success: true,
@@ -509,6 +513,9 @@ export async function DELETE(request: Request) {
       affectedLists: affected.affectedLists,
     });
   } catch (error) {
+    if (error instanceof ConnectorOperationBusyError) {
+      return ApiErrors.conflict('Connector has an active operation');
+    }
     return ApiErrors.internal('Failed to delete connector', error);
   }
 }

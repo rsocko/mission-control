@@ -1,4 +1,5 @@
 import type { TaskFilterContext } from '@/lib/task-filter-context';
+import type { ContextAppearance } from '@/types';
 import type {
   HubProjectSummaryDto,
   TaskListItemDto,
@@ -37,6 +38,7 @@ export interface SourceList {
   icon?: string | null;
   iconColor?: string | null;
   selectedForSync?: boolean;
+  appearance?: ContextAppearance | null;
 }
 
 export interface EnabledSource {

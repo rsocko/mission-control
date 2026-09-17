@@ -9,6 +9,7 @@ import type { TaskDetailMode } from './task-detail-types';
 
 export interface TaskNotesSectionProps {
   mode: TaskDetailMode;
+  taskId: string;
   /** Saved notes markdown. */
   description: string | null;
   /** Draft notes while the editor is open. */
@@ -36,6 +37,7 @@ export interface TaskNotesSectionProps {
 /** Notes card with inline markdown preview and editor. */
 export function TaskNotesSection({
   mode,
+  taskId,
   description,
   descValue,
   editingDesc,
@@ -130,6 +132,7 @@ export function TaskNotesSection({
               <TaskDetailMarkdown
                 onCheckboxToggle={onCheckboxToggle}
                 sourceUrl={sourceUrl}
+                taskId={taskId}
               >
                 {description}
               </TaskDetailMarkdown>

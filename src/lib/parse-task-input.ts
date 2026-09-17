@@ -8,8 +8,8 @@
  * - Effort: "^1" (XS), "^2" (S), "^3" (M), "^4" (L), "^5" (XL)
  * - Planning horizon: "~next", "~soon", "~later", "~someday"
  * - Tags: "#tagname"
- * - Destination: "@work", "@personal", "@github"
- * - Project: "/project-name"
+ * - Project: "+Project" or '+"Project with spaces"'
+ * - My Day: standalone "*"
  * - Recurrence: "every day", "every 3 days", "weekly", "every 2 weeks",
  *               "monthly", "yearly", "weekdays", "every mon,wed,fri"
  */
@@ -26,7 +26,6 @@ export interface ParseTaskInputOptions {
   naturalLanguageDates?: boolean;
   preserveText?: boolean;
   projects?: QuickAddProject[];
-  applyDateSuggestions?: boolean;
 }
 
 export interface ParsedTask {
@@ -35,9 +34,9 @@ export interface ParsedTask {
   dueDateLabel: string | null; // Human-readable label
   priority: string | null; // critical | high | medium | low
   tags: string[];          // Tag names (without #)
-  destination: string | null; // work | personal | github | null
   project: string | null;  // Project name (without +)
   projectId: string | null;
+  addToMyDay: boolean;
   dateSuggestion: {
     date: string;
     label: string;
@@ -223,7 +222,7 @@ function maskEscapedDateExpressions(text: string, today: Date): string {
 }
 
 function stripEscapeBackslashes(text: string, today: Date): string {
-  let cleaned = text.replace(/\\([#@!~^/+])/g, '$1');
+  let cleaned = text.replace(/\\([#@!~^/+*])/g, '$1');
   const escapedDateOffsets = findEscapedDateRanges(cleaned, today)
     .flatMap((range) => range.escapeOffsets)
     .sort((a, b) => b - a);
@@ -259,16 +258,15 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
 
   const naturalLanguageDates = options.naturalLanguageDates ?? true;
   const preserveText = options.preserveText ?? false;
-  const applyDateSuggestions = options.applyDateSuggestions ?? false;
   let remaining = input;
   let title = input;
   let dueDate: string | null = null;
   let dueDateLabel: string | null = null;
   let priority: string | null = null;
   const foundTags: string[] = [];
-  let destination: string | null = null;
   let project: string | null = null;
   let projectId: string | null = null;
+  let addToMyDay = false;
   let dateSuggestion: ParsedTask['dateSuggestion'] = null;
   let estimatedDuration: number | null = null;
   let effort: number | null = null;
@@ -332,6 +330,14 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     if (!preserveText) title = removeMatchedText(title, effortMatch[0]);
   }
 
+  // Extract the standalone My Day marker. A backslash keeps a literal asterisk.
+  const myDayTokenRegex = /(?<!\\)(^|\s)\*(?=\s|$)/g;
+  addToMyDay = /(?<!\\)(^|\s)\*(?=\s|$)/.test(remaining);
+  if (addToMyDay) {
+    remaining = remaining.replace(myDayTokenRegex, '$1').trim();
+    if (!preserveText) title = title.replace(myDayTokenRegex, '$1').trim();
+  }
+
   // Extract tags: #tagname (not escaped with \)
   // Colons and dots are allowed so namespaced tags like "area:projects" or "v2.0" work
   const tagMatches = remaining.matchAll(/(?<!\\)#([a-zA-Z0-9_:./-]+)/g);
@@ -340,14 +346,6 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
   }
   remaining = remaining.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
   if (!preserveText) title = title.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
-
-  // Extract destination: @work, @personal, @github (not escaped with \)
-  const destMatch = remaining.match(/(?<!\\)@(work|personal|github|todo)\b/i);
-  if (destMatch) {
-    destination = destMatch[1].toLowerCase();
-    remaining = removeMatchedText(remaining, destMatch[0]);
-    if (!preserveText) title = removeMatchedText(title, destMatch[0]);
-  }
 
   // Extract project: +Project or +"Project with spaces"
   const projectMatch = findProjectToken(remaining, options.projects ?? []);
@@ -358,8 +356,8 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     if (!preserveText) title = removeMatchedText(title, projectMatch.matchedText);
   }
 
-  // Explicit date commands are applied immediately. Free-form trailing dates are
-  // suggestions so ambiguous titles are never changed without confirmation.
+  // Explicit date commands are applied immediately. Free-form trailing dates stay
+  // suggestions until the user converts one to /due: through the suggestion UI.
   const explicitDueMatch = remaining.match(/(?:^|\s)\/due:\s*(.+?)(?=\s+(?:[#@!~^+]|\w+\/)|$)/i);
   if (explicitDueMatch) {
     const explicitDate = parseNLPDate(explicitDueMatch[1], today);
@@ -381,22 +379,11 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     const dateInput = maskEscapedDateExpressions(remaining, today);
     const trailingDate = findTrailingDate(dateInput, today);
     if (trailingDate) {
-      if (applyDateSuggestions) {
-        dueDate = trailingDate.date;
-        dueDateLabel = trailingDate.label;
-        if (!preserveText) {
-          const titleWithoutDate = title
-            .replace(new RegExp(`${escapeRegex(trailingDate.matchedText)}\\s*$`, 'i'), '')
-            .trim();
-          if (titleWithoutDate) title = titleWithoutDate;
-        }
-      } else {
-        dateSuggestion = {
-          date: trailingDate.date,
-          label: trailingDate.label,
-          matchedText: trailingDate.matchedText,
-        };
-      }
+      dateSuggestion = {
+        date: trailingDate.date,
+        label: trailingDate.label,
+        matchedText: trailingDate.matchedText,
+      };
     }
   }
 
@@ -412,9 +399,9 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     dueDateLabel,
     priority,
     tags: foundTags,
-    destination,
     project,
     projectId,
+    addToMyDay,
     dateSuggestion,
     estimatedDuration,
     effort,
@@ -428,7 +415,7 @@ export function parseTaskInputForSubmission(
   input: string,
   options: ParseTaskInputOptions = {},
 ): ParsedTask {
-  return parseTaskInput(input, { ...options, applyDateSuggestions: true });
+  return parseTaskInput(input, options);
 }
 
 /**

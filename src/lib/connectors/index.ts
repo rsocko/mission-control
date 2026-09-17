@@ -129,10 +129,12 @@ export interface IConnector {
   /** Mark a task as complete */
   completeTask?(sourceId: string): Promise<void>;
 
+  /** Represent a local cancellation using the closest non-destructive source state. */
+  cancelTask?(sourceId: string): Promise<void>;
+
   /** Close a task with a specific reason (e.g. not_planned, duplicate) */
   closeTaskWithReason?(sourceId: string, reason: 'completed' | 'not_planned' | 'duplicate'): Promise<void>;
 
-  /** Delete a task */
   /** Delete a task */
   deleteTask?(sourceId: string): Promise<void>;
 
@@ -156,6 +158,9 @@ export interface IConnector {
 
   /** Update a sub-task/checklist item */
   updateSubTask?(parentSourceId: string, subTaskSourceId: string, updates: Partial<TaskItem>): Promise<void>;
+
+  /** Reorder all direct sub-tasks under a parent. */
+  reorderSubTasks?(parentSourceId: string, orderedSubTaskSourceIds: readonly string[]): Promise<void>;
 
   /** Add a tag/label to a task in the source system */
   addTagToTask?(sourceId: string, tagName: string): Promise<void>;

@@ -101,6 +101,13 @@ describe('SQLite project-hierarchy adapter', () => {
                     'list', 'active', 0, 0, 0, '{}', ?, ?)
         `).run(projectId, NOW, NOW);
       },
+      async seedForeignPhase(projectId, phaseId) {
+        sqlite.prepare(`
+          INSERT INTO project_phases (
+            id, project_id, name, status, sort_order, created_at, updated_at
+          ) VALUES (?, ?, 'Foreign phase', 'pending', 0, ?, ?)
+        `).run(phaseId, projectId, NOW, NOW);
+      },
       async readRevision(projectId) {
         const row = sqlite.prepare(
           'SELECT hierarchy_revision AS revision FROM hub_projects WHERE id = ?',

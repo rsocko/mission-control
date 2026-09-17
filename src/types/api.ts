@@ -60,6 +60,10 @@ export type TaskListItemDto = TaskListDomainFields & {
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   hubProjectIds?: string[];
   projectPhaseMemberships?: Array<{
     projectId: string;
@@ -70,6 +74,8 @@ export type TaskListItemDto = TaskListDomainFields & {
   linkedSourceCount?: number;
   hasDescription: boolean;
   editPolicy: TaskEditPolicy;
+  syncStatus?: string;
+  pushRetryCount?: number;
 };
 
 export interface TaskListStatsDto {
@@ -98,7 +104,7 @@ export interface TaskListResponseDto {
 
 type HubProjectSummaryFields = Pick<
   HubProject,
-  'id' | 'name' | 'color'
+  'id' | 'name' | 'color' | 'appearance'
 >;
 
 export type KanbanColumnDto = Pick<KanbanColumn, 'id' | 'name' | 'color'> &

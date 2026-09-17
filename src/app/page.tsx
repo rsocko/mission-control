@@ -55,6 +55,7 @@ import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
+import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';
 
 const MobileDashboard = dynamic(
   () => import('@/components/dashboard/mobile/MobileDashboard').then(mod => mod.MobileDashboard),
@@ -130,6 +131,15 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   const textFilter = useDashboardViewStore((s) => s.textFilter);
   const setTextFilter = useDashboardViewStore((s) => s.setTextFilter);
   const parsedTextFilter = useMemo(() => parseFilterQuery(textFilter), [textFilter]);
+  const activeSourceList = state.listFilter
+    ? state.sourceLists.find((list) => (
+        list.sourceId === state.listFilter
+        || `${list.connectorInstanceId}:${list.sourceId}` === state.listFilter
+      ))
+    : null;
+  const activeProject = state.projectFilter
+    ? state.projects.find((project) => project.id === state.projectFilter)
+    : null;
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [subtasksOpenRequest, setSubtasksOpenRequest] = useState<TaskSubtasksOpenRequest | null>(null);
@@ -199,16 +209,22 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   });
 
   return (
-    <>
+    <ContextThemeSurface
+      kind="list"
+      active={!isAllTasksPage && Boolean(activeSourceList)}
+      accentColor={activeSourceList?.appearance?.accentColor ?? activeSourceList?.iconColor ?? activeProject?.color}
+      appearance={activeSourceList?.appearance ?? activeProject?.appearance}
+      className="h-full min-h-0"
+    >
       {!isAllTasksPage && (
-        <div className="sm:hidden px-4 pt-3 pb-2 overflow-y-auto h-full">
+        <div className="h-full w-full overflow-y-auto px-4 pb-2 pt-3 sm:hidden">
           <InsightsBackLink />
           <MobileDashboard />
         </div>
       )}
 
       {/* Desktop task workspace */}
-      <div className="hidden min-w-0 sm:flex h-full">
+      <div className="hidden h-full w-full min-w-0 sm:flex">
       <div aria-live="polite" aria-atomic="true" className="sr-only" id="task-announcements" />
 
       <DashboardSidebar
@@ -227,7 +243,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           <div className="flex flex-wrap gap-2 mb-4 items-start">
             <div className={isCollapsed('one-thing') ? 'flex-shrink-0' : 'w-full'}>
               <OneThingBanner
-                onTaskClick={taskSelection.toggleTask}
+                onTaskClick={taskSelection.selectTask}
                 onRefresh={() => actions.setRefreshTrigger((n) => n + 1)}
                 collapsed={isCollapsed('one-thing')}
                 onToggleCollapse={() => toggleSection('one-thing')}
@@ -246,7 +262,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
 
             <div className={isCollapsed('recent-wins') ? 'flex-shrink-0' : 'w-full'}>
               <RecentWins
-                onTaskClick={taskSelection.toggleTask}
+                onTaskClick={taskSelection.selectTask}
                 collapsed={isCollapsed('recent-wins')}
                 onToggleCollapse={() => toggleSection('recent-wins')}
               />
@@ -638,7 +654,6 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                       {...createTaskRowInteractionHandlers({
                         taskId: task.id,
                         bulkMode: state.bulkMode,
-                        onBeforeClick: taskSelection.cancelPendingDeselect,
                         onSelect: taskSelection.handleTaskClick,
                         onDoubleClick: taskSelection.handleTaskDoubleClick,
                         onModifierClick: (_taskId, e) => {
@@ -847,7 +862,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
         />
       )}
     </div>
-    </>
+    </ContextThemeSurface>
   );
 }
 
@@ -1134,26 +1149,45 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
               requestAnimationFrame(() => {
                 const ids = Array.from(state.bulkSelected);
                 actions.setBulkSelected(new Set()); actions.setBulkMode(false);
-                // Optimistically remove tasks from state
-                const previousTasks = state.taskResponse.tasks.filter(t => ids.includes(t.id));
                 actions.setRefreshTrigger((n) => n + 1);
-                // Deferred delete with undo window
-                let undone = false;
-                pushUndoWithToast(`${ids.length} task${ids.length > 1 ? 's' : ''} deleted`, () => {
-                  undone = true;
-                  // Restore is handled by refresh since tasks weren't deleted server-side yet
-                  actions.setRefreshTrigger((n) => n + 1);
-                });
-                setTimeout(async () => {
-                  if (!undone) {
-                    const failedIds: string[] = [];
-                    for (const id of ids) {
-                      try { const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' }); if (!res.ok) failedIds.push(id); } catch { failedIds.push(id); }
+                void (async () => {
+                  const results = await Promise.all(ids.map(async (id) => {
+                    try {
+                      const response = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
+                      const body = await response.json().catch(() => ({})) as {
+                        restorable?: boolean;
+                      };
+                      return { id, ok: response.ok, restorable: body.restorable === true };
+                    } catch {
+                      return { id, ok: false, restorable: false };
                     }
-                    if (failedIds.length > 0) toast.error(`Failed to delete ${failedIds.length} task${failedIds.length > 1 ? 's' : ''}`);
+                  }));
+                  const failed = results.filter((result) => !result.ok);
+                  const restorableIds = results
+                    .filter((result) => result.ok && result.restorable)
+                    .map((result) => result.id);
+                  if (failed.length > 0) {
+                    toast.error(`Failed to delete ${failed.length} task${failed.length > 1 ? 's' : ''}`);
                   }
                   actions.setRefreshTrigger((n) => n + 1);
-                }, 5500);
+                  if (restorableIds.length > 0) {
+                    pushUndoWithToast(
+                      `${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`,
+                      async () => {
+                        const restores = await Promise.all(restorableIds.map((id) =>
+                          fetch(`/api/tasks/${id}/restore`, { method: 'POST' }),
+                        ));
+                        const restoreFailures = restores.filter((response) => !response.ok).length;
+                        actions.setRefreshTrigger((n) => n + 1);
+                        if (restoreFailures > 0) {
+                          throw new Error(`Failed to restore ${restoreFailures} task${restoreFailures > 1 ? 's' : ''}`);
+                        }
+                      },
+                    );
+                  } else if (failed.length < results.length) {
+                    toast.success(`${results.length - failed.length} task${results.length - failed.length > 1 ? 's' : ''} deleted`);
+                  }
+                })();
               });
             },
           });

@@ -1,21 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
-type ChainableProxy = Record<PropertyKey, unknown>;
-
-function chainable<T>(terminal: T) {
-  const chain: ChainableProxy = new Proxy({}, {
-    get(_, prop: string | symbol) {
-      if (prop === 'then') return (resolve: (value: T) => unknown) => resolve(terminal);
-      if (prop === 'get') return () => Array.isArray(terminal) ? terminal[0] : terminal;
-      if (prop === 'all') return () => terminal;
-      if (prop === 'run') return () => terminal;
-      return vi.fn(() => chain);
-    },
-  });
-  return chain;
-}
-
 const mockDb = {
   select: vi.fn(),
   insert: vi.fn(),
@@ -23,12 +8,18 @@ const mockDb = {
 const mockGetCapabilities = vi.fn();
 const mockIsConnectorEnabled = vi.fn();
 const mockInsertValues = vi.fn();
-const mockGetConnector = vi.fn(() => ({ createSubTask: vi.fn() }));
+const mockGetConnector = vi.fn((): {
+  type?: string;
+  createSubTask?: (...args: unknown[]) => unknown;
+  reorderSubTasks?: (...args: unknown[]) => unknown;
+} => ({ createSubTask: vi.fn() }));
 const mockInitializeConnector = vi.fn();
 const mockLogWriteThrough = vi.fn();
 const mockGetTask = vi.fn();
 const mockGetSubtaskProposalSnapshot = vi.fn();
 const mockListSubtasks = vi.fn();
+const mockGetSubtaskOrderState = vi.fn();
+const mockReorderSubtasks = vi.fn();
 const mockCreateSubtask = vi.fn();
 const mockAcceptSubtaskProposal = vi.fn();
 const mockCompleteSubtaskWriteThrough = vi.fn();
@@ -102,9 +93,9 @@ const taskVersion = '2026-07-30T12:00:00.000Z';
 const contextVersion = 'a'.repeat(64);
 const proposalId = '3d188f4c-7eca-4d17-8cbe-601cc9d6a898';
 
-function request(body: Record<string, unknown>) {
+function request(body: Record<string, unknown>, method = 'POST') {
   return new Request('https://mc.example/api/tasks/parent/subtasks', {
-    method: 'POST',
+    method,
     headers: {
       'Content-Type': 'application/json',
       authorization: 'Bearer acceptance-test-token',
@@ -177,6 +168,8 @@ beforeEach(() => {
     subtaskTitles: [],
   });
   mockListSubtasks.mockResolvedValue([]);
+  mockGetSubtaskOrderState.mockResolvedValue({ revision: 0, subtasks: [] });
+  mockReorderSubtasks.mockResolvedValue({ kind: 'reordered', revision: 1 });
   mockGetConnector.mockReturnValue({ createSubTask: vi.fn() });
   mockCreateSubtask.mockResolvedValue({ kind: 'created' });
   mockAcceptSubtaskProposal.mockResolvedValue({
@@ -193,12 +186,173 @@ beforeEach(() => {
       getTask: mockGetTask,
       getSubtaskProposalSnapshot: mockGetSubtaskProposalSnapshot,
       listSubtasks: mockListSubtasks,
+      getSubtaskOrderState: mockGetSubtaskOrderState,
+      reorderSubtasks: mockReorderSubtasks,
       createSubtask: mockCreateSubtask,
       acceptSubtaskProposal: mockAcceptSubtaskProposal,
       completeSubtaskWriteThrough: mockCompleteSubtaskWriteThrough,
     },
   });
 });
+
+describe('subtask reorder route', () => {
+    it('persists a complete local order with revision fencing', async () => {
+      const subtasks = [
+        {
+          id: 'child-a',
+          title: 'A',
+          status: 'todo',
+          sourceId: 'local:child-a',
+          connectorType: 'local',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 0,
+        },
+        {
+          id: 'child-b',
+          title: 'B',
+          status: 'todo',
+          sourceId: 'local:child-b',
+          connectorType: 'local',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 1,
+        },
+      ];
+      mockGetSubtaskOrderState.mockResolvedValue({ revision: 3, subtasks });
+      mockReorderSubtasks.mockResolvedValue({ kind: 'reordered', revision: 4 });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: ['child-b', 'child-a'],
+        expectedRevision: 3,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(200);
+      await expect(response.json()).resolves.toEqual({
+        revision: 4,
+        writeBack: 'local-only',
+      });
+      expect(mockReorderSubtasks).toHaveBeenCalledWith({
+        parentTaskId: 'parent',
+        orderedChildIds: ['child-b', 'child-a'],
+        expectedRevision: 3,
+      });
+    });
+
+    it('returns the current order after a stale request', async () => {
+      mockGetSubtaskOrderState.mockResolvedValue({ revision: 5, subtasks: [] });
+      mockReorderSubtasks.mockResolvedValue({
+        kind: 'revision-conflict',
+        currentRevision: 5,
+      });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: [],
+        expectedRevision: 4,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toMatchObject({
+        revision: 5,
+        subtasks: [],
+      });
+    });
+
+    it('returns the current sibling set when membership changed', async () => {
+      const currentSubtasks = [{
+        id: 'new-child',
+        title: 'New',
+        status: 'todo',
+        sourceId: 'local:new-child',
+        connectorType: 'local',
+        priority: 'none',
+        effort: null,
+        parentId: 'parent',
+        siblingOrder: 0,
+      }];
+      mockGetSubtaskOrderState
+        .mockResolvedValueOnce({ revision: 3, subtasks: [] })
+        .mockResolvedValueOnce({ revision: 3, subtasks: currentSubtasks });
+      mockReorderSubtasks.mockResolvedValue({ kind: 'invalid-children' });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: [],
+        expectedRevision: 3,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(422);
+      await expect(response.json()).resolves.toMatchObject({
+        revision: 3,
+        subtasks: currentSubtasks,
+      });
+    });
+
+    it('restores local order when source write-through fails', async () => {
+      const subtasks = [
+        {
+          id: 'child-a',
+          title: 'A',
+          status: 'todo',
+          sourceId: 'remote:a',
+          connectorType: 'test-remote',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 0,
+        },
+        {
+          id: 'child-b',
+          title: 'B',
+          status: 'todo',
+          sourceId: 'remote:b',
+          connectorType: 'test-remote',
+          priority: 'none',
+          effort: null,
+          parentId: 'parent',
+          siblingOrder: 1,
+        },
+      ];
+      mockParentTask({
+        sourceId: 'remote:parent',
+        connectorType: 'test-remote',
+        connectorInstanceId: 'test-remote',
+      });
+      mockGetCapabilities.mockResolvedValue({
+        write: true,
+        subtaskOrderWrite: true,
+      });
+      mockGetSubtaskOrderState.mockResolvedValue({ revision: 3, subtasks });
+      mockReorderSubtasks
+        .mockResolvedValueOnce({ kind: 'reordered', revision: 4 })
+        .mockResolvedValueOnce({ kind: 'reordered', revision: 5 });
+      mockGetConnector.mockReturnValue({
+        type: 'test-remote',
+        reorderSubTasks: vi.fn().mockRejectedValue(new Error('source unavailable')),
+      });
+
+      const { PATCH } = await import('@/app/api/tasks/[id]/subtasks/route');
+      const response = await PATCH(request({
+        orderedChildIds: ['child-b', 'child-a'],
+        expectedRevision: 3,
+      }, 'PATCH'), { params: Promise.resolve({ id: 'parent' }) });
+
+      expect(response.status).toBe(502);
+      await expect(response.json()).resolves.toMatchObject({
+        revision: 5,
+        subtasks,
+      });
+      expect(mockReorderSubtasks).toHaveBeenNthCalledWith(2, {
+        parentTaskId: 'parent',
+        orderedChildIds: ['child-a', 'child-b'],
+        expectedRevision: 4,
+      });
+    });
+  });
 
 describe('AI proposal acceptance through the subtask route', () => {
   it('rejects a proposal when the parent task changed', async () => {

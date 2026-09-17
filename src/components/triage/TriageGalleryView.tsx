@@ -1,8 +1,10 @@
 'use client';
 
-import type { ComponentType } from 'react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ComponentType, RefObject } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import {
   Archive,
   BookOpen,
@@ -785,6 +787,7 @@ interface TriageGalleryViewProps {
   loading: boolean;
   density?: GalleryDensity;
   onDensityChange?: (density: GalleryDensity) => void;
+  scrollRef?: RefObject<HTMLDivElement | null>;
 }
 
 export default function TriageGalleryView({
@@ -796,10 +799,24 @@ export default function TriageGalleryView({
   loading,
   density = 'default',
   onDensityChange,
+  scrollRef,
 }: TriageGalleryViewProps) {
   const [focusIndex, setFocusIndex] = useState(0);
+  const [columns, setColumns] = useState(DENSITY_COLUMNS[density]);
+  const [scrollMargin, setScrollMargin] = useState(0);
   const gridRef = useRef<HTMLDivElement>(null);
+  const pendingFocusIndexRef = useRef<number | null>(null);
   const [animateRef] = useListAnimate({ duration: 250 });
+  const virtualizeRows = shouldVirtualizeList(items.length);
+  const rowCount = Math.ceil(items.length / columns);
+  const rowVirtualizer = useVirtualizer({
+    count: virtualizeRows ? rowCount : 0,
+    getScrollElement: () => scrollRef?.current ?? null,
+    getItemKey: (index) => items[index * columns]?.id ?? index,
+    estimateSize: () => 520,
+    overscan: 2,
+    scrollMargin,
+  });
 
   // Merge gridRef (for keyboard nav) and animateRef (for auto-animate)
   const mergedGridRef = useCallback((node: HTMLDivElement | null) => {
@@ -824,10 +841,26 @@ export default function TriageGalleryView({
     }
   }, [selectedId, items, focusIndex]);
 
-  // Calculate columns from density setting for arrow nav
-  const getColumns = useCallback(() => {
-    return DENSITY_COLUMNS[density];
+  useEffect(() => {
+    const updateColumns = () => {
+      const configured = DENSITY_COLUMNS[density];
+      if (window.innerWidth <= 480) setColumns(1);
+      else if (window.innerWidth <= 768) setColumns(2);
+      else if (window.innerWidth <= 1024) setColumns(Math.min(configured, 3));
+      else setColumns(configured);
+    };
+    updateColumns();
+    window.addEventListener('resize', updateColumns);
+    return () => window.removeEventListener('resize', updateColumns);
   }, [density]);
+
+  useLayoutEffect(() => {
+    if (!virtualizeRows) return;
+    setScrollMargin(gridRef.current?.offsetTop ?? 0);
+  }, [columns, virtualizeRows]);
+
+  // Calculate columns from density setting for arrow nav
+  const getColumns = useCallback(() => columns, [columns]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -908,18 +941,26 @@ export default function TriageGalleryView({
       if (nextIndex !== focusIndex) {
         setFocusIndex(nextIndex);
         onSelect(items[nextIndex].id);
+        pendingFocusIndexRef.current = nextIndex;
 
         // Scroll focused card into view
-        const cards = gridRef.current?.children;
-        if (cards?.[nextIndex]) {
-          (cards[nextIndex] as HTMLElement).scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        if (virtualizeRows) {
+          rowVirtualizer.scrollToIndex(Math.floor(nextIndex / cols), { align: 'auto' });
+        } else {
+          const cards = gridRef.current?.children;
+          if (cards?.[nextIndex]) {
+            const card = cards[nextIndex] as HTMLElement;
+            card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            card.querySelector<HTMLElement>('[role="button"]')?.focus();
+            pendingFocusIndexRef.current = null;
+          }
         }
       }
     }
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [focusIndex, items, getColumns, onSelect, onAction, onDensityChange]);
+  }, [focusIndex, items, getColumns, onSelect, onAction, onDensityChange, rowVirtualizer, virtualizeRows]);
 
   if (loading) {
     return (
@@ -957,24 +998,81 @@ export default function TriageGalleryView({
           .gallery-masonry-grid { --gallery-cols: 1; }
         }
       `}</style>
-      <div
-        ref={mergedGridRef}
-        className="gallery-masonry-grid grid items-start gap-4"
-      >
-        {items.map((item, index) => (
-          <GalleryCard
-            key={item.id}
-            item={item}
-            isFocused={index === focusIndex}
-            onSelect={() => {
-              setFocusIndex(index);
-              onSelect(item.id);
-            }}
-            onAction={(actionType) => onAction(item.id, actionType)}
-            busyAction={busyAction}
-          />
-        ))}
-      </div>
+      {virtualizeRows ? (
+        <div
+          ref={gridRef}
+          role="presentation"
+          data-virtualized="true"
+          className="relative w-full"
+          style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+        >
+          {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const startIndex = virtualRow.index * columns;
+            return (
+              <div
+                key={virtualRow.key}
+                ref={(node) => {
+                  rowVirtualizer.measureElement(node);
+                  const pendingIndex = pendingFocusIndexRef.current;
+                  if (
+                    node
+                    && pendingIndex !== null
+                    && Math.floor(pendingIndex / columns) === virtualRow.index
+                  ) {
+                    pendingFocusIndexRef.current = null;
+                    requestAnimationFrame(() => {
+                      node
+                        .querySelector<HTMLElement>(`[data-gallery-index="${pendingIndex}"] [role="button"]`)
+                        ?.focus();
+                    });
+                  }
+                }}
+                data-index={virtualRow.index}
+                className="gallery-masonry-grid absolute left-0 top-0 grid w-full items-start gap-4 pb-4"
+                style={{ transform: `translateY(${virtualRow.start - scrollMargin}px)` }}
+              >
+                {items.slice(startIndex, startIndex + columns).map((item, laneIndex) => {
+                  const index = startIndex + laneIndex;
+                  return (
+                    <div key={item.id} data-gallery-index={index}>
+                      <GalleryCard
+                        item={item}
+                        isFocused={index === focusIndex}
+                        onSelect={() => {
+                          setFocusIndex(index);
+                          onSelect(item.id);
+                        }}
+                        onAction={(actionType) => onAction(item.id, actionType)}
+                        busyAction={busyAction}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div
+          ref={mergedGridRef}
+          className="gallery-masonry-grid grid items-start gap-4"
+        >
+          {items.map((item, index) => (
+            <div key={item.id} data-gallery-index={index}>
+              <GalleryCard
+                item={item}
+                isFocused={index === focusIndex}
+                onSelect={() => {
+                  setFocusIndex(index);
+                  onSelect(item.id);
+                }}
+                onAction={(actionType) => onAction(item.id, actionType)}
+                busyAction={busyAction}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Keyboard hints */}
       <div className="fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-[8px] border border-[var(--surface-3)] bg-[var(--surface-1)] px-4 py-2 text-[12px] text-[var(--text-tertiary)] shadow-[0_4px_12px_rgba(0,0,0,0.5)]">

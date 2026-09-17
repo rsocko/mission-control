@@ -60,6 +60,7 @@ function populatedScenario() {
     project: {
       name: 'Overview Project',
       description: 'Delivery of the reporting workspace.',
+      autoIncludeRules: [{ field: 'tags', operator: 'contains', value: 'reporting' }],
       startedAt: '2026-03-02',
       targetDate: '2027-11-30',
       completedAt: null,
@@ -118,6 +119,22 @@ describe('project overview tab', () => {
     expect(screen.getByRole('heading', { name: 'Plan' })).toBeInTheDocument();
   });
 
+  it('highlights tasks that still need a phase and opens the Plan assignment area', async () => {
+    await renderProjectTab('Overview');
+
+    const alert = await screen.findByRole('status');
+    expect(within(alert).getByText('2 tasks need a phase')).toBeInTheDocument();
+    expect(within(alert).getByText(
+      'Auto-include rules can add project tasks without placing them in the plan.',
+    ))
+      .toBeInTheDocument();
+
+    fireEvent.click(within(alert).getByRole('button', { name: 'Assign in Plan' }));
+
+    expect(await screen.findByRole('heading', { name: 'Plan' })).toBeInTheDocument();
+    expect(screen.getByText('Unassigned Tasks')).toBeInTheDocument();
+  });
+
   it('shares task selection with the task detail panel from activity and reports', async () => {
     await renderProjectTab('Overview');
 
@@ -174,6 +191,7 @@ describe('project overview tab', () => {
     expect(await screen.findByText('No recent task activity yet.')).toBeInTheDocument();
     expect(screen.getByRole('img', { name: '0% of project tasks complete' })).toBeInTheDocument();
     expect(screen.getByText(/No phases defined yet/)).toBeInTheDocument();
+    expect(screen.queryByText(/needs? a phase/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Set up phases →' }));
 

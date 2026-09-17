@@ -666,6 +666,7 @@ export function createPostgresDailyPlanningPersistence(
             t.planning_horizon AS "planningHorizon", t.due_date AS "dueDate",
             t.push_count AS "pushCount", t.connector_type AS "connectorType",
             t.connector_instance_id AS "connectorInstanceId", t.source_id AS "sourceId",
+            t.sync_status AS "syncStatus", t.push_retry_count AS "pushRetryCount",
             t.source_list_id AS "sourceListId", t.source_list_name AS "sourceListName",
             t.assignee AS assignee, t.created_at AS "createdAt", t.completed_at AS "completedAt",
             t.metadata AS metadata, t.effort AS effort, t.micro_status AS "microStatus",

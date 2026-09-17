@@ -14,7 +14,11 @@
  * multi-query composites below stay deliberately non-atomic on both backends.
  */
 
-import type { InsightsAnalyticsRepository } from '@/db/persistence/analytics';
+import type {
+  AnalyticsMyDayPlanningEvent,
+  AnalyticsTaskCompletion,
+  InsightsAnalyticsRepository,
+} from '@/db/persistence/analytics';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   addCalendarDays,
@@ -85,10 +89,36 @@ export interface TrendDataPoint {
   created: number;
 }
 
+export interface PlanAlignmentPoint {
+  date: string;
+  committed: number;
+  plannedCompleted: number;
+  unplannedCompleted: number;
+  carryover: number;
+}
+
+export interface PlanAlignmentInsights {
+  points: PlanAlignmentPoint[];
+  totals: Omit<PlanAlignmentPoint, 'date'>;
+  planCoverage: number;
+  commitmentRate: number;
+}
+
 export interface SourceBreakdownItem {
   source: string;
   count: number;
   percentage: number;
+}
+
+export interface TaskBreakdownItem {
+  value: string;
+  count: number;
+  percentage: number;
+}
+
+export interface TaskBreakdown {
+  byPriority: TaskBreakdownItem[];
+  byStatus: TaskBreakdownItem[];
 }
 
 export interface ProjectActivityItem {
@@ -99,6 +129,17 @@ export interface ProjectActivityItem {
   open: number;
   delta: number; // completed - created in period
 }
+
+export type WorkActivityDimension = 'lists' | 'tags' | 'projects' | 'sources';
+
+export interface WorkActivityItem {
+  key: string;
+  label: string;
+  active: number;
+  closed: number;
+}
+
+export type WorkActivityBreakdown = Record<WorkActivityDimension, WorkActivityItem[]>;
 
 export interface RoutineHeatmapEntry {
   routineId: string;
@@ -112,6 +153,49 @@ export interface ActivityHeatmapEntry {
   date: string;
   taskCompletions: number;
   routineCompletions: number;
+}
+
+export interface HourlyProductivityEntry {
+  hour: number;
+  taskCompletions: number;
+}
+
+export interface WeekdayProductivityEntry {
+  day: number;
+  label: string;
+  taskCompletions: number;
+  routineCompletions: number;
+  total: number;
+}
+
+export interface CompletionTimeliness {
+  onTime: number;
+  late: number;
+  withoutDueDate: number;
+  onTimeRate: number | null;
+}
+
+export interface ProductivityActivityTotals {
+  tasks: number;
+  routines: number;
+  total: number;
+}
+
+export interface ProductivityPeriodComparison {
+  period: 'week' | 'month';
+  current: ProductivityActivityTotals;
+  previous: ProductivityActivityTotals;
+  changePercent: number | null;
+}
+
+export interface ProductivityInsights {
+  periodStart: string;
+  periodEnd: string;
+  timeZone: string;
+  hourly: HourlyProductivityEntry[];
+  weekdays: WeekdayProductivityEntry[];
+  timeliness: CompletionTimeliness;
+  comparisons: ProductivityPeriodComparison[];
 }
 
 export interface PlanningFrictionCategory {
@@ -158,10 +242,13 @@ export interface InsightsSnapshot {
     streak: PeriodKpi;
   };
   trends: TrendDataPoint[];
+  planAlignment: PlanAlignmentInsights;
   sourceBreakdown: SourceBreakdownItem[];
+  taskBreakdown: TaskBreakdown;
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
   projectActivity: ProjectActivityItem[];
+  workActivity: WorkActivityBreakdown;
   routineHeatmap: RoutineHeatmapEntry[];
   delivery: DeliveryMetrics;
   deliveryFilters: {
@@ -180,6 +267,7 @@ export interface InsightsSnapshot {
     unsupportedMeasures: string;
   };
   activityHeatmap: ActivityHeatmapEntry[];
+  productivity: ProductivityInsights;
   flow: FlowInsightsResult | null;
 }
 
@@ -192,7 +280,9 @@ export interface InsightsSummarySection {
   periodEnd: string;
   kpis: InsightsSnapshot['kpis'];
   trends: TrendDataPoint[];
+  planAlignment: PlanAlignmentInsights;
   sourceBreakdown: SourceBreakdownItem[];
+  taskBreakdown: TaskBreakdown;
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
 }
@@ -215,8 +305,10 @@ export interface InsightsActivitySection {
   section: 'activity';
   period: InsightsPeriod;
   projectActivity: ProjectActivityItem[];
+  workActivity: WorkActivityBreakdown;
   routineHeatmap: RoutineHeatmapEntry[];
   activityHeatmap: ActivityHeatmapEntry[];
+  productivity: ProductivityInsights;
 }
 
 export type InsightsSectionSnapshot =
@@ -319,6 +411,119 @@ async function getCompletionTrends(
   return points;
 }
 
+function planningEventTime(event: AnalyticsMyDayPlanningEvent): number {
+  return parseStoredTimestamp(event.occurredAt);
+}
+
+export function buildPlanAlignment(
+  completions: AnalyticsTaskCompletion[],
+  events: AnalyticsMyDayPlanningEvent[],
+  start: string,
+  end: string,
+): PlanAlignmentInsights {
+  const eventsByDate = new Map<string, Map<string, AnalyticsMyDayPlanningEvent[]>>();
+  for (const event of events) {
+    const tasksForDate = eventsByDate.get(event.date)
+      ?? new Map<string, AnalyticsMyDayPlanningEvent[]>();
+    const taskEvents = tasksForDate.get(event.taskId) ?? [];
+    taskEvents.push(event);
+    tasksForDate.set(event.taskId, taskEvents);
+    eventsByDate.set(event.date, tasksForDate);
+  }
+  for (const tasksForDate of eventsByDate.values()) {
+    for (const taskEvents of tasksForDate.values()) {
+      taskEvents.sort((a, b) => planningEventTime(a) - planningEventTime(b) || a.id - b.id);
+    }
+  }
+
+  const completionsByDate = new Map<string, AnalyticsTaskCompletion[]>();
+  for (const completion of completions) {
+    if (!completion.completedAt) continue;
+    const date = formatDateInLocalTimezone(
+      new Date(parseStoredTimestamp(completion.completedAt)),
+    );
+    const dayCompletions = completionsByDate.get(date) ?? [];
+    dayCompletions.push(completion);
+    completionsByDate.set(date, dayCompletions);
+  }
+
+  const points: PlanAlignmentPoint[] = [];
+  const current = new Date(`${start}T12:00:00`);
+  const endDate = new Date(`${end}T12:00:00`);
+  while (current <= endDate) {
+    const date = fmtDate(current);
+    const tasksForDate = eventsByDate.get(date)
+      ?? new Map<string, AnalyticsMyDayPlanningEvent[]>();
+    const activeCommittedTaskIds = new Set<string>();
+    let plannedCompleted = 0;
+    let unplannedCompleted = 0;
+
+    for (const completion of completionsByDate.get(date) ?? []) {
+      const completedAt = parseStoredTimestamp(completion.completedAt);
+      const stateAtCompletion = (tasksForDate.get(completion.id) ?? [])
+        .filter(event => event.eventType !== 'my_day_missed')
+        .filter(event => planningEventTime(event) <= completedAt)
+        .at(-1)?.eventType;
+      if (stateAtCompletion === 'my_day_committed') {
+        plannedCompleted++;
+        activeCommittedTaskIds.add(completion.id);
+      } else {
+        unplannedCompleted++;
+      }
+    }
+
+    for (const [taskId, taskEvents] of tasksForDate) {
+      const finalPlanningState = taskEvents
+        .filter(event => event.eventType !== 'my_day_missed')
+        .at(-1)?.eventType;
+      if (finalPlanningState === 'my_day_committed') activeCommittedTaskIds.add(taskId);
+    }
+    const carryover = [...tasksForDate.values()].filter(taskEvents => (
+      taskEvents.some(event => event.eventType === 'my_day_missed')
+    )).length;
+
+    points.push({
+      date,
+      committed: activeCommittedTaskIds.size,
+      plannedCompleted,
+      unplannedCompleted,
+      carryover,
+    });
+    current.setDate(current.getDate() + 1);
+  }
+
+  const totals = points.reduce<Omit<PlanAlignmentPoint, 'date'>>((sum, point) => ({
+    committed: sum.committed + point.committed,
+    plannedCompleted: sum.plannedCompleted + point.plannedCompleted,
+    unplannedCompleted: sum.unplannedCompleted + point.unplannedCompleted,
+    carryover: sum.carryover + point.carryover,
+  }), { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 });
+  const totalCompleted = totals.plannedCompleted + totals.unplannedCompleted;
+
+  return {
+    points,
+    totals,
+    planCoverage: totalCompleted > 0
+      ? Math.round((totals.plannedCompleted / totalCompleted) * 100)
+      : 0,
+    commitmentRate: totals.committed > 0
+      ? Math.round((totals.plannedCompleted / totals.committed) * 100)
+      : 0,
+  };
+}
+
+async function getPlanAlignment(
+  repository: InsightsAnalyticsRepository,
+  start: string,
+  end: string,
+): Promise<PlanAlignmentInsights> {
+  const [completions, events] = await Promise.all([
+    repository.listTopLevelTaskCompletionsIn(getRangeBounds(start, end)),
+    repository.listMyDayPlanningEvents({ from: start, to: end }),
+  ]);
+  return buildPlanAlignment(completions, events, start, end);
+}
+
 export async function getSourceBreakdown(
   start: string,
   end: string,
@@ -331,6 +536,35 @@ export async function getSourceBreakdown(
     count: Number(r.count),
     percentage: total > 0 ? Math.round((Number(r.count) / total) * 100) : 0,
   }));
+}
+
+function buildTaskBreakdown(
+  rows: Array<{ value: string; count: number }>,
+  values: readonly string[],
+): TaskBreakdownItem[] {
+  const counts = new Map(rows.map((row) => [row.value, Number(row.count)]));
+  const total = values.reduce((sum, value) => sum + (counts.get(value) ?? 0), 0);
+  return values.map((value) => {
+    const count = counts.get(value) ?? 0;
+    return {
+      value,
+      count,
+      percentage: total > 0 ? Math.round((count / total) * 100) : 0,
+    };
+  });
+}
+
+async function getTaskBreakdown(
+  repository: InsightsAnalyticsRepository,
+): Promise<TaskBreakdown> {
+  const [priorityRows, statusRows] = await Promise.all([
+    repository.countCurrentTasksByPriority(),
+    repository.countCurrentTasksByStatus(),
+  ]);
+  return {
+    byPriority: buildTaskBreakdown(priorityRows, ['critical', 'high', 'medium', 'low', 'none']),
+    byStatus: buildTaskBreakdown(statusRows, ['todo', 'in_progress', 'done', 'cancelled']),
+  };
 }
 
 async function getTaskAgeDistribution(
@@ -494,6 +728,39 @@ async function getProjectActivity(
   return results.sort((a, b) => b.completed - a.completed).slice(0, 8);
 }
 
+async function getWorkActivity(
+  repository: InsightsAnalyticsRepository,
+  start: string,
+  end: string,
+  timeZone: string,
+): Promise<WorkActivityBreakdown> {
+  const activity = await repository.workActivityIn({
+    startInclusive: fromZonedTime(`${start}T00:00:00`, timeZone).toISOString(),
+    endExclusive: fromZonedTime(
+      `${addCalendarDays(end, 1)}T00:00:00`,
+      timeZone,
+    ).toISOString(),
+  });
+  const rank = (items: WorkActivityItem[], dimension: WorkActivityDimension) => (
+    items
+      .filter(item => dimension !== 'tags' || !isSyntheticTag(item.label))
+      .filter(item => item.active > 0 || item.closed > 0)
+      .sort((a, b) => (
+        (b.active + b.closed) - (a.active + a.closed)
+        || b.closed - a.closed
+        || a.label.localeCompare(b.label)
+      ))
+      .slice(0, 8)
+  );
+
+  return {
+    lists: rank(activity.lists, 'lists'),
+    tags: rank(activity.tags, 'tags'),
+    projects: rank(activity.projects, 'projects'),
+    sources: rank(activity.sources, 'sources'),
+  };
+}
+
 async function getRoutineHeatmap(
   repository: InsightsAnalyticsRepository,
   weekMonday: string,
@@ -589,6 +856,213 @@ async function getActivityHeatmap(
   }
 
   return entries;
+}
+
+const WEEKDAYS = [
+  { day: 1, label: 'Mon' },
+  { day: 2, label: 'Tue' },
+  { day: 3, label: 'Wed' },
+  { day: 4, label: 'Thu' },
+  { day: 5, label: 'Fri' },
+  { day: 6, label: 'Sat' },
+  { day: 0, label: 'Sun' },
+] as const;
+
+function getRangeBoundsInTimeZone(start: string, end: string, timeZone: string) {
+  return {
+    startInclusive: fromZonedTime(`${start}T00:00:00`, timeZone).toISOString(),
+    endExclusive: fromZonedTime(
+      `${addCalendarDays(end, 1)}T00:00:00`,
+      timeZone,
+    ).toISOString(),
+  };
+}
+
+function completedDateInTimeZone(timestamp: string, timeZone: string): string | null {
+  const parsed = parseStoredTimestamp(timestamp);
+  if (!Number.isFinite(parsed)) return null;
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(parsed));
+  const values = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function completedHourInTimeZone(timestamp: string, timeZone: string): number | null {
+  const parsed = parseStoredTimestamp(timestamp);
+  if (!Number.isFinite(parsed)) return null;
+  const hour = Number(new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date(parsed)).find(part => part.type === 'hour')?.value);
+  return Number.isInteger(hour) && hour >= 0 && hour <= 23 ? hour : null;
+}
+
+function startOfWeekMonday(date: string): string {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return addCalendarDays(date, day === 0 ? -6 : 1 - day);
+}
+
+function previousMonthToDate(today: string): { start: string; end: string } {
+  const [year, month, day] = today.split('-').map(Number);
+  const previousStartDate = new Date(Date.UTC(year, month - 2, 1));
+  const previousYear = previousStartDate.getUTCFullYear();
+  const previousMonth = previousStartDate.getUTCMonth() + 1;
+  const previousMonthLastDay = new Date(Date.UTC(year, month - 1, 0)).getUTCDate();
+  const comparableDay = Math.min(day, previousMonthLastDay);
+  const prefix = `${previousYear}-${String(previousMonth).padStart(2, '0')}`;
+  return {
+    start: `${prefix}-01`,
+    end: `${prefix}-${String(comparableDay).padStart(2, '0')}`,
+  };
+}
+
+function activityTotals(tasks: number, routines: number): ProductivityActivityTotals {
+  return { tasks, routines, total: tasks + routines };
+}
+
+async function getProductivityInsights(
+  repository: InsightsAnalyticsRepository,
+  periodStart: string,
+  periodEnd: string,
+  today: string,
+  timeZone: string,
+): Promise<ProductivityInsights> {
+  const [completedTasks, routineRows] = await Promise.all([
+    repository.listCompletedTaskTimingsIn(
+      getRangeBoundsInTimeZone(periodStart, periodEnd, timeZone),
+    ),
+    repository.countRoutineCompletionsByDate({ from: periodStart, to: periodEnd }),
+  ]);
+
+  const hourly = Array.from(
+    { length: 24 },
+    (_, hour): HourlyProductivityEntry => ({ hour, taskCompletions: 0 }),
+  );
+  const weekdays = WEEKDAYS.map(
+    ({ day, label }): WeekdayProductivityEntry => ({
+      day,
+      label,
+      taskCompletions: 0,
+      routineCompletions: 0,
+      total: 0,
+    }),
+  );
+  const weekdaysByDay = new Map(weekdays.map(entry => [entry.day, entry]));
+  let onTime = 0;
+  let late = 0;
+  let withoutDueDate = 0;
+
+  for (const task of completedTasks) {
+    if (!task.completedAt) continue;
+    const completedDate = completedDateInTimeZone(task.completedAt, timeZone);
+    const completedHour = completedHourInTimeZone(task.completedAt, timeZone);
+    if (!completedDate || completedHour === null) continue;
+
+    hourly[completedHour].taskCompletions += 1;
+    const weekday = new Date(`${completedDate}T00:00:00Z`).getUTCDay();
+    const weekdayEntry = weekdaysByDay.get(weekday);
+    if (weekdayEntry) weekdayEntry.taskCompletions += 1;
+
+    const dueDate = task.dueDate?.slice(0, 10);
+    if (!dueDate) withoutDueDate += 1;
+    else if (completedDate <= dueDate) onTime += 1;
+    else late += 1;
+  }
+
+  for (const row of routineRows) {
+    const weekday = new Date(`${row.date}T00:00:00Z`).getUTCDay();
+    const weekdayEntry = weekdaysByDay.get(weekday);
+    if (weekdayEntry) weekdayEntry.routineCompletions += Number(row.count);
+  }
+  for (const weekday of weekdays) {
+    weekday.total = weekday.taskCompletions + weekday.routineCompletions;
+  }
+
+  const currentWeekStart = startOfWeekMonday(today);
+  const previousWeekStart = addCalendarDays(currentWeekStart, -7);
+  const previousWeekEnd = addCalendarDays(today, -7);
+  const currentMonthStart = `${today.slice(0, 7)}-01`;
+  const previousMonth = previousMonthToDate(today);
+  const comparisonRanges = [
+    {
+      period: 'week' as const,
+      currentStart: currentWeekStart,
+      currentEnd: today,
+      previousStart: previousWeekStart,
+      previousEnd: previousWeekEnd,
+    },
+    {
+      period: 'month' as const,
+      currentStart: currentMonthStart,
+      currentEnd: today,
+      previousStart: previousMonth.start,
+      previousEnd: previousMonth.end,
+    },
+  ];
+  const comparisons = await Promise.all(comparisonRanges.map(async range => {
+    const [
+      currentTasks,
+      previousTasks,
+      currentRoutinesByDate,
+      previousRoutinesByDate,
+    ] = await Promise.all([
+      repository.countTasksCompletedIn(
+        getRangeBoundsInTimeZone(range.currentStart, range.currentEnd, timeZone),
+      ),
+      repository.countTasksCompletedIn(
+        getRangeBoundsInTimeZone(range.previousStart, range.previousEnd, timeZone),
+      ),
+      repository.countRoutineCompletionsByDate({
+        from: range.currentStart,
+        to: range.currentEnd,
+      }),
+      repository.countRoutineCompletionsByDate({
+        from: range.previousStart,
+        to: range.previousEnd,
+      }),
+    ]);
+    const currentRoutines = currentRoutinesByDate.reduce(
+      (sum, row) => sum + Number(row.count),
+      0,
+    );
+    const previousRoutines = previousRoutinesByDate.reduce(
+      (sum, row) => sum + Number(row.count),
+      0,
+    );
+    const current = activityTotals(currentTasks, currentRoutines);
+    const previous = activityTotals(previousTasks, previousRoutines);
+    return {
+      period: range.period,
+      current,
+      previous,
+      changePercent: previous.total > 0
+        ? Math.round(((current.total - previous.total) / previous.total) * 100)
+        : current.total === 0 ? 0 : null,
+    };
+  }));
+
+  const completionsWithDueDate = onTime + late;
+  return {
+    periodStart,
+    periodEnd,
+    timeZone,
+    hourly,
+    weekdays,
+    timeliness: {
+      onTime,
+      late,
+      withoutDueDate,
+      onTimeRate: completionsWithDueDate > 0
+        ? Math.round((onTime / completionsWithDueDate) * 100)
+        : null,
+    },
+    comparisons,
+  };
 }
 
 async function getAvgTaskAge(
@@ -753,7 +1227,9 @@ export async function computeInsightsSection(
       prevAvgAge,
       streak,
       trends,
+      planAlignment,
       sourceBreakdown,
+      taskBreakdown,
       taskAge,
       planningFriction,
     ] = await Promise.all([
@@ -765,7 +1241,9 @@ export async function computeInsightsSection(
       getAvgTaskAge(repository, prevPeriodStart, prevPeriodEnd),
       getStreak(repository),
       getCompletionTrends(repository, periodStart, periodEnd),
+      getPlanAlignment(repository, periodStart, periodEnd),
       getSourceBreakdown(periodStart, periodEnd),
+      getTaskBreakdown(repository),
       getTaskAgeDistribution(repository),
       getPlanningFriction(repository, periodStart, periodEnd),
     ]);
@@ -809,7 +1287,9 @@ export async function computeInsightsSection(
         },
       },
       trends,
+      planAlignment,
       sourceBreakdown,
+      taskBreakdown,
       taskAge,
       planningFriction,
     };
@@ -879,18 +1359,30 @@ export async function computeInsightsSection(
   const repository = await insightsRepository();
   const { today: activityToday, weekMonday } = getRoutineWeekContext(now, timeZone);
   const activityStart = fmtDate(addDays(subYears(new Date(activityToday + 'T12:00:00'), 1), 1));
-  const [projectActivity, routineHeatmap, activityHeatmap] = await Promise.all([
+  const productivityStart = options.startDate ?? daysAgo(activityToday, period - 1);
+  const productivityEnd = options.endDate ?? activityToday;
+  const [projectActivity, workActivity, routineHeatmap, activityHeatmap, productivity] = await Promise.all([
     getProjectActivity(repository, periodStart, periodEnd),
+    getWorkActivity(repository, periodStart, periodEnd, timeZone),
     getRoutineHeatmap(repository, weekMonday, activityToday),
     getActivityHeatmap(repository, activityStart, activityToday),
+    getProductivityInsights(
+      repository,
+      productivityStart,
+      productivityEnd,
+      activityToday,
+      timeZone,
+    ),
   ]);
 
   return {
     section,
     period,
     projectActivity,
+    workActivity,
     routineHeatmap,
     activityHeatmap,
+    productivity,
   };
 }
 
@@ -914,15 +1406,19 @@ export async function computeInsights(
     periodEnd: summary.periodEnd,
     kpis: summary.kpis,
     trends: summary.trends,
+    planAlignment: summary.planAlignment,
     sourceBreakdown: summary.sourceBreakdown,
+    taskBreakdown: summary.taskBreakdown,
     taskAge: summary.taskAge,
     planningFriction: summary.planningFriction,
     projectActivity: activity.projectActivity,
+    workActivity: activity.workActivity,
     routineHeatmap: activity.routineHeatmap,
     delivery: delivery.delivery,
     deliveryFilters: delivery.deliveryFilters,
     deliverySemantics: delivery.deliverySemantics,
     activityHeatmap: activity.activityHeatmap,
+    productivity: activity.productivity,
     flow: flow.flow,
   };
 }

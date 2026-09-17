@@ -69,6 +69,8 @@ function hierarchyCommandTaskIds(command: ProjectHierarchyCommand): string[] {
       return command.states.map((state) => state.taskId);
     case 'update_phase_item':
       return [command.taskId];
+    case 'replace_phase_structure':
+      return command.placements.map((placement) => placement.taskId);
     case 'reorder_phases':
       return [];
   }
@@ -85,6 +87,7 @@ interface ProjectPageDataContextValue {
   progress: ProgressSummary;
   phaseEntries: Record<string, PhaseTaskEntry[]>;
   taskToPhase: Map<string, ProjectPhase>;
+  unassignedTasks: ProjectTask[];
   phaseMenuItems: Array<{ id: string; name: string }>;
   reportRefreshKey: string;
 }
@@ -108,10 +111,9 @@ interface ProjectPageTaskInteractionsContextValue {
   notesOpenRequest: TaskNotesOpenRequest | null;
   openTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
   clearTaskNotesRequest: () => void;
-  toggleTask: (taskId: string) => void;
+  selectTask: (taskId: string) => void;
   handleTaskClick: (taskId: string) => void;
   handleTaskDoubleClick: (taskId: string) => void;
-  cancelPendingDeselect: () => void;
   handleGraphTaskSelect: (taskId: string | null) => void;
   allProjects: HubProject[];
   completingIds: Set<string>;
@@ -183,10 +185,9 @@ export function ProjectPageProvider({
   const { setQuickAddFilter, clearQuickAddFilter } = useQuickAddContext();
 
   const {
-    cancelPendingDeselect,
     handleTaskClick,
     handleTaskDoubleClick,
-    toggleTask,
+    selectTask,
   } = useTaskSelection({
     selectedTaskId,
     onSelectionChange: (taskId) => {
@@ -198,14 +199,12 @@ export function ProjectPageProvider({
   });
 
   const handleGraphTaskSelect = useCallback((taskId: string | null) => {
-    cancelPendingDeselect();
     setNotesOpenRequest(null);
     setDetailMode('panel');
     setSelectedTaskId(taskId);
-  }, [cancelPendingDeselect, setSelectedTaskId]);
+  }, [setSelectedTaskId]);
 
   const openTaskNotes = useCallback((taskId: string, mode: 'read' | 'edit') => {
-    cancelPendingDeselect();
     setDetailMode('panel');
     setSelectedTaskId(taskId);
     notesRequestIdRef.current += 1;
@@ -214,7 +213,7 @@ export function ProjectPageProvider({
       taskId,
       mode,
     });
-  }, [cancelPendingDeselect, setSelectedTaskId]);
+  }, [setSelectedTaskId]);
 
   const clearTaskNotesRequest = useCallback(() => {
     setNotesOpenRequest(null);
@@ -507,6 +506,12 @@ export function ProjectPageProvider({
     }
     return mapping;
   }, [phaseItemsByPhase, phases]);
+  const unassignedTasks = useMemo(
+    () => phases.length > 0
+      ? tasks.filter((task) => !taskToPhase.has(task.id))
+      : [],
+    [phases.length, taskToPhase, tasks],
+  );
   const phaseMenuItems = useMemo(
     () => phases.map((phase) => ({ id: phase.id, name: phase.name })),
     [phases],
@@ -533,6 +538,7 @@ export function ProjectPageProvider({
     progress,
     phaseEntries,
     taskToPhase,
+    unassignedTasks,
     phaseMenuItems,
     reportRefreshKey,
   }), [
@@ -548,6 +554,7 @@ export function ProjectPageProvider({
     reportRefreshKey,
     taskToPhase,
     tasks,
+    unassignedTasks,
   ]);
 
   const mutationsValue = useMemo<ProjectPageMutationsContextValue>(() => ({
@@ -574,10 +581,9 @@ export function ProjectPageProvider({
     notesOpenRequest,
     openTaskNotes,
     clearTaskNotesRequest,
-    toggleTask,
+    selectTask,
     handleTaskClick,
     handleTaskDoubleClick,
-    cancelPendingDeselect,
     handleGraphTaskSelect,
     allProjects,
     completingIds: taskActions.completingIds,
@@ -603,8 +609,7 @@ export function ProjectPageProvider({
     taskActions.handleCompleteTask,
     taskActions.handleRemoveFromMyDay,
     taskActions.myDayTaskIds,
-    cancelPendingDeselect,
-    toggleTask,
+    selectTask,
   ]);
 
   return (

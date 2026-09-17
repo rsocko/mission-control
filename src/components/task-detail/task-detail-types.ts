@@ -27,6 +27,9 @@ export interface Subtask {
   id: string;
   title: string;
   status: string;
+  sourceId?: string;
+  connectorType?: string;
+  siblingOrder?: number | null;
 }
 
 /** Full task record backing the detail panel. */
@@ -42,6 +45,9 @@ export interface TaskDetail {
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  lastSyncedAt?: string;
+  pushRetryCount?: number;
   sourceListId: string | null;
   sourceListName: string | null;
   sourceId: string | null;
@@ -52,6 +58,7 @@ export interface TaskDetail {
   tagIds: string[];
   projectIds: string[];
   subtasks: Subtask[];
+  subtaskOrderRevision?: number;
   metadata: string | null;
   estimatedDuration?: number | null;
   recurrence?: string | null;
@@ -60,6 +67,10 @@ export interface TaskDetail {
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;
   reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   reminderTimezone?: string;
   snoozedUntil?: string | null;
   isInMyDay?: boolean;

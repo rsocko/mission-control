@@ -1,16 +1,18 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { SearchResult } from '@/lib/search/fts';
+import type { SearchFacets, SearchResult } from '@/lib/search/fts';
 import { fuseHybridResults } from '@/lib/search/hybrid-ranking';
 
 type SearchScope = 'tasks' | 'notifications' | 'all';
+type SearchDate = '7d' | '30d' | 'overdue';
 
 interface SearchResponse {
   note?: string | null;
   semanticAvailable?: boolean;
   semanticEnabled?: boolean;
   durationMs?: number;
+  facets?: SearchFacets;
   results: SearchResult[];
 }
 
@@ -21,6 +23,8 @@ interface UseProgressiveSearchOptions {
   limit?: number;
   source?: string | null;
   status?: string | null;
+  notificationKind?: 'triage' | 'notes' | null;
+  date?: SearchDate | null;
   excludeDone?: boolean;
   universeEligible?: boolean;
 }
@@ -51,6 +55,8 @@ export function useProgressiveSearch({
   limit = 20,
   source = null,
   status = null,
+  notificationKind = null,
+  date = null,
   excludeDone = false,
   universeEligible = false,
 }: UseProgressiveSearchOptions) {
@@ -65,6 +71,7 @@ export function useProgressiveSearch({
   const [note, setNote] = useState<string | null>(null);
   const [semanticEnabled, setSemanticEnabled] = useState(false);
   const [semanticAvailable, setSemanticAvailable] = useState(false);
+  const [facets, setFacets] = useState<SearchFacets>({ sources: [], statuses: [] });
   const [capabilityReady, setCapabilityReady] = useState(false);
   const [keywordRevision, setKeywordRevision] = useState(0);
 
@@ -102,6 +109,7 @@ export function useProgressiveSearch({
       setKeywordDurationMs(null);
       setSemanticDurationMs(null);
       setNote(null);
+      setFacets({ sources: [], statuses: [] });
       return;
     }
 
@@ -115,6 +123,8 @@ export function useProgressiveSearch({
     });
     if (source) params.set('source', source);
     if (status) params.set('status', status);
+    if (notificationKind) params.set('notificationKind', notificationKind);
+    if (date) params.set('date', date);
     if (excludeDone) params.set('excludeDone', 'true');
     if (universeEligible) params.set('universeEligible', 'true');
 
@@ -131,6 +141,7 @@ export function useProgressiveSearch({
         setKeywordResults(payload.results);
         setKeywordDurationMs(payload.durationMs ?? null);
         setNote(payload.note ?? null);
+        setFacets(payload.facets ?? { sources: [], statuses: [] });
         setKeywordRevision(revision);
       })
       .catch((error: unknown) => {
@@ -138,6 +149,7 @@ export function useProgressiveSearch({
         setKeywordResults([]);
         setKeywordDurationMs(null);
         setNote(error instanceof Error ? error.message : 'Search failed.');
+        setFacets({ sources: [], statuses: [] });
       })
       .finally(() => {
         if (!controller.signal.aborted && requestRevisionRef.current === revision) {
@@ -146,7 +158,18 @@ export function useProgressiveSearch({
       });
 
     return () => controller.abort();
-  }, [enabled, excludeDone, limit, normalizedQuery, source, status, type, universeEligible]);
+  }, [
+    date,
+    enabled,
+    excludeDone,
+    limit,
+    normalizedQuery,
+    notificationKind,
+    source,
+    status,
+    type,
+    universeEligible,
+  ]);
 
   useEffect(() => {
     if (
@@ -170,6 +193,8 @@ export function useProgressiveSearch({
     });
     if (source) params.set('source', source);
     if (status) params.set('status', status);
+    if (notificationKind) params.set('notificationKind', notificationKind);
+    if (date) params.set('date', date);
     if (excludeDone) params.set('excludeDone', 'true');
     if (universeEligible) params.set('universeEligible', 'true');
 
@@ -194,11 +219,13 @@ export function useProgressiveSearch({
     return () => controller.abort();
   }, [
     capabilityReady,
+    date,
     enabled,
     excludeDone,
     keywordRevision,
     limit,
     normalizedQuery,
+    notificationKind,
     semanticAvailable,
     semanticEnabled,
     source,
@@ -226,5 +253,6 @@ export function useProgressiveSearch({
     semanticDurationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   };
 }

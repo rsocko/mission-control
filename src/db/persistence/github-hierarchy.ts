@@ -37,6 +37,7 @@ export interface GitHubHierarchyTaskIdentityRow {
 /** The full task columns the fenced apply re-reads and mutates. */
 export interface GitHubHierarchyTaskRow extends GitHubHierarchyTaskIdentityRow {
   parentId: string | null;
+  siblingOrder?: number | null;
   depth: number;
 }
 
@@ -67,6 +68,10 @@ export interface GitHubHierarchyTaskUpdate {
   taskId: string;
   parentId: string | null;
   depth: number;
+  /** Whether this update changes either sibling membership or sibling position. */
+  subtaskOrderChanged?: boolean;
+  /** Canonical source order, present only for an observed hierarchy endpoint. */
+  siblingOrder?: number | null;
   /** New metadata object, present only when `metadata.githubParent` changed. */
   metadata?: Record<string, unknown>;
 }

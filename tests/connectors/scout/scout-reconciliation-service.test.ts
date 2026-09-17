@@ -60,12 +60,16 @@ function testDatabase() {
       status TEXT DEFAULT 'todo' NOT NULL, priority TEXT DEFAULT 'none' NOT NULL,
       planning_horizon TEXT,
       due_date TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, completed_at TEXT,
-      parent_id TEXT, depth INTEGER DEFAULT 0 NOT NULL, is_checklist_item INTEGER DEFAULT 0 NOT NULL,
+      deleted_at TEXT,
+      parent_id TEXT, sibling_order INTEGER, subtask_order_revision INTEGER DEFAULT 0 NOT NULL,
+      depth INTEGER DEFAULT 0 NOT NULL, is_checklist_item INTEGER DEFAULT 0 NOT NULL,
       source_list_id TEXT, source_list_name TEXT, assignee TEXT, micro_status TEXT, status_reason TEXT,
       metadata TEXT DEFAULT '{}' NOT NULL, sync_status TEXT DEFAULT 'synced' NOT NULL,
       last_synced_at TEXT NOT NULL, push_retry_count INTEGER DEFAULT 0 NOT NULL,
       kanban_column TEXT, kanban_order REAL, snoozed_until TEXT, reminder_at TEXT,
-      reminder_relative TEXT, reminder_due_time TEXT,
+      reminder_relative TEXT, reminder_due_time TEXT, reminder_nag_interval INTEGER,
+      reminder_nag_stop_at TEXT, reminder_nag_series_id TEXT,
+      reminder_nag_sequence INTEGER DEFAULT 0 NOT NULL,
       effort INTEGER, is_bulk_import INTEGER DEFAULT 0 NOT NULL,
       local_disposition TEXT DEFAULT 'active' NOT NULL,
       push_count INTEGER DEFAULT 0 NOT NULL,
@@ -708,12 +712,14 @@ function createSqliteScoutContractHarness(): ScoutPersistenceContractHarness {
       connector_instance_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT,
       status TEXT NOT NULL DEFAULT 'todo', priority TEXT NOT NULL DEFAULT 'none',
       due_date TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-      completed_at TEXT, depth INTEGER NOT NULL DEFAULT 0,
+      completed_at TEXT, deleted_at TEXT, depth INTEGER NOT NULL DEFAULT 0,
       is_checklist_item INTEGER NOT NULL DEFAULT 0, source_list_id TEXT,
       source_list_name TEXT, micro_status TEXT, status_reason TEXT,
       metadata TEXT NOT NULL DEFAULT '{}', sync_status TEXT NOT NULL DEFAULT 'synced',
       last_synced_at TEXT NOT NULL, snoozed_until TEXT, reminder_at TEXT,
-      reminder_relative TEXT, reminder_due_time TEXT
+      reminder_relative TEXT, reminder_due_time TEXT, reminder_nag_interval INTEGER,
+      reminder_nag_stop_at TEXT, reminder_nag_series_id TEXT,
+      reminder_nag_sequence INTEGER DEFAULT 0 NOT NULL
     );
     CREATE UNIQUE INDEX idx_tasks_source_connector ON tasks(source_id, connector_instance_id);
     CREATE TABLE task_field_states (

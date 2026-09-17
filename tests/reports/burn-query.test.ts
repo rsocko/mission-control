@@ -20,6 +20,7 @@ function createDatabase() {
     CREATE TABLE hub_projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      appearance TEXT,
       started_at TEXT,
       target_date TEXT
     );
@@ -34,7 +35,8 @@ function createDatabase() {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      completed_at TEXT
+      completed_at TEXT,
+      deleted_at TEXT
     );
     CREATE TABLE task_history_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,13 +98,13 @@ describe('getBurnReport', () => {
   it('queries historical project and phase members rather than only current junction rows', async () => {
     const { sqlite, repository } = createDatabase();
     sqlite.exec(`
-      INSERT INTO hub_projects VALUES (
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
         'project-1', 'Reporting', '2026-07-01', '2026-07-31'
       );
       INSERT INTO project_phases VALUES (
         'phase-1', 'project-1', 'Build', '2026-07-01', '2026-07-15'
       );
-      INSERT INTO tasks VALUES
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES
         ('task-1', 'Migrated task', '2026-07-01T08:00:00.000Z', '2026-07-01T10:00:00.000Z'),
         ('task-2', 'Added task', '2026-07-01T08:00:00.000Z', NULL);
     `);
@@ -177,10 +179,10 @@ describe('getBurnReport', () => {
   it('loads migration baselines after the requested range to reconstruct earlier lifecycle dates', async () => {
     const { sqlite, repository } = createDatabase();
     sqlite.exec(`
-      INSERT INTO hub_projects VALUES (
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
         'project-1', 'Reporting', '2026-06-01', '2026-08-31'
       );
-      INSERT INTO tasks VALUES (
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES (
         'task-1',
         'Historical task',
         '2026-06-10T08:00:00.000Z',
@@ -225,10 +227,10 @@ describe('getBurnReport', () => {
   it('loads later project additions to reconstruct scope in an earlier requested range', async () => {
     const { sqlite, repository } = createDatabase();
     sqlite.exec(`
-      INSERT INTO hub_projects VALUES (
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
         'project-1', 'Reporting', '2025-03-01', '2026-08-31'
       );
-      INSERT INTO tasks VALUES (
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES (
         'task-1',
         'Older organized task',
         '2025-03-25T08:00:00.000Z',

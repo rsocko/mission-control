@@ -11,6 +11,7 @@ import {
   registerDefaultNotificationProviders,
 } from '@/lib/notifications/providers';
 import { executeHomeAssistantProviderAction } from '@/lib/notifications/providers/home-assistant-action';
+import { syncLogger } from '@/lib/logger';
 
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
 const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
@@ -54,6 +55,22 @@ function asRecord(value: unknown): Record<string, unknown> {
 function parseActionPayload(value: unknown): Record<string, unknown> {
   if (typeof value !== 'string') return asRecord(value);
   return asRecord(JSON.parse(value));
+}
+
+async function queueHomeAssistantReconciliation(
+  connectorId: string,
+  notificationId: string,
+): Promise<void> {
+  try {
+    const { syncScheduler } = await import('@/lib/sync');
+    await syncScheduler.queueFollowUpSync(connectorId);
+  } catch (error) {
+    syncLogger.warn({
+      err: error,
+      connectorId,
+      notificationId,
+    }, 'Failed to queue Home Assistant action reconciliation');
+  }
 }
 
 export async function POST(
@@ -157,6 +174,12 @@ export async function POST(
           success: true,
           error: null,
         });
+      }
+      if (
+        HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType)
+        && notification.connectorInstanceId
+      ) {
+        await queueHomeAssistantReconciliation(notification.connectorInstanceId, id);
       }
       return NextResponse.json({ success: true, result: providerResult.result });
     }

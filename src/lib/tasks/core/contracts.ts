@@ -490,6 +490,8 @@ export interface TaskCoreTaskRow {
   readonly completedAt: string | null;
   readonly recurrenceGeneratedFromTaskId: string | null;
   readonly parentId: string | null;
+  readonly siblingOrder?: number | null;
+  readonly subtaskOrderRevision?: number;
   readonly depth: number;
   readonly isChecklistItem: boolean;
   readonly sourceListId: string | null;
@@ -507,6 +509,10 @@ export interface TaskCoreTaskRow {
   readonly reminderAt: string | null;
   readonly reminderRelative: string | null;
   readonly reminderDueTime: string | null;
+  readonly reminderNagInterval?: number | null;
+  readonly reminderNagStopAt?: string | null;
+  readonly reminderNagSeriesId?: string | null;
+  readonly reminderNagSequence?: number;
   readonly effort: number | null;
   readonly isBulkImport: boolean;
 }
@@ -593,6 +599,7 @@ export interface TaskDetailSubtask {
   readonly sourceId: string;
   readonly connectorType: string;
   readonly effort: number | null;
+  readonly siblingOrder?: number | null;
 }
 
 export interface TaskDetailResult {
@@ -600,6 +607,7 @@ export interface TaskDetailResult {
   readonly tagIds: string[];
   readonly projectIds: string[];
   readonly subtasks: TaskDetailSubtask[];
+  readonly subtaskOrderRevision: number;
   readonly schedule: Pick<
     TaskScheduleRow,
     'estimatedDuration' | 'recurrence' | 'recurrenceMode'
@@ -720,6 +728,10 @@ export interface TaskCoreTaskPatch {
   readonly reminderAt?: string | null;
   readonly reminderRelative?: string | null;
   readonly reminderDueTime?: string | null;
+  readonly reminderNagInterval?: number | null;
+  readonly reminderNagStopAt?: string | null;
+  readonly reminderNagSeriesId?: string | null;
+  readonly reminderNagSequence?: number;
   readonly effort?: number | null;
   readonly metadata?: Record<string, unknown>;
   readonly syncStatus?: string;
@@ -732,6 +744,9 @@ export interface TaskRecurrenceSuccessorMutation {
   readonly scheduledDate: string;
   readonly scheduledTime: string | null;
   readonly reminderAt: string | null;
+  readonly reminderNagInterval: number | null;
+  readonly reminderNagStopAt: string | null;
+  readonly reminderNagSeriesId: string | null;
   readonly metadata: Record<string, unknown>;
 }
 
@@ -797,6 +812,21 @@ export type TaskRemovalOutcome =
       readonly taskVersion: string | null;
     };
 
+export type TaskRestoreOutcome =
+  | { readonly kind: 'not-found' }
+  | { readonly kind: 'not-deleted' }
+  | {
+      readonly kind: 'restored';
+      readonly task: {
+        readonly id: string;
+        readonly title: string;
+        readonly description: string | null;
+        readonly sourceListName: string | null;
+        readonly connectorType: string;
+        readonly status: string;
+      };
+    };
+
 export interface TaskRemovalRepository {
   getTaskRemovalContext(taskId: string): Promise<TaskRemovalContext | null>;
   applyTaskRemoval(input: {
@@ -815,6 +845,8 @@ export interface TaskRemovalRepository {
     readonly leaseToken: string;
     readonly expectedUpdatedAt: string;
   }): Promise<TaskRemovalOutcome>;
+  restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome>;
+  purgeDeletedBefore(cutoff: string): Promise<readonly string[]>;
 }
 
 /**
@@ -1369,7 +1401,19 @@ export interface TaskAncillarySubtask {
   readonly priority: string;
   readonly effort: number | null;
   readonly parentId: string | null;
+  readonly siblingOrder?: number | null;
 }
+
+export interface TaskSubtaskOrderState {
+  readonly revision: number;
+  readonly subtasks: TaskAncillarySubtask[];
+}
+
+export type TaskSubtaskReorderOutcome =
+  | { readonly kind: 'reordered'; readonly revision: number }
+  | { readonly kind: 'parent-not-found' }
+  | { readonly kind: 'invalid-children' }
+  | { readonly kind: 'revision-conflict'; readonly currentRevision: number };
 
 export interface TaskSubtaskProposalSnapshot {
   readonly parentUpdatedAt: string;
@@ -1445,6 +1489,12 @@ export interface TaskAncillaryRepository {
     readonly now: string;
   }): Promise<TaskPromoteOutcome>;
   listSubtasks(parentTaskId: string): Promise<TaskAncillarySubtask[]>;
+  getSubtaskOrderState(parentTaskId: string): Promise<TaskSubtaskOrderState | null>;
+  reorderSubtasks(input: {
+    readonly parentTaskId: string;
+    readonly orderedChildIds: readonly string[];
+    readonly expectedRevision: number;
+  }): Promise<TaskSubtaskReorderOutcome>;
   getSubtaskProposalSnapshot(
     parentTaskId: string,
   ): Promise<TaskSubtaskProposalSnapshot | null>;

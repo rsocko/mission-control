@@ -99,9 +99,19 @@ export function describeAnalyticsRepositoriesContract(
 
     // ─── KPI counts ───────────────────────────────────────────────────────
 
-    it('counts open work by status, due window, priority, assignee, and source', async () => {
-      await insert('tasks', task('open-1', { status: 'todo', due_date: '2026-03-01', priority: 'high' }));
-      await insert('tasks', task('open-2', { status: 'in_progress', due_date: '2026-03-12', assignee: 'me' }));
+    it('counts open work by status, due window, priority, assignee, horizon, and source', async () => {
+      await insert('tasks', task('open-1', {
+        status: 'todo',
+        due_date: '2026-03-01',
+        priority: 'high',
+        planning_horizon: 'next',
+      }));
+      await insert('tasks', task('open-2', {
+        status: 'in_progress',
+        due_date: '2026-03-12',
+        assignee: 'me',
+        planning_horizon: 'soon',
+      }));
       await insert('tasks', task('done-1', { status: 'done', due_date: '2026-03-01' }));
       await insert('tasks', task('cancelled-1', { status: 'cancelled', due_date: '2026-03-01' }));
       await insert('tasks', task('doc-1', { status: 'todo', connector_type: 'document-intelligence' }));
@@ -111,7 +121,10 @@ export function describeAnalyticsRepositoriesContract(
       expect(await kpis.countOpenTasksDueBefore('2026-03-10')).toBe(1);
       expect(await kpis.countOpenTasksDueBetween({ from: '2026-03-10', to: '2026-03-20' })).toBe(1);
       expect(await kpis.countOpenTasksWithPriorities(['high', 'critical'])).toBe(1);
-      expect(await kpis.countOpenTasksWithAssignee()).toBe(1);
+      expect(await kpis.countOpenTasksAssignedToMe()).toBe(2);
+      expect(await kpis.countOpenTasksWithPlanningHorizons(['next'])).toBe(1);
+      expect(await kpis.countOpenTasksWithPlanningHorizons(['next', 'soon'])).toBe(2);
+      expect(await kpis.countOpenTasksWithoutPlanningHorizon()).toBe(1);
       expect(await kpis.countOpenTasksByConnectorType('document-intelligence')).toBe(1);
       expect(typeof await kpis.countOpenTasks()).toBe('number');
     });
@@ -137,6 +150,39 @@ export function describeAnalyticsRepositoriesContract(
       const focus = await kpis.listFocusItemStatuses('today', '2026-03-10');
       expect(focus.map((item) => item.id).sort()).toEqual(['focus-1', 'focus-2']);
       expect(focus.filter((item) => item.status === 'done')).toHaveLength(1);
+    });
+
+    it('matches Assigned to Me against enabled GitHub identity evidence', async () => {
+      await insert('connector_configs', {
+        id: 'github-live',
+        type: 'github-issues',
+        name: 'GitHub',
+        capabilities: '{}',
+        settings: JSON.stringify({ authenticatedUser: 'octocat' }),
+        enabled: true,
+        deleted_at: null,
+        created_at: NOW,
+        updated_at: NOW,
+      });
+      await insert('tasks', task('github-mine', {
+        connector_type: 'github-issues',
+        connector_instance_id: 'github-live',
+        status: 'todo',
+        assignee: 'octocat',
+      }));
+      await insert('tasks', task('github-theirs', {
+        connector_type: 'github-issues',
+        connector_instance_id: 'github-live',
+        status: 'todo',
+        assignee: 'hubot',
+      }));
+      await insert('tasks', task('github-unassigned', {
+        connector_type: 'github-issues',
+        connector_instance_id: 'github-live',
+        status: 'todo',
+      }));
+
+      expect(await harness.repository.kpis.countOpenTasksAssignedToMe()).toBe(1);
     });
 
     it('counts triage backlog and staleness by captured text order', async () => {
@@ -197,7 +243,11 @@ export function describeAnalyticsRepositoriesContract(
     // ─── Instant comparison parity ────────────────────────────────────────
 
     it('compares stored timestamps by instant and drops unparsable text', async () => {
-      await insert('tasks', task('in-utc', { status: 'done', completed_at: '2026-03-10T01:00:00.000Z' }));
+      await insert('tasks', task('in-utc', {
+        status: 'done',
+        completed_at: '2026-03-10T01:00:00.000Z',
+        due_date: '2026-03-09',
+      }));
       await insert('tasks', task('in-precise', { status: 'done', completed_at: '2026-03-10T01:00:00.1234567Z' }));
       await insert('tasks', task('in-offsetless', { status: 'done', completed_at: '2026-03-10T02:00:00' }));
       await insert('tasks', task('in-offset', { status: 'done', completed_at: '2026-03-10T08:00:00+05:00' }));
@@ -214,6 +264,12 @@ export function describeAnalyticsRepositoriesContract(
       expect(await harness.repository.kpis.countTasksCompletedIn(range)).toBe(5);
       expect(await harness.repository.insights.countTasksCompletedIn(range)).toBe(5);
       expect(await harness.repository.insights.listCompletedTimestampsIn(range)).toHaveLength(5);
+      const timings = await harness.repository.insights.listCompletedTaskTimingsIn(range);
+      expect(timings).toHaveLength(5);
+      expect(timings).toContainEqual({
+        completedAt: '2026-03-10T01:00:00.000Z',
+        dueDate: '2026-03-09',
+      });
     });
 
     it('treats the instant range as half open at both ends', async () => {
@@ -301,6 +357,27 @@ export function describeAnalyticsRepositoriesContract(
 
     // ─── Insights aggregates and ordering ─────────────────────────────────
 
+    it('counts current top-level task inventory by priority and status', async () => {
+      await insert('tasks', task('todo-high', { status: 'todo', priority: 'high' }));
+      await insert('tasks', task('progress-high', { status: 'in_progress', priority: 'high' }));
+      await insert('tasks', task('done-high', { status: 'done', priority: 'high' }));
+      await insert('tasks', task('done-low', { status: 'done', priority: 'low' }));
+      await insert('tasks', task('dismissed', { status: 'todo', local_disposition: 'dismissed' }));
+      await insert('tasks', task('deleted', { status: 'todo', deleted_at: NOW }));
+      await insert('tasks', task('subtask', { status: 'todo', depth: 1 }));
+      await insert('tasks', task('checklist', { status: 'todo', is_checklist_item: true }));
+
+      const insights = harness.repository.insights;
+      expect(await insights.countCurrentTasksByPriority()).toEqual([
+        { value: 'high', count: 2 },
+      ]);
+      expect(await insights.countCurrentTasksByStatus()).toEqual([
+        { value: 'done', count: 2 },
+        { value: 'in_progress', count: 1 },
+        { value: 'todo', count: 1 },
+      ]);
+    });
+
     it('orders the source breakdown by count then connector type', async () => {
       const completedAt = '2026-03-10T01:00:00.000Z';
       for (const id of ['a1', 'a2']) {
@@ -319,6 +396,78 @@ export function describeAnalyticsRepositoriesContract(
         { source: 'beta', count: 1 },
       ]);
       expect(typeof rows[0].count).toBe('number');
+    });
+
+    it('compares active and period-closed top-level work across organization dimensions', async () => {
+      const completedAt = '2026-03-10T01:00:00.000Z';
+      await insert('hub_projects', {
+        id: 'p-1', name: 'Launch', color: '#3b82f6', status: 'active', hidden: false,
+        created_at: NOW, updated_at: NOW,
+      });
+      await insert('tags', {
+        id: 'tag-1', name: 'Planning', slug: 'planning', type: 'hub', color: '#3b82f6',
+        created_at: NOW,
+      });
+      await insert('tags', {
+        id: 'tag-alias', name: 'Plan', slug: 'plan-source', type: 'source', color: '#3b82f6',
+        unified_into: 'tag-1', created_at: NOW,
+      });
+      await insert('source_lists', {
+        id: 'list-1', connector_instance_id: 'connector-live', source_id: 'remote-work',
+        name: 'Work old name', type: 'list', user_display_name: 'Work',
+      });
+      await insert('connector_configs', {
+        id: 'connector-two',
+        type: 'local',
+        name: 'Second',
+        capabilities: '{}',
+        created_at: NOW,
+        updated_at: NOW,
+      });
+      await insert('source_lists', {
+        id: 'list-2', connector_instance_id: 'connector-two', source_id: 'remote-work',
+        name: 'Work', type: 'list',
+      });
+      await insert('tasks', task('active-1', {
+        status: 'todo', connector_type: 'github', source_list_id: 'remote-work',
+        source_list_name: 'Stale Work',
+      }));
+      await insert('tasks', task('closed-1', {
+        status: 'done', completed_at: completedAt, connector_type: 'github',
+        source_list_id: 'remote-work', source_list_name: 'Stale Work',
+      }));
+      await insert('tasks', task('second-list', {
+        status: 'todo', connector_type: 'local', connector_instance_id: 'connector-two',
+        source_list_id: 'remote-work', source_list_name: 'Work',
+      }));
+      await insert('tasks', task('old-closed', {
+        status: 'done', completed_at: '2026-03-01T01:00:00.000Z', connector_type: 'github',
+        source_list_id: 'remote-work', source_list_name: 'Stale Work',
+      }));
+      await insert('tasks', task('cancelled-1', {
+        status: 'cancelled', connector_type: 'github', source_list_id: 'remote-work',
+        source_list_name: 'Stale Work',
+      }));
+      await insert('task_tags', { task_id: 'active-1', tag_id: 'tag-alias' });
+      await insert('task_tags', { task_id: 'closed-1', tag_id: 'tag-1' });
+      await insert('task_projects', { task_id: 'active-1', project_id: 'p-1' });
+      await insert('task_projects', { task_id: 'closed-1', project_id: 'p-1' });
+
+      const rows = await harness.repository.insights.workActivityIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      });
+
+      expect([...rows.lists].sort((a, b) => a.key.localeCompare(b.key))).toEqual([
+        { key: 'connector-live:remote-work', label: 'Work', active: 1, closed: 1 },
+        { key: 'connector-two:remote-work', label: 'Work', active: 1, closed: 0 },
+      ]);
+      expect(rows.tags).toEqual([{ key: 'tag-1', label: 'Planning', active: 1, closed: 1 }]);
+      expect(rows.projects).toEqual([{ key: 'p-1', label: 'Launch', active: 1, closed: 1 }]);
+      expect([...rows.sources].sort((a, b) => a.key.localeCompare(b.key))).toEqual([
+        { key: 'github', label: 'github', active: 1, closed: 1 },
+        { key: 'local', label: 'local', active: 1, closed: 0 },
+      ]);
     });
 
     it('joins planning-friction signals to their top-level task', async () => {
@@ -476,11 +625,72 @@ export function describeAnalyticsRepositoriesContract(
         startInclusive: '2026-03-10T00:00:00.000Z',
         endExclusive: '2026-03-11T00:00:00.000Z',
       })).toEqual([{
+        id: 'done-1',
         createdAt: '2026-03-08T00:00:00.000Z',
         completedAt: '2026-03-10T00:00:00.000Z',
       }]);
       expect(await insights.listCompletedTimestampsSince('2026-03-09T00:00:00.000Z'))
         .toEqual(['2026-03-10T00:00:00.000Z']);
+      expect(await insights.listTopLevelTaskCompletionsIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      })).toEqual([{
+        id: 'done-1',
+        completedAt: '2026-03-10T00:00:00.000Z',
+      }]);
+    });
+
+    it('excludes subtasks and checklist items from plan-alignment completions', async () => {
+      const completedAt = '2026-03-10T00:00:00.000Z';
+      await insert('tasks', task('done-root', { status: 'done', completed_at: completedAt }));
+      await insert('tasks', task('done-subtask', {
+        status: 'done',
+        depth: 1,
+        completed_at: completedAt,
+      }));
+      await insert('tasks', task('done-checklist', {
+        status: 'done',
+        is_checklist_item: true,
+        completed_at: completedAt,
+      }));
+
+      expect(await harness.repository.insights.listTopLevelTaskCompletionsIn({
+        startInclusive: '2026-03-10T00:00:00.000Z',
+        endExclusive: '2026-03-11T00:00:00.000Z',
+      })).toEqual([{ id: 'done-root', completedAt }]);
+    });
+
+    it('lists My Day planning events by planning date in deterministic order', async () => {
+      await insert('tasks', task('planned'));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_withdrawn',
+        new_value: '2026-03-10',
+        occurred_at: '2026-03-09T20:00:00.000Z',
+      }));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_committed',
+        new_value: '2026-03-10',
+        occurred_at: '2026-03-09T19:00:00.000Z',
+      }));
+      await insert('task_history_events', historyEvent({
+        task_id: 'planned',
+        event_type: 'my_day_committed',
+        new_value: '2026-03-12',
+        occurred_at: '2026-03-09T18:00:00.000Z',
+      }));
+
+      const rows = await harness.repository.insights.listMyDayPlanningEvents({
+        from: '2026-03-10',
+        to: '2026-03-11',
+      });
+
+      expect(rows.map(row => [row.eventType, row.date, row.occurredAt])).toEqual([
+        ['my_day_committed', '2026-03-10', '2026-03-09T19:00:00.000Z'],
+        ['my_day_withdrawn', '2026-03-10', '2026-03-09T20:00:00.000Z'],
+      ]);
+      expect(rows.every(row => typeof row.id === 'number')).toBe(true);
     });
 
     // ─── Flow ─────────────────────────────────────────────────────────────

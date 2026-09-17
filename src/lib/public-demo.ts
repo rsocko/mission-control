@@ -21,6 +21,7 @@ const blockedPrefixes = [
   '/api/mcp',
   '/api/notifications/triage',
   '/api/project-phases/ai-refine',
+  '/api/project-phases/ai-reorganize',
   '/api/project-phases/ai-suggest',
   '/api/push',
   '/api/resets/ai-summary',

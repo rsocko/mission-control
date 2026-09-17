@@ -135,4 +135,29 @@ describe('MobileTriageStream', () => {
     expect(screen.getByText('Urgent item')).toBeInTheDocument();
     expect(screen.queryByText('Evergreen item')).toBeNull();
   });
+
+  it('virtualizes streams above the shared 50-item threshold', () => {
+    const items = Array.from({ length: 51 }, (_, index) => makeItem({
+      id: `item-${index}`,
+      sourceId: `source-${index}`,
+      sourceUrl: `https://example.com/item-${index}`,
+      title: `Triage item ${index}`,
+    }));
+
+    const { container } = render(
+      <MobileTriageStream
+        items={items}
+        loading={false}
+        onItemTap={vi.fn()}
+        activeSourceFilter="all"
+        onSourceFilterChange={vi.fn()}
+        activeTypeFilter={null}
+        onTypeFilterChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('51 items in view')).toBeInTheDocument();
+    expect(container.querySelector('[data-virtualized="true"]')).toBeInTheDocument();
+    expect(screen.queryByText('Triage item 50')).not.toBeInTheDocument();
+  });
 });

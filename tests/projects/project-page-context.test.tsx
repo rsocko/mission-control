@@ -126,8 +126,8 @@ function SharedStateProbe({
       <p>{data.taskToPhase.get(task.id)?.name}</p>
       <p>{interactions.selectedTaskId ?? 'No selection'}</p>
       <p>{interactions.detailMode}</p>
-      <button type="button" onClick={() => interactions.toggleTask(task.id)}>
-        Toggle task
+      <button type="button" onClick={() => interactions.selectTask(task.id)}>
+        Select task
       </button>
       <button type="button" onDoubleClick={() => interactions.handleTaskDoubleClick(task.id)}>
         Open task fullscreen
@@ -226,7 +226,7 @@ describe('ProjectPageContext', () => {
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(screen.getByText('No selection')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select task' }));
     expect(screen.getByText(task.id)).toBeInTheDocument();
   });
 
@@ -273,7 +273,7 @@ describe('ProjectPageContext', () => {
     const dataValue = dataValues.at(-1);
     const mutationValue = mutationValues.at(-1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select task' }));
     await waitFor(() => expect(screen.getByText(task.id)).toBeInTheDocument());
 
     expect(dataValues.at(-1)).toBe(dataValue);

@@ -867,6 +867,15 @@ export interface SemanticQueryRequest {
   excludeConnectorInstanceIds?: string[];
   /** Restricts task projections to records without a parent before scoring. */
   rootTaskOnly?: boolean;
+  /** Restricts alerts to the mobile Inbox or captured-note classification. */
+  notificationKind?: 'triage' | 'notes';
+  /**
+   * Keeps records whose primary date is at or after this ISO timestamp.
+   * Tasks prefer dueDate when present; other records use sourceUpdatedAt.
+   */
+  dateFrom?: string;
+  /** Keeps only tasks with a dueDate before this ISO timestamp. */
+  dueBefore?: string;
   /** Excluded before scoring; never returned even at a lower rank. */
   excludeEntityIds?: string[];
   /** AND-ed portable metadata predicates, applied before the candidate cap. */

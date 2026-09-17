@@ -75,6 +75,7 @@ export function containsLiteral(column: AnyColumn, value: string): SQL {
 /** Never surface tasks from soft-deleted connectors or notification-only sources. */
 export function getTaskSourceVisibilityConditions(): SQL[] {
   return [
+    isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
     notInArray(tasks.connectorType, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]),
   ];

@@ -1,6 +1,7 @@
-import type { ProjectStatus, ProjectHealth, ProjectProgress, HubProject, Tag } from '@/types';
+import type { ProjectStatus, ProjectProgress, HubProject, Tag } from '@/types';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
+import { deriveProjectPulse } from '@/lib/projects/project-pulse';
 
 // ─── STATUS INFERENCE ───────────────────────────────────────────────────────
 
@@ -11,28 +12,6 @@ export function inferProjectStatus(progress: ProjectProgress, override?: Project
   if (progress.percentComplete === 100) return 'completed';
   if (progress.inProgressTasks > 0 || progress.completedTasks > 0) return 'active';
   return 'not_started';
-}
-
-export function inferHealth(
-  targetDate: string | null | undefined,
-  progress: ProjectProgress,
-  overdueTasks: number
-): ProjectHealth {
-  const overduePercent = overdueTasks / Math.max(progress.totalTasks, 1);
-
-  if (overduePercent > 0.3) return 'behind';
-  if (overduePercent > 0.1) return 'at_risk';
-
-  if (targetDate) {
-    const target = new Date(targetDate);
-    const now = new Date();
-    const daysRemaining = (target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-    // At risk if <20% of time left but <80% complete
-    if (daysRemaining < 7 && progress.percentComplete < 80) return 'at_risk';
-    if (daysRemaining < 0 && progress.percentComplete < 100) return 'behind';
-  }
-
-  return 'on_track';
 }
 
 // ─── PROGRESS COMPUTATION ───────────────────────────────────────────────────
@@ -85,7 +64,7 @@ function getProjectTagsMap(rows: Array<Tag & { projectId: string }>): Record<str
 
 export interface CategoryGroup {
   category: string;
-  projects: (HubProject & { progress: ProjectProgress })[];
+  projects: OverviewProject[];
 }
 
 export interface ProjectsOverview {
@@ -116,7 +95,64 @@ export interface OverviewTask {
   completedAt: string | null;
 }
 
-export type OverviewProject = HubProject & { progress: ProjectProgress };
+export interface OverviewPhase {
+  id: string;
+  name: string;
+  status: string;
+  color: string | null;
+  totalTasks: number;
+  completedTasks: number;
+  inProgressTasks: number;
+  percentComplete: number;
+}
+
+export type OverviewProject = HubProject & {
+  progress: ProjectProgress;
+  phases: OverviewPhase[];
+};
+
+export function buildProjectPhaseSummaries(
+  phases: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+    status: string;
+    color: string | null;
+  }>,
+  phaseItems: Array<{ phaseId: string; taskId: string }>,
+  taskMap: Map<string, OverviewTask>,
+): Map<string, OverviewPhase[]> {
+  const phaseTaskIdsMap = new Map<string, string[]>();
+  for (const item of phaseItems) {
+    const taskIds = phaseTaskIdsMap.get(item.phaseId) ?? [];
+    taskIds.push(item.taskId);
+    phaseTaskIdsMap.set(item.phaseId, taskIds);
+  }
+
+  const phasesByProject = new Map<string, OverviewPhase[]>();
+  for (const phase of phases) {
+    const phaseTasks = (phaseTaskIdsMap.get(phase.id) ?? [])
+      .map(taskId => taskMap.get(taskId))
+      .filter((task): task is OverviewTask => task !== undefined);
+    const totalTasks = phaseTasks.length;
+    const completedTasks = phaseTasks.filter(task => task.status === 'done').length;
+    const inProgressTasks = phaseTasks.filter(task => task.status === 'in_progress').length;
+    const projectPhases = phasesByProject.get(phase.projectId) ?? [];
+    projectPhases.push({
+      id: phase.id,
+      name: phase.name,
+      status: phase.status,
+      color: phase.color,
+      totalTasks,
+      completedTasks,
+      inProgressTasks,
+      percentComplete: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+    });
+    phasesByProject.set(phase.projectId, projectPhases);
+  }
+
+  return phasesByProject;
+}
 
 const projectNameCollator = new Intl.Collator('en', {
   numeric: true,
@@ -307,12 +343,30 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
       totalTasks, completedTasks, inProgressTasks, percentComplete,
       health: 'on_track', lastActivity,
     };
-    progress.health = inferHealth(project.targetDate, progress, overdueTasks);
-
     const status = inferProjectStatus(progress, project.statusOverride as ProjectStatus | null);
+    const recentlyCompletedTasks = projectTasks.filter((task) => (
+      task.status === 'done'
+      && task.completedAt
+      && new Date(task.completedAt) >= new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000))
+      && new Date(task.completedAt) <= now
+    )).length;
+    progress.pulse = deriveProjectPulse({
+      totalTasks,
+      completedTasks,
+      percentComplete,
+      overdueTasks,
+      scheduledTasks: projectTasks.filter((task) => Boolean(task.dueDate)).length,
+      targetDate: project.targetDate,
+      lastActivity,
+      recentlyCompletedTasks,
+      lifecycleStatus: status,
+    }, now);
+    progress.health = progress.pulse.legacyHealth;
 
     return { ...project, status, progress };
   });
+
+  const phasesByProject = buildProjectPhaseSummaries(rows.phases, rows.phaseItems, taskMap);
 
   // Get tags (already batched)
   const projectTagsMap = getProjectTagsMap(rows.tags as Array<Tag & { projectId: string }>);
@@ -320,16 +374,17 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
   // Enrich with tags
   const enrichedProjects = projectsWithProgress.map(p => ({
     ...p,
+    phases: phasesByProject.get(p.id) ?? [],
     tags: projectTagsMap[p.id] || [],
     sourceBindings: (p.sourceBindings as unknown) || [],
     autoIncludeRules: (p.autoIncludeRules as unknown) || [],
     kanbanColumns: (p.kanbanColumns as unknown) || [],
     metadata: (p.metadata as Record<string, unknown>) || {},
-  })) as unknown as (HubProject & { progress: ProjectProgress })[];
+  })) as unknown as OverviewProject[];
 
   // Group by category
-  const categoryMap = new Map<string, (HubProject & { progress: ProjectProgress })[]>();
-  const uncategorized: (HubProject & { progress: ProjectProgress })[] = [];
+  const categoryMap = new Map<string, OverviewProject[]>();
+  const uncategorized: OverviewProject[] = [];
 
   for (const project of enrichedProjects) {
     if (project.category) {

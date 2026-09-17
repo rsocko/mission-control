@@ -6,6 +6,7 @@ import {
 
 const mocks = vi.hoisted(() => ({
   listDeletedIds: vi.fn(async () => ['deleted-connector']),
+  keywordFacets: vi.fn(async () => ({ sources: [], statuses: [] })),
   keywordSearch: vi.fn(async () => [{
     type: 'task' as const,
     id: 'task-1',
@@ -45,6 +46,7 @@ describe('poisoned-SQLite PostgreSQL AI search route', () => {
       removeNotification: vi.fn(async () => undefined),
       warmUp: vi.fn(async () => undefined),
       search: mocks.keywordSearch,
+      facets: mocks.keywordFacets,
     });
   });
 
@@ -64,6 +66,10 @@ describe('poisoned-SQLite PostgreSQL AI search route', () => {
     expect(body.results).toHaveLength(1);
     expect(mocks.listDeletedIds).toHaveBeenCalledOnce();
     expect(mocks.keywordSearch).toHaveBeenCalledWith('planning', expect.objectContaining({
+      type: 'tasks',
+      excludeConnectorInstanceIds: ['deleted-connector'],
+    }));
+    expect(mocks.keywordFacets).toHaveBeenCalledWith('planning', expect.objectContaining({
       type: 'tasks',
       excludeConnectorInstanceIds: ['deleted-connector'],
     }));

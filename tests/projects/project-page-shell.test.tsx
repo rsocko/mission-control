@@ -114,6 +114,15 @@ describe('project detail shell', () => {
     expect(screen.queryByRole('heading', { name: 'Description' })).not.toBeInTheDocument();
   });
 
+  it('shows the unphased task count on the Plan tab', async () => {
+    await renderProjectPage();
+
+    const planTab = await screen.findByRole('button', {
+      name: /^Plan \(1\) 1 unphased task$/,
+    });
+    expect(within(planTab).getByLabelText('1 unphased task')).toHaveTextContent('1');
+  });
+
   it('keeps the header usable for an unknown tab query and recovers on selection', async () => {
     navigationState.search = 'tab=not-a-tab';
     await renderProjectPage();
@@ -125,6 +134,16 @@ describe('project detail shell', () => {
     await openProjectTab('Overview');
     expect(await screen.findByRole('heading', { name: 'Description' })).toBeInTheDocument();
     expect(navigationState.push).not.toHaveBeenCalled();
+  });
+
+  it('keeps the project backdrop visible through the sticky header', async () => {
+    await renderProjectPage();
+
+    const header = (await screen.findByRole('heading', { name: 'Shell Project' })).closest('section');
+    expect(header).toHaveClass(
+      '[background:var(--context-header)]',
+      'backdrop-blur-xl',
+    );
   });
 
   it('runs the route-triggered AI proposal while another tab is active', async () => {

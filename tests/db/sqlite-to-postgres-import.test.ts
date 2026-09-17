@@ -302,7 +302,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       expect.stringContaining('0106_task-delay-insights'),
       expect.stringContaining('0109_relative_task_reminders'),
       expect.stringContaining('0111_completion_anchored_recurrence'),
-      expect.stringContaining('0118_add_planning_horizon'),
+      expect.stringContaining('0134_low_next_avengers'),
       expect.stringContaining('recurrence/planning runtimes'),
     ]);
 
@@ -517,9 +517,11 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
   it('derives the complete JSON target inventory from the PostgreSQL schema', () => {
     const columns = expectedJsonTargetColumns();
 
-    expect(columns).toHaveLength(117);
-    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(117);
+    expect(columns).toHaveLength(119);
+    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(119);
     expect(columns).toContainEqual({ table: 'app_settings', column: 'value' });
+    expect(columns).toContainEqual({ table: 'hub_projects', column: 'appearance' });
+    expect(columns).toContainEqual({ table: 'source_lists', column: 'appearance' });
     expect(columns).toContainEqual({ table: 'tasks', column: 'metadata' });
     expect(columns).toContainEqual({ table: 'worker_health_snapshot', column: 'payload' });
     expect(columns).toContainEqual({ table: 'event_outbox', column: 'payload' });
@@ -820,7 +822,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
 
       expect(result.evidence.schema).toMatchObject({
         importTableCount: 163,
-        jsonTargetColumnCount: 117,
+        jsonTargetColumnCount: 119,
       });
       expect(result.evidence.schema.jsonRowsScanned).toBeGreaterThan(0);
     } finally {
@@ -1362,7 +1364,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.command.activationChanged).toBe(false);
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.evidence.schema.sqliteMigrationCount).toBe(232);
+    expect(result.evidence.schema.sqliteMigrationCount).toBe(236);
     expect(result.evidence.schema.importTableCount).toBe(163);
     expect(result.copiedTables).toHaveLength(163);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
@@ -1403,7 +1405,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
       ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(132);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(136);
     } finally {
       sqlite.close();
     }
@@ -1414,7 +1416,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     try {
       replacePriorityEntityTable(sqlite, historicalPriorityEntityColumns);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(131);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(135);
     } finally {
       sqlite.close();
     }
@@ -1470,7 +1472,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
           supportedHistoricalShape: true,
         }),
       ]));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(232);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(236);
     } finally {
       fixture.close();
     }
@@ -1495,16 +1497,19 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         columnOrderMismatch: true,
         supportedHistoricalShape: true,
       });
-      expect(tasksMismatch?.actualColumnOrder.slice(-7)).toEqual([
-        'push_retry_count',
-        'local_disposition',
-        'recurrence_generated_from_task_id',
-        'planning_horizon',
+      expect(tasksMismatch?.actualColumnOrder.slice(-10)).toEqual([
         'push_count',
         'reminder_relative',
         'reminder_due_time',
+        'deleted_at',
+        'sibling_order',
+        'subtask_order_revision',
+        'reminder_nag_interval',
+        'reminder_nag_stop_at',
+        'reminder_nag_series_id',
+        'reminder_nag_sequence',
       ]);
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(232);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(236);
     } finally {
       fixture.close();
     }
@@ -1524,7 +1529,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         actualColumnOrder: deriveTrustedTasksColumnOrders().get('continuous-production'),
         supportedHistoricalShape: true,
       }));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(232);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(236);
     } finally {
       fixture.close();
     }
@@ -1636,8 +1641,14 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
       } catch (error) {
         message = error instanceof Error ? error.message : String(error);
       }
-      expect(message).toMatch(
-        /column-order expected=\[id,source_id,.*planning_horizon,status_reason,push_retry_count\] actual=\[source_id,id,.*reminder_due_time\]/,
+      const expected = deriveTrustedTasksColumnOrders().get('fresh');
+      const released = deriveTrustedTasksColumnOrders().get('released-runtime-first');
+      expect(message).toContain(
+        `column-order expected=[${expected?.join(',')}] actual=[${[
+          released?.[1],
+          released?.[0],
+          ...(released?.slice(2) ?? []),
+        ].join(',')}]`,
       );
       expect(message).not.toMatch(/CREATE TABLE|DEFAULT|Synthetic|saffronruntime/);
     } finally {
@@ -1765,7 +1776,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     const sqlite = currentSqlite();
     try {
       replaceInboundWebhookTable(sqlite, historicalInboundWebhookColumns);
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(131);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(135);
     } finally {
       sqlite.close();
     }

@@ -1324,6 +1324,39 @@ export class SqliteSemanticIndexRepository implements SemanticIndexRepository {
         OR json_type(d.metadata, '$.parentId') = 'null'
       )`;
     }
+    if (request.notificationKind) {
+      const noteHint = `LOWER(
+        COALESCE(json_extract(d.metadata, '$.category'), '') || ' ' ||
+        COALESCE(json_extract(d.metadata, '$.connectorType'), '') || ' ' ||
+        d.title || ' ' || d.body
+      )`;
+      const noteMatch = `(
+        INSTR(${noteHint}, 'capture') > 0
+        OR INSTR(${noteHint}, 'note') > 0
+        OR INSTR(${noteHint}, 'memo') > 0
+        OR INSTR(${noteHint}, 'idea') > 0
+        OR INSTR(${noteHint}, 'journal') > 0
+      )`;
+      sql += request.notificationKind === 'notes'
+        ? ` AND ${noteMatch}`
+        : ` AND NOT ${noteMatch}`;
+    }
+    if (request.dateFrom) {
+      sql += ` AND (
+        CASE
+          WHEN v.entity_type = 'task'
+            THEN COALESCE(NULLIF(json_extract(d.metadata, '$.dueDate'), ''), v.source_updated_at)
+          ELSE COALESCE(NULLIF(json_extract(d.metadata, '$.receivedAt'), ''), v.source_updated_at)
+        END
+      ) >= ?`;
+      params.push(request.dateFrom);
+    }
+    if (request.dueBefore) {
+      sql += ` AND v.entity_type = 'task'
+        AND NULLIF(json_extract(d.metadata, '$.dueDate'), '') IS NOT NULL
+        AND json_extract(d.metadata, '$.dueDate') < ?`;
+      params.push(request.dueBefore);
+    }
     if (request.excludeEntityIds && request.excludeEntityIds.length > 0) {
       sql += ` AND v.entity_id NOT IN (${request.excludeEntityIds.map(() => '?').join(', ')})`;
       params.push(...request.excludeEntityIds);

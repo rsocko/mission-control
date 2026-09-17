@@ -205,6 +205,22 @@ SQLite values take precedence over environment defaults.
 | `HOME_ASSISTANT_TOKEN` | — | HA long-lived access token |
 | `HOME_ASSISTANT_ENTITIES` | — | Comma-separated entity globs to monitor |
 
+### Home Assistant alert ownership
+
+Use Home Assistant automations to decide when a device condition deserves an
+alert, including timing, presence checks, suppression, and escalation. Publish
+those outcomes as Home Assistant persistent notifications for Mission Control
+to ingest. Mission Control then owns notification presentation, severity,
+deduplication, and lifecycle.
+
+The optional **Polled device rules** source is a legacy convenience layer with
+built-in rules for open doors, low batteries, motion, and offline devices. It
+can be enabled or disabled as a group in the connector settings, but individual
+rules are not managed in the UI. The built-in open-door rule requires a Home
+Assistant opening device class (`door`, `garage_door`, `opening`, or `window`)
+so entities whose names merely contain `door`, such as doorbell diagnostics,
+are not misclassified.
+
 Finance Insight publication also requires an exact ISO 4217
 `householdCurrency` in the persisted Finance Manager connector settings. There
 is no currency environment fallback or inferred/default currency.

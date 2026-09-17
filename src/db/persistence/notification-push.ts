@@ -25,12 +25,14 @@ export interface NotificationPushPreferences {
 export interface SaveNotificationPushPreferencesInput {
   preferences: NotificationPushPreferences;
   pushDeliveryEnabled?: boolean;
+  persistentRemindersEnabled?: boolean;
   updatedAt: string;
 }
 
 export interface NotificationPushPersistence {
   getPreferences(): Promise<NotificationPushPreferences>;
   getPushDeliveryEnabled(): Promise<boolean>;
+  getPersistentRemindersEnabled(): Promise<boolean>;
   savePreferences(input: SaveNotificationPushPreferencesInput): Promise<void>;
   getScheduledSummariesEnabled(): Promise<boolean>;
   setScheduledSummariesEnabled(enabled: boolean, updatedAt: string): Promise<void>;

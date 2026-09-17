@@ -25,6 +25,10 @@ const TASK_PATCH_SCHEMA = z.strictObject({
     .nullable(),
   reminderRelative: z.enum(REMINDER_RELATIVE_RULE_VALUES).nullable(),
   reminderDueTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).nullable(),
+  reminderNagInterval: z.union([z.literal(1), z.literal(5), z.literal(15)]).nullable(),
+  reminderNagStopAt: z.string().datetime({ offset: true })
+    .transform(value => new Date(value).toISOString())
+    .nullable(),
   relativeReminderDueDateResolution: z.enum(['remove', 'convert_to_absolute']).optional(),
 }).partial();
 
@@ -51,6 +55,8 @@ const FIELD_BY_INPUT_KEY = {
   reminderAt: 'reminderAt',
   reminderRelative: 'reminderAt',
   reminderDueTime: 'reminderAt',
+  reminderNagInterval: 'reminderAt',
+  reminderNagStopAt: 'reminderAt',
   relativeReminderDueDateResolution: 'reminderAt',
 } as const satisfies Record<keyof TaskPatchInput, TaskField>;
 

@@ -65,6 +65,9 @@ vi.mock('@/components/insights/RoutineHeatmap', () => ({
 vi.mock('@/components/insights/ProjectActivity', () => ({
   ProjectActivity: () => <div data-testid="project-activity" />,
 }));
+vi.mock('@/components/insights/WorkActivityChart', () => ({
+  WorkActivityChart: () => <div data-testid="work-activity-chart" />,
+}));
 vi.mock('@/components/insights/DeliveryTrendChart', () => ({
   DeliveryTrendChart: () => <div data-testid="delivery-trend-chart" />,
 }));
@@ -123,6 +126,7 @@ const insightsPayload = {
     topTags: [{ label: 'planning', count: 2 }],
   },
   projectActivity: [],
+  workActivity: { lists: [], tags: [], projects: [], sources: [] },
   routineHeatmap: [],
   delivery: {
     throughput: {
@@ -255,6 +259,7 @@ describe('InsightsPage', () => {
     expect(latestInsightsRequest().searchParams.get('interval')).toBe('week');
     expect(fetchSpy).toHaveBeenCalledWith('/api/insights/observations?period=7');
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
+    expect(screen.getByTestId('work-activity-chart')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText('Planning friction')).toBeInTheDocument();

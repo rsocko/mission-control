@@ -100,6 +100,17 @@ export interface ProjectActivityItem {
   delta: number; // completed - created in period
 }
 
+export type WorkActivityDimension = 'lists' | 'tags' | 'projects' | 'sources';
+
+export interface WorkActivityItem {
+  key: string;
+  label: string;
+  active: number;
+  closed: number;
+}
+
+export type WorkActivityBreakdown = Record<WorkActivityDimension, WorkActivityItem[]>;
+
 export interface RoutineHeatmapEntry {
   routineId: string;
   routineName: string;
@@ -162,6 +173,7 @@ export interface InsightsSnapshot {
   taskAge: TaskAgeBucket[];
   planningFriction: PlanningFrictionInsights;
   projectActivity: ProjectActivityItem[];
+  workActivity: WorkActivityBreakdown;
   routineHeatmap: RoutineHeatmapEntry[];
   delivery: DeliveryMetrics;
   deliveryFilters: {
@@ -215,6 +227,7 @@ export interface InsightsActivitySection {
   section: 'activity';
   period: InsightsPeriod;
   projectActivity: ProjectActivityItem[];
+  workActivity: WorkActivityBreakdown;
   routineHeatmap: RoutineHeatmapEntry[];
   activityHeatmap: ActivityHeatmapEntry[];
 }
@@ -492,6 +505,39 @@ async function getProjectActivity(
   }
 
   return results.sort((a, b) => b.completed - a.completed).slice(0, 8);
+}
+
+async function getWorkActivity(
+  repository: InsightsAnalyticsRepository,
+  start: string,
+  end: string,
+  timeZone: string,
+): Promise<WorkActivityBreakdown> {
+  const activity = await repository.workActivityIn({
+    startInclusive: fromZonedTime(`${start}T00:00:00`, timeZone).toISOString(),
+    endExclusive: fromZonedTime(
+      `${addCalendarDays(end, 1)}T00:00:00`,
+      timeZone,
+    ).toISOString(),
+  });
+  const rank = (items: WorkActivityItem[], dimension: WorkActivityDimension) => (
+    items
+      .filter(item => dimension !== 'tags' || !isSyntheticTag(item.label))
+      .filter(item => item.active > 0 || item.closed > 0)
+      .sort((a, b) => (
+        (b.active + b.closed) - (a.active + a.closed)
+        || b.closed - a.closed
+        || a.label.localeCompare(b.label)
+      ))
+      .slice(0, 8)
+  );
+
+  return {
+    lists: rank(activity.lists, 'lists'),
+    tags: rank(activity.tags, 'tags'),
+    projects: rank(activity.projects, 'projects'),
+    sources: rank(activity.sources, 'sources'),
+  };
 }
 
 async function getRoutineHeatmap(
@@ -879,8 +925,9 @@ export async function computeInsightsSection(
   const repository = await insightsRepository();
   const { today: activityToday, weekMonday } = getRoutineWeekContext(now, timeZone);
   const activityStart = fmtDate(addDays(subYears(new Date(activityToday + 'T12:00:00'), 1), 1));
-  const [projectActivity, routineHeatmap, activityHeatmap] = await Promise.all([
+  const [projectActivity, workActivity, routineHeatmap, activityHeatmap] = await Promise.all([
     getProjectActivity(repository, periodStart, periodEnd),
+    getWorkActivity(repository, periodStart, periodEnd, timeZone),
     getRoutineHeatmap(repository, weekMonday, activityToday),
     getActivityHeatmap(repository, activityStart, activityToday),
   ]);
@@ -889,6 +936,7 @@ export async function computeInsightsSection(
     section,
     period,
     projectActivity,
+    workActivity,
     routineHeatmap,
     activityHeatmap,
   };
@@ -918,6 +966,7 @@ export async function computeInsights(
     taskAge: summary.taskAge,
     planningFriction: summary.planningFriction,
     projectActivity: activity.projectActivity,
+    workActivity: activity.workActivity,
     routineHeatmap: activity.routineHeatmap,
     delivery: delivery.delivery,
     deliveryFilters: delivery.deliveryFilters,

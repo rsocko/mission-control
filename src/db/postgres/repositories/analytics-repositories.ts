@@ -1,6 +1,7 @@
 import type { Pool } from 'pg';
 import type {
   AnalyticsDeliveryFilter,
+  AnalyticsCompletedTaskTiming,
   AnalyticsDeliveryRecord,
   AnalyticsFilterOptions,
   AnalyticsFlowTask,
@@ -425,6 +426,21 @@ function createInsightsRepository(pool: Pool): InsightsAnalyticsRepository {
         [startInclusive, endExclusive],
       );
       return rows.map(row => ({ id: row.id, completedAt: row.completed_at }));
+    },
+
+    async listCompletedTaskTimingsIn({ startInclusive, endExclusive }) {
+      const { rows } = await pool.query<{
+        completed_at: string | null;
+        due_date: string | null;
+      }>(
+        `SELECT completed_at, due_date FROM tasks
+         WHERE status = 'done' AND ${completedIn}`,
+        [startInclusive, endExclusive],
+      );
+      return rows.map((row): AnalyticsCompletedTaskTiming => ({
+        completedAt: row.completed_at,
+        dueDate: row.due_date,
+      }));
     },
 
     listCompletedTimestampsSince: (startInclusive) => listCompletedTimestampsSince(

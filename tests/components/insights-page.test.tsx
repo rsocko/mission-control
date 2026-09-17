@@ -80,6 +80,9 @@ vi.mock('@/components/insights/LeadTimeChart', () => ({
 vi.mock('@/components/insights/ActivityHeatmap', () => ({
   ActivityHeatmap: () => <div data-testid="activity-heatmap" />,
 }));
+vi.mock('@/components/insights/ProductivityPatterns', () => ({
+  ProductivityPatterns: () => <div data-testid="productivity-patterns" />,
+}));
 vi.mock('@/components/insights/FlowInsightsSection', () => ({
   FlowInsightsSection: () => <section aria-label="Flow reports">Flow reports</section>,
 }));
@@ -176,6 +179,17 @@ const insightsPayload = {
   activityHeatmap: [
     { date: '2026-07-27', taskCompletions: 4, routineCompletions: 2 },
   ],
+  productivity: {
+    periodStart: '2026-07-21',
+    periodEnd: '2026-07-27',
+    timeZone: 'UTC',
+    hourly: Array.from({ length: 24 }, (_, hour) => ({ hour, taskCompletions: 0 })),
+    weekdays: [
+      { day: 1, label: 'Mon', taskCompletions: 4, routineCompletions: 2, total: 6 },
+    ],
+    timeliness: { onTime: 3, late: 1, withoutDueDate: 0, onTimeRate: 75 },
+    comparisons: [],
+  },
 };
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -268,6 +282,7 @@ describe('InsightsPage', () => {
     expect(latestInsightsRequest().searchParams.get('interval')).toBe('week');
     expect(fetchSpy).toHaveBeenCalledWith('/api/insights/observations?period=7');
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
+    expect(screen.getByTestId('productivity-patterns')).toBeInTheDocument();
     expect(screen.getByTestId('plan-alignment-chart')).toBeInTheDocument();
     expect(screen.getByTestId('work-activity-chart')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');

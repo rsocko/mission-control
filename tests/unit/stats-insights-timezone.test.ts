@@ -17,10 +17,14 @@ const mocks = vi.hoisted(() => ({
   listCompletedTaskTimingsIn: vi.fn(),
   listCompletedTimestampsSince: vi.fn(),
   sourceBreakdownIn: vi.fn(),
+  workActivityIn: vi.fn(),
   listOpenTaskCreatedTimestamps: vi.fn(),
   listPlanningFrictionEvents: vi.fn(),
   listTaskTagNames: vi.fn(),
   listActiveProjects: vi.fn(),
+  countProjectTasksCompletedIn: vi.fn(),
+  countProjectOpenTasks: vi.fn(),
+  countProjectTopLevelTasksCreatedIn: vi.fn(),
   listActiveRoutines: vi.fn(),
   listRoutineCompletionsBetween: vi.fn(),
   listRoutineCompletionsInHalfOpenRange: vi.fn(),
@@ -60,10 +64,14 @@ describe('insights configured-timezone bucketing', () => {
     mocks.listCompletedTaskTimingsIn.mockResolvedValue([]);
     mocks.listCompletedTimestampsSince.mockResolvedValue([]);
     mocks.sourceBreakdownIn.mockResolvedValue([]);
+    mocks.workActivityIn.mockResolvedValue({ lists: [], tags: [], projects: [], sources: [] });
     mocks.listOpenTaskCreatedTimestamps.mockResolvedValue([]);
     mocks.listPlanningFrictionEvents.mockResolvedValue([]);
     mocks.listTaskTagNames.mockResolvedValue([]);
     mocks.listActiveProjects.mockResolvedValue([]);
+    mocks.countProjectTasksCompletedIn.mockResolvedValue(0);
+    mocks.countProjectOpenTasks.mockResolvedValue(0);
+    mocks.countProjectTopLevelTasksCreatedIn.mockResolvedValue(0);
     mocks.listActiveRoutines.mockResolvedValue([]);
     mocks.listRoutineCompletionsBetween.mockResolvedValue([]);
     mocks.listRoutineCompletionsInHalfOpenRange.mockResolvedValue([]);
@@ -185,5 +193,34 @@ describe('insights configured-timezone bucketing', () => {
       onTimeRate: 50,
     });
     expect(result.productivity.timeZone).toBe('America/New_York');
+  });
+
+  it('ranks organization activity and excludes synthetic tags', async () => {
+    mocks.workActivityIn.mockResolvedValue({
+      lists: [
+        { key: 'personal', label: 'Personal', active: 2, closed: 1 },
+        { key: 'work', label: 'Work', active: 6, closed: 4 },
+      ],
+      tags: [
+        { key: 'real', label: 'planning', active: 1, closed: 3 },
+        { key: 'synthetic', label: 'priority:high', active: 9, closed: 9 },
+      ],
+      projects: [],
+      sources: [],
+    });
+    const { computeInsightsSection } = await import('@/lib/stats/insights');
+
+    const result = await computeInsightsSection('activity', 7, {
+      timeZone: 'America/New_York',
+    });
+
+    expect(result.workActivity.lists.map(item => item.label)).toEqual(['Work', 'Personal']);
+    expect(result.workActivity.tags).toEqual([
+      { key: 'real', label: 'planning', active: 1, closed: 3 },
+    ]);
+    expect(mocks.workActivityIn).toHaveBeenCalledWith({
+      startInclusive: '2026-08-10T04:00:00.000Z',
+      endExclusive: '2026-08-17T04:00:00.000Z',
+    });
   });
 });

@@ -42,6 +42,9 @@ export type KpiSlug =
   | 'my-day'
   | 'high-priority'
   | 'assigned-to-me'
+  | 'horizon-next'
+  | 'horizon-soon'
+  | 'needs-horizon'
   | 'completed-today'
   | 'this-week-progress'
   | 'routines-kept'
@@ -165,8 +168,29 @@ async function computeHighPriority(repository: KpiAnalyticsRepository): Promise<
 }
 
 async function computeAssignedToMe(repository: KpiAnalyticsRepository): Promise<KpiResult> {
-  const value = await repository.countOpenTasksWithAssignee();
+  const value = await repository.countOpenTasksAssignedToMe();
   return { slug: 'assigned-to-me', label: 'Assigned to Me', value, type: 'counter', accent: 'indigo' };
+}
+
+async function computeHorizonNext(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasksWithPlanningHorizons(['next']);
+  return { slug: 'horizon-next', label: 'Next Horizon', value, type: 'counter', accent: 'emerald' };
+}
+
+async function computeHorizonSoon(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasksWithPlanningHorizons(['soon']);
+  return { slug: 'horizon-soon', label: 'Soon Horizon', value, type: 'counter', accent: 'blue' };
+}
+
+async function computeNeedsHorizon(repository: KpiAnalyticsRepository): Promise<KpiResult> {
+  const value = await repository.countOpenTasksWithoutPlanningHorizon();
+  return {
+    slug: 'needs-horizon',
+    label: 'Needs Horizon',
+    value,
+    type: 'counter',
+    accent: value > 0 ? 'amber' : 'slate',
+  };
 }
 
 async function computeCompletedToday(repository: KpiAnalyticsRepository): Promise<KpiResult> {
@@ -419,6 +443,9 @@ const KPI_REGISTRY: Record<KpiSlug, KpiComputer> = {
   'my-day': (repository, today) => computeMyDay(repository, today),
   'high-priority': (repository) => computeHighPriority(repository),
   'assigned-to-me': (repository) => computeAssignedToMe(repository),
+  'horizon-next': (repository) => computeHorizonNext(repository),
+  'horizon-soon': (repository) => computeHorizonSoon(repository),
+  'needs-horizon': (repository) => computeNeedsHorizon(repository),
   'completed-today': (repository) => computeCompletedToday(repository),
   'this-week-progress': (repository, today) => computeThisWeekProgress(repository, today),
   'routines-kept': (repository, today) => computeRoutinesKept(repository, today),
@@ -473,7 +500,7 @@ export const ALL_KPI_SLUGS: KpiSlug[] = Object.keys(KPI_REGISTRY) as KpiSlug[];
 export const KPI_CATALOG: Array<{
   slug: KpiSlug;
   label: string;
-  category: 'counts' | 'progress' | 'integrations';
+  category: 'counts' | 'planning' | 'progress' | 'integrations';
   type: KpiVisualType;
   description: string;
 }> = [
@@ -485,6 +512,9 @@ export const KPI_CATALOG: Array<{
   { slug: 'high-priority', label: 'High Priority', category: 'counts', type: 'counter', description: 'High or critical priority tasks' },
   { slug: 'assigned-to-me', label: 'Assigned to Me', category: 'counts', type: 'counter', description: 'Tasks assigned to you' },
   { slug: 'completed-today', label: 'Done Today', category: 'counts', type: 'counter', description: 'Tasks completed since midnight' },
+  { slug: 'horizon-next', label: 'Next Horizon', category: 'planning', type: 'counter', description: 'Open tasks planned for the next horizon' },
+  { slug: 'horizon-soon', label: 'Soon Horizon', category: 'planning', type: 'counter', description: 'Open tasks planned for the soon horizon' },
+  { slug: 'needs-horizon', label: 'Needs Horizon', category: 'planning', type: 'counter', description: 'Open tasks that still need a planning horizon' },
   { slug: 'this-week-progress', label: 'This Week', category: 'progress', type: 'fraction', description: 'Weekly task completion progress' },
   { slug: 'routines-kept', label: 'Routines', category: 'progress', type: 'percentage', description: 'Routine completion rate this week' },
   { slug: 'streak', label: 'Streak', category: 'progress', type: 'counter', description: 'Consecutive days with completions' },

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { motion } from 'motion/react';
 import { ChevronDown, Plus, Search, X } from 'lucide-react';
 import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
@@ -27,6 +28,7 @@ import {
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
 import { cn } from '@/lib/utils';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import { EMPTY_TASK_RESPONSE } from '@/types/dashboard';
 import { fadeSlideUp } from '@/lib/motion';
 import { PhaseAddTaskMenu } from '../components';
@@ -97,6 +99,7 @@ export function ProjectTasksTab({
   const [viewDensity, setViewDensity] = useState<ViewDensity>('comfortable');
   const [addTaskMenuOpen, setAddTaskMenuOpen] = useState(false);
   const taskFilterProjectIdRef = useRef(projectId);
+  const taskListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (taskFilterProjectIdRef.current === projectId) return;
@@ -139,6 +142,21 @@ export function ProjectTasksTab({
     () => new Map(filteredTasks.map((task) => [task.id, task])),
     [filteredTasks],
   );
+  const virtualizeTaskRows = shouldVirtualizeList(taskRows.length);
+  const taskRowVirtualizer = useVirtualizer({
+    count: virtualizeTaskRows ? taskRows.length : 0,
+    getScrollElement: () => taskListRef.current,
+    getItemKey: (index) => {
+      const row = taskRows[index];
+      return row?.type === 'header' ? `header-${row.label}` : row?.type === 'task' ? row.task.id : index;
+    },
+    estimateSize: (index) => {
+      const row = taskRows[index];
+      if (row?.type === 'header') return 37;
+      return viewDensity === 'compact' ? 36 : 56;
+    },
+    overscan: 8,
+  });
   const hasProjectTaskFilters = (
     countTaskFilters(taskFilterContext)
     - (taskFilterContext.completion === 'all' ? 1 : 0)
@@ -149,6 +167,123 @@ export function ProjectTasksTab({
       completion: current.completion,
     }));
   }, []);
+
+  const renderTaskRow = (row: (typeof taskRows)[number], index: number) => {
+    if (row.type === 'header') {
+      const isCollapsed = collapsedGroups.has(row.label);
+      return (
+        <button
+          key={`header-${row.label}`}
+          type="button"
+          onClick={() => {
+            setCollapsedGroups((current) => {
+              const next = new Set(current);
+              if (next.has(row.label)) next.delete(row.label);
+              else next.add(row.label);
+              return next;
+            });
+          }}
+          className="flex w-full items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-2 text-left hover:bg-[var(--surface-1)]"
+        >
+          <span className={cn(
+            'text-xs text-[var(--text-muted)] transition-transform duration-150',
+            !isCollapsed && 'rotate-90',
+          )}>▶</span>
+          <span className="text-sm font-bold uppercase tracking-wide text-[var(--accent-400)]">{row.label}</span>
+          <span className="text-xs text-[var(--text-muted)]">({row.count})</span>
+        </button>
+      );
+    }
+    if (row.type !== 'task') return null;
+
+    const task = filteredTaskById.get(row.task.id);
+    if (!task) return null;
+    const phaseName = task.projectPhaseMemberships?.find((membership) => (
+      membership.projectId === projectId
+    ))?.phaseName || 'Unassigned';
+    const contextActions = getTaskContextActions(task);
+    return (
+      <TaskContextMenu
+        key={`${task.id}-${index}`}
+        task={{
+          id: task.id,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          connectorType: task.connectorType,
+          connectorInstanceId: task.connectorInstanceId,
+          sourceId: task.sourceId,
+          dueDate: task.dueDate,
+          localDisposition: task.localDisposition,
+          taskSourceModel: task.taskSourceModel,
+          editPolicy: task.editPolicy,
+        }}
+        isInMyDay={myDayTaskIds.has(task.id)}
+        projectPhases={phaseMenuItems}
+        projects={allProjects}
+        taskProjectIds={task.hubProjectIds}
+        taskProjectPhaseMemberships={task.projectPhaseMemberships}
+        actions={contextActions}
+      >
+        <div
+          role="listitem"
+          aria-posinset={index + 1}
+          aria-setsize={taskRows.length}
+          className="cursor-pointer"
+          onClick={() => selectTask(task.id)}
+        >
+          <TaskRow
+            task={task}
+            onComplete={contextActions.onComplete}
+            onSetDueDate={(date) => {
+              if (date) contextActions.onPickDate(date);
+              else contextActions.onClearDueDate?.();
+            }}
+            onSetPriority={contextActions.onSetPriority}
+            onSetStatus={(status) => contextActions.onSetStatus?.(status)}
+            onSetLocalDisposition={(disposition) => (
+              contextActions.onSetLocalDisposition?.(disposition)
+            )}
+            onOpenNotes={(mode) => openTaskNotes(task.id, mode)}
+            onAddToMyDay={() => contextActions.onAddToMyDay?.()}
+            onRemoveFromMyDay={() => contextActions.onRemoveFromMyDay?.()}
+            isInMyDay={myDayTaskIds.has(task.id)}
+            hideSourceListName={taskGroupBy === 'list'}
+            compact={viewDensity === 'compact'}
+            isCompleting={completingIds.has(task.id)}
+            isSelected={selectedTaskId === task.id}
+            showDivider={index < taskRows.length - 1}
+            secondaryMetadata={(
+              <span className="shrink-0 text-xs text-[var(--text-muted)]">
+                Phase: {phaseName}
+              </span>
+            )}
+            filterController={{
+              tagSlugs: taskFilterContext.tagSlugs,
+              projectId: null,
+              onToggleTag: (slug) => {
+                setTaskFilterContext((current) => updateTaskFilterContext(current, {
+                  tagSlugs: current.tagSlugs.includes(slug)
+                    ? current.tagSlugs.filter((tagSlug) => tagSlug !== slug)
+                    : [...current.tagSlugs, slug],
+                }));
+              },
+              onFilterPriority: (priority) => {
+                setTaskFilterContext((current) => updateTaskFilterContext(current, {
+                  priorities: [priority],
+                }));
+              },
+              onFilterStatus: (status) => {
+                setTaskFilterContext((current) => updateTaskFilterContext(current, {
+                  statuses: [status],
+                }));
+              },
+            }}
+          />
+        </div>
+      </TaskContextMenu>
+    );
+  };
 
   // The Activity boundary keeps filter, sort, and menu state alive while the
   // user works in another tab; only the active tab contributes markup.
@@ -254,124 +389,35 @@ export function ProjectTasksTab({
             </div>
           ) : (
             <div
+              ref={taskListRef}
               role="list"
               aria-label="Project task list"
-              className="overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)]"
+              data-virtualized={virtualizeTaskRows || undefined}
+              className={cn(
+                'overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)]',
+                virtualizeTaskRows && 'max-h-[min(70vh,48rem)] overflow-y-auto',
+              )}
             >
-              {taskRows.map((row, index) => {
-                if (row.type === 'header') {
-                  const isCollapsed = collapsedGroups.has(row.label);
-                  return (
-                    <button
-                      key={`header-${row.label}`}
-                      type="button"
-                      onClick={() => {
-                        setCollapsedGroups((current) => {
-                          const next = new Set(current);
-                          if (next.has(row.label)) next.delete(row.label);
-                          else next.add(row.label);
-                          return next;
-                        });
-                      }}
-                      className="flex w-full items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-2 text-left hover:bg-[var(--surface-1)]"
-                    >
-                      <span className={cn(
-                        'text-xs text-[var(--text-muted)] transition-transform duration-150',
-                        !isCollapsed && 'rotate-90',
-                      )}>▶</span>
-                      <span className="text-sm font-bold uppercase tracking-wide text-[var(--accent-400)]">{row.label}</span>
-                      <span className="text-xs text-[var(--text-muted)]">({row.count})</span>
-                    </button>
-                  );
-                }
-                if (row.type !== 'task') return null;
-
-                const task = filteredTaskById.get(row.task.id);
-                if (!task) return null;
-                const phaseName = task.projectPhaseMemberships?.find((membership) => (
-                  membership.projectId === projectId
-                ))?.phaseName || 'Unassigned';
-                const contextActions = getTaskContextActions(task);
-                return (
-                  <TaskContextMenu
-                    key={`${task.id}-${index}`}
-                    task={{
-                      id: task.id,
-                      title: task.title,
-                      status: task.status,
-                      priority: task.priority,
-                      connectorType: task.connectorType,
-                      connectorInstanceId: task.connectorInstanceId,
-                      sourceId: task.sourceId,
-                      dueDate: task.dueDate,
-                      localDisposition: task.localDisposition,
-                      taskSourceModel: task.taskSourceModel,
-                      editPolicy: task.editPolicy,
-                    }}
-                    isInMyDay={myDayTaskIds.has(task.id)}
-                    projectPhases={phaseMenuItems}
-                    projects={allProjects}
-                    taskProjectIds={task.hubProjectIds}
-                    taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                    actions={contextActions}
-                  >
+              {virtualizeTaskRows ? (
+                <div
+                  role="presentation"
+                  className="relative w-full"
+                  style={{ height: `${taskRowVirtualizer.getTotalSize()}px` }}
+                >
+                  {taskRowVirtualizer.getVirtualItems().map((virtualRow) => (
                     <div
-                      role="listitem"
-                      className="cursor-pointer"
-                      onClick={() => selectTask(task.id)}
+                      key={virtualRow.key}
+                      ref={taskRowVirtualizer.measureElement}
+                      data-index={virtualRow.index}
+                      role="presentation"
+                      className="absolute left-0 top-0 w-full"
+                      style={{ transform: `translateY(${virtualRow.start}px)` }}
                     >
-                      <TaskRow
-                        task={task}
-                        onComplete={contextActions.onComplete}
-                        onSetDueDate={(date) => {
-                          if (date) contextActions.onPickDate(date);
-                          else contextActions.onClearDueDate?.();
-                        }}
-                        onSetPriority={contextActions.onSetPriority}
-                        onSetStatus={(status) => contextActions.onSetStatus?.(status)}
-                        onSetLocalDisposition={(disposition) => (
-                          contextActions.onSetLocalDisposition?.(disposition)
-                        )}
-                        onOpenNotes={(mode) => openTaskNotes(task.id, mode)}
-                        onAddToMyDay={() => contextActions.onAddToMyDay?.()}
-                        onRemoveFromMyDay={() => contextActions.onRemoveFromMyDay?.()}
-                        isInMyDay={myDayTaskIds.has(task.id)}
-                        hideSourceListName={taskGroupBy === 'list'}
-                        compact={viewDensity === 'compact'}
-                        isCompleting={completingIds.has(task.id)}
-                        isSelected={selectedTaskId === task.id}
-                        showDivider={index < taskRows.length - 1}
-                        secondaryMetadata={(
-                          <span className="shrink-0 text-xs text-[var(--text-muted)]">
-                            Phase: {phaseName}
-                          </span>
-                        )}
-                        filterController={{
-                          tagSlugs: taskFilterContext.tagSlugs,
-                          projectId: null,
-                          onToggleTag: (slug) => {
-                            setTaskFilterContext((current) => updateTaskFilterContext(current, {
-                              tagSlugs: current.tagSlugs.includes(slug)
-                                ? current.tagSlugs.filter((tagSlug) => tagSlug !== slug)
-                                : [...current.tagSlugs, slug],
-                            }));
-                          },
-                          onFilterPriority: (priority) => {
-                            setTaskFilterContext((current) => updateTaskFilterContext(current, {
-                              priorities: [priority],
-                            }));
-                          },
-                          onFilterStatus: (status) => {
-                            setTaskFilterContext((current) => updateTaskFilterContext(current, {
-                              statuses: [status],
-                            }));
-                          },
-                        }}
-                      />
+                      {renderTaskRow(taskRows[virtualRow.index], virtualRow.index)}
                     </div>
-                  </TaskContextMenu>
-                );
-              })}
+                  ))}
+                </div>
+              ) : taskRows.map(renderTaskRow)}
             </div>
           )}
         </CardContent>

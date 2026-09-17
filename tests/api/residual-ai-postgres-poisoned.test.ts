@@ -89,7 +89,17 @@ const snapshot = {
     streak: { label: 'Streak', value: 2, unit: 'days' },
   },
   trends: [],
+  planAlignment: {
+    points: [],
+    totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+    planCoverage: 0,
+    commitmentRate: 0,
+  },
   sourceBreakdown: [],
+  taskBreakdown: {
+    byPriority: [],
+    byStatus: [],
+  },
   taskAge: [],
   planningFriction: {
     signalsInPeriod: 0,

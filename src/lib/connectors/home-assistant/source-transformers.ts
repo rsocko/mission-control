@@ -15,6 +15,14 @@ function bool(value: unknown): boolean {
 }
 
 function finiteNumber(value: unknown): number | null {
+  if (
+    value === null
+    || value === undefined
+    || typeof value === 'boolean'
+    || (typeof value === 'string' && value.trim() === '')
+  ) {
+    return null;
+  }
   const numeric = typeof value === 'number' ? value : Number(value);
   return Number.isFinite(numeric) ? numeric : null;
 }

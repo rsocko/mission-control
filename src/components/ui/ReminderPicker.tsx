@@ -7,6 +7,13 @@ import { Bell, Clock, Sun, Calendar, X, Loader2, Repeat2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   computeRelativeReminderAt,
   REMINDER_RELATIVE_RULES,
   type ReminderRelativeRule,
@@ -114,7 +121,6 @@ export function ReminderPicker({
     dueTime ?? DEFAULT_RELATIVE_DUE_TIME,
   );
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [customStopMinutes, setCustomStopMinutes] = useState(180);
   const timeInputRef = useRef<HTMLInputElement>(null);
   const relativeTimeInputRef = useRef<HTMLInputElement>(null);
 
@@ -141,12 +147,10 @@ export function ReminderPicker({
   const nagStopMinutes = nagStopAt && value
     ? Math.round((Date.parse(nagStopAt) - Date.parse(value)) / 60_000)
     : null;
-
-  useEffect(() => {
-    if (nagStopMinutes !== null && ![30, 60, 120].includes(nagStopMinutes)) {
-      setCustomStopMinutes(nagStopMinutes);
-    }
-  }, [nagStopMinutes]);
+  const customStopMinutes = nagStopMinutes !== null
+    && ![30, 60, 120].includes(nagStopMinutes)
+    ? nagStopMinutes
+    : 180;
 
   const save = useCallback(async (updates: Parameters<ReminderPickerProps['onChange']>[0]) => {
     setSaveError(null);
@@ -448,49 +452,65 @@ export function ReminderPicker({
                             ))}
                           </div>
                         </fieldset>
-                        <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                           <span>Stop after</span>
-                          <select
+                          <Select
                             value={nagStopMinutes === null
                               ? 'none'
                               : [30, 60, 120].includes(nagStopMinutes)
                                 ? String(nagStopMinutes)
                                 : 'custom'}
-                            onChange={(event) => {
-                              const minutes = event.target.value === 'custom'
+                            onValueChange={(nextValue) => {
+                              const minutes = nextValue === 'custom'
                                 ? customStopMinutes
-                                : Number(event.target.value);
+                                : Number(nextValue);
                               void save({
-                                reminderNagStopAt: event.target.value === 'none' || !value
+                                reminderNagStopAt: nextValue === 'none' || !value
                                   ? null
                                   : new Date(Date.parse(value) + minutes * 60_000).toISOString(),
                               });
                             }}
-                            className="ml-auto min-h-8 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-secondary)] outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
                           >
-                            <option value="none">Until done</option>
-                            <option value="30">30 minutes</option>
-                            <option value="60">1 hour</option>
-                            <option value="120">2 hours</option>
-                            <option value="custom">Custom ({customStopMinutes} min)</option>
-                          </select>
-                        </label>
+                            <SelectTrigger
+                              variant="inline"
+                              aria-label="Stop repeat alerts after"
+                              className="ml-auto min-h-8 border-[var(--border)] bg-[var(--surface-0)] px-2"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Until done</SelectItem>
+                              <SelectItem value="30">30 minutes</SelectItem>
+                              <SelectItem value="60">1 hour</SelectItem>
+                              <SelectItem value="120">2 hours</SelectItem>
+                              <SelectItem value="custom">
+                                Custom ({customStopMinutes} min)
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                         {nagStopMinutes !== null && ![30, 60, 120].includes(nagStopMinutes) && (
                           <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
                             <span>Minutes</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={10_080}
-                              value={customStopMinutes}
-                              onChange={(event) => setCustomStopMinutes(Number(event.target.value))}
-                              onBlur={() => value && void save({
-                                reminderNagStopAt: new Date(
-                                  Date.parse(value) + customStopMinutes * 60_000,
-                                ).toISOString(),
-                              })}
-                              className="ml-auto min-h-8 w-20 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-secondary)] outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60"
-                            />
+                            <span className="input-glow ml-auto rounded-md">
+                              <input
+                                key={customStopMinutes}
+                                type="number"
+                                min={1}
+                                max={10_080}
+                                defaultValue={customStopMinutes}
+                                onBlur={(event) => value && void save({
+                                  reminderNagStopAt: new Date(
+                                    Date.parse(value)
+                                    + Math.min(
+                                      10_080,
+                                      Math.max(1, Number(event.currentTarget.value) || 1),
+                                    ) * 60_000,
+                                  ).toISOString(),
+                                })}
+                                className="min-h-8 w-20 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-secondary)] outline-none"
+                              />
+                            </span>
                           </label>
                         )}
                         <p className="text-xs leading-4 text-[var(--text-muted)]">

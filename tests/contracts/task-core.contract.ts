@@ -1114,6 +1114,9 @@ export function describeTaskCoreContract(
             scheduledDate: WEEK,
             scheduledTime: null,
             reminderAt: null,
+            reminderNagInterval: null,
+            reminderNagStopAt: null,
+            reminderNagSeriesId: null,
             metadata: { recurrence: 'FREQ=DAILY' },
           },
         });
@@ -1139,6 +1142,9 @@ export function describeTaskCoreContract(
             scheduledDate: WEEK,
             scheduledTime: null,
             reminderAt: null,
+            reminderNagInterval: null,
+            reminderNagStopAt: null,
+            reminderNagSeriesId: null,
             metadata: {},
           },
         });

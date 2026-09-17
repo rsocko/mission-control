@@ -67,7 +67,9 @@ function testDatabase() {
       metadata TEXT DEFAULT '{}' NOT NULL, sync_status TEXT DEFAULT 'synced' NOT NULL,
       last_synced_at TEXT NOT NULL, push_retry_count INTEGER DEFAULT 0 NOT NULL,
       kanban_column TEXT, kanban_order REAL, snoozed_until TEXT, reminder_at TEXT,
-      reminder_relative TEXT, reminder_due_time TEXT,
+      reminder_relative TEXT, reminder_due_time TEXT, reminder_nag_interval INTEGER,
+      reminder_nag_stop_at TEXT, reminder_nag_series_id TEXT,
+      reminder_nag_sequence INTEGER DEFAULT 0 NOT NULL,
       effort INTEGER, is_bulk_import INTEGER DEFAULT 0 NOT NULL,
       local_disposition TEXT DEFAULT 'active' NOT NULL,
       push_count INTEGER DEFAULT 0 NOT NULL,
@@ -715,7 +717,9 @@ function createSqliteScoutContractHarness(): ScoutPersistenceContractHarness {
       source_list_name TEXT, micro_status TEXT, status_reason TEXT,
       metadata TEXT NOT NULL DEFAULT '{}', sync_status TEXT NOT NULL DEFAULT 'synced',
       last_synced_at TEXT NOT NULL, snoozed_until TEXT, reminder_at TEXT,
-      reminder_relative TEXT, reminder_due_time TEXT
+      reminder_relative TEXT, reminder_due_time TEXT, reminder_nag_interval INTEGER,
+      reminder_nag_stop_at TEXT, reminder_nag_series_id TEXT,
+      reminder_nag_sequence INTEGER DEFAULT 0 NOT NULL
     );
     CREATE UNIQUE INDEX idx_tasks_source_connector ON tasks(source_id, connector_instance_id);
     CREATE TABLE task_field_states (

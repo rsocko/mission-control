@@ -733,10 +733,10 @@ export function createPostgresTaskReminderRepository(pool: Pool): TaskReminderRe
           `
             UPDATE tasks
             SET reminder_at = $1,
-                reminder_nag_sequence = CASE WHEN $1 IS NOT NULL THEN reminder_nag_sequence + 1 ELSE 0 END,
-                reminder_nag_interval = CASE WHEN $1 IS NOT NULL THEN reminder_nag_interval ELSE NULL END,
-                reminder_nag_stop_at = CASE WHEN $1 IS NOT NULL THEN reminder_nag_stop_at ELSE NULL END,
-                reminder_nag_series_id = CASE WHEN $1 IS NOT NULL THEN reminder_nag_series_id ELSE NULL END,
+                reminder_nag_sequence = CASE WHEN $1::text IS NOT NULL THEN reminder_nag_sequence + 1 ELSE 0 END,
+                reminder_nag_interval = CASE WHEN $1::text IS NOT NULL THEN reminder_nag_interval ELSE NULL END,
+                reminder_nag_stop_at = CASE WHEN $1::text IS NOT NULL THEN reminder_nag_stop_at ELSE NULL END,
+                reminder_nag_series_id = CASE WHEN $1::text IS NOT NULL THEN reminder_nag_series_id ELSE NULL END,
                 reminder_relative = CASE WHEN $2 THEN reminder_relative ELSE NULL END,
                 reminder_due_time = CASE WHEN $2 THEN reminder_due_time ELSE NULL END,
                 updated_at = $3

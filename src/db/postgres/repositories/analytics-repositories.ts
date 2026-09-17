@@ -3,6 +3,7 @@ import type {
   AnalyticsDeliveryFilter,
   AnalyticsCompletedTaskTiming,
   AnalyticsDeliveryRecord,
+  AnalyticsDimensionCount,
   AnalyticsFilterOptions,
   AnalyticsFlowTask,
   AnalyticsFocusItemStatus,
@@ -144,6 +145,10 @@ export function withinInstantRange(column: string, startParam: number, endParam:
 }
 
 const OPEN_TASK_CONDITION = `status NOT IN ('done', 'cancelled')`;
+const CURRENT_TOP_LEVEL_TASK_CONDITION = `deleted_at IS NULL
+  AND local_disposition = 'active'
+  AND depth = 0
+  AND is_checklist_item = false`;
 
 /**
  * The Drizzle `notificationNeedsAttention()` predicate, reproduced exactly.
@@ -460,6 +465,35 @@ function createInsightsRepository(pool: Pool): InsightsAnalyticsRepository {
       );
       return rows.map((row): AnalyticsSourceCount => ({
         source: row.source,
+        count: Number(row.count),
+      }));
+    },
+
+    async countCurrentTasksByPriority() {
+      const { rows } = await pool.query<{ value: string; count: number }>(
+        `SELECT priority AS value, count(*)::int AS count
+         FROM tasks
+         WHERE ${CURRENT_TOP_LEVEL_TASK_CONDITION}
+           AND ${OPEN_TASK_CONDITION}
+         GROUP BY priority
+         ORDER BY priority COLLATE "C"`,
+      );
+      return rows.map((row): AnalyticsDimensionCount => ({
+        value: row.value,
+        count: Number(row.count),
+      }));
+    },
+
+    async countCurrentTasksByStatus() {
+      const { rows } = await pool.query<{ value: string; count: number }>(
+        `SELECT status AS value, count(*)::int AS count
+         FROM tasks
+         WHERE ${CURRENT_TOP_LEVEL_TASK_CONDITION}
+         GROUP BY status
+         ORDER BY status COLLATE "C"`,
+      );
+      return rows.map((row): AnalyticsDimensionCount => ({
+        value: row.value,
         count: Number(row.count),
       }));
     },

@@ -357,6 +357,27 @@ export function describeAnalyticsRepositoriesContract(
 
     // ─── Insights aggregates and ordering ─────────────────────────────────
 
+    it('counts current top-level task inventory by priority and status', async () => {
+      await insert('tasks', task('todo-high', { status: 'todo', priority: 'high' }));
+      await insert('tasks', task('progress-high', { status: 'in_progress', priority: 'high' }));
+      await insert('tasks', task('done-high', { status: 'done', priority: 'high' }));
+      await insert('tasks', task('done-low', { status: 'done', priority: 'low' }));
+      await insert('tasks', task('dismissed', { status: 'todo', local_disposition: 'dismissed' }));
+      await insert('tasks', task('deleted', { status: 'todo', deleted_at: NOW }));
+      await insert('tasks', task('subtask', { status: 'todo', depth: 1 }));
+      await insert('tasks', task('checklist', { status: 'todo', is_checklist_item: true }));
+
+      const insights = harness.repository.insights;
+      expect(await insights.countCurrentTasksByPriority()).toEqual([
+        { value: 'high', count: 2 },
+      ]);
+      expect(await insights.countCurrentTasksByStatus()).toEqual([
+        { value: 'done', count: 2 },
+        { value: 'in_progress', count: 1 },
+        { value: 'todo', count: 1 },
+      ]);
+    });
+
     it('orders the source breakdown by count then connector type', async () => {
       const completedAt = '2026-03-10T01:00:00.000Z';
       for (const id of ['a1', 'a2']) {

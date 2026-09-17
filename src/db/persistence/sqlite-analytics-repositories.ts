@@ -68,6 +68,12 @@ import type {
 type AnalyticsDatabase = BetterSQLite3Database<typeof schema>;
 
 const OPEN_TASK_CONDITION = notInArray(tasks.status, ['done', 'cancelled']);
+const CURRENT_TOP_LEVEL_TASK_CONDITION = and(
+  isNull(tasks.deletedAt),
+  eq(tasks.localDisposition, 'active'),
+  eq(tasks.depth, 0),
+  eq(tasks.isChecklistItem, false),
+);
 
 function count(row: { count: unknown } | undefined): number {
   return Number(row?.count ?? 0);
@@ -306,6 +312,30 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
         .groupBy(tasks.connectorType)
         .orderBy(sql`count(*) DESC`, asc(tasks.connectorType));
       return rows.map((row) => ({ source: row.source, count: Number(row.count) }));
+    },
+
+    async countCurrentTasksByPriority() {
+      const rows = await db.select({
+        value: tasks.priority,
+        count: sql<number>`count(*)`,
+      })
+        .from(tasks)
+        .where(and(CURRENT_TOP_LEVEL_TASK_CONDITION, OPEN_TASK_CONDITION))
+        .groupBy(tasks.priority)
+        .orderBy(asc(tasks.priority));
+      return rows.map((row) => ({ value: row.value, count: Number(row.count) }));
+    },
+
+    async countCurrentTasksByStatus() {
+      const rows = await db.select({
+        value: tasks.status,
+        count: sql<number>`count(*)`,
+      })
+        .from(tasks)
+        .where(CURRENT_TOP_LEVEL_TASK_CONDITION)
+        .groupBy(tasks.status)
+        .orderBy(asc(tasks.status));
+      return rows.map((row) => ({ value: row.value, count: Number(row.count) }));
     },
 
     async workActivityIn(range) {

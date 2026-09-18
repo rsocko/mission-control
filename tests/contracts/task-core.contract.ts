@@ -1237,6 +1237,22 @@ export function describeTaskCoreContract(
           taskId: 'touch-2026-08-14',
           projectId: 'touch-project',
         }]);
+        const historyContext = await harness.persistence.mutations.getTaskWriteContext(
+          'touch-2026-08-14',
+        );
+        expect(historyContext).not.toBeNull();
+        if (!historyContext) return;
+        await expect(harness.persistence.mutations.mutateTask({
+          taskId: 'touch-2026-08-14',
+          expectedUpdatedAt: historyContext.task.updatedAt,
+          expectedStatusForTerminalTransition: null,
+          now: historyContext.task.updatedAt,
+          patch: { planningHorizon: 'next' },
+          planningHistory: {
+            previousValue: null,
+            newValue: 'next',
+          },
+        })).resolves.toMatchObject({ kind: 'committed' });
         await harness.persistence.timeActivities.start({
           taskId: 'touch-2026-08-15',
           commandId: 'touch-time-activity',

@@ -228,6 +228,14 @@ export interface TaskCoreContractHarness {
     timezoneId: string;
     connectorInstanceId: string | null;
   }>>;
+  listRecurrenceBackfillDecisions(): Promise<Array<{
+    occurrenceId: string;
+    decision: string;
+    reason: string;
+    taskId: string | null;
+    supersededByOccurrenceId: string | null;
+    decidedAt: string;
+  }>>;
   listMyDayTaskIds(): Promise<string[]>;
   getTaskUpdatedAt(taskId: string): Promise<string | null>;
   getTaskDeletedAt(taskId: string): Promise<string | null>;
@@ -342,6 +350,44 @@ function occurrenceRequest(
       type: 'task.created' as const,
       timestamp: task.createdAt,
       payload: { taskId },
+    },
+  };
+}
+
+function backfillRequest(
+  rule: CanonicalRecurrenceRuleV1,
+  input: {
+    startInclusive?: string;
+    endExclusive?: string;
+    asOf?: string;
+    decidedAt?: string;
+  } = {},
+) {
+  return {
+    rule,
+    range: {
+      kind: 'local-date' as const,
+      startInclusive: input.startInclusive ?? TODAY,
+      endExclusive: input.endExclusive ?? '2026-08-18',
+    },
+    asOf: {
+      kind: 'local-date' as const,
+      value: input.asOf ?? '2026-08-18',
+    },
+    decidedAt: input.decidedAt ?? '2026-08-18T12:00:00.000Z',
+    materializationFor(occurrence: { localDate: string; instant: string | null }) {
+      const request = occurrenceRequest(
+        `backfill-${occurrence.localDate}`,
+        rule,
+        { localDate: occurrence.localDate, instant: occurrence.instant },
+      );
+      return {
+        task: request.task,
+        tagIds: request.tagIds,
+        projectIds: request.projectIds,
+        schedule: request.schedule,
+        event: request.event,
+      };
     },
   };
 }
@@ -1113,6 +1159,223 @@ export function describeTaskCoreContract(
         });
         expect(await harness.listTaskIds()).not.toContain('occurrence-after-delete');
         expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+      });
+
+      it('backfills a range without recreating collapsed identities on replay or concurrency', async () => {
+        const rule = scheduleRule({
+          seriesIdentity: { kind: 'mission-control', stableId: 'backfill-replay-series' },
+        });
+        const request = backfillRequest(rule, {
+          endExclusive: '2026-08-15',
+          asOf: '2026-08-14',
+        });
+        const [first, concurrent] = await Promise.all([
+          harness.persistence.occurrences.backfillRange(request),
+          harness.persistence.occurrences.backfillRange({
+            ...request,
+            decidedAt: '2026-08-18T13:00:00.000Z',
+          }),
+        ]);
+
+        expect(first).toEqual(concurrent);
+        expect(first).toMatchObject({
+          status: 'success',
+          decisions: [
+            { decision: 'collapsed', taskId: null },
+            { decision: 'collapsed', taskId: null },
+            { decision: 'collapsed', taskId: null },
+            { decision: 'collapsed', taskId: null },
+            { decision: 'materialized', taskId: 'backfill-2026-08-14' },
+          ],
+        });
+        const replay = await harness.persistence.occurrences.backfillRange({
+          ...request,
+          decidedAt: '2026-08-19T12:00:00.000Z',
+        });
+        expect(replay).toEqual(first);
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+        expect(await harness.listRecurrenceBackfillDecisions()).toHaveLength(5);
+      });
+
+      it('preserves touched, completed, and in-progress occurrences while superseding untouched pileup', async () => {
+        const rule = scheduleRule({
+          seriesIdentity: { kind: 'mission-control', stableId: 'backfill-touch-series' },
+        });
+        const existing = [
+          { date: '2026-08-10', status: 'done', description: null },
+          { date: '2026-08-11', status: 'in_progress', description: null },
+          { date: '2026-08-12', status: 'todo', description: 'Durable note' },
+          { date: '2026-08-13', status: 'todo', description: null },
+          { date: '2026-08-14', status: 'todo', description: null },
+          { date: '2026-08-15', status: 'todo', description: null },
+          { date: '2026-08-16', status: 'todo', description: null },
+        ];
+        for (const item of existing) {
+          const request = occurrenceRequest(`touch-${item.date}`, rule, {
+            localDate: item.date,
+          });
+          await harness.persistence.occurrences.materializeOccurrence({
+            ...request,
+            task: {
+              ...request.task,
+              status: item.status,
+              description: item.description,
+              updatedAt: item.date === '2026-08-16'
+                ? '2026-08-16T13:00:00.000Z'
+                : request.task.updatedAt,
+            },
+          });
+        }
+        await harness.insertAttachments([{
+          id: 'touch-attachment',
+          taskId: 'touch-2026-08-13',
+          name: 'evidence.txt',
+          size: 1,
+        }]);
+        await harness.insertProjects([{ id: 'touch-project', name: 'Touch project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'touch-2026-08-14',
+          projectId: 'touch-project',
+        }]);
+        await harness.persistence.timeActivities.start({
+          taskId: 'touch-2026-08-15',
+          commandId: 'touch-time-activity',
+          serverNow: '2026-08-15T12:00:00.000Z',
+          mode: 'focus',
+          targetSeconds: 60,
+        });
+
+        const result = await harness.persistence.occurrences.backfillRange(
+          backfillRequest(rule, {
+            endExclusive: '2026-08-18',
+            asOf: '2026-08-18',
+          }),
+        );
+        expect(result.status).toBe('success');
+        if (result.status !== 'success') return;
+        expect(result.decisions.map(({ decision, reason }) => [decision, reason])).toEqual([
+          ['preserved', 'protected-status:done'],
+          ['preserved', 'protected-status:in_progress'],
+          ['preserved', 'touched:description'],
+          ['preserved', 'touched:attachment'],
+          ['preserved', 'touched:history,planning-membership'],
+          ['preserved', 'touched:time-activity'],
+          ['preserved', 'touched:field-edit'],
+          ['materialized', 'current-actionable'],
+        ]);
+        for (const item of existing) {
+          expect(await harness.getTaskDeletedAt(`touch-${item.date}`)).toBeNull();
+        }
+      });
+
+      it('supersedes only untouched local missed tasks and never synthesizes connector occurrences', async () => {
+        const localRule = scheduleRule({
+          seriesIdentity: { kind: 'mission-control', stableId: 'backfill-supersede-series' },
+        });
+        for (const date of ['2026-08-10', '2026-08-11']) {
+          await harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest(`supersede-${date}`, localRule, { localDate: date }),
+          );
+        }
+        const local = await harness.persistence.occurrences.backfillRange(
+          backfillRequest(localRule, {
+            endExclusive: '2026-08-13',
+            asOf: '2026-08-13',
+          }),
+        );
+        expect(local).toMatchObject({
+          status: 'success',
+          decisions: [
+            { decision: 'superseded', taskId: 'supersede-2026-08-10' },
+            { decision: 'superseded', taskId: 'supersede-2026-08-11' },
+            { decision: 'materialized', taskId: 'backfill-2026-08-12' },
+          ],
+        });
+        expect(await harness.getTaskDeletedAt('supersede-2026-08-10'))
+          .toBe('2026-08-18T12:00:00.000Z');
+
+        const connectorRule = scheduleRule({
+          seriesIdentity: {
+            kind: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'connector-backfill',
+            externalSeriesId: 'series',
+            stability: 'provider',
+          },
+          source: {
+            owner: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'connector-backfill',
+            support: { status: 'supported', reasons: [] },
+            raw: {},
+          },
+        });
+        const existing = occurrenceRequest('connector-existing', connectorRule, {
+          localDate: '2026-08-10',
+        });
+        await harness.persistence.occurrences.materializeOccurrence(existing);
+        const connector = await harness.persistence.occurrences.backfillRange(
+          backfillRequest(connectorRule, {
+            endExclusive: '2026-08-13',
+            asOf: '2026-08-13',
+          }),
+        );
+        expect(connector).toMatchObject({
+          status: 'success',
+          decisions: [
+            { decision: 'preserved', taskId: 'connector-existing' },
+            { decision: 'connector-owned-missing', taskId: null },
+            { decision: 'connector-owned-missing', taskId: null },
+          ],
+        });
+        expect(await harness.getTaskDeletedAt('connector-existing')).toBeNull();
+        expect(await harness.persistence.scoutDeletion.hardDeleteScoutTask('connector-existing'))
+          .toMatchObject({ kind: 'deleted' });
+        expect((await harness.listRecurrenceBackfillDecisions()).find(
+          ({ reason }) => reason === 'connector-owned-existing',
+        )?.taskId).toBeNull();
+      });
+
+      it('rejects projection work bounds before materialization', async () => {
+        const rangeBound = await harness.persistence.occurrences.backfillRange({
+          ...backfillRequest(scheduleRule(), {
+            startInclusive: '2020-01-01',
+            endExclusive: '2031-01-01',
+            asOf: '2031-01-01',
+          }),
+          limits: { maxOccurrences: 2 },
+        });
+        expect(rangeBound).toEqual({
+          status: 'bounds-exceeded',
+          bound: 'range',
+          maximum: 3_660,
+        });
+        const occurrenceBound = await harness.persistence.occurrences.backfillRange({
+          ...backfillRequest(scheduleRule(), {
+            startInclusive: '2020-01-01',
+            endExclusive: '2030-01-01',
+            asOf: '2030-01-01',
+          }),
+          limits: { maxOccurrences: 2 },
+        });
+        expect(occurrenceBound).toEqual({
+          status: 'bounds-exceeded',
+          bound: 'occurrences',
+          maximum: 2,
+        });
+        const iterationBound = await harness.persistence.occurrences.backfillRange({
+          ...backfillRequest(scheduleRule(), {
+            endExclusive: '2026-08-12',
+            asOf: '2026-08-12',
+          }),
+          limits: { maxIterations: 1 },
+        });
+        expect(iterationBound).toEqual({
+          status: 'bounds-exceeded',
+          bound: 'iterations',
+          maximum: 1,
+        });
+        expect(await harness.listRecurrenceBackfillDecisions()).toEqual([]);
       });
     });
 

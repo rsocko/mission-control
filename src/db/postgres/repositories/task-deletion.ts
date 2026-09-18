@@ -37,6 +37,10 @@ export async function cleanupTaskAssociations(
     'UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ANY($1::text[])',
     [ids],
   );
+  await client.query(
+    'UPDATE task_recurrence_backfill_decisions SET task_id = NULL WHERE task_id = ANY($1::text[])',
+    [ids],
+  );
 }
 
 /** Applies {@link cleanupTaskAssociations} and then deletes the task rows. */
@@ -66,5 +70,8 @@ export async function cleanupTaskAssociationsInTransaction(
   `);
   await tx.execute(sql`
     UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ${taskId}
+  `);
+  await tx.execute(sql`
+    UPDATE task_recurrence_backfill_decisions SET task_id = NULL WHERE task_id = ${taskId}
   `);
 }

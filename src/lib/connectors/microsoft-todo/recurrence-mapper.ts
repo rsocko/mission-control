@@ -13,6 +13,7 @@ type MicrosoftRecurrence = NonNullable<GraphTodoTask['recurrence']>;
 
 export interface MicrosoftRecurrenceMappingInput {
   readonly recurrence: MicrosoftRecurrence;
+  readonly rawRecurrence?: unknown;
   readonly connectorType: string;
   readonly connectorInstanceId: string;
   readonly providerTaskId: string;
@@ -213,7 +214,7 @@ export function mapMicrosoftTodoRecurrence(
         status: supportStatus,
         reasons,
       },
-      raw: input.recurrence,
+      raw: input.rawRecurrence ?? input.recurrence,
     },
     compatibility: {
       legacyLabel: input.legacyLabel,

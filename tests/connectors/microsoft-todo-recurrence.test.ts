@@ -105,11 +105,56 @@ describe('Microsoft To Do recurrence serialization', () => {
       semantics: { pattern: { type: 'daily', interval: 2 } },
       source: {
         raw: {
-          pattern: { type: 'daily', interval: 2 },
-          range: { type: 'noEnd', startDate: '2026-03-02' },
+          Pattern: { Type: 'daily', Interval: 2 },
+          Range: { Type: 'noEnd', StartDate: '2026-03-02' },
         },
       },
     });
+  });
+
+  it('replays the same provider occurrence with the same scoped identity', () => {
+    const graphTask = {
+      id: 'provider-occurrence-1',
+      title: 'Water plants',
+      status: 'notStarted',
+      importance: 'normal',
+      createdDateTime: '2026-03-01T14:00:00Z',
+      lastModifiedDateTime: '2026-03-01T14:00:00Z',
+      recurrence: {
+        pattern: { type: 'daily', interval: 1 },
+        range: { type: 'noEnd', startDate: '2026-03-02' },
+      },
+    };
+
+    const first = mapGraphTask(
+      graphTask,
+      'list-1',
+      'Tasks',
+      'microsoft-todo',
+      'todo-work',
+    );
+    const replay = mapGraphTask(
+      graphTask,
+      'list-1',
+      'Tasks',
+      'microsoft-todo',
+      'todo-work',
+    );
+    const otherConnector = mapGraphTask(
+      graphTask,
+      'list-1',
+      'Tasks',
+      'microsoft-todo',
+      'todo-personal',
+    );
+
+    expect(replay.sourceId).toBe(first.sourceId);
+    expect(replay.metadata.canonicalRecurrence?.series.id).toBe(
+      first.metadata.canonicalRecurrence?.series.id,
+    );
+    expect(otherConnector.metadata.canonicalRecurrence?.series.id).not.toBe(
+      first.metadata.canonicalRecurrence?.series.id,
+    );
   });
 
   it('stores a connector-scoped canonical rule for supported imports', () => {
@@ -298,6 +343,34 @@ describe('Microsoft To Do recurrence serialization', () => {
     expect(task.metadata.recurrenceIdentity).toBe(
       getRecurrencePatternIdentity(recurrence),
     );
+  });
+
+  it('marks provider timezone conversion as lossy without dropping raw recurrence', () => {
+    const recurrence = {
+      pattern: { type: 'daily', interval: 1 },
+      range: { type: 'noEnd', startDate: '2026-03-02' },
+    };
+    const task = mapGraphTask({
+      id: 'windows-timezone-occurrence',
+      title: 'Water plants',
+      status: 'notStarted',
+      importance: 'normal',
+      createdDateTime: '2026-03-01T14:00:00Z',
+      lastModifiedDateTime: '2026-03-01T14:00:00Z',
+      dueDateTime: {
+        dateTime: '2026-03-02T09:00:00',
+        timeZone: 'Pacific Standard Time',
+      },
+      recurrence,
+    }, 'list-1', 'Tasks', 'microsoft-todo', 'todo-work');
+
+    expect(task.metadata.canonicalRecurrence?.source).toMatchObject({
+      support: {
+        status: 'lossy',
+        reasons: ['provider_timezone_not_iana'],
+      },
+      raw: recurrence,
+    });
   });
 
   it('preserves Graph linked resources for task detail source actions', () => {

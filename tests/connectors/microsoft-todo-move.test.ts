@@ -182,4 +182,51 @@ describe('Microsoft To Do list moves', () => {
     );
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('denies unowned recurrence create, update, and delete writes', async () => {
+    const providerTask = {
+      id: 'provider-task',
+      title: 'Provider series',
+      status: 'notStarted',
+      importance: 'normal',
+      createdDateTime: '2026-09-01T00:00:00Z',
+      lastModifiedDateTime: '2026-09-01T00:00:00Z',
+      recurrence: {
+        pattern: { type: 'daily', interval: 1 },
+        range: { type: 'noEnd', startDate: '2026-09-01' },
+      },
+    };
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: input.toString(), init });
+      return Response.json(providerTask);
+    }));
+    const { mapGraphTask } = await import(
+      '@/lib/connectors/microsoft-todo/task-transformer'
+    );
+    const metadata = mapGraphTask(
+      providerTask,
+      'list-1',
+      'Tasks',
+      'microsoft-todo',
+      config.id,
+    ).metadata;
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config);
+
+    await expect(connector.createTask({
+      title: providerTask.title,
+      sourceListId: 'list-1',
+      metadata,
+    })).rejects.toThrow('denied for provider-owned series');
+    await expect(connector.updateTask('list-1:provider-task', {
+      metadata,
+    })).rejects.toThrow('denied for provider-owned series');
+    await expect(connector.deleteTask('list-1:provider-task'))
+      .rejects.toThrow('denied for provider-owned series');
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].init?.method).toBeUndefined();
+  });
 });

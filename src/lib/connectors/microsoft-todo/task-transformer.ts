@@ -123,6 +123,7 @@ export function mapSubstrateTask(
   const canonicalRecurrence = substrateRecurrence && recurrence
     ? mapMicrosoftTodoRecurrence({
         recurrence: substrateRecurrence,
+        rawRecurrence: subTask.Recurrence,
         connectorType,
         connectorInstanceId,
         providerTaskId: String(subTask.Id),

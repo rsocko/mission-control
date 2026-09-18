@@ -42,10 +42,14 @@ function parseMetadata(metadata: RecurringTaskCandidate['metadata']): Record<str
   }
 }
 
-function getCanonicalSeriesId(metadata: unknown): string | null {
+function getStableCanonicalSeriesId(metadata: unknown): string | null {
   const parsedMetadata = parseMetadata(metadata);
   const canonical = readRecurrenceMetadata(parsedMetadata);
-  return canonical.rule?.series.id ?? null;
+  if (!canonical.rule) return null;
+  const identity = canonical.rule.series.identity;
+  return identity.kind === 'mission-control' || identity.stability === 'provider'
+    ? canonical.rule.series.id
+    : null;
 }
 
 function getLegacyRecurrenceIdentity(metadata: unknown): string | null {
@@ -58,7 +62,7 @@ function getLegacyRecurrenceIdentity(metadata: unknown): string | null {
 
 function getRecurrenceIdentities(metadata: unknown): string[] {
   return [
-    getCanonicalSeriesId(metadata),
+    getStableCanonicalSeriesId(metadata),
     getLegacyRecurrenceIdentity(metadata),
   ].filter((value): value is string => value !== null);
 }
@@ -79,10 +83,12 @@ export function getRecurringSeriesKey(task: {
   sourceListId: string | null;
   metadata: unknown;
 }): string | null {
-  const recurrenceIdentity = getRecurrenceIdentity(task.metadata);
-  const recurrencePattern = recurrenceIdentity ?? getRecurrenceLabel(task.metadata);
+  const stableSeriesId = getStableCanonicalSeriesId(task.metadata);
+  if (stableSeriesId) return `series::${stableSeriesId}`;
+  const recurrencePattern = getLegacyRecurrenceIdentity(task.metadata)
+    ?? getRecurrenceLabel(task.metadata);
   if (!recurrencePattern) return null;
-  return `${getRecurringTitleKey(task)}::${recurrencePattern}`;
+  return `legacy::${getRecurringTitleKey(task)}::${recurrencePattern}`;
 }
 
 export function getRecurringTitleKey(task: {
@@ -178,23 +184,37 @@ export function findOpenRecurringTaskDuplicates(
   today: string,
   knownRecurringTitleKeys: ReadonlySet<string> = new Set(),
 ): RecurringTaskDuplicateGroup[] {
+  const stableSeriesByTitle = new Map<string, string | null>();
+  for (const task of tasks) {
+    const stableSeriesId = getStableCanonicalSeriesId(task.metadata);
+    if (!stableSeriesId) continue;
+    const titleKey = getRecurringTitleKey(task);
+    const existing = stableSeriesByTitle.get(titleKey);
+    stableSeriesByTitle.set(
+      titleKey,
+      existing === undefined || existing === stableSeriesId ? stableSeriesId : null,
+    );
+  }
   const groups = new Map<string, RecurringTaskCandidate[]>();
 
   for (const task of tasks) {
-    const key = getRecurringTitleKey(task);
+    const titleKey = getRecurringTitleKey(task);
+    const stableSeriesId = getStableCanonicalSeriesId(task.metadata)
+      ?? stableSeriesByTitle.get(titleKey);
+    const key = stableSeriesId ? `series::${stableSeriesId}` : `legacy::${titleKey}`;
     const group = groups.get(key);
     if (group) group.push(task);
     else groups.set(key, [task]);
   }
 
   const duplicateGroups: RecurringTaskDuplicateGroup[] = [];
-  for (const [key, group] of groups) {
+  for (const group of groups.values()) {
     if (group.length <= 1) continue;
 
     const identityTasks = group.filter(hasRecurringIdentity);
     const recurrenceTasks = group.filter(hasRecurrenceEvidence);
     const canonicalSeriesIds = new Set(
-      identityTasks.flatMap(task => getCanonicalSeriesId(task.metadata) ?? []),
+      identityTasks.flatMap(task => getStableCanonicalSeriesId(task.metadata) ?? []),
     );
     const legacyRecurrenceIdentities = new Set(
       identityTasks.flatMap(task => getLegacyRecurrenceIdentity(task.metadata) ?? []),
@@ -217,7 +237,7 @@ export function findOpenRecurringTaskDuplicates(
       canonicalSeriesIds.size === 0
       && legacyRecurrenceIdentities.size === 0
       && recurrenceLabels.size === 0
-      && !knownRecurringTitleKeys.has(key)
+      && !knownRecurringTitleKeys.has(getRecurringTitleKey(group[0]))
     ) continue;
 
     const keeperCandidates = identityTasks.length > 0

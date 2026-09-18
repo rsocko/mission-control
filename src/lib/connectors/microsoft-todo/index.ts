@@ -17,6 +17,13 @@ import { mergeAsyncStreams } from '../task-page-stream';
 import { isMicroStatusSyncEnabled, updateTagsWithMicroStatus } from '@/lib/micro-status';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { mergeConnectorSettings } from '../shared/connector-config-store';
+import {
+  assertConnectorRecurrenceWriteAllowed,
+  assertTaskRecurrenceWriteAllowed,
+  getTaskRecurrenceOwnership,
+  type ConnectorRecurrenceContract,
+  type RecurrenceWriteOperation,
+} from '../recurrence-ownership';
 
 import { createGraphClient, GRAPH_BASE_URL, SUBSTRATE_BASE_URL } from './graph-client';
 import type { GraphClient } from './graph-client';
@@ -38,6 +45,18 @@ import type {
 } from './types';
 
 export type { SubstrateMyDayTask } from './types';
+
+export const MICROSOFT_TODO_RECURRENCE_CONTRACT = {
+  imported: {
+    series: 'provider',
+    occurrences: 'provider',
+  },
+  writes: {
+    'create-series': ['mission-control'],
+    'update-series': ['mission-control'],
+    'delete-series': ['mission-control'],
+  },
+} as const satisfies ConnectorRecurrenceContract;
 
 function removeBufferedRecurringTask(tasks: TaskItem[], sourceId: string): void {
   const index = tasks.findIndex(task => task.sourceId === sourceId);
@@ -395,6 +414,15 @@ export class MicrosoftTodoConnector implements IConnector {
 
     const recurrencePattern = metadata?.recurrence as string | undefined;
     if (recurrencePattern && recurrencePattern !== 'none') {
+      assertTaskRecurrenceWriteAllowed({
+        contract: MICROSOFT_TODO_RECURRENCE_CONTRACT,
+        operation: 'create-series',
+        metadata,
+        legacyOwnership: {
+          series: 'mission-control',
+          occurrences: 'mission-control',
+        },
+      });
       body.recurrence = this.buildRecurrencePattern(recurrencePattern, task.dueDate);
     }
 
@@ -417,6 +445,11 @@ export class MicrosoftTodoConnector implements IConnector {
     const metadata = updates.metadata as Record<string, unknown> | undefined;
     const recurrencePattern = metadata?.recurrence as string | undefined;
     if (recurrencePattern !== undefined) {
+      assertTaskRecurrenceWriteAllowed({
+        contract: MICROSOFT_TODO_RECURRENCE_CONTRACT,
+        operation: 'update-series',
+        metadata,
+      });
       body.recurrence = recurrencePattern && recurrencePattern !== 'none'
         ? this.buildRecurrencePattern(recurrencePattern, updates.dueDate)
         : null;
@@ -504,6 +537,14 @@ export class MicrosoftTodoConnector implements IConnector {
     const path = checklistItemId
       ? graphTodoChecklistItemPath(listId, taskId, checklistItemId)
       : graphTodoTaskPath(listId, taskId);
+    if (!checklistItemId) {
+      const exists = await this.assertRemoteRecurrenceWriteAllowed(
+        listId,
+        taskId,
+        'delete-series',
+      );
+      if (!exists) return;
+    }
     const res = await this.client.graphFetch(path, { method: 'DELETE' });
     if (res.status === 404) return; // Task already deleted remotely — treat as success
     if (!res.ok) throw new Error(`Failed to delete task: ${res.status}`);
@@ -703,6 +744,21 @@ export class MicrosoftTodoConnector implements IConnector {
     const getRes = await this.client.graphFetch(sourceTaskPath);
     if (!getRes.ok) throw new Error(`Failed to read task: ${getRes.status}`);
     const taskData = await getRes.json();
+    if (taskData.recurrence) {
+      const ownership = getTaskRecurrenceOwnership(
+        mapGraphTask(taskData, listId, '', this.type, this.id).metadata,
+      );
+      if (!ownership) {
+        throw new Error('Microsoft To Do recurrence ownership is missing');
+      }
+      for (const operation of ['create-series', 'delete-series'] as const) {
+        assertConnectorRecurrenceWriteAllowed({
+          contract: MICROSOFT_TODO_RECURRENCE_CONTRACT,
+          operation,
+          ownership,
+        });
+      }
+    }
 
     const newTaskBody: Record<string, unknown> = {};
     if (taskData.title) newTaskBody.title = taskData.title;
@@ -724,6 +780,28 @@ export class MicrosoftTodoConnector implements IConnector {
     if (!delRes.ok) connectorLogger.warn({ status: delRes.status }, 'Failed to delete task from source list after move');
 
     return `${targetListSourceId}:${created.id}`;
+  }
+
+  private async assertRemoteRecurrenceWriteAllowed(
+    listId: string,
+    taskId: string,
+    operation: RecurrenceWriteOperation,
+  ): Promise<boolean> {
+    const taskPath = graphTodoTaskPath(listId, taskId);
+    const currentRes = await this.client.graphFetch(taskPath);
+    if (currentRes.status === 404) return false;
+    if (!currentRes.ok) {
+      throw new Error(`Failed to verify recurrence ownership: ${currentRes.status}`);
+    }
+    const taskData = await currentRes.json() as GraphTodoTask;
+    if (taskData.recurrence) {
+      assertTaskRecurrenceWriteAllowed({
+        contract: MICROSOFT_TODO_RECURRENCE_CONTRACT,
+        operation,
+        metadata: mapGraphTask(taskData, listId, '', this.type, this.id).metadata,
+      });
+    }
+    return true;
   }
 
   async setMyDay(sourceId: string, isInMyDay: boolean): Promise<void> {

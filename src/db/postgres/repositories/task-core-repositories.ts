@@ -1585,6 +1585,7 @@ async function repointTaskReferences(
 
   const remainingRepoints = [
     sql`UPDATE task_linked_sources SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
+    sql`UPDATE task_recurrence_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE task_reminder_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE notifications SET related_task_id = ${successorTaskId} WHERE related_task_id = ${sourceTaskId}`,
     sql`UPDATE scout_reconciliation_suggestions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,

@@ -1,4 +1,4 @@
-import { boolean, jsonb, serial } from 'drizzle-orm/pg-core';
+import { boolean, check, jsonb, serial } from 'drizzle-orm/pg-core';
 import {
   doublePrecision as real,
   index,
@@ -106,6 +106,100 @@ export const tasks = pgTable('tasks', {
   uniqueIndex('idx_tasks_recurrence_generated_from')
     .on(table.recurrenceGeneratedFromTaskId)
     .where(sql`${table.recurrenceGeneratedFromTaskId} IS NOT NULL`),
+]);
+
+export const taskRecurrenceOccurrences = pgTable('task_recurrence_occurrences', {
+  occurrenceId: text('occurrence_id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  generatedFromTaskId: text('generated_from_task_id'),
+  seriesId: text('series_id').notNull(),
+  ruleRevisionId: text('rule_revision_id').notNull(),
+  effectiveKind: text('effective_kind').$type<'local-date' | 'instant'>().notNull(),
+  effectiveValue: text('effective_value').notNull(),
+  localDate: text('local_date').notNull(),
+  instant: text('instant'),
+  occurrenceNumber: integer('occurrence_number'),
+  anchorKind: text('anchor_kind').$type<'schedule' | 'completion'>().notNull(),
+  anchorValue: text('anchor_value').notNull(),
+  timezoneId: text('timezone_id').notNull(),
+  timezoneKind: text('timezone_kind').$type<'iana' | 'provider'>().notNull(),
+  materializationStrategy: text('materialization_strategy')
+    .$type<'on-schedule' | 'on-completion'>()
+    .notNull(),
+  sourceOwner: text('source_owner').$type<'mission-control' | 'connector'>().notNull(),
+  seriesIdentityKind: text('series_identity_kind')
+    .$type<'mission-control' | 'connector'>()
+    .notNull(),
+  stableSeriesId: text('stable_series_id'),
+  connectorType: text('connector_type'),
+  connectorInstanceId: text('connector_instance_id'),
+  externalSeriesId: text('external_series_id'),
+  seriesStability: text('series_stability').$type<'provider' | 'derived'>(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_task_recurrence_occurrences_identity').on(
+    table.seriesId,
+    table.ruleRevisionId,
+    table.effectiveKind,
+    table.effectiveValue,
+  ),
+  uniqueIndex('idx_task_recurrence_occurrences_task').on(table.taskId),
+  uniqueIndex('idx_task_recurrence_occurrences_generation').on(table.generatedFromTaskId),
+  check(
+    'task_recurrence_occurrences_effective_check',
+    sql`(
+      (${table.effectiveKind} = 'local-date'
+        AND ${table.effectiveValue} = ${table.localDate}
+        AND ${table.instant} IS NULL)
+      OR
+      (${table.effectiveKind} = 'instant'
+        AND ${table.effectiveValue} = ${table.instant}
+        AND ${table.instant} IS NOT NULL)
+    )`,
+  ),
+  check(
+    'task_recurrence_occurrences_anchor_check',
+    sql`(
+      (${table.materializationStrategy} = 'on-schedule'
+        AND ${table.anchorKind} = 'schedule'
+        AND ${table.generatedFromTaskId} IS NULL)
+      OR
+      (${table.materializationStrategy} = 'on-completion'
+        AND ${table.anchorKind} = 'completion'
+        AND ${table.generatedFromTaskId} IS NOT NULL)
+    )`,
+  ),
+  check(
+    'task_recurrence_occurrences_provenance_check',
+    sql`(
+      (${table.sourceOwner} = 'mission-control'
+        AND ${table.seriesIdentityKind} = 'mission-control'
+        AND ${table.stableSeriesId} IS NOT NULL
+        AND ${table.connectorType} IS NULL
+        AND ${table.connectorInstanceId} IS NULL
+        AND ${table.externalSeriesId} IS NULL
+        AND ${table.seriesStability} IS NULL)
+      OR
+      (${table.sourceOwner} = 'connector'
+        AND ${table.connectorType} IS NOT NULL
+        AND ${table.connectorInstanceId} IS NOT NULL
+        AND (
+          (${table.seriesIdentityKind} = 'mission-control'
+            AND ${table.stableSeriesId} IS NOT NULL
+            AND ${table.externalSeriesId} IS NULL
+            AND ${table.seriesStability} IS NULL)
+          OR
+          (${table.seriesIdentityKind} = 'connector'
+            AND ${table.stableSeriesId} IS NULL
+            AND ${table.externalSeriesId} IS NOT NULL
+            AND ${table.seriesStability} IS NOT NULL)
+        ))
+    )`,
+  ),
+  check(
+    'task_recurrence_occurrences_number_check',
+    sql`${table.occurrenceNumber} IS NULL OR ${table.occurrenceNumber} > 0`,
+  ),
 ]);
 
 // ─── TASK REMINDER OCCURRENCES ───────────────────────────────────────────────

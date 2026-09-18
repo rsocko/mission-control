@@ -44,7 +44,7 @@ describe('PostgreSQL schema', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(163);
+    expect(Object.keys(postgresTables)).toHaveLength(164);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -255,7 +255,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(11);
+    expect(migrations).toHaveLength(12);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -273,7 +273,7 @@ describe('PostgreSQL schema', () => {
     expect(sql).not.toContain('AUTOINCREMENT');
 
     const persistentRemindersSql = readFileSync(
-      resolve(migrationDirectory, migrations.at(-1)!),
+      resolve(migrationDirectory, '0010_certain_warhawk.sql'),
       'utf8',
     );
     expect(persistentRemindersSql).toContain(
@@ -281,6 +281,17 @@ describe('PostgreSQL schema', () => {
     );
     expect(persistentRemindersSql).toContain(
       'CREATE INDEX "idx_task_reminder_occurrences_series_sequence"',
+    );
+
+    const recurringOccurrenceSql = readFileSync(
+      resolve(migrationDirectory, '0011_recurring_occurrence_identity.sql'),
+      'utf8',
+    );
+    expect(recurringOccurrenceSql).toContain(
+      'CREATE TABLE IF NOT EXISTS "task_recurrence_occurrences"',
+    );
+    expect(recurringOccurrenceSql).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "idx_task_recurrence_occurrences_identity"',
     );
 
     const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');

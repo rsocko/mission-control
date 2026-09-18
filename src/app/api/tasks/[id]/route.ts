@@ -79,6 +79,23 @@ async function removeTaskSearch(taskId: string): Promise<void> {
 
 const taskWriteThroughQueues = new Map<string, Promise<void>>();
 
+function normalizeStoredRecurrence(value: string): string {
+  const match = value.trim().match(
+    /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(?:;INTERVAL=(\d+))?$/i,
+  );
+  if (!match) return value;
+  const unit = match[1].toLowerCase();
+  const interval = match[2] ? Number(match[2]) : 1;
+  if (interval === 1) return unit;
+  const plural = {
+    daily: 'days',
+    weekly: 'weeks',
+    monthly: 'months',
+    yearly: 'years',
+  }[unit];
+  return `every ${interval} ${plural}`;
+}
+
 function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Promise<void> {
   const previous = taskWriteThroughQueues.get(taskId) ?? Promise.resolve();
   const queued = previous.catch(() => {}).then(write);
@@ -236,9 +253,15 @@ export async function PATCH(
       && currentTask.status !== input.status
       && !['done', 'cancelled'].includes(currentTask.status)
       && ['done', 'cancelled'].includes(input.status);
+    const resultingRecurrence = input.recurrence === undefined
+      ? currentSchedule?.recurrence ?? null
+      : input.recurrence;
+    const resultingRecurrenceMode = input.recurrence === null
+      ? 'schedule'
+      : input.recurrenceMode ?? currentSchedule?.recurrenceMode ?? 'schedule';
     const shouldReturnCompletionOccurrence = input.status === 'done'
-      && currentSchedule?.recurrenceMode === 'completion'
-      && Boolean(currentSchedule.recurrence)
+      && resultingRecurrenceMode === 'completion'
+      && Boolean(resultingRecurrence)
       && localIdentity;
 
     const updates: Record<string, unknown> = {};
@@ -392,7 +415,7 @@ export async function PATCH(
           updates.metadata = writeRecurrenceMetadata(
             nextMetadata,
             canonicalizeLegacyRecurrence({
-              recurrence: nextRecurrence,
+              recurrence: normalizeStoredRecurrence(nextRecurrence),
               mode: input.recurrenceMode
                 ?? currentSchedule?.recurrenceMode
                 ?? 'schedule',
@@ -445,14 +468,42 @@ export async function PATCH(
 
     let recurrenceSuccessor: TaskMutationRequest['recurrenceSuccessor'];
     if (shouldReturnCompletionOccurrence) {
-      const recurrence = currentSchedule!.recurrence!;
+      const recurrence = normalizeStoredRecurrence(resultingRecurrence!);
       const nextTaskId = randomUUID();
       const recurrenceTimezone = getTimezone();
+      let successorRule;
+      try {
+        successorRule = readRecurrenceMetadata(
+          (updates.metadata ?? currentTask.metadata) as Record<string, unknown>,
+        ).rule ?? canonicalizeLegacyRecurrence({
+          recurrence,
+          mode: currentSchedule?.recurrenceMode ?? 'completion',
+          startDate: (
+            currentTask.dueDate
+            ?? currentSchedule?.scheduledDate
+            ?? getLocalToday()
+          ).slice(0, 10),
+          localTime: extractRecurrenceLocalTime(currentTask.dueDate, recurrenceTimezone),
+          timezone: recurrenceTimezone,
+          seriesIdentity: {
+            kind: 'mission-control',
+            stableId: currentTask.id,
+            ...(localIdentity
+              ? {}
+              : { connectorInstanceId: currentTask.connectorInstanceId }),
+          },
+        });
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid recurrence',
+        );
+      }
       const includeCompletionTime = Boolean(
         currentTask.dueDate?.includes('T') || currentSchedule?.scheduledTime,
       );
+      const completionAnchor = currentTask.completedAt ?? now;
       const nextDueDate = getCompletionAnchoredDueDate(
-        now,
+        completionAnchor,
         recurrence,
         recurrenceTimezone,
         includeCompletionTime,
@@ -495,6 +546,16 @@ export async function PATCH(
         reminderNagSeriesId: nextReminderAt && currentTask.reminderNagInterval
           ? randomUUID()
           : null,
+        rule: successorRule,
+        occurrence: {
+          localDate: nextScheduledDate,
+          instant: nextDueDate.includes('T') ? new Date(nextDueDate).toISOString() : null,
+          occurrenceNumber: null,
+          anchor: {
+            kind: 'completion',
+            completedAt: completionAnchor,
+          },
+        },
         metadata,
       };
     }

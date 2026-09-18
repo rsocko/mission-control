@@ -48,6 +48,7 @@ import {
   taskIngestSuppressions,
   taskLinkedSources,
   taskProjects,
+  taskRecurrenceOccurrences,
   taskReminderOccurrences,
   taskSchedules,
   taskTags,
@@ -162,6 +163,8 @@ import {
   type TaskMutationOutcome,
   type TaskMutationRepository,
   type TaskMutationRequest,
+  type TaskOccurrenceMaterializationInput,
+  type TaskOccurrenceMaterializationRepository,
   type TaskMoveTaskInsert,
   type TaskMoveTaskRow,
   type TaskOrganizationRepository,
@@ -200,6 +203,16 @@ import {
   type TemplateWorkflowTaskInsert,
   type WriteThroughTaskMoveRepository,
 } from '@/lib/tasks/core/contracts';
+import { writeRecurrenceMetadata } from '@/lib/recurrence/canonical';
+import {
+  assertRecurrenceOccurrenceMatches,
+  assertRecurrenceOccurrenceTaskScope,
+  assertRecurrenceOccurrenceTiming,
+  createPersistedRecurrenceOccurrence,
+  deriveRecurrenceOccurrenceProvenance,
+  type PersistedRecurrenceOccurrence,
+  type RecurrenceOccurrenceProvenance,
+} from '@/lib/recurrence/occurrence-persistence';
 
 /**
  * PostgreSQL implementation of the L04 task-core contracts.
@@ -1572,6 +1585,7 @@ async function repointTaskReferences(
 
   const remainingRepoints = [
     sql`UPDATE task_linked_sources SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
+    sql`UPDATE task_recurrence_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE task_reminder_occurrences SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE notifications SET related_task_id = ${successorTaskId} WHERE related_task_id = ${sourceTaskId}`,
     sql`UPDATE scout_reconciliation_suggestions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
@@ -1912,6 +1926,75 @@ function sameSnapshot(
  */
 function moveTaskInsertValues(task: TaskMoveTaskInsert) {
   return { ...task, metadata: task.metadata };
+}
+
+async function findPostgresRecurrenceOccurrence(
+  tx: PostgresTransaction,
+  provenance: RecurrenceOccurrenceProvenance,
+  taskId: string,
+  generatedFromTaskId: string | null,
+): Promise<PersistedRecurrenceOccurrence> {
+  const [byIdentity] = await tx.select().from(taskRecurrenceOccurrences).where(and(
+    eq(taskRecurrenceOccurrences.seriesId, provenance.seriesId),
+    eq(taskRecurrenceOccurrences.ruleRevisionId, provenance.ruleRevisionId),
+    eq(taskRecurrenceOccurrences.effectiveKind, provenance.effectiveKind),
+    eq(taskRecurrenceOccurrences.effectiveValue, provenance.effectiveValue),
+  )).limit(1);
+  const [byOccurrenceId] = byIdentity
+    ? []
+    : await tx.select().from(taskRecurrenceOccurrences)
+        .where(eq(taskRecurrenceOccurrences.occurrenceId, provenance.occurrenceId))
+        .limit(1);
+  const [byTaskId] = byIdentity || byOccurrenceId
+    ? []
+    : await tx.select().from(taskRecurrenceOccurrences)
+        .where(eq(taskRecurrenceOccurrences.taskId, taskId))
+        .limit(1);
+  const stored = byIdentity ?? byOccurrenceId ?? byTaskId;
+  if (!stored) {
+    throw new Error('Recurrence occurrence conflict did not resolve to a stored claim');
+  }
+  assertRecurrenceOccurrenceMatches(stored, provenance);
+  if (stored.generatedFromTaskId !== generatedFromTaskId) {
+    throw new Error('Stored recurrence occurrence conflicts on generatedFromTaskId');
+  }
+  return stored;
+}
+
+async function claimPostgresRecurrenceOccurrence(
+  tx: PostgresTransaction,
+  provenance: RecurrenceOccurrenceProvenance,
+  taskId: string,
+  generatedFromTaskId: string | null,
+  createdAt: string,
+): Promise<
+  { readonly claimed: true; readonly occurrenceId: string; readonly taskId: string }
+  | { readonly claimed: false; readonly occurrenceId: string; readonly taskId: string }
+> {
+  const claim = createPersistedRecurrenceOccurrence(
+    provenance,
+    taskId,
+    generatedFromTaskId,
+    createdAt,
+  );
+  const inserted = await tx.insert(taskRecurrenceOccurrences)
+    .values(claim)
+    .onConflictDoNothing()
+    .returning({ occurrenceId: taskRecurrenceOccurrences.occurrenceId });
+  if (inserted.length > 0) {
+    return { claimed: true, occurrenceId: provenance.occurrenceId, taskId };
+  }
+  const existing = await findPostgresRecurrenceOccurrence(
+    tx,
+    provenance,
+    taskId,
+    generatedFromTaskId,
+  );
+  return {
+    claimed: false,
+    occurrenceId: existing.occurrenceId,
+    taskId: existing.taskId,
+  };
 }
 
 class PostgresTaskAncillaryRepository implements TaskAncillaryRepository {
@@ -3008,6 +3091,71 @@ class PostgresTaskCreateRepository implements TaskCreateRepository {
   }
 }
 
+class PostgresTaskOccurrenceMaterializationRepository
+implements TaskOccurrenceMaterializationRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+
+  async materializeOccurrence(input: TaskOccurrenceMaterializationInput) {
+    const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+      rule: input.rule,
+      occurrence: input.occurrence,
+    });
+    const task = {
+      ...input.task,
+      metadata: writeRecurrenceMetadata(input.task.metadata, rule),
+    };
+    assertRecurrenceOccurrenceTaskScope(task, provenance);
+    assertRecurrenceOccurrenceTiming(task, input.schedule, provenance, task.id);
+    const generatedFromTaskId = input.generatedFromTaskId ?? null;
+    if (
+      (provenance.materializationStrategy === 'on-completion')
+      !== (generatedFromTaskId !== null)
+    ) {
+      throw new Error(
+        'Completion recurrence occurrences require a generating task identity',
+      );
+    }
+
+    return this.db.transaction(async (tx) => {
+      const claim = await claimPostgresRecurrenceOccurrence(
+        tx,
+        provenance,
+        task.id,
+        generatedFromTaskId,
+        task.createdAt,
+      );
+      if (!claim.claimed) {
+        return {
+          kind: 'existing' as const,
+          occurrenceId: claim.occurrenceId,
+          taskId: claim.taskId,
+        };
+      }
+
+      await tx.insert(tasks).values(moveTaskInsertValues(task));
+      if (input.tagIds.length) {
+        await tx.insert(taskTags).values(
+          [...new Set(input.tagIds)].map((tagId) => ({ taskId: task.id, tagId })),
+        ).onConflictDoNothing();
+      }
+      if (input.projectIds.length) {
+        await tx.insert(taskProjects).values(
+          [...new Set(input.projectIds)].map((projectId) => ({ taskId: task.id, projectId })),
+        ).onConflictDoNothing();
+      }
+      if (input.schedule) {
+        await tx.insert(taskSchedules).values(input.schedule);
+      }
+      await enqueueTaskCoreEvent(tx, input.event);
+      return {
+        kind: 'created' as const,
+        occurrenceId: claim.occurrenceId,
+        taskId: claim.taskId,
+      };
+    });
+  }
+}
+
 class PostgresTaskMutationRepository implements TaskMutationRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
@@ -3179,96 +3327,129 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
       let recurrenceNextTaskId: string | null = null;
       if (request.recurrenceSuccessor) {
         const successor = request.recurrenceSuccessor;
-        const inserted = await tx.insert(tasks).values(moveTaskInsertValues({
-          ...currentTask,
-          id: successor.id,
-          sourceId: `local:${successor.id}`,
-          connectorType: 'local',
-          connectorInstanceId: 'local',
-          status: 'todo',
-          localDisposition: 'active',
-          dueDate: successor.dueDate,
-          createdAt: request.now,
-          updatedAt: request.now,
-          completedAt: null,
-          recurrenceGeneratedFromTaskId: request.taskId,
-          metadata: successor.metadata,
-          syncStatus: 'synced',
-          lastSyncedAt: request.now,
-          pushRetryCount: 0,
-          reminderAt: successor.reminderAt,
-          reminderNagInterval: successor.reminderNagInterval,
-          reminderNagStopAt: successor.reminderNagStopAt,
-          reminderNagSeriesId: successor.reminderNagSeriesId,
-          reminderNagSequence: 0,
-          isBulkImport: false,
-        })).onConflictDoNothing().returning({ id: tasks.id });
-        if (inserted.length) {
-          recurrenceNextTaskId = successor.id;
-          const [schedule] = await tx.select().from(taskSchedules)
-            .where(eq(taskSchedules.taskId, request.taskId)).limit(1);
-          if (schedule) {
-            await tx.insert(taskSchedules).values({
-              ...schedule,
-              taskId: successor.id,
-              scheduledDate: successor.scheduledDate,
-              scheduledTime: successor.scheduledTime,
-            });
-          }
-          const sourceTags = await tx.select({ tagId: taskTags.tagId }).from(taskTags)
-            .where(eq(taskTags.taskId, request.taskId));
-          if (sourceTags.length) {
-            await tx.insert(taskTags).values(sourceTags.map((row) => ({
-              taskId: successor.id,
-              tagId: row.tagId,
-            })));
-          }
-          const sourceProjects = await tx.select({ projectId: taskProjects.projectId })
-            .from(taskProjects).where(eq(taskProjects.taskId, request.taskId));
-          if (sourceProjects.length) {
-            await tx.insert(taskProjects).values(sourceProjects.map((row) => ({
-              taskId: successor.id,
-              projectId: row.projectId,
-            })));
-          }
-          const phases = await tx.select().from(projectPhaseItems)
-            .where(eq(projectPhaseItems.taskId, request.taskId));
-          if (phases.length) {
-            await tx.insert(projectPhaseItems).values(phases.map((row) => ({
-              ...row,
-              id: crypto.randomUUID(),
-              taskId: successor.id,
-              createdAt: request.now,
-            })));
-          }
-          const dependencies = await tx.select().from(taskDependencies)
-            .where(eq(taskDependencies.taskId, request.taskId));
-          if (dependencies.length) {
-            await tx.insert(taskDependencies).values(dependencies.map((row) => ({
-              ...row,
-              id: crypto.randomUUID(),
-              taskId: successor.id,
-              syncStatus: 'local' as const,
-              syncAction: null,
-              syncError: null,
-              lastSyncedAt: null,
-              createdAt: request.now,
-            })));
-          }
-          const attachments = await tx.select().from(taskAttachments)
-            .where(eq(taskAttachments.taskId, request.taskId));
-          if (attachments.length) {
-            await tx.insert(taskAttachments).values(attachments.map((row) => ({
-              ...row,
-              id: crypto.randomUUID(),
-              taskId: successor.id,
-              createdAt: request.now,
-            })));
-          }
+        const [historicalSuccessor] = await tx.select({ id: tasks.id }).from(tasks)
+          .where(eq(tasks.recurrenceGeneratedFromTaskId, request.taskId)).limit(1);
+        const [durableSuccessor] = await tx.select({
+          taskId: taskRecurrenceOccurrences.taskId,
+        }).from(taskRecurrenceOccurrences)
+          .where(eq(taskRecurrenceOccurrences.generatedFromTaskId, request.taskId))
+          .limit(1);
+        if (
+          historicalSuccessor
+          && durableSuccessor
+          && historicalSuccessor.id !== durableSuccessor.taskId
+        ) {
+          throw new Error('Recurrence successor history conflicts with its durable claim');
+        }
+        if (historicalSuccessor || durableSuccessor) {
+          recurrenceNextTaskId = historicalSuccessor?.id ?? durableSuccessor!.taskId;
         } else {
-          const [existing] = await tx.select({ id: tasks.id }).from(tasks)
-            .where(eq(tasks.recurrenceGeneratedFromTaskId, request.taskId)).limit(1);
-          recurrenceNextTaskId = existing?.id ?? null;
+          const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+            rule: successor.rule,
+            occurrence: successor.occurrence,
+          });
+          const successorTask = {
+            ...currentTask,
+            id: successor.id,
+            sourceId: `local:${successor.id}`,
+            connectorType: 'local',
+            connectorInstanceId: 'local',
+            status: 'todo',
+            localDisposition: 'active',
+            dueDate: successor.dueDate,
+            createdAt: request.now,
+            updatedAt: request.now,
+            completedAt: null,
+            recurrenceGeneratedFromTaskId: request.taskId,
+            metadata: writeRecurrenceMetadata(successor.metadata, rule),
+            syncStatus: 'synced',
+            lastSyncedAt: request.now,
+            pushRetryCount: 0,
+            reminderAt: successor.reminderAt,
+            reminderNagInterval: successor.reminderNagInterval,
+            reminderNagStopAt: successor.reminderNagStopAt,
+            reminderNagSeriesId: successor.reminderNagSeriesId,
+            reminderNagSequence: 0,
+            isBulkImport: false,
+          } satisfies TaskMoveTaskInsert;
+          assertRecurrenceOccurrenceTaskScope(successorTask, provenance);
+          assertRecurrenceOccurrenceTiming(
+            successorTask,
+            { taskId: successor.id, scheduledDate: successor.scheduledDate },
+            provenance,
+            successor.id,
+          );
+          const claim = await claimPostgresRecurrenceOccurrence(
+            tx,
+            provenance,
+            successor.id,
+            request.taskId,
+            request.now,
+          );
+          recurrenceNextTaskId = claim.taskId;
+          if (claim.claimed) {
+            await tx.insert(tasks).values(moveTaskInsertValues(successorTask));
+            const [schedule] = await tx.select().from(taskSchedules)
+              .where(eq(taskSchedules.taskId, request.taskId)).limit(1);
+            if (schedule) {
+              await tx.insert(taskSchedules).values({
+                ...schedule,
+                taskId: successor.id,
+                scheduledDate: successor.scheduledDate,
+                scheduledTime: successor.scheduledTime,
+              });
+            }
+            const sourceTags = await tx.select({ tagId: taskTags.tagId }).from(taskTags)
+              .where(eq(taskTags.taskId, request.taskId));
+            if (sourceTags.length) {
+              await tx.insert(taskTags).values(sourceTags.map((row) => ({
+                taskId: successor.id,
+                tagId: row.tagId,
+              })));
+            }
+            const sourceProjects = await tx.select({ projectId: taskProjects.projectId })
+              .from(taskProjects).where(eq(taskProjects.taskId, request.taskId));
+            if (sourceProjects.length) {
+              await tx.insert(taskProjects).values(sourceProjects.map((row) => ({
+                taskId: successor.id,
+                projectId: row.projectId,
+              })));
+            }
+            const phases = await tx.select().from(projectPhaseItems)
+              .where(eq(projectPhaseItems.taskId, request.taskId));
+            if (phases.length) {
+              await tx.insert(projectPhaseItems).values(phases.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                createdAt: request.now,
+              })));
+            }
+            const dependencies = await tx.select().from(taskDependencies)
+              .where(eq(taskDependencies.taskId, request.taskId));
+            if (dependencies.length) {
+              await tx.insert(taskDependencies).values(dependencies.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                syncStatus: 'local' as const,
+                syncAction: null,
+                syncError: null,
+                lastSyncedAt: null,
+                createdAt: request.now,
+              })));
+            }
+            const attachments = await tx.select().from(taskAttachments)
+              .where(eq(taskAttachments.taskId, request.taskId));
+            if (attachments.length) {
+              await tx.insert(taskAttachments).values(attachments.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                createdAt: request.now,
+              })));
+            }
+          }
         }
       }
       for (const event of request.events ?? []) await enqueueTaskCoreEvent(tx, event);
@@ -5255,6 +5436,7 @@ export function createPostgresTaskCorePersistence(
     collections: new PostgresTaskCollectionReadRepository(db, queries),
     details: new PostgresTaskDetailReadRepository(db),
     creates: new PostgresTaskCreateRepository(db),
+    occurrences: new PostgresTaskOccurrenceMaterializationRepository(db),
     mutations: new PostgresTaskMutationRepository(db),
     removals: new PostgresTaskRemovalRepository(db),
     taskReads: new PostgresTaskReadRepository(db, filterInputs),

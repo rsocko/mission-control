@@ -2,6 +2,7 @@ import { afterAll, beforeAll, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as SchemaModule from '@/db/schema';
+import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
 import {
   describeTaskCoreContract,
   type SeedAttachment,
@@ -59,6 +60,7 @@ beforeAll(async () => {
         schema.taskAttachments,
         schema.taskLinkedSources,
         schema.taskSchedules,
+        schema.taskRecurrenceOccurrences,
         schema.projectPhaseItems,
         schema.projectPhases,
         schema.taskProjects,
@@ -88,9 +90,9 @@ beforeAll(async () => {
         connectorInstanceId: row.connectorInstanceId ?? 'local',
         title: row.title ?? row.id,
         description: row.description ?? null,
-        status: row.status ?? 'todo',
-        localDisposition: row.localDisposition ?? 'active',
-        priority: row.priority ?? 'none',
+        status: (row.status ?? 'todo') as TaskStatus,
+        localDisposition: (row.localDisposition ?? 'active') as LocalDisposition,
+        priority: (row.priority ?? 'none') as TaskPriority,
         planningHorizon: (row.planningHorizon ?? null) as 'next' | null,
         dueDate: row.dueDate ?? null,
         createdAt: row.createdAt ?? DEFAULT_NOW,
@@ -106,7 +108,7 @@ beforeAll(async () => {
         microStatus: row.microStatus ?? null,
         snoozedUntil: row.snoozedUntil ?? null,
         metadata: row.metadata ?? {},
-        syncStatus: row.syncStatus ?? 'synced',
+        syncStatus: (row.syncStatus ?? 'synced') as 'synced' | 'pending' | 'failed' | 'local',
         lastSyncedAt: row.lastSyncedAt ?? DEFAULT_NOW,
         effort: row.effort ?? null,
       })));
@@ -215,8 +217,8 @@ beforeAll(async () => {
       if (rows.length === 0) return;
       await db.insert(schema.taskDependencies).values(rows.map((row) => ({
         ...row,
-        type: 'blocks',
-        syncStatus: 'local',
+        type: 'blocks' as const,
+        syncStatus: 'local' as const,
         createdAt: DEFAULT_NOW,
       })));
     },
@@ -396,6 +398,22 @@ beforeAll(async () => {
         .prepare('SELECT DISTINCT task_id AS taskId FROM task_attachments')
         .all() as Array<{ taskId: string }>;
       return rows.map((row) => row.taskId).sort();
+    },
+    async listRecurrenceOccurrences() {
+      return sqlite.prepare(`
+        SELECT
+          occurrence_id AS occurrenceId,
+          task_id AS taskId,
+          generated_from_task_id AS generatedFromTaskId,
+          series_id AS seriesId,
+          rule_revision_id AS ruleRevisionId,
+          effective_kind AS effectiveKind,
+          effective_value AS effectiveValue,
+          timezone_id AS timezoneId,
+          connector_instance_id AS connectorInstanceId
+        FROM task_recurrence_occurrences
+        ORDER BY occurrence_id
+      `).all() as Awaited<ReturnType<TaskCoreContractHarness['listRecurrenceOccurrences']>>;
     },
     async getTaskUpdatedAt(taskId) {
       const row = sqlite

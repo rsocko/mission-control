@@ -11,6 +11,7 @@ import { useDashboardFilterState } from '@/lib/hooks/useDashboardFilterState';
 import { useDashboardUiState } from '@/lib/hooks/useDashboardUiState';
 import { useDashboardSavedViews } from '@/lib/hooks/useDashboardSavedViews';
 import { useDashboardTaskActions } from '@/lib/hooks/useDashboardTaskActions';
+import { useDashboardUrlFilters } from '@/lib/hooks/useDashboardUrlFilters';
 import { MAX_TASK_PAGE_SIZE } from '@/app/api/tasks/pagination';
 import {
   DASHBOARD_TASK_ENTITY_LIMIT,
@@ -316,7 +317,6 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatusEntry[]>([]);
   const { listRef, lastClickedIndexRef } = dashboardUi;
-  const hasHydratedUrlFiltersRef = useRef(false);
   const [allSourceCounts, setAllSourceCounts] = useState<Record<string, number>>({});
   const { completingIds, runTaskCompletion } = useTaskCompletion();
   const [exitingTasks, setExitingTasks] = useState<Array<{ id: string; title: string; yOffset: number; reason: 'complete' | 'remove' }>>([]);
@@ -367,20 +367,11 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     router.replace(next.size ? `${pathname}?${next.toString()}` : pathname, { scroll: false });
   }, [pathname, router, searchParams]);
 
-  // Initialize filters from URL search params (e.g. from Insights clickable charts)
-  useEffect(() => {
-    if (hasHydratedUrlFiltersRef.current) return;
-    hasHydratedUrlFiltersRef.current = true;
-    if (searchParams.has(TASK_FILTER_CONTEXT_PARAM)) return;
-    const urlSource = searchParams.get('source');
-    const urlListId = searchParams.get('listId');
-    const urlTag = searchParams.get('tag');
-    if (urlSource || urlListId || urlTag) {
-      setSourceFilter(urlSource);
-      setListFilter(urlListId);
-      setTagFilter(urlTag ? [urlTag] : []);
-    }
-  }, [searchParams, setListFilter, setSourceFilter, setTagFilter]);
+  useDashboardUrlFilters(searchParams, {
+    setSourceFilter,
+    setListFilter,
+    setTagFilter,
+  });
 
   // Load available destinations for the Add Task modal
   useEffect(() => {

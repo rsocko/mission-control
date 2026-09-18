@@ -57,6 +57,7 @@ import {
   triageItems,
   weeklyOneThing,
 } from '../schema';
+import { taskTimeActivities } from '../schema/tasks';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
 import {
   compileCanonicalTaskFilter,
@@ -163,6 +164,11 @@ import {
   type TaskMutationOutcome,
   type TaskMutationRepository,
   type TaskMutationRequest,
+  type TaskTimeActivity,
+  type TaskTimeActivityMutationOutcome,
+  type TaskTimeActivityRepository,
+  type TaskTimeActivityStartInput,
+  type TaskTimeActivityTransitionInput,
   type TaskOccurrenceMaterializationInput,
   type TaskOccurrenceMaterializationRepository,
   type TaskMoveTaskInsert,
@@ -202,6 +208,7 @@ import {
   type TemplateSubtaskInsert,
   type TemplateWorkflowTaskInsert,
   type WriteThroughTaskMoveRepository,
+  elapsedTaskTimeAt,
 } from '@/lib/tasks/core/contracts';
 import { writeRecurrenceMetadata } from '@/lib/recurrence/canonical';
 import {
@@ -3156,6 +3163,187 @@ implements TaskOccurrenceMaterializationRepository {
   }
 }
 
+type PostgresTaskTimeActivityRow = typeof taskTimeActivities.$inferSelect;
+function toTaskTimeActivity(row: PostgresTaskTimeActivityRow): TaskTimeActivity {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    mode: row.mode,
+    state: row.state,
+    targetSeconds: row.targetSeconds,
+    elapsedSeconds: row.elapsedSeconds,
+    activeStartedAt: row.activeStartedAt,
+    startedAt: row.startedAt,
+    updatedAt: row.updatedAt,
+    version: row.version,
+  };
+}
+async function completeExpiredTaskTimeActivity(
+  tx: PostgresTransaction,
+  row: PostgresTaskTimeActivityRow,
+  serverNow: string,
+): Promise<PostgresTaskTimeActivityRow> {
+  if (
+    row.activeKey !== 1
+    || elapsedTaskTimeAt(toTaskTimeActivity(row), serverNow) < row.targetSeconds
+  ) {
+    return row;
+  }
+  const [updated] = await tx.update(taskTimeActivities).set({
+    state: 'completed',
+    activeKey: null,
+    elapsedSeconds: row.targetSeconds,
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: row.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, row.id),
+    eq(taskTimeActivities.version, row.version),
+  )).returning();
+  return updated ?? row;
+}
+async function cancelActiveTaskTimeActivity(
+  tx: PostgresTransaction,
+  taskId: string,
+  serverNow: string,
+): Promise<void> {
+  const [active] = await tx.select().from(taskTimeActivities).where(and(
+    eq(taskTimeActivities.taskId, taskId),
+    eq(taskTimeActivities.activeKey, 1),
+  )).limit(1).for('update');
+  if (!active) return;
+  await tx.update(taskTimeActivities).set({
+    state: 'cancelled',
+    activeKey: null,
+    elapsedSeconds: elapsedTaskTimeAt(toTaskTimeActivity(active), serverNow),
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: active.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, active.id),
+    eq(taskTimeActivities.version, active.version),
+  ));
+}
+class PostgresTaskTimeActivityRepository implements TaskTimeActivityRepository {
+  constructor(private readonly db: PostgresDatabase) {}
+  async getTaskActivity(taskId: string, serverNow: string) {
+    return this.db.transaction(async (tx) => {
+      const [task] = await tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt),
+      )).limit(1);
+      if (!task) return { taskExists: false, activity: null };
+      const [row] = await tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.taskId, taskId))
+        .orderBy(desc(sql`coalesce(${taskTimeActivities.activeKey}, 0)`), desc(taskTimeActivities.startedAt)).limit(1).for('update');
+      const current = row ? await completeExpiredTaskTimeActivity(tx, row, serverNow) : null;
+      return { taskExists: true, activity: current ? toTaskTimeActivity(current) : null };
+    });
+  }
+  async start(input: TaskTimeActivityStartInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('task-time-activity-active'))`);
+      const [existing] = await tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, input.commandId)).limit(1);
+      if (existing) {
+        return existing.taskId === input.taskId
+          && existing.mode === input.mode
+          && (existing.mode === 'deadline' || existing.targetSeconds === input.targetSeconds)
+          ? { kind: 'replayed', activity: toTaskTimeActivity(existing) }
+          : { kind: 'conflict', reason: 'command' };
+      }
+      const [task] = await tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.deletedAt),
+        notInArray(tasks.status, ['done', 'cancelled']),
+      )).limit(1).for('update');
+      if (!task) return { kind: 'task-not-found' };
+      const [active] = await tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.activeKey, 1)).limit(1).for('update');
+      const current = active
+        ? await completeExpiredTaskTimeActivity(tx, active, input.serverNow)
+        : null;
+      if (current?.activeKey) {
+        return { kind: 'conflict', reason: 'active-timer', activeTaskId: current.taskId };
+      }
+      const [created] = await tx.insert(taskTimeActivities).values({
+        id: input.commandId,
+        taskId: input.taskId,
+        mode: input.mode,
+        state: 'running',
+        activeKey: 1,
+        targetSeconds: input.targetSeconds,
+        elapsedSeconds: 0,
+        activeStartedAt: input.serverNow,
+        startedAt: input.serverNow,
+        updatedAt: input.serverNow,
+        version: 0,
+        lastCommandId: input.commandId,
+        lastCommandAction: 'start',
+      }).returning();
+      return { kind: 'committed', activity: toTaskTimeActivity(created) };
+    });
+  }
+  async transition(input: TaskTimeActivityTransitionInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.db.transaction(async (tx) => {
+      const [row] = await tx.select().from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.id, input.activityId),
+        eq(taskTimeActivities.taskId, input.taskId),
+      )).limit(1).for('update');
+      if (!row) return { kind: 'activity-not-found' };
+      if (row.lastCommandId === input.commandId && row.lastCommandAction === input.action) {
+        return { kind: 'replayed', activity: toTaskTimeActivity(row) };
+      }
+      if (row.version !== input.expectedVersion) return { kind: 'conflict', reason: 'version' };
+      const allowed = input.action === 'pause'
+        ? row.state === 'running'
+        : input.action === 'resume'
+          ? row.state === 'paused'
+          : input.action === 'complete'
+            ? row.state === 'running' || row.state === 'paused'
+            : row.state === 'running' || row.state === 'paused' || row.state === 'completed';
+      if (!allowed) return { kind: 'conflict', reason: 'state' };
+      const requestedState = input.action === 'pause'
+        ? 'paused'
+        : input.action === 'resume'
+          ? 'running'
+          : input.action === 'complete'
+            ? 'completed'
+            : 'cancelled';
+      const elapsedSeconds = input.action === 'resume'
+        ? row.elapsedSeconds
+        : elapsedTaskTimeAt(toTaskTimeActivity(row), input.serverNow);
+      const nextState = input.action !== 'cancel' && elapsedSeconds >= row.targetSeconds
+        ? 'completed' : requestedState;
+      const [updated] = await tx.update(taskTimeActivities).set({
+        state: nextState,
+        activeKey: nextState === 'running' || nextState === 'paused' ? 1 : null,
+        elapsedSeconds,
+        activeStartedAt: nextState === 'running' ? input.serverNow : null,
+        updatedAt: input.serverNow,
+        version: row.version + 1,
+        lastCommandId: input.commandId,
+        lastCommandAction: input.action,
+      }).where(and(
+        eq(taskTimeActivities.id, row.id),
+        eq(taskTimeActivities.version, row.version),
+      )).returning();
+      if (!updated) return { kind: 'conflict', reason: 'version' };
+      return { kind: 'committed', activity: toTaskTimeActivity(updated) };
+    });
+  }
+  async hasDurableTimeActivity(taskId: string): Promise<boolean> {
+    const [row] = await this.db.select({ id: taskTimeActivities.id })
+      .from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.taskId, taskId),
+        or(
+          ne(taskTimeActivities.state, 'cancelled'),
+          gte(taskTimeActivities.elapsedSeconds, 1),
+        ),
+      )).limit(1);
+    return Boolean(row);
+  }
+}
 class PostgresTaskMutationRepository implements TaskMutationRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
@@ -3228,6 +3416,9 @@ class PostgresTaskMutationRepository implements TaskMutationRepository {
         return latest
           ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
           : { kind: 'not-found' } as const;
+      }
+      if (request.patch.status === 'done' || request.patch.status === 'cancelled') {
+        await cancelActiveTaskTimeActivity(tx, request.taskId, request.now);
       }
       if (request.schedulePatch) {
         await tx.insert(taskSchedules).values({
@@ -3542,6 +3733,7 @@ class PostgresTaskRemovalRepository implements TaskRemovalRepository {
         }
       }
       for (const event of input.events ?? []) await enqueueTaskCoreEvent(tx, event);
+      await cancelActiveTaskTimeActivity(tx, input.taskId, input.now);
       return {
         kind: 'committed',
         action: input.mode === 'mirror-dismiss'
@@ -5438,6 +5630,7 @@ export function createPostgresTaskCorePersistence(
     creates: new PostgresTaskCreateRepository(db),
     occurrences: new PostgresTaskOccurrenceMaterializationRepository(db),
     mutations: new PostgresTaskMutationRepository(db),
+    timeActivities: new PostgresTaskTimeActivityRepository(db),
     removals: new PostgresTaskRemovalRepository(db),
     taskReads: new PostgresTaskReadRepository(db, filterInputs),
     filterInputs,

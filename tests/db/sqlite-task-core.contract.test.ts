@@ -17,6 +17,7 @@ import {
   type SeedTask,
   type TaskCoreContractHarness,
 } from '../contracts/task-core.contract';
+import { describeTaskTimeActivityContract } from '../contracts/task-time-activity.contract';
 
 /**
  * Runs the shared task-core contract suite against the real SQLite adapter
@@ -461,3 +462,4 @@ afterAll(() => {
 });
 
 describeTaskCoreContract('SQLite adapter', async () => harness);
+describeTaskTimeActivityContract('SQLite adapter', async () => harness);

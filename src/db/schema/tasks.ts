@@ -230,6 +230,36 @@ export const taskReminderOccurrences = sqliteTable('task_reminder_occurrences', 
     .on(table.state, table.nextAttemptAt, table.leaseExpiresAt),
 ]);
 
+export const taskTimeActivities = sqliteTable('task_time_activities', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  mode: text('mode', { enum: ['focus', 'deadline'] }).notNull(),
+  state: text('state', { enum: ['running', 'paused', 'completed', 'cancelled'] }).notNull(),
+  activeKey: integer('active_key'),
+  targetSeconds: integer('target_seconds').notNull(),
+  elapsedSeconds: integer('elapsed_seconds').notNull().default(0),
+  activeStartedAt: text('active_started_at'),
+  startedAt: text('started_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  version: integer('version').notNull().default(0),
+  lastCommandId: text('last_command_id').notNull(),
+  lastCommandAction: text('last_command_action').notNull(),
+}, (table) => [
+  uniqueIndex('idx_task_time_activities_active').on(table.activeKey),
+  index('idx_task_time_activities_task_started').on(table.taskId, table.startedAt),
+  check(
+    'task_time_activities_contract_check',
+    sql`(
+      ${table.mode} IN ('focus', 'deadline')
+      AND ${table.state} IN ('running', 'paused', 'completed', 'cancelled')
+      AND ((${table.state} IN ('running', 'paused') AND ${table.activeKey} = 1)
+        OR (${table.state} IN ('completed', 'cancelled') AND ${table.activeKey} IS NULL))
+      AND ${table.targetSeconds} > 0
+      AND ${table.elapsedSeconds} >= 0
+      AND ${table.elapsedSeconds} <= ${table.targetSeconds}
+    )`,
+  ),
+]);
 // ─── TASK SCHEDULES (Focus & Planning) ──────────────────────────────────────
 
 export const taskSchedules = sqliteTable('task_schedules', {

@@ -7,6 +7,8 @@ import { getTableConfig as getSqliteTableConfig } from 'drizzle-orm/sqlite-core'
 import { describe, expect, it } from 'vitest';
 import * as postgresSchema from '@/db/postgres/schema';
 import * as sqliteSchema from '@/db/schema';
+import { taskTimeActivities as postgresTaskTimeActivities } from '@/db/postgres/schema/tasks';
+import { taskTimeActivities as sqliteTaskTimeActivities } from '@/db/schema/tasks';
 
 function exportedTables(schema: Record<string, unknown>) {
   return Object.fromEntries(
@@ -40,11 +42,28 @@ function sharedTables(schema: Record<string, unknown>) {
 }
 
 describe('PostgreSQL schema', () => {
+  it('keeps task time activity columns, indexes, foreign keys, and checks in parity', () => {
+    const sqliteColumns = Object.values(getTableColumns(sqliteTaskTimeActivities))
+      .map((column) => [column.name, column.notNull, column.hasDefault]);
+    const postgresColumns = Object.values(getTableColumns(postgresTaskTimeActivities))
+      .map((column) => [column.name, column.notNull, column.hasDefault]);
+    expect(postgresColumns).toEqual(sqliteColumns);
+
+    const sqlite = getSqliteTableConfig(sqliteTaskTimeActivities);
+    const postgres = getPostgresTableConfig(postgresTaskTimeActivities);
+    expect(postgres.indexes.map((index) => [index.config.name, index.config.unique]))
+      .toEqual(sqlite.indexes.map((index) => [index.config.name, index.config.unique]));
+    expect(postgres.checks.map((check) => check.name))
+      .toEqual(sqlite.checks.map((check) => check.name));
+    expect(postgres.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(sqlite.foreignKeys[0]?.onDelete).toBe('cascade');
+  });
+
   it('has a table and column equivalent for every SQLite schema export', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(164);
+    expect(Object.keys(postgresTables)).toHaveLength(165);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -255,7 +274,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(12);
+    expect(migrations).toHaveLength(13);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.

@@ -70,6 +70,7 @@ export {
   quickSortOperations,
   taskAttachments,
   taskLinkedSources,
+  taskTimeActivities,
 } from './tasks';
 
 // Triage

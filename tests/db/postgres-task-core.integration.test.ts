@@ -15,6 +15,7 @@ import {
   type SeedTask,
   type TaskCoreContractHarness,
 } from '../contracts/task-core.contract';
+import { describeTaskTimeActivityContract } from '../contracts/task-time-activity.contract';
 
 vi.unmock('drizzle-orm');
 
@@ -611,6 +612,7 @@ async function waitForTaskCoreLockWait(): Promise<void> {
 
 if (connectionString) {
   describeTaskCoreContract('PostgreSQL adapter', createHarness);
+  describeTaskTimeActivityContract('PostgreSQL adapter', createHarness);
 
   describe('PostgreSQL task-core row locking', () => {
     beforeEach(async () => {

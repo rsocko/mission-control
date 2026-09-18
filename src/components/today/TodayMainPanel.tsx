@@ -678,7 +678,7 @@ export function TodayMainPanel({
           </div>
         )}
 
-        {(showTimer || focusTask) && <div className="mb-6"><TimerPanel taskTitle={focusTask?.title} taskDeadline={focusTask?.dueDate || undefined} /></div>}
+        <div className={showTimer || focusTask ? 'mb-6' : ''}><TimerPanel taskId={focusTask?.taskId} taskTitle={focusTask?.title} taskDeadline={focusTask?.dueDate || undefined} hiddenWhenIdle={!showTimer && !focusTask} onRestore={onSetShowTimer} /></div>
 
         {loading ? (
           <div className="space-y-4 py-4 animate-pulse">

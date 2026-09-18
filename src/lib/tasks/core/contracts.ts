@@ -820,6 +820,48 @@ export interface TaskMutationRepository {
   mutateTask(request: TaskMutationRequest): Promise<TaskMutationOutcome>;
 }
 
+export type TaskTimeActivityMode = 'focus' | 'deadline';
+export type TaskTimeActivityState = 'running' | 'paused' | 'completed' | 'cancelled';
+export type TaskTimeActivityAction = 'pause' | 'resume' | 'complete' | 'cancel';
+export interface TaskTimeActivity {
+  readonly id: string; readonly taskId: string;
+  readonly mode: TaskTimeActivityMode; readonly state: TaskTimeActivityState;
+  readonly targetSeconds: number; readonly elapsedSeconds: number;
+  readonly activeStartedAt: string | null;
+  readonly startedAt: string; readonly updatedAt: string; readonly version: number;
+}
+export type TaskTimeActivityMutationOutcome =
+  | { readonly kind: 'committed' | 'replayed'; readonly activity: TaskTimeActivity }
+  | { readonly kind: 'task-not-found' | 'activity-not-found' }
+  | {
+      readonly kind: 'conflict';
+      readonly reason: 'active-timer' | 'command' | 'state' | 'version';
+      readonly activeTaskId?: string;
+    };
+export interface TaskTimeActivityStartInput {
+  readonly taskId: string; readonly commandId: string; readonly serverNow: string;
+  readonly mode: TaskTimeActivityMode; readonly targetSeconds: number;
+}
+export interface TaskTimeActivityTransitionInput {
+  readonly taskId: string; readonly activityId: string; readonly commandId: string;
+  readonly action: TaskTimeActivityAction; readonly expectedVersion: number; readonly serverNow: string;
+}
+export interface TaskTimeActivityRepository {
+  getTaskActivity(taskId: string, serverNow: string):
+    Promise<{ readonly taskExists: boolean; readonly activity: TaskTimeActivity | null }>;
+  start(input: TaskTimeActivityStartInput): Promise<TaskTimeActivityMutationOutcome>;
+  transition(input: TaskTimeActivityTransitionInput): Promise<TaskTimeActivityMutationOutcome>;
+  hasDurableTimeActivity(taskId: string): Promise<boolean>;
+}
+export function elapsedTaskTimeAt(
+  activity: Pick<TaskTimeActivity, 'activeStartedAt' | 'elapsedSeconds' | 'state' | 'targetSeconds'>,
+  serverNow: string,
+): number {
+  if (activity.state !== 'running' || !activity.activeStartedAt) return activity.elapsedSeconds;
+  const activeSeconds = Math.max(0,
+    Math.floor((Date.parse(serverNow) - Date.parse(activity.activeStartedAt)) / 1000));
+  return Math.min(activity.targetSeconds, activity.elapsedSeconds + activeSeconds);
+}
 export type TaskRemovalMode =
   | 'mirror-dismiss'
   | 'ingested-cancel'
@@ -2152,6 +2194,7 @@ export interface TaskCorePersistence {
   readonly creates: TaskCreateRepository;
   readonly occurrences: TaskOccurrenceMaterializationRepository;
   readonly mutations: TaskMutationRepository;
+  readonly timeActivities: TaskTimeActivityRepository;
   readonly removals: TaskRemovalRepository;
   readonly taskReads: TaskReadRepository;
   readonly filterInputs: TaskFilterInputRepository;

@@ -18,6 +18,7 @@ import {
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import db, { runTransaction } from '@/db';
 import * as schema from '@/db/schema';
+import { taskTimeActivities } from '@/db/schema/tasks';
 import {
   appSettings,
   connectorConfigs,
@@ -166,6 +167,11 @@ import {
   type TaskMutationOutcome,
   type TaskMutationRepository,
   type TaskMutationRequest,
+  type TaskTimeActivity,
+  type TaskTimeActivityMutationOutcome,
+  type TaskTimeActivityRepository,
+  type TaskTimeActivityStartInput,
+  type TaskTimeActivityTransitionInput,
   type TaskOccurrenceMaterializationInput,
   type TaskOccurrenceMaterializationRepository,
   type TaskMoveTaskInsert,
@@ -205,6 +211,7 @@ import {
   type TemplateSubtaskInsert,
   type TemplateWorkflowTaskInsert,
   type WriteThroughTaskMoveRepository,
+  elapsedTaskTimeAt,
 } from '@/lib/tasks/core/contracts';
 import { writeRecurrenceMetadata } from '@/lib/recurrence/canonical';
 import {
@@ -3002,6 +3009,189 @@ implements TaskOccurrenceMaterializationRepository {
   }
 }
 
+type SqliteTaskTimeActivityRow = typeof taskTimeActivities.$inferSelect;
+function toTaskTimeActivity(row: SqliteTaskTimeActivityRow): TaskTimeActivity {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    mode: row.mode,
+    state: row.state,
+    targetSeconds: row.targetSeconds,
+    elapsedSeconds: row.elapsedSeconds,
+    activeStartedAt: row.activeStartedAt,
+    startedAt: row.startedAt,
+    updatedAt: row.updatedAt,
+    version: row.version,
+  };
+}
+function completeExpiredTaskTimeActivity(
+  tx: SqliteTransaction,
+  row: SqliteTaskTimeActivityRow,
+  serverNow: string,
+): SqliteTaskTimeActivityRow {
+  if (
+    row.activeKey !== 1
+    || elapsedTaskTimeAt(toTaskTimeActivity(row), serverNow) < row.targetSeconds
+  ) {
+    return row;
+  }
+  tx.update(taskTimeActivities).set({
+    state: 'completed',
+    activeKey: null,
+    elapsedSeconds: row.targetSeconds,
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: row.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, row.id),
+    eq(taskTimeActivities.version, row.version),
+  )).run();
+  return tx.select().from(taskTimeActivities)
+    .where(eq(taskTimeActivities.id, row.id)).get() ?? row;
+}
+function cancelActiveTaskTimeActivity(
+  tx: SqliteTransaction,
+  taskId: string,
+  serverNow: string,
+): void {
+  const active = tx.select().from(taskTimeActivities).where(and(
+    eq(taskTimeActivities.taskId, taskId),
+    eq(taskTimeActivities.activeKey, 1),
+  )).get();
+  if (!active) return;
+  tx.update(taskTimeActivities).set({
+    state: 'cancelled',
+    activeKey: null,
+    elapsedSeconds: elapsedTaskTimeAt(toTaskTimeActivity(active), serverNow),
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: active.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, active.id),
+    eq(taskTimeActivities.version, active.version),
+  )).run();
+}
+class SqliteTaskTimeActivityRepository implements TaskTimeActivityRepository {
+  constructor(private readonly runTransaction: SqliteTaskCoreTransactionRunner) {}
+  async getTaskActivity(taskId: string, serverNow: string) {
+    return this.runTransaction((tx) => {
+      const task = tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt),
+      )).get();
+      if (!task) return { taskExists: false, activity: null };
+      const row = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.taskId, taskId))
+        .orderBy(desc(sql`coalesce(${taskTimeActivities.activeKey}, 0)`), desc(taskTimeActivities.startedAt)).limit(1).get();
+      const current = row ? completeExpiredTaskTimeActivity(tx, row, serverNow) : null;
+      return { taskExists: true, activity: current ? toTaskTimeActivity(current) : null };
+    });
+  }
+  async start(input: TaskTimeActivityStartInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.runTransaction((tx) => {
+      const existing = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, input.commandId)).get();
+      if (existing) {
+        return existing.taskId === input.taskId
+          && existing.mode === input.mode
+          && (existing.mode === 'deadline' || existing.targetSeconds === input.targetSeconds)
+          ? { kind: 'replayed', activity: toTaskTimeActivity(existing) }
+          : { kind: 'conflict', reason: 'command' };
+      }
+      const task = tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.deletedAt),
+        notInArray(tasks.status, ['done', 'cancelled']),
+      )).get();
+      if (!task) return { kind: 'task-not-found' };
+      const active = tx.select()
+        .from(taskTimeActivities).where(eq(taskTimeActivities.activeKey, 1)).get();
+      const current = active
+        ? completeExpiredTaskTimeActivity(tx, active, input.serverNow)
+        : null;
+      if (current?.activeKey) {
+        return { kind: 'conflict', reason: 'active-timer', activeTaskId: current.taskId };
+      }
+      tx.insert(taskTimeActivities).values({
+        id: input.commandId,
+        taskId: input.taskId,
+        mode: input.mode,
+        state: 'running',
+        activeKey: 1,
+        targetSeconds: input.targetSeconds,
+        elapsedSeconds: 0,
+        activeStartedAt: input.serverNow,
+        startedAt: input.serverNow,
+        updatedAt: input.serverNow,
+        version: 0,
+        lastCommandId: input.commandId,
+        lastCommandAction: 'start',
+      }).run();
+      const created = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, input.commandId)).get()!;
+      return { kind: 'committed', activity: toTaskTimeActivity(created) };
+    });
+  }
+  async transition(input: TaskTimeActivityTransitionInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.runTransaction((tx) => {
+      const row = tx.select().from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.id, input.activityId),
+        eq(taskTimeActivities.taskId, input.taskId),
+      )).get();
+      if (!row) return { kind: 'activity-not-found' };
+      if (row.lastCommandId === input.commandId && row.lastCommandAction === input.action) {
+        return { kind: 'replayed', activity: toTaskTimeActivity(row) };
+      }
+      if (row.version !== input.expectedVersion) return { kind: 'conflict', reason: 'version' };
+      const allowed = input.action === 'pause'
+        ? row.state === 'running'
+        : input.action === 'resume'
+          ? row.state === 'paused'
+          : input.action === 'complete'
+            ? row.state === 'running' || row.state === 'paused'
+            : row.state === 'running' || row.state === 'paused' || row.state === 'completed';
+      if (!allowed) return { kind: 'conflict', reason: 'state' };
+      const requestedState = input.action === 'pause'
+        ? 'paused'
+        : input.action === 'resume'
+          ? 'running'
+          : input.action === 'complete'
+            ? 'completed'
+            : 'cancelled';
+      const elapsedSeconds = input.action === 'resume'
+        ? row.elapsedSeconds
+        : elapsedTaskTimeAt(toTaskTimeActivity(row), input.serverNow);
+      const nextState = input.action !== 'cancel' && elapsedSeconds >= row.targetSeconds
+        ? 'completed' : requestedState;
+      tx.update(taskTimeActivities).set({
+        state: nextState,
+        activeKey: nextState === 'running' || nextState === 'paused' ? 1 : null,
+        elapsedSeconds,
+        activeStartedAt: nextState === 'running' ? input.serverNow : null,
+        updatedAt: input.serverNow,
+        version: row.version + 1,
+        lastCommandId: input.commandId,
+        lastCommandAction: input.action,
+      }).where(and(
+        eq(taskTimeActivities.id, row.id),
+        eq(taskTimeActivities.version, row.version),
+      )).run();
+      const updated = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, row.id)).get()!;
+      return { kind: 'committed', activity: toTaskTimeActivity(updated) };
+    });
+  }
+  async hasDurableTimeActivity(taskId: string): Promise<boolean> {
+    return this.runTransaction((tx) => Boolean(tx.select({ id: taskTimeActivities.id })
+      .from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.taskId, taskId),
+        or(
+          ne(taskTimeActivities.state, 'cancelled'),
+          gte(taskTimeActivities.elapsedSeconds, 1),
+        ),
+      )).limit(1).get()), { readOnly: true });
+  }
+}
 class SqliteTaskMutationRepository implements TaskMutationRepository {
   constructor(
     private readonly database: Drizzle,
@@ -3078,6 +3268,9 @@ class SqliteTaskMutationRepository implements TaskMutationRepository {
         return latest
           ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
           : { kind: 'not-found' } as const;
+      }
+      if (request.patch.status === 'done' || request.patch.status === 'cancelled') {
+        cancelActiveTaskTimeActivity(tx, request.taskId, request.now);
       }
       if (request.schedulePatch) {
         tx.insert(taskSchedules).values({
@@ -3398,6 +3591,7 @@ class SqliteTaskRemovalRepository implements TaskRemovalRepository {
       for (const event of input.events ?? []) {
         enqueueTaskCoreEvent(tx, event);
       }
+      cancelActiveTaskTimeActivity(tx, input.taskId, input.now);
       return {
         kind: 'committed',
         action: input.mode === 'mirror-dismiss'
@@ -5299,6 +5493,7 @@ export function createSqliteTaskCorePersistence(
     creates: new SqliteTaskCreateRepository(database, transactionRunner),
     occurrences: new SqliteTaskOccurrenceMaterializationRepository(transactionRunner),
     mutations: new SqliteTaskMutationRepository(database, transactionRunner),
+    timeActivities: new SqliteTaskTimeActivityRepository(transactionRunner),
     removals: new SqliteTaskRemovalRepository(database, transactionRunner),
     taskReads: new SqliteTaskReadRepository(database, filterInputs),
     filterInputs,

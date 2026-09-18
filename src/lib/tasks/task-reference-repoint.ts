@@ -47,6 +47,7 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'task_schedules.task_id': 'rebuild',
   'task_source_write_leases.task_id': 'history',
   'task_tags.task_id': 'rebuild',
+  'task_time_activities.task_id': 'history',
   'task_triage_log.task_id': 'repoint',
   'tasks.parent_id': 'repoint',
   'tasks.recurrence_generated_from_task_id': 'lineage',

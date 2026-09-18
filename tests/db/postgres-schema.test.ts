@@ -63,7 +63,7 @@ describe('PostgreSQL schema', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(164);
+    expect(Object.keys(postgresTables)).toHaveLength(165);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {

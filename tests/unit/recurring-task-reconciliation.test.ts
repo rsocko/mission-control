@@ -82,7 +82,7 @@ describe('recurring task reconciliation', () => {
       connectorType: 'microsoft-todo',
       connectorInstanceId: 'todo-1',
       externalSeriesId: 'provider-task-1',
-      stability: 'derived' as const,
+      stability: 'provider' as const,
     };
     const source = {
       owner: 'connector' as const,
@@ -111,7 +111,7 @@ describe('recurring task reconciliation', () => {
       {
         id: 'daily',
         sourceId: 'source-daily',
-        title: 'Water plants',
+        title: 'Water the plants',
         sourceListId: 'list',
         dueDate: '2026-08-01',
         updatedAt: '2026-08-01',
@@ -138,6 +138,15 @@ describe('recurring task reconciliation', () => {
 
     expect(daily.series.id).toBe(weekly.series.id);
     expect(daily.revision.id).not.toBe(weekly.revision.id);
+    expect(getRecurringSeriesKey({
+      title: 'Old title',
+      sourceListId: 'old-list',
+      metadata: { canonicalRecurrence: daily },
+    })).toBe(getRecurringSeriesKey({
+      title: 'New title',
+      sourceListId: 'new-list',
+      metadata: { canonicalRecurrence: weekly },
+    }));
     expect(groups).toHaveLength(1);
     expect(groups[0].keeper.id).toBe('weekly');
   });

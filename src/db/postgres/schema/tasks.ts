@@ -202,6 +202,47 @@ export const taskRecurrenceOccurrences = pgTable('task_recurrence_occurrences', 
   ),
 ]);
 
+export const taskRecurrenceBackfillDecisions = pgTable(
+  'task_recurrence_backfill_decisions',
+  {
+    occurrenceId: text('occurrence_id').primaryKey(),
+    seriesId: text('series_id').notNull(),
+    ruleRevisionId: text('rule_revision_id').notNull(),
+    effectiveKind: text('effective_kind').$type<'local-date' | 'instant'>().notNull(),
+    effectiveValue: text('effective_value').notNull(),
+    decision: text('decision').$type<
+      'materialized'
+      | 'preserved'
+      | 'collapsed'
+      | 'superseded'
+      | 'connector-owned-missing'
+    >().notNull(),
+    reason: text('reason').notNull(),
+    taskId: text('task_id'),
+    supersededByOccurrenceId: text('superseded_by_occurrence_id'),
+    decidedAt: text('decided_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_task_recurrence_backfill_identity').on(
+      table.seriesId,
+      table.ruleRevisionId,
+      table.effectiveKind,
+      table.effectiveValue,
+    ),
+    index('idx_task_recurrence_backfill_task').on(table.taskId),
+    check(
+      'task_recurrence_backfill_decision_check',
+      sql`${table.decision} IN (
+        'materialized',
+        'preserved',
+        'collapsed',
+        'superseded',
+        'connector-owned-missing'
+      )`,
+    ),
+  ],
+);
+
 // ─── TASK REMINDER OCCURRENCES ───────────────────────────────────────────────
 
 export const taskReminderOccurrences = pgTable('task_reminder_occurrences', {

@@ -17,6 +17,12 @@ import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
 import type { TaskMetadata } from '@/lib/recurrence/canonical';
 import type { RecurrenceOccurrenceDescriptor } from '@/lib/recurrence/occurrence-persistence';
 import type {
+  ProjectedRecurrenceOccurrence,
+  RecurrenceCompletionAnchor,
+  RecurrenceProjectionInput,
+  RecurrenceProjectionRange,
+} from '@/lib/recurrence/projection';
+import type {
   QuickSortBeforeSnapshot,
   QuickSortTaskSnapshot,
 } from '@/types/quick-sort';
@@ -771,10 +777,263 @@ export interface TaskOccurrenceMaterializationOutcome {
   readonly taskId: string;
 }
 
+export type RecurrenceBackfillDecision =
+  | 'materialized'
+  | 'preserved'
+  | 'collapsed'
+  | 'superseded'
+  | 'connector-owned-missing';
+
+export type RecurrenceBackfillTouchReason =
+  | 'attachment'
+  | 'description'
+  | 'field-edit'
+  | 'history'
+  | 'planning-membership'
+  | 'time-activity';
+
+export interface RecurrenceBackfillExistingOccurrence {
+  readonly taskId: string | null;
+  readonly status: string | null;
+  readonly deletedAt: string | null;
+  readonly touchReasons: readonly RecurrenceBackfillTouchReason[];
+}
+
+interface RecurrenceBackfillPolicyOccurrence {
+  readonly occurrenceId: string;
+  readonly occurrence: ProjectedRecurrenceOccurrence;
+  readonly sourceOwner: 'mission-control' | 'connector';
+  readonly existing: RecurrenceBackfillExistingOccurrence | null;
+}
+
+interface PlannedRecurrenceBackfillDecision {
+  readonly occurrenceId: string;
+  readonly decision: RecurrenceBackfillDecision;
+  readonly reason: string;
+  readonly taskId: string | null;
+  readonly supersededByOccurrenceId: string | null;
+}
+
+export type RecurrenceBackfillAsOf =
+  | { readonly kind: 'local-date'; readonly value: string }
+  | { readonly kind: 'instant'; readonly value: string };
+
+const RECURRENCE_BACKFILL_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const RECURRENCE_BACKFILL_INSTANT_PATTERN = /(?:Z|[+-]\d{2}:\d{2})$/;
+
+function recurrenceBackfillCalendarDateValue(value: string): number | null {
+  if (!RECURRENCE_BACKFILL_DATE_PATTERN.test(value)) return null;
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = Date.UTC(year, month - 1, day);
+  const date = new Date(parsed);
+  return date.getUTCFullYear() === year
+    && date.getUTCMonth() === month - 1
+    && date.getUTCDate() === day
+    ? parsed
+    : null;
+}
+
+function recurrenceBackfillInstantValue(value: string): number | null {
+  if (!RECURRENCE_BACKFILL_INSTANT_PATTERN.test(value)) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function normalizeRecurrenceBackfillInstant(value: string): string | null {
+  const parsed = recurrenceBackfillInstantValue(value);
+  return parsed === null ? null : new Date(parsed).toISOString();
+}
+
+function recurrenceBackfillOccurrenceValue(
+  occurrence: ProjectedRecurrenceOccurrence,
+  kind: RecurrenceBackfillAsOf['kind'],
+): number {
+  if (kind === 'local-date') return recurrenceBackfillCalendarDateValue(occurrence.localDate)!;
+  return recurrenceBackfillInstantValue(occurrence.instant!)!;
+}
+
+export function validateRecurrenceBackfillAsOf(
+  range: RecurrenceProjectionRange,
+  asOf: RecurrenceBackfillAsOf,
+): readonly string[] {
+  if (range.kind !== asOf.kind) return ['asOf.kind must match range.kind'];
+  const valid = asOf.kind === 'local-date'
+    ? recurrenceBackfillCalendarDateValue(asOf.value) !== null
+    : recurrenceBackfillInstantValue(asOf.value) !== null;
+  return valid
+    ? []
+    : [asOf.kind === 'local-date'
+        ? 'asOf.value must be a calendar date'
+        : 'asOf.value must include a UTC offset or Z suffix'];
+}
+
+export function planRecurrenceBackfill(input: {
+  readonly range: RecurrenceProjectionRange;
+  readonly asOf: RecurrenceBackfillAsOf;
+  readonly occurrences: readonly RecurrenceBackfillPolicyOccurrence[];
+}): readonly PlannedRecurrenceBackfillDecision[] {
+  const issues = validateRecurrenceBackfillAsOf(input.range, input.asOf);
+  if (issues.length > 0) throw new Error(issues[0]);
+
+  const asOfValue = input.asOf.kind === 'local-date'
+    ? recurrenceBackfillCalendarDateValue(input.asOf.value)!
+    : recurrenceBackfillInstantValue(input.asOf.value)!;
+  const missed = input.occurrences.filter(({ occurrence, existing }) => (
+    recurrenceBackfillOccurrenceValue(occurrence, input.asOf.kind) < asOfValue
+    && (
+      existing === null
+      || (
+        existing.deletedAt === null
+        && (existing.status === 'todo' || existing.status === 'in_progress')
+      )
+    )
+  ));
+  const exactCurrent = input.occurrences.find(({ occurrence, existing }) => (
+    recurrenceBackfillOccurrenceValue(occurrence, input.asOf.kind) === asOfValue
+    && (
+      existing === null
+      || (
+        existing.deletedAt === null
+        && (existing.status === 'todo' || existing.status === 'in_progress')
+      )
+    )
+  ));
+  const currentActionable = exactCurrent?.occurrenceId ?? missed.at(-1)?.occurrenceId ?? null;
+
+  return input.occurrences.map((candidate): PlannedRecurrenceBackfillDecision => {
+    const { existing, occurrenceId, sourceOwner } = candidate;
+    const isMissed = recurrenceBackfillOccurrenceValue(
+      candidate.occurrence,
+      input.asOf.kind,
+    ) < asOfValue;
+    if (existing) {
+      if (sourceOwner === 'connector') {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: 'connector-owned-existing',
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (existing.taskId === null || existing.deletedAt !== null) {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: 'durable-occurrence-claim',
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (existing.status !== 'todo') {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: `protected-status:${existing.status}`,
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (existing.touchReasons.length > 0) {
+        return {
+          occurrenceId,
+          decision: 'preserved',
+          reason: `touched:${[...existing.touchReasons].sort().join(',')}`,
+          taskId: existing.taskId,
+          supersededByOccurrenceId: null,
+        };
+      }
+      if (isMissed && occurrenceId !== currentActionable) {
+        return {
+          occurrenceId,
+          decision: 'superseded',
+          reason: 'untouched-missed-pileup',
+          taskId: existing.taskId,
+          supersededByOccurrenceId: currentActionable,
+        };
+      }
+      return {
+        occurrenceId,
+        decision: 'preserved',
+        reason: occurrenceId === currentActionable ? 'current-actionable' : 'existing-future',
+        taskId: existing.taskId,
+        supersededByOccurrenceId: null,
+      };
+    }
+    if (sourceOwner === 'connector') {
+      return {
+        occurrenceId,
+        decision: 'connector-owned-missing',
+        reason: 'provider-occurrence-ownership',
+        taskId: null,
+        supersededByOccurrenceId: null,
+      };
+    }
+    if (isMissed && occurrenceId !== currentActionable) {
+      return {
+        occurrenceId,
+        decision: 'collapsed',
+        reason: 'untouched-missed-pileup',
+        taskId: null,
+        supersededByOccurrenceId: currentActionable,
+      };
+    }
+    return {
+      occurrenceId,
+      decision: 'materialized',
+      reason: occurrenceId === currentActionable ? 'current-actionable' : 'scheduled-in-range',
+      taskId: null,
+      supersededByOccurrenceId: null,
+    };
+  });
+}
+
+export interface TaskRecurrenceBackfillInput {
+  readonly rule: unknown;
+  readonly range: RecurrenceProjectionRange;
+  readonly asOf: RecurrenceBackfillAsOf;
+  readonly completionAnchors?: readonly RecurrenceCompletionAnchor[];
+  readonly limits?: RecurrenceProjectionInput['limits'];
+  readonly decidedAt: string;
+  readonly materializationFor: (
+    occurrence: ProjectedRecurrenceOccurrence,
+  ) => Omit<TaskOccurrenceMaterializationInput, 'rule' | 'occurrence'>;
+}
+
+export interface TaskRecurrenceBackfillDecision {
+  readonly occurrenceId: string;
+  readonly decision: RecurrenceBackfillDecision;
+  readonly reason: string;
+  readonly taskId: string | null;
+  readonly supersededByOccurrenceId: string | null;
+  readonly decidedAt: string;
+}
+
+export type TaskRecurrenceBackfillOutcome =
+  | {
+      readonly status: 'success';
+      readonly iterations: number;
+      readonly decisions: readonly TaskRecurrenceBackfillDecision[];
+    }
+  | {
+      readonly status: 'invalid';
+      readonly issues: readonly string[];
+    }
+  | {
+      readonly status: 'unsupported';
+      readonly reasons: readonly string[];
+    }
+  | {
+      readonly status: 'bounds-exceeded';
+      readonly bound: 'range' | 'iterations' | 'occurrences' | 'completion-anchors';
+      readonly maximum: number;
+    };
+
 export interface TaskOccurrenceMaterializationRepository {
   materializeOccurrence(
     input: TaskOccurrenceMaterializationInput,
   ): Promise<TaskOccurrenceMaterializationOutcome>;
+  backfillRange(input: TaskRecurrenceBackfillInput): Promise<TaskRecurrenceBackfillOutcome>;
 }
 
 export interface TaskWriteContext {

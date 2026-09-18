@@ -44,6 +44,7 @@ export {
 export {
   tasks,
   taskRecurrenceOccurrences,
+  taskRecurrenceBackfillDecisions,
   taskReminderOccurrences,
   taskSchedules,
   tags,

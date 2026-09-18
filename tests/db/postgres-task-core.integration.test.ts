@@ -78,8 +78,10 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           triage_items,
           task_ingest_suppressions,
           task_attachments,
+          task_time_activities,
           task_linked_sources,
           task_schedules,
+          task_recurrence_backfill_decisions,
           task_recurrence_occurrences,
           quick_sort_operations,
           task_triage_log,
@@ -551,6 +553,24 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         connectorInstanceId: row.connector_instance_id === null
           ? null
           : String(row.connector_instance_id),
+      }));
+    },
+    async listRecurrenceBackfillDecisions() {
+      const result = await client.query(`
+        SELECT occurrence_id, decision, reason, task_id,
+          superseded_by_occurrence_id, decided_at
+        FROM task_recurrence_backfill_decisions
+        ORDER BY effective_value
+      `);
+      return result.rows.map((row) => ({
+        occurrenceId: String(row.occurrence_id),
+        decision: String(row.decision),
+        reason: String(row.reason),
+        taskId: row.task_id === null ? null : String(row.task_id),
+        supersededByOccurrenceId: row.superseded_by_occurrence_id === null
+          ? null
+          : String(row.superseded_by_occurrence_id),
+        decidedAt: String(row.decided_at),
       }));
     },
     async getTaskUpdatedAt(taskId) {

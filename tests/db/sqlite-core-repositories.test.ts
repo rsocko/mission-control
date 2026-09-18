@@ -84,6 +84,10 @@ function createHarness() {
       task_id TEXT NOT NULL,
       depends_on_task_id TEXT NOT NULL
     );
+    CREATE TABLE task_recurrence_backfill_decisions (
+      occurrence_id TEXT PRIMARY KEY,
+      task_id TEXT
+    );
     CREATE TABLE hub_projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -312,6 +316,10 @@ describe('SQLite core repository compatibility behavior', () => {
         INSERT INTO task_dependencies (task_id, depends_on_task_id)
         VALUES (?, 'task-child')
       `).run(parent.id);
+      harness.sqlite.prepare(`
+        INSERT INTO task_recurrence_backfill_decisions (occurrence_id, task_id)
+        VALUES ('occurrence-portable', ?)
+      `).run(parent.id);
 
       await expect(harness.repositories.tasks.delete(parent.id)).resolves.toBe(true);
       for (const table of dependentTables) {
@@ -324,6 +332,11 @@ describe('SQLite core repository compatibility behavior', () => {
         .toBeUndefined();
       expect(harness.sqlite.prepare('SELECT 1 FROM task_dependencies').get())
         .toBeUndefined();
+      expect(harness.sqlite.prepare(`
+        SELECT task_id AS taskId
+        FROM task_recurrence_backfill_decisions
+        WHERE occurrence_id = 'occurrence-portable'
+      `).get()).toEqual({ taskId: null });
       expect(harness.sqlite.prepare(
         'SELECT parent_id AS parentId, depth FROM tasks WHERE id = ?',
       ).get('task-child')).toEqual({ parentId: null, depth: 0 });

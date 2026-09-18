@@ -79,6 +79,7 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
           task_attachments,
           task_linked_sources,
           task_schedules,
+          task_recurrence_occurrences,
           quick_sort_operations,
           task_triage_log,
           project_phase_items,
@@ -527,6 +528,29 @@ async function createHarness(): Promise<TaskCoreContractHarness> {
         'SELECT DISTINCT task_id FROM task_attachments ORDER BY task_id',
       );
       return result.rows.map((row) => row.task_id);
+    },
+    async listRecurrenceOccurrences() {
+      const result = await client.query(`
+        SELECT occurrence_id, task_id, generated_from_task_id, series_id, rule_revision_id,
+          effective_kind, effective_value, timezone_id, connector_instance_id
+        FROM task_recurrence_occurrences
+        ORDER BY occurrence_id
+      `);
+      return result.rows.map((row) => ({
+        occurrenceId: String(row.occurrence_id),
+        taskId: String(row.task_id),
+        generatedFromTaskId: row.generated_from_task_id === null
+          ? null
+          : String(row.generated_from_task_id),
+        seriesId: String(row.series_id),
+        ruleRevisionId: String(row.rule_revision_id),
+        effectiveKind: String(row.effective_kind),
+        effectiveValue: String(row.effective_value),
+        timezoneId: String(row.timezone_id),
+        connectorInstanceId: row.connector_instance_id === null
+          ? null
+          : String(row.connector_instance_id),
+      }));
     },
     async getTaskUpdatedAt(taskId) {
       const result = await client.query<{ updated_at: string }>(

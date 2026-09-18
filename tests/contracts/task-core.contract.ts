@@ -5,6 +5,11 @@ import type {
   TaskCoreTaskRow,
   TaskFilterSpec,
 } from '@/lib/tasks/core/contracts';
+import {
+  canonicalizeLegacyRecurrence,
+  type CanonicalRecurrenceRuleV1,
+  type LegacyRecurrenceInput,
+} from '@/lib/recurrence/canonical';
 
 /**
  * Shared, backend-neutral contract suite for the task-core persistence
@@ -212,6 +217,17 @@ export interface TaskCoreContractHarness {
   listProjectPhaseIds(taskId: string): Promise<string[]>;
   listIngestSuppressions(): Promise<Array<{ connectorInstanceId: string; sourceId: string }>>;
   listAttachmentTaskIds(): Promise<string[]>;
+  listRecurrenceOccurrences(): Promise<Array<{
+    occurrenceId: string;
+    taskId: string;
+    generatedFromTaskId: string | null;
+    seriesId: string;
+    ruleRevisionId: string;
+    effectiveKind: string;
+    effectiveValue: string;
+    timezoneId: string;
+    connectorInstanceId: string | null;
+  }>>;
   listMyDayTaskIds(): Promise<string[]>;
   getTaskUpdatedAt(taskId: string): Promise<string | null>;
   getTaskDeletedAt(taskId: string): Promise<string | null>;
@@ -258,6 +274,77 @@ export function makeSpec(overrides: Partial<TaskFilterSpec> = {}): TaskFilterSpe
 }
 
 const NOW = '2026-08-05T12:00:00.000Z';
+
+function completionRule(stableId = 'task-recurring') {
+  return canonicalizeLegacyRecurrence({
+    recurrence: 'daily',
+    mode: 'completion',
+    startDate: TODAY,
+    localTime: null,
+    timezone: 'UTC',
+    seriesIdentity: { kind: 'mission-control', stableId },
+  });
+}
+
+function scheduleRule(overrides: Partial<LegacyRecurrenceInput> = {}) {
+  return canonicalizeLegacyRecurrence({
+    recurrence: 'daily',
+    mode: 'schedule',
+    startDate: TODAY,
+    localTime: null,
+    timezone: 'UTC',
+    seriesIdentity: { kind: 'mission-control', stableId: 'projected-series' },
+    ...overrides,
+  });
+}
+
+function occurrenceRequest(
+  taskId: string,
+  rule: CanonicalRecurrenceRuleV1,
+  input: {
+    localDate?: string;
+    instant?: string | null;
+    occurrenceNumber?: number | null;
+  } = {},
+) {
+  const connectorIdentity = rule.series.identity.kind === 'connector'
+    ? rule.series.identity
+    : null;
+  const task = {
+    ...writableTask(taskId),
+    sourceId: connectorIdentity ? `${connectorIdentity.connectorType}:${taskId}` : `local:${taskId}`,
+    connectorType: connectorIdentity?.connectorType ?? 'local',
+    connectorInstanceId: connectorIdentity?.connectorInstanceId ?? 'local',
+    dueDate: input.instant ?? input.localDate ?? WEEK,
+  };
+  return {
+    rule,
+    occurrence: {
+      localDate: input.localDate ?? WEEK,
+      instant: input.instant ?? null,
+      occurrenceNumber: input.occurrenceNumber ?? 1,
+      anchor: { kind: 'schedule' as const, startDate: TODAY },
+    },
+    task,
+    tagIds: [],
+    projectIds: [],
+    schedule: {
+      taskId,
+      scheduledDate: input.localDate ?? WEEK,
+      scheduledTime: null,
+      estimatedDuration: null,
+      isTimeBlocked: false,
+      recurrence: 'FREQ=DAILY',
+      recurrenceMode: 'schedule' as const,
+    },
+    event: {
+      stableKey: `task-created:${taskId}`,
+      type: 'task.created' as const,
+      timestamp: task.createdAt,
+      payload: { taskId },
+    },
+  };
+}
 
 function baseTasks(): SeedTask[] {
   return [
@@ -873,6 +960,162 @@ export function describeTaskCoreContract(
       });
     });
 
+    describe('recurrence occurrence materialization', () => {
+      it('atomically elects one task across replay and concurrent writers', async () => {
+        const rule = scheduleRule();
+        const [first, second] = await Promise.all([
+          harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest('occurrence-writer-a', rule),
+          ),
+          harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest('occurrence-writer-b', rule),
+          ),
+        ]);
+
+        expect([first.kind, second.kind].sort()).toEqual(['created', 'existing']);
+        expect(first.taskId).toBe(second.taskId);
+        expect(await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-replay', rule),
+        )).toMatchObject({
+          kind: 'existing',
+          taskId: first.taskId,
+        });
+        expect((await harness.listTaskIds()).filter(
+          (id) => id.startsWith('occurrence-writer-'),
+        )).toEqual([first.taskId]);
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+      });
+
+      it('rolls back a claim when candidate persistence fails so a partial retry can win', async () => {
+        const rule = scheduleRule({ seriesIdentity: {
+          kind: 'mission-control',
+          stableId: 'partial-retry-series',
+        } });
+        const mismatched = occurrenceRequest('occurrence-mismatched', rule);
+        await expect(harness.persistence.occurrences.materializeOccurrence({
+          ...mismatched,
+          schedule: { ...mismatched.schedule, scheduledDate: TODAY },
+        })).rejects.toThrow('schedule must match');
+        expect(await harness.listRecurrenceOccurrences()).toEqual([]);
+
+        await harness.insertTasks([{ id: 'occurrence-duplicate-task' }]);
+
+        await expect(harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-duplicate-task', rule),
+        )).rejects.toThrow();
+        expect(await harness.listRecurrenceOccurrences()).toEqual([]);
+
+        await expect(harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-retry-task', rule),
+        )).resolves.toMatchObject({
+          kind: 'created',
+          taskId: 'occurrence-retry-task',
+        });
+      });
+
+      it('separates rule revisions, instant identities, and connector instances', async () => {
+        const daily = scheduleRule();
+        const weekly = scheduleRule({ recurrence: 'weekly' });
+        const timed = scheduleRule({
+          localTime: '09:00',
+          timezone: 'America/New_York',
+        });
+        await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-daily', daily),
+        );
+        await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-weekly', weekly),
+        );
+        await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-timed', timed, {
+            instant: '2026-08-17T13:00:00.000Z',
+          }),
+        );
+
+        for (const connectorInstanceId of ['planner-a', 'planner-b']) {
+          const connectorRule = scheduleRule({
+            seriesIdentity: {
+              kind: 'connector',
+              connectorType: 'microsoft-planner',
+              connectorInstanceId,
+              externalSeriesId: 'provider-series',
+              stability: 'provider',
+            },
+            source: {
+              owner: 'connector',
+              connectorType: 'microsoft-planner',
+              connectorInstanceId,
+              support: { status: 'supported', reasons: [] },
+              raw: { recurrence: 'daily' },
+            },
+          });
+          await harness.persistence.occurrences.materializeOccurrence(
+            occurrenceRequest(`occurrence-${connectorInstanceId}`, connectorRule),
+          );
+        }
+
+        const rows = await harness.listRecurrenceOccurrences();
+        expect(rows).toHaveLength(5);
+        expect(new Set(rows
+          .filter((row) => row.taskId === 'occurrence-daily' || row.taskId === 'occurrence-weekly')
+          .map((row) => row.ruleRevisionId)).size).toBe(2);
+        expect(rows).toEqual(expect.arrayContaining([
+          expect.objectContaining({
+            taskId: 'occurrence-timed',
+            effectiveKind: 'instant',
+            effectiveValue: '2026-08-17T13:00:00.000Z',
+            timezoneId: 'America/New_York',
+          }),
+          expect.objectContaining({
+            taskId: 'occurrence-planner-a',
+            connectorInstanceId: 'planner-a',
+          }),
+          expect.objectContaining({
+            taskId: 'occurrence-planner-b',
+            connectorInstanceId: 'planner-b',
+          }),
+        ]));
+        const connectorSeries = rows
+          .filter((row) => row.connectorInstanceId !== null)
+          .map((row) => row.seriesId);
+        expect(new Set(connectorSeries).size).toBe(2);
+      });
+
+      it('retains the logical occurrence claim after task deletion', async () => {
+        const rule = scheduleRule({
+          seriesIdentity: {
+            kind: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'scout-durable',
+            externalSeriesId: 'durable-claim-series',
+            stability: 'provider',
+          },
+          source: {
+            owner: 'connector',
+            connectorType: 'scout',
+            connectorInstanceId: 'scout-durable',
+            support: { status: 'supported', reasons: [] },
+            raw: { recurrence: 'daily' },
+          },
+        });
+        const created = await harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-to-delete', rule),
+        );
+        expect(await harness.persistence.scoutDeletion.hardDeleteScoutTask(created.taskId))
+          .toMatchObject({ kind: 'deleted' });
+        expect(await harness.listTaskIds()).not.toContain(created.taskId);
+
+        await expect(harness.persistence.occurrences.materializeOccurrence(
+          occurrenceRequest('occurrence-after-delete', rule),
+        )).resolves.toMatchObject({
+          kind: 'existing',
+          taskId: created.taskId,
+        });
+        expect(await harness.listTaskIds()).not.toContain('occurrence-after-delete');
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
+      });
+    });
+
     describe('collection, detail, and write transactions', () => {
       it('hydrates collection/detail data and treats search metacharacters literally', async () => {
         await harness.insertTasks([
@@ -1117,6 +1360,13 @@ export function describeTaskCoreContract(
             reminderNagInterval: null,
             reminderNagStopAt: null,
             reminderNagSeriesId: null,
+            rule: completionRule(),
+            occurrence: {
+              localDate: WEEK,
+              instant: null,
+              occurrenceNumber: null,
+              anchor: { kind: 'completion', completedAt: firstNow },
+            },
             metadata: { recurrence: 'FREQ=DAILY' },
           },
         });
@@ -1129,6 +1379,15 @@ export function describeTaskCoreContract(
         expect(await harness.listProjectPhaseIds('task-successor')).toEqual(['phase-recurring']);
         expect(await harness.listTaskDependencyIds('task-successor')).toEqual(['task-prerequisite']);
         expect(await harness.listAttachmentTaskIds()).toContain('task-successor');
+        expect(await harness.listRecurrenceOccurrences()).toEqual([
+          expect.objectContaining({
+            taskId: 'task-successor',
+            generatedFromTaskId: 'task-recurring',
+            effectiveKind: 'local-date',
+            effectiveValue: WEEK,
+            timezoneId: 'UTC',
+          }),
+        ]);
 
         const second = await harness.persistence.mutations.mutateTask({
           taskId: 'task-recurring',
@@ -1145,6 +1404,13 @@ export function describeTaskCoreContract(
             reminderNagInterval: null,
             reminderNagStopAt: null,
             reminderNagSeriesId: null,
+            rule: completionRule(),
+            occurrence: {
+              localDate: WEEK,
+              instant: null,
+              occurrenceNumber: null,
+              anchor: { kind: 'completion', completedAt: firstNow },
+            },
             metadata: {},
           },
         });
@@ -1153,6 +1419,7 @@ export function describeTaskCoreContract(
           recurrenceNextTaskId: 'task-successor',
         });
         expect(await harness.listTaskIds()).not.toContain('task-successor-duplicate');
+        expect(await harness.listRecurrenceOccurrences()).toHaveLength(1);
       });
 
       it('deletes a local task atomically and rejects a stale deletion', async () => {

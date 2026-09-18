@@ -15,6 +15,7 @@
 
 import type { LocalDisposition, TaskPriority, TaskStatus } from '@/types';
 import type { TaskMetadata } from '@/lib/recurrence/canonical';
+import type { RecurrenceOccurrenceDescriptor } from '@/lib/recurrence/occurrence-persistence';
 import type {
   QuickSortBeforeSnapshot,
   QuickSortTaskSnapshot,
@@ -749,6 +750,31 @@ export interface TaskRecurrenceSuccessorMutation {
   readonly reminderNagStopAt: string | null;
   readonly reminderNagSeriesId: string | null;
   readonly metadata: Record<string, unknown>;
+  readonly rule: unknown;
+  readonly occurrence: RecurrenceOccurrenceDescriptor;
+}
+
+export interface TaskOccurrenceMaterializationInput {
+  readonly task: TaskCoreTaskRow;
+  readonly tagIds: readonly string[];
+  readonly projectIds: readonly string[];
+  readonly schedule: TaskScheduleRow | null;
+  readonly event: TaskCoreEvent;
+  readonly rule: unknown;
+  readonly occurrence: RecurrenceOccurrenceDescriptor;
+  readonly generatedFromTaskId?: string | null;
+}
+
+export interface TaskOccurrenceMaterializationOutcome {
+  readonly kind: 'created' | 'existing';
+  readonly occurrenceId: string;
+  readonly taskId: string;
+}
+
+export interface TaskOccurrenceMaterializationRepository {
+  materializeOccurrence(
+    input: TaskOccurrenceMaterializationInput,
+  ): Promise<TaskOccurrenceMaterializationOutcome>;
 }
 
 export interface TaskWriteContext {
@@ -2124,6 +2150,7 @@ export interface TaskCorePersistence {
   readonly collections: TaskCollectionReadRepository;
   readonly details: TaskDetailReadRepository;
   readonly creates: TaskCreateRepository;
+  readonly occurrences: TaskOccurrenceMaterializationRepository;
   readonly mutations: TaskMutationRepository;
   readonly removals: TaskRemovalRepository;
   readonly taskReads: TaskReadRepository;

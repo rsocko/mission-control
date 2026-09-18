@@ -1,4 +1,5 @@
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+import { canonicalJson } from '@/db/persistence/value-codecs';
 import {
   RECURRENCE_WEEKDAYS,
   parseCanonicalRecurrenceRule,
@@ -58,6 +59,23 @@ export interface RecurrenceOccurrenceIdentityInput {
   readonly effective:
     | { readonly kind: 'local-date'; readonly value: string }
     | { readonly kind: 'instant'; readonly value: string };
+}
+
+export function serializeRecurrenceOccurrenceIdentity(
+  identity: RecurrenceOccurrenceIdentityInput,
+): string {
+  return canonicalJson({
+    effective: identity.effective,
+    revisionId: identity.revisionId,
+    seriesId: identity.seriesId,
+    version: 1,
+  });
+}
+
+export function createRecurrenceOccurrenceId(
+  identity: RecurrenceOccurrenceIdentityInput,
+): string {
+  return `occurrence:v1:${serializeRecurrenceOccurrenceIdentity(identity)}`;
 }
 
 export interface ProjectedRecurrenceOccurrence {

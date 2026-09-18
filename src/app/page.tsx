@@ -297,11 +297,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           listGroups={state.listGroups}
           onSaveView={actions.startNewView}
         />
-        {state.savingView && (
+        {state.savedItemEditorKind && (
           <form
             onSubmit={(event) => {
               event.preventDefault();
-              actions.saveCurrentView();
+              actions.saveCurrentSavedItem();
             }}
             onKeyDown={(event) => {
               if (
@@ -318,23 +318,25 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 Icon
               </label>
               <IconPickerButton
-                value={state.viewIcon}
-                onChange={actions.setViewIcon}
+                value={state.savedItemIcon}
+                onChange={actions.setSavedItemIcon}
                 size="sm"
                 className="w-9 rounded-md"
-                color={state.viewIconColor || undefined}
-                onColorChange={actions.setViewIconColor}
+                color={state.savedItemIconColor || undefined}
+                onColorChange={actions.setSavedItemIconColor}
               />
             </div>
             <label className="min-w-0 flex-1">
               <span className="mb-1 block text-xs font-medium text-[var(--text-tertiary)]">
-                View name
+                {state.savedItemEditorKind === 'view' ? 'View name' : 'Quick filter name'}
               </span>
               <input
                 type="text"
-                value={state.viewName}
-                onChange={(e) => actions.setViewName(e.target.value)}
-                placeholder="e.g. No project assigned"
+                value={state.savedItemName}
+                onChange={(e) => actions.setSavedItemName(e.target.value)}
+                placeholder={state.savedItemEditorKind === 'view'
+                  ? 'e.g. Weekly planning'
+                  : 'e.g. Needs triage'}
                 className="h-8 w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--border-focus)] focus:shadow-[var(--shadow-focus-glow)]"
                 autoFocus
               />
@@ -342,10 +344,10 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
             <div className="flex h-8 items-center gap-1">
               <button
                 type="submit"
-                disabled={!state.viewName.trim()}
+                disabled={!state.savedItemName.trim()}
                 className="h-8 rounded-md bg-[var(--accent-action)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {state.editingViewId ? 'Update' : 'Save'}
+                {state.editingSavedItemId ? 'Update' : 'Save'}
               </button>
               <button
                 type="button"

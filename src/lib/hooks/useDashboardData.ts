@@ -38,6 +38,7 @@ import type {
   SourceList,
   EnabledSource,
   SyncStatusEntry,
+  SavedQuickFilter,
   SavedView,
 } from '@/types/dashboard';
 import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
@@ -92,6 +93,7 @@ export interface DashboardState {
   syncStatus: SyncStatusEntry[];
   myDayTaskIds: Set<string>;
   savedViews: SavedView[];
+  savedQuickFilters: SavedQuickFilter[];
   addTaskDestinations: TaskDestination[];
 
   // Loading states
@@ -145,12 +147,13 @@ export interface DashboardState {
   tagsExpanded: boolean;
   allSourceCounts: Record<string, number>;
 
-  // View saving
-  savingView: boolean;
-  editingViewId: string | null;
-  viewName: string;
-  viewIcon: string;
-  viewIconColor: string;
+  // Saved item editor
+  savedItemEditorKind: 'view' | 'quick-filter' | null;
+  editingSavedItemId: string | null;
+  savedItemName: string;
+  savedItemIcon: string;
+  savedItemIconColor: string;
+  activeSavedQuickFilterId: string | null;
 }
 
 export interface DashboardActions {
@@ -216,14 +219,19 @@ export interface DashboardActions {
 
   // View save actions
   startNewView: () => void;
+  startNewQuickFilter: () => void;
   cancelViewEditor: () => void;
   editView: (view: SavedView) => void;
-  setViewName: (v: string) => void;
-  setViewIcon: (v: string) => void;
-  setViewIconColor: (v: string) => void;
-  saveCurrentView: () => void;
+  editQuickFilter: (filter: SavedQuickFilter) => void;
+  setSavedItemName: (v: string) => void;
+  setSavedItemIcon: (v: string) => void;
+  setSavedItemIconColor: (v: string) => void;
+  saveCurrentSavedItem: () => void;
   applyView: (view: SavedView) => void;
+  applyQuickFilter: (filter: SavedQuickFilter) => void;
+  clearSavedQuickFilter: () => void;
   deleteView: (id: string) => void;
+  deleteQuickFilter: (id: string) => void;
 
   // Subtask optimistic update
   updateSubtaskCount: (taskId: string, done: number, total: number) => void;
@@ -523,18 +531,35 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }, [router]);
   const savedViewsState = useDashboardSavedViews({
     taskFilterContext,
+    presentationState: {
+      sortBy,
+      sortDirection,
+      groupBy,
+      viewDensity,
+    },
     filterActions,
     searchParams: searchParams.toString(),
     pathname,
     replaceUrl: replaceDashboardUrl,
   });
   const {
-    savedViews, savingView, editingViewId, viewName, viewIcon, viewIconColor,
+    savedViews,
+    savedQuickFilters,
+    activeQuickFilterId: activeSavedQuickFilterId,
+    editorKind: savedItemEditorKind,
+    editingItemId: editingSavedItemId,
+    itemName: savedItemName,
+    itemIcon: savedItemIcon,
+    itemIconColor: savedItemIconColor,
   } = savedViewsState.state;
   const {
-    startNewView, cancelViewEditor, editView,
-    setViewName, setViewIcon, setViewIconColor,
-    saveCurrentView, applyView, deleteView,
+    startNewView, startNewQuickFilter, cancelViewEditor, editView, editQuickFilter,
+    setItemName: setSavedItemName,
+    setItemIcon: setSavedItemIcon,
+    setItemIconColor: setSavedItemIconColor,
+    saveCurrentItem: saveCurrentSavedItem,
+    applyView, applyQuickFilter, clearQuickFilter: clearSavedQuickFilter,
+    deleteView, deleteQuickFilter,
   } = savedViewsState.actions;
   const completionScopeKey = JSON.stringify({
     taskFilterContext,
@@ -999,7 +1024,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   return {
     state: {
       taskResponse, projects, allTags, allAssignees, enabledSources, sourceLists, listGroups,
-      syncStatus, myDayTaskIds, savedViews, addTaskDestinations,
+      syncStatus, myDayTaskIds, savedViews, savedQuickFilters, addTaskDestinations,
       loading, loadingMore, loadingMoreGroups, refreshing, isSyncing,
       sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
       priorityFilter, statusFilter,
@@ -1010,7 +1035,8 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       showAddTaskModal, addTaskInitialDest, addTaskInitialListId, groupTotalCounts,
       collapsedSections, expandedSourceLists, collapsedListGroups, listSearch,
       tagSearch, tagsExpanded, allSourceCounts,
-      savingView, editingViewId, viewName, viewIcon, viewIconColor,
+      savedItemEditorKind, editingSavedItemId, savedItemName, savedItemIcon,
+      savedItemIconColor, activeSavedQuickFilterId,
     },
     actions: {
       fetchData, loadMoreForGroup, setRefreshTrigger, patchTaskInList, updateSubtaskCount,
@@ -1026,9 +1052,10 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       setShowAddTaskModal, setAddTaskInitialDest, setAddTaskInitialListId,
       toggleSection, setExpandedSourceLists, setCollapsedListGroups, setListSearch,
       setTagSearch, setTagsExpanded,
-      startNewView, cancelViewEditor, editView,
-      setViewName, setViewIcon, setViewIconColor,
-      saveCurrentView, applyView, deleteView,
+      startNewView, startNewQuickFilter, cancelViewEditor, editView, editQuickFilter,
+      setSavedItemName, setSavedItemIcon, setSavedItemIconColor,
+      saveCurrentSavedItem, applyView, applyQuickFilter, clearSavedQuickFilter,
+      deleteView, deleteQuickFilter,
       animateTaskExit,
     },
     computed: {

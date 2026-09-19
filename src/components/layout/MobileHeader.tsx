@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type Ref } from 'react';
 import { Menu, Search, WifiOff, Cloud } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { useOnlineStatus } from '@/lib/hooks/useOnlineStatus';
+import { useOfflineConnectivity } from '@/components/providers/OfflineSyncProvider';
 import { useOfflineQueue } from '@/lib/hooks/useOfflineQueue';
 import { NavigationBadge } from '@/components/layout/NavigationBadge';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
@@ -122,7 +122,7 @@ export function MobileHeader({
 }: MobileHeaderProps) {
   const dotColor = useNotificationDotColor(!navigationCounts);
   const { preferences } = useNavigationBadgePreferences();
-  const isOnline = useOnlineStatus();
+  const connectivity = useOfflineConnectivity();
   const { totalPendingCount } = useOfflineQueue();
 
   const handleSearchClick = useCallback(() => {
@@ -206,7 +206,7 @@ export function MobileHeader({
       </div>
 
       {/* Offline indicator banner (#1529) */}
-      <OfflineBanner isOnline={isOnline} pendingCount={totalPendingCount} />
+      <OfflineBanner connectivity={connectivity} pendingCount={totalPendingCount} />
     </header>
   );
 }
@@ -214,7 +214,7 @@ export function MobileHeader({
 // ─── Offline Banner ──────────────────────────────────────────────────────────
 
 interface OfflineBannerProps {
-  isOnline: boolean;
+  connectivity: 'offline' | 'checking' | 'online';
   pendingCount: number;
 }
 
@@ -222,7 +222,7 @@ interface OfflineBannerProps {
  * Subtle banner shown when the device is offline or has pending mutations.
  * Animates in/out with CSS transitions. Shows pending count when > 0.
  */
-function OfflineBanner({ isOnline, pendingCount }: OfflineBannerProps) {
+function OfflineBanner({ connectivity, pendingCount }: OfflineBannerProps) {
   // Track whether we've ever gone offline to avoid showing the "back online"
   // banner on initial mount.
   const [hasBeenOffline, setHasBeenOffline] = useState(false);
@@ -230,7 +230,7 @@ function OfflineBanner({ isOnline, pendingCount }: OfflineBannerProps) {
   const [showReconnected, setShowReconnected] = useState(false);
 
   useEffect(() => {
-    if (!isOnline) {
+    if (connectivity === 'offline') {
       setHasBeenOffline(true);
       setShowReconnected(false);
     } else if (hasBeenOffline) {
@@ -238,12 +238,13 @@ function OfflineBanner({ isOnline, pendingCount }: OfflineBannerProps) {
       const timer = setTimeout(() => setShowReconnected(false), 3000);
       return () => clearTimeout(timer);
     }
-  }, [isOnline, hasBeenOffline]);
+  }, [connectivity, hasBeenOffline]);
 
   // Nothing to show if online with no pending actions and no recent reconnect
-  if (isOnline && !showReconnected && pendingCount === 0) return null;
+  if (connectivity === 'online' && !showReconnected && pendingCount === 0) return null;
 
-  const isOffline = !isOnline;
+  const isOffline = connectivity === 'offline';
+  const isChecking = connectivity === 'checking';
 
   return (
     <div
@@ -253,7 +254,9 @@ function OfflineBanner({ isOnline, pendingCount }: OfflineBannerProps) {
         'flex items-center gap-2 px-3 py-1.5 text-xs font-medium transition-all duration-300 ease-out',
         isOffline
           ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 border-b border-amber-200 dark:border-amber-800'
-          : showReconnected
+         : isChecking
+          ? 'bg-slate-100 dark:bg-slate-900/60 text-slate-700 dark:text-slate-200 border-b border-[var(--border-subtle)]'
+         : showReconnected
             ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 border-b border-emerald-200 dark:border-emerald-800'
             : 'bg-blue-50 dark:bg-blue-950/40 text-blue-800 dark:text-blue-200 border-b border-blue-200 dark:border-blue-800',
       )}
@@ -262,12 +265,17 @@ function OfflineBanner({ isOnline, pendingCount }: OfflineBannerProps) {
         <>
           <WifiOff size={14} className="shrink-0 animate-pulse" />
           <span>
-            You&apos;re offline
+            Offline — changes are saved locally
             {pendingCount > 0 && (
               <> &middot; {pendingCount} pending {pendingCount === 1 ? 'action' : 'actions'}</>
             )}
           </span>
         </>
+      ) : isChecking ? (
+       <>
+         <Cloud size={14} className="shrink-0 animate-pulse" />
+         <span>Checking Mission Control connection&hellip;</span>
+       </>
       ) : showReconnected ? (
         <>
           <Cloud size={14} className="shrink-0" />

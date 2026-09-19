@@ -28,6 +28,7 @@ import {
   taskFieldBlockedReason,
   taskRemovalConfirmation,
 } from '@/lib/tasks/client-edit-policy';
+import { persistTaskPatch } from '@/lib/offline-task-actions';
 
 interface UseTodayActionsParams {
   items: MyDayItem[];
@@ -104,6 +105,11 @@ export function useTodayActions({
     toast.error(taskFieldBlockedReason(policy, field));
     return false;
   };
+  const canQueueFieldOffline = (
+    taskId: string,
+    field: TaskField,
+    context?: { editPolicy?: TaskEditPolicy },
+  ) => taskPolicy(taskId, context)?.fields[field]?.mutation === 'local';
 
   async function addToDay(taskId: string) {
     try {
@@ -224,12 +230,10 @@ export function useTodayActions({
         setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
       },
       request: async () => {
-        const response = await fetch(`/api/tasks/${taskId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'done' }),
+        const result = await persistTaskPatch(taskId, { status: 'done' }, {
+          allowOffline: canQueueFieldOffline(taskId, 'status', taskContext),
         });
-        if (!response.ok) throw new Error('Failed to complete task');
+        if (result.queued) toast.success('Completed locally — will sync when connected');
         notifyTaskChanged(taskId);
       },
       rollback: () => {
@@ -265,15 +269,17 @@ export function useTodayActions({
   async function setTaskDueDate(taskId: string, date: string | null, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'dueDate', taskContext)) return;
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dueDate: date }),
+      const result = await persistTaskPatch(taskId, { dueDate: date }, {
+        allowOffline: canQueueFieldOffline(taskId, 'dueDate', taskContext),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (result.queued) {
+        toast.success('Due date updated locally — will sync when connected');
+      }
       notifyTaskChanged(taskId);
-      toast.success('Due date updated');
-      fetchData();
+      if (!result.queued) {
+        toast.success('Due date updated');
+        fetchData();
+      }
     } catch {
       toast.error('Failed to update due date');
     }
@@ -283,15 +289,17 @@ export function useTodayActions({
   async function setTaskPriority(taskId: string, priority: string, taskContext?: { editPolicy?: TaskEditPolicy }) {
     if (!ensureFieldEditable(taskId, 'priority', taskContext)) return;
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ priority }),
+      const result = await persistTaskPatch(taskId, { priority: priority as 'critical' | 'high' | 'medium' | 'low' | 'none' }, {
+        allowOffline: canQueueFieldOffline(taskId, 'priority', taskContext),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (result.queued) {
+        toast.success('Priority updated locally — will sync when connected');
+      }
       notifyTaskChanged(taskId);
-      toast.success('Priority updated');
-      fetchData();
+      if (!result.queued) {
+        toast.success('Priority updated');
+        fetchData();
+      }
     } catch {
       toast.error('Failed to update priority');
     }
@@ -300,14 +308,14 @@ export function useTodayActions({
   async function updateTaskTitle(taskId: string, title: string) {
     if (!ensureFieldEditable(taskId, 'title')) return;
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+      const result = await persistTaskPatch(taskId, { title }, {
+        allowOffline: canQueueFieldOffline(taskId, 'title'),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (result.queued) {
+        toast.success('Title updated locally — will sync when connected');
+      }
       notifyTaskChanged(taskId);
-      fetchData({ skipSync: true });
+      if (!result.queued) fetchData({ skipSync: true });
     } catch {
       toast.error('Failed to update title');
     }
@@ -316,12 +324,10 @@ export function useTodayActions({
   async function updateTaskDescription(taskId: string, description: string) {
     if (!ensureFieldEditable(taskId, 'description')) return;
     try {
-      const res = await fetch(`/api/tasks/${taskId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description }),
+      const result = await persistTaskPatch(taskId, { description }, {
+        allowOffline: canQueueFieldOffline(taskId, 'description'),
       });
-      if (!res.ok) throw new Error('Failed');
+      if (result.queued) toast.success('Description updated locally — will sync when connected');
       notifyTaskChanged(taskId);
     } catch {
       toast.error('Failed to update description');

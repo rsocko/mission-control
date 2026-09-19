@@ -55,6 +55,7 @@ const OFFLINE_SYNC_TAG = "sync-offline-captures";
 const OFFLINE_DB_NAME = "mission-control-offline";
 const OFFLINE_STORE = "pending-captures";
 const OFFLINE_ACTION_STORE = "pending-actions";
+const OFFLINE_ACTION_SYNC_TAG = "sync-offline-actions";
 
 interface PendingCapture {
   id: string;
@@ -278,6 +279,15 @@ async function replayOfflineCaptures(): Promise<void> {
 self.addEventListener("sync", (event: ExtendableEvent & { tag?: string }) => {
   if (event.tag === OFFLINE_SYNC_TAG) {
     event.waitUntil(replayOfflineCaptures());
+  }
+  if (event.tag === OFFLINE_ACTION_SYNC_TAG) {
+    event.waitUntil(
+      self.clients.matchAll({ type: "window" }).then((clients) => {
+        for (const client of clients) {
+          client.postMessage({ type: "offline-action-sync-request" });
+        }
+      }),
+    );
   }
 });
 

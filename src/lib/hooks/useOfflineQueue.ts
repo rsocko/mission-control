@@ -9,12 +9,12 @@ import {
   getPendingActions,
   replayPendingActions,
   removePendingCapture,
+  removeAction,
   type PendingCapture,
   type PendingCaptureImage,
   type OfflineAction,
   type PendingCaptureDestination,
 } from '@/lib/offline-queue';
-import { useOnReconnect } from './useOnlineStatus';
 
 export interface OfflineQueueState {
   /** Items waiting to be synced */
@@ -40,6 +40,8 @@ export interface OfflineQueueState {
   sync: () => Promise<void>;
   /** Explicitly discard a pending capture */
   discard: (id: string) => Promise<void>;
+  /** Explicitly discard a queued mutation after reviewing it. */
+  discardAction: (id: string) => Promise<void>;
 }
 
 export function useOfflineQueue(): OfflineQueueState {
@@ -68,39 +70,16 @@ export function useOfflineQueue(): OfflineQueueState {
     await removePendingCapture(id);
     await refreshPending();
   }, [refreshPending]);
+  const discardAction = useCallback(async (id: string) => {
+    await removeAction(id);
+    await refreshPending();
+  }, [refreshPending]);
 
   // Listen for queue change events (from action queue operations)
   useEffect(() => {
     const handler = () => refreshPending();
     window.addEventListener('offline-queue:changed', handler);
     return () => window.removeEventListener('offline-queue:changed', handler);
-  }, [refreshPending]);
-
-  // Auto-sync on reconnect
-  useOnReconnect(() => {
-    void (async () => {
-      setIsSyncing(true);
-      try {
-        await Promise.all([syncPendingCaptures(), replayPendingActions()]);
-        await refreshPending();
-      } finally {
-        setIsSyncing(false);
-      }
-    })();
-  });
-
-  // Listen for a custom event dispatched by the SW after background sync
-  useEffect(() => {
-    const controller = navigator.serviceWorker;
-    if (!controller) return;
-
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.type === 'offline-sync-complete') {
-        refreshPending();
-      }
-    };
-    controller.addEventListener('message', handleMessage);
-    return () => controller.removeEventListener('message', handleMessage);
   }, [refreshPending]);
 
   const enqueue = useCallback(async (
@@ -135,6 +114,23 @@ export function useOfflineQueue(): OfflineQueueState {
     }
   }, [refreshPending]);
 
+  // Listen for service-worker background-sync completion and wake-up hints.
+  useEffect(() => {
+    const controller = navigator.serviceWorker;
+    if (!controller) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'offline-sync-complete') {
+        refreshPending();
+      }
+      if (event.data?.type === 'offline-action-sync-request' && navigator.onLine) {
+        void sync();
+      }
+    };
+    controller.addEventListener('message', handleMessage);
+    return () => controller.removeEventListener('message', handleMessage);
+  }, [refreshPending, sync]);
+
   const totalPendingCount = pending.length + pendingActions.length;
 
   return {
@@ -147,5 +143,6 @@ export function useOfflineQueue(): OfflineQueueState {
     enqueueImage,
     sync,
     discard,
+    discardAction,
   };
 }

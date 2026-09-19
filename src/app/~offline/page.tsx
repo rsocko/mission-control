@@ -6,8 +6,8 @@ export default function OfflinePage() {
       <div className="text-center space-y-4 px-6">
         <h1 className="text-3xl font-bold">You&apos;re offline</h1>
         <p className="text-[var(--text-secondary)] max-w-md">
-          Mission Control needs an internet connection. Please check your
-          network and try again.
+          Cached Mission Control screens remain available. New captures and
+          supported task changes will sync when Mission Control is reachable again.
         </p>
         <button
           onClick={() => window.location.reload()}

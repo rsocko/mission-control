@@ -12,6 +12,7 @@ import { BackgroundAiToastProvider } from "@/components/BackgroundAiToastProvide
 import { UndoKeyboardProvider } from "@/components/UndoKeyboardProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PwaInstallPrompt } from "@/components/PwaInstallPrompt";
+import { OfflineSyncProvider } from "@/components/providers/OfflineSyncProvider";
 import { APP_DARK_BACKGROUND, APP_DARK_CHROME } from "@/lib/brand";
 
 const geistSans = Geist({
@@ -75,6 +76,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[var(--background)] text-[var(--text-primary)]" style={{ backgroundColor: APP_DARK_BACKGROUND }}>
         <SerwistProvider swUrl="/serwist/sw.js">
         <ReactQueryProvider>
+        <OfflineSyncProvider>
         <AppMotionProvider>
         <TooltipProvider>
         <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:top-2 focus:left-2 focus:px-4 focus:py-2 focus:bg-[var(--accent)] focus:text-white focus:rounded-[var(--radius-md)] focus:text-sm focus:font-medium">
@@ -91,6 +93,7 @@ export default function RootLayout({
         <Toaster />
         </TooltipProvider>
         </AppMotionProvider>
+        </OfflineSyncProvider>
         </ReactQueryProvider>
         </SerwistProvider>
       </body>

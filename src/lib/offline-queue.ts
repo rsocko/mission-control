@@ -18,7 +18,7 @@ import {
 } from '@/lib/capture-image';
 
 const DB_NAME = 'mission-control-offline';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE_NAME = 'pending-captures';
 const ACTION_STORE = 'pending-actions';
 export const SYNC_TAG = 'sync-offline-captures';
@@ -66,16 +66,22 @@ export interface OfflineAction {
   /** JSON-serializable payload with mutation data */
   payload: Record<string, unknown>;
   createdAt: string;
+  /** The server revision the action was based on, when the action edits an entity. */
+  expectedUpdatedAt?: string;
   /** Number of replay attempts so far */
   attempts: number;
   /** Last error message if replay failed */
   lastError?: string;
+  /** Failed conflicts stay visible until the user explicitly resolves them. */
+  state: 'pending' | 'blocked';
+  lastAttemptAt?: string;
 }
 
 /** Input for queueing an offline action (id and metadata are generated) */
 export interface QueueActionInput {
   type: string;
   payload: Record<string, unknown>;
+  expectedUpdatedAt?: string;
 }
 
 function openDB(): Promise<IDBDatabase> {
@@ -286,6 +292,21 @@ export async function requestBackgroundSync(): Promise<boolean> {
   return false;
 }
 
+/** Ask the service worker to notify an open client to replay mutation handlers. */
+export async function requestActionBackgroundSync(): Promise<boolean> {
+  if (!('serviceWorker' in navigator)) return false;
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    if ('sync' in registration) {
+      await (registration as unknown as { sync: { register(tag: string): Promise<void> } }).sync.register(ACTION_SYNC_TAG);
+      return true;
+    }
+  } catch {
+    // Background Sync is an optional wake-up hint; foreground reconnect remains authoritative.
+  }
+  return false;
+}
+
 // ─── Generic Offline Action Queue (#1528) ────────────────────────────────────
 
 /**
@@ -328,7 +349,9 @@ export async function queueAction(input: QueueActionInput): Promise<OfflineActio
     type: input.type,
     payload: input.payload,
     createdAt: new Date().toISOString(),
+    expectedUpdatedAt: input.expectedUpdatedAt,
     attempts: 0,
+    state: 'pending',
   };
 
   const db = await openDB();
@@ -359,7 +382,10 @@ export async function getPendingActions(): Promise<OfflineAction[]> {
     const request = index.getAll();
     request.onsuccess = () => {
       db.close();
-      resolve(request.result);
+      resolve((request.result as OfflineAction[]).map((action) => ({
+        ...action,
+        state: action.state ?? 'pending',
+      })));
     };
     request.onerror = () => {
       db.close();
@@ -405,8 +431,12 @@ export async function updateAction(action: OfflineAction): Promise<void> {
   });
 }
 
-/** Maximum number of retry attempts before an action is discarded */
-const MAX_ACTION_ATTEMPTS = 5;
+export class OfflineActionBlockedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'OfflineActionBlockedError';
+  }
+}
 
 /**
  * Replay all pending actions using registered handlers.
@@ -430,12 +460,7 @@ export async function replayPendingActions(): Promise<{ synced: number; failed: 
       continue;
     }
 
-    // Drop actions that have exceeded max attempts
-    if (action.attempts >= MAX_ACTION_ATTEMPTS) {
-      await removeAction(action.id);
-      dropped++;
-      continue;
-    }
+    if (action.state === 'blocked') continue;
 
     try {
       await handler(action.payload);
@@ -444,6 +469,11 @@ export async function replayPendingActions(): Promise<{ synced: number; failed: 
     } catch (err) {
       action.attempts++;
       action.lastError = err instanceof Error ? err.message : 'Replay error';
+      action.lastAttemptAt = new Date().toISOString();
+      if (err instanceof OfflineActionBlockedError) {
+        action.state = 'blocked';
+        dropped++;
+      }
       await updateAction(action);
       failed++;
     }

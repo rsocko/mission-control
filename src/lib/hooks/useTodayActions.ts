@@ -361,42 +361,42 @@ export function useTodayActions({
       variant: 'danger',
       onConfirm: () => {
         setConfirmDialog((dialog) => ({ ...dialog, open: false }));
-        // Defer heavy state updates to the next frame so Radix can finish its
-        // close sequence (removing pointer-events:none from <body>) before React
-        // re-renders the task list.
         requestAnimationFrame(() => {
           const previousItems = items;
           const previousSuggestions = suggestions;
           setItems((prev) => prev.filter((current) => current.taskId !== taskId));
-          // The task may only exist as a suggestion (never added to My Day),
-          // so remove it from every suggestion group too -- otherwise it
-          // lingers there until the next full refetch.
           setSuggestions((current) => removeTaskFromSuggestions(current, taskId));
-          let undone = false;
-          toast.success('Task deleted', {
-            action: {
-              label: 'Undo',
-              onClick: () => {
-                undone = true;
-                setItems(previousItems);
-                setSuggestions(previousSuggestions);
-              },
-            },
-            duration: 5000,
-          });
-          setTimeout(async () => {
-            if (!undone) {
-              try {
-                const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
-                if (!res.ok) throw new Error('Failed');
-                fetchData({ skipSync: true });
-              } catch {
-                setItems(previousItems);
-                setSuggestions(previousSuggestions);
-                toast.error('Failed to delete task');
+
+          void (async () => {
+            try {
+              const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+              if (!res.ok) throw new Error('Failed');
+              const body = typeof res.json === 'function'
+                ? await res.json().catch(() => ({})) as { restorable?: boolean }
+                : {};
+
+              notifyTaskChanged(taskId);
+              if (body.restorable) {
+                pushUndoWithToast('Task deleted', async () => {
+                  const restoreResponse = await fetch(`/api/tasks/${taskId}/restore`, {
+                    method: 'POST',
+                  });
+                  if (!restoreResponse.ok) throw new Error('Failed to restore task');
+                  setItems(previousItems);
+                  setSuggestions(previousSuggestions);
+                  notifyTaskChanged(taskId);
+                  await fetchData({ skipSync: true });
+                });
+              } else {
+                toast.success('Task deleted');
               }
+              await fetchData({ skipSync: true });
+            } catch {
+              setItems(previousItems);
+              setSuggestions(previousSuggestions);
+              toast.error('Failed to delete task');
             }
-          }, 5500);
+          })();
         });
       },
     });

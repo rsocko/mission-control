@@ -168,6 +168,11 @@ export function getQuickAddSlashDestinations(
         .includes(normalizedQuery);
     })
     .sort((a, b) => {
+      if (normalizedQuery) {
+        const aMatchesListName = Boolean(a.listName?.toLowerCase().includes(normalizedQuery));
+        const bMatchesListName = Boolean(b.listName?.toLowerCase().includes(normalizedQuery));
+        if (aMatchesListName !== bMatchesListName) return aMatchesListName ? -1 : 1;
+      }
       if (Boolean(a.listId) !== Boolean(b.listId)) return a.listId ? -1 : 1;
       return (a.shortLabel ?? a.label).localeCompare(b.shortLabel ?? b.label);
     });

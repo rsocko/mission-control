@@ -368,5 +368,63 @@ describe('useTodayActions completion', () => {
     });
 
     expect(result.current.suggestions.yesterday).toHaveLength(0);
+    expect(global.fetch).toHaveBeenCalledWith('/api/tasks/suggestion-2', { method: 'DELETE' });
+  });
+
+  it('deletes a My Day task immediately and restores it through undo', async () => {
+    vi.useRealTimers();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => ({
+      ok: true,
+      json: async () => input.toString().endsWith('/restore')
+        ? { success: true }
+        : { success: true, restorable: true },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const fetchData = vi.fn(async () => {});
+    const item = {
+      ...mirrorTodayItem(),
+      taskId: 'task-to-delete',
+      title: 'Delete me',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      sourceListName: 'Inbox',
+      taskSourceModel: 'mc-owned' as const,
+      editPolicy: editableTaskPolicy,
+    };
+    const { result } = renderHook(() => {
+      const [items, setItems] = useState([item]);
+      const actions = useTodayActions({
+        items,
+        setItems,
+        scheduled: [],
+        calendarEvents: [],
+        sourceLists: [],
+        energyLevel: null,
+        setEnergyLevel: vi.fn(),
+        todayISO: '2026-07-31',
+        fetchData,
+      });
+      return { items, actions };
+    });
+
+    act(() => {
+      void result.current.actions.deleteTask('task-to-delete');
+    });
+    await act(async () => {
+      result.current.actions.confirmDialog.onConfirm();
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    });
+
+    expect(result.current.items).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-to-delete', { method: 'DELETE' });
+    expect(mocks.pushUndoWithToast).toHaveBeenCalledWith('Task deleted', expect.any(Function));
+
+    const undo = mocks.pushUndoWithToast.mock.calls[0]?.[1] as (() => Promise<void>) | undefined;
+    await act(async () => {
+      await undo?.();
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-to-delete/restore', { method: 'POST' });
+    expect(result.current.items).toEqual([item]);
   });
 });

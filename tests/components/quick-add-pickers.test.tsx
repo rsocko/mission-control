@@ -6,7 +6,10 @@ import {
 } from '@/components/add-task/DestinationPicker';
 import { TemplatePicker } from '@/components/add-task/TemplatePicker';
 import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
-import { findQuickAddContextDestination } from '@/lib/hooks/useQuickAddDestinations';
+import {
+  findQuickAddContextDestination,
+  useQuickAddDestinations,
+} from '@/lib/hooks/useQuickAddDestinations';
 import type { QuickAddDestination } from '@/components/add-task/quick-add-types';
 import type { TaskTemplate } from '@/types';
 
@@ -133,6 +136,56 @@ describe('Quick Add destination picker', () => {
     fireEvent.keyDown(search, { key: 'Enter' });
 
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ listId: 'today' }));
+  });
+
+  it('retains source-list database IDs for the task detail View action', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === '/api/features') {
+        return new Response(JSON.stringify({
+          taskDestinations: [{
+            id: 'todo',
+            type: 'microsoft-todo',
+            name: 'Microsoft To Do',
+            account: 'personal',
+          }],
+        }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === '/api/connectors/todo/lists') {
+        return new Response(JSON.stringify({
+          sourceLists: [{
+            id: 'source-list-row-1',
+            sourceId: 'remote-list-1',
+            connectorInstanceId: 'todo',
+            name: 'Homelab Roadmap',
+            taskCount: 1,
+            groupId: null,
+          }],
+          groups: [],
+        }), { headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ destination: null }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }));
+
+    const { result } = renderHook(() => useQuickAddDestinations({
+      sourceFilter: null,
+      listFilter: null,
+      listFilterName: null,
+      listFilterConnectorType: null,
+    }));
+
+    await waitFor(() => {
+      expect(result.current.sourceLists).toEqual([
+        expect.objectContaining({
+          id: 'source-list-row-1',
+          sourceId: 'remote-list-1',
+          connectorInstanceId: 'todo',
+          name: 'Homelab Roadmap',
+        }),
+      ]);
+    });
   });
 
   it('closes on Escape without changing the destination', () => {

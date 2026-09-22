@@ -660,7 +660,9 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
   }, [activeIndex]);
 
   return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
+    // Task detail launches its own portaled menus and dialogs, so Search must not
+    // apply a body-level pointer/focus lock that would disable those surfaces.
+    <Dialog.Root modal={false} open={open} onOpenChange={handleOpenChange}>
       <Dialog.Trigger asChild>
         <button
           type="button"

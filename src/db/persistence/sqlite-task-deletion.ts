@@ -31,6 +31,9 @@ export function cleanupTaskAssociations(database: SqliteDatabase, taskId: string
   database.prepare(
     'UPDATE notifications SET related_task_id = NULL WHERE related_task_id = ?',
   ).run(taskId);
+  database.prepare(
+    'UPDATE task_recurrence_backfill_decisions SET task_id = NULL WHERE task_id = ?',
+  ).run(taskId);
 }
 
 /**

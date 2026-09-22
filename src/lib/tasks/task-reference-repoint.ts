@@ -41,6 +41,7 @@ export const TASK_REFERENCE_COLUMN_POLICIES = {
   'task_history_events.task_id': 'history',
   'task_linked_sources.task_id': 'repoint',
   'task_projects.task_id': 'rebuild',
+  'task_recurrence_backfill_decisions.task_id': 'history',
   'task_recurrence_occurrences.generated_from_task_id': 'lineage',
   'task_recurrence_occurrences.task_id': 'repoint',
   'task_reminder_occurrences.task_id': 'repoint',

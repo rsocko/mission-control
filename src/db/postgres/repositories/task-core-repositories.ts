@@ -48,6 +48,7 @@ import {
   taskIngestSuppressions,
   taskLinkedSources,
   taskProjects,
+  taskRecurrenceBackfillDecisions,
   taskRecurrenceOccurrences,
   taskReminderOccurrences,
   taskSchedules,
@@ -171,6 +172,10 @@ import {
   type TaskTimeActivityTransitionInput,
   type TaskOccurrenceMaterializationInput,
   type TaskOccurrenceMaterializationRepository,
+  type TaskRecurrenceBackfillDecision,
+  type TaskRecurrenceBackfillInput,
+  type TaskRecurrenceBackfillOutcome,
+  type RecurrenceBackfillTouchReason,
   type TaskMoveTaskInsert,
   type TaskMoveTaskRow,
   type TaskOrganizationRepository,
@@ -209,6 +214,9 @@ import {
   type TemplateWorkflowTaskInsert,
   type WriteThroughTaskMoveRepository,
   elapsedTaskTimeAt,
+  normalizeRecurrenceBackfillInstant,
+  planRecurrenceBackfill,
+  validateRecurrenceBackfillAsOf,
 } from '@/lib/tasks/core/contracts';
 import { writeRecurrenceMetadata } from '@/lib/recurrence/canonical';
 import {
@@ -220,6 +228,7 @@ import {
   type PersistedRecurrenceOccurrence,
   type RecurrenceOccurrenceProvenance,
 } from '@/lib/recurrence/occurrence-persistence';
+import { projectRecurrence } from '@/lib/recurrence/projection';
 
 /**
  * PostgreSQL implementation of the L04 task-core contracts.
@@ -1299,6 +1308,9 @@ async function deleteSingleTaskWithinTransaction(
   await tx.update(notifications)
     .set({ relatedTaskId: null })
     .where(eq(notifications.relatedTaskId, taskId));
+  await tx.update(taskRecurrenceBackfillDecisions)
+    .set({ taskId: null })
+    .where(eq(taskRecurrenceBackfillDecisions.taskId, taskId));
   await tx.delete(taskDependencies).where(or(
     eq(taskDependencies.taskId, taskId),
     eq(taskDependencies.dependsOnTaskId, taskId),
@@ -1542,6 +1554,9 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
       await tx.update(notifications)
         .set({ relatedTaskId: null })
         .where(inArray(notifications.relatedTaskId, taskIds));
+      await tx.update(taskRecurrenceBackfillDecisions)
+        .set({ taskId: null })
+        .where(inArray(taskRecurrenceBackfillDecisions.taskId, taskIds));
       await tx.delete(tasks).where(inArray(tasks.id, taskIds));
 
       return {
@@ -3098,68 +3113,323 @@ class PostgresTaskCreateRepository implements TaskCreateRepository {
   }
 }
 
+async function materializePostgresOccurrence(
+  tx: PostgresTransaction,
+  input: TaskOccurrenceMaterializationInput,
+) {
+  const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+    rule: input.rule,
+    occurrence: input.occurrence,
+  });
+  const task = {
+    ...input.task,
+    metadata: writeRecurrenceMetadata(input.task.metadata, rule),
+  };
+  assertRecurrenceOccurrenceTaskScope(task, provenance);
+  assertRecurrenceOccurrenceTiming(task, input.schedule, provenance, task.id);
+  const generatedFromTaskId = input.generatedFromTaskId ?? null;
+  if (
+    (provenance.materializationStrategy === 'on-completion')
+    !== (generatedFromTaskId !== null)
+  ) {
+    throw new Error('Completion recurrence occurrences require a generating task identity');
+  }
+
+  const claim = await claimPostgresRecurrenceOccurrence(
+    tx,
+    provenance,
+    task.id,
+    generatedFromTaskId,
+    task.createdAt,
+  );
+  if (!claim.claimed) {
+    return {
+      kind: 'existing' as const,
+      occurrenceId: claim.occurrenceId,
+      taskId: claim.taskId,
+    };
+  }
+
+  await tx.insert(tasks).values(moveTaskInsertValues(task));
+  if (input.tagIds.length) {
+    await tx.insert(taskTags).values(
+      [...new Set(input.tagIds)].map((tagId) => ({ taskId: task.id, tagId })),
+    ).onConflictDoNothing();
+  }
+  if (input.projectIds.length) {
+    await tx.insert(taskProjects).values(
+      [...new Set(input.projectIds)].map((projectId) => ({ taskId: task.id, projectId })),
+    ).onConflictDoNothing();
+  }
+  if (input.schedule) await tx.insert(taskSchedules).values(input.schedule);
+  await enqueueTaskCoreEvent(tx, input.event);
+  return {
+    kind: 'created' as const,
+    occurrenceId: claim.occurrenceId,
+    taskId: claim.taskId,
+  };
+}
+
+type PostgresBackfillDecisionRow = typeof taskRecurrenceBackfillDecisions.$inferSelect;
+
+function toBackfillDecision(row: PostgresBackfillDecisionRow): TaskRecurrenceBackfillDecision {
+  return {
+    occurrenceId: row.occurrenceId,
+    decision: row.decision,
+    reason: row.reason,
+    taskId: row.taskId,
+    supersededByOccurrenceId: row.supersededByOccurrenceId,
+    decidedAt: row.decidedAt,
+  };
+}
+
+function markTouched(
+  touched: Map<string, Set<RecurrenceBackfillTouchReason>>,
+  taskIds: readonly string[],
+  reason: RecurrenceBackfillTouchReason,
+): void {
+  for (const taskId of taskIds) {
+    const reasons = touched.get(taskId) ?? new Set<RecurrenceBackfillTouchReason>();
+    reasons.add(reason);
+    touched.set(taskId, reasons);
+  }
+}
+
 class PostgresTaskOccurrenceMaterializationRepository
 implements TaskOccurrenceMaterializationRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
   async materializeOccurrence(input: TaskOccurrenceMaterializationInput) {
-    const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+    return this.db.transaction((tx) => materializePostgresOccurrence(tx, input));
+  }
+
+  async backfillRange(
+    input: TaskRecurrenceBackfillInput,
+  ): Promise<TaskRecurrenceBackfillOutcome> {
+    const asOfIssues = validateRecurrenceBackfillAsOf(input.range, input.asOf);
+    if (asOfIssues.length > 0) return { status: 'invalid', issues: asOfIssues };
+    const decidedAt = normalizeRecurrenceBackfillInstant(input.decidedAt);
+    if (decidedAt === null) {
+      return { status: 'invalid', issues: ['decidedAt must be a valid instant'] };
+    }
+    const projection = projectRecurrence({
       rule: input.rule,
-      occurrence: input.occurrence,
+      range: input.range,
+      completionAnchors: input.completionAnchors,
+      limits: input.limits,
     });
-    const task = {
-      ...input.task,
-      metadata: writeRecurrenceMetadata(input.task.metadata, rule),
-    };
-    assertRecurrenceOccurrenceTaskScope(task, provenance);
-    assertRecurrenceOccurrenceTiming(task, input.schedule, provenance, task.id);
-    const generatedFromTaskId = input.generatedFromTaskId ?? null;
-    if (
-      (provenance.materializationStrategy === 'on-completion')
-      !== (generatedFromTaskId !== null)
-    ) {
-      throw new Error(
-        'Completion recurrence occurrences require a generating task identity',
-      );
+    if (projection.status !== 'success') return projection;
+    if (projection.occurrences.length === 0) {
+      return { status: 'success', iterations: projection.iterations, decisions: [] };
     }
 
-    return this.db.transaction(async (tx) => {
-      const claim = await claimPostgresRecurrenceOccurrence(
-        tx,
-        provenance,
-        task.id,
-        generatedFromTaskId,
-        task.createdAt,
+    const projected = projection.occurrences.map((occurrence) => ({
+      occurrence,
+      provenance: deriveRecurrenceOccurrenceProvenance({
+        rule: input.rule,
+        occurrence,
+      }).provenance,
+    }));
+    const occurrenceIds = projected.map(({ provenance }) => provenance.occurrenceId);
+
+    const decisions = await this.db.transaction(async (tx) => {
+      const existingDecisionRows = await tx.select().from(taskRecurrenceBackfillDecisions)
+        .where(inArray(taskRecurrenceBackfillDecisions.occurrenceId, occurrenceIds));
+      const decidedById = new Map(
+        existingDecisionRows.map((row) => [row.occurrenceId, row]),
       );
-      if (!claim.claimed) {
-        return {
-          kind: 'existing' as const,
-          occurrenceId: claim.occurrenceId,
-          taskId: claim.taskId,
-        };
+      const undecided = projected.filter(
+        ({ provenance }) => !decidedById.has(provenance.occurrenceId),
+      );
+      if (undecided.length > 0) {
+        const undecidedIds = undecided.map(({ provenance }) => provenance.occurrenceId);
+        const occurrenceRows = await tx.select().from(taskRecurrenceOccurrences)
+          .where(inArray(taskRecurrenceOccurrences.occurrenceId, undecidedIds));
+        const taskIds = occurrenceRows.map((row) => row.taskId).sort();
+        const taskRows = taskIds.length === 0
+          ? []
+          : await tx.select({
+              id: tasks.id,
+              status: tasks.status,
+              deletedAt: tasks.deletedAt,
+              description: tasks.description,
+              planningHorizon: tasks.planningHorizon,
+              createdAt: tasks.createdAt,
+              updatedAt: tasks.updatedAt,
+            }).from(tasks).where(inArray(tasks.id, taskIds)).orderBy(asc(tasks.id)).for('update');
+        const taskById = new Map(taskRows.map((row) => [row.id, row]));
+        const touched = new Map<string, Set<RecurrenceBackfillTouchReason>>();
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.description?.trim()).map((row) => row.id),
+          'description',
+        );
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.updatedAt !== row.createdAt).map((row) => row.id),
+          'field-edit',
+        );
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.planningHorizon !== null).map((row) => row.id),
+          'planning-membership',
+        );
+        if (taskIds.length > 0) {
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskFieldStates.taskId }).from(taskFieldStates).where(and(
+              inArray(taskFieldStates.taskId, taskIds),
+              isNotNull(taskFieldStates.localEditedAt),
+            ))).map((row) => row.taskId),
+            'field-edit',
+          );
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskHistoryEvents.taskId }).from(taskHistoryEvents).where(and(
+              inArray(taskHistoryEvents.taskId, taskIds),
+              ne(taskHistoryEvents.eventType, 'baseline'),
+            ))).map((row) => row.taskId),
+            'history',
+          );
+          const planningTaskIds = [
+            ...await tx.select({ taskId: taskProjects.taskId }).from(taskProjects)
+              .where(inArray(taskProjects.taskId, taskIds)),
+            ...await tx.select({ taskId: projectPhaseItems.taskId }).from(projectPhaseItems)
+              .where(inArray(projectPhaseItems.taskId, taskIds)),
+            ...await tx.select({ taskId: myDayItems.taskId }).from(myDayItems)
+              .where(inArray(myDayItems.taskId, taskIds)),
+            ...await tx.select({ taskId: focusItems.taskId }).from(focusItems)
+              .where(inArray(focusItems.taskId, taskIds)),
+          ].map((row) => row.taskId);
+          markTouched(touched, planningTaskIds, 'planning-membership');
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskAttachments.taskId }).from(taskAttachments)
+              .where(inArray(taskAttachments.taskId, taskIds))).map((row) => row.taskId),
+            'attachment',
+          );
+          markTouched(
+            touched,
+            (await tx.select({ taskId: taskTimeActivities.taskId }).from(taskTimeActivities)
+              .where(and(
+                inArray(taskTimeActivities.taskId, taskIds),
+                or(
+                  ne(taskTimeActivities.state, 'cancelled'),
+                  gte(taskTimeActivities.elapsedSeconds, 1),
+                ),
+              ))).map((row) => row.taskId),
+            'time-activity',
+          );
+        }
+        const occurrenceById = new Map(
+          occurrenceRows.map((row) => [row.occurrenceId, row]),
+        );
+        const planned = planRecurrenceBackfill({
+          range: input.range,
+          asOf: input.asOf,
+          occurrences: projected.map(({ occurrence, provenance }) => {
+            const decided = decidedById.get(provenance.occurrenceId);
+            if (decided) {
+              const remainsActionable = decided.decision === 'materialized'
+                || decided.decision === 'preserved';
+              return {
+                occurrenceId: provenance.occurrenceId,
+                occurrence,
+                sourceOwner: provenance.sourceOwner,
+                existing: {
+                  taskId: remainsActionable ? decided.taskId : null,
+                  status: remainsActionable ? 'todo' : null,
+                  deletedAt: remainsActionable ? null : decided.decidedAt,
+                  touchReasons: remainsActionable ? ['history' as const] : [],
+                },
+              };
+            }
+            const stored = occurrenceById.get(provenance.occurrenceId);
+            const task = stored ? taskById.get(stored.taskId) : undefined;
+            return {
+              occurrenceId: provenance.occurrenceId,
+              occurrence,
+              sourceOwner: provenance.sourceOwner,
+              existing: stored
+                ? {
+                    taskId: task ? stored.taskId : null,
+                    status: task?.status ?? null,
+                    deletedAt: task?.deletedAt ?? null,
+                    touchReasons: task ? [...(touched.get(task.id) ?? [])] : [],
+                  }
+                : null,
+            };
+          }),
+        }).filter(({ occurrenceId }) => !decidedById.has(occurrenceId));
+        const candidateById = new Map(
+          undecided.map((candidate) => [candidate.provenance.occurrenceId, candidate]),
+        );
+
+        for (const desired of planned) {
+          const candidate = candidateById.get(desired.occurrenceId)!;
+          const materialization = desired.decision === 'materialized'
+            ? input.materializationFor(candidate.occurrence)
+            : null;
+          const proposed = {
+            occurrenceId: candidate.provenance.occurrenceId,
+            seriesId: candidate.provenance.seriesId,
+            ruleRevisionId: candidate.provenance.ruleRevisionId,
+            effectiveKind: candidate.provenance.effectiveKind,
+            effectiveValue: candidate.provenance.effectiveValue,
+            decision: desired.decision,
+            reason: desired.reason,
+            taskId: materialization?.task.id ?? desired.taskId,
+            supersededByOccurrenceId: desired.supersededByOccurrenceId,
+            decidedAt,
+          };
+          const claimed = await tx.insert(taskRecurrenceBackfillDecisions).values(proposed)
+            .onConflictDoNothing().returning({ occurrenceId: taskRecurrenceBackfillDecisions.occurrenceId });
+          if (claimed.length === 0) {
+            const [existing] = await tx.select().from(taskRecurrenceBackfillDecisions)
+              .where(eq(taskRecurrenceBackfillDecisions.occurrenceId, desired.occurrenceId))
+              .limit(1);
+            if (!existing) throw new Error('Backfill decision conflict did not resolve');
+            decidedById.set(existing.occurrenceId, existing);
+            continue;
+          }
+
+          if (materialization) {
+            const outcome = await materializePostgresOccurrence(tx, {
+              ...materialization,
+              rule: input.rule,
+              occurrence: candidate.occurrence,
+            });
+            if (outcome.taskId !== proposed.taskId) {
+              await tx.update(taskRecurrenceBackfillDecisions).set({ taskId: outcome.taskId })
+                .where(eq(taskRecurrenceBackfillDecisions.occurrenceId, desired.occurrenceId));
+              proposed.taskId = outcome.taskId;
+            }
+          } else if (desired.decision === 'superseded' && desired.taskId) {
+            const superseded = await tx.update(tasks).set({
+              deletedAt: decidedAt,
+              updatedAt: decidedAt,
+            }).where(and(
+              eq(tasks.id, desired.taskId),
+              eq(tasks.connectorType, 'local'),
+              eq(tasks.status, 'todo'),
+              isNull(tasks.deletedAt),
+            )).returning({ id: tasks.id });
+            if (superseded.length !== 1) {
+              throw new Error('Protected recurrence occurrence changed during backfill');
+            }
+          }
+          decidedById.set(proposed.occurrenceId, proposed);
+        }
       }
 
-      await tx.insert(tasks).values(moveTaskInsertValues(task));
-      if (input.tagIds.length) {
-        await tx.insert(taskTags).values(
-          [...new Set(input.tagIds)].map((tagId) => ({ taskId: task.id, tagId })),
-        ).onConflictDoNothing();
-      }
-      if (input.projectIds.length) {
-        await tx.insert(taskProjects).values(
-          [...new Set(input.projectIds)].map((projectId) => ({ taskId: task.id, projectId })),
-        ).onConflictDoNothing();
-      }
-      if (input.schedule) {
-        await tx.insert(taskSchedules).values(input.schedule);
-      }
-      await enqueueTaskCoreEvent(tx, input.event);
-      return {
-        kind: 'created' as const,
-        occurrenceId: claim.occurrenceId,
-        taskId: claim.taskId,
-      };
+      return occurrenceIds.map((occurrenceId) => {
+        const row = decidedById.get(occurrenceId);
+        if (!row) throw new Error('Backfill decision was not persisted');
+        return toBackfillDecision(row);
+      });
     });
+
+    return { status: 'success', iterations: projection.iterations, decisions };
   }
 }
 

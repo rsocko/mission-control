@@ -59,8 +59,10 @@ beforeAll(async () => {
         schema.triageItems,
         schema.taskIngestSuppressions,
         schema.taskAttachments,
+        schema.taskTimeActivities,
         schema.taskLinkedSources,
         schema.taskSchedules,
+        schema.taskRecurrenceBackfillDecisions,
         schema.taskRecurrenceOccurrences,
         schema.projectPhaseItems,
         schema.projectPhases,
@@ -415,6 +417,16 @@ beforeAll(async () => {
         FROM task_recurrence_occurrences
         ORDER BY occurrence_id
       `).all() as Awaited<ReturnType<TaskCoreContractHarness['listRecurrenceOccurrences']>>;
+    },
+    async listRecurrenceBackfillDecisions() {
+      return sqlite.prepare(`
+        SELECT occurrence_id AS occurrenceId, decision, reason, task_id AS taskId,
+          superseded_by_occurrence_id AS supersededByOccurrenceId, decided_at AS decidedAt
+        FROM task_recurrence_backfill_decisions
+        ORDER BY effective_value
+      `).all() as Awaited<
+        ReturnType<TaskCoreContractHarness['listRecurrenceBackfillDecisions']>
+      >;
     },
     async getTaskUpdatedAt(taskId) {
       const row = sqlite

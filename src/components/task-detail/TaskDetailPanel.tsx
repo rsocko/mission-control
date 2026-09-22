@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
@@ -50,6 +50,7 @@ import { toggleMarkdownCheckbox } from './TaskDetailMarkdown';
 import { useTaskDetailData } from './useTaskDetailData';
 import { useTaskDetailMutations, type TaskConfirmRequest } from './useTaskDetailMutations';
 import { parseTaskMetadata } from './task-detail-types';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
   TaskDetailPanelProps,
@@ -584,6 +585,10 @@ export function TaskDetailPanel({
     ? task.recurrence ?? 'none'
     : parsedMetadata?.recurrence ?? 'none';
   const supportsRecurrence = task ? RECURRENCE_CONNECTORS.includes(task.connectorType) : false;
+  const recurrenceOptions = useMemo<RecurrenceEditorOptions>(() => ({
+    skipDates: [...(task?.recurrenceControl?.rule?.semantics.exceptions.skipDates ?? [])],
+    catchUp: task?.recurrenceControl?.rule?.semantics.materialization.catchUp ?? 'latest',
+  }), [task?.recurrenceControl?.rule]);
 
   // Pre-compute the next recurring date for the "Skip to current" action.
   // Only defined when the task is overdue and has a recurrence set.
@@ -970,8 +975,12 @@ export function TaskDetailPanel({
           canEditRecurrence={canEditRecurrence}
           recurrenceBlockedReason={blockedReason('recurrence')}
           recurrenceSaveLabel={saveLabel('recurrence')}
+          recurrenceControl={task.recurrenceControl}
+          recurrenceOptions={recurrenceOptions}
+          recurrenceOptionsSaving={mutations.recurrenceOptionsSaving}
           onRecurrenceChange={(recurrence) => { void mutations.handleRecurrenceChange(recurrence); }}
           onRecurrenceModeChange={(recurrenceMode) => { void mutations.handleRecurrenceModeChange(recurrenceMode); }}
+          onRecurrenceOptionsChange={(options) => { void mutations.handleRecurrenceOptionsChange(options); }}
           skipToCurrentDate={skipToCurrentDate}
           skippingToCurrent={mutations.skippingToCurrent}
           canEditDueDate={canEditDueDate}

@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
+import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
 
 vi.mock('@/lib/semantic-index/publication-service', () => ({
   publishSemanticEntityDelete: vi.fn(async () => undefined),
@@ -371,6 +372,103 @@ describe('completion-anchored task recurrence', () => {
       type: 'weekly',
       interval: 1,
       daysOfWeek: ['monday'],
+    });
+  });
+
+  it('persists and updates local recurrence exceptions and catch-up policy', async () => {
+    const createResponse = await createTask(new Request('http://localhost/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Review operations',
+        connectorType: 'local',
+        dueDate: '2026-09-21',
+        recurrence: 'weekly',
+        recurrenceSkipDates: ['2026-09-28'],
+        recurrenceCatchUp: 'none',
+      }),
+    }));
+    expect(createResponse.status).toBe(201);
+    const { id } = await createResponse.json() as { id: string };
+    const readSemantics = () => {
+      const row = sqlite.prepare('SELECT metadata FROM tasks WHERE id = ?')
+        .get(id) as { metadata: unknown };
+      return (parseTaskMetadataCompat(row.metadata).metadata as {
+        canonicalRecurrence: {
+          semantics: {
+            exceptions: { skipDates: string[] };
+            materialization: { catchUp: string };
+          };
+        };
+      }).canonicalRecurrence.semantics;
+    };
+
+    expect(readSemantics()).toMatchObject({
+      exceptions: { skipDates: ['2026-09-28'] },
+      materialization: { catchUp: 'none' },
+    });
+
+    const updateResponse = await patchTask(new Request(`http://localhost/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        recurrenceSkipDates: ['2026-10-05'],
+        recurrenceCatchUp: 'latest',
+      }),
+    }), { params: Promise.resolve({ id }) });
+    expect(updateResponse.status).toBe(200);
+    expect(readSemantics()).toMatchObject({
+      exceptions: { skipDates: ['2026-10-05'] },
+      materialization: { catchUp: 'latest' },
+    });
+  });
+
+  it('rejects edits to provider-owned canonical recurrence', async () => {
+    const createResponse = await createTask(new Request('http://localhost/api/tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: 'Imported schedule',
+        connectorType: 'local',
+        dueDate: '2026-09-21',
+        recurrence: 'weekly',
+      }),
+    }));
+    const { id } = await createResponse.json() as { id: string };
+    const providerRule = canonicalizeLegacyRecurrence({
+      recurrence: 'weekly',
+      mode: 'schedule',
+      startDate: '2026-09-21',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'connector',
+        connectorType: 'example',
+        connectorInstanceId: 'example-1',
+        externalSeriesId: 'series-1',
+        stability: 'provider',
+      },
+      source: {
+        owner: 'connector',
+        connectorType: 'example',
+        connectorInstanceId: 'example-1',
+        support: { status: 'supported', reasons: [] },
+        raw: {},
+      },
+    });
+    sqlite.prepare('UPDATE tasks SET metadata = ? WHERE id = ?').run(
+      JSON.stringify({ canonicalRecurrence: providerRule }),
+      id,
+    );
+
+    const response = await patchTask(new Request(`http://localhost/api/tasks/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ recurrenceSkipDates: ['2026-09-28'] }),
+    }), { params: Promise.resolve({ id }) });
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'This recurrence is owned by its provider and must be changed there',
     });
   });
 

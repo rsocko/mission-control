@@ -1,12 +1,16 @@
 'use client';
 
 import { Bell, FastForward, Repeat } from 'lucide-react';
-import RecurrencePicker, { getRecurrenceDisplayLabel } from '@/components/ui/RecurrencePicker';
+import RecurrencePicker from '@/components/ui/RecurrencePicker';
 import { ReminderPicker } from '@/components/ui/ReminderPicker';
 import { formatShortDate } from '@/lib/utils/task-detail-date';
 import { cn } from '@/lib/utils';
 import type { TaskDetailMode } from './task-detail-types';
 import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import type {
+  RecurrenceControlState,
+  RecurrenceEditorOptions,
+} from '@/lib/recurrence/editor-contract';
 
 export interface TaskPlanningSectionProps {
   mode: TaskDetailMode;
@@ -35,8 +39,12 @@ export interface TaskPlanningSectionProps {
   canEditRecurrence: boolean;
   recurrenceBlockedReason?: string;
   recurrenceSaveLabel?: string;
+  recurrenceControl?: RecurrenceControlState;
+  recurrenceOptions: RecurrenceEditorOptions;
+  recurrenceOptionsSaving: boolean;
   onRecurrenceChange: (recurrence: string) => void;
   onRecurrenceModeChange: (mode: 'schedule' | 'completion') => void;
+  onRecurrenceOptionsChange: (options: RecurrenceEditorOptions) => void;
   /** Next occurrence date when the task is overdue and recurring, else null. */
   skipToCurrentDate: string | null;
   skippingToCurrent: boolean;
@@ -70,8 +78,12 @@ export function TaskPlanningSection({
   canEditRecurrence,
   recurrenceBlockedReason,
   recurrenceSaveLabel,
+  recurrenceControl,
+  recurrenceOptions,
+  recurrenceOptionsSaving,
   onRecurrenceChange,
   onRecurrenceModeChange,
+  onRecurrenceOptionsChange,
   skipToCurrentDate,
   skippingToCurrent,
   canEditDueDate,
@@ -126,21 +138,24 @@ export function TaskPlanningSection({
           )}>
             <Repeat size={13} className={`mt-1 flex-shrink-0 ${hasRecurrence ? 'text-blue-400' : 'text-[var(--text-muted)]'}`} />
             <div className="flex-1 min-w-0 space-y-1.5">
-              {supportsRecurrence ? (
-                <div title={!canEditRecurrence ? recurrenceBlockedReason : recurrenceSaveLabel}>
-                  <RecurrencePicker
-                    value={currentRecurrence}
-                    onChange={onRecurrenceChange}
-                    mode={recurrenceMode}
-                    onModeChange={onRecurrenceModeChange}
-                    completionModeAvailable={completionModeAvailable}
-                    variant="compact"
-                    disabled={!canEditRecurrence}
-                  />
-                </div>
-              ) : (
-                <span className="text-xs text-blue-400">{getRecurrenceDisplayLabel(currentRecurrence)}</span>
-              )}
+              <div title={!canEditRecurrence ? recurrenceBlockedReason : recurrenceSaveLabel}>
+                <RecurrencePicker
+                  value={currentRecurrence}
+                  onChange={onRecurrenceChange}
+                  mode={recurrenceMode}
+                  onModeChange={onRecurrenceModeChange}
+                  completionModeAvailable={completionModeAvailable}
+                  variant="compact"
+                  disabled={!supportsRecurrence || !canEditRecurrence}
+                  startDate={dueDate}
+                  timezone={reminderTimezone}
+                  options={recurrenceOptions}
+                  onOptionsChange={onRecurrenceOptionsChange}
+                  optionsSaving={recurrenceOptionsSaving}
+                  controlState={recurrenceControl}
+                  advancedEditingAvailable={completionModeAvailable}
+                />
+              </div>
               {skipToCurrentDate && (
                 <button
                   type="button"

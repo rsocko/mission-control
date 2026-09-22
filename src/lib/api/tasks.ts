@@ -57,6 +57,8 @@ export interface CreateTaskPayload {
   estimatedDuration?: number;
   recurrence?: string;
   recurrenceMode?: 'schedule' | 'completion';
+  recurrenceSkipDates?: string[];
+  recurrenceCatchUp?: 'latest' | 'none';
 }
 
 /** POST /api/tasks — create a new task. */

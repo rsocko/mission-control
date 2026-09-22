@@ -18,6 +18,7 @@ import {
   canonicalizeLegacyRecurrence,
   extractRecurrenceLocalTime,
 } from '@/lib/recurrence/canonical';
+import { applyRecurrenceEditorOptions } from '@/lib/recurrence/editor';
 import type { TaskPriority } from '@/types';
 import { isPlanningHorizon } from '@/lib/tasks/planning-horizon';
 import type { ConnectorCapabilities } from '@/types';
@@ -329,6 +330,10 @@ export async function POST(request: Request) {
       effort,
     } = body;
     const recurrenceMode = body.recurrenceMode === 'completion' ? 'completion' : 'schedule';
+    const recurrenceSkipDates = Array.isArray(body.recurrenceSkipDates)
+      ? body.recurrenceSkipDates
+      : [];
+    const recurrenceCatchUp = body.recurrenceCatchUp === 'none' ? 'none' : 'latest';
     const requestedConnectorInstanceId = typeof body.connectorInstanceId === 'string'
       && body.connectorInstanceId.trim()
       ? body.connectorInstanceId.trim()
@@ -338,6 +343,14 @@ export async function POST(request: Request) {
       : null;
     if (typeof title !== 'string' || !title.trim()) {
       return ApiErrors.badRequest('title is required');
+    }
+    if (
+      recurrenceSkipDates.length > 100
+      || recurrenceSkipDates.some((date: unknown) => (
+        typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)
+      ))
+    ) {
+      return ApiErrors.badRequest('recurrenceSkipDates must contain at most 100 calendar dates');
     }
     const resolvedPriority: TaskPriority = isTaskPriority(priority) ? priority : 'none';
     if (
@@ -364,6 +377,14 @@ export async function POST(request: Request) {
     }
     if (recurrenceMode === 'completion' && isRemote) {
       return ApiErrors.badRequest('Completion-anchored recurrence is available only for local tasks');
+    }
+    if (
+      isRemote
+      && (recurrenceSkipDates.length > 0 || recurrenceCatchUp !== 'latest')
+    ) {
+      return ApiErrors.badRequest(
+        'Exceptions and catch-up policy are available only for Mission Control tasks',
+      );
     }
 
     const persistence = await getTaskCorePersistence();
@@ -414,20 +435,26 @@ export async function POST(request: Request) {
     }
     if (recurrence) {
       try {
-        metadata.canonicalRecurrence = canonicalizeLegacyRecurrence({
-          recurrence,
-          mode: recurrenceMode,
-          startDate: typeof dueDate === 'string'
-            ? dueDate.slice(0, 10)
-            : getLocalToday(),
-          localTime: extractRecurrenceLocalTime(dueDate, getTimezone()),
-          timezone: getTimezone(),
-          seriesIdentity: {
-            kind: 'mission-control',
-            stableId: id,
-            ...(isRemote ? { connectorInstanceId } : {}),
+        metadata.canonicalRecurrence = applyRecurrenceEditorOptions(
+          canonicalizeLegacyRecurrence({
+            recurrence,
+            mode: recurrenceMode,
+            startDate: typeof dueDate === 'string'
+              ? dueDate.slice(0, 10)
+              : getLocalToday(),
+            localTime: extractRecurrenceLocalTime(dueDate, getTimezone()),
+            timezone: getTimezone(),
+            seriesIdentity: {
+              kind: 'mission-control',
+              stableId: id,
+              ...(isRemote ? { connectorInstanceId } : {}),
+            },
+          }),
+          {
+            skipDates: recurrenceSkipDates,
+            catchUp: recurrenceCatchUp,
           },
-        });
+        );
       } catch (error) {
         return ApiErrors.badRequest(
           error instanceof Error ? error.message : 'Invalid recurrence',

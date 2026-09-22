@@ -30,6 +30,7 @@ import {
 import type { QuickAddDestination } from './quick-add-types';
 import type { PlanningHorizon } from '@/types';
 import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 
 interface Tag {
   id: string;
@@ -169,6 +170,10 @@ export function AddTaskModal({
   const [customDurationInput, setCustomDurationInput] = useState('');
   const [recurrence, setRecurrence] = useState<string>(initialParsed?.recurrence || 'none');
   const [recurrenceMode, setRecurrenceMode] = useState<'schedule' | 'completion'>('schedule');
+  const [recurrenceOptions, setRecurrenceOptions] = useState<RecurrenceEditorOptions>({
+    skipDates: [],
+    catchUp: 'latest',
+  });
   const [availableLists, setAvailableLists] = useState<SourceList[]>([]);
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [selectedListId, setSelectedListId] = useState<string>(initialListId || initialDestination.listId || '');
@@ -374,6 +379,8 @@ export function AddTaskModal({
           effort: captureSemantics?.effort || effort || undefined,
           recurrence: captureSemantics?.recurrence || (recurrence !== 'none' ? recurrence : undefined),
           recurrenceMode: captureSemantics?.recurrence || recurrence !== 'none' ? recurrenceMode : undefined,
+          recurrenceSkipDates: recurrence !== 'none' ? recurrenceOptions.skipDates : undefined,
+          recurrenceCatchUp: recurrence !== 'none' ? recurrenceOptions.catchUp : undefined,
           triageItemId,
         }),
       });
@@ -409,6 +416,7 @@ export function AddTaskModal({
           setCustomDurationInput('');
           setRecurrence('none');
           setRecurrenceMode('schedule');
+          setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
           setAddToMyDay(initialAddToMyDay ?? false);
           setTagSearchQuery('');
           setShowTagDropdown(false);
@@ -947,15 +955,25 @@ export function AddTaskModal({
               </label>
               <RecurrencePicker
                 value={recurrence}
-                onChange={setRecurrence}
+                onChange={(next) => {
+                  setRecurrence(next);
+                  if (next === 'none') {
+                    setRecurrenceMode('schedule');
+                    setRecurrenceOptions({ skipDates: [], catchUp: 'latest' });
+                  }
+                }}
                 mode={recurrenceMode}
                 onModeChange={setRecurrenceMode}
                 completionModeAvailable={activeDestination.connectorType === 'local'}
                 variant="full"
+                startDate={dueDate || null}
+                options={recurrenceOptions}
+                onOptionsChange={setRecurrenceOptions}
+                advancedEditingAvailable={activeDestination.connectorType === 'local'}
               />
-              {recurrence !== 'none' && ['ms-todo', 'outlook-calendar'].includes(activeDestination.connectorType) && (
+              {recurrence !== 'none' && activeDestination.connectorType !== 'local' && (
                 <p className="text-xs text-[var(--text-muted)] mt-1">
-                  Synced to {activeDestination.connectorType === 'ms-todo' ? 'Microsoft To Do' : 'Outlook'}
+                  The recurrence will be written to {activeDestination.label}; provider support may simplify the rule.
                 </p>
               )}
             </div>

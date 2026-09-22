@@ -6,6 +6,7 @@ import type {
   TaskSourceModel,
 } from '@/types';
 import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import type { RecurrenceControlState } from '@/lib/recurrence/editor-contract';
 
 /** A tag that can be displayed on, added to, or removed from a task. */
 export interface TaskTag {
@@ -63,6 +64,7 @@ export interface TaskDetail {
   estimatedDuration?: number | null;
   recurrence?: string | null;
   recurrenceMode?: 'schedule' | 'completion';
+  recurrenceControl?: RecurrenceControlState;
   effort?: number | null;
   reminderAt?: string | null;
   reminderRelative?: ReminderRelativeRule | null;

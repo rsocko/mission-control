@@ -25,6 +25,8 @@ Both entry points use the same parser and create-preview behavior.
 
 Typeahead menus resolve tags, priorities, effort, lists, and projects. Project names selected from typeahead are stored by project ID; an unknown `+Project` blocks creation instead of silently discarding the assignment.
 
+Type `/` followed by part of a list name to choose a destination. Matches in the actual list name appear before matches found only in a group name, source, or other destination label. Matching is case-insensitive, with alphabetical ordering within each tier (lists before list-less sources). Typing `/` without search text keeps the default lists-first alphabetical order.
+
 ## Safe date detection
 
 Explicit `/due:` commands apply immediately. A natural-language date at the end of ordinary text is offered as a suggestion:

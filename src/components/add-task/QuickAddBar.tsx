@@ -249,6 +249,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     selectDestination,
     isPickerOpen: showDestPicker,
     setPickerOpen: setShowDestPicker,
+    sourceLists,
   } = useQuickAddDestinations({
     sourceFilter: quickAddCtx.sourceFilter,
     listFilter: quickAddCtx.listFilter,
@@ -313,6 +314,27 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const contextProjectIdRef = useRef<string | null>(null);
   // When true, submit the task after the next typeahead acceptance clears the dropdown
   const submitAfterTypeaheadRef = useRef(false);
+
+  const moveViewedTaskToList = useCallback(async (targetListId: string) => {
+    if (!viewTaskId) return;
+
+    try {
+      const response = await fetch(`/api/tasks/${viewTaskId}/move-to-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetListId }),
+      });
+      if (!response.ok) throw new Error('Failed to move task');
+
+      const targetList = sourceLists.find((list) => list.id === targetListId);
+      toast.success(`Moved to ${targetList?.name || 'list'}`);
+      onTaskAdded?.();
+      window.dispatchEvent(new CustomEvent('mission-control:task-added'));
+    } catch (error) {
+      taskLogger.error('Failed to move Quick Add task to list', { error, taskId: viewTaskId });
+      toast.error('Failed to move task');
+    }
+  }, [onTaskAdded, sourceLists, viewTaskId]);
 
   // Voice capture for dictation into the quick-add input
   const handleVoiceTranscript = useCallback((text: string) => {
@@ -2193,6 +2215,8 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           <LazyTaskDetailPanel
             taskId={viewTaskId}
             mode="dialog"
+            sourceLists={sourceLists}
+            onMoveToList={moveViewedTaskToList}
             onClose={() => setViewTaskId(null)}
             onUpdate={() => {
               onTaskAdded?.();

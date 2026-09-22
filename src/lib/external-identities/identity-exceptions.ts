@@ -1,5 +1,4 @@
 import { and, desc, eq } from 'drizzle-orm';
-import db, { runTransaction } from '@/db';
 import {
   githubIdentityBackfillItems,
   githubIdentityExceptionEvents,
@@ -12,7 +11,9 @@ import type {
 } from './stable-identity-types';
 import { GITHUB_IDENTITY_EXCEPTION_ARCHIVAL_PROOF_TYPE } from '@/db/schema';
 import type { GitHubIdentityExceptionProofType } from '@/db/schema';
+import type { GitHubIdentityExceptionSnapshot } from '@/db/persistence/github-identity';
 import type { ExternalIdentityTransaction } from './service';
+import { getGitHubIdentityOperatorRepository, getGitHubIdentityRepository } from './worker-persistence';
 
 export type GitHubIdentityExceptionEvent =
   typeof githubIdentityExceptionEvents.$inferSelect;
@@ -23,11 +24,17 @@ export type GitHubIdentityExceptionEvent =
  * local and durable: either the Stage-1 backfill proved the issue inaccessible,
  * or the operator explicitly confirms an authoritative deletion for a task that
  * still carries a verified NodeID binding.
+ *
+ * This is one of the five pre-existing, previously audited GitHub worker
+ * operator/recovery surfaces (see `github-worker-errors.ts`). It is a manual,
+ * operator-only mutation with no normal HTTP/application caller; PostgreSQL
+ * does not implement it and fails closed via `UnsupportedGitHubWorkerOperationError`
+ * before any SQLite import, transaction, or durable mutation.
  */
-export function recordGitHubIdentityException(
+export async function recordGitHubIdentityException(
   request: GitHubIdentityExceptionRequest,
-): GitHubIdentityExceptionResult {
-  return runTransaction((tx) => recordGitHubIdentityExceptionInTransaction(tx, request));
+): Promise<GitHubIdentityExceptionResult> {
+  return (await getGitHubIdentityOperatorRepository()).recordIdentityException(request);
 }
 
 export function recordGitHubIdentityExceptionInTransaction(
@@ -234,31 +241,27 @@ function existingProofType(
   return event.action === 'accept' ? 'stage1_inaccessible' : null;
 }
 
-export function getLatestGitHubIdentityException(
+export async function getLatestGitHubIdentityException(
   connectorInstanceId: string,
   bindingType: GitHubIdentityExceptionRequest['bindingType'],
   localId: string,
-): GitHubIdentityExceptionEvent | null {
-  return db.select().from(githubIdentityExceptionEvents)
-    .where(and(
-      eq(githubIdentityExceptionEvents.connectorInstanceId, connectorInstanceId),
-      eq(githubIdentityExceptionEvents.bindingType, bindingType),
-      eq(githubIdentityExceptionEvents.localId, localId),
-      eq(githubIdentityExceptionEvents.category, 'terminal_inaccessible'),
-    ))
-    .orderBy(desc(githubIdentityExceptionEvents.id))
-    .limit(1)
-    .get() ?? null;
-}
-
-export function hasAcceptedGitHubTerminalInaccessibleException(
-  connectorInstanceId: string,
-  bindingType: GitHubIdentityExceptionRequest['bindingType'],
-  localId: string,
-): boolean {
-  return getLatestGitHubIdentityException(
+): Promise<GitHubIdentityExceptionSnapshot | null> {
+  const identity = await getGitHubIdentityRepository();
+  return identity.getLatestTerminalInaccessibleException({
     connectorInstanceId,
     bindingType,
     localId,
-  )?.action === 'accept';
+  });
+}
+
+export async function hasAcceptedGitHubTerminalInaccessibleException(
+  connectorInstanceId: string,
+  bindingType: GitHubIdentityExceptionRequest['bindingType'],
+  localId: string,
+): Promise<boolean> {
+  return (await getLatestGitHubIdentityException(
+    connectorInstanceId,
+    bindingType,
+    localId,
+  ))?.action === 'accept';
 }

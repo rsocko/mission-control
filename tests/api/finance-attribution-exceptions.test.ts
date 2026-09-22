@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 const { requestRetryMock } = vi.hoisted(() => ({
   requestRetryMock: vi.fn(),
@@ -34,7 +35,7 @@ beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   process.env.MC_API_KEY = 'test-finance-api-key';
   vi.resetModules();
-  const dbModule = await import('@/db');
+  const dbModule = await importInitializedSqliteDatabase();
   sqlite = dbModule.sqlite;
   const now = '2026-08-08T12:00:00.000Z';
   sqlite.prepare(`
@@ -60,7 +61,7 @@ beforeAll(async () => {
     ) VALUES (
       ?, ?, 'transaction-one', '2026-08-08', -10,
       'Invented merchant', 'account-one', '1234', 'kid-one',
-      'card-rule', 'pending', 0, 0, '[]',
+      'account-rule', 'pending', 0, 0, '[]',
       'active', 'source-hash', ?, ?, ?,
       'attributed', '[]', 'pending', 0
     )
@@ -128,6 +129,15 @@ describe.sequential('finance attribution exception APIs', () => {
     ), { params: Promise.resolve({ id: connectorId }) });
     expect(invalidCursor.status).toBe(400);
     expect(await invalidCursor.json()).toMatchObject({ code: 'invalid_cursor' });
+
+    const missingConnectorWithInvalidCursor = await GET(new Request(
+      'https://mc.example/api/connectors/missing-finance/finance/attribution-exceptions?cursor=invalid',
+      { headers: trustedHeaders() },
+    ), { params: Promise.resolve({ id: 'missing-finance' }) });
+    expect(missingConnectorWithInvalidCursor.status).toBe(404);
+    expect(await missingConnectorWithInvalidCursor.json()).toMatchObject({
+      code: 'connector_not_found',
+    });
   });
 
   it('fails closed when a same-origin request supplies an invalid API credential', async () => {
@@ -329,7 +339,9 @@ describe.sequential('finance attribution exception APIs', () => {
     expect(sqlite.prepare(`
       SELECT status FROM finance_attribution_exceptions WHERE id = ?
     `).get(exceptionId)).toEqual({ status: 'retry_requested' });
-    expect(requestRetryMock).toHaveBeenCalledTimes(2);
+    // Retry scheduling happens strictly after the first committed retry, never
+    // for the idempotent replay.
+    expect(requestRetryMock).toHaveBeenCalledTimes(1);
     expect(requestRetryMock).toHaveBeenCalledWith(connectorId);
     expect(sqlite.prepare(`
       SELECT count(*) AS count, max(full) AS full

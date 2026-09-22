@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type {
+  ExportKeysetQuery,
+  ExportTaskTagQuery,
+  OperationalExportRecord,
+} from '@/db/persistence/operational-utility';
 
-const { exportLogger, rowsByTable, queryCalls } = vi.hoisted(() => ({
+const { exportLogger, rowsByTable, queryCalls, operationalUtility } = vi.hoisted(() => ({
   exportLogger: {
     error: vi.fn(),
     info: vi.fn(),
@@ -8,78 +13,53 @@ const { exportLogger, rowsByTable, queryCalls } = vi.hoisted(() => ({
   },
   queryCalls: [] as Array<{ limit: number; table: string }>,
   rowsByTable: new Map<string, Record<string, unknown>[]>(),
+  operationalUtility: { present: true },
 }));
 
 vi.mock('@/lib/logger', () => ({ exportLogger }));
 vi.mock('@/lib/telemetry/runtime', () => ({
   recordLivenessProbe: vi.fn(),
 }));
-vi.mock('@/db/schema', () => {
-  const table = (name: string, columns: string[]) => ({
-    _: { name },
-    ...Object.fromEntries(columns.map((column) => [column, `${name}.${column}`])),
-  });
+
+/**
+ * The route reads only through the operational-utility export subport, so the
+ * test doubles that port instead of the database: `@/db` is never imported.
+ */
+vi.mock('@/lib/persistence/worker-runtime', () => {
+  const keysetPage = (table: string) => async (
+    query: ExportKeysetQuery,
+  ): Promise<OperationalExportRecord[]> => {
+    queryCalls.push({ limit: query.limit, table });
+    const rows = (rowsByTable.get(table) ?? [])
+      .filter((row) => query.afterId === undefined || String(row.id) > query.afterId);
+    return rows.slice(0, query.limit);
+  };
   return {
-    connectorConfigs: table('connector_configs', ['deletedAt', 'enabled', 'id', 'name', 'type']),
-    hubProjects: table('hub_projects', ['id']),
-    notifications: table('notifications', ['id']),
-    syncLog: table('sync_log', ['id']),
-    tags: table('tags', ['id']),
-    tasks: table('tasks', ['id']),
-    taskTags: table('task_tags', ['tagId', 'taskId']),
+    getWorkerPersistenceRepositories: async () => ({
+      operationalUtility: operationalUtility.present
+        ? {
+          exports: {
+            listTasksPage: keysetPage('tasks'),
+            listNotificationsPage: keysetPage('notifications'),
+            listTagsPage: keysetPage('tags'),
+            listHubProjectsPage: keysetPage('hub_projects'),
+            listConnectorsPage: keysetPage('connector_configs'),
+            listSyncLogPage: keysetPage('sync_log'),
+            async listTaskTagsPage(query: ExportTaskTagQuery) {
+              queryCalls.push({ limit: query.limit, table: 'task_tags' });
+              const rows = (rowsByTable.get('task_tags') ?? []).filter((row) => {
+                if (!query.after) return true;
+                const key = `${String(row.taskId)}\u0000${String(row.tagId)}`;
+                return key > `${query.after.taskId}\u0000${query.after.tagId}`;
+              });
+              return rows.slice(0, query.limit);
+            },
+          },
+        }
+        : undefined,
+    }),
   };
 });
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => {
-      let table = '';
-      let limit = Number.MAX_SAFE_INTEGER;
-      let condition: unknown;
-      const query = {
-        from(value: { _: { name: string } }) {
-          table = value._.name;
-          return query;
-        },
-        limit(value: number) {
-          limit = value;
-          return query;
-        },
-        orderBy() {
-          return query;
-        },
-        then(resolve: (rows: Record<string, unknown>[]) => unknown) {
-          const matches = (row: Record<string, unknown>, expression: unknown): boolean => {
-            if (!expression) return true;
-            const value = expression as {
-              args?: unknown[];
-              col?: unknown;
-              type?: string;
-              val?: unknown;
-            };
-            if (value.type === 'and') return (value.args ?? []).every((item) => matches(row, item));
-            if (value.type === 'or') return (value.args ?? []).some((item) => matches(row, item));
-            if (value.type === 'isNull') {
-              const column = String(value.col ?? value.args?.[0]).split('.').at(-1)!;
-              return row[column] === null || row[column] === undefined;
-            }
-            const column = String(value.col ?? value.args?.[0]).split('.').at(-1)!;
-            if (value.type === 'eq') return row[column] === value.args?.[1];
-            if (value.type === 'gt') return String(row[column]) > String(value.val ?? value.args?.[1]);
-            return true;
-          };
-          queryCalls.push({ limit, table });
-          const rows = (rowsByTable.get(table) ?? []).filter((row) => matches(row, condition));
-          return Promise.resolve(resolve(rows.slice(0, limit)));
-        },
-        where(value: unknown) {
-          condition = value;
-          return query;
-        },
-      };
-      return query;
-    }),
-  },
-}));
 
 function trustedRequest(path: string, signal?: AbortSignal) {
   return new Request(`http://localhost${path}`, {
@@ -108,6 +88,7 @@ async function drainReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
 beforeEach(() => {
   rowsByTable.clear();
   queryCalls.length = 0;
+  operationalUtility.present = true;
   exportLogger.error.mockReset();
   exportLogger.info.mockReset();
   exportLogger.warn.mockReset();
@@ -140,6 +121,19 @@ describe('GET /api/export', () => {
     await response.body?.cancel();
   });
 
+  it('reports 503 when the backend does not provide operational utility persistence', async () => {
+    operationalUtility.present = false;
+    const { GET } = await import('@/app/api/export/route');
+
+    const response = await GET(trustedRequest('/api/export?type=tasks'));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: 'Operational utility persistence is not available in the selected backend',
+    });
+    expect(queryCalls).toEqual([]);
+  });
+
   it('preserves the JSON schema while paging database reads', async () => {
     rowsByTable.set('tasks', [
       { id: '1', title: 'First', metadata: { source: 'test' } },
@@ -165,6 +159,26 @@ describe('GET /api/export', () => {
       { limit: 1, table: 'tasks' },
       { limit: 1, table: 'tasks' },
     ]);
+  });
+
+  it('pages task tags with a (taskId, tagId) cursor in the declared order', async () => {
+    rowsByTable.set('tags', []);
+    rowsByTable.set('task_tags', [
+      { taskId: 'task-1', tagId: 'tag-a' },
+      { taskId: 'task-1', tagId: 'tag-b' },
+      { taskId: 'task-2', tagId: 'tag-a' },
+    ]);
+    const { GET } = await import('@/app/api/export/route');
+
+    const response = await GET(trustedRequest('/api/export?format=json&type=tags'));
+    const body = await response.json();
+
+    expect(body.taskTags).toEqual([
+      { taskId: 'task-1', tagId: 'tag-a' },
+      { taskId: 'task-1', tagId: 'tag-b' },
+      { taskId: 'task-2', tagId: 'tag-a' },
+    ]);
+    expect(queryCalls.filter((call) => call.table === 'task_tags')).toHaveLength(4);
   });
 
   it('streams compatible CSV with correct escaping', async () => {
@@ -205,6 +219,22 @@ describe('GET /api/export', () => {
     const response = await GET(trustedRequest('/api/export?format=csv&type=tasks'));
 
     expect(await response.text()).toContain("\n1,'=1+1,todo");
+  });
+
+  it('caps the sync log at 100 records', async () => {
+    process.env.MC_EXPORT_BATCH_SIZE = '250';
+    rowsByTable.set('sync_log', Array.from({ length: 150 }, (_, index) => ({
+      id: `sync-${index.toString().padStart(4, '0')}`,
+    })));
+    const { GET } = await import('@/app/api/export/route');
+
+    const response = await GET(trustedRequest('/api/export?format=json&type=all'));
+    const body = await response.json();
+
+    expect(body.syncLog).toHaveLength(100);
+    expect(queryCalls.filter((call) => call.table === 'sync_log')).toEqual([
+      { limit: 100, table: 'sync_log' },
+    ]);
   });
 
   it('rejects equivalent exports until the active stream is cleaned up', async () => {

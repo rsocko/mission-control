@@ -28,11 +28,14 @@ vi.mock('next/navigation', () => ({
 type MockDivProps = React.ComponentPropsWithoutRef<'div'>;
 const MockMotionDiv = React.forwardRef<HTMLDivElement, MockDivProps>(({ children, ...props }, ref) => <div ref={ref} {...props}>{children}</div>);
 MockMotionDiv.displayName = 'MockMotionDiv';
+type MockSectionProps = React.ComponentPropsWithoutRef<'section'>;
+const MockMotionSection = React.forwardRef<HTMLElement, MockSectionProps>(({ children, ...props }, ref) => <section ref={ref} {...props}>{children}</section>);
+MockMotionSection.displayName = 'MockMotionSection';
 
 vi.mock('motion/react', () => ({
   motion: {
     div: MockMotionDiv,
-    section: MockMotionDiv,
+    section: MockMotionSection,
   },
 }));
 
@@ -50,6 +53,9 @@ vi.mock('lucide-react', () => ({
 vi.mock('@/components/insights/CompletionTrendChart', () => ({
   CompletionTrendChart: () => <div data-testid="completion-trend-chart" />,
 }));
+vi.mock('@/components/insights/PlanAlignmentChart', () => ({
+  PlanAlignmentChart: () => <div data-testid="plan-alignment-chart" />,
+}));
 vi.mock('@/components/insights/SourceBreakdownChart', () => ({
   SourceBreakdownChart: () => <div data-testid="source-breakdown-chart" />,
 }));
@@ -62,6 +68,9 @@ vi.mock('@/components/insights/RoutineHeatmap', () => ({
 vi.mock('@/components/insights/ProjectActivity', () => ({
   ProjectActivity: () => <div data-testid="project-activity" />,
 }));
+vi.mock('@/components/insights/WorkActivityChart', () => ({
+  WorkActivityChart: () => <div data-testid="work-activity-chart" />,
+}));
 vi.mock('@/components/insights/DeliveryTrendChart', () => ({
   DeliveryTrendChart: () => <div data-testid="delivery-trend-chart" />,
 }));
@@ -70,6 +79,12 @@ vi.mock('@/components/insights/LeadTimeChart', () => ({
 }));
 vi.mock('@/components/insights/ActivityHeatmap', () => ({
   ActivityHeatmap: () => <div data-testid="activity-heatmap" />,
+}));
+vi.mock('@/components/insights/TaskBreakdownChart', () => ({
+  TaskBreakdownChart: () => <div data-testid="task-breakdown-chart" />,
+}));
+vi.mock('@/components/insights/ProductivityPatterns', () => ({
+  ProductivityPatterns: () => <div data-testid="productivity-patterns" />,
 }));
 vi.mock('@/components/insights/FlowInsightsSection', () => ({
   FlowInsightsSection: () => <section aria-label="Flow reports">Flow reports</section>,
@@ -93,11 +108,27 @@ const insightsPayload = {
     streak: { value: 2, delta: 0 },
   },
   trends: [],
+  planAlignment: {
+    points: [],
+    totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+    planCoverage: 0,
+    commitmentRate: 0,
+  },
   sourceBreakdown: [],
+  taskBreakdown: {
+    byPriority: [{ value: 'high', count: 3, percentage: 100 }],
+    byStatus: [{ value: 'todo', count: 3, percentage: 100 }],
+  },
   taskAge: [],
   planningFriction: {
+    signalsInPeriod: 5,
+    affectedTaskCount: 2,
     pushesInPeriod: 3,
     pushedTaskCount: 2,
+    missedCommitments: 2,
+    elapsedBlocks: 0,
+    overdueTransitions: 0,
+    snoozeExtensions: 0,
     totalDaysDeferred: 12,
     averageDaysPerPush: 4,
     topTasks: [{
@@ -105,6 +136,8 @@ const insightsPayload = {
       title: 'Clarify launch plan',
       dueDate: '2026-08-20',
       pushCount: 5,
+      signalsInPeriod: 4,
+      missedCommitmentsInPeriod: 2,
       pushesInPeriod: 2,
       daysDeferredInPeriod: 9,
     }],
@@ -112,6 +145,7 @@ const insightsPayload = {
     topTags: [{ label: 'planning', count: 2 }],
   },
   projectActivity: [],
+  workActivity: { lists: [], tags: [], projects: [], sources: [] },
   routineHeatmap: [],
   delivery: {
     throughput: {
@@ -152,6 +186,17 @@ const insightsPayload = {
   activityHeatmap: [
     { date: '2026-07-27', taskCompletions: 4, routineCompletions: 2 },
   ],
+  productivity: {
+    periodStart: '2026-07-21',
+    periodEnd: '2026-07-27',
+    timeZone: 'UTC',
+    hourly: Array.from({ length: 24 }, (_, hour) => ({ hour, taskCompletions: 0 })),
+    weekdays: [
+      { day: 1, label: 'Mon', taskCompletions: 4, routineCompletions: 2, total: 6 },
+    ],
+    timeliness: { onTime: 3, late: 1, withoutDueDate: 0, onTimeRate: 75 },
+    comparisons: [],
+  },
 };
 
 let fetchSpy: ReturnType<typeof vi.spyOn>;
@@ -244,9 +289,17 @@ describe('InsightsPage', () => {
     expect(latestInsightsRequest().searchParams.get('interval')).toBe('week');
     expect(fetchSpy).toHaveBeenCalledWith('/api/insights/observations?period=7');
     expect(screen.getByTestId('activity-heatmap')).toBeInTheDocument();
+    expect(screen.getByTestId('task-breakdown-chart')).toBeInTheDocument();
+    expect(screen.getByText('Current task mix')).toBeInTheDocument();
+    expect(screen.getByTestId('productivity-patterns')).toBeInTheDocument();
+    expect(screen.getByTestId('plan-alignment-chart')).toBeInTheDocument();
+    expect(screen.getByTestId('work-activity-chart')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '7 days' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByRole('button', { name: '30 days' })).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByText('Planning friction')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Planning friction' })).toHaveAttribute('id', 'planning-friction');
+    expect(screen.getByText('Most affected tasks')).toBeInTheDocument();
+    expect(screen.queryByText('Most shifted tasks')).not.toBeInTheDocument();
     expect(screen.getByText('Clarify launch plan')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open Clarify launch plan' }));
     expect(pushSpy).toHaveBeenCalledWith('/today?taskId=task-1');

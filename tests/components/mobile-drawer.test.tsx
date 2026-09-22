@@ -430,7 +430,11 @@ describe('MobileHeader', () => {
 
     const menu = screen.getByLabelText('Open menu (has notifications)');
     expect(menu).toHaveTextContent('12');
-    expect(screen.getByText('12')).toHaveClass('bg-amber-400');
+    const badge = screen.getByText('12');
+    const iconAnchor = menu.querySelector('[data-mobile-menu-icon]');
+    expect(badge).toHaveClass('bg-amber-400');
+    expect(iconAnchor).toHaveClass('relative');
+    expect(iconAnchor).toContainElement(badge);
   });
 
   it('renders hamburger icon (F-8)', () => {

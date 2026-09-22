@@ -15,7 +15,17 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       streak: { label: 'Streak', value: 3, unit: 'days' },
     },
     trends: [],
+    planAlignment: {
+      points: [],
+      totals: { committed: 0, plannedCompleted: 0, unplannedCompleted: 0, carryover: 0 },
+      planCoverage: 0,
+      commitmentRate: 0,
+    },
     sourceBreakdown: [],
+    taskBreakdown: {
+      byPriority: [],
+      byStatus: [],
+    },
     taskAge: [
       { label: '< 1 day', count: 2, minDays: 0, maxDays: 1 },
       { label: '1–7 days', count: 5, minDays: 1, maxDays: 7 },
@@ -25,8 +35,14 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       { label: '> 90 days', count: 0, minDays: 91, maxDays: null },
     ],
     planningFriction: {
+      signalsInPeriod: 0,
+      affectedTaskCount: 0,
       pushesInPeriod: 0,
       pushedTaskCount: 0,
+      missedCommitments: 0,
+      elapsedBlocks: 0,
+      overdueTransitions: 0,
+      snoozeExtensions: 0,
       totalDaysDeferred: 0,
       averageDaysPerPush: 0,
       topTasks: [],
@@ -34,6 +50,7 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       topTags: [],
     },
     projectActivity: [],
+    workActivity: { lists: [], tags: [], projects: [], sources: [] },
     routineHeatmap: [],
     delivery: {
       throughput: { interval: 'week', total: 0, averagePerInterval: 0, points: [] },
@@ -62,6 +79,15 @@ function makeSnapshot(overrides: Partial<InsightsSnapshot> = {}): InsightsSnapsh
       unsupportedMeasures: '',
     },
     activityHeatmap: [],
+    productivity: {
+      periodStart: '2026-06-24',
+      periodEnd: '2026-07-23',
+      timeZone: 'UTC',
+      hourly: [],
+      weekdays: [],
+      timeliness: { onTime: 0, late: 0, withoutDueDate: 0, onTimeRate: null },
+      comparisons: [],
+    },
     flow: {
       start: '2026-01-01T00:00:00.000Z',
       end: '2026-01-08T00:00:00.000Z',
@@ -210,8 +236,14 @@ describe('detectObservations', () => {
   it('turns repeated due-date pushes into an actionable observation', () => {
     const snapshot = makeSnapshot({
       planningFriction: {
+        signalsInPeriod: 5,
+        affectedTaskCount: 2,
         pushesInPeriod: 5,
         pushedTaskCount: 2,
+        missedCommitments: 0,
+        elapsedBlocks: 0,
+        overdueTransitions: 0,
+        snoozeExtensions: 0,
         totalDaysDeferred: 18,
         averageDaysPerPush: 3.6,
         topTasks: [],
@@ -224,11 +256,11 @@ describe('detectObservations', () => {
     const observation = result.find(item => item.id === 'obs-planning-friction');
 
     expect(observation).toMatchObject({
-      title: 'Plans shifted 5 times',
+      title: '5 planning friction signals',
       severity: 'warning',
     });
     expect(observation?.description).toContain('planning');
-    expect(observation?.description).toContain('18 days');
+    expect(observation?.description).toContain('5 later due-date moves');
   });
 
   it('returns max 3 observations', () => {

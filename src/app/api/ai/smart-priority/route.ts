@@ -1,4 +1,4 @@
-import { computeSmartPriority } from '@/lib/ai';
+import { computeSmartPriority } from '@/lib/ai/features/smart-priority';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { resolveTaskEditPoliciesByIds } from '@/lib/tasks/edit-policy';

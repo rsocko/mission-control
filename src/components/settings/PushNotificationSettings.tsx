@@ -10,6 +10,7 @@
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import {
+  Bell,
   BellOff,
   Moon,
   Sun,
@@ -17,6 +18,7 @@ import {
   Sunset,
   RefreshCw,
   Power,
+  Repeat2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -27,10 +29,13 @@ import {
   requestMCNativeBridge,
   type NativeBridgeWindow,
 } from '@/lib/native/bridge';
+import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
 
 /* ─────── Types ─────── */
 
 interface PushPreferences {
+  pushDeliveryEnabled: boolean;
+  persistentRemindersEnabled: boolean;
   morningEnabled: boolean;
   morningHour: number;
   triageNudgeEnabled: boolean;
@@ -52,10 +57,13 @@ interface SchedulerJob {
 
 interface SchedulerStatus {
   running: boolean;
+  enabled?: boolean;
   jobs: SchedulerJob[];
 }
 
 const DEFAULT_PREFS: PushPreferences = {
+  pushDeliveryEnabled: true,
+  persistentRemindersEnabled: true,
   morningEnabled: true,
   morningHour: 8,
   triageNudgeEnabled: true,
@@ -115,7 +123,7 @@ function SettingRow({
         <div className="min-w-0">
           <p className="text-sm text-[var(--text-primary)]">{label}</p>
           {description && (
-            <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">{description}</p>
+            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">{description}</p>
           )}
         </div>
       </div>
@@ -256,7 +264,7 @@ export function PushNotificationSettings() {
   const toggleScheduler = useCallback(async () => {
     if (!scheduler || schedulerBusy) return;
     setSchedulerBusy(true);
-    const action = scheduler.running ? 'stop' : 'start';
+    const action = (scheduler.enabled ?? scheduler.running) ? 'stop' : 'start';
     try {
       const res = await fetch('/api/push/scheduler', {
         method: 'POST',
@@ -307,7 +315,7 @@ export function PushNotificationSettings() {
                   <p
                     role="status"
                     aria-live="polite"
-                    className="text-[11px] text-[var(--text-tertiary)] mt-1"
+                    className="text-xs text-[var(--text-tertiary)] mt-1"
                   >
                     {nativePushDescription}
                   </p>
@@ -360,6 +368,18 @@ export function PushNotificationSettings() {
       <SectionLabel>Global</SectionLabel>
       <SectionCard>
         <SettingRow
+          icon={<Bell size={14} />}
+          label="Push Delivery"
+          description="Allow eligible notifications to reach registered devices"
+          trailing={
+            <Toggle
+              enabled={prefs.pushDeliveryEnabled}
+              onChange={(v) => update({ pushDeliveryEnabled: v })}
+              label="Push Delivery"
+            />
+          }
+        />
+        <SettingRow
           icon={<BellOff size={14} />}
           label="Do Not Disturb"
           description="Suppress all push notifications"
@@ -372,14 +392,28 @@ export function PushNotificationSettings() {
           }
         />
         <SettingRow
-          icon={<Power size={14} />}
-          label="Notification Scheduler"
-          description={scheduler?.running ? 'Running — triggers fire on schedule' : 'Stopped — no automatic triggers'}
+          icon={<Repeat2 size={14} />}
+          label="Persistent Reminders"
+          description="Emergency stop for all Repeat until done alerts"
           trailing={
             <Toggle
-              enabled={scheduler?.running ?? false}
+              enabled={prefs.persistentRemindersEnabled}
+              onChange={(v) => update({ persistentRemindersEnabled: v })}
+              label="Persistent Reminders"
+            />
+          }
+        />
+        <SettingRow
+          icon={<Power size={14} />}
+          label="Scheduled Summaries"
+          description={(scheduler?.enabled ?? scheduler?.running)
+            ? 'Morning, triage, and carry-forward summaries are enabled'
+            : 'Morning, triage, and carry-forward summaries are stopped'}
+          trailing={
+            <Toggle
+              enabled={scheduler?.enabled ?? scheduler?.running ?? false}
               onChange={schedulerBusy ? () => {} : toggleScheduler}
-              label="Notification Scheduler"
+              label="Scheduled Summaries"
             />
           }
           isLast
@@ -517,13 +551,13 @@ export function PushNotificationSettings() {
               >
                 <div className="min-w-0">
                   <p className="text-sm text-[var(--text-primary)] capitalize">{job.name.replace(/-/g, ' ')}</p>
-                  <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5 font-mono">{job.schedule}</p>
+                  <p className="text-xs text-[var(--text-tertiary)] mt-0.5 font-mono">{job.schedule}</p>
                 </div>
                 <div className="text-right flex-shrink-0">
                   {job.lastRun ? (
                     <>
                       <p className={cn(
-                        'text-[11px]',
+                        'text-xs',
                         job.lastResult === 'sent' ? 'text-emerald-400' :
                         job.lastResult === 'error' ? 'text-red-400' :
                         'text-[var(--text-tertiary)]'
@@ -532,12 +566,12 @@ export function PushNotificationSettings() {
                          job.lastResult === 'error' ? '✗ Error' :
                          '— Skipped'}
                       </p>
-                      <p className="text-[10px] text-[var(--text-muted)]">
+                      <p className="text-xs text-[var(--text-muted)]">
                         {formatRelativeTime(job.lastRun)}
                       </p>
                     </>
                   ) : (
-                    <p className="text-[11px] text-[var(--text-muted)]">Not run yet</p>
+                    <p className="text-xs text-[var(--text-muted)]">Not run yet</p>
                   )}
                 </div>
               </div>
@@ -547,10 +581,12 @@ export function PushNotificationSettings() {
       )}
 
       {saving && (
-        <p className="text-center text-[11px] text-[var(--text-muted)] mt-2">
+        <p className="text-center text-xs text-[var(--text-muted)] mt-2">
           Saving...
         </p>
       )}
+
+      <ConnectorPushRules />
     </div>
   );
 }

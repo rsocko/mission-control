@@ -10,11 +10,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockIngest = vi.fn();
-const mockSingleIngest = vi.fn();
 
-vi.mock('@/lib/triage/capture', () => ({
+vi.mock('@/lib/triage/import-capture', () => ({
   ingestTriageImports: mockIngest,
-  ingestTriageImport: mockSingleIngest,
 }));
 
 vi.mock('@/lib/triage/query', () => ({
@@ -39,7 +37,6 @@ describe('POST /api/triage/import/bulk', () => {
 
   beforeEach(() => {
     mockIngest.mockReset();
-    mockSingleIngest.mockReset();
     process.env.MC_TRIAGE_CAPTURE_KEY = 'test-capture-key';
   });
 
@@ -144,11 +141,8 @@ describe('POST /api/triage/import/bulk', () => {
     expect(data.total).toBe(3);
   });
 
-  it('falls back to isolated item ingestion when the batch fails', async () => {
+  it('fails the request without ambiguous item-by-item retry when the batch fails', async () => {
     mockIngest.mockRejectedValueOnce(new Error('boom'));
-    mockSingleIngest
-      .mockResolvedValueOnce({ status: 'imported' })
-      .mockRejectedValueOnce(new Error('boom'));
     const { POST } = await import('@/app/api/triage/import/bulk/route');
     const req = makeRequest(
       {
@@ -161,11 +155,7 @@ describe('POST /api/triage/import/bulk', () => {
     );
 
     const res = await POST(req);
-    const data = await res.json();
-
-    expect(res.status).toBe(200);
-    expect(data.imported).toBe(1);
-    expect(data.skipped).toBe(1);
-    expect(data.errors).toContain('boom');
+    expect(res.status).toBe(500);
+    expect(mockIngest).toHaveBeenCalledTimes(1);
   });
 });

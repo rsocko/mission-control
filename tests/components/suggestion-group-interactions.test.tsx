@@ -31,10 +31,14 @@ function renderGroup({
   onSelect = vi.fn<(taskId: string) => void>(),
   onComplete = vi.fn<() => void>(),
   onAdd = vi.fn<(taskId: string) => void>(),
+  description,
+  learnMoreHref,
 }: {
   onSelect?: (taskId: string) => void;
   onComplete?: () => void;
   onAdd?: (taskId: string) => void;
+  description?: string;
+  learnMoreHref?: string;
 } = {}) {
   const actions: TaskContextMenuActions = {
     onComplete,
@@ -55,11 +59,15 @@ function renderGroup({
         tasks={[task]}
         color="red"
         onAdd={onAdd}
+        onComplete={() => onComplete()}
         onSelect={onSelect}
+        completingIds={new Set()}
         getContextMenuActions={() => actions}
         sourceLists={[]}
         listGroups={[]}
         projects={[]}
+        description={description}
+        learnMoreHref={learnMoreHref}
       />
     </TooltipProvider>,
   );
@@ -75,6 +83,21 @@ describe('SuggestionGroup task interactions', () => {
     fireEvent.click(screen.getByText('Suggested task'));
 
     expect(onSelect).toHaveBeenCalledWith('task-1');
+  });
+
+  it('uses a single spacing step between the status circle and connector icon', () => {
+    renderGroup();
+
+    expect(screen.getByRole('button', { name: /Suggested task due Aug 4/ })).toHaveClass('pl-0', 'pr-2');
+  });
+
+  it('marks the task complete from its status circle without opening details', () => {
+    const { onComplete, onSelect } = renderGroup();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mark "Suggested task" complete' }));
+
+    expect(onComplete).toHaveBeenCalledOnce();
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it('exposes the standard task context menu', async () => {
@@ -96,5 +119,15 @@ describe('SuggestionGroup task interactions', () => {
 
     expect(onAdd).toHaveBeenCalledWith('task-1');
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it('explains algorithmic groups and links to their report', () => {
+    renderGroup({
+      description: 'Tasks with recent planning friction signals.',
+      learnMoreHref: '/insights#planning-friction',
+    });
+
+    expect(screen.getByText('Tasks with recent planning friction signals.')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View planning friction insights' })).toHaveAttribute('href', '/insights#planning-friction');
   });
 });

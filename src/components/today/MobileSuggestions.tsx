@@ -6,11 +6,14 @@ import {
   AlertCircle, ArrowUpDown, Brain, Calendar, CalendarClock,
   ChevronDown, ChevronRight, ChevronUp,
   Flame, History, Plus, RotateCcw, Sparkles,
+  TimerReset,
 } from 'lucide-react';
 import { ConnectorIcon } from './SortableTaskRow';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
-import type { SuggestionGroups, SuggestionTask } from './types';
+import { REPLANNING_SUGGESTION, type SuggestionGroups, type SuggestionTask } from './types';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 interface MobileSuggestionsProps {
   suggestions: SuggestionGroups;
@@ -25,13 +28,24 @@ interface GroupConfig {
   icon: React.ReactNode;
   color: string;
   sortable?: boolean;
+  description?: string;
+  learnMoreHref?: string;
 }
 
 const GROUPS: GroupConfig[] = [
+  {
+    key: 'planningSignals',
+    title: REPLANNING_SUGGESTION.title,
+    icon: <RotateCcw size={16} />,
+    color: 'rose',
+    description: REPLANNING_SUGGESTION.description,
+    learnMoreHref: REPLANNING_SUGGESTION.insightsHref,
+  },
+  { key: 'planningNext', title: 'Planned for Next', icon: <TimerReset size={16} />, color: 'emerald' },
   { key: 'yesterday', title: "Yesterday's Incomplete", icon: <History size={16} />, color: 'amber' },
   { key: 'overdue', title: 'Overdue', icon: <AlertCircle size={16} />, color: 'red', sortable: true },
   { key: 'dueToday', title: 'Due Today', icon: <CalendarClock size={16} />, color: 'blue' },
-  { key: 'dueThisWeek', title: 'Due This Week', icon: <Calendar size={16} />, color: 'cyan', sortable: true },
+  { key: 'dueThisWeek', title: NEXT_7_DAYS_LABEL, icon: <Calendar size={16} />, color: 'cyan', sortable: true },
   { key: 'highPriority', title: 'High Priority', icon: <Flame size={16} />, color: 'orange' },
   { key: 'aiRecommended', title: 'AI Recommended', icon: <Brain size={16} />, color: 'purple' },
   { key: 'recentlyAdded', title: 'Recently Added', icon: <Plus size={16} />, color: 'emerald' },
@@ -98,8 +112,8 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
             className="overflow-hidden"
           >
             <div className="px-4 pb-4 space-y-2">
-              {GROUPS.map(({ key, title, icon, color, sortable }) => {
-                const tasks = suggestions[key];
+              {GROUPS.map(({ key, title, icon, color, sortable, description, learnMoreHref }) => {
+                const tasks = suggestions[key] ?? [];
                 if (tasks.length === 0) return null;
                 return (
                   <MobileSuggestionAccordion
@@ -110,6 +124,8 @@ export function MobileSuggestions({ suggestions, onAddToDay, onSelectTask, initi
                     color={color}
                     tasks={tasks}
                     sortable={sortable}
+                    description={description}
+                    learnMoreHref={learnMoreHref}
                     expanded={expandedGroup === key}
                     onToggle={handleGroupToggle}
                     onAdd={onAddToDay}
@@ -132,6 +148,8 @@ function MobileSuggestionAccordion({
   color,
   tasks,
   sortable,
+  description,
+  learnMoreHref,
   expanded,
   onToggle,
   onAdd,
@@ -143,6 +161,8 @@ function MobileSuggestionAccordion({
   color: string;
   tasks: SuggestionTask[];
   sortable?: boolean;
+  description?: string;
+  learnMoreHref?: string;
   expanded: boolean;
   onToggle: (key: keyof SuggestionGroups) => void;
   onAdd: (taskId: string) => void;
@@ -219,6 +239,19 @@ function MobileSuggestionAccordion({
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
+            {description && (
+              <div className="border-b border-[var(--border-subtle)] px-4 py-3 text-xs leading-relaxed text-[var(--text-muted)]">
+                {description}
+                {learnMoreHref && (
+                  <>
+                    {' '}
+                    <a className="font-medium text-[var(--accent-400)] underline-offset-2 active:underline" href={learnMoreHref}>
+                      View planning friction insights
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
             {/* Sort control */}
             {sortable && (
               <div className="px-4 py-2 border-b border-[var(--border-subtle)] flex items-center">
@@ -244,6 +277,7 @@ function MobileSuggestionAccordion({
                     className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left"
                     onClick={() => onSelect(task.id)}
                   >
+                    <TaskStatusIndicator status={task.status} microStatus={task.microStatus} />
                     <ConnectorIcon type={task.connectorType} size={14} />
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm text-[var(--text-primary)] truncate">{task.title}</span>
@@ -252,6 +286,7 @@ function MobileSuggestionAccordion({
                           {formatDueDate(task.dueDate)}
                         </span>
                       )}
+                      <TaskBlockedBadge status={task.status} microStatus={task.microStatus} className="mt-1" />
                       {(task.pushCount ?? 0) >= 2 && (
                         <span className="mt-0.5 block text-xs text-amber-400">
                           Rescheduled {task.pushCount ?? 0} times

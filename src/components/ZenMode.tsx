@@ -8,6 +8,7 @@ import { useViewMode } from '@/lib/hooks/useViewMode';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import type { ScoreBreakdown } from '@/lib/smart-score';
 import type { TaskEditPolicy } from '@/types';
@@ -19,6 +20,8 @@ import { formatDueDate } from '@/lib/utils/date-format';
 interface ZenTask {
   id: string;
   title: string;
+  status: string;
+  microStatus?: string | null;
   priority: string;
   dueDate: string | null;
   score: number;
@@ -40,9 +43,11 @@ export function ZenMode() {
       const res = await fetch('/api/smart-score?limit=50&status=open');
       const data = await res.json();
       setTasks(
-        (data.scores || []).map((s: { taskId: string; task: { title: string; priority: string; dueDate: string | null; editPolicy: TaskEditPolicy } | null; score: ScoreBreakdown }) => ({
+        (data.scores || []).map((s: { taskId: string; task: { title: string; status: string; microStatus?: string | null; priority: string; dueDate: string | null; editPolicy: TaskEditPolicy } | null; score: ScoreBreakdown }) => ({
           id: s.taskId,
           title: s.task?.title || '',
+          status: s.task?.status || 'todo',
+          microStatus: s.task?.microStatus,
           priority: s.task?.priority || 'none',
           dueDate: s.task?.dueDate || null,
           score: s.score.total,
@@ -206,14 +211,14 @@ export function ZenMode() {
                             onClick={() => completeTask(task.id)}
                             disabled={isCompleting || !canEditTaskField(task.editPolicy, 'status')}
                             title={!canEditTaskField(task.editPolicy, 'status') ? taskFieldBlockedReason(task.editPolicy, 'status') : undefined}
-                            className={`w-5 h-5 rounded-full border-2 flex-shrink-0 transition-[border-color,background-color,color] duration-200 flex items-center justify-center cursor-pointer ${
-                              isCompleting
-                                ? 'border-green-400 bg-green-400 text-white'
-                                : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30'
-                            }`}
+                            className="group/status flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center"
                             aria-label={`Complete "${task.title}"`}
                           >
-                            {isCompleting && <Check size={12} />}
+                            <TaskStatusIndicator
+                              status={task.status}
+                              microStatus={task.microStatus}
+                              isCompleting={isCompleting}
+                            />
                           </button>
                         </CompletionBurst>
 
@@ -229,6 +234,7 @@ export function ZenMode() {
                             {task.title}
                           </p>
                         </button>
+                        <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
                         {task.priority !== 'none' && (
                           <span className={`text-xs font-semibold uppercase tracking-wider ${getTaskPriorityVisual(task.priority).textClass}`}>
                             {task.priority}

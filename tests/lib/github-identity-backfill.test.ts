@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { eq } from 'drizzle-orm';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type {
   GitHubIdentityBackfillResolution,
   GitHubIdentityResolver,
@@ -18,7 +19,7 @@ let schema: typeof import('@/db/schema');
 let backfill: typeof import('@/lib/external-identities/github-backfill');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   schema = await import('@/db/schema');
   backfill = await import('@/lib/external-identities/github-backfill');
 });
@@ -87,7 +88,7 @@ describe('GitHub identity backfill', () => {
     createConnector('dry-run');
     createTask('dry-run', 'dry-task', 'owner/repo:3', {}, 'synced');
     const before = identityCounts();
-    const statusBefore = backfill.getGitHubIdentityBackfillStatus('dry-run');
+    const statusBefore = await backfill.getGitHubIdentityBackfillStatus('dry-run');
     const result = await backfill.runGitHubIdentityBackfill({
       connectorInstanceId: 'dry-run',
       dryRun: true,
@@ -95,7 +96,7 @@ describe('GitHub identity backfill', () => {
     });
     expect(result).toMatchObject({ dryRun: true, processed: 1, bound: 1 });
     expect(identityCounts()).toEqual(before);
-    expect(backfill.getGitHubIdentityBackfillStatus('dry-run')).toEqual(statusBefore);
+    expect(await backfill.getGitHubIdentityBackfillStatus('dry-run')).toEqual(statusBefore);
   });
 
   it('leaves rate-limited batches retryable without advancing the cursor', async () => {

@@ -1,58 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { KpiAnalyticsRepository } from '@/db/persistence/analytics';
 
-const mocks = vi.hoisted(() => {
-  const terminals: unknown[] = [];
+/**
+ * The stats engine reads through the composed `analytics.kpis` repository, so
+ * these cases stub that repository rather than a SQLite handle. The timezone
+ * behaviour under test is unchanged: local day/week boundaries are still
+ * resolved in this module and handed to persistence as instants.
+ */
 
-  function chainable(terminal: unknown) {
-    const chain = new Proxy<Record<PropertyKey, unknown>>({}, {
-      get(_, property) {
-        if (property === 'then') {
-          return (resolve: (value: unknown) => unknown) => resolve(terminal);
-        }
-        return vi.fn(() => chain);
-      },
-    });
-    return chain;
-  }
-
-  return {
-    terminals,
-    select: vi.fn(() => chainable(terminals.shift() ?? [])),
-    getLocalDateBoundsISO: vi.fn((date: string) => ({
-      dayStart: `${date}T04:00:00.000Z`,
-      nextDayStart: `${date}-nextT04:00:00.000Z`,
-    })),
-    formatDateInLocalTimezone: vi.fn((date: Date) => {
-      const iso = date.toISOString();
-      if (iso === '2026-08-17T01:00:00.000Z') return '2026-08-16';
-      if (iso === '2026-08-16T02:00:00.000Z') return '2026-08-15';
-      return iso.slice(0, 10);
-    }),
-  };
-});
-
-vi.mock('@/db', () => ({
-  default: { select: mocks.select },
+const mocks = vi.hoisted(() => ({
+  countNonCancelledTasksDueBetween: vi.fn(),
+  countTasksCompletedIn: vi.fn(),
+  listCompletedTimestampsSince: vi.fn(),
+  getLocalDateBoundsISO: vi.fn((date: string) => ({
+    dayStart: `${date}T04:00:00.000Z`,
+    nextDayStart: `${date}-nextT04:00:00.000Z`,
+  })),
+  formatDateInLocalTimezone: vi.fn((date: Date) => {
+    const iso = date.toISOString();
+    if (iso === '2026-08-17T01:00:00.000Z') return '2026-08-16';
+    if (iso === '2026-08-16T02:00:00.000Z') return '2026-08-15';
+    return iso.slice(0, 10);
+  }),
 }));
 
-vi.mock('@/db/schema', () => ({
-  tasks: {
-    id: 'taskId',
-    status: 'status',
-    priority: 'priority',
-    assignee: 'assignee',
-    dueDate: 'dueDate',
-    completedAt: 'completedAt',
-    createdAt: 'createdAt',
-    updatedAt: 'updatedAt',
-    connectorType: 'connectorType',
-  },
-  notifications: { id: 'notificationId' },
-  myDayItems: { taskId: 'myDayTaskId', date: 'myDayDate' },
-  focusItems: { id: 'focusId', taskId: 'focusTaskId', scope: 'focusScope', date: 'focusDate' },
-  routines: { id: 'routineId', isActive: 'routineActive', isArchived: 'routineArchived' },
-  routineCompletions: { routineId: 'completionRoutineId', date: 'completionDate' },
-  triageItems: { status: 'triageStatus', createdAt: 'triageCreatedAt' },
+const kpis = {
+  countNonCancelledTasksDueBetween: mocks.countNonCancelledTasksDueBetween,
+  countTasksCompletedIn: mocks.countTasksCompletedIn,
+  listCompletedTimestampsSince: mocks.listCompletedTimestampsSince,
+} as unknown as KpiAnalyticsRepository;
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({ analytics: { kpis } }),
 }));
 
 vi.mock('@/lib/utils/date', () => ({
@@ -69,18 +48,14 @@ vi.mock('@/lib/utils/date', () => ({
   ),
 }));
 
-vi.mock('@/lib/notifications/lifecycle-sql', () => ({
-  notificationNeedsAttention: vi.fn(() => ({})),
-}));
-
 describe('stats configured-timezone bucketing', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.terminals.length = 0;
   });
 
   it('uses configured local week boundaries for completed work', async () => {
-    mocks.terminals.push([{ count: 3 }], [{ count: 2 }]);
+    mocks.countNonCancelledTasksDueBetween.mockResolvedValue(3);
+    mocks.countTasksCompletedIn.mockResolvedValue(2);
     const { computeKpi } = await import('@/lib/stats');
 
     const result = await computeKpi('this-week-progress', { today: '2026-08-16' });
@@ -88,12 +63,16 @@ describe('stats configured-timezone bucketing', () => {
     expect(result).toMatchObject({ value: 2, max: 3 });
     expect(mocks.getLocalDateBoundsISO).toHaveBeenCalledWith('2026-08-10');
     expect(mocks.getLocalDateBoundsISO).toHaveBeenCalledWith('2026-08-16');
+    expect(mocks.countTasksCompletedIn).toHaveBeenCalledWith({
+      startInclusive: '2026-08-10T04:00:00.000Z',
+      endExclusive: '2026-08-16-nextT04:00:00.000Z',
+    });
   });
 
   it('groups completion timestamps into configured local streak days', async () => {
-    mocks.terminals.push([
-      { completedAt: '2026-08-17T01:00:00.0000000' },
-      { completedAt: '2026-08-16T02:00:00.0000000' },
+    mocks.listCompletedTimestampsSince.mockResolvedValue([
+      '2026-08-17T01:00:00.0000000',
+      '2026-08-16T02:00:00.0000000',
     ]);
     const { computeKpi } = await import('@/lib/stats');
 
@@ -104,12 +83,13 @@ describe('stats configured-timezone bucketing', () => {
   });
 
   it('uses DST-aware local bounds for each daily average bucket', async () => {
-    mocks.terminals.push(...Array.from({ length: 7 }, () => [{ count: 1 }]));
+    mocks.countTasksCompletedIn.mockResolvedValue(1);
     const { computeKpi } = await import('@/lib/stats');
 
     const result = await computeKpi('daily-avg', { today: '2026-08-16' });
 
     expect(result.value).toBe(1);
     expect(mocks.getLocalDateBoundsISO).toHaveBeenCalledTimes(7);
+    expect(mocks.countTasksCompletedIn).toHaveBeenCalledTimes(7);
   });
 });

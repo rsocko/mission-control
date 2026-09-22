@@ -4,7 +4,7 @@ sidebar_label: Overview
 sidebar_position: 1
 status: active
 created: 2026-06-15
-last_reviewed: 2026-08-03
+last_reviewed: 2026-08-29
 category: architecture
 related:
   - "[Frontend](frontend.md)"
@@ -51,7 +51,7 @@ flowchart TB
     WorkerMetrics["Runtime sampler"]
   end
 
-  subgraph Data["Shared SQLite WAL volume"]
+  subgraph Data["Configured relational backend"]
     Domain[("Domain tables")]
     Jobs[("sync_jobs<br/>leases, results, retries")]
     JobEvents[("sync_job_events<br/>durable SSE cursor")]
@@ -76,7 +76,7 @@ flowchart TB
   QueueSchedules --> Jobs
   Maintenance --> Domain
   Maintenance <--> Sources
-  QueueRunner -->|"BEGIN IMMEDIATE claim"| Jobs
+  QueueRunner -->|"transactional claim"| Jobs
   QueueRunner --> Pipeline
   Pipeline <--> Sources
   Pipeline --> Domain
@@ -84,6 +84,13 @@ flowchart TB
   WebMetrics --> Runtime
   WorkerMetrics --> Runtime
 ```
+
+PostgreSQL is the approved production target and is implemented as an explicit
+runtime backend. SQLite remains the default compatibility backend and the
+documented homelab backend until the maintenance-window cutover is completed.
+See the
+[database scaling and migration strategy](../design/active/database-scaling-strategy.md)
+for the decision and deployment status.
 
 Production sets `MC_SYNC_EXECUTION_MODE=worker`. The web and worker services use
 the same image and database, but they are separate Node processes. Next.js owns
@@ -102,21 +109,21 @@ rejects `MC_SYNC_WORKER_REPLICA_COUNT` values other than `1`.
 
 ## Data Flow — Sync Cycle
 
-How data moves between external sources and the local database.
+How data moves between external sources and the configured relational backend.
 
 ```mermaid
 sequenceDiagram
   actor User
   participant Web as Next.js web
-  participant DB as SQLite WAL
+  participant DB as Configured relational backend
   participant Worker as Sync worker
   participant Src as External source
 
   User->>Web: POST /api/sync
-  Web->>DB: BEGIN IMMEDIATE enqueue or deduplicate
+  Web->>DB: Transactional enqueue or deduplicate
   DB-->>Web: Durable job ID
   Note over Web: Durable routing does not load or run the connector
-  Worker->>DB: BEGIN IMMEDIATE claim and lease
+  Worker->>DB: Transactional claim and lease
   DB-->>Worker: Owned job
   Worker->>DB: Renew lease / read cancellation
   Worker->>Src: Retry pending writes, then pull
@@ -155,7 +162,7 @@ sequenceDiagram
 | Framework | Next.js (App Router) |
 | Language | TypeScript |
 | UI | React, Tailwind CSS, Lucide Icons |
-| Database | SQLite (better-sqlite3) + Drizzle ORM |
+| Database | PostgreSQL (approved production target) or SQLite (default compatibility backend), selected explicitly at runtime |
 | AI | Vercel AI SDK (multi-provider) |
 | Auth | Microsoft OAuth2 (multi-tenant) |
 | Scheduling | node-cron; connector sync schedules run in the worker, push-notification schedules in the web process |

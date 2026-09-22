@@ -1,6 +1,14 @@
 import Database from 'better-sqlite3';
-import { readFileSync } from 'fs';
-import { resolve } from 'path';
+import { createHash } from 'node:crypto';
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 const MIGRATIONS_FOLDER = resolve(process.cwd(), 'drizzle');
@@ -66,6 +74,57 @@ describe('migration chain completeness', () => {
       }
     } finally {
       sqlite.close();
+    }
+  });
+
+  it('uses portable migration hashes while accepting legacy checkout-specific hashes', async () => {
+    vi.doUnmock('drizzle-orm');
+    vi.doUnmock('crypto');
+    vi.resetModules();
+    const { _runMigrationsIndividually } = await import('@/db');
+    const directory = mkdtempSync(join(tmpdir(), 'mc-portable-migration-hash-'));
+    const metaDirectory = join(directory, 'meta');
+    const tag = '0000_line_ending_probe';
+    const portableSql = 'CREATE TABLE line_ending_probe (id INTEGER);\n';
+    const portableHash = createHash('sha256')
+      .update(portableSql)
+      .digest('hex');
+    const legacyWindowsHash = createHash('sha256')
+      .update(portableSql.replace(/\n/g, '\r\n'))
+      .digest('hex');
+    mkdirSync(metaDirectory);
+    writeFileSync(join(directory, `${tag}.sql`), portableSql);
+    writeFileSync(join(metaDirectory, '_journal.json'), JSON.stringify({
+      entries: [{ idx: 0, tag, when: 1 }],
+    }));
+
+    const fresh = new Database(':memory:');
+    const legacy = new Database(':memory:');
+    try {
+      _runMigrationsIndividually(fresh, directory);
+      expect(fresh.prepare(
+        'SELECT hash FROM __drizzle_migrations',
+      ).pluck().get()).toBe(portableHash);
+
+      legacy.exec(`
+        CREATE TABLE __drizzle_migrations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          hash TEXT NOT NULL,
+          created_at INTEGER
+        );
+        CREATE TABLE line_ending_probe (id INTEGER);
+      `);
+      legacy.prepare(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, 1)',
+      ).run(legacyWindowsHash);
+      _runMigrationsIndividually(legacy, directory);
+      expect(legacy.prepare(
+        'SELECT COUNT(*) FROM __drizzle_migrations',
+      ).pluck().get()).toBe(1);
+    } finally {
+      fresh.close();
+      legacy.close();
+      rmSync(directory, { recursive: true, force: true });
     }
   });
 });

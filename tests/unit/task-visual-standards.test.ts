@@ -28,7 +28,7 @@ describe('task visual standards', () => {
     )).toEqual({
       todo: '#94a3b8',
       in_progress: '#3b82f6',
-      blocked: '#ef4444',
+      blocked: '#f59e0b',
       done: '#10b981',
       cancelled: '#64748b',
     });

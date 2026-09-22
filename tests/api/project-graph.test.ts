@@ -4,17 +4,17 @@ const getProjectSubgraph = vi.fn();
 const createTaskDependency = vi.fn();
 const deleteTaskDependency = vi.fn();
 
-class MockGraphServiceError extends Error {
+class MockProjectGraphServiceError extends Error {
   constructor(message: string, readonly status: 400 | 404 | 409 | 502) {
     super(message);
   }
 }
 
-vi.mock('@/lib/graph/service', () => ({
+vi.mock('@/lib/graph/project-service', () => ({
   getProjectSubgraph,
   createTaskDependency,
   deleteTaskDependency,
-  GraphServiceError: MockGraphServiceError,
+  ProjectGraphServiceError: MockProjectGraphServiceError,
 }));
 
 beforeEach(() => {
@@ -51,7 +51,7 @@ describe('DELETE /api/projects/[id]/task-dependencies/[dependencyId]', () => {
 
   it('surfaces source removal failures', async () => {
     deleteTaskDependency.mockRejectedValue(
-      new MockGraphServiceError('GitHub rejected dependency removal', 502),
+      new MockProjectGraphServiceError('GitHub rejected dependency removal', 502),
     );
     const { DELETE } = await import(
       '@/app/api/projects/[id]/task-dependencies/[dependencyId]/route'
@@ -145,7 +145,7 @@ describe('POST /api/projects/[id]/task-dependencies', () => {
 
   it('surfaces graph validation conflicts', async () => {
     createTaskDependency.mockRejectedValue(
-      new MockGraphServiceError('This dependency would create a cycle', 409),
+      new MockProjectGraphServiceError('This dependency would create a cycle', 409),
     );
     const { POST } = await import('@/app/api/projects/[id]/task-dependencies/route');
     const response = await POST(

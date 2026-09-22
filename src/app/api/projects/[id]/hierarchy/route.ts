@@ -13,7 +13,7 @@ export async function GET(
 ) {
   try {
     const { id: projectId } = await params;
-    const hierarchy = getProjectHierarchySnapshot(projectId);
+    const hierarchy = await getProjectHierarchySnapshot(projectId);
     if (!hierarchy) return ApiErrors.notFound('Project');
     return NextResponse.json({ hierarchy });
   } catch (error) {

@@ -5,9 +5,9 @@ import type {
   AgentDataClassification,
   ExternalAgentDataPolicy,
   ExternalAgentLocality,
-} from '@/db/schema';
+} from './contracts';
 import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
-import { redactPushText } from '@/lib/notifications/service';
+import { redactPushText } from '@/lib/notifications/push-text';
 import { ExternalAgentError } from './errors';
 
 export const DEFAULT_EXTERNAL_AGENT_FIELDS = [

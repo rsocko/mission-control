@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { SyncResult } from '@/types';
 
 vi.unmock('drizzle-orm');
@@ -30,7 +31,7 @@ function success(): SyncResult {
 }
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   queue = await import('@/lib/sync/job-queue');
   ({ enqueueFinanceInsightContinuation } = await import('@/lib/finance-insights/continuation'));
   ({ findFinanceInsightContinuationPublicationId } = await import(
@@ -62,18 +63,19 @@ afterAll(() => {
 });
 
 describe.sequential('finance insight durable continuation', () => {
-  it('deduplicates delayed work and survives worker restart under the connector lease', () => {
+  it('deduplicates delayed work and survives worker restart under the connector lease', async () => {
     const active = queue.enqueueSyncJob('finance-continuation');
-    expect(queue.claimNextSyncJob('worker-before-restart')?.id).toBe(active.id);
+    const claimed = queue.claimNextSyncJob('worker-before-restart')!;
+    expect(claimed.id).toBe(active.id);
     const now = new Date();
 
-    const first = enqueueFinanceInsightContinuation({
+    const first = await enqueueFinanceInsightContinuation({
       connectorId: 'finance-continuation',
       jobId: active.id,
       now,
       environment: { TYRION_FINANCE_INSIGHTS_CONTINUATION_DELAY_MS: '60000' },
     });
-    const replay = enqueueFinanceInsightContinuation({
+    const replay = await enqueueFinanceInsightContinuation({
       connectorId: 'finance-continuation',
       jobId: active.id,
       now,
@@ -88,7 +90,12 @@ describe.sequential('finance insight durable continuation', () => {
     });
     expect(queue.claimNextSyncJob('competing-worker')).toBeNull();
 
-    queue.completeSyncJob(active.id, 'worker-before-restart', success());
+    queue.completeSyncJob(
+      claimed.id,
+      'worker-before-restart',
+      claimed.attempt,
+      success(),
+    );
     expect(queue.claimNextSyncJob('worker-after-restart')).toBeNull();
     database.sqlite.prepare(`
       UPDATE sync_jobs SET available_at = ? WHERE id = ?
@@ -100,15 +107,15 @@ describe.sequential('finance insight durable continuation', () => {
     });
   });
 
-  it('rejects continuation without the active durable lease', () => {
-    expect(() => enqueueFinanceInsightContinuation({
+  it('rejects continuation without the active durable lease', async () => {
+    await expect(enqueueFinanceInsightContinuation({
       connectorId: 'finance-continuation',
       jobId: 'not-the-active-job',
-    })).toThrow('finance_insight_continuation_lease_unavailable');
+    })).rejects.toThrow('finance_insight_continuation_lease_unavailable');
     expect(queue.getSyncQueueMetrics().queued).toBe(0);
   });
 
-  it('selects the newest persisted pending or retryable evaluation', () => {
+  it('selects the newest persisted pending or retryable evaluation', async () => {
     const now = new Date().toISOString();
     const insertPublication = database.sqlite.prepare(`
       INSERT INTO finance_insight_publications (
@@ -148,15 +155,17 @@ describe.sequential('finance insight durable continuation', () => {
     insertDelivery.run('queued-publication', 2, 'queued', 0, now, now);
     insertDelivery.run('retryable-publication', 3, null, 1, now, now);
 
-    expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+    await expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+      .resolves
       .toBe('retryable-publication');
     database.sqlite.prepare(`
       UPDATE finance_insight_publication_delivery
       SET last_error_retryable = 0
       WHERE publication_id = 'retryable-publication'
     `).run();
-    expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+    await expect(findFinanceInsightContinuationPublicationId('finance-continuation'))
+      .resolves
       .toBe('queued-publication');
-    expect(findFinanceInsightContinuationPublicationId('other-connector')).toBeNull();
+    await expect(findFinanceInsightContinuationPublicationId('other-connector')).resolves.toBeNull();
   });
 });

@@ -11,6 +11,7 @@ import { useDashboardFilterState } from '@/lib/hooks/useDashboardFilterState';
 import { useDashboardUiState } from '@/lib/hooks/useDashboardUiState';
 import { useDashboardSavedViews } from '@/lib/hooks/useDashboardSavedViews';
 import { useDashboardTaskActions } from '@/lib/hooks/useDashboardTaskActions';
+import { useDashboardUrlFilters } from '@/lib/hooks/useDashboardUrlFilters';
 import { MAX_TASK_PAGE_SIZE } from '@/app/api/tasks/pagination';
 import {
   DASHBOARD_TASK_ENTITY_LIMIT,
@@ -38,11 +39,16 @@ import type {
   SourceList,
   EnabledSource,
   SyncStatusEntry,
+  SavedQuickFilter,
   SavedView,
 } from '@/types/dashboard';
+import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 import { PAGE_SIZE } from '@/types/dashboard';
 import type { LocalDisposition } from '@/types';
-import { getTaskStatusGroupLabel } from '@/lib/tasks/task-status-groups';
+import {
+  resolveGroupLoadOffset,
+  updateGroupCountsForTaskChange,
+} from '@/lib/tasks/task-grouping';
 
 function isRecentQuickFilter(quickFilter: string | null): boolean {
   return quickFilter === 'recentlyCreated' || quickFilter === 'recentlyClosed';
@@ -53,6 +59,8 @@ function getRecentQuickFilterSortBy(quickFilter: string | null, fallback: string
   if (quickFilter === 'recentlyClosed') return 'completedAt';
   return fallback;
 }
+
+const EMPTY_GROUP_TOTAL_COUNTS: Record<string, number> = {};
 
 export interface TaskDestination {
   id: string;
@@ -86,6 +94,7 @@ export interface DashboardState {
   syncStatus: SyncStatusEntry[];
   myDayTaskIds: Set<string>;
   savedViews: SavedView[];
+  savedQuickFilters: SavedQuickFilter[];
   addTaskDestinations: TaskDestination[];
 
   // Loading states
@@ -112,6 +121,7 @@ export interface DashboardState {
   viewDensity: 'compact' | 'comfortable';
   showCompleted: boolean;
   hiddenQuickFilters: string[];
+  quickFilterVisibility: Record<string, QuickFilterVisibility>;
 
   // UI state
   selectedTaskId: string | null;
@@ -138,9 +148,13 @@ export interface DashboardState {
   tagsExpanded: boolean;
   allSourceCounts: Record<string, number>;
 
-  // View saving
-  savingView: boolean;
-  viewName: string;
+  // Saved item editor
+  savedItemEditorKind: 'view' | 'quick-filter' | null;
+  editingSavedItemId: string | null;
+  savedItemName: string;
+  savedItemIcon: string;
+  savedItemIconColor: string;
+  activeSavedQuickFilterId: string | null;
 }
 
 export interface DashboardActions {
@@ -167,6 +181,7 @@ export interface DashboardActions {
   setViewDensity: (v: 'compact' | 'comfortable') => void;
   setShowCompleted: (v: boolean) => void;
   toggleQuickFilterVisibility: (filterId: string) => void;
+  setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
 
   // Task actions
   completeTask: (taskId: string) => Promise<void>;
@@ -204,11 +219,20 @@ export interface DashboardActions {
   setTagsExpanded: (v: boolean) => void;
 
   // View save actions
-  setSavingView: (v: boolean) => void;
-  setViewName: (v: string) => void;
-  saveCurrentView: () => void;
+  startNewView: () => void;
+  startNewQuickFilter: () => void;
+  cancelViewEditor: () => void;
+  editView: (view: SavedView) => void;
+  editQuickFilter: (filter: SavedQuickFilter) => void;
+  setSavedItemName: (v: string) => void;
+  setSavedItemIcon: (v: string) => void;
+  setSavedItemIconColor: (v: string) => void;
+  saveCurrentSavedItem: () => void;
   applyView: (view: SavedView) => void;
+  applyQuickFilter: (filter: SavedQuickFilter) => void;
+  clearSavedQuickFilter: () => void;
   deleteView: (id: string) => void;
+  deleteQuickFilter: (id: string) => void;
 
   // Subtask optimistic update
   updateSubtaskCount: (taskId: string, done: number, total: number) => void;
@@ -248,17 +272,20 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const includeScoreBreakdown = options.includeScoreBreakdown === true;
   const [projects, setProjects] = useState<HubProject[]>([]);
   const [loadingMoreGroups, setLoadingMoreGroups] = useState<Set<string>>(new Set());
+  const groupLoadOffsetsRef = useRef(new Map<string, number>());
+  const groupLoadedTaskGroupsRef = useRef(new Map<string, string>());
 
   const { state: filterState, actions: filterActions } = useDashboardFilterState();
   const {
     sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
     priorityFilter, statusFilter, textFilter, sortBy, sortDirection, groupBy,
-    viewDensity, showCompleted, hiddenQuickFilters,
+    viewDensity, showCompleted, hiddenQuickFilters, quickFilterVisibility,
   } = filterState;
   const {
     setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter,
     setProjectFilter, setPriorityFilter, setStatusFilter, setSortBy, setSortDirection,
     setGroupBy, setViewDensity, setShowCompleted, toggleQuickFilterVisibility,
+    setQuickFilterVisibility,
   } = filterActions;
   const [allTags, setAllTags] = useState<TaskTag[]>([]);
   const filterOptionsQuery = useQuery<{ assignees: string[] }>({
@@ -290,11 +317,14 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   const [listGroups, setListGroups] = useState<ListGroup[]>([]);
   const [syncStatus, setSyncStatus] = useState<SyncStatusEntry[]>([]);
   const { listRef, lastClickedIndexRef } = dashboardUi;
-  const hasHydratedUrlFiltersRef = useRef(false);
   const [allSourceCounts, setAllSourceCounts] = useState<Record<string, number>>({});
   const { completingIds, runTaskCompletion } = useTaskCompletion();
   const [exitingTasks, setExitingTasks] = useState<Array<{ id: string; title: string; yOffset: number; reason: 'complete' | 'remove' }>>([]);
-  const [groupTotalCounts, setGroupTotalCounts] = useState<Record<string, number>>({});
+  const [groupTotalsState, setGroupTotalsState] = useState<{
+    scope: string;
+    counts: Record<string, number>;
+  }>({ scope: '', counts: EMPTY_GROUP_TOTAL_COUNTS });
+  const [groupCountsRefreshTrigger, setGroupCountsRefreshTrigger] = useState(0);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [myDayTaskIds, setMyDayTaskIds] = useState<Set<string>>(new Set());
   const [myDayItemStatuses, setMyDayItemStatuses] = useState<Map<string, string>>(new Map());
@@ -337,20 +367,11 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     router.replace(next.size ? `${pathname}?${next.toString()}` : pathname, { scroll: false });
   }, [pathname, router, searchParams]);
 
-  // Initialize filters from URL search params (e.g. from Insights clickable charts)
-  useEffect(() => {
-    if (hasHydratedUrlFiltersRef.current) return;
-    hasHydratedUrlFiltersRef.current = true;
-    if (searchParams.has(TASK_FILTER_CONTEXT_PARAM)) return;
-    const urlSource = searchParams.get('source');
-    const urlListId = searchParams.get('listId');
-    const urlTag = searchParams.get('tag');
-    if (urlSource || urlListId || urlTag) {
-      setSourceFilter(urlSource);
-      setListFilter(urlListId);
-      setTagFilter(urlTag ? [urlTag] : []);
-    }
-  }, [searchParams, setListFilter, setSourceFilter, setTagFilter]);
+  useDashboardUrlFilters(searchParams, {
+    setSourceFilter,
+    setListFilter,
+    setTagFilter,
+  });
 
   // Load available destinations for the Add Task modal
   useEffect(() => {
@@ -501,14 +522,35 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }, [router]);
   const savedViewsState = useDashboardSavedViews({
     taskFilterContext,
+    presentationState: {
+      sortBy,
+      sortDirection,
+      groupBy,
+      viewDensity,
+    },
     filterActions,
     searchParams: searchParams.toString(),
     pathname,
     replaceUrl: replaceDashboardUrl,
   });
-  const { savedViews, savingView, viewName } = savedViewsState.state;
   const {
-    setSavingView, setViewName, saveCurrentView, applyView, deleteView,
+    savedViews,
+    savedQuickFilters,
+    activeQuickFilterId: activeSavedQuickFilterId,
+    editorKind: savedItemEditorKind,
+    editingItemId: editingSavedItemId,
+    itemName: savedItemName,
+    itemIcon: savedItemIcon,
+    itemIconColor: savedItemIconColor,
+  } = savedViewsState.state;
+  const {
+    startNewView, startNewQuickFilter, cancelViewEditor, editView, editQuickFilter,
+    setItemName: setSavedItemName,
+    setItemIcon: setSavedItemIcon,
+    setItemIconColor: setSavedItemIconColor,
+    saveCurrentItem: saveCurrentSavedItem,
+    applyView, applyQuickFilter, clearQuickFilter: clearSavedQuickFilter,
+    deleteView, deleteQuickFilter,
   } = savedViewsState.actions;
   const completionScopeKey = JSON.stringify({
     taskFilterContext,
@@ -516,6 +558,18 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     sortDirection: effectiveSortDirection,
     groupBy: effectiveGroupBy,
   });
+  const groupCountScopeKey = JSON.stringify({
+    taskFilterContext,
+    groupBy: effectiveGroupBy,
+  });
+  const groupTotalCounts = groupTotalsState.scope === groupCountScopeKey
+    ? groupTotalsState.counts
+    : EMPTY_GROUP_TOTAL_COUNTS;
+
+  useEffect(() => {
+    groupLoadOffsetsRef.current.clear();
+    groupLoadedTaskGroupsRef.current.clear();
+  }, [completionScopeKey]);
 
   // Initial data fetch (features, connectors, list-groups, source counts)
   // These use React Query for caching — re-visits show stale data instantly
@@ -712,9 +766,15 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   }, [refreshTrigger]);
 
   useEffect(() => {
+    const refreshGroupCounts = () => setGroupCountsRefreshTrigger((value) => value + 1);
+    window.addEventListener('mc:task-completed', refreshGroupCounts);
+    return () => window.removeEventListener('mc:task-completed', refreshGroupCounts);
+  }, []);
+
+  useEffect(() => {
     const activeGroupBy = isRecentQuickFilter(quickFilter) ? 'none' : groupBy;
     if (!activeGroupBy || activeGroupBy === 'none') {
-      setGroupTotalCounts({});
+      setGroupTotalsState({ scope: groupCountScopeKey, counts: EMPTY_GROUP_TOTAL_COUNTS });
       return;
     }
     const initial = new URLSearchParams({ groupBy: activeGroupBy, parentOnly: 'true' });
@@ -725,13 +785,46 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         if (!response.ok) throw new Error(`Failed to fetch group counts (${response.status})`);
         return response.json();
       })
-      .then((data) => setGroupTotalCounts(data.counts || {}))
+      .then((data) => setGroupTotalsState({
+        scope: groupCountScopeKey,
+        counts: data.counts || {},
+      }))
       .catch((error) => {
         if (error instanceof DOMException && error.name === 'AbortError') return;
         uiLogger.error('Failed to fetch task group counts', { error });
       });
     return () => controller.abort();
-  }, [groupBy, quickFilter, taskFilterContext]);
+  }, [
+    groupBy,
+    groupCountsRefreshTrigger,
+    groupCountScopeKey,
+    quickFilter,
+    refreshTrigger,
+    syncProgress.refetchKey,
+    taskFilterContext,
+  ]);
+
+  const updateTaskGroupCounts = useCallback((
+    previousTask: TaskResponse['tasks'][number] | null,
+    nextTask: TaskResponse['tasks'][number] | null,
+  ) => {
+    if (!effectiveGroupBy || effectiveGroupBy === 'none') return;
+    const today = effectiveGroupBy === 'dueDate' ? getClientToday() : '';
+    setGroupTotalsState((current) => (
+      current.scope === groupCountScopeKey
+        ? {
+            ...current,
+            counts: updateGroupCountsForTaskChange(
+              current.counts,
+              effectiveGroupBy,
+              today,
+              previousTask,
+              nextTask,
+            ),
+          }
+        : current
+    ));
+  }, [effectiveGroupBy, groupCountScopeKey]);
 
   // ─── Load More For Group ────────────────────────────────────────────────────
 
@@ -742,59 +835,70 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     setLoadingMoreGroups((prev) => new Set(prev).add(groupLabel));
 
     try {
-      // Count how many tasks in this group are already loaded
-      const existingCount = taskResponse.tasks.filter((task) => {
-        if (activeGroupBy === 'list') return (task.sourceListName || 'No List') === groupLabel;
-        if (activeGroupBy === 'status') {
-          return getTaskStatusGroupLabel(task.status) === groupLabel;
-        }
-        if (activeGroupBy === 'priority') return (task.priority || 'none') === groupLabel;
-        if (activeGroupBy === 'dueDate') {
-          const today = getClientToday();
-          if (!task.dueDate) return groupLabel === 'No Due Date';
-          if (task.dueDate < today) return groupLabel === 'Overdue';
-          if (task.dueDate === today) return groupLabel === 'Today';
-          return task.dueDate === groupLabel;
-        }
-        if (activeGroupBy === 'tag') {
-          if (!task.tags?.length) return groupLabel === 'Untagged';
-          return task.tags.some((t) => t.name === groupLabel);
-        }
-        if (activeGroupBy === 'project') {
-          if (!task.projectPhaseMemberships?.length) return groupLabel === 'No Project';
-          return task.projectPhaseMemberships.some((m) => {
-            const key = m.phaseName
-              ? `${m.projectName} › ${m.phaseName}`
-              : `${m.projectName} › Unphased`;
-            return key === groupLabel;
-          });
-        }
-        return false;
-      }).length;
+      const today = activeGroupBy === 'dueDate' ? getClientToday() : '';
+      const resolvedOffset = resolveGroupLoadOffset({
+        tasks: taskResponse.tasks,
+        groupBy: activeGroupBy,
+        groupLabel,
+        today,
+        loadedTaskGroups: groupLoadedTaskGroupsRef.current,
+        savedOffset: groupLoadOffsetsRef.current.get(groupLabel),
+      });
+      for (const taskId of resolvedOffset.staleTaskIds) {
+        groupLoadedTaskGroupsRef.current.delete(taskId);
+      }
+      for (const staleGroupLabel of resolvedOffset.staleGroupLabels) {
+        groupLoadOffsetsRef.current.delete(staleGroupLabel);
+      }
+      let nextOffset = resolvedOffset.offset;
       const remainingCapacity = DASHBOARD_TASK_ENTITY_LIMIT - taskResponse.tasks.length;
       if (remainingCapacity <= 0) {
-        setGroupTotalCounts((current) => ({ ...current, [groupLabel]: existingCount }));
         return;
       }
 
-      const params = buildTaskParams(existingCount, sortBy, sortDirection);
-      params.set('groupBy', activeGroupBy);
-      params.set('groupValue', groupLabel);
-      params.set('offset', String(existingCount));
-      params.set('limit', String(PAGE_SIZE));
+      const existingIds = new Set(taskResponse.tasks.map((task) => task.id));
+      const newTasks: TaskResponse['tasks'] = [];
+      let groupTotal = groupTotalCounts[groupLabel] ?? Number.POSITIVE_INFINITY;
 
-      const res = await fetch(`/api/tasks?${params.toString()}`);
-      if (!res.ok) throw new Error(`Failed to load more tasks for group (${res.status})`);
-      const data: TaskResponse = await res.json();
+      while (nextOffset < groupTotal && newTasks.length < Math.min(PAGE_SIZE, remainingCapacity)) {
+        const params = buildTaskParams(nextOffset, sortBy, sortDirection);
+        params.set('groupBy', activeGroupBy);
+        params.set('groupValue', groupLabel);
+        params.set('offset', String(nextOffset));
+        params.set('limit', String(PAGE_SIZE));
 
-      if (data.tasks?.length) {
+        const res = await fetch(`/api/tasks?${params.toString()}`);
+        if (!res.ok) throw new Error(`Failed to load more tasks for group (${res.status})`);
+        const data: TaskResponse = await res.json();
+        groupTotal = data.total;
+
+        let consumed = 0;
+        for (const task of data.tasks) {
+          consumed += 1;
+          if (existingIds.has(task.id)) continue;
+          existingIds.add(task.id);
+          newTasks.push(task);
+          if (newTasks.length >= Math.min(PAGE_SIZE, remainingCapacity)) break;
+        }
+        nextOffset += consumed;
+        if (data.tasks.length === 0) break;
+      }
+
+      groupLoadOffsetsRef.current.set(groupLabel, nextOffset);
+      setGroupTotalsState((current) => (
+        current.scope === groupCountScopeKey
+          ? { ...current, counts: { ...current.counts, [groupLabel]: groupTotal } }
+          : current
+      ));
+
+      if (newTasks.length) {
+        for (const task of newTasks) groupLoadedTaskGroupsRef.current.set(task.id, groupLabel);
         setTaskResponse((current) => {
-          // Deduplicate: only add tasks not already in the list
           const existingIds = new Set(current.tasks.map((t) => t.id));
-          const newTasks = data.tasks
+          const uniqueNewTasks = newTasks
             .filter((t) => !existingIds.has(t.id))
             .slice(0, remainingCapacity);
-          return { ...current, tasks: [...current.tasks, ...newTasks] };
+          return { ...current, tasks: [...current.tasks, ...uniqueNewTasks] };
         });
       }
     } catch (err) {
@@ -806,7 +910,16 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
         return next;
       });
     }
-  }, [buildTaskParams, groupBy, quickFilter, sortBy, sortDirection, taskResponse.tasks]);
+  }, [
+    buildTaskParams,
+    groupBy,
+    groupCountScopeKey,
+    groupTotalCounts,
+    quickFilter,
+    sortBy,
+    sortDirection,
+    taskResponse.tasks,
+  ]);
 
   const taskActions = useDashboardTaskActions({
     taskResponse,
@@ -824,6 +937,7 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
     completionScopeKey,
     runTaskCompletion,
     fetchData,
+    updateTaskGroupCounts,
   });
   const {
     completeTask,
@@ -901,24 +1015,26 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
   return {
     state: {
       taskResponse, projects, allTags, allAssignees, enabledSources, sourceLists, listGroups,
-      syncStatus, myDayTaskIds, savedViews, addTaskDestinations,
+      syncStatus, myDayTaskIds, savedViews, savedQuickFilters, addTaskDestinations,
       loading, loadingMore, loadingMoreGroups, refreshing, isSyncing,
       sourceFilter, listFilter, listGroupFilter, tagFilter, quickFilter, projectFilter,
       priorityFilter, statusFilter,
       sortBy, sortDirection, groupBy, viewDensity, showCompleted, hiddenQuickFilters,
+      quickFilterVisibility,
       selectedTaskId, bulkMode, bulkSelected, collapsedGroups, sidebarExpanded, sidebarMode,
       completingIds, exitingTasks, confirmDialog, saveTemplateTask, detailMode,
       showAddTaskModal, addTaskInitialDest, addTaskInitialListId, groupTotalCounts,
       collapsedSections, expandedSourceLists, collapsedListGroups, listSearch,
       tagSearch, tagsExpanded, allSourceCounts,
-      savingView, viewName,
+      savedItemEditorKind, editingSavedItemId, savedItemName, savedItemIcon,
+      savedItemIconColor, activeSavedQuickFilterId,
     },
     actions: {
       fetchData, loadMoreForGroup, setRefreshTrigger, patchTaskInList, updateSubtaskCount,
       setSourceFilter, setListFilter, setListGroupFilter, setTagFilter, setQuickFilter, setProjectFilter,
       setPriorityFilter, setStatusFilter,
       setSortBy, setSortDirection, setGroupBy, setViewDensity, setShowCompleted,
-      toggleQuickFilterVisibility,
+      toggleQuickFilterVisibility, setQuickFilterVisibility,
       completeTask, snoozeTask, deleteTask,
       setTaskDueDate, setTaskPriority, setTaskStatus, setTaskLocalDisposition,
       moveTaskToList, addTaskToProject, addToMyDay, removeFromMyDay,
@@ -927,7 +1043,10 @@ export function useDashboardData(options: { includeScoreBreakdown?: boolean } = 
       setShowAddTaskModal, setAddTaskInitialDest, setAddTaskInitialListId,
       toggleSection, setExpandedSourceLists, setCollapsedListGroups, setListSearch,
       setTagSearch, setTagsExpanded,
-      setSavingView, setViewName, saveCurrentView, applyView, deleteView,
+      startNewView, startNewQuickFilter, cancelViewEditor, editView, editQuickFilter,
+      setSavedItemName, setSavedItemIcon, setSavedItemIconColor,
+      saveCurrentSavedItem, applyView, applyQuickFilter, clearSavedQuickFilter,
+      deleteView, deleteQuickFilter,
       animateTaskExit,
     },
     computed: {

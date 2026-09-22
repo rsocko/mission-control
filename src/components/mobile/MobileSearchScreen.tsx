@@ -19,6 +19,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fadeSlideUp, modalContent, modalOverlay, staggerContainer } from '@/lib/motion';
 import type { SearchResult } from '@/lib/search/fts';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import {
+  MOBILE_SEARCH_DEBOUNCE_MS,
+  useDebouncedSearchQuery,
+} from '@/lib/hooks/useDebouncedSearchQuery';
 import { cn } from '@/lib/utils';
 
 export interface MobileSearchScreenProps {
@@ -39,7 +43,6 @@ interface RecentSearchesSectionProps {
 
 const RECENT_SEARCHES_KEY = 'mc:recent-searches';
 const MAX_RECENT_SEARCHES = 5;
-const SEARCH_DEBOUNCE_MS = 300;
 
 const SUGGESTED_SEARCHES = [
   'High priority tasks',
@@ -50,7 +53,7 @@ const SUGGESTED_SEARCHES = [
 const TYPE_FILTERS: ReadonlyArray<{ key: TypeFilter; label: string }> = [
   { key: 'all', label: 'All' },
   { key: 'tasks', label: 'Tasks' },
-  { key: 'triage', label: 'Triage' },
+  { key: 'triage', label: 'Inbox' },
   { key: 'notes', label: 'Notes' },
 ];
 
@@ -160,6 +163,10 @@ function deriveCategory(result: SearchResult): Exclude<TypeFilter, 'all'> {
   if (result.type === 'task') return 'tasks';
 
   const metadata = result.metadata ?? {};
+  const notificationKind = getString(metadata, ['notificationKind']);
+  if (notificationKind === 'notes' || notificationKind === 'triage') {
+    return notificationKind;
+  }
   const hint = [
     getString(metadata, ['entityType', 'itemType', 'kind', 'recordType', 'category']),
     getString(metadata, ['sourceListName', 'connectorType', 'projectName']),
@@ -197,7 +204,7 @@ function getBadgeConfig(result: SearchResult) {
   }
 
   return {
-    label: 'Triage',
+    label: 'Inbox',
     icon: Inbox,
     className: 'bg-orange-500/15 text-orange-200 ring-1 ring-orange-300/20',
   };
@@ -205,7 +212,13 @@ function getBadgeConfig(result: SearchResult) {
 
 function getProjectLabel(result: SearchResult) {
   const metadata = result.metadata ?? {};
-  return getString(metadata, ['projectName', 'project', 'projectTitle', 'sourceListName']);
+  return getString(metadata, [
+    'projectName',
+    'project',
+    'projectTitle',
+    'sourceListName',
+    'connectorType',
+  ]);
 }
 
 function getStatusLabel(result: SearchResult) {
@@ -311,12 +324,6 @@ function matchesDateFilter(result: SearchResult, dateFilter: DateFilter) {
   return compareDate.getTime() >= now - days * 24 * 60 * 60 * 1000;
 }
 
-function uniqueSorted(values: Array<string | undefined>) {
-  return Array.from(new Set(values.filter((value): value is string => Boolean(value)))).sort((a, b) =>
-    a.localeCompare(b),
-  );
-}
-
 function RecentSearchesSection({ recentSearches, onSelect, onClear }: RecentSearchesSectionProps) {
   if (recentSearches.length === 0) return null;
 
@@ -366,7 +373,11 @@ export function MobileSearchScreen({
   const previouslyOpenRef = useRef(false);
 
   const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debouncedQuery = useDebouncedSearchQuery(query, {
+    enabled: isOpen,
+    debounceMs: MOBILE_SEARCH_DEBOUNCE_MS,
+    immediateQuery: isOpen ? initialQuery : '',
+  });
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [projectFilter, setProjectFilter] = useState<string>('all');
@@ -381,10 +392,16 @@ export function MobileSearchScreen({
     keywordDurationMs: durationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: isOpen,
+    type: typeFilter === 'all' || typeFilter === 'tasks' ? typeFilter : 'notifications',
+    notificationKind: typeFilter === 'triage' || typeFilter === 'notes' ? typeFilter : null,
     limit: 20,
+    source: projectFilter === 'all' ? null : projectFilter,
+    status: statusFilter === 'all' ? null : statusFilter,
+    date: dateFilter === 'all' ? null : dateFilter,
   });
 
   useEffect(() => {
@@ -400,7 +417,6 @@ export function MobileSearchScreen({
     if (!previouslyOpenRef.current) {
       const nextQuery = initialQuery?.trim() ?? '';
       setQuery(nextQuery);
-      setDebouncedQuery(nextQuery);
       setTypeFilter('all');
       setProjectFilter('all');
       setStatusFilter('all');
@@ -445,29 +461,14 @@ export function MobileSearchScreen({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
 
-  useEffect(() => {
-    if (!isOpen) return;
-
-    const timeoutId = window.setTimeout(() => {
-      const nextValue = query.trim();
-      setDebouncedQuery(nextValue);
-
-      if (!nextValue) {
-        setDebouncedQuery('');
-      }
-    }, SEARCH_DEBOUNCE_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isOpen, query]);
-
   const projectOptions = useMemo(
-    () => uniqueSorted(results.map((result) => getProjectLabel(result))),
-    [results],
+    () => facets.sources.map((facet) => facet.value),
+    [facets.sources],
   );
 
   const statusOptions = useMemo(
-    () => uniqueSorted(results.map((result) => getStatusLabel(result))),
-    [results],
+    () => facets.statuses.map((facet) => facet.value),
+    [facets.statuses],
   );
 
   const filteredResults = useMemo(() => {
@@ -504,7 +505,6 @@ export function MobileSearchScreen({
 
   const handleClearQuery = useCallback(() => {
     setQuery('');
-    setDebouncedQuery('');
     setTypeFilter('all');
     setProjectFilter('all');
     setStatusFilter('all');

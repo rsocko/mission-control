@@ -17,6 +17,7 @@ const mockSyncLogRows: unknown[] = [];
 const mockInProgressTasks: Array<{ id: string; sourceId: string; status: string; completedAt: string | null }> = [];
 const mockUpdateSets: Array<{ data: unknown; id: string }> = [];
 let mockConnectorInstance: Partial<IConnector> | null = null;
+let mockIdentityBlocked = 0;
 
 vi.mock('@/db', () => {
   const updateWhereFn = vi.fn();
@@ -32,11 +33,9 @@ vi.mock('@/db', () => {
           where: vi.fn((condition: unknown) => {
             // For sync_log hydration
             if (!fields) {
-              const rows = [] as unknown[] & {
-                limit: ReturnType<typeof vi.fn>;
-              };
-              rows.limit = vi.fn(async () => mockConnectorInstance
-                ? [{
+              const rows = Object.assign([] as unknown[], {
+                limit: vi.fn(async () => mockConnectorInstance
+                  ? [{
                     id: mockConnectorInstance.id,
                     type: mockConnectorInstance.type,
                     name: mockConnectorInstance.displayName,
@@ -47,8 +46,9 @@ vi.mock('@/db', () => {
                     credentials: '{}',
                     settings: '{}',
                     syncedLists: '[]',
-                  }]
-                : []);
+                    }]
+                  : []),
+              });
               return rows;
             }
             // Check if this is the in_progress task query
@@ -95,6 +95,84 @@ vi.mock('@/db/schema', () => ({
   tasks: { id: 'id', sourceId: 'source_id', connectorInstanceId: 'connector_instance_id', status: 'status', completedAt: 'completed_at', syncStatus: 'sync_status', lastSyncedAt: 'last_synced_at', sourceListId: 'source_list_id' },
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    connectors: {
+      get: vi.fn(async () => mockConnectorInstance
+        ? {
+            id: mockConnectorInstance.id,
+            type: mockConnectorInstance.type,
+            name: mockConnectorInstance.displayName,
+            enabled: true,
+            syncMode: 'manual',
+            capabilities: mockConnectorInstance.capabilities ?? {},
+            credentials: {},
+            settings: {},
+            syncedLists: [],
+          }
+        : null),
+    },
+    syncRuns: {
+      listLatestSuccessfulPulls: vi.fn(async () => [...mockSyncLogRows]),
+      append: vi.fn(async () => undefined),
+    },
+    execution: {
+      support: {
+        allowsLegacyWorkflow: vi.fn(() => false),
+        assertConfigSupported: vi.fn(),
+        assertConnectorSupported: vi.fn(),
+        listConnectorTaskIdentities: vi.fn(async () => []),
+        listConnectorTaskIds: vi.fn(async () => []),
+      },
+      lists: {
+        list: vi.fn(async () => []),
+        removeLegacyProjectLists: vi.fn(async () => undefined),
+      },
+      pulls: {
+        listStaleInProgress: vi.fn(async () => [...mockInProgressTasks]),
+        applyVerifiedTerminalStatus: vi.fn(async (input: {
+          taskId: string;
+          status: string;
+          completedAt: string;
+        }) => {
+          mockUpdateSets.push({
+            id: input.taskId,
+            data: {
+              status: input.status,
+              completedAt: input.completedAt,
+              syncStatus: 'synced',
+            },
+          });
+          return true;
+        }),
+      },
+      notifications: {
+        ingest: vi.fn(async () => []),
+        listActive: vi.fn(async () => []),
+        applyReconciliation: vi.fn(async () => 0),
+        recordReconciliationFailure: vi.fn(async () => undefined),
+        archiveStale: vi.fn(async () => 0),
+        mergeMetadata: vi.fn(async () => true),
+      },
+    },
+    github: {
+      identity: {
+        getModeSnapshot: vi.fn(async (connectorInstanceId: string) => ({
+          connectorInstanceId,
+          effectiveMode: 'stable',
+          modeRevision: 1,
+          capturedAt: new Date().toISOString(),
+        })),
+        checkDecisionsCurrent: vi.fn(async () => true),
+      },
+      writeFence: {},
+      dependencies: {},
+      hierarchy: {},
+      projects: {},
+    },
+  }),
+}));
+
 vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
   readGitHubHierarchyObservation: () => ({ kind: 'not-issue' }),
   mergeGitHubHierarchyObservation: () => true,
@@ -102,10 +180,10 @@ vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
 }));
 
 vi.mock('@/lib/sync/maintenance-lock', () => ({
-  assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
 
-vi.mock('@/lib/sync/connector-lock', () => ({
+vi.mock('@/lib/sync/connector-lock-runtime', () => ({
   ConnectorOperationBusyError: class ConnectorOperationBusyError extends Error {},
   runWithConnectorOperationLease: vi.fn(
     async (_id: string, _operation: string, callback: () => Promise<unknown>) => callback(),
@@ -134,9 +212,18 @@ vi.mock('@/lib/connectors', () => ({
   },
 }));
 
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
+    getConnector: vi.fn(() => mockConnectorInstance),
+    getAllConnectors: vi.fn(() => []),
+    replaceConnector: vi.fn(() => mockConnectorInstance),
+  }),
+}));
+
 vi.mock('@/lib/external-identities', () => ({
   GITHUB_IDENTITY_MODE: 'stable',
   GitHubStableIdentityRuntime: class {
+    blockedReasonCodes: readonly string[] = [];
     modeSnapshot = {
       connectorInstanceId: 'stale-verify',
       effectiveMode: 'stable',
@@ -180,7 +267,17 @@ vi.mock('@/lib/sync/pull-manager', () => ({
     for await (const page of pages) {
       for (const task of page) remoteSourceIds.add(task.sourceId);
     }
-    return { added: 0, updated: 0, removed: 0, localOnlyProtected: 0, parentTasksAdded: 0, subtasksAdded: 0, remoteSourceIds };
+    return {
+      added: 0,
+      updated: 0,
+      removed: 0,
+      localOnlyProtected: 0,
+      parentTasksAdded: 0,
+      subtasksAdded: 0,
+      remoteSourceIds,
+      identityBlocked: mockIdentityBlocked,
+      identityBlockedOutcomes: mockIdentityBlocked > 0 ? { path_reuse: mockIdentityBlocked } : {},
+    };
   }),
 }));
 
@@ -231,6 +328,7 @@ describe('stale in_progress verification', () => {
     mockInProgressTasks.length = 0;
     mockUpdateSets.length = 0;
     mockConnectorInstance = null;
+    mockIdentityBlocked = 0;
     vi.clearAllMocks();
   });
 
@@ -398,5 +496,31 @@ describe('stale in_progress verification', () => {
 
     // updateTask should NOT be called for verification — task was already in pull results
     expect(mockConnectorInstance.updateTask).not.toHaveBeenCalled();
+  });
+
+  it('reports blocked GitHub task identities as an unsuccessful sync', async () => {
+    mockIdentityBlocked = 2;
+    mockConnectorInstance = {
+      id: 'github-1',
+      type: 'github-issues',
+      displayName: 'GitHub Issues',
+      capabilities: { read: true, write: true, sync: true } as ConnectorCapabilities,
+      fetchTasks: vi.fn(async function* () { yield []; }),
+      fetchNotifications: vi.fn().mockResolvedValue([]),
+      fetchSourceLists: vi.fn().mockResolvedValue([]),
+    };
+
+    const scheduler = new SyncExecutionPipeline();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const result = await scheduler.runSyncLocally('github-1');
+
+    expect(result.success).toBe(false);
+    expect(result.errors).toContain(
+      '2 GitHub task identity decision(s) blocked (path_reuse=2)',
+    );
+    expect(syncLogger.info).toHaveBeenCalledWith(
+      expect.objectContaining({ connectorId: 'github-1', success: false }),
+      'Sync completed',
+    );
   });
 });

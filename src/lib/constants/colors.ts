@@ -30,12 +30,17 @@ export const LOCAL_CONNECTOR_ICON_PATH = '/icons/connectors/local.svg';
 /** Icon paths for connector logos */
 export const CONNECTOR_ICON_PATHS: Record<string, string> = {
   'local': LOCAL_CONNECTOR_ICON_PATH,
+  'mission-control': '/icons/connectors/mission-control.svg',
   'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
+  'microsoft-todo-work': '/icons/connectors/microsoft-todo.svg',
+  'ms-todo': '/icons/connectors/microsoft-todo.svg',
   'github-issues': '/icons/connectors/github.svg',
   'outlook-email': '/icons/connectors/outlook.svg',
   'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
+  'scout': '/icons/connectors/scout.svg',
   'rymessage': '/icons/connectors/rymessage.svg',
   'document-intelligence': '/icons/agents/owl.svg',
+  'home-assistant': '/icons/connectors/home-assistant.svg',
   finance: '/icons/connectors/tyrion.svg',
   'finance-manager': '/icons/connectors/tyrion.svg',
   'monarch-money': '/icons/connectors/tyrion.svg',
@@ -44,18 +49,31 @@ export const CONNECTOR_ICON_PATHS: Record<string, string> = {
 
 /** Human-friendly connector names for accessibility (alt text, aria-labels) */
 export const CONNECTOR_LABELS: Record<string, string> = {
+  'mission-control': 'Local',
   'microsoft-todo': 'Microsoft To Do',
+  'microsoft-todo-work': 'Microsoft To Do',
+  'ms-todo': 'Microsoft To Do',
   'github-issues': 'GitHub Issues',
   'outlook-email': 'Outlook Email',
   'outlook-calendar': 'Outlook Calendar',
+  'scout': 'Microsoft Scout',
   'rymessage': 'RyMessage',
   'document-intelligence': 'OWL',
+  'home-assistant': 'Home Assistant',
   finance: 'Tyrion',
   'finance-manager': 'Tyrion',
   'monarch-money': 'Tyrion',
   'custom-rest': 'Custom REST',
   'local': 'Local',
 };
+
+export function getConnectorLabel(connectorType: string): string {
+  return CONNECTOR_LABELS[connectorType]
+    ?? connectorType
+      .split(/[-_]+/)
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(' ');
+}
 
 /**
  * Generate accessible tag pill styles.

@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid Work To Do pull request' }, { status: 400 });
   }
   try {
-    return NextResponse.json(createWorkTodoPullRequest(parsed.data.connectorInstanceId));
+    return NextResponse.json(await createWorkTodoPullRequest(parsed.data.connectorInstanceId));
   } catch (error) {
     if (error instanceof WorkTodoBridgeError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });

@@ -1,17 +1,20 @@
 ﻿'use client';
 
-import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plus, RotateCcw, Sparkles, Target } from 'lucide-react';
+import { AlertCircle, Brain, Calendar, CalendarClock, Clock, Flame, History, Plus, RotateCcw, Sparkles, Target, TimerReset } from 'lucide-react';
 import { SuggestionGroup } from './SuggestionGroup';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
-import type { SourceList, SuggestionGroups, SuggestionTask } from './types';
+import { REPLANNING_SUGGESTION, type SourceList, type SuggestionGroups, type SuggestionTask } from './types';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 interface TodaySidebarProps {
   suggestions: SuggestionGroups;
   totalMinutes: number;
   whatsNextLoading: boolean;
   onAddToDay: (taskId: string) => void;
+  onCompleteTask: (task: SuggestionTask) => void;
   onSelectTask: (taskId: string) => void;
+  completingIds: ReadonlySet<string>;
   getContextMenuActions: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
@@ -24,14 +27,25 @@ export function TodaySidebar({
   totalMinutes,
   whatsNextLoading,
   onAddToDay,
+  onCompleteTask,
   onSelectTask,
+  completingIds,
   getContextMenuActions,
   sourceLists,
   listGroups,
   projects,
   onGetWhatsNext,
 }: TodaySidebarProps) {
-  const interactionProps = { onAdd: onAddToDay, onSelect: onSelectTask, getContextMenuActions, sourceLists, listGroups, projects };
+  const interactionProps = {
+    onAdd: onAddToDay,
+    onComplete: onCompleteTask,
+    onSelect: onSelectTask,
+    completingIds,
+    getContextMenuActions,
+    sourceLists,
+    listGroups,
+    projects,
+  };
 
   return (
     <aside className="flex h-full min-h-0 w-80 flex-shrink-0 flex-col overflow-hidden border-l border-[var(--border)] bg-[var(--surface-1)]" aria-label="Plan and focus suggestions">
@@ -58,10 +72,20 @@ export function TodaySidebar({
 
         <div className="space-y-1">
           <h4 className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-2 flex items-center gap-1"><Sparkles size={11} /> Suggestions</h4>
+          <SuggestionGroup
+            title={REPLANNING_SUGGESTION.title}
+            icon={<RotateCcw size={12} />}
+            tasks={suggestions.planningSignals}
+            color="rose"
+            description={REPLANNING_SUGGESTION.description}
+            learnMoreHref={REPLANNING_SUGGESTION.insightsHref}
+            {...interactionProps}
+          />
+          <SuggestionGroup title="Planned for Next" icon={<TimerReset size={12} />} tasks={suggestions.planningNext} color="emerald" {...interactionProps} />
           <SuggestionGroup title="Yesterday's Incomplete" icon={<History size={12} />} tasks={suggestions.yesterday} color="amber" {...interactionProps} />
           <SuggestionGroup title="Overdue" icon={<AlertCircle size={12} />} tasks={suggestions.overdue} color="red" sortable {...interactionProps} />
           <SuggestionGroup title="Due Today" icon={<CalendarClock size={12} />} tasks={suggestions.dueToday} color="blue" {...interactionProps} />
-          <SuggestionGroup title="Due This Week" icon={<Calendar size={12} />} tasks={suggestions.dueThisWeek} color="cyan" sortable {...interactionProps} />
+          <SuggestionGroup title={NEXT_7_DAYS_LABEL} icon={<Calendar size={12} />} tasks={suggestions.dueThisWeek} color="cyan" sortable {...interactionProps} />
           <SuggestionGroup title="High Priority" icon={<Flame size={12} />} tasks={suggestions.highPriority} color="orange" {...interactionProps} />
           <SuggestionGroup title="AI Recommended" icon={<Brain size={12} />} tasks={suggestions.aiRecommended} color="purple" {...interactionProps} />
           <SuggestionGroup title="Recently Added" icon={<Plus size={12} />} tasks={suggestions.recentlyAdded} color="emerald" {...interactionProps} />

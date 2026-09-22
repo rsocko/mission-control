@@ -138,12 +138,17 @@ export interface SemanticSimilarityGraphEdge extends BaseGraphEdge {
   type: 'semantic-similarity';
   provenance: 'embedding';
   score: number;
+  explanation: string;
   embedding: {
     provider?: string;
     model?: string;
     version?: string;
+    indexId?: string;
+    projectionVersion?: number;
     sourceUpdatedAt?: string;
     targetUpdatedAt?: string;
+    sourceEmbeddedAt?: string;
+    targetEmbeddedAt?: string;
   };
 }
 

@@ -6,6 +6,9 @@ export function getDependencyRelationshipDegradation(
   now = Date.now(),
 ): string | null {
   if (progress?.latestTerminalOutcome === 'partial') {
+    if (/polling stopped|cancelled|aborted|interrupted/i.test(progress.failureReason ?? '')) {
+      return 'GitHub relationship verification was interrupted';
+    }
     return 'Latest GitHub relationship poll was partial';
   }
   if ((progress?.consecutiveFailedGenerationCount ?? 0) >= 2) {

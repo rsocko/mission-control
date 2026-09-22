@@ -1,18 +1,11 @@
 import 'server-only';
 
-import { and, asc, eq, inArray, or, type SQL } from 'drizzle-orm';
-import db from '@/db';
-import {
-  hubProjects,
-  projectPhaseItems,
-  projectPhases,
-  tags,
-  taskDependencies,
-  taskProjects,
-  tasks,
-  taskTags,
-} from '@/db/schema';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import { findSimilarTaskEmbeddings } from '@/lib/search/semantic';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
+import type { NeighborAggregateRef } from '@/db/persistence/graph-reporting';
+import { isUniverseSemanticNeighborsEnabled } from './universe-semantic-config';
 import {
   boundGraph,
   canonicalizeExplicitEdge,
@@ -48,6 +41,7 @@ export interface NodeNeighborQuery {
   maxNodes?: number;
   maxEdges?: number;
   semanticTopK?: number;
+  eligibleTaskIds?: string[];
   authorizeTask?: (taskId: string) => boolean | Promise<boolean>;
 }
 
@@ -160,122 +154,70 @@ function normalizeRelationships(include?: NeighborRelationship[]) {
   return new Set(relationships);
 }
 
-const neighborTaskColumns = {
-  id: tasks.id,
-  title: tasks.title,
-  description: tasks.description,
-  status: tasks.status,
-  microStatus: tasks.microStatus,
-};
-
 async function getAggregateNodeNeighbors(
   nodeRef: Exclude<NeighborNodeRef, { kind: 'task' }>,
   include: Set<NeighborRelationship>,
   budgets: { maxNodes: number; maxEdges: number },
-  authorizeTask?: NodeNeighborQuery['authorizeTask'],
+  eligibleTaskIds?: string[],
 ) {
-  let centerNode: SharedGraphNode;
-  let taskRows: Array<{
-    id: string;
-    title: string;
-    description: string | null;
-    status: string;
-    microStatus: string | null;
-  }>;
-
-  if (nodeRef.kind === 'tag') {
-    const [tag] = await db.select({
-      id: tags.id,
-      name: tags.name,
-      color: tags.color,
-    }).from(tags).where(eq(tags.id, nodeRef.id));
-    if (!tag) throw new GraphNodeNotFoundError('Graph node not found');
-    centerNode = {
-      id: `tag:${tag.id}`,
-      entityId: tag.id,
-      kind: 'tag',
-      label: tag.name,
-      color: tag.color,
-    };
-    taskRows = await db.select(neighborTaskColumns)
-      .from(taskTags)
-      .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
-      .where(eq(taskTags.tagId, nodeRef.id))
-      .orderBy(asc(tasks.id))
-      .limit(budgets.maxNodes);
-  } else if (nodeRef.kind === 'project') {
-    const [project] = await db.select({
-      id: hubProjects.id,
-      name: hubProjects.name,
-      description: hubProjects.description,
-      status: hubProjects.status,
-      color: hubProjects.color,
-    }).from(hubProjects).where(eq(hubProjects.id, nodeRef.id));
-    if (!project) throw new GraphNodeNotFoundError('Graph node not found');
-    centerNode = {
-      id: `project:${project.id}`,
-      entityId: project.id,
-      kind: 'project',
-      label: project.name,
-      description: project.description,
-      status: normalizeStatus(project.status),
-      color: project.color,
-    };
-    taskRows = await db.select(neighborTaskColumns)
-      .from(taskProjects)
-      .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-      .where(eq(taskProjects.projectId, nodeRef.id))
-      .orderBy(asc(tasks.id))
-      .limit(budgets.maxNodes);
-  } else {
-    centerNode = propertyNode(nodeRef.dimension, nodeRef.value);
-    let condition: SQL;
-    if (nodeRef.dimension === 'priority') {
-      condition = eq(tasks.priority, nodeRef.value);
-    } else if (nodeRef.dimension === 'status') {
-      condition = eq(tasks.status, nodeRef.value);
-    } else if (nodeRef.dimension === 'source') {
-      condition = eq(tasks.connectorType, nodeRef.value);
-    } else if (nodeRef.dimension === 'effort') {
-      const effort = Number(nodeRef.value);
-      if (!Number.isInteger(effort)) {
-        throw new GraphQueryValidationError('Effort property value must be an integer');
-      }
-      condition = eq(tasks.effort, effort);
-    } else {
-      const separator = nodeRef.value.indexOf(':');
-      if (separator <= 0 || separator === nodeRef.value.length - 1) {
-        throw new GraphQueryValidationError(
-          'List property value must use connector-instance:list-id',
-        );
-      }
-      const listCondition = and(
-        eq(tasks.connectorInstanceId, nodeRef.value.slice(0, separator)),
-        eq(tasks.sourceListId, nodeRef.value.slice(separator + 1)),
-      );
-      if (!listCondition) {
-        throw new GraphQueryValidationError('Unable to construct list property query');
-      }
-      condition = listCondition;
-    }
-    taskRows = await db.select(neighborTaskColumns)
-      .from(tasks)
-      .where(condition)
-      .orderBy(asc(tasks.id))
-      .limit(budgets.maxNodes);
-    if (!taskRows.length) throw new GraphNodeNotFoundError('Graph node not found');
+  if (
+    nodeRef.kind === 'property'
+    && nodeRef.dimension === 'effort'
+    && !Number.isInteger(Number(nodeRef.value))
+  ) {
+    throw new GraphQueryValidationError('Effort property value must be an integer');
   }
+  if (
+    nodeRef.kind === 'property'
+    && nodeRef.dimension === 'list'
+    && (
+      nodeRef.value.indexOf(':') <= 0
+      || nodeRef.value.indexOf(':') === nodeRef.value.length - 1
+    )
+  ) {
+    throw new GraphQueryValidationError(
+      'List property value must use connector-instance:list-id',
+    );
+  }
+  const repository = requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).neighbors;
+  const result = await repository.readAggregate({
+    ref: nodeRef as NeighborAggregateRef,
+    eligibleTaskIds,
+    limit: budgets.maxNodes,
+  });
+  if (!result.center) throw new GraphNodeNotFoundError('Graph node not found');
+  if (nodeRef.kind === 'property' && !result.tasks.length) {
+    throw new GraphNodeNotFoundError('Graph node not found');
+  }
+  let centerNode: SharedGraphNode;
+  if (result.center.kind === 'tag') {
+    centerNode = {
+      id: `tag:${result.center.row.id}`,
+      entityId: result.center.row.id,
+      kind: 'tag',
+      label: result.center.row.name,
+      color: result.center.row.color,
+    };
+  } else if (result.center.kind === 'project') {
+    centerNode = {
+      id: `project:${result.center.row.id}`,
+      entityId: result.center.row.id,
+      kind: 'project',
+      label: result.center.row.name,
+      description: result.center.row.description,
+      status: normalizeStatus(result.center.row.status),
+      color: result.center.row.color,
+    };
+  } else {
+    const propertyRef = nodeRef as Extract<NeighborNodeRef, { kind: 'property' }>;
+    centerNode = propertyNode(propertyRef.dimension, propertyRef.value);
+  }
+  let taskRows = result.tasks;
 
-  if (authorizeTask) {
-    const candidateCount = taskRows.length;
-    const authorized = await Promise.all(taskRows.map(async (task) => ({
-      task,
-      allowed: await authorizeTask(task.id),
-    })));
-    taskRows = authorized.filter((result) => result.allowed).map((result) => result.task);
-    if (candidateCount > 0 && taskRows.length === 0) {
-      throw new GraphAuthorizationError('Access to this graph node is forbidden');
-    }
+  if (eligibleTaskIds && taskRows.length === 0) {
+    throw new GraphNodeNotFoundError('Graph node not found');
   }
   if (!include.has('derived')) taskRows = [];
   const sourceTruncated = taskRows.length >= budgets.maxNodes;
@@ -328,26 +270,47 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     neighborQuery: true,
   });
   const semanticTopK = normalizeSemanticTopK(input.semanticTopK);
+  let eligibleTaskIds = input.eligibleTaskIds;
+  if (input.authorizeTask) {
+    if (!eligibleTaskIds) {
+      throw new GraphAuthorizationError(
+        'An eligible task scope is required before authorized neighborhood expansion',
+      );
+    }
+    const authorized = await Promise.all(eligibleTaskIds.map(async (id) => ({
+      id,
+      allowed: await input.authorizeTask?.(id),
+    })));
+    eligibleTaskIds = authorized
+      .filter((candidate) => candidate.allowed)
+      .map((candidate) => candidate.id);
+  }
   if (nodeRef.kind !== 'task') {
-    return getAggregateNodeNeighbors(nodeRef, include, budgets, input.authorizeTask);
+    return getAggregateNodeNeighbors(
+      nodeRef,
+      include,
+      budgets,
+      eligibleTaskIds,
+    );
   }
   const taskId = nodeRef.id;
+  if (eligibleTaskIds && !eligibleTaskIds.includes(taskId)) {
+    throw new GraphAuthorizationError('Access to this graph node is forbidden');
+  }
   if (input.authorizeTask && !await input.authorizeTask(taskId)) {
     throw new GraphAuthorizationError('Access to this graph node is forbidden');
   }
-  const [center] = await db.select({
-    id: tasks.id,
-    title: tasks.title,
-    description: tasks.description,
-    status: tasks.status,
-    microStatus: tasks.microStatus,
-    priority: tasks.priority,
-    connectorType: tasks.connectorType,
-    connectorInstanceId: tasks.connectorInstanceId,
-    sourceListId: tasks.sourceListId,
-    sourceListName: tasks.sourceListName,
-    effort: tasks.effort,
-  }).from(tasks).where(eq(tasks.id, taskId));
+  const repository = requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).neighbors;
+  const context = await repository.readTask({
+    taskId,
+    eligibleTaskIds,
+    dependencyLimit: budgets.maxEdges + 1,
+    includeExplicit: include.has('explicit'),
+    includeDerived: include.has('derived'),
+  });
+  const center = context.center;
   if (!center) {
     throw new GraphNodeNotFoundError('Graph node not found');
   }
@@ -358,30 +321,27 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
   const edges = new Map<string, SharedGraphEdge>();
 
   if (include.has('explicit')) {
-    const dependencies = await db.select().from(taskDependencies).where(or(
-      eq(taskDependencies.taskId, taskId),
-      eq(taskDependencies.dependsOnTaskId, taskId),
-    )).orderBy(asc(taskDependencies.createdAt), asc(taskDependencies.id));
+    const dependencies = context.dependencies;
     const neighborTaskIds = [...new Set(dependencies.flatMap((dependency) => [
       dependency.taskId,
       dependency.dependsOnTaskId,
     ]).filter((id) => id !== taskId))];
-    const dependencyTasks = neighborTaskIds.length
-      ? await db.select({
-          id: tasks.id,
-          title: tasks.title,
-          description: tasks.description,
-          status: tasks.status,
-          microStatus: tasks.microStatus,
-        }).from(tasks).where(inArray(tasks.id, neighborTaskIds))
-      : [];
-    const dependencyTaskById = new Map(dependencyTasks.map((task) => [task.id, task]));
-    for (const taskId of neighborTaskIds) {
+    const eligibleNeighborTaskIds = neighborTaskIds;
+    const dependencyTaskById = new Map(context.dependencyTasks.map((task) => [task.id, task]));
+    for (const taskId of eligibleNeighborTaskIds) {
       const dependencyTask = dependencyTaskById.get(taskId);
       if (!dependencyTask) continue;
       nodes.set(`task:${dependencyTask.id}`, taskNode(dependencyTask));
     }
     for (const dependency of dependencies) {
+      if (
+        dependency.taskId !== taskId
+        && !eligibleNeighborTaskIds.includes(dependency.taskId)
+      ) continue;
+      if (
+        dependency.dependsOnTaskId !== taskId
+        && !eligibleNeighborTaskIds.includes(dependency.dependsOnTaskId)
+      ) continue;
       const metadata = {
         id: `dependency:${dependency.id}`,
         source: `task:${dependency.dependsOnTaskId}`,
@@ -402,36 +362,11 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
   }
 
   if (include.has('derived')) {
-    const [projectRows, phaseRows, tagRows] = await Promise.all([
-      db.select({
-        id: hubProjects.id,
-        name: hubProjects.name,
-        description: hubProjects.description,
-        status: hubProjects.status,
-        color: hubProjects.color,
-      }).from(taskProjects)
-        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-        .where(eq(taskProjects.taskId, taskId)),
-      db.select({
-        id: projectPhases.id,
-        name: projectPhases.name,
-        description: projectPhases.description,
-        status: projectPhases.status,
-        color: projectPhases.color,
-      }).from(projectPhaseItems)
-        .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
-        .where(and(
-          eq(projectPhaseItems.taskId, taskId),
-          eq(projectPhaseItems.isProposed, false),
-        )),
-      db.select({
-        id: tags.id,
-        name: tags.name,
-        color: tags.color,
-      }).from(taskTags)
-        .innerJoin(tags, eq(taskTags.tagId, tags.id))
-        .where(eq(taskTags.taskId, taskId)),
-    ]);
+    const [projectRows, phaseRows, tagRows] = [
+      context.projects,
+      context.phases,
+      context.tags,
+    ];
     for (const project of projectRows) {
       const nodeId = `project:${project.id}`;
       nodes.set(nodeId, {
@@ -521,6 +456,8 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     status:
       | 'not-requested'
       | 'available'
+      | 'partial'
+      | 'denied'
       | 'unavailable'
       | 'missing'
       | 'stale'
@@ -528,23 +465,38 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
     note?: string;
   } = { requested: false, status: 'not-requested' };
   if (include.has('semantic')) {
-    const similarity = await findSimilarTaskEmbeddings(taskId, { limit: semanticTopK });
+    if (!isUniverseSemanticNeighborsEnabled()) {
+      semantic = {
+        requested: true,
+        status: 'denied',
+        note: 'Universe semantic neighborhoods are disabled by the independent feature gate.',
+      };
+    } else {
+      const deletedConnectorIds = await repository.listDeletedConnectorIds();
+      const similarity = await findSimilarTaskEmbeddings(taskId, {
+        limit: semanticTopK,
+        eligibleTaskIds,
+        eligibilityFilters: [
+          {
+            keys: ['connectorType'],
+            match: 'none',
+            values: [...NOTIFICATION_ONLY_CONNECTOR_TYPES],
+          },
+        ],
+        excludedConnectorInstanceIds: deletedConnectorIds,
+      });
     semantic = {
       requested: true,
       status: similarity.status,
       ...('note' in similarity ? { note: similarity.note } : {}),
     };
-    if (similarity.status === 'available' && similarity.neighbors.length) {
-      const semanticTasks = await db.select({
-        id: tasks.id,
-        title: tasks.title,
-        description: tasks.description,
-        status: tasks.status,
-        microStatus: tasks.microStatus,
-      }).from(tasks).where(inArray(
-        tasks.id,
+    if (
+      (similarity.status === 'available' || similarity.status === 'partial')
+      && similarity.neighbors.length
+    ) {
+      const semanticTasks = await repository.listTasks(
         similarity.neighbors.map((neighbor) => neighbor.taskId),
-      ));
+      );
       for (const semanticTask of semanticTasks) {
         nodes.set(`task:${semanticTask.id}`, taskNode(semanticTask));
       }
@@ -556,12 +508,17 @@ export async function getNodeNeighbors(input: NodeNeighborQuery) {
           embedding: {
             provider: similarity.provider,
             model: similarity.model,
+            indexId: similarity.indexId,
+            projectionVersion: similarity.projectionVersion,
             sourceUpdatedAt: similarity.sourceUpdatedAt,
-            targetUpdatedAt: neighbor.embeddingUpdatedAt,
+            targetUpdatedAt: neighbor.sourceUpdatedAt,
+            sourceEmbeddedAt: similarity.sourceEmbeddedAt,
+            targetEmbeddedAt: neighbor.embeddedAt,
           },
         });
         edges.set(edge.id, edge);
       }
+    }
     }
   }
 

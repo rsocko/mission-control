@@ -2,12 +2,34 @@ import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import { syncScheduler } from '@/lib/sync';
 import { ConnectorOperationBusyError } from '@/lib/sync/connector-lock';
-import { getPersistedFinanceConnectorConfig } from '@/lib/connectors/monarch-money/config';
 import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
+import { FINANCE_PROVIDER_ALIASES, normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   FinanceInsightBackfillError,
   runFinanceInsightTransactionBackfill,
 } from '@/lib/connectors/monarch-money/transaction-backfill';
+
+async function getFinanceConnectorConfig(connectorId?: string) {
+  const repositories = await getWorkerPersistenceRepositories();
+  let resolvedId = connectorId;
+  if (!resolvedId) {
+    const ids = await repositories.finance.insights.connectors.listEnabledConnectorIds(
+      FINANCE_PROVIDER_ALIASES,
+      2,
+    );
+    if (ids.length === 0) throw new Error('Finance connector is not configured');
+    if (ids.length > 1) {
+      throw new Error('connectorId is required when multiple finance connectors are enabled');
+    }
+    [resolvedId] = ids;
+  }
+  const config = await repositories.connectors.get(resolvedId!);
+  if (!config || !config.enabled || normalizeFinanceProviderAlias(config.type) === null) {
+    throw new Error('Finance connector is not configured');
+  }
+  return config;
+}
 
 export async function POST(request: Request) {
   if (!trustedFinanceMutationActor(request)) {
@@ -20,7 +42,7 @@ export async function POST(request: Request) {
       insightBackfill?: unknown;
     };
     const connectorId = typeof body.connectorId === 'string' ? body.connectorId : undefined;
-    const config = await getPersistedFinanceConnectorConfig(connectorId);
+    const config = await getFinanceConnectorConfig(connectorId);
     if (body.insightBackfill !== undefined) {
       if (
         body.full === true

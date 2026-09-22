@@ -4,13 +4,16 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { AnimatePresence, motion } from 'motion/react';
-import { ArrowUpDown, ChevronDown, ChevronRight, Plus, RotateCcw } from 'lucide-react';
+import { ArrowUpDown, ChevronDown, ChevronRight, History, Info, Plus, RotateCcw } from 'lucide-react';
 import { TaskContextMenu, type HubProject, type TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type { ListGroup } from '@/types/dashboard';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { ConnectorIcon } from './SortableTaskRow';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import type { SourceList, SuggestionTask } from './types';
 
 const PAGE_SIZE = 5;
@@ -35,12 +38,16 @@ interface SuggestionGroupProps {
   tasks: SuggestionTask[];
   color: string;
   onAdd: (taskId: string) => void;
+  onComplete: (task: SuggestionTask) => void;
   onSelect: (taskId: string) => void;
+  completingIds: ReadonlySet<string>;
   getContextMenuActions: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
   projects: HubProject[];
   sortable?: boolean;
+  description?: string;
+  learnMoreHref?: string;
 }
 
 export function SuggestionGroup({
@@ -49,12 +56,16 @@ export function SuggestionGroup({
   tasks,
   color,
   onAdd,
+  onComplete,
   onSelect,
+  completingIds,
   getContextMenuActions,
   sourceLists,
   listGroups,
   projects,
   sortable = false,
+  description,
+  learnMoreHref,
 }: SuggestionGroupProps) {
   const [expanded, setExpanded] = useState(false);
   const [pageIndex, setPageIndex] = useState(0);
@@ -102,9 +113,23 @@ export function SuggestionGroup({
   return (
     <div className={`rounded-lg border ${styles.border} overflow-hidden`}>
       <div className={`flex items-center ${styles.bg}`}>
-        <button onClick={() => setExpanded(!expanded)} className="flex-1 px-3 py-2 flex items-center gap-2 hover:brightness-110 transition-[filter]">
+        <button
+          onClick={() => setExpanded(!expanded)}
+          className="flex-1 px-3 py-2 flex items-center gap-2 hover:brightness-110 transition-[filter]"
+          aria-expanded={expanded}
+          aria-label={description ? `${title} (${tasks.length}). ${description}` : undefined}
+        >
           <span className={styles.header}>{icon}</span>
-          <span className={`text-xs font-semibold ${styles.header} flex-1 text-left`}>{title}</span>
+          <span className={`flex flex-1 items-center gap-1 text-left text-xs font-semibold ${styles.header}`}>
+            {title}
+            {description && (
+              <Tooltip content={description} placement="left">
+                <span aria-hidden="true" className="inline-flex">
+                  <Info size={10} />
+                </span>
+              </Tooltip>
+            )}
+          </span>
           <span className={`text-xs ${styles.header} font-mono`}>{tasks.length}</span>
           <motion.span animate={{ rotate: expanded ? 90 : 0 }} transition={{ duration: 0.15 }} className={styles.header}>
             <ChevronRight size={12} />
@@ -120,6 +145,19 @@ export function SuggestionGroup({
             transition={{ duration: 0.2, ease: [0.25, 0.1, 0.25, 1] }}
             className="overflow-hidden"
           >
+            {description && (
+              <div className="border-b border-[var(--border-subtle)] px-3 py-2 text-xs leading-relaxed text-[var(--text-muted)]">
+                {description}
+                {learnMoreHref && (
+                  <>
+                    {' '}
+                    <a className="font-medium text-[var(--accent-400)] hover:underline" href={learnMoreHref}>
+                      View planning friction insights
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
             {sortable && (
               <div className="px-3 py-1 border-b border-[var(--border-subtle)] flex items-center">
                 <button onClick={() => setSortDir((dir) => dir === 'asc' ? 'desc' : 'asc')} className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] flex items-center gap-1 transition-colors">
@@ -135,7 +173,7 @@ export function SuggestionGroup({
                     const task = visibleTasks[virtualRow.index];
                     return (
                       <div key={task.id} className="absolute left-0 top-0 w-full" style={{ height: `${virtualRow.size}px`, transform: `translateY(${virtualRow.start}px)` }}>
-                        <SuggestionRow task={task} styles={styles} onAdd={onAdd} onSelect={onSelect} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />
+                        <SuggestionRow task={task} styles={styles} onAdd={onAdd} onComplete={onComplete} onSelect={onSelect} isCompleting={completingIds.has(task.id)} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />
                       </div>
                     );
                   })}
@@ -143,7 +181,7 @@ export function SuggestionGroup({
               </div>
             ) : (
               <div ref={suggestionsRef} className="px-2 py-1.5 space-y-0.5">
-                {visibleTasks.map((task) => <SuggestionRow key={task.id} task={task} styles={styles} onAdd={onAdd} onSelect={onSelect} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />)}
+                {visibleTasks.map((task) => <SuggestionRow key={task.id} task={task} styles={styles} onAdd={onAdd} onComplete={onComplete} onSelect={onSelect} isCompleting={completingIds.has(task.id)} getContextMenuActions={getContextMenuActions} sourceLists={sourceLists} listGroups={listGroups} projects={projects} />)}
               </div>
             )}
             {totalPages > 1 && (
@@ -170,7 +208,9 @@ function SuggestionRow({
   task,
   styles,
   onAdd,
+  onComplete,
   onSelect,
+  isCompleting,
   getContextMenuActions,
   sourceLists,
   listGroups,
@@ -179,12 +219,17 @@ function SuggestionRow({
   task: SuggestionTask;
   styles: { header: string };
   onAdd: (taskId: string) => void;
+  onComplete: (task: SuggestionTask) => void;
   onSelect: (taskId: string) => void;
+  isCompleting: boolean;
   getContextMenuActions: (task: SuggestionTask) => TaskContextMenuActions;
   sourceLists: SourceList[];
   listGroups: ListGroup[];
   projects: HubProject[];
 }) {
+  const canComplete = canEditTaskField(task.editPolicy, 'status');
+  const completionBlockedReason = taskFieldBlockedReason(task.editPolicy, 'status');
+
   return (
     <TaskContextMenu
       task={{
@@ -209,9 +254,27 @@ function SuggestionRow({
       <div
         className="flex items-center gap-2 rounded-md hover:bg-white/5 transition-colors group/item"
       >
+        <CompletionBurst celebrating={isCompleting}>
+          <Tooltip content={canComplete ? 'Mark complete' : completionBlockedReason}>
+            <button
+              type="button"
+              onClick={() => onComplete(task)}
+              disabled={isCompleting || !canComplete}
+              aria-label={canComplete ? `Mark "${task.title}" complete` : completionBlockedReason}
+              className="group/status ml-2 flex h-5 w-5 shrink-0 items-center justify-center disabled:cursor-not-allowed"
+            >
+              <TaskStatusIndicator
+                status={task.status}
+                microStatus={task.microStatus}
+                isCompleting={isCompleting}
+                size="sm"
+              />
+            </button>
+          </Tooltip>
+        </CompletionBurst>
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-400)]"
+          className="flex min-w-0 flex-1 items-center gap-2 py-1.5 pl-0 pr-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-400)]"
           onClick={() => onSelect(task.id)}
         >
           <ConnectorIcon type={task.connectorType} size={12} />
@@ -219,12 +282,21 @@ function SuggestionRow({
             <span className="text-xs text-[var(--text-primary)] truncate block">{task.title}</span>
             <span className="flex items-center gap-2">
               {task.dueDate && <span className={`text-xs ${styles.header}`}>due {formatDueDate(task.dueDate)}</span>}
+              <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
               {(task.pushCount ?? 0) >= 2 && (
                 <span
                   className="inline-flex items-center gap-0.5 text-xs text-amber-400"
                   title={`Rescheduled ${task.pushCount ?? 0} times`}
                 >
                   <RotateCcw size={9} aria-hidden="true" /> {task.pushCount ?? 0}
+                </span>
+              )}
+              {(task.planningSignalCount ?? 0) > 0 && (
+                <span
+                  className="inline-flex items-center gap-0.5 text-xs text-rose-400"
+                  title={`${task.planningSignalCount ?? 0} planning friction signals`}
+                >
+                  <History size={9} aria-hidden="true" /> {task.planningSignalCount ?? 0}
                 </span>
               )}
             </span>

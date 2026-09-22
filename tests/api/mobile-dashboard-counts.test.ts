@@ -12,8 +12,13 @@ describe('GET /api/mobile-dashboard task counts', () => {
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
 
+    // The route now reads through the selected worker persistence composition,
+    // so the SQLite runtime has to be initialized before it is imported.
+    const { importInitializedSqliteDatabase } = await import(
+      '../helpers/initialized-sqlite-database'
+    );
     const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/app/api/mobile-dashboard/route'),
     ]);

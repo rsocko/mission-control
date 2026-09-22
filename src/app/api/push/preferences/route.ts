@@ -1,29 +1,15 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { pushPreferences } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { pushNotificationScheduler } from '@/lib/push/scheduler';
+import { getNotificationPushPersistence } from '@/lib/push/notification-push-service';
 
 /** Get push notification preferences */
 export async function GET() {
-  const rows = await db.select().from(pushPreferences).where(eq(pushPreferences.id, 'default')).limit(1);
-
-  if (rows.length === 0) {
-    // Return defaults
-    return NextResponse.json({
-      morningEnabled: true,
-      morningHour: 8,
-      triageNudgeEnabled: true,
-      triageNudgeThreshold: 5,
-      carryForwardEnabled: true,
-      carryForwardHour: 18,
-      quietStart: null,
-      quietEnd: null,
-      doNotDisturb: false,
-    });
-  }
-
-  const prefs = rows[0];
+  const persistence = await getNotificationPushPersistence();
+  const [prefs, pushDeliveryEnabled, persistentRemindersEnabled] = await Promise.all([
+    persistence.getPreferences(),
+    persistence.getPushDeliveryEnabled(),
+    persistence.getPersistentRemindersEnabled(),
+  ]);
   return NextResponse.json({
     morningEnabled: prefs.morningEnabled,
     morningHour: prefs.morningHour,
@@ -34,6 +20,8 @@ export async function GET() {
     quietStart: prefs.quietStart,
     quietEnd: prefs.quietEnd,
     doNotDisturb: prefs.doNotDisturb,
+    pushDeliveryEnabled,
+    persistentRemindersEnabled,
   });
 }
 
@@ -49,6 +37,8 @@ export async function PUT(request: Request) {
     const triageNudgeThreshold = Number(body.triageNudgeThreshold ?? 5);
     const quietStart = body.quietStart != null ? Number(body.quietStart) : null;
     const quietEnd = body.quietEnd != null ? Number(body.quietEnd) : null;
+    const pushDeliveryEnabledInput = body.pushDeliveryEnabled;
+    const persistentRemindersEnabledInput = body.persistentRemindersEnabled;
 
     if (!Number.isInteger(morningHour) || morningHour < 0 || morningHour > 23) {
       return NextResponse.json({ error: 'morningHour must be 0-23' }, { status: 400 });
@@ -65,6 +55,28 @@ export async function PUT(request: Request) {
     if (quietEnd !== null && (!Number.isInteger(quietEnd) || quietEnd < 0 || quietEnd > 23)) {
       return NextResponse.json({ error: 'quietEnd must be 0-23' }, { status: 400 });
     }
+    if (
+      pushDeliveryEnabledInput !== undefined
+      && typeof pushDeliveryEnabledInput !== 'boolean'
+    ) {
+      return NextResponse.json({ error: 'pushDeliveryEnabled must be a boolean' }, { status: 400 });
+    }
+    if (
+      persistentRemindersEnabledInput !== undefined
+      && typeof persistentRemindersEnabledInput !== 'boolean'
+    ) {
+      return NextResponse.json({ error: 'persistentRemindersEnabled must be a boolean' }, { status: 400 });
+    }
+    for (const field of [
+      'morningEnabled',
+      'triageNudgeEnabled',
+      'carryForwardEnabled',
+      'doNotDisturb',
+    ] as const) {
+      if (body[field] !== undefined && typeof body[field] !== 'boolean') {
+        return NextResponse.json({ error: `${field} must be a boolean` }, { status: 400 });
+      }
+    }
 
     const values = {
       id: 'default' as const,
@@ -80,18 +92,27 @@ export async function PUT(request: Request) {
       updatedAt: now,
     };
 
-    // Upsert
-    const existing = await db.select().from(pushPreferences).where(eq(pushPreferences.id, 'default')).limit(1);
-    if (existing.length > 0) {
-      await db.update(pushPreferences).set(values).where(eq(pushPreferences.id, 'default'));
-    } else {
-      await db.insert(pushPreferences).values(values);
-    }
+    const persistence = await getNotificationPushPersistence();
+    await persistence.savePreferences({
+      preferences: {
+        morningEnabled: values.morningEnabled,
+        morningHour: values.morningHour,
+        triageNudgeEnabled: values.triageNudgeEnabled,
+        triageNudgeThreshold: values.triageNudgeThreshold,
+        carryForwardEnabled: values.carryForwardEnabled,
+        carryForwardHour: values.carryForwardHour,
+        quietStart: values.quietStart,
+        quietEnd: values.quietEnd,
+        doNotDisturb: values.doNotDisturb,
+      },
+      pushDeliveryEnabled: pushDeliveryEnabledInput,
+      persistentRemindersEnabled: persistentRemindersEnabledInput,
+      updatedAt: now,
+    });
 
-    // Restart scheduler so cron times reflect new morningHour/carryForwardHour
-    if (pushNotificationScheduler.isRunning()) {
-      await pushNotificationScheduler.restart();
-    }
+    // The scheduler checks its running state inside the lifecycle lock so a
+    // concurrent stop cannot be undone by this settings refresh.
+    await pushNotificationScheduler.restart();
 
     return NextResponse.json({ status: 'saved' });
   } catch (error) {

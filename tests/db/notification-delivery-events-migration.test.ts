@@ -32,6 +32,7 @@ describe('notification delivery events migration', () => {
         'created_at',
         'sent_at',
         'last_error',
+        'claim_token',
       ]);
 
       const indexes = sqlite.prepare(

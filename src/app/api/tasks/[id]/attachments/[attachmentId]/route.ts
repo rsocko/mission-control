@@ -1,10 +1,9 @@
-import { and, eq } from 'drizzle-orm';
-import db from '@/db';
-import { taskAttachments, tasks } from '@/db/schema';
-import { connectorRegistry } from '@/lib/connectors';
-import { syncScheduler } from '@/lib/sync';
 import { ApiErrors } from '@/lib/api-error';
+import { getConnectorRegistry } from '@/lib/connectors/registry-runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import logger from '@/lib/logger';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type { ConnectorConfig } from '@/types';
 
 const INLINE_CONTENT_TYPES = new Set([
   'application/pdf',
@@ -57,6 +56,24 @@ function contentDisposition(name: string, disposition: 'inline' | 'attachment'):
   return `${disposition}; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
+async function getOrRefreshAttachmentConnector(connectorInstanceId: string) {
+  const registry = getConnectorRegistry();
+  const existing = registry.getConnector(connectorInstanceId);
+  if (existing) return existing;
+
+  const repositories = await getWorkerPersistenceRepositories();
+  const config = await repositories.connectors.get(connectorInstanceId);
+  if (!config) return null;
+  repositories.execution.support.assertConfigSupported(config);
+
+  const resolvedConfig: ConnectorConfig = {
+    ...config,
+    syncMode: config.syncMode || 'poll',
+    pollIntervalMinutes: config.pollIntervalMinutes ?? 5,
+  };
+  return registry.replaceConnector(resolvedConfig);
+}
+
 /**
  * GET /api/tasks/[id]/attachments/[attachmentId]
  * Returns task-scoped attachment bytes. Previewable types may opt into inline
@@ -69,22 +86,11 @@ export async function GET(
   const { id, attachmentId } = await params;
 
   try {
-    const [task] = await db.select({
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-    }).from(tasks).where(eq(tasks.id, id));
+    const { taskReads } = await getTaskCorePersistence();
+    const { task, attachment: localAttachment } =
+      await taskReads.getAttachmentReadContext(id, attachmentId);
 
     if (!task) return ApiErrors.notFound('Task');
-
-    const [localAttachment] = await db.select({
-      name: taskAttachments.name,
-      contentType: taskAttachments.contentType,
-      contentBase64: taskAttachments.contentBase64,
-      sourceAttachmentId: taskAttachments.sourceAttachmentId,
-    }).from(taskAttachments).where(
-      and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, id)),
-    );
 
     const isLocal = task.sourceId.startsWith('local:') || task.connectorType === 'local';
     let name = localAttachment?.name;
@@ -94,10 +100,7 @@ export async function GET(
     if (!contentBase64) {
       if (isLocal) return ApiErrors.notFound('Attachment');
 
-      let connector = connectorRegistry.getConnector(task.connectorInstanceId) ?? null;
-      if (!connector) {
-        connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
-      }
+      const connector = await getOrRefreshAttachmentConnector(task.connectorInstanceId);
       if (!connector?.getAttachmentContent) {
         return ApiErrors.badRequest('This connector does not support downloading attachments');
       }

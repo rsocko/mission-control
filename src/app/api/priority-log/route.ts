@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { prioritySyncLog } from '@/db/schema';
-import { desc, eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
 /**
  * GET /api/priority-log — View priority sync events
@@ -11,14 +9,14 @@ import { ApiErrors } from '@/lib/api-error';
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const taskId = searchParams.get('taskId');
-  const limit = parseInt(searchParams.get('limit') || '50', 10);
+  const requestedLimit = Number.parseInt(searchParams.get('limit') || '50', 10);
+  const limit = Math.min(Math.max(requestedLimit || 50, 1), 200);
 
   try {
-    const query = taskId
-      ? db.select().from(prioritySyncLog).where(eq(prioritySyncLog.taskId, taskId)).orderBy(desc(prioritySyncLog.timestamp)).limit(limit)
-      : db.select().from(prioritySyncLog).orderBy(desc(prioritySyncLog.timestamp)).limit(limit);
-
-    const events = await query;
+    const events = await (await getTaskCorePersistence()).priorityEntities.listPrioritySyncLog({
+      taskId: taskId ?? undefined,
+      limit,
+    });
 
     return NextResponse.json({ events });
   } catch (error) {

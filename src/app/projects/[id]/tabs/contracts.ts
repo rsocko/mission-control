@@ -37,8 +37,10 @@ export type RequestConfirmation = (request: ConfirmationRequest) => void;
  * opens the review overlay even when the Plan tab is not the active tab.
  */
 export interface ProjectProposalActions {
-  generate: () => void;
-  refine: () => void;
+  generate: (guidance?: string) => void;
+  refine: (guidance?: string) => void;
+  reorganize: (phaseId: string, guidance?: string) => void;
   isGenerating: boolean;
   isRefining: boolean;
+  isReorganizing: boolean;
 }

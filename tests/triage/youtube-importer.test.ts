@@ -14,14 +14,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockIngest = vi.fn();
-const mockUpsertSyncState = vi.fn();
+const mockBatchIngest = vi.fn();
+const mockGetSyncState = vi.fn();
+const mockRecordSyncRun = vi.fn();
 
-vi.mock('@/lib/triage/capture', () => ({
-  ingestTriageImport: mockIngest,
+vi.mock('@/lib/triage/import-capture', () => ({
+  ingestTriageImports: mockBatchIngest,
 }));
 
 vi.mock('@/lib/triage/sync-state', () => ({
-  upsertSyncState: mockUpsertSyncState,
+  getSyncState: mockGetSyncState,
+  recordSyncRun: mockRecordSyncRun,
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -33,12 +36,51 @@ vi.mock('@/lib/mode', () => ({
 }));
 
 const mockFetchWithRateLimit = vi.fn();
+interface MockFullSyncResult {
+  outcome: 'success' | 'partial' | 'failure' | 'stale';
+  imported: number;
+  skipped: number;
+  errors: string[];
+  pagesProcessed: number;
+  durationMs: number;
+  lastCursor: string | null;
+}
+const createFullSyncResult = (): MockFullSyncResult => ({
+  outcome: 'success',
+  imported: 0,
+  skipped: 0,
+  errors: [] as string[],
+  pagesProcessed: 0,
+  durationMs: 0,
+  lastCursor: null as string | null,
+});
+const completeFullSyncResult = (result: MockFullSyncResult, startedAt: number) => {
+  result.durationMs = Date.now() - startedAt;
+  result.outcome = result.errors.length === 0
+    ? 'success'
+    : result.imported > 0 || result.skipped > 0 || result.pagesProcessed > 0
+      ? 'partial'
+      : 'failure';
+  return result;
+};
 
 vi.mock('@/lib/triage/importers/base-importer', () => ({
   fetchWithRateLimit: mockFetchWithRateLimit,
   IMPORT_USER_AGENT: 'mission-control-triage-importer/1.0',
   MAX_PAGES: 50,
+  createFullSyncResult,
+  completeFullSyncResult,
+  remoteResponseError: (label: string, response: Response, qualifier?: string) =>
+    new Error(`${label} failed${qualifier ? ` (${qualifier})` : ''}: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`),
+  safeRemoteError: (label: string) => `${label} failed`,
 }));
+
+beforeEach(() => {
+  mockBatchIngest.mockImplementation(async (inputs: unknown[]) =>
+    Promise.all(inputs.map((input) => mockIngest(input))));
+  mockGetSyncState.mockResolvedValue(null);
+  mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
+});
 
 // ─── parseDescriptionLinks ──────────────────────────────────────────────────
 
@@ -125,12 +167,20 @@ describe('getYouTubeAccessToken', () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    vi.doMock('@/lib/triage', () => ({ ingestTriageImport: mockIngest }));
-    vi.doMock('@/lib/triage/sync-state', () => ({ upsertSyncState: mockUpsertSyncState }));
+    vi.doMock('@/lib/triage/import-capture', () => ({ ingestTriageImports: mockBatchIngest }));
+    vi.doMock('@/lib/triage/sync-state', () => ({
+      getSyncState: mockGetSyncState,
+      recordSyncRun: mockRecordSyncRun,
+    }));
     vi.doMock('@/lib/triage/importers/base-importer', () => ({
       fetchWithRateLimit: mockFetchWithRateLimit,
       IMPORT_USER_AGENT: 'mission-control-triage-importer/1.0',
       MAX_PAGES: 50,
+      createFullSyncResult,
+      completeFullSyncResult,
+      remoteResponseError: (label: string, response: Response, qualifier?: string) =>
+        new Error(`${label} failed${qualifier ? ` (${qualifier})` : ''}: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`),
+      safeRemoteError: (label: string) => `${label} failed`,
     }));
 
     const mod = await import('@/lib/triage/importers/youtube-importer');
@@ -197,12 +247,20 @@ describe('importYouTubePlaylist', () => {
     vi.resetModules();
     mockIngest.mockReset();
     mockFetchWithRateLimit.mockReset();
-    vi.doMock('@/lib/triage', () => ({ ingestTriageImport: mockIngest }));
-    vi.doMock('@/lib/triage/sync-state', () => ({ upsertSyncState: mockUpsertSyncState }));
+    vi.doMock('@/lib/triage/import-capture', () => ({ ingestTriageImports: mockBatchIngest }));
+    vi.doMock('@/lib/triage/sync-state', () => ({
+      getSyncState: mockGetSyncState,
+      recordSyncRun: mockRecordSyncRun,
+    }));
     vi.doMock('@/lib/triage/importers/base-importer', () => ({
       fetchWithRateLimit: mockFetchWithRateLimit,
       IMPORT_USER_AGENT: 'mission-control-triage-importer/1.0',
       MAX_PAGES: 50,
+      createFullSyncResult,
+      completeFullSyncResult,
+      remoteResponseError: (label: string, response: Response, qualifier?: string) =>
+        new Error(`${label} failed${qualifier ? ` (${qualifier})` : ''}: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`),
+      safeRemoteError: (label: string) => `${label} failed`,
     }));
 
     const mod = await import('@/lib/triage/importers/youtube-importer');
@@ -326,13 +384,23 @@ describe('importAllYouTubePlaylist', () => {
     vi.resetModules();
     mockIngest.mockReset();
     mockFetchWithRateLimit.mockReset();
-    mockUpsertSyncState.mockReset();
-    vi.doMock('@/lib/triage', () => ({ ingestTriageImport: mockIngest }));
-    vi.doMock('@/lib/triage/sync-state', () => ({ upsertSyncState: mockUpsertSyncState }));
+    mockRecordSyncRun.mockReset();
+    mockGetSyncState.mockResolvedValue(null);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
+    vi.doMock('@/lib/triage/import-capture', () => ({ ingestTriageImports: mockBatchIngest }));
+    vi.doMock('@/lib/triage/sync-state', () => ({
+      getSyncState: mockGetSyncState,
+      recordSyncRun: mockRecordSyncRun,
+    }));
     vi.doMock('@/lib/triage/importers/base-importer', () => ({
       fetchWithRateLimit: mockFetchWithRateLimit,
       IMPORT_USER_AGENT: 'mission-control-triage-importer/1.0',
       MAX_PAGES: 50,
+      createFullSyncResult,
+      completeFullSyncResult,
+      remoteResponseError: (label: string, response: Response, qualifier?: string) =>
+        new Error(`${label} failed${qualifier ? ` (${qualifier})` : ''}: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`),
+      safeRemoteError: (label: string) => `${label} failed`,
     }));
 
     const mod = await import('@/lib/triage/importers/youtube-importer');
@@ -355,7 +423,7 @@ describe('importAllYouTubePlaylist', () => {
         }),
       });
     mockIngest.mockResolvedValue({ status: 'imported' });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const result = await importAllYouTubePlaylist({
       accessToken: 'token',
@@ -364,8 +432,9 @@ describe('importAllYouTubePlaylist', () => {
 
     expect(result.pagesProcessed).toBe(2);
     expect(result.imported).toBe(2);
-    expect(mockUpsertSyncState).toHaveBeenCalledWith(
+    expect(mockRecordSyncRun).toHaveBeenCalledWith(
       'youtube-PLmulti',
+      0,
       expect.objectContaining({ imported: 2 }),
     );
   });
@@ -382,7 +451,7 @@ describe('importAllYouTubePlaylist', () => {
       }),
     );
     mockIngest.mockResolvedValue({ status: 'imported' });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const result = await importAllYouTubePlaylist({
       accessToken: 'token',
@@ -407,7 +476,7 @@ describe('importAllYouTubePlaylist', () => {
       }),
     );
     mockIngest.mockResolvedValue({ status: 'skipped', reason: 'Already ingested' });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const result = await importAllYouTubePlaylist({
       accessToken: 'token',
@@ -429,15 +498,16 @@ describe('importAllYouTubePlaylist', () => {
       }),
     });
     mockIngest.mockResolvedValue({ status: 'imported' });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     await importAllYouTubePlaylist({
       accessToken: 'token',
       playlistId: 'PLsync',
     });
 
-    expect(mockUpsertSyncState).toHaveBeenCalledWith(
+    expect(mockRecordSyncRun).toHaveBeenCalledWith(
       'youtube-PLsync',
+      0,
       expect.objectContaining({
         imported: 1,
         skipped: 0,
@@ -456,13 +526,23 @@ describe('importAllYouTubePlaylists', () => {
     vi.resetModules();
     mockIngest.mockReset();
     mockFetchWithRateLimit.mockReset();
-    mockUpsertSyncState.mockReset();
-    vi.doMock('@/lib/triage', () => ({ ingestTriageImport: mockIngest }));
-    vi.doMock('@/lib/triage/sync-state', () => ({ upsertSyncState: mockUpsertSyncState }));
+    mockRecordSyncRun.mockReset();
+    mockGetSyncState.mockResolvedValue(null);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
+    vi.doMock('@/lib/triage/import-capture', () => ({ ingestTriageImports: mockBatchIngest }));
+    vi.doMock('@/lib/triage/sync-state', () => ({
+      getSyncState: mockGetSyncState,
+      recordSyncRun: mockRecordSyncRun,
+    }));
     vi.doMock('@/lib/triage/importers/base-importer', () => ({
       fetchWithRateLimit: mockFetchWithRateLimit,
       IMPORT_USER_AGENT: 'mission-control-triage-importer/1.0',
       MAX_PAGES: 50,
+      createFullSyncResult,
+      completeFullSyncResult,
+      remoteResponseError: (label: string, response: Response, qualifier?: string) =>
+        new Error(`${label} failed${qualifier ? ` (${qualifier})` : ''}: ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`),
+      safeRemoteError: (label: string) => `${label} failed`,
     }));
 
     const mod = await import('@/lib/triage/importers/youtube-importer');
@@ -487,7 +567,7 @@ describe('importAllYouTubePlaylists', () => {
       }),
     });
     mockIngest.mockResolvedValue({ status: 'imported' });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const result = await importAllYouTubePlaylists({
       clientId: 'cid',
@@ -501,6 +581,11 @@ describe('importAllYouTubePlaylists', () => {
     // Two playlists fetched
     expect(mockFetchWithRateLimit).toHaveBeenCalledTimes(2);
     expect(result.imported).toBe(2);
+    expect(mockRecordSyncRun).toHaveBeenCalledWith(
+      'youtube',
+      0,
+      expect.objectContaining({ imported: 2 }),
+    );
   });
 
   it('defaults to WL + LL when no playlist IDs configured', async () => {
@@ -513,7 +598,7 @@ describe('importAllYouTubePlaylists', () => {
       ok: true,
       json: () => Promise.resolve({ items: [] }),
     });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     await importAllYouTubePlaylists({
       clientId: 'cid',
@@ -549,7 +634,7 @@ describe('importAllYouTubePlaylists', () => {
         }),
       });
     mockIngest.mockResolvedValue({ status: 'imported' });
-    mockUpsertSyncState.mockResolvedValue(undefined);
+    mockRecordSyncRun.mockResolvedValue({ status: 'applied' });
 
     const result = await importAllYouTubePlaylists({
       clientId: 'cid',
@@ -559,8 +644,25 @@ describe('importAllYouTubePlaylists', () => {
     });
 
     expect(result.errors.length).toBeGreaterThan(0);
-    expect(result.errors[0]).toContain('Failed to import playlist PLbad');
+    expect(result.errors[0]).toContain('Playlist PLbad: YouTube playlist import failed');
     expect(result.imported).toBe(1);
+    expect(result.outcome).toBe('partial');
+  });
+
+  it('does not expose OAuth secrets when token exchange fails', async () => {
+    const secret = 'synthetic-youtube-refresh-secret';
+    globalThis.fetch = vi.fn().mockRejectedValue(new Error(`network failed ${secret}`));
+
+    const result = await importAllYouTubePlaylists({
+      clientId: 'cid',
+      clientSecret: 'csec',
+      refreshToken: secret,
+      playlistIds: ['PL1'],
+    });
+
+    expect(result.outcome).toBe('failure');
+    expect(JSON.stringify(result.errors)).not.toContain(secret);
+    expect(JSON.stringify(mockRecordSyncRun.mock.calls)).not.toContain(secret);
   });
 });
 
@@ -640,6 +742,7 @@ describe('POST /api/triage/import/youtube', () => {
 
   it('handles full mode import', async () => {
     const mockFullImport = vi.fn().mockResolvedValue({
+      outcome: 'success',
       imported: 10,
       skipped: 2,
       errors: [],
@@ -680,6 +783,7 @@ describe('POST /api/triage/import/youtube', () => {
 
   it('handles incremental mode import', async () => {
     const mockFullImport = vi.fn().mockResolvedValue({
+      outcome: 'success',
       imported: 3,
       skipped: 5,
       errors: [],

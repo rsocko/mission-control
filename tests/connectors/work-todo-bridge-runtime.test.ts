@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('Work To Do bridge runtime', () => {
   let db: typeof import('@/db').default;
@@ -13,7 +14,7 @@ describe('Work To Do bridge runtime', () => {
     vi.doUnmock('crypto');
     vi.resetModules();
     const [dbModule, schemaModule, serviceModule] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/connectors/work-todo/service'),
     ]);
@@ -155,7 +156,7 @@ describe('Work To Do bridge runtime', () => {
       fields: { title: 'Local revised title' },
     });
 
-    const acknowledgement = service.acknowledgeWorkTodoChanges({
+    const acknowledgement = await service.acknowledgeWorkTodoChanges({
       connectorInstanceId: 'work-todo',
       leaseId: firstLease.leaseId,
       processedAt: '2026-08-07T18:12:00.000Z',
@@ -254,7 +255,7 @@ describe('Work To Do bridge runtime', () => {
       updatedAt: '2026-08-07T18:21:00.000Z',
     });
 
-    const result = service.acknowledgeWorkTodoChanges({
+    const result = await service.acknowledgeWorkTodoChanges({
       connectorInstanceId: 'work-todo',
       leaseId: lease.leaseId,
       processedAt: '2026-08-07T18:22:00.000Z',
@@ -289,7 +290,7 @@ describe('Work To Do bridge runtime', () => {
       updatedAt: '2026-08-07T18:00:00.000Z',
     });
 
-    const pullRequest = service.createWorkTodoPullRequest('work-todo');
+    const pullRequest = await service.createWorkTodoPullRequest('work-todo');
     const status = await service.getWorkTodoBridgeStatus('work-todo');
 
     expect(pullRequest).toMatchObject({

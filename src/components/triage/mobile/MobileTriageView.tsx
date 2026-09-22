@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useCallback, useMemo } from 'react';
-import { AnimatePresence, useReducedMotion } from 'motion/react';
 import type {
   TriageActionRecord,
   TriageActionType,
@@ -12,6 +11,7 @@ import MobileTriageFocus from './MobileTriageFocus';
 import MobileTriageStream from './MobileTriageStream';
 import MobileTriageItemDetail from './MobileTriageItemDetail';
 import MobileTriageEmpty from './MobileTriageEmpty';
+import type { InboxGroup } from '@/lib/inbox/items';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -33,6 +33,9 @@ interface MobileTriageViewProps {
     streak: number;
     totalProcessed: number;
   };
+  group: InboxGroup;
+  onGroupChange: (group: InboxGroup) => void;
+  groupCounts: Record<InboxGroup, number>;
 }
 
 // ─── Component ──────────────────────────────────────────────────────────────
@@ -45,13 +48,14 @@ export default function MobileTriageView({
   busyAction,
   onRefresh,
   stats,
+  group,
+  onGroupChange,
+  groupCounts,
 }: MobileTriageViewProps) {
   const [mode, setMode] = useState<MobileTriageMode>('stream');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [sourceFilter, setSourceFilter] = useState<TriageSourcePlatform | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const prefersReducedMotion = useReducedMotion() ?? false;
-
   const selectedItem = useMemo(
     () => items.find((i) => i.id === selectedItemId) ?? null,
     [items, selectedItemId],
@@ -73,8 +77,14 @@ export default function MobileTriageView({
     setMode('stream');
   }, []);
 
+  const handleGroupChange = useCallback((nextGroup: InboxGroup) => {
+    setSourceFilter('all');
+    setTypeFilter(null);
+    onGroupChange(nextGroup);
+  }, [onGroupChange]);
+
   // Empty state: no items and not loading
-  if (!loading && items.length === 0) {
+  if (!loading && items.length === 0 && group === 'all' && groupCounts.all === 0) {
     return (
       <MobileTriageEmpty
         stats={stats ?? { processedToday: 0, streak: 0, totalProcessed: 0 }}
@@ -97,6 +107,9 @@ export default function MobileTriageView({
           onSourceFilterChange={setSourceFilter}
           activeTypeFilter={typeFilter}
           onTypeFilterChange={setTypeFilter}
+          group={group}
+          onGroupChange={handleGroupChange}
+          groupCounts={groupCounts}
         />
       ) : (
         <MobileTriageFocus
@@ -110,16 +123,12 @@ export default function MobileTriageView({
       )}
 
       {/* Bottom sheet detail view (F-45: opens on card tap from stream) */}
-      <AnimatePresence initial={!prefersReducedMotion}>
-        {selectedItem && (
-          <MobileTriageItemDetail
-            item={selectedItem}
-            onClose={handleCloseDetail}
-            onAction={onAction}
-            busyAction={busyAction}
-          />
-        )}
-      </AnimatePresence>
+      <MobileTriageItemDetail
+        item={selectedItem}
+        onClose={handleCloseDetail}
+        onAction={onAction}
+        busyAction={busyAction}
+      />
     </div>
   );
 }

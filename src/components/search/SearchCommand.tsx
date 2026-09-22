@@ -2,13 +2,42 @@
 
 import * as Dialog from '@radix-ui/react-dialog';
 import { AnimatePresence, motion } from 'motion/react';
-import { AlertTriangle, Bell, Calendar, Filter, ListTodo, Loader2, Plus, Search, X } from 'lucide-react';
+import {
+  Activity,
+  AlertTriangle,
+  ArrowRight,
+  Bell,
+  Bot,
+  Calendar,
+  CircleDollarSign,
+  ClipboardPlus,
+  Columns3,
+  Database,
+  FileText,
+  Filter,
+  FolderKanban,
+  Inbox,
+  LayoutDashboard,
+  ListTodo,
+  Loader2,
+  Orbit,
+  Plus,
+  Repeat2,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sun,
+  Target,
+  X,
+  Zap,
+  type LucideIcon,
+} from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { fadeSlideUp, modalContent, modalOverlay, staggerContainer } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
-import { parseTaskInput, parseTaskInputForSubmission, type QuickAddProject } from '@/lib/parse-task-input';
+import { parseTaskInput, parseTaskInputForSubmission } from '@/lib/parse-task-input';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
@@ -18,7 +47,26 @@ import {
 import { toast } from 'sonner';
 import { taskLogger } from '@/lib/client-logger';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
+import {
+  DESKTOP_SEARCH_DEBOUNCE_MS,
+  useDebouncedSearchQuery,
+} from '@/lib/hooks/useDebouncedSearchQuery';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { getLocalToday } from '@/lib/utils/client-date';
+import type { HubProjectSummaryDto } from '@/types/api';
+import type { SourceList } from '@/types/dashboard';
+import {
+  getDestinationResults,
+  getProjectResults,
+  getSourceListResults,
+  readRecentNavigation,
+  saveRecentNavigation,
+  type GlobalSearchResult,
+  type NavigationIconKey,
+  type RecentNavigationResult,
+  type SearchConnector,
+  type SearchFeatures,
+} from '@/lib/navigation/global-search';
 
 type TypeFilter = 'all' | 'tasks' | 'notifications';
 
@@ -37,6 +85,8 @@ interface SearchResult {
   metadata: Record<string, unknown>;
 }
 
+type PaletteResult = SearchResult | GlobalSearchResult;
+
 interface ActiveFilters {
   type: TypeFilter;
   source: string | null;
@@ -47,11 +97,34 @@ interface ActiveFilters {
 const RECENT_SEARCHES_KEY = 'mc:recent-searches';
 const MAX_RECENT_SEARCHES = 5;
 
-const SUGGESTED_SEARCHES = [
-  { label: 'High priority tasks', query: 'high priority' },
-  { label: 'Unread notifications', query: 'unread notification' },
-  { label: 'In progress', query: 'in progress' },
-];
+const NAVIGATION_ICONS: Record<NavigationIconKey, LucideIcon> = {
+  activity: Activity,
+  bell: Bell,
+  calendar: Calendar,
+  capture: ClipboardPlus,
+  columns: Columns3,
+  dashboard: LayoutDashboard,
+  docs: FileText,
+  finance: CircleDollarSign,
+  goals: Target,
+  graph: Orbit,
+  houston: Bot,
+  inbox: Inbox,
+  list: ListTodo,
+  projects: FolderKanban,
+  'quick-sort': Zap,
+  reconciliation: ShieldCheck,
+  routines: Repeat2,
+  settings: Settings,
+  source: Database,
+};
+
+const GLOBAL_RESULT_LABELS: Record<GlobalSearchResult['type'], string> = {
+  destination: 'Page',
+  project: 'Project',
+  source: 'Source',
+  list: 'List',
+};
 
 function getRecentSearches(): string[] {
   if (typeof window === 'undefined') return [];
@@ -74,6 +147,10 @@ function saveRecentSearch(query: string) {
   }
 }
 
+function isGlobalSearchResult(result: PaletteResult): result is GlobalSearchResult {
+  return result.type !== 'task' && result.type !== 'notification';
+}
+
 function renderHighlightedText(value: string) {
   if (!value) {
     return null;
@@ -88,7 +165,7 @@ function renderHighlightedText(value: string) {
     return (
       <mark
         key={`${marked[1]}-${index}`}
-        className="rounded-[4px] bg-yellow-500/20 px-0.5 text-[var(--text-primary)]"
+        className="rounded-[4px] bg-yellow-300 px-0.5 font-semibold text-yellow-950"
       >
         {marked[1]}
       </mark>
@@ -96,31 +173,98 @@ function renderHighlightedText(value: string) {
   });
 }
 
-function extractRefiners(results: SearchResult[]) {
-  const sources = new Set<string>();
-  const statuses = new Set<string>();
+function GlobalResultsSection({
+  title,
+  results,
+  startIndex,
+  activeIndex,
+  onActivate,
+  onOpen,
+}: {
+  title: string;
+  results: readonly GlobalSearchResult[];
+  startIndex: number;
+  activeIndex: number;
+  onActivate: (index: number) => void;
+  onOpen: (result: GlobalSearchResult) => void;
+}) {
+  if (results.length === 0) return null;
 
-  for (const result of results) {
-    const source = result.metadata.sourceListName || result.metadata.connectorType;
-    if (source) sources.add(String(source));
-    const status = result.metadata.status || result.metadata.category;
-    if (status) statuses.add(String(status));
-  }
-
-  return { sources: Array.from(sources).sort(), statuses: Array.from(statuses).sort() };
+  return (
+    <section>
+      <div className="mb-1.5 flex items-center justify-between px-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+        <span>{title}</span>
+        <span className="font-mono font-normal tracking-normal">{results.length}</span>
+      </div>
+      <div className="space-y-1">
+        {results.map((result, index) => {
+          const flatIndex = startIndex + index;
+          const Icon = NAVIGATION_ICONS[result.iconKey];
+          const actionLabel = result.type === 'source' || result.type === 'list' ? 'Jump to' : 'Open';
+          return (
+            <motion.button
+              key={`${result.type}-${result.id}`}
+              id={`search-result-${flatIndex}`}
+              type="button"
+              role="option"
+              aria-selected={activeIndex === flatIndex}
+              data-search-item
+              onClick={() => onOpen(result)}
+              onMouseEnter={() => onActivate(flatIndex)}
+              className={cn(
+                'group grid min-h-12 w-full grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-2.5 rounded-[var(--radius-md)] border border-transparent px-3 py-2 text-left transition-[background-color,border-color] duration-100 hover:bg-[var(--surface-1)]',
+                activeIndex === flatIndex && 'border-[var(--accent-700)]/30 bg-[var(--surface-1)]',
+              )}
+              variants={fadeSlideUp}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--surface-1)] text-[var(--accent-300)]">
+                <Icon size={13} />
+              </span>
+              <span className="min-w-0">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    {result.title}
+                  </span>
+                  <span className="shrink-0 rounded bg-[var(--surface-2)] px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--text-tertiary)]">
+                    {GLOBAL_RESULT_LABELS[result.type]}
+                  </span>
+                </span>
+                <span className="mt-0.5 block truncate text-xs text-[var(--text-secondary)]">
+                  {result.subtitle}
+                </span>
+              </span>
+              <span className={cn(
+                'flex items-center gap-1 text-[10px] text-[var(--text-tertiary)] transition-opacity',
+                activeIndex === flatIndex ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
+              )}>
+                {actionLabel}
+                <ArrowRight size={11} />
+              </span>
+            </motion.button>
+          );
+        })}
+      </div>
+    </section>
+  );
 }
 
-export function SearchCommand() {
+export function SearchCommand({ features }: { features?: SearchFeatures | null }) {
   const router = useRouter();
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
-  const [debouncedQuery, setDebouncedQuery] = useState('');
+  const debouncedQuery = useDebouncedSearchQuery(query, {
+    enabled: open,
+    debounceMs: DESKTOP_SEARCH_DEBOUNCE_MS,
+  });
   const [activeIndex, setActiveIndex] = useState(-1);
   const [previewTaskId, setPreviewTaskId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ActiveFilters>({ type: 'all', source: null, status: null, excludeDone: true });
   const [showFilters, setShowFilters] = useState(false);
-  const [projects, setProjects] = useState<QuickAddProject[]>([]);
+  const [projects, setProjects] = useState<HubProjectSummaryDto[]>([]);
+  const [connectors, setConnectors] = useState<SearchConnector[]>([]);
+  const [sourceLists, setSourceLists] = useState<SourceList[]>([]);
+  const [recentNavigation, setRecentNavigation] = useState<RecentNavigationResult[]>([]);
   const [projectsLoadState, setProjectsLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [quickAddPreferences, setQuickAddPreferencesState] = useState<QuickAddPreferences>(DEFAULT_QUICK_ADD_PREFERENCES);
   const [creatingTask, setCreatingTask] = useState(false);
@@ -137,6 +281,7 @@ export function SearchCommand() {
     keywordDurationMs: durationMs,
     semanticEnabled,
     semanticAvailable,
+    facets,
   } = useProgressiveSearch({
     query: debouncedQuery,
     enabled: open,
@@ -167,6 +312,19 @@ export function SearchCommand() {
         taskLogger.error('Failed to load projects for command palette', { error });
       });
 
+    fetch('/api/connectors')
+      .then((response) => {
+        if (!response.ok) throw new Error(`Failed to load sources (${response.status})`);
+        return response.json();
+      })
+      .then((data) => {
+        setConnectors(Array.isArray(data.connectors) ? data.connectors : []);
+        setSourceLists(Array.isArray(data.sourceLists) ? data.sourceLists : []);
+      })
+      .catch((error) => {
+        taskLogger.error('Failed to load sources for command palette', { error });
+      });
+
     return () => {
       window.removeEventListener(QUICK_ADD_PREFERENCES_EVENT, syncPreferences);
       window.removeEventListener('storage', syncPreferences);
@@ -176,7 +334,9 @@ export function SearchCommand() {
   const handleOpenChange = useCallback((nextOpen: boolean) => {
     setOpen(nextOpen);
 
-    if (!nextOpen) {
+    if (nextOpen) {
+      setRecentNavigation(readRecentNavigation());
+    } else {
       setActiveIndex(-1);
       setPreviewTaskId(null);
       setShowFilters(false);
@@ -189,36 +349,33 @@ export function SearchCommand() {
   const handleQueryChange = useCallback((value: string) => {
     setQuery(value);
     setActiveIndex(-1);
-
-    if (!value.trim()) {
-      setDebouncedQuery('');
-    }
   }, []);
 
   useEffect(() => {
-    const timeoutId = window.setTimeout(() => {
-      setDebouncedQuery(query.trim());
-    }, 80);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [query]);
-
-  useEffect(() => {
-    const openSearch = () => setOpen(true);
+    const openSearch = (event: Event) => {
+      const nextQuery = (event as CustomEvent<{ query?: string }>).detail?.query;
+      if (nextQuery) {
+        setQuery(nextQuery);
+        setActiveIndex(-1);
+      }
+      setRecentNavigation(readRecentNavigation());
+      setOpen(true);
+    };
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (!open && shouldBlockGlobalShortcut(event)) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        setOpen((current) => !current);
+        if (!open) setRecentNavigation(readRecentNavigation());
+        setOpen(!open);
       }
     };
 
-    window.addEventListener('mission-control:open-search', openSearch as EventListener);
+    window.addEventListener('mission-control:open-search', openSearch);
     window.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.removeEventListener('mission-control:open-search', openSearch as EventListener);
+      window.removeEventListener('mission-control:open-search', openSearch);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [open]);
@@ -259,38 +416,106 @@ export function SearchCommand() {
     return filtered;
   }, [results, filters.source, filters.status, filters.excludeDone]);
 
-  const refiners = useMemo(() => extractRefiners(results), [results]);
+  const refiners = useMemo(() => ({
+    sources: facets.sources.map((facet) => facet.value),
+    statuses: facets.statuses.map((facet) => facet.value),
+  }), [facets]);
 
   const groupedResults = useMemo(() => ({
     tasks: filteredResults.filter((result) => result.type === 'task'),
     notifications: filteredResults.filter((result) => result.type === 'notification'),
   }), [filteredResults]);
 
-  // Flat list for keyboard navigation
-  const flatResults = useMemo(() => [
-    ...groupedResults.tasks,
-    ...groupedResults.notifications,
-  ], [groupedResults]);
+  const destinationResults = useMemo(
+    () => getDestinationResults(query, features),
+    [features, query],
+  );
+  const projectResults = useMemo(
+    () => getProjectResults(query, projects),
+    [projects, query],
+  );
+  const sourceListResults = useMemo(
+    () => getSourceListResults(query, connectors, sourceLists),
+    [connectors, query, sourceLists],
+  );
+  const zeroQueryDestinations = useMemo(
+    () => getDestinationResults('', features, { suggestedOnly: true }),
+    [features],
+  );
+  const availableRecentNavigation = useMemo(() => {
+    const destinations = getDestinationResults('', features, { limit: 100 });
+    return recentNavigation.flatMap((recent) => {
+      const candidates = recent.type === 'destination'
+        ? destinations
+        : recent.type === 'project'
+          ? getProjectResults(recent.title, projects, projects.length)
+          : getSourceListResults(
+              recent.title,
+              connectors,
+              sourceLists,
+              connectors.length + sourceLists.length,
+            );
+      const current = candidates.find(candidate => (
+        candidate.type === recent.type && candidate.id === recent.id
+      ));
+      return current ? [current] : [];
+    });
+  }, [connectors, features, projects, recentNavigation, sourceLists]);
+  const recentNavigationIds = useMemo(
+    () => new Set(availableRecentNavigation.map(result => `${result.type}:${result.id}`)),
+    [availableRecentNavigation],
+  );
+  const suggestedDestinations = useMemo(
+    () => zeroQueryDestinations.filter(result => (
+      !recentNavigationIds.has(`${result.type}:${result.id}`)
+    )),
+    [recentNavigationIds, zeroQueryDestinations],
+  );
+  const globalResults = useMemo(
+    () => [...destinationResults, ...projectResults, ...sourceListResults],
+    [destinationResults, projectResults, sourceListResults],
+  );
+
+  // One ordered collection keeps keyboard navigation stable across provider groups.
+  const flatResults = useMemo<PaletteResult[]>(() => (
+    query.trim()
+      ? [...globalResults, ...groupedResults.tasks, ...groupedResults.notifications]
+      : [...availableRecentNavigation, ...suggestedDestinations]
+  ), [
+    globalResults,
+    groupedResults.notifications,
+    groupedResults.tasks,
+    query,
+    availableRecentNavigation,
+    suggestedDestinations,
+  ]);
 
   const hasActiveFilters = filters.source !== null || filters.status !== null || filters.type !== 'all' || !filters.excludeDone;
 
-  const clearFilters = () => {
-    setFilters({ type: 'all', source: null, status: null, excludeDone: true });
-  };
-
-  useEffect(() => {
+  const updateFilters = useCallback((update: (current: ActiveFilters) => ActiveFilters) => {
+    setFilters(update);
     setActiveIndex(-1);
-  }, [filters.excludeDone, filters.source, filters.status, filters.type]);
+  }, []);
 
-  const openResult = useCallback((result: SearchResult) => {
-    saveRecentSearch(query);
-    if (result.type === 'task') {
+  const clearFilters = useCallback(() => {
+    setFilters({ type: 'all', source: null, status: null, excludeDone: true });
+    setActiveIndex(-1);
+  }, []);
+
+  const openResult = useCallback((result: PaletteResult) => {
+    if (isGlobalSearchResult(result)) {
+      setRecentNavigation(saveRecentNavigation(result));
+      handleOpenChange(false);
+      router.push(result.href);
+    } else if (result.type === 'task') {
+      saveRecentSearch(query);
       setPreviewTaskId(result.id);
     } else {
+      saveRecentSearch(query);
       handleOpenChange(false);
       router.push(result.href);
     }
-  }, [router, query]);
+  }, [handleOpenChange, query, router]);
 
   const createTask = useCallback(async () => {
     const taskToCreate = parseTaskInputForSubmission(query, { ...quickAddPreferences, projects });
@@ -307,6 +532,7 @@ export function SearchCommand() {
     }
     setCreatingTask(true);
     try {
+      let myDayAssignmentFailed = false;
       const response = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -325,10 +551,44 @@ export function SearchCommand() {
       if (!response.ok) {
         throw new Error(await response.text() || `Failed to create task (${response.status})`);
       }
+      const createdTask = await response.json() as {
+        id: string;
+        editPolicy?: { sourceModel?: string };
+      };
+      if (taskToCreate.addToMyDay) {
+        const myDayResponse = await fetch('/api/my-day', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ taskId: createdTask.id, date: getLocalToday() }),
+        });
+        if (myDayResponse.ok) {
+          window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
+            detail: {
+              taskId: createdTask.id,
+              title: taskToCreate.title,
+              priority: taskToCreate.priority || 'none',
+              dueDate: taskToCreate.dueDate,
+              connectorType: 'local',
+              sourceListName: null,
+              status: 'todo',
+              editPolicy: createdTask.editPolicy,
+            },
+          }));
+        } else {
+          myDayAssignmentFailed = true;
+          taskLogger.error('Command palette task created but My Day assignment failed', {
+            taskId: createdTask.id,
+            status: myDayResponse.status,
+          });
+        }
+      }
       window.dispatchEvent(new CustomEvent('mission-control:task-added'));
-      toast.success(`Created “${taskToCreate.title}”`);
+      if (myDayAssignmentFailed) {
+        toast.error(`Created “${taskToCreate.title}”, but it could not be added to My Day.`);
+      } else {
+        toast.success(`Created “${taskToCreate.title}”${taskToCreate.addToMyDay ? ' · My Day' : ''}`);
+      }
       setQuery('');
-      setDebouncedQuery('');
       handleOpenChange(false);
     } catch (error) {
       taskLogger.error('Failed to create task from command palette', { error });
@@ -354,6 +614,17 @@ export function SearchCommand() {
       return;
     }
 
+    if (
+      event.key === 'Enter'
+      && (event.ctrlKey || event.metaKey)
+      && query.trim()
+      && parsedCreateTask.title
+    ) {
+      event.preventDefault();
+      void createTask();
+      return;
+    }
+
     if (flatResults.length === 0) {
       if (event.key === 'Enter' && query.trim() && parsedCreateTask.title) {
         event.preventDefault();
@@ -374,13 +645,8 @@ export function SearchCommand() {
         break;
       }
       case 'Enter': {
-        if (activeIndex >= 0 && activeIndex < flatResults.length) {
-          event.preventDefault();
-          openResult(flatResults[activeIndex]);
-        } else if (query.trim() && parsedCreateTask.title) {
-          event.preventDefault();
-          void createTask();
-        }
+        event.preventDefault();
+        openResult(flatResults[activeIndex >= 0 ? activeIndex : 0]);
         break;
       }
     }
@@ -442,7 +708,7 @@ export function SearchCommand() {
                 )}>
                   <Dialog.Title className="sr-only">Search Mission Control</Dialog.Title>
                   <Dialog.Description className="sr-only">
-                    Search across tasks and notifications using keyword or semantic matching.
+                    Navigate to pages, projects, sources, and lists, or search tasks and notifications.
                   </Dialog.Description>
 
                   {/* Search input header */}
@@ -461,19 +727,31 @@ export function SearchCommand() {
                           value={query}
                           onChange={(event) => handleQueryChange(event.target.value)}
                           onKeyDown={handleKeyDown}
-                          placeholder="Search tasks and notifications..."
+                          aria-label="Search Mission Control"
+                          aria-controls="mission-control-search-results"
+                          aria-activedescendant={activeIndex >= 0 ? `search-result-${activeIndex}` : undefined}
+                          placeholder="Search tasks, projects, pages, sources, and lists..."
                           className="w-full bg-transparent text-base text-[var(--text-primary)] outline-none placeholder:text-[var(--text-tertiary)]"
                         />
                       </div>
                       <kbd className="hidden shrink-0 rounded-md border border-[var(--border)] bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] sm:inline-block">
                         ESC
                       </kbd>
+                      <Dialog.Close asChild>
+                        <button
+                          type="button"
+                          aria-label="Close search"
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-1)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
+                        >
+                          <X size={16} />
+                        </button>
+                      </Dialog.Close>
                     </div>
 
                     {/* Mode and filter row */}
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                       <span className="rounded-full bg-[var(--surface-1)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-                        Keyword
+                        Navigate + Search
                       </span>
                       {semanticEnabled && semanticAvailable ? (
                         <span className="rounded-full bg-[var(--accent-900)]/30 px-2.5 py-1 text-[11px] font-medium text-[var(--accent-300)] shadow-[inset_0_0_0_1px_rgba(96,165,250,0.2)]">
@@ -504,9 +782,9 @@ export function SearchCommand() {
                       </button>
 
                       {/* Result count and timing */}
-                      {!loading && debouncedQuery && filteredResults.length > 0 && durationMs !== null && (
+                      {!loading && debouncedQuery && flatResults.length > 0 && durationMs !== null && (
                         <span className="ml-auto text-[11px] text-[var(--text-tertiary)]">
-                          {filteredResults.length} result{filteredResults.length !== 1 ? 's' : ''} · {durationMs}ms
+                          {flatResults.length} result{flatResults.length !== 1 ? 's' : ''} · {durationMs}ms
                         </span>
                       )}
                     </div>
@@ -528,7 +806,7 @@ export function SearchCommand() {
                               <button
                                 key={t}
                                 type="button"
-                                onClick={() => setFilters((f) => ({ ...f, type: t }))}
+                                onClick={() => updateFilters((f) => ({ ...f, type: t }))}
                                 className={cn(
                                   'rounded-md px-2 py-0.5 text-[11px] transition-colors duration-100',
                                   filters.type === t
@@ -549,7 +827,7 @@ export function SearchCommand() {
                                 <button
                                   key={source}
                                   type="button"
-                                  onClick={() => setFilters((f) => ({ ...f, source: f.source === source ? null : source }))}
+                                  onClick={() => updateFilters((f) => ({ ...f, source: f.source === source ? null : source }))}
                                   className={cn(
                                     'rounded-md px-2 py-0.5 text-[11px] transition-colors duration-100',
                                     filters.source === source
@@ -571,7 +849,7 @@ export function SearchCommand() {
                                 <button
                                   key={status}
                                   type="button"
-                                  onClick={() => setFilters((f) => ({ ...f, status: f.status === status ? null : status }))}
+                                  onClick={() => updateFilters((f) => ({ ...f, status: f.status === status ? null : status }))}
                                   className={cn(
                                     'rounded-md px-2 py-0.5 text-[11px] transition-colors duration-100',
                                     filters.status === status
@@ -589,7 +867,7 @@ export function SearchCommand() {
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={() => setFilters((f) => ({ ...f, excludeDone: !f.excludeDone }))}
+                              onClick={() => updateFilters((f) => ({ ...f, excludeDone: !f.excludeDone }))}
                               className={cn(
                                 'rounded-md px-2 py-0.5 text-[11px] transition-colors duration-100',
                                 !filters.excludeDone
@@ -624,8 +902,23 @@ export function SearchCommand() {
                   </div>
 
                   {/* Results area */}
-                  <div ref={resultsRef} className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4">
-                    {query.trim() && parsedCreateTask.title ? (
+                  <div
+                    ref={resultsRef}
+                    id="mission-control-search-results"
+                    role="listbox"
+                    aria-label="Search results"
+                    className="min-h-0 flex-1 overflow-y-auto p-3 sm:p-4"
+                  >
+                    <p className="sr-only" role="status" aria-live="polite">
+                      {query.trim()
+                        ? `${flatResults.length} matching results`
+                        : `${flatResults.length} recent and suggested destinations`}
+                    </p>
+                    {query.trim()
+                      && parsedCreateTask.title
+                      && !loading
+                      && query.trim() === debouncedQuery
+                      && flatResults.length === 0 ? (
                       <div className="mb-3 rounded-[var(--radius-lg)] border border-[var(--accent-700)]/30 bg-[var(--accent-900)]/10 p-2">
                         <button
                           type="button"
@@ -648,6 +941,11 @@ export function SearchCommand() {
                               {parsedCreateTask.tags.map(tag => <span key={tag}>#{tag}</span>)}
                               {parsedCreateTask.project && <span>+{parsedCreateTask.project}</span>}
                               {parsedCreateTask.dueDateLabel && <span>{parsedCreateTask.dueDateLabel}</span>}
+                              {parsedCreateTask.addToMyDay && (
+                                <span className="inline-flex items-center gap-1">
+                                  <Sun size={10} /> My Day
+                                </span>
+                              )}
                             </span>
                           </span>
                         </button>
@@ -662,53 +960,33 @@ export function SearchCommand() {
                         )}
                       </div>
                     ) : null}
-                    {!debouncedQuery && !loading ? (
+                    {!query.trim() ? (
                       <div className="space-y-4">
-                        {(() => {
-                          const recent = getRecentSearches();
-                          if (recent.length > 0) {
-                            return (
-                              <div>
-                                <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Recent</p>
-                                <div className="space-y-0.5">
-                                  {recent.map((q) => (
-                                    <button
-                                      key={q}
-                                      type="button"
-                                      onClick={() => { handleQueryChange(q); setQuery(q); }}
-                                      className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-1.5 text-sm text-[var(--text-secondary)] transition-colors duration-100 hover:bg-[var(--surface-1)] hover:text-[var(--text-primary)]"
-                                    >
-                                      <Search size={12} className="shrink-0 text-[var(--text-tertiary)]" />
-                                      {q}
-                                    </button>
-                                  ))}
-                                </div>
-                              </div>
-                            );
-                          }
-                          return null;
-                        })()}
-                        <div>
-                          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">Suggestions</p>
-                          <div className="space-y-0.5">
-                            {SUGGESTED_SEARCHES.map((suggestion) => (
-                              <button
-                                key={suggestion.query}
-                                type="button"
-                                onClick={() => { handleQueryChange(suggestion.query); setQuery(suggestion.query); }}
-                                className="flex w-full items-center gap-2 rounded-[var(--radius-md)] px-3 py-1.5 text-sm text-[var(--text-secondary)] transition-colors duration-100 hover:bg-[var(--surface-1)] hover:text-[var(--text-primary)]"
-                              >
-                                <Search size={12} className="shrink-0 text-[var(--text-tertiary)]" />
-                                {suggestion.label}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        <GlobalResultsSection
+                          title="Recent"
+                          results={availableRecentNavigation}
+                          startIndex={0}
+                          activeIndex={activeIndex}
+                          onActivate={setActiveIndex}
+                          onOpen={openResult}
+                        />
+                        <GlobalResultsSection
+                          title="Navigate"
+                          results={suggestedDestinations}
+                          startIndex={availableRecentNavigation.length}
+                          activeIndex={activeIndex}
+                          onActivate={setActiveIndex}
+                          onOpen={openResult}
+                        />
                       </div>
                     ) : null}
 
-                    {loading && debouncedQuery && filteredResults.length === 0 ? (
-                      <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
+                    {loading && debouncedQuery && flatResults.length === 0 ? (
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]"
+                      >
                         <Loader2 size={14} className="animate-spin" />
                         Searching...
                       </div>
@@ -716,14 +994,31 @@ export function SearchCommand() {
 
                     {/* Inline typing indicator before debounce fires */}
                     {!loading && query.trim() && query.trim() !== debouncedQuery ? (
-                      <div className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]">
+                      <div
+                        role="status"
+                        aria-live="polite"
+                        className="flex items-center gap-2 px-1 py-6 text-sm text-[var(--text-tertiary)]"
+                      >
                         <Loader2 size={14} className="animate-spin" />
                         <span className="animate-pulse">Typing...</span>
                       </div>
                     ) : null}
 
-                    {!loading && debouncedQuery && filteredResults.length === 0 ? (
-                      <div className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-4 py-8 text-center">
+                    {!loading && debouncedQuery && flatResults.length === 0 && note ? (
+                      <div
+                        role="alert"
+                        className="rounded-[var(--radius-lg)] border border-red-500/20 bg-red-500/5 px-4 py-8 text-center"
+                      >
+                        <p className="text-sm text-[var(--text-primary)]">Search unavailable.</p>
+                        <p className="mt-2 text-xs text-[var(--text-tertiary)]">{note}</p>
+                      </div>
+                    ) : null}
+
+                    {!loading && debouncedQuery && flatResults.length === 0 && !note ? (
+                      <div
+                        role="status"
+                        className="rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-1)]/60 px-4 py-8 text-center"
+                      >
                         <p className="text-sm text-[var(--text-primary)]">No matching results.</p>
                         <p className="mt-2 text-xs text-[var(--text-tertiary)]">
                           {hasActiveFilters ? (
@@ -739,7 +1034,7 @@ export function SearchCommand() {
                       </div>
                     ) : null}
 
-                    {filteredResults.length > 0 ? (
+                    {query.trim() && flatResults.length > 0 ? (
                       <motion.div
                         className="space-y-4"
                         initial="hidden"
@@ -747,6 +1042,30 @@ export function SearchCommand() {
                         exit="hidden"
                         variants={staggerContainer}
                       >
+                        <GlobalResultsSection
+                          title="Go to"
+                          results={destinationResults}
+                          startIndex={0}
+                          activeIndex={activeIndex}
+                          onActivate={setActiveIndex}
+                          onOpen={openResult}
+                        />
+                        <GlobalResultsSection
+                          title="Projects"
+                          results={projectResults}
+                          startIndex={destinationResults.length}
+                          activeIndex={activeIndex}
+                          onActivate={setActiveIndex}
+                          onOpen={openResult}
+                        />
+                        <GlobalResultsSection
+                          title="Sources and lists"
+                          results={sourceListResults}
+                          startIndex={destinationResults.length + projectResults.length}
+                          activeIndex={activeIndex}
+                          onActivate={setActiveIndex}
+                          onOpen={openResult}
+                        />
                         {groupedResults.tasks.length > 0 && (
                           <section>
                             <div className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
@@ -754,16 +1073,21 @@ export function SearchCommand() {
                               Tasks ({groupedResults.tasks.length})
                             </div>
                             <div className="space-y-1">
-                              {groupedResults.tasks.map((result, idx) => (
+                              {groupedResults.tasks.map((result, idx) => {
+                                const flatIdx = globalResults.length + idx;
+                                return (
                                 <motion.button
                                   key={`task-${result.id}`}
+                                  id={`search-result-${flatIdx}`}
                                   type="button"
+                                  role="option"
+                                  aria-selected={activeIndex === flatIdx}
                                   data-search-item
                                   onClick={() => openResult(result)}
-                                  onMouseEnter={() => setActiveIndex(idx)}
+                                  onMouseEnter={() => setActiveIndex(flatIdx)}
                                   className={cn(
                                     'w-full rounded-[var(--radius-md)] border border-transparent px-3 py-2.5 text-left transition-[background-color,border-color] duration-100 hover:bg-[var(--surface-1)]',
-                                    activeIndex === idx && 'bg-[var(--surface-1)] border-[var(--accent-700)]/30',
+                                    activeIndex === flatIdx && 'bg-[var(--surface-1)] border-[var(--accent-700)]/30',
                                     previewTaskId === result.id && 'bg-[var(--accent-900)]/20 border-[var(--accent-700)]/40',
                                   )}
                                   variants={fadeSlideUp}
@@ -790,7 +1114,7 @@ export function SearchCommand() {
                                         {result.metadata.status ? (
                                           <span
                                             className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                                            onClick={(e) => { e.stopPropagation(); setFilters((f) => ({ ...f, status: String(result.metadata.status) })); setShowFilters(true); }}
+                                            onClick={(e) => { e.stopPropagation(); updateFilters((f) => ({ ...f, status: String(result.metadata.status) })); setShowFilters(true); }}
                                           >
                                             {String(result.metadata.status)}
                                           </span>
@@ -798,7 +1122,7 @@ export function SearchCommand() {
                                         {result.metadata.sourceListName ? (
                                           <span
                                             className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                                            onClick={(e) => { e.stopPropagation(); setFilters((f) => ({ ...f, source: String(result.metadata.sourceListName) })); setShowFilters(true); }}
+                                            onClick={(e) => { e.stopPropagation(); updateFilters((f) => ({ ...f, source: String(result.metadata.sourceListName) })); setShowFilters(true); }}
                                           >
                                             {String(result.metadata.sourceListName)}
                                           </span>
@@ -806,7 +1130,7 @@ export function SearchCommand() {
                                         {result.metadata.connectorType && !result.metadata.sourceListName ? (
                                           <span
                                             className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                                            onClick={(e) => { e.stopPropagation(); setFilters((f) => ({ ...f, source: String(result.metadata.connectorType) })); setShowFilters(true); }}
+                                            onClick={(e) => { e.stopPropagation(); updateFilters((f) => ({ ...f, source: String(result.metadata.connectorType) })); setShowFilters(true); }}
                                           >
                                             {String(result.metadata.connectorType)}
                                           </span>
@@ -815,7 +1139,8 @@ export function SearchCommand() {
                                     </div>
                                   </div>
                                 </motion.button>
-                              ))}
+                                );
+                              })}
                             </div>
                           </section>
                         )}
@@ -828,11 +1153,14 @@ export function SearchCommand() {
                             </div>
                             <div className="space-y-1">
                               {groupedResults.notifications.map((result, idx) => {
-                                const flatIdx = groupedResults.tasks.length + idx;
+                                const flatIdx = globalResults.length + groupedResults.tasks.length + idx;
                                 return (
                                   <motion.button
                                     key={`notification-${result.id}`}
+                                    id={`search-result-${flatIdx}`}
                                     type="button"
+                                    role="option"
+                                    aria-selected={activeIndex === flatIdx}
                                     data-search-item
                                     onClick={() => openResult(result)}
                                     onMouseEnter={() => setActiveIndex(flatIdx)}
@@ -864,7 +1192,7 @@ export function SearchCommand() {
                                           {result.metadata.category ? (
                                             <span
                                               className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                                              onClick={(e) => { e.stopPropagation(); setFilters((f) => ({ ...f, status: String(result.metadata.category) })); setShowFilters(true); }}
+                                              onClick={(e) => { e.stopPropagation(); updateFilters((f) => ({ ...f, status: String(result.metadata.category) })); setShowFilters(true); }}
                                             >
                                               {String(result.metadata.category)}
                                             </span>
@@ -872,7 +1200,7 @@ export function SearchCommand() {
                                           {result.metadata.connectorType ? (
                                             <span
                                               className="cursor-pointer rounded-md bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]"
-                                              onClick={(e) => { e.stopPropagation(); setFilters((f) => ({ ...f, source: String(result.metadata.connectorType) })); setShowFilters(true); }}
+                                              onClick={(e) => { e.stopPropagation(); updateFilters((f) => ({ ...f, source: String(result.metadata.connectorType) })); setShowFilters(true); }}
                                             >
                                               {String(result.metadata.connectorType)}
                                             </span>
@@ -891,6 +1219,22 @@ export function SearchCommand() {
                             </div>
                           </section>
                         )}
+                        {parsedCreateTask.title ? (
+                          <button
+                            type="button"
+                            onClick={() => void createTask()}
+                            disabled={creatingTask}
+                            className="flex w-full items-center gap-2 rounded-[var(--radius-md)] border border-[var(--accent-700)]/20 bg-[var(--accent-900)]/10 px-3 py-2 text-left text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--accent-900)]/20 disabled:opacity-60"
+                          >
+                            {creatingTask ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                            <span className="min-w-0 flex-1 truncate">
+                              Create task <span className="font-medium text-[var(--text-primary)]">{parsedCreateTask.title}</span>
+                            </span>
+                            <kbd className="shrink-0 rounded border border-[var(--border)] bg-[var(--surface-1)] px-1.5 py-0.5 text-[10px] text-[var(--text-tertiary)]">
+                              Ctrl Enter
+                            </kbd>
+                          </button>
+                        ) : null}
                       </motion.div>
                     ) : null}
                   </div>

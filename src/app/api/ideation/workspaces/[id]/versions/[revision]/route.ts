@@ -11,7 +11,7 @@ type Context = { params: Promise<{ id: string; revision: string }> };
 export async function GET(_request: Request, { params }: Context) {
   try {
     const { id, revision } = await params;
-    const version = ideationWorkspaceService.getVersion(id, revision);
+    const version = await ideationWorkspaceService.getVersion(id, revision);
     return version
       ? NextResponse.json({ version })
       : ApiErrors.notFound('Ideation workspace version');
@@ -26,7 +26,7 @@ export async function POST(request: Request, { params }: Context) {
   try {
     const { id, revision } = await params;
     const body = await request.json();
-    const workspace = ideationWorkspaceService.restore(
+    const workspace = await ideationWorkspaceService.restore(
       id,
       Number(revision),
       body.baseRevision,

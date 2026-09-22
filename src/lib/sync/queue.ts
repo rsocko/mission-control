@@ -1,14 +1,13 @@
 import type { SyncResult } from '@/types';
 import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
-import { assertConnectorMaintenanceUnlocked } from './maintenance-lock';
+import { assertConnectorMaintenanceUnlockedAsync } from './maintenance-lock';
+import { assertConnectorSyncEnqueueAllowedAsync } from './control-state';
 import {
-  countRemainingSyncJobs,
-  enqueueSyncJob,
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   isDurableSyncMode,
   waitForSyncJob,
   type SyncJobSource,
-} from './job-queue';
+} from './job-runtime';
 
 const MAX_CONCURRENT_SYNCS = 1;
 
@@ -22,6 +21,7 @@ interface QueuedSync {
   connectorId: string;
   options?: { full?: boolean };
   resolve: (result: SyncResult) => void;
+  reject: (error: unknown) => void;
 }
 
 function rejectedSyncResult(connectorId: string, error: string): SyncResult {
@@ -55,12 +55,16 @@ export class SyncQueue {
     connectorId: string,
     options?: SyncRequestOptions,
   ): Promise<SyncResult> {
-    assertConnectorMaintenanceUnlocked(connectorId);
+    await assertConnectorMaintenanceUnlockedAsync(connectorId);
+    await assertConnectorSyncEnqueueAllowedAsync(
+      connectorId,
+      options?.source ?? 'api',
+    );
     if (!isDurableSyncMode()) {
       return this.enqueueSync(connectorId, options);
     }
 
-    const job = enqueueSyncJob(connectorId, {
+    const job = await (await getSyncJobRepository()).enqueue(connectorId, {
       full: options?.full,
       source: options?.source ?? 'api',
     });
@@ -87,15 +91,16 @@ export class SyncQueue {
       return this.executeSync(connectorId, options);
     }
 
-    return new Promise<SyncResult>((resolve) => {
-      this.queue.push({ connectorId, options, resolve });
+    return new Promise<SyncResult>((resolve, reject) => {
+      this.queue.push({ connectorId, options, resolve, reject });
       setQueuedExpensiveOperations(this.queue.length);
     });
   }
 
-  queueFollowUpSync(connectorId: string): void {
+  async queueFollowUpSync(connectorId: string): Promise<void> {
+    await assertConnectorSyncEnqueueAllowedAsync(connectorId, 'api');
     if (isDurableSyncMode()) {
-      enqueueSyncJob(connectorId, { full: true, source: 'api' });
+      await (await getSyncJobRepository()).enqueue(connectorId, { full: true, source: 'api' });
       return;
     }
 
@@ -109,6 +114,7 @@ export class SyncQueue {
         connectorId,
         options: { full: true },
         resolve: () => undefined,
+        reject: () => undefined,
       });
       setQueuedExpensiveOperations(this.queue.length);
       return;
@@ -116,9 +122,10 @@ export class SyncQueue {
     void this.enqueueSync(connectorId, { full: true });
   }
 
-  getRemaining(): number {
+  async getRemaining(): Promise<number> {
     if (isDurableSyncMode()) {
-      return countRemainingSyncJobs(getSyncQueueMetrics());
+      const metrics = await (await getSyncJobRepository()).getMetrics();
+      return metrics.queued + Math.max(0, metrics.running - 1);
     }
     return this.queue.length + Math.max(0, this.activeSyncCount - 1);
   }
@@ -149,7 +156,7 @@ export class SyncQueue {
         next.resolve(rejectedSyncResult(next.connectorId, 'Sync already in progress'));
         continue;
       }
-      void this.executeSync(next.connectorId, next.options).then(next.resolve);
+      void this.executeSync(next.connectorId, next.options).then(next.resolve, next.reject);
     }
   }
 

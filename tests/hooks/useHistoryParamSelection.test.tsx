@@ -36,6 +36,18 @@ describe('useHistoryParamSelection', () => {
     expect(window.history.state.__missionControlHistory.position).toBe(1);
   });
 
+  it('does not navigate when selecting the open detail again', () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    const { result } = renderHook(() => useHistoryParamSelection('taskId'));
+
+    act(() => result.current[1]('task-1'));
+    act(() => result.current[1]('task-1'));
+
+    expect(back).not.toHaveBeenCalled();
+    expect(window.location.search).toBe('?keep=1&taskId=task-1');
+    expect(window.history.state.__missionControlHistory.position).toBe(1);
+  });
+
   it('uses Back to close a detail opened in the app', () => {
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
     const { result } = renderHook(() => useHistoryParamSelection('taskId'));
@@ -44,6 +56,20 @@ describe('useHistoryParamSelection', () => {
     act(() => result.current[1](null));
 
     expect(back).toHaveBeenCalledOnce();
+  });
+
+  it('replaces the detail URL when its task was removed from the current view', () => {
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+    const { result } = renderHook(() => useHistoryParamSelection('taskId'));
+
+    act(() => result.current[1]('task-1'));
+    act(() => result.current[1](null, { history: 'replace' }));
+
+    expect(back).not.toHaveBeenCalled();
+    expect(result.current[0]).toBeNull();
+    expect(window.location.pathname).toBe('/today');
+    expect(window.location.search).toBe('?keep=1');
+    expect(currentAppHistoryDetail()).toBeNull();
   });
 
   it('removes only its parameter for a direct-linked detail', async () => {
@@ -57,6 +83,29 @@ describe('useHistoryParamSelection', () => {
 
     await waitFor(() => expect(result.current[0]).toBeNull());
     expect(window.location.search).toBe('?keep=1');
+  });
+
+  it('does not navigate back when the detail marker belongs to another page', async () => {
+    const { result } = renderHook(() => useHistoryParamSelection('taskId'));
+
+    act(() => result.current[1]('task-1'));
+    act(() => {
+      window.history.replaceState({
+        ...window.history.state,
+        __missionControlDetail: {
+          kind: 'detail',
+          param: 'taskId',
+          parentHref: '/projects/another-project',
+        },
+      }, '', '/projects/current-project?taskId=task-1');
+    });
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+    act(() => result.current[1](null));
+
+    await waitFor(() => expect(result.current[0]).toBeNull());
+    expect(back).not.toHaveBeenCalled();
+    expect(window.location.href).toBe('http://localhost:3000/projects/current-project');
   });
 
   it('restores trigger focus without scrolling when Back closes detail', async () => {

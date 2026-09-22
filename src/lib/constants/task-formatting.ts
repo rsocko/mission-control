@@ -98,12 +98,12 @@ export const TASK_STATUS_VISUALS = {
   },
   blocked: {
     label: 'Blocked',
-    textClass: 'text-[var(--danger)]',
-    dotClass: 'bg-[var(--danger)]',
-    borderClass: 'border-[var(--danger)]/60',
-    badgeClass: 'text-[var(--danger)] bg-[var(--danger-muted)]/30 border-[var(--danger)]/20',
-    actionClass: 'text-[var(--danger)] hover:bg-[var(--danger)]/15 hover:text-red-300',
-    color: '#ef4444',
+    textClass: 'text-amber-300',
+    dotClass: 'bg-amber-400',
+    borderClass: 'border-amber-400/60',
+    badgeClass: 'text-amber-300 bg-amber-900/25 border-amber-700/40',
+    actionClass: 'text-amber-300 hover:bg-amber-300/15 hover:text-amber-200',
+    color: '#f59e0b',
   },
   done: {
     label: 'Done',

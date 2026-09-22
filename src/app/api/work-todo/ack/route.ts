@@ -30,7 +30,7 @@ export async function POST(request: Request) {
     }, { status: 400 });
   }
   try {
-    return NextResponse.json(acknowledgeWorkTodoChanges(parsed.data));
+    return NextResponse.json(await acknowledgeWorkTodoChanges(parsed.data));
   } catch (error) {
     if (error instanceof WorkTodoBridgeError) {
       return NextResponse.json({ error: error.message, code: error.code }, { status: error.status });

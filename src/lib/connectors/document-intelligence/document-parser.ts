@@ -9,15 +9,44 @@ export interface DocAction {
   id: string;
   document_id: number;
   document_title: string;
-  action_type: 'pay' | 'respond' | 'file' | 'review' | 'sign' | 'schedule';
+  action_type: 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
+  category?: string | null;
   urgency: 'critical' | 'high' | 'medium' | 'low';
+  confidence?: number | null;
   due_date?: string | null;
   amount?: number | null;
   correspondent?: string | null;
   summary: string;
-  status: 'pending' | 'in_progress' | 'done' | 'dismissed';
+  recommended_cta?: {
+    id?: string | null;
+    label?: string | null;
+    url?: string | null;
+    phone?: string | null;
+    metadata?: Record<string, unknown> | null;
+  } | null;
+  extracted_data?: Record<string, unknown> | null;
+  action_ready?: boolean;
+  review_state?: 'ready' | 'needs_review' | 'resolved_no_action' | string | null;
+  needs_review_url?: string | null;
+  /** Transitional alias accepted from prerelease OWL builds. */
+  review_url?: string | null;
+  source_actions?: DocSourceAction[] | null;
+  status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;
+  updated_at?: string;
+  snoozed_until?: string | null;
   document_url?: string;
+  document_type?: string | null;
+  preview_url?: string | null;
+  preview_type?: 'pdf' | 'iframe' | 'image' | 'external' | null;
+  thumbnail_url?: string | null;
+}
+
+export interface DocSourceAction {
+  id: string;
+  label: string;
+  method: 'POST';
+  url: string;
 }
 
 export interface MissingStatement {
@@ -46,11 +75,30 @@ const TASK_ACTION_TYPES = new Set<DocAction['action_type']>([
   'sign',
   'schedule',
   'file',
+  'archive',
   'review',
 ]);
 
 export function isTaskAction(action: DocAction): boolean {
   return TASK_ACTION_TYPES.has(action.action_type);
+}
+
+/**
+ * New OWL versions explicitly own action readiness. Missing readiness fields
+ * identify a legacy response and preserve the pre-readiness behavior.
+ */
+export function isActionReady(action: DocAction): boolean {
+  if (typeof action.action_ready === 'boolean') return action.action_ready;
+  return true;
+}
+
+export function isActionAwaitingReview(action: DocAction): boolean {
+  return !isActionReady(action)
+    && action.review_state === 'needs_review'
+    && action.status !== 'completed'
+    && action.status !== 'done'
+    && action.status !== 'dismissed'
+    && action.status !== 'not_an_action';
 }
 
 export function isSinceMatch(value: string | undefined, since?: Date): boolean {
@@ -70,6 +118,9 @@ export function mapActionToTask(
   const hubLinks = docHubBaseUrl
     ? buildDocHubTaskLinks(docHubBaseUrl, action.id, action.document_id)
     : { actionUrl: null, documentUrl: null };
+  const preview = resolveActionPreview(action);
+  const primaryAction = resolveActionCta(action);
+  const reviewUrl = resolveReviewUrl(action, hubLinks.actionUrl);
 
   return {
     id: `docintel-${action.id}`,
@@ -82,7 +133,13 @@ export function mapActionToTask(
     priority: mapUrgency(action.urgency),
     dueDate: action.due_date || undefined,
     createdAt: action.created_at || new Date().toISOString(),
-    updatedAt: action.created_at || new Date().toISOString(),
+    updatedAt: action.updated_at || action.created_at || new Date().toISOString(),
+    completedAt: action.status === 'completed' || action.status === 'done'
+      ? action.updated_at || action.created_at
+      : undefined,
+    snoozedUntil: action.status === 'snoozed'
+      ? action.snoozed_until || undefined
+      : null,
     childIds: [],
     depth: 0,
     isChecklistItem: false,
@@ -92,14 +149,33 @@ export function mapActionToTask(
     tags: buildTaskTags(action, connectorType),
     metadata: {
       actionType: action.action_type,
+      category: action.category,
       amount: action.amount,
+      confidence: action.confidence,
       correspondent: action.correspondent,
       documentId: action.document_id,
       documentTitle: action.document_title,
+      documentType: action.document_type,
       documentUrl: action.document_url,
       urgency: action.urgency,
-      previewUrl: action.document_url,
-      previewType: 'external',
+      actionReady: isActionReady(action),
+      reviewState: action.review_state,
+      reviewUrl,
+      primaryActionId: primaryAction?.id,
+      primaryActionLabel: primaryAction?.label,
+      primaryActionUrl: primaryAction?.url,
+      recommendedCta: action.recommended_cta,
+      sourceActions: resolveSourceActions(action),
+      owlStatus: action.status,
+      owlDisposition: action.status === 'dismissed' || action.status === 'not_an_action'
+        ? action.status
+        : undefined,
+      owlSnoozedUntil: action.status === 'snoozed'
+        ? action.snoozed_until || undefined
+        : undefined,
+      owlUpdatedAt: action.updated_at || action.created_at,
+      previewUrl: preview.url,
+      previewType: preview.type,
       previewLabel: 'View in Paperless-ngx',
       docHubUrl: hubLinks.actionUrl,
       docHubDocumentUrl: hubLinks.documentUrl,
@@ -107,6 +183,178 @@ export function mapActionToTask(
     syncStatus: 'synced',
     lastSyncedAt: new Date().toISOString(),
   };
+}
+
+export function mapActionToReviewNotification(
+  action: DocAction,
+  connectorType: string,
+  connectorInstanceId: string,
+  docHubBaseUrl?: string,
+): InboundNotification {
+  const hubLinks = docHubBaseUrl
+    ? buildDocHubTaskLinks(docHubBaseUrl, action.id, action.document_id)
+    : { actionUrl: null, documentUrl: null };
+  const reviewUrl = resolveReviewUrl(action, hubLinks.actionUrl);
+  const preview = resolveActionPreview(action);
+
+  return {
+    id: `docintel-review-${action.id}`,
+    sourceId: `review-${action.id}`,
+    connectorType,
+    connectorInstanceId,
+    title: `Needs review in OWL: ${action.document_title}`,
+    body: action.summary || 'OWL needs confirmation before this becomes an executable action.',
+    level: 'heads_up',
+    category: 'document',
+    templateKey: 'owl_needs_review',
+    isRead: false,
+    isActionable: !!reviewUrl,
+    actionUrl: reviewUrl || undefined,
+    receivedAt: action.updated_at || action.created_at || new Date().toISOString(),
+    sourceActivityAt: action.updated_at || action.created_at,
+    sourceActivityKey: `${action.review_state || 'needs_review'}:${action.updated_at || action.created_at || ''}`,
+    hubProjectIds: [],
+    tags: [buildTag('needs-review', 'Needs Review', connectorType)],
+    metadata: {
+      actionId: action.id,
+      actionType: action.action_type,
+      category: action.category,
+      confidence: action.confidence,
+      documentId: action.document_id,
+      documentTitle: action.document_title,
+      previewUrl: preview.url,
+      previewType: preview.type,
+      previewLabel: 'View in Paperless-ngx',
+      reviewState: action.review_state || 'needs_review',
+      reviewUrl,
+      docHubUrl: reviewUrl,
+    },
+  };
+}
+
+function resolveActionPreview(action: DocAction): {
+  url: string | undefined;
+  type: NonNullable<DocAction['preview_type']>;
+} {
+  if (action.preview_url) {
+    return {
+      url: action.preview_url,
+      type: action.preview_type || inferPreviewType(action.preview_url),
+    };
+  }
+
+  if (action.thumbnail_url) {
+    return { url: action.thumbnail_url, type: 'image' };
+  }
+
+  return { url: action.document_url, type: 'external' };
+}
+
+function inferPreviewType(url: string): NonNullable<DocAction['preview_type']> {
+  const pathname = safeUrl(url)?.pathname.toLowerCase() || '';
+  if (pathname.endsWith('.pdf') || pathname.endsWith('/preview/')) return 'pdf';
+  if (/\.(avif|gif|jpe?g|png|svg|webp)$/.test(pathname)) return 'image';
+  return 'iframe';
+}
+
+function safeUrl(value: unknown): URL | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
+
+export function resolveReviewUrl(action: DocAction, fallback: string | null): string | null {
+  return safeUrl(action.needs_review_url)?.toString()
+    || safeUrl(action.review_url)?.toString()
+    || safeUrl(fallback)?.toString()
+    || null;
+}
+
+export function resolveSourceActions(action: DocAction): DocSourceAction[] {
+  if (!Array.isArray(action.source_actions)) return [];
+  return action.source_actions.filter((sourceAction): sourceAction is DocSourceAction => (
+    !!sourceAction
+    && typeof sourceAction.id === 'string'
+    && !!sourceAction.id.trim()
+    && typeof sourceAction.label === 'string'
+    && !!sourceAction.label.trim()
+    && sourceAction.method === 'POST'
+    && typeof sourceAction.url === 'string'
+    && isSafeSourceActionReference(sourceAction.url)
+  ));
+}
+
+function isSafeSourceActionReference(value: string): boolean {
+  if (value.startsWith('/api/action-queue/actions/')) return true;
+  return !!safeUrl(value);
+}
+
+export function resolveActionCta(action: DocAction): {
+  id?: string;
+  label: string;
+  url: string;
+} | null {
+  const recommended = action.recommended_cta;
+  const recommendedUrl = safeUrl(recommended?.url)?.toString();
+  const recommendedPhone = normalizePhoneUrl(recommended?.phone);
+  const extractedUrl = resolveExtractedActionUrl(action);
+  const url = recommendedUrl || recommendedPhone || extractedUrl;
+  if (!url) return null;
+
+  return {
+    id: typeof recommended?.id === 'string' && recommended.id.trim()
+      ? recommended.id.trim()
+      : undefined,
+    label: typeof recommended?.label === 'string' && recommended.label.trim()
+      ? recommended.label.trim()
+      : defaultCtaLabel(action.action_type),
+    url,
+  };
+}
+
+function resolveExtractedActionUrl(action: DocAction): string | null {
+  const data = action.extracted_data;
+  if (!data) return null;
+  const actionSpecificKeys: Partial<Record<DocAction['action_type'], string[]>> = {
+    pay: ['payment_url', 'pay_url', 'portal_url'],
+    respond: ['response_url', 'reply_url', 'portal_url'],
+    sign: ['signature_url', 'sign_url', 'portal_url'],
+    schedule: ['scheduling_url', 'schedule_url', 'portal_url'],
+    file: ['filing_url', 'portal_url'],
+    archive: ['archive_url', 'portal_url'],
+    review: ['review_url', 'portal_url'],
+  };
+  const keys = ['action_url', ...(actionSpecificKeys[action.action_type] || [])];
+  for (const key of keys) {
+    const url = safeUrl(data[key]);
+    if (url) return url.toString();
+  }
+  return null;
+}
+
+function normalizePhoneUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const phone = value.trim();
+  if (!/^\+?[\d().\-\s]{3,30}$/.test(phone)) return null;
+  const normalized = phone.replace(/[().\-\s]/g, '');
+  return normalized ? `tel:${normalized}` : null;
+}
+
+function defaultCtaLabel(actionType: DocAction['action_type']): string {
+  const labels: Record<DocAction['action_type'], string> = {
+    pay: 'Pay now',
+    respond: 'Respond',
+    sign: 'Sign',
+    schedule: 'Schedule',
+    file: 'File document',
+    archive: 'Archive document',
+    review: 'Open document',
+  };
+  return labels[actionType];
 }
 
 export function mapMissingStatementToNotification(
@@ -202,6 +450,7 @@ export function mapActionToTriageItem(
   const hubLinks = docHubBaseUrl
     ? buildDocHubTaskLinks(docHubBaseUrl, action.id, action.document_id)
     : { actionUrl: null, documentUrl: null };
+  const primaryActionCta = resolveActionCta(action);
 
   return {
     id: `docintel-triage-${action.id}`,
@@ -236,6 +485,7 @@ export function mapActionToTriageItem(
     aiUrgency: urgencyLevel,
     rawMetadata: {
       actionType: action.action_type,
+      category: action.category,
       amount: action.amount,
       correspondent: action.correspondent,
       documentId: action.document_id,
@@ -243,6 +493,14 @@ export function mapActionToTriageItem(
       documentUrl,
       urgency: action.urgency,
       dueDate: action.due_date,
+      actionReady: isActionReady(action),
+      reviewState: action.review_state,
+      reviewUrl: resolveReviewUrl(action, hubLinks.actionUrl),
+      primaryActionId: primaryActionCta?.id,
+      primaryActionLabel: primaryActionCta?.label,
+      primaryActionUrl: primaryActionCta?.url,
+      recommendedCta: action.recommended_cta,
+      sourceActions: resolveSourceActions(action),
       connectorInstanceId,
       docHubUrl: hubLinks.actionUrl,
       docHubDocumentUrl: hubLinks.documentUrl,
@@ -307,6 +565,8 @@ function buildTaskTitle(action: DocAction): string {
       return `Schedule: ${action.document_title}`;
     case 'file':
       return `File: ${action.document_title}`;
+    case 'archive':
+      return `Archive: ${action.document_title}`;
     case 'review':
       return `Review: ${action.document_title}`;
     default:
@@ -326,9 +586,16 @@ function mapUrgency(urgency: string): TaskItem['priority'] {
 
 function mapActionStatus(status: DocAction['status']): TaskItem['status'] {
   switch (status) {
-    case 'done': return 'done';
-    case 'dismissed': return 'cancelled';
-    case 'in_progress': return 'in_progress';
+    case 'completed':
+    case 'done':
+      return 'done';
+    case 'dismissed':
+    case 'not_an_action':
+      return 'cancelled';
+    case 'snoozed':
+    case 'acknowledged':
+    case 'pending':
+      return 'todo';
     default: return 'todo';
   }
 }
@@ -355,13 +622,13 @@ function buildTaskTags(action: DocAction, connectorType: string) {
   return tags;
 }
 
-function buildTag(slug: string, name: string, _source: string) {
+function buildTag(slug: string, name: string, source: string) {
   return {
     id: `docintel-tag-${slug}`,
     name,
     slug,
     type: 'source' as const,
-    source: 'document-intelligence',
+    source,
     confirmed: true,
     createdAt: new Date().toISOString(),
   };

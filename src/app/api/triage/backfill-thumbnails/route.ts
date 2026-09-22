@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { cacheThumbnail } from '@/lib/triage/thumbnail-cache';
 import logger from '@/lib/logger';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 /**
  * POST /api/triage/backfill-thumbnails
@@ -33,20 +31,11 @@ export async function POST(request: Request) {
   const sourceFilter = searchParams.get('source') || null;
 
   try {
-    // Fetch items missing thumbnailUrl
-    const items = await db.select({
-      id: triageItems.id,
-      sourcePlatform: triageItems.sourcePlatform,
-      sourceUrl: triageItems.sourceUrl,
-      rawMetadata: triageItems.rawMetadata,
-      thumbnailUrl: triageItems.thumbnailUrl,
-    }).from(triageItems).where(isNull(triageItems.thumbnailUrl));
-
-    const candidates = items
-      .filter((item) => {
-        if (sourceFilter && item.sourcePlatform !== sourceFilter) return false;
-        return true;
-      });
+    const candidates = await getTriagePersistenceRepositories()
+      .items
+      .listMissingThumbnailCandidates(
+        sourceFilter ? { source: sourceFilter } : undefined,
+      );
 
     const updates: Array<{ id: string; thumbnailUrl: string; source: string; sourceUrl: string }> = [];
 
@@ -173,9 +162,7 @@ export async function POST(request: Request) {
           finalUrl = cachedUrl;
         }
       }
-      await db.update(triageItems).set({ thumbnailUrl: finalUrl }).where(
-        and(eq(triageItems.id, id), isNull(triageItems.thumbnailUrl)),
-      );
+      await getTriagePersistenceRepositories().items.fillThumbnailIfNull(id, finalUrl);
       updated++;
     }
 

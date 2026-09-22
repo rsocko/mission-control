@@ -136,7 +136,7 @@ export default function TriageSyncStatus() {
           <div className="flex items-center gap-2 px-2 mt-2">
             <button
               type="button"
-              onClick={triggerSync}
+              onClick={() => triggerSync()}
               disabled={progress.isSyncing}
               className="flex items-center gap-1 text-xs text-[var(--text-muted)] hover:text-[var(--accent-400)] transition-colors disabled:opacity-50"
               title="Sync all sources now"

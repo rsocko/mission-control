@@ -5,12 +5,31 @@ import {
   CONNECTOR_ICON_PATHS,
   LOCAL_CONNECTOR_ICON_PATH,
 } from '@/lib/constants/colors';
-import { CONNECTOR_ICONS } from '@/types/dashboard';
+import { CONNECTOR_ICONS as SETTINGS_CONNECTOR_ICONS } from '@/app/settings/components/types';
+import {
+  CONNECTOR_ICONS,
+  NOTIFICATION_SOURCE_ICONS,
+} from '@/types/dashboard';
 
 describe('connector icon mappings', () => {
   it('uses the canonical Local connector icon for local tasks', () => {
     expect(CONNECTOR_ICON_PATHS.local).toBe(LOCAL_CONNECTOR_ICON_PATH);
     expect(CONNECTOR_ICONS.local).toBe(LOCAL_CONNECTOR_ICON_PATH);
+  });
+
+  it('uses the local Copilot icon for Scout', () => {
+    expect(CONNECTOR_ICONS.scout).toBe('/icons/connectors/scout.svg');
+  });
+
+  it('uses the Home Assistant logo across connector surfaces', () => {
+    expect(CONNECTOR_ICON_PATHS['home-assistant']).toBe('/icons/connectors/home-assistant.svg');
+    expect(CONNECTOR_ICONS['home-assistant']).toBe('/icons/connectors/home-assistant.svg');
+    expect(SETTINGS_CONNECTOR_ICONS['home-assistant']).toBe('/icons/connectors/home-assistant.svg');
+    expect(NOTIFICATION_SOURCE_ICONS['home-assistant']).toBe('/icons/connectors/home-assistant.svg');
+    expect(readFileSync(
+      resolve(process.cwd(), 'public/icons/connectors/home-assistant.svg'),
+      'utf8',
+    )).toContain('fill="#18bcf2"');
   });
 
   it.each(['finance-manager', 'monarch-money'])(

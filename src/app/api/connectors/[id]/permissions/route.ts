@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
 import { probePermissions } from '@/lib/auth';
 import { ApiErrors } from '@/lib/api-error';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { probeGitHubScopes } from '@/lib/connectors/github-issues/scope-probe';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 /**
  * GET /api/connectors/[id]/permissions — Probe what permissions are available.
@@ -20,11 +18,9 @@ export async function GET(
 
   try {
     // Look up connector to determine type
-    const [connector] = await db
-      .select({ type: connectorConfigs.type, credentials: connectorConfigs.credentials })
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await (
+      await getConnectorManagementPersistence()
+    ).getConnector(id);
 
     if (!connector) {
       return NextResponse.json({ error: 'Connector not found' }, { status: 404 });

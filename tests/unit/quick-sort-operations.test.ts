@@ -11,6 +11,7 @@ const snapshot: QuickSortTaskSnapshot = {
   statusReason: null,
   localDisposition: 'active',
   priority: 'none',
+  planningHorizon: null,
   dueDate: null,
   completedAt: null,
   microStatus: 'ready',
@@ -47,6 +48,7 @@ describe('Quick Sort operation snapshots', () => {
 
   it.each([
     [{ effort: 3 }, { effort: null }],
+    [{ planningHorizon: 'next' }, { planningHorizon: null }],
     [{ dueDate: '2026-08-20' }, { dueDate: null }],
     [{ snoozedUntil: '2026-08-16T12:30:00.000Z' }, { snoozedUntil: null }],
     [{ localDisposition: 'handled' }, { localDisposition: 'active' }],

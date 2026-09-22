@@ -169,6 +169,24 @@ describe('iOS Share Sheet capture service', () => {
     });
   });
 
+  it('reports an in-flight reservation without creating or releasing a capture', async () => {
+    const deps = dependencies({
+      claim: vi.fn(async () => ({ status: 'pending' as const })),
+    });
+
+    const result = await processIOSShareCapture(request(), urlPayload(), deps);
+
+    expect(result).toMatchObject({
+      status: 409,
+      body: {
+        error: { code: 'INTERNAL_ERROR', retryable: true },
+      },
+    });
+    expect(deps.createCapture).not.toHaveBeenCalled();
+    expect(deps.complete).not.toHaveBeenCalled();
+    expect(deps.release).not.toHaveBeenCalled();
+  });
+
   it('releases failed reservations and returns a retryable redacted error', async () => {
     const deps = dependencies({
       createCapture: vi.fn(async () => {

@@ -1,10 +1,10 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { packageSyncWorkerRuntime } from './package-sync-worker-runtime.mjs';
 import { removeTemporaryRuntime } from './remove-temporary-runtime.mjs';
+import { stageSyncWorkerRuntime } from './lib/stage-sync-worker-runtime.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'mc-worker-runtime-'));
@@ -61,13 +61,7 @@ function waitForExit(child, timeoutMs) {
 }
 
 try {
-  await Promise.all([
-    cp(path.join(root, 'dist'), path.join(runtimeRoot, 'dist'), { recursive: true }),
-    cp(path.join(root, 'drizzle'), path.join(runtimeRoot, 'drizzle'), { recursive: true }),
-    packagedRuntime
-      ? cp(packagedRuntime, runtimeRoot, { recursive: true, dereference: true })
-      : packageSyncWorkerRuntime(runtimeRoot),
-  ]);
+  await stageSyncWorkerRuntime({ root, runtimeRoot, packagedRuntime });
 
   const prettySmokePath = path.join(runtimeRoot, 'pino-pretty-smoke.cjs');
   await writeFile(
@@ -249,10 +243,30 @@ try {
     if (!logs.includes('"runtimeRelease":"smoke-worker"')) {
       throw new Error('Worker startup did not report its runtime release');
     }
-    if (!logs.includes('Sync worker: triage auto-sync scheduler initialized')) {
+    if (!logs.includes('Triage auto-sync scheduler initialized')) {
       throw new Error('Worker startup has not completed');
     }
   });
+
+  const healthcheck = spawnSync(
+    process.execPath,
+    ['dist/sync-worker-healthcheck.cjs'],
+    {
+      cwd: runtimeRoot,
+      env: {
+        ...process.env,
+        NODE_ENV: 'production',
+        MC_DATABASE_BACKEND: 'sqlite',
+        MC_DB_PATH: databasePath,
+        MC_WORKER_INSTANCE_FILE: instancePath,
+      },
+      encoding: 'utf8',
+      timeout: 10_000,
+    },
+  );
+  if (healthcheck.status !== 0) {
+    throw new Error(healthcheck.stderr || 'Packaged worker healthcheck did not pass');
+  }
 
   worker.send('shutdown');
   const exit = await waitForExit(worker, 30_000);

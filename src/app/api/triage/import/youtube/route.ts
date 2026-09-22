@@ -35,6 +35,15 @@ export async function POST(request: Request) {
         playlistIds,
         incremental: mode === 'incremental',
       });
+      if (result.outcome === 'failure') {
+        throw new Error('YouTube full import failed');
+      }
+      if (result.outcome === 'stale') {
+        return NextResponse.json(
+          { error: 'YouTube import state changed concurrently' },
+          { status: 409 },
+        );
+      }
       return NextResponse.json({ result, mode });
     }
 

@@ -142,7 +142,7 @@ export async function GET(request: Request) {
 
   let cache: FinanceInsightOccurrenceCache;
   try {
-    cache = readFinanceInsightOccurrenceCache(config.id);
+    cache = await readFinanceInsightOccurrenceCache(config.id);
   } catch (error) {
     logger.warn(
       { code: 'finance_insight_presentation_cache_failed', connectorId: config.id, err: error },

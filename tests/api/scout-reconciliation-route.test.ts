@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { reconcileScoutTasks, actOnSuggestion } = vi.hoisted(() => ({
+const { reconcileScoutTasks, actOnSuggestion, listSuggestions } = vi.hoisted(() => ({
   reconcileScoutTasks: vi.fn(),
   actOnSuggestion: vi.fn(),
+  listSuggestions: vi.fn(),
 }));
 
 vi.mock('@/lib/connectors/scout/reconciliation-service', async (importOriginal) => {
@@ -11,11 +12,13 @@ vi.mock('@/lib/connectors/scout/reconciliation-service', async (importOriginal) 
     ...actual,
     reconcileScoutTasks,
     actOnReconciliationSuggestion: actOnSuggestion,
+    listReconciliationSuggestions: listSuggestions,
   };
 });
 
 import { POST as reconcile } from '@/app/api/scout/reconcile/route';
 import { POST as act } from '@/app/api/scout/reconciliation/suggestions/[id]/route';
+import { GET as listSuggestionsRoute } from '@/app/api/scout/reconciliation/suggestions/route';
 import { ScoutReconciliationError } from '@/lib/connectors/scout/reconciliation-service';
 
 function reconcileRequest(body: string, headers: Record<string, string> = {}) {
@@ -38,6 +41,7 @@ describe('Scout reconciliation API', () => {
   beforeEach(() => {
     reconcileScoutTasks.mockReset();
     actOnSuggestion.mockReset();
+    listSuggestions.mockReset();
   });
 
   afterEach(() => {
@@ -112,8 +116,7 @@ describe('Scout reconciliation API', () => {
     expect(malformed.status).toBe(400);
   });
 
-  it('derives the actor server-side for authenticated confirmation', async () => {
-    process.env.MC_API_KEY = 'trusted-key';
+  it('derives the actor server-side for authenticated confirmation', async () => {    process.env.MC_API_KEY = 'trusted-key';
     actOnSuggestion.mockResolvedValue({ suggestionId: 'suggestion-1', status: 'accepted' });
     const response = await act(actionRequest({
       action: 'accept',
@@ -128,5 +131,24 @@ describe('Scout reconciliation API', () => {
       payloadHash: 'a'.repeat(64),
       actor: 'user',
     });
+  });
+  it('bounds the suggestion list page size and reports its count', async () => {
+    const invalid = await listSuggestionsRoute(
+      new Request('https://mc.example/api/scout/reconciliation/suggestions?limit=0'),
+    );
+    expect(invalid.status).toBe(400);
+    expect(listSuggestions).not.toHaveBeenCalled();
+
+    listSuggestions.mockResolvedValue([
+      { id: 'suggestion-1', taskId: 'task-1' },
+      { id: 'suggestion-2', taskId: 'task-2' },
+    ]);
+    const response = await listSuggestionsRoute(
+      new Request('https://mc.example/api/scout/reconciliation/suggestions?limit=25'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(listSuggestions).toHaveBeenCalledWith({ limit: 25 });
+    expect(await response.json()).toMatchObject({ count: 2 });
   });
 });

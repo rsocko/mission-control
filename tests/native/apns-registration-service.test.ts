@@ -1,5 +1,6 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 process.env.MC_DB_PATH = ':memory:';
@@ -32,7 +33,7 @@ const deviceToken = 'ab'.repeat(32);
 const baseTime = new Date('2026-08-02T12:00:00.000Z');
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   schema = await import('@/db/schema');
   ({ eq } = await import('drizzle-orm'));
   service = await import('@/lib/native/apns-registration-service');
@@ -147,6 +148,60 @@ describe('native APNs registration lifecycle', () => {
       status: 409,
       body: { error: { code: 'REPLAY_DETECTED' } },
     });
+  });
+
+  it('fails closed on malformed stored replay payloads without leaking token material', async () => {
+    const body = registrationBody();
+    await service.processApnsRegistration(request(body.requestId), body, baseTime);
+    db.update(schema.nativePushRequests).set({
+      responseBody: {
+        kind: 'registration',
+        state: 'registered',
+        privateToken: deviceToken,
+      },
+    }).run();
+
+    const replay = await service.processApnsRegistration(
+      request(body.requestId),
+      body,
+      new Date(baseTime.getTime() + 1_000),
+    );
+
+    expect(replay).toMatchObject({
+      status: 500,
+      body: { error: { code: 'INTERNAL_ERROR', retryable: true } },
+    });
+    expect(JSON.stringify(replay)).not.toContain(deviceToken);
+  });
+
+  it('replays pre-migration APNs request hashes and stored HTTP envelopes', async () => {
+    const body = registrationBody();
+    const stored = {
+      version: 1,
+      requestId: body.requestId,
+      ok: true,
+      data: {
+        registrationId: '77777777-7777-4777-8777-777777777777',
+        state: 'registered',
+        updatedAt: baseTime.toISOString(),
+      },
+    };
+    db.insert(schema.nativePushRequests).values({
+      credentialId,
+      requestId: body.requestId,
+      operation: 'register',
+      payloadHash: createHash('sha256')
+        .update(`register\n${JSON.stringify(body)}`, 'utf8')
+        .digest('hex'),
+      responseStatus: 201,
+      responseBody: stored,
+      createdAt: baseTime.toISOString(),
+    }).run();
+
+    await expect(
+      service.processApnsRegistration(request(body.requestId), body, baseTime),
+    ).resolves.toEqual({ status: 201, body: stored });
+    expect(db.select().from(schema.apnsRegistrations).all()).toEqual([]);
   });
 
     it('retires a token reassigned to a new installation after reinstall', async () => {
@@ -392,6 +447,54 @@ describe('APNs durable delivery channel', () => {
     });
     expect(JSON.stringify(payload)).not.toContain('provider-jwt');
     expect(JSON.stringify(payload)).not.toContain(deviceToken);
+  });
+
+  it('uses unique repeat delivery IDs with one stable native collapse group', async () => {
+    await register();
+    const registration = db.select().from(schema.apnsRegistrations).get()!;
+    const notificationId = '12345678-1234-4123-8123-123456789012';
+    const collapseId = `mc:${notificationId}`;
+    const first = sender.buildApnsPayload({
+      notificationId,
+      deliveryId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      collapseId,
+      title: 'Still pending',
+      tag: collapseId,
+      url: '/today',
+      kind: 'task_reminder',
+    });
+    const second = sender.buildApnsPayload({
+      notificationId,
+      deliveryId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      collapseId,
+      title: 'Still pending',
+      tag: collapseId,
+      url: '/today',
+      kind: 'task_reminder',
+    });
+
+    const firstHeaders = sender.buildApnsRequestHeaders(
+      registration,
+      deviceToken,
+      first,
+      'provider-jwt',
+    );
+    const secondHeaders = sender.buildApnsRequestHeaders(
+      registration,
+      deviceToken,
+      second,
+      'provider-jwt',
+    );
+    expect(firstHeaders['apns-id']).toBe('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+    expect(secondHeaders['apns-id']).toBe('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb');
+    expect(firstHeaders['apns-collapse-id']).toBe(collapseId);
+    expect(secondHeaders['apns-collapse-id']).toBe(collapseId);
+    expect(first).toMatchObject({
+      aps: { sound: 'default', 'thread-id': collapseId },
+    });
+    expect(second).toMatchObject({
+      aps: { sound: 'default', 'thread-id': collapseId },
+    });
   });
 
   it('retries transient failures and retires permanent invalid tokens', async () => {

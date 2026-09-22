@@ -2,10 +2,10 @@
 title: "Document Intelligence ↔ Mission Control: API Integration Contract"
 status: proposed
 created: 2026-07-23
-last_reviewed: 2026-07-23
+last_reviewed: 2026-08-24
 category: design
 label: di-mc-integration
-version: "1.0"
+version: "1.1"
 parties:
   consumer: "Mission Control (Next.js / TypeScript)"
   provider: "Document Intelligence Hub (FastAPI / Python)"
@@ -27,6 +27,11 @@ tracking:
 ## 1. Overview
 
 Mission Control (MC) consumes the Document Intelligence Hub (DI) API via the `DocumentIntelligenceConnector`. DI is a FastAPI/Python service that processes documents from Paperless-ngx, generating actions, alerts, and insights. MC is a Next.js/TypeScript application that aggregates these into its unified task/alert/triage system.
+
+OWL owns document interpretation, Needs Review, the trusted Action Queue, and
+Paperless lifecycle. MC owns cross-system prioritization and lightweight
+execution. MC does not reproduce OWL correction, pipeline health, dry-run,
+backfill, or custom-run administration.
 
 ### Architecture
 
@@ -73,7 +78,11 @@ Fetch document-derived actions that MC maps to TaskItems.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `status` | `string` | No | Filter by status: `pending`, `in_progress`, `done`, `dismissed` |
+| `status` | `string` | No | MC sends `all`; individual values are `pending`, legacy `acknowledged`, `completed`, `dismissed`, `snoozed`, and `not_an_action` |
+| `limit` | `number` | No | MC requests pages of 100 |
+| `offset` | `number` | No | Zero-based offset; MC advances it by the returned row count |
+| `updated_since` | ISO 8601 timestamp | No | Inclusive source-update filter supported by OWL |
+| `include_not_ready` | `boolean` | No | Defaults to `false`. MC uses `true` only when fetching Needs Review notifications. |
 
 **Response:** `200 OK`
 
@@ -82,21 +91,60 @@ interface DocAction {
   id: string;
   document_id: number;
   document_title: string;
-  action_type: 'pay' | 'respond' | 'file' | 'review' | 'sign' | 'schedule';
+  action_type: 'pay' | 'respond' | 'file' | 'archive' | 'review' | 'sign' | 'schedule';
+  category?: string | null;
   urgency: 'critical' | 'high' | 'medium' | 'low';
   due_date?: string | null;        // ISO 8601 date string
   amount?: number | null;           // Dollar amount (for 'pay' actions)
   correspondent?: string | null;    // Entity name (for 'pay' actions)
   summary: string;                  // AI-generated action summary
-  status: 'pending' | 'in_progress' | 'done' | 'dismissed';
+  action_ready: boolean;            // Authoritative MC task-ingestion gate
+  review_state: 'ready' | 'needs_review' | 'resolved_no_action';
+  needs_review_url: string | null;   // Exact OWL review item
+  recommended_cta: {
+    id: string;
+    label: string;
+    url?: string | null;
+    phone?: string | null;
+    metadata?: Record<string, unknown>;
+    [safeField: string]: unknown;
+  } | null;
+  source_actions: Array<{
+    id: string;
+    label: string;
+    method: 'POST';
+    url: string;
+  }>;
+  status: 'pending' | 'acknowledged' | 'completed' | 'done' | 'dismissed' | 'snoozed' | 'not_an_action';
   created_at: string;               // ISO 8601 timestamp
+  updated_at: string;               // ISO 8601 source freshness timestamp
+  snoozed_until?: string | null;     // Present for snoozed actions
   document_url?: string;            // Paperless document URL
+  document_type?: string | null;
+  preview_url?: string | null;       // Embeddable OWL/Paperless preview URL
+  preview_type?: 'pdf' | 'iframe' | 'image' | 'external' | null;
+  thumbnail_url?: string | null;     // Used when no richer preview is available
 }
 ```
 
-**Response body:** `DocAction[]`
+**Response body:** OWL returns a flat `DocAction[]`, ordered deterministically by
+`created_at DESC, id DESC`. MC requests successive offsets until a page contains
+fewer than 100 rows. For backward compatibility, MC also accepts an envelope
+whose records are named `actions`, `items`, or `results`, with cursor or page
+metadata. Repeating a page is treated as an upstream error.
 
-**MC Mapping:** Each action where `action_type ∈ {pay, respond, file, review, sign, schedule}` is mapped to a `TaskItem` via `mapActionToTask()`.
+**MC Mapping:** MC maps only supported actions where `action_ready === true`.
+For legacy OWL instances that omit readiness fields, MC preserves the prior
+behavior. Explicit `false` is never inferred away from urgency, confidence,
+status, or review state. MC requests `include_not_ready=true` separately and
+maps `needs_review` records to compact notifications with
+`needs_review_url`; they are not tasks or triage recommendations.
+
+MC orders OWL work by deadline: overdue, today, next 7 days, later, then no due
+date. Action type and category are filters and tie-breakers. PAY, RESPOND, SIGN,
+and SCHEDULE outrank FILE and ARCHIVE only when deadlines tie. This ordering is
+an OWL projection inside MC and does not replace MC's cross-source Do Next
+intelligence.
 
 ---
 
@@ -114,15 +162,75 @@ Update an action's status (task completion / alert dismissal writeback).
 
 ```typescript
 interface ActionStatusUpdate {
-  status: 'done' | 'dismissed';
+  status: 'pending' | 'completed' | 'done' | 'dismissed';
 }
 ```
 
 **Response:** `200 OK` (empty body or updated action)
 
 **MC Usage:**
-- `completeTask(sourceId)` → sends `{ status: 'done' }`
+- `completeTask(sourceId)` → sends `{ status: 'completed' }`
+- `reopenTask(sourceId)` → sends `{ status: 'pending' }`
+- `updateTask(sourceId, { status: 'cancelled' })` → sends `{ status: 'dismissed' }`
 - `dismissAlert(sourceId)` → sends `{ status: 'dismissed' }` (for `eob-*` and `action-*` prefixed IDs)
+
+OWL performs the corresponding Paperless-aware mutation before reporting
+success.
+
+---
+
+#### `POST /api/action-queue/actions/{id}/snooze`
+
+Snooze an action in OWL and its Paperless-backed workflow.
+
+```typescript
+interface ActionSnooze {
+  until: string; // Future ISO 8601 timestamp
+}
+```
+
+**Response:** `200 OK` or another 2xx response after the source mutation
+succeeds.
+
+---
+
+#### `POST /api/action-queue/actions/{id}/feedback`
+
+Record classifier or extraction feedback.
+
+```typescript
+type ActionFeedback =
+  | { feedback_type: 'not_an_action' }
+  | { feedback_type: 'misclassified'; corrected_action_type: DocAction['action_type'] }
+  | { feedback_type: 'wrong_urgency'; corrected_urgency: DocAction['urgency'] }
+  | { feedback_type: 'wrong_amount'; corrected_amount: number | null };
+```
+
+`not_an_action` is a false-positive terminal source disposition, not a
+reclassification shortcut. MC clears rejected action metadata while retaining
+durable document facts. The correction variants update the extracted value and
+return the corrected action, including its current contextual CTA, without
+changing lifecycle.
+
+---
+
+#### Discovered source actions
+
+MC renders `source_actions` generically and invokes only declared same-origin
+`POST` actions through its server-side OWL connector. A ready action may expose:
+
+- `send_to_review` → `POST /api/action-queue/actions/{id}/review`
+- `file_document` → `POST /api/action-queue/actions/{id}/file`
+
+Each endpoint returns the updated connector item. MC refreshes source-controlled
+fields and CTA immediately. FILE/ARCHIVE mutation remains atomic and
+Paperless-aware in OWL; MC never removes Paperless tags itself. A non-2xx
+response is surfaced as failure and is not recorded locally.
+
+`recommended_cta` remains distinct from lifecycle and source actions. Opening a
+safe URL or calling a phone number never marks the action complete. Done and
+Snooze remain explicit source mutations. Complex review/correction always
+deep-links to the exact OWL item.
 
 ---
 
@@ -399,13 +507,21 @@ When a module is disabled, the connector skips the corresponding API call entire
 | — | `id` | `docintel-{id}` |
 | `action_type` + fields | `title` | `buildTaskTitle()` — e.g. "Pay: PG&E — $143.22" |
 | `summary` | `description` | Direct |
-| `status` | `status` | `pending`/`in_progress` → `todo`, `done` → `done`, `dismissed` → `cancelled` |
+| `status` | `status` | `pending` → `todo`; `completed`/legacy `done` → `done`; `dismissed`/`not_an_action` → `cancelled`; `snoozed` → `todo` |
+| `snoozed_until` | `snoozedUntil` | Preserved only while OWL status is `snoozed` |
+| `updated_at` | `updatedAt` | Source freshness timestamp; falls back to `created_at` |
+| `status` | `metadata.owlStatus` | Original OWL lifecycle value |
+| `dismissed`/`not_an_action` | `metadata.owlDisposition` | Preserves the terminal source outcome |
+| `snoozed_until` | `metadata.owlSnoozedUntil` | Preserves the source snooze deadline |
+| `updated_at` | `metadata.owlUpdatedAt` | Preserves source freshness for diagnostics |
 | `urgency` | `priority` | `critical` → `critical`, `high` → `high`, `medium` → `medium`, `low` → `low` |
 | `due_date` | `dueDate` | Direct (ISO string) |
 | `created_at` | `createdAt` | Direct (ISO string) |
 | `document_url` | `metadata.documentUrl` | Direct |
-| `document_url` | `metadata.previewUrl` | Direct |
-| — | `metadata.previewType` | `'external'` |
+| `preview_url` | `metadata.previewUrl` | Preferred rich preview when supplied |
+| `thumbnail_url` | `metadata.previewUrl` | Used when no rich preview is supplied |
+| `document_url` | `metadata.previewUrl` | External fallback; MC previews it through OWL's authenticated document proxy |
+| `preview_type` | `metadata.previewType` | Direct when `preview_url` is supplied; otherwise inferred |
 | — | `metadata.previewLabel` | `'View in Paperless'` |
 | `amount` | `metadata.amount` | Direct |
 | `correspondent` | `metadata.correspondent` | Direct |

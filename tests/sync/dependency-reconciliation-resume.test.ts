@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { IConnector } from '@/lib/connectors';
 import type { SourceTaskDependency } from '@/types';
 import {
@@ -167,7 +168,7 @@ beforeAll(async () => {
   vi.doUnmock('crypto');
   vi.resetModules();
   [dbModule, schema, manager] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/sync/task-dependency-manager'),
   ]);
@@ -210,6 +211,13 @@ describe('checkpointed dependency reconciliation', () => {
       { full: true },
     );
     expect(first.snapshot).toMatchObject({ status: 'running', processed: 2, total: 5 });
+    expect(Object.keys(first).sort()).toEqual([
+      'failed',
+      'imported',
+      'pushed',
+      'removed',
+      'snapshot',
+    ]);
     expect(await dbModule.default.select().from(schema.taskDependencies)).toEqual(
       expect.arrayContaining([expect.objectContaining({ id: `${connectorId}-stale` })]),
     );
@@ -457,7 +465,7 @@ describe('checkpointed dependency reconciliation', () => {
     dbModule.sqlite.close();
     vi.resetModules();
     [dbModule, schema, manager] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync/task-dependency-manager'),
     ]);

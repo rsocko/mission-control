@@ -53,13 +53,18 @@ Tasks often start their life in one source (e.g. a quick-capture MS Todo item) b
 | Custom REST | ✅ | ✅ | If write capability enabled |
 | Outlook Calendar | ✅ | ❌ | Read-only |
 | Outlook Email | ✅ | ❌ | Read-only |
-| RyMessage | ✅ | ❌ | Read-only |
+| RyMessage | Candidate/provenance | ❌ | Materialized provider task (normally Microsoft To Do) participates under that provider; no duplicate RyMessage task |
 | Home Assistant | ✅ | ❌ | Read-only |
 | Document Intelligence | ✅ | ❌ | Read-only |
 | Local | ✅ | ❌ | Local-only tasks; no external source lists |
 | Monarch Money | ❌ | ❌ | Alerts only, no tasks |
 
 **Rule:** A connector can be a *source* if it has `capabilities.read = true` and produces tasks. A connector can be a *target* if it has `capabilities.taskCreate = true`.
+
+RyMessage task candidates are not independently movable tasks. After
+materialization, the selected provider is the source and the RyMessage action
+remains attached as provenance. See
+[RyMessage Task Materialization](rymessage-task-materialization.md).
 
 ### Context Menu Visibility Rules
 

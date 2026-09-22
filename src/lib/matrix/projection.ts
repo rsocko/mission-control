@@ -1,10 +1,13 @@
 import type { DashboardTaskViewModel as Task } from '@/types/dashboard';
 import {
   effortPosition,
+  horizonPosition,
   markerDensityScale,
   priorityPosition,
+  timingConflict,
   urgencyScore,
   type MatrixAxisMode,
+  type MatrixTimingConflict,
 } from './scales';
 
 export interface ProjectedMatrixTask {
@@ -14,18 +17,23 @@ export interface ProjectedMatrixTask {
   urgency: number | null;
   daysUntilDue: number | null;
   urgencyState: ReturnType<typeof urgencyScore>['state'];
+  timingConflict: MatrixTimingConflict | null;
 }
 
 export interface MatrixNeedsData {
   missingPriority: Task[];
   missingEffort: Task[];
-  missingDueDate: Task[];
+  missingHorizon: Task[];
   invalidDueDate: Task[];
 }
 
 export interface MatrixProjection {
   tasks: ProjectedMatrixTask[];
   needsData: MatrixNeedsData;
+  timingConflicts: Array<{
+    task: Task;
+    conflict: MatrixTimingConflict;
+  }>;
 }
 
 export interface MatrixTaskMark {
@@ -61,10 +69,11 @@ export function projectTasks(
 ): MatrixProjection {
   const result: MatrixProjection = {
     tasks: [],
+    timingConflicts: [],
     needsData: {
       missingPriority: [],
       missingEffort: [],
-      missingDueDate: [],
+      missingHorizon: [],
       invalidDueDate: [],
     },
   };
@@ -73,31 +82,42 @@ export function projectTasks(
     const y = priorityPosition(task.priority);
     const urgency = urgencyScore(task.dueDate, today);
     const effort = effortPosition(task.effort);
+    const horizon = horizonPosition(task.planningHorizon);
+    const conflict = timingConflict(task.planningHorizon, urgency);
 
     if (y === null) result.needsData.missingPriority.push(task);
     if (effort === null) result.needsData.missingEffort.push(task);
-    if (!task.dueDate) {
-      result.needsData.missingDueDate.push(task);
-    } else if (urgency.value === null) {
+    if (horizon === null) result.needsData.missingHorizon.push(task);
+    if (task.dueDate && urgency.value === null) {
       result.needsData.invalidDueDate.push(task);
+    }
+    if (conflict) {
+      result.timingConflicts.push({ task, conflict });
     }
 
     if (
       y === null
       || (axisMode === 'priority-urgency' && urgency.value === null)
       || (axisMode === 'priority-effort' && effort === null)
+      || (axisMode === 'priority-horizon' && horizon === null)
     ) {
       continue;
     }
 
-    result.tasks.push({
+    const projectedTask = {
       task,
-      x: axisMode === 'priority-effort' ? effort! : urgency.value!,
+      x: axisMode === 'priority-effort'
+        ? effort!
+        : axisMode === 'priority-horizon'
+          ? horizon!
+          : urgency.value!,
       y,
       urgency: urgency.value,
       daysUntilDue: urgency.daysUntilDue,
       urgencyState: urgency.state,
-    });
+      timingConflict: conflict,
+    };
+    result.tasks.push(projectedTask);
   }
   return result;
 }
@@ -107,6 +127,13 @@ function priorityBandBounds(priority: number): [number, number] {
   if (priority >= 75) return [63, 87];
   if (priority >= 50) return [38, 62];
   return [3, 37];
+}
+
+function horizonBandBounds(position: number): [number, number] {
+  if (position < 25) return [2, 23];
+  if (position < 50) return [27, 48];
+  if (position < 75) return [52, 73];
+  return [77, 98];
 }
 
 function placeIndividualMarks(
@@ -127,6 +154,9 @@ function placeIndividualMarks(
     const anchorX = (item.x / 100) * width;
     const anchorY = (item.y / 100) * height;
     const [minBandY, maxBandY] = priorityBandBounds(item.y);
+    const [minBandX, maxBandX] = axisMode === 'priority-horizon'
+      ? horizonBandBounds(item.x)
+      : [0, 100];
     const quadrant = quadrantForPoint(item.x, item.y, axisMode);
     const baseAngle = ((stableHash(item.task.id) % 360) * Math.PI) / 180;
     let best = { x: anchorX, y: anchorY, collisions: Number.POSITIVE_INFINITY };
@@ -134,7 +164,13 @@ function placeIndividualMarks(
     for (let attempt = 0; attempt < 72; attempt += 1) {
       const radius = attempt === 0 ? 0 : 4 + Math.sqrt(attempt) * separation * 0.72;
       const angle = baseAngle + attempt * 2.399963229728653;
-      const candidateX = Math.max(separation / 2, Math.min(width - separation / 2, anchorX + Math.cos(angle) * radius));
+      const candidateX = Math.max(
+        Math.max(separation / 2, (minBandX / 100) * width),
+        Math.min(
+          Math.min(width - separation / 2, (maxBandX / 100) * width),
+          anchorX + Math.cos(angle) * radius,
+        ),
+      );
       const candidateY = Math.max(
         (minBandY / 100) * height,
         Math.min((maxBandY / 100) * height, anchorY + Math.sin(angle) * radius),

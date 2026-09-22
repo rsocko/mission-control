@@ -1,31 +1,27 @@
 import 'server-only';
-import { sqlite } from '@/db';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { requireOperationalUtilityPersistence } from '@/db/persistence/worker-repositories';
 import { resetDemoDatabase } from '@/lib/seed-api';
 import { updateSettings } from '@/lib/mode';
 
 interface PublicDemoRuntimeDependencies {
-  initializeDatabase(): void;
+  initializeDatabase(): void | Promise<void>;
   resetDemoDatabase(): Promise<void>;
-  markSeeded(timestamp: string): void;
+  markSeeded(timestamp: string): void | Promise<void>;
+}
+
+async function publicDemoPersistence() {
+  return requireOperationalUtilityPersistence(await getWorkerPersistenceRepositories())
+    .publicDemo;
 }
 
 const defaultDependencies: PublicDemoRuntimeDependencies = {
-  initializeDatabase() {
-    sqlite.prepare('SELECT 1').get();
+  async initializeDatabase() {
+    await (await publicDemoPersistence()).ensureReady();
   },
   resetDemoDatabase,
-  markSeeded(timestamp) {
-    sqlite.exec(`
-      CREATE TABLE IF NOT EXISTS public_demo_runtime (
-        id TEXT PRIMARY KEY,
-        seeded_at TEXT NOT NULL
-      )
-    `);
-    sqlite.prepare(`
-      INSERT INTO public_demo_runtime (id, seeded_at)
-      VALUES ('seed', ?)
-      ON CONFLICT(id) DO UPDATE SET seeded_at = excluded.seeded_at
-    `).run(timestamp);
+  async markSeeded(timestamp) {
+    await (await publicDemoPersistence()).markSeeded(timestamp);
     updateSettings({ mode: 'demo', demoSeededAt: timestamp });
   },
 };
@@ -33,7 +29,7 @@ const defaultDependencies: PublicDemoRuntimeDependencies = {
 export async function initializePublicDemoData(
   dependencies: PublicDemoRuntimeDependencies = defaultDependencies,
 ): Promise<void> {
-  dependencies.initializeDatabase();
+  await dependencies.initializeDatabase();
   await dependencies.resetDemoDatabase();
-  dependencies.markSeeded(new Date().toISOString());
+  await dependencies.markSeeded(new Date().toISOString());
 }

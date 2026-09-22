@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import QuickSortMode from '@/components/quick-sort/QuickSortMode';
-import { editableTaskPolicy } from '../fixtures/task-edit-policy';
+import type { TaskEditPolicy } from '@/types';
+import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
 const mocks = vi.hoisted(() => ({
   dismiss: vi.fn(),
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   updateTask: vi.fn(),
   suggestions: {},
   taskPriority: 'none',
+  taskEditPolicy: null as unknown as TaskEditPolicy,
   hasTasks: true,
 }));
 
@@ -40,14 +42,15 @@ vi.mock('@/lib/hooks/useQuickSortData', () => ({
       sourceListId: null,
       sourceListName: null,
       dueDate: null,
+      planningHorizon: null,
       createdAt: '2026-07-31T12:00:00.000Z',
       projects: [],
       phases: [],
       tags: [],
-      editPolicy: editableTaskPolicy,
+      editPolicy: mocks.taskEditPolicy,
     }] : [],
     loading: false,
-    counts: { no_priority: 1, no_effort: 1, no_tags: 1, no_due_date: 0 },
+    counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0 },
     suggestions: mocks.suggestions,
     recentTagIds: [],
     dismiss: mocks.dismiss,
@@ -65,6 +68,7 @@ vi.mock('@/components/quick-sort/ModeSelector', () => ({
     <>
       <button disabled={disabled} onClick={() => onSelect('no_tags')}>Open no-tags queue</button>
       <button disabled={disabled} onClick={() => onSelect('no_priority')}>Open priority queue</button>
+      <button disabled={disabled} onClick={() => onSelect('quadrant')}>Open quadrant queue</button>
     </>
   ),
 }));
@@ -76,7 +80,14 @@ vi.mock('@/components/ui/AnimatedCounter', () => ({
     <span data-testid="animated-counter">{value}</span>
   ),
 }));
-vi.mock('@/components/quick-sort/QuickSortCard', () => ({ default: () => <div>Task card</div> }));
+vi.mock('@/components/quick-sort/QuickSortCard', () => ({
+  default: ({ onSkip }: { onSkip: (taskId: string) => void }) => (
+    <>
+      <div>Task card</div>
+      <button onClick={() => onSkip('task-1')}>Simulate swipe up</button>
+    </>
+  ),
+}));
 vi.mock('@/components/quick-sort/QuickSortActions', () => ({
   default: ({ onSkip, onViewTask }: { onSkip: () => void; onViewTask: () => void }) => (
     <>
@@ -109,6 +120,7 @@ describe('QuickSortMode task drawer', () => {
     mocks.alternateReloadQueue.mockResolvedValue(undefined);
     mocks.suggestions = {};
     mocks.taskPriority = 'none';
+    mocks.taskEditPolicy = editableTaskPolicy;
     mocks.hasTasks = true;
   });
 
@@ -121,6 +133,17 @@ describe('QuickSortMode task drawer', () => {
 
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
     expect(mocks.refreshQueue).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the icon-only undo control at a 44px touch target on mobile', () => {
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open no-tags queue' }));
+
+    const undo = screen.getByRole('button', { name: 'Nothing to undo' });
+    expect(undo.className).toContain('min-h-11');
+    expect(undo.className).toContain('min-w-11');
+    expect(undo.querySelector('span')?.className).toContain('hidden');
   });
 
   it('opens task details as an inline desktop panel', () => {
@@ -243,7 +266,7 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.refreshCounts).not.toHaveBeenCalled();
   });
 
-  it('supports desktop keyboard shortcuts without requiring swipe gestures', async () => {
+  it('supports direct priority keyboard shortcuts without requiring swipe gestures', async () => {
     vi.stubGlobal('matchMedia', vi.fn(() => ({
       matches: true,
       addEventListener: vi.fn(),
@@ -256,11 +279,11 @@ describe('QuickSortMode task drawer', () => {
     render(<QuickSortMode />);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
-    fireEvent.keyDown(document, { key: '2' });
+    fireEvent.keyDown(document, { key: '1' });
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
-    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({ priority: 'high' });
+    expect(JSON.parse(String(patchCall?.[1]?.body)).patch).toEqual({ priority: 'critical' });
   });
 
   it('leaves global navigation chords to the app shortcut handler', () => {
@@ -275,7 +298,7 @@ describe('QuickSortMode task drawer', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuickSortMode />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open quadrant queue' }));
     fireEvent.keyDown(document, { key: 'g' });
     fireEvent.keyDown(document, { key: 'd' });
 
@@ -403,8 +426,7 @@ describe('QuickSortMode task drawer', () => {
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
   });
 
-  it('snoozes skipped tasks for 30 minutes before dismissing them', async () => {
-    const now = Date.now();
+  it('records skipped tasks without mutating task fields', async () => {
     const fetchMock = vi.fn<typeof fetch>(
       async () => new Response(JSON.stringify({ success: true })),
     );
@@ -416,17 +438,15 @@ describe('QuickSortMode task drawer', () => {
 
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     const patchCall = fetchMock.mock.calls.find(([url]) => url === '/api/tasks/quick-sort/operations');
-    if (!patchCall) throw new Error('Expected task snooze request');
+    if (!patchCall) throw new Error('Expected Quick Sort skip request');
     const body = JSON.parse(String(patchCall[1]?.body));
-    const snoozedUntil = new Date(body.patch.snoozedUntil).getTime();
-    expect(snoozedUntil).toBeGreaterThanOrEqual(now + 30 * 60 * 1000);
-    expect(snoozedUntil).toBeLessThanOrEqual(Date.now() + 30 * 60 * 1000);
+    expect(body).toMatchObject({ action: 'skipped', patch: {} });
     expect(mocks.refreshCounts).toHaveBeenCalledOnce();
 
     unmount();
   });
 
-  it('keeps a task visible when snoozing it fails', async () => {
+  it('keeps a task visible when recording its skip fails', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 500 })));
     render(<QuickSortMode />);
 
@@ -435,6 +455,53 @@ describe('QuickSortMode task drawer', () => {
 
     await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith('Failed to skip task'));
     expect(mocks.dismiss).not.toHaveBeenCalled();
+  });
+
+  it('allows skip when the upstream source blocks snooze', async () => {
+    mocks.taskEditPolicy = makeTaskEditPolicy({
+      sourceModel: 'remote-mirror',
+      mutations: { snoozedUntil: 'blocked' },
+      reasons: { snoozedUntil: 'Snooze is controlled by the upstream task source' },
+    });
+    const fetchMock = vi.fn<typeof fetch>(
+      async () => new Response(JSON.stringify({ operation: { state: 'applied' } })),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Simulate swipe up' }));
+
+    await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+    const operationCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/tasks/quick-sort/operations',
+    );
+    expect(JSON.parse(String(operationCall?.[1]?.body))).toMatchObject({
+      action: 'skipped',
+      patch: {},
+    });
+  });
+
+  it('reloads authoritative queue membership when undoing a skip', async () => {
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      if (String(input).endsWith('/undo')) {
+        return new Response(JSON.stringify({ undone: true }));
+      }
+      return new Response(JSON.stringify({ operation: { state: 'applied' } }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<QuickSortMode />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Skip task' }));
+    await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
+
+    const undoButton = await screen.findByRole('button', { name: 'Undo Skip' });
+    await waitFor(() => expect(undoButton).toBeEnabled());
+    fireEvent.click(undoButton);
+
+    await waitFor(() => expect(mocks.reloadQueue).toHaveBeenCalledOnce());
+    expect(mocks.restoreTask).not.toHaveBeenCalled();
   });
 
   it('undoes the latest operation with Ctrl+Z and restores its queue position', async () => {
@@ -453,11 +520,11 @@ describe('QuickSortMode task drawer', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<QuickSortMode />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open priority queue' }));
-    fireEvent.keyDown(document, { key: '2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Open quadrant queue' }));
+    fireEvent.keyDown(document, { key: '1' });
     await waitFor(() => expect(mocks.dismiss).toHaveBeenCalledWith('task-1'));
     await waitFor(() => expect(
-      screen.getByRole('button', { name: 'Undo Set priority' }),
+      screen.getByRole('button', { name: 'Undo Do first' }),
     ).toBeEnabled());
 
     const globalUndo = vi.fn();

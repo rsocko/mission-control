@@ -1,4 +1,9 @@
 import type { IdeationNodeKind } from './ideation-types';
+import {
+  createLayeredHierarchyLayout,
+} from '@rsocko/generic-graph-canvas-shared-workbench/layout';
+import type { Placement } from '@rsocko/generic-graph-canvas-shared-workbench/core';
+import { ideationNodesToGraphDocument } from '@/lib/graph-workbench/adapters';
 
 export interface IdeationLayoutNode {
   id: string;
@@ -22,48 +27,37 @@ export interface IdeationMindMapLayout {
   edges: IdeationLayoutEdge[];
 }
 
-const HORIZONTAL_SPACING = 250;
-const VERTICAL_SPACING = 104;
-const ORIGIN_OFFSET = 30;
+const NODE_WIDTH = 176;
+const NODE_HEIGHT = 72;
 
 export function layoutIdeationMindMap(nodes: readonly IdeationLayoutNode[]): IdeationMindMapLayout {
   const ordered = [...nodes].sort((left, right) =>
     left.sortOrder - right.sortOrder || left.id.localeCompare(right.id));
-  const byParent = new Map<string | null, IdeationLayoutNode[]>();
-  for (const node of ordered) {
-    byParent.set(node.parentId, [...(byParent.get(node.parentId) ?? []), node]);
-  }
-
-  const positions = new Map<string, { x: number; y: number }>();
-  const visiting = new Set<string>();
-  let leafIndex = 0;
-  const place = (node: IdeationLayoutNode, depth: number): number => {
-    if (visiting.has(node.id)) {
-      const y = leafIndex++ * VERTICAL_SPACING;
-      positions.set(node.id, {
-        x: depth * HORIZONTAL_SPACING + ORIGIN_OFFSET,
-        y: y + ORIGIN_OFFSET,
-      });
-      return y;
-    }
-    visiting.add(node.id);
-    const children = (byParent.get(node.id) ?? []).filter((child) => !positions.has(child.id));
-    const childYs = children.map((child) => place(child, depth + 1));
-    visiting.delete(node.id);
-    const y = childYs.length
-      ? (Math.min(...childYs) + Math.max(...childYs)) / 2
-      : leafIndex++ * VERTICAL_SPACING;
-    positions.set(node.id, {
-      x: depth * HORIZONTAL_SPACING + ORIGIN_OFFSET,
-      y: y + ORIGIN_OFFSET,
-    });
-    return y;
-  };
-
-  for (const root of byParent.get(null) ?? []) place(root, 0);
-  for (const node of ordered) {
-    if (!positions.has(node.id)) place(node, 0);
-  }
+  const document = ideationNodesToGraphDocument(ordered.map((node) => ({
+    ...node,
+    label: node.id,
+    properties: {},
+  })));
+  const currentPlacements = new Map<string, Placement>(
+    ordered.map((node) => [node.id, {
+      x: 0,
+      y: 0,
+      width: NODE_WIDTH,
+      height: NODE_HEIGHT,
+    }]),
+  );
+  const placements = createLayeredHierarchyLayout(document, currentPlacements, {
+    rootId: ordered.find((node) => node.parentId === null)?.id,
+    orientation: 'horizontal',
+    siblingGap: 32,
+    levelGap: 74,
+  });
+  const positions = new Map(
+    [...placements].map(([id, placement]) => [
+      id,
+      { x: placement.x + 30, y: placement.y + 30 },
+    ]),
+  );
 
   return {
     positions,

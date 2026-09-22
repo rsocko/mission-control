@@ -3,7 +3,8 @@
 import { useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
-import { getTaskStatusGroupLabel } from '@/lib/tasks/task-status-groups';
+import { getTaskGroupLabels, NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
+import { DASHBOARD_TASK_ENTITY_LIMIT } from '@/lib/hooks/useDashboardQueries';
 import type {
   DashboardTaskResponseViewModel as TaskResponse,
   DashboardTaskViewModel as Task,
@@ -22,6 +23,7 @@ interface UseTaskListVirtualizationOptions {
   viewDensity: 'compact' | 'comfortable';
   listRef: React.RefObject<HTMLDivElement | null>;
   groupTotalCounts?: Record<string, number>;
+  groupProjectId?: string;
 }
 
 const PRIORITY_ORDER: Record<string, number> = {
@@ -46,12 +48,36 @@ const DUE_DATE_FIXED_ORDER: Record<string, number> = {
   'No Due Date': Number.MAX_SAFE_INTEGER,
 };
 
+const EFFORT_ORDER: Record<string, number> = {
+  '1': 0,
+  '2': 1,
+  '3': 2,
+  '4': 3,
+  '5': 4,
+  [NO_EFFORT_GROUP_LABEL]: 5,
+};
+const PLANNING_HORIZON_ORDER: Record<string, number> = {
+  Next: 0,
+  Soon: 1,
+  Later: 2,
+  Someday: 3,
+  'Not set': 4,
+};
+
 function getCanonicalGroupOrder(groupBy: string): ((a: string, b: string) => number) | null {
   if (groupBy === 'priority') {
     return (a, b) => (PRIORITY_ORDER[a] ?? 99) - (PRIORITY_ORDER[b] ?? 99);
   }
   if (groupBy === 'status') {
     return (a, b) => (STATUS_ORDER[a] ?? 99) - (STATUS_ORDER[b] ?? 99);
+  }
+  if (groupBy === 'effort') {
+    return (a, b) => (EFFORT_ORDER[a] ?? 99) - (EFFORT_ORDER[b] ?? 99);
+  }
+  if (groupBy === 'planningHorizon') {
+    return (a, b) => (
+      (PLANNING_HORIZON_ORDER[a] ?? 99) - (PLANNING_HORIZON_ORDER[b] ?? 99)
+    );
   }
   if (groupBy === 'source') {
     // Keep sources in a stable alphabetical order, with 'local' last
@@ -74,10 +100,10 @@ function getCanonicalGroupOrder(groupBy: string): ((a: string, b: string) => num
       return a.localeCompare(b);
     };
   }
-  if (groupBy === 'list' || groupBy === 'tag') {
+  if (groupBy === 'list' || groupBy === 'tag' || groupBy === 'phase') {
     return (a, b) => {
-      const aEmpty = a === 'No List' || a === 'Untagged';
-      const bEmpty = b === 'No List' || b === 'Untagged';
+      const aEmpty = a === 'No List' || a === 'Untagged' || a === 'Unassigned';
+      const bEmpty = b === 'No List' || b === 'Untagged' || b === 'Unassigned';
       if (aEmpty && bEmpty) return 0;
       if (aEmpty) return 1;
       if (bEmpty) return -1;
@@ -102,80 +128,25 @@ export function useTaskListVirtualization({
   viewDensity,
   listRef,
   groupTotalCounts,
+  groupProjectId,
 }: UseTaskListVirtualizationOptions) {
-  const virtualRows: VirtualRow[] = useMemo(() => {
-    const tasks = taskResponse.tasks;
-    if (groupBy === 'none' || !tasks.length) {
-      const rows: VirtualRow[] = tasks.map((task) => ({ type: 'task' as const, task }));
-      if (taskResponse.hasMore) rows.push({ type: 'load-more' as const });
-      return rows;
-    }
-
-    const today = groupBy === 'dueDate' ? getClientToday() : '';
-    const groups = new Map<string, Task[]>();
-    for (const task of tasks) {
-      let key: string;
-      if (groupBy === 'source') key = task.connectorType || 'local';
-      else if (groupBy === 'list') key = task.sourceListName || 'No List';
-      else if (groupBy === 'status') key = getTaskStatusGroupLabel(task.status);
-      else if (groupBy === 'priority') key = task.priority || 'none';
-      else if (groupBy === 'dueDate') {
-        if (!task.dueDate) key = 'No Due Date';
-        else if (task.dueDate < today) key = 'Overdue';
-        else if (task.dueDate === today) key = 'Today';
-        else key = task.dueDate;
-      } else if (groupBy === 'tag') {
-        if (task.tags?.length) {
-          for (const tag of task.tags) {
-            const tagKey = tag.name;
-            if (!groups.has(tagKey)) groups.set(tagKey, []);
-            groups.get(tagKey)!.push(task);
-          }
-          continue;
-        } else {
-          key = 'Untagged';
-        }
-      } else if (groupBy === 'project') {
-        if (task.projectPhaseMemberships?.length) {
-          for (const membership of task.projectPhaseMemberships) {
-            const projKey = membership.phaseName
-              ? `${membership.projectName} › ${membership.phaseName}`
-              : `${membership.projectName} › Unphased`;
-            if (!groups.has(projKey)) groups.set(projKey, []);
-            groups.get(projKey)!.push(task);
-          }
-          continue;
-        } else {
-          key = 'No Project';
-        }
-      } else key = 'All';
-
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(task);
-    }
-
-    // Sort groups by canonical order; tasks within each group keep their API sort order
-    const comparator = getCanonicalGroupOrder(groupBy);
-    const sortedKeys = comparator
-      ? Array.from(groups.keys()).sort(comparator)
-      : Array.from(groups.keys());
-
-    const rows: VirtualRow[] = [];
-    for (const label of sortedKeys) {
-      const groupTasks = groups.get(label)!;
-      const totalCount = groupTotalCounts?.[label];
-      rows.push({ type: 'header', label, count: groupTasks.length, totalCount });
-      if (!collapsedGroups.has(label)) {
-        for (const task of groupTasks) rows.push({ type: 'task', task });
-        // Show per-group load more when the group has more items than currently loaded
-        if (totalCount && totalCount > groupTasks.length) {
-          rows.push({ type: 'load-more-group', label, remaining: totalCount - groupTasks.length });
-        }
-      }
-    }
-    if (taskResponse.hasMore) rows.push({ type: 'load-more' });
-    return rows;
-  }, [taskResponse.tasks, taskResponse.hasMore, groupBy, collapsedGroups, groupTotalCounts]);
+  const virtualRows = useMemo(
+    () => buildTaskListRows({
+      taskResponse,
+      groupBy,
+      collapsedGroups,
+      groupTotalCounts,
+      groupProjectId,
+    }),
+    [
+      taskResponse.tasks,
+      taskResponse.hasMore,
+      groupBy,
+      collapsedGroups,
+      groupTotalCounts,
+      groupProjectId,
+    ],
+  );
 
   const rowVirtualizer = useVirtualizer({
     count: virtualRows.length,
@@ -197,4 +168,68 @@ export function useTaskListVirtualization({
     rowVirtualizer,
     virtualItems,
   };
+}
+
+type BuildTaskListRowsOptions = Pick<
+  UseTaskListVirtualizationOptions,
+  'taskResponse' | 'groupBy' | 'collapsedGroups' | 'groupTotalCounts' | 'groupProjectId'
+>;
+
+export function buildTaskListRows({
+  taskResponse,
+  groupBy,
+  collapsedGroups,
+  groupTotalCounts,
+  groupProjectId,
+}: BuildTaskListRowsOptions): VirtualRow[] {
+  const tasks = taskResponse.tasks;
+  if (groupBy === 'none' || !tasks.length) {
+    const rows: VirtualRow[] = tasks.map((task) => ({ type: 'task', task }));
+    if (taskResponse.hasMore) rows.push({ type: 'load-more' });
+    return rows;
+  }
+
+  const today = groupBy === 'dueDate' ? getClientToday() : '';
+  const groups = new Map<string, Task[]>();
+  for (const task of tasks) {
+    for (const label of getTaskGroupLabels(task, groupBy, today, {
+      projectId: groupProjectId,
+    })) {
+      if (!groups.has(label)) groups.set(label, []);
+      groups.get(label)!.push(task);
+    }
+  }
+
+  // Include groups not represented on the first page so each can load independently.
+  const groupKeys = new Set(groups.keys());
+  for (const [label, count] of Object.entries(groupTotalCounts ?? {})) {
+    if (count > 0) groupKeys.add(label);
+  }
+
+  // Sort groups by canonical order; tasks within each group keep their API sort order.
+  const comparator = getCanonicalGroupOrder(groupBy);
+  const sortedKeys = comparator
+    ? Array.from(groupKeys).sort(comparator)
+    : Array.from(groupKeys);
+
+  const rows: VirtualRow[] = [];
+  for (const label of sortedKeys) {
+    const groupTasks = groups.get(label) ?? [];
+    const totalCount = groupTotalCounts?.[label];
+    rows.push({ type: 'header', label, count: groupTasks.length, totalCount });
+    if (!collapsedGroups.has(label)) {
+      for (const task of groupTasks) rows.push({ type: 'task', task });
+      if (
+        tasks.length < DASHBOARD_TASK_ENTITY_LIMIT
+        && totalCount !== undefined
+        && totalCount > groupTasks.length
+      ) {
+        rows.push({ type: 'load-more-group', label, remaining: totalCount - groupTasks.length });
+      }
+    }
+  }
+  if (Object.keys(groupTotalCounts ?? {}).length === 0 && taskResponse.hasMore) {
+    rows.push({ type: 'load-more' });
+  }
+  return rows;
 }

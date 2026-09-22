@@ -1,10 +1,14 @@
 import { NextResponse } from 'next/server';
-import { pushNotificationScheduler } from '@/lib/push/scheduler';
+import {
+  pushNotificationScheduler,
+  scheduledSummariesEnabled,
+} from '@/lib/push/scheduler';
 
 /** GET /api/push/scheduler — Get scheduler status */
 export async function GET() {
   return NextResponse.json({
     running: pushNotificationScheduler.isRunning(),
+    enabled: await scheduledSummariesEnabled(),
     jobs: pushNotificationScheduler.getStatus(),
   });
 }
@@ -19,16 +23,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const action = body.action;
-
     switch (action) {
       case 'start':
-        await pushNotificationScheduler.start();
+        await pushNotificationScheduler.startAndPersist();
         break;
       case 'stop':
-        await pushNotificationScheduler.stop();
+        await pushNotificationScheduler.stopAndPersist();
         break;
       case 'restart':
-        await pushNotificationScheduler.restart();
+        await pushNotificationScheduler.restartAndPersist();
         break;
       default:
         return NextResponse.json(
@@ -40,6 +43,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       status: action === 'stop' ? 'stopped' : 'running',
       running: pushNotificationScheduler.isRunning(),
+      enabled: await scheduledSummariesEnabled(),
       jobs: pushNotificationScheduler.getStatus(),
     });
   } catch (error) {

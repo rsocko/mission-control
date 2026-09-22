@@ -57,6 +57,10 @@ describe('GitHub dependency relationship health', () => {
   it('reports partial and repeated failures ahead of age', () => {
     expect(getDependencyRelationshipDegradation(progress({
       latestTerminalOutcome: 'partial',
+      failureReason: 'Dependency relationship polling stopped',
+    }), staleAfterMs, now)).toBe('GitHub relationship verification was interrupted');
+    expect(getDependencyRelationshipDegradation(progress({
+      latestTerminalOutcome: 'partial',
       consecutiveFailedGenerationCount: 3,
     }), staleAfterMs, now)).toBe('Latest GitHub relationship poll was partial');
     expect(getDependencyRelationshipDegradation(progress({

@@ -1,7 +1,7 @@
-import db from '@/db';
-import { hubProjects, tasks, taskProjects, projectTags, tags } from '@/db/schema';
-import { eq, inArray } from 'drizzle-orm';
-import type { ProjectStatus, ProjectHealth, ProjectProgress, HubProject, Tag } from '@/types';
+import type { ProjectStatus, ProjectProgress, HubProject, Tag } from '@/types';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { requireGraphReportingPersistence } from '@/db/persistence/worker-repositories';
+import { deriveProjectPulse } from '@/lib/projects/project-pulse';
 
 // ─── STATUS INFERENCE ───────────────────────────────────────────────────────
 
@@ -14,45 +14,15 @@ export function inferProjectStatus(progress: ProjectProgress, override?: Project
   return 'not_started';
 }
 
-export function inferHealth(
-  targetDate: string | null | undefined,
-  progress: ProjectProgress,
-  overdueTasks: number
-): ProjectHealth {
-  const overduePercent = overdueTasks / Math.max(progress.totalTasks, 1);
-
-  if (overduePercent > 0.3) return 'behind';
-  if (overduePercent > 0.1) return 'at_risk';
-
-  if (targetDate) {
-    const target = new Date(targetDate);
-    const now = new Date();
-    const daysRemaining = (target.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-    // At risk if <20% of time left but <80% complete
-    if (daysRemaining < 7 && progress.percentComplete < 80) return 'at_risk';
-    if (daysRemaining < 0 && progress.percentComplete < 100) return 'behind';
-  }
-
-  return 'on_track';
-}
-
 // ─── PROGRESS COMPUTATION ───────────────────────────────────────────────────
 
 export async function computeProjectProgress(projectId: string): Promise<ProjectProgress> {
-  const projectTaskIds = await db
-    .select({ taskId: taskProjects.taskId })
-    .from(taskProjects)
-    .where(eq(taskProjects.projectId, projectId));
-
-  if (projectTaskIds.length === 0) {
+  const projectTasks = await requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).overview.listProjectTaskStatuses(projectId);
+  if (projectTasks.length === 0) {
     return { totalTasks: 0, completedTasks: 0, inProgressTasks: 0, percentComplete: 0, health: 'on_track' };
   }
-
-  const ids = projectTaskIds.map(t => t.taskId);
-  const projectTasks = await db
-    .select({ status: tasks.status, updatedAt: tasks.updatedAt, parentId: tasks.parentId })
-    .from(tasks)
-    .where(inArray(tasks.id, ids));
 
   const topLevelTasks = topLevelProjectTasks(projectTasks);
   const totalTasks = topLevelTasks.length;
@@ -72,27 +42,19 @@ export async function computeProjectProgress(projectId: string): Promise<Project
 
 // ─── FETCH TAGS FOR PROJECTS ──────────────────────────────────────────────
 
-async function getProjectTagsMap(projectIds: string[]): Promise<Record<string, Tag[]>> {
-  if (projectIds.length === 0) return {};
-
-  const rows = await db
-    .select({ projectId: projectTags.projectId, tag: tags })
-    .from(projectTags)
-    .innerJoin(tags, eq(projectTags.tagId, tags.id))
-    .where(inArray(projectTags.projectId, projectIds));
-
+function getProjectTagsMap(rows: Array<Tag & { projectId: string }>): Record<string, Tag[]> {
   const map: Record<string, Tag[]> = {};
   for (const row of rows) {
     if (!map[row.projectId]) map[row.projectId] = [];
     map[row.projectId].push({
-      id: row.tag.id,
-      name: row.tag.name,
-      slug: row.tag.slug,
-      type: row.tag.type as Tag['type'],
-      source: row.tag.source || undefined,
-      color: row.tag.color || undefined,
-      confirmed: row.tag.confirmed,
-      createdAt: row.tag.createdAt,
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      type: row.type as Tag['type'],
+      source: row.source || undefined,
+      color: row.color || undefined,
+      confirmed: row.confirmed,
+      createdAt: row.createdAt,
     });
   }
   return map;
@@ -102,7 +64,7 @@ async function getProjectTagsMap(projectIds: string[]): Promise<Record<string, T
 
 export interface CategoryGroup {
   category: string;
-  projects: (HubProject & { progress: ProjectProgress })[];
+  projects: OverviewProject[];
 }
 
 export interface ProjectsOverview {
@@ -133,7 +95,64 @@ export interface OverviewTask {
   completedAt: string | null;
 }
 
-export type OverviewProject = HubProject & { progress: ProjectProgress };
+export interface OverviewPhase {
+  id: string;
+  name: string;
+  status: string;
+  color: string | null;
+  totalTasks: number;
+  completedTasks: number;
+  inProgressTasks: number;
+  percentComplete: number;
+}
+
+export type OverviewProject = HubProject & {
+  progress: ProjectProgress;
+  phases: OverviewPhase[];
+};
+
+export function buildProjectPhaseSummaries(
+  phases: Array<{
+    id: string;
+    projectId: string;
+    name: string;
+    status: string;
+    color: string | null;
+  }>,
+  phaseItems: Array<{ phaseId: string; taskId: string }>,
+  taskMap: Map<string, OverviewTask>,
+): Map<string, OverviewPhase[]> {
+  const phaseTaskIdsMap = new Map<string, string[]>();
+  for (const item of phaseItems) {
+    const taskIds = phaseTaskIdsMap.get(item.phaseId) ?? [];
+    taskIds.push(item.taskId);
+    phaseTaskIdsMap.set(item.phaseId, taskIds);
+  }
+
+  const phasesByProject = new Map<string, OverviewPhase[]>();
+  for (const phase of phases) {
+    const phaseTasks = (phaseTaskIdsMap.get(phase.id) ?? [])
+      .map(taskId => taskMap.get(taskId))
+      .filter((task): task is OverviewTask => task !== undefined);
+    const totalTasks = phaseTasks.length;
+    const completedTasks = phaseTasks.filter(task => task.status === 'done').length;
+    const inProgressTasks = phaseTasks.filter(task => task.status === 'in_progress').length;
+    const projectPhases = phasesByProject.get(phase.projectId) ?? [];
+    projectPhases.push({
+      id: phase.id,
+      name: phase.name,
+      status: phase.status,
+      color: phase.color,
+      totalTasks,
+      completedTasks,
+      inProgressTasks,
+      percentComplete: totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0,
+    });
+    phasesByProject.set(phase.projectId, projectPhases);
+  }
+
+  return phasesByProject;
+}
 
 const projectNameCollator = new Intl.Collator('en', {
   numeric: true,
@@ -262,9 +281,10 @@ export function buildPortfolioPulse(
 }
 
 export async function getProjectsOverview(): Promise<ProjectsOverview> {
-  // Fetch all visible projects (exclude hidden)
-  const allProjects = (await db.select().from(hubProjects).orderBy(hubProjects.name))
-    .filter(p => !p.hidden);
+  const rows = await requireGraphReportingPersistence(
+    await getWorkerPersistenceRepositories(),
+  ).overview.read();
+  const allProjects = rows.projects;
 
   if (allProjects.length === 0) {
     return {
@@ -286,30 +306,8 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
     };
   }
 
-  const projectIds = allProjects.map(p => p.id);
-
-  // Batch: fetch all task-project mappings in one query
-  const allProjectTaskRows = await db
-    .select({ projectId: taskProjects.projectId, taskId: taskProjects.taskId })
-    .from(taskProjects)
-    .where(inArray(taskProjects.projectId, projectIds));
-
-  // Collect all unique task IDs and batch-fetch task data
-  const allTaskIds = [...new Set(allProjectTaskRows.map(r => r.taskId))];
-  const allTaskData = allTaskIds.length > 0
-    ? await db
-        .select({
-          id: tasks.id,
-          title: tasks.title,
-          status: tasks.status,
-          parentId: tasks.parentId,
-          dueDate: tasks.dueDate,
-          updatedAt: tasks.updatedAt,
-          completedAt: tasks.completedAt,
-        })
-        .from(tasks)
-        .where(inArray(tasks.id, allTaskIds))
-    : [];
+  const allProjectTaskRows = rows.memberships;
+  const allTaskData = rows.tasks;
 
   // Build lookup maps
   const taskMap = new Map(topLevelProjectTasks(allTaskData).map(t => [t.id, t]));
@@ -345,29 +343,48 @@ export async function getProjectsOverview(): Promise<ProjectsOverview> {
       totalTasks, completedTasks, inProgressTasks, percentComplete,
       health: 'on_track', lastActivity,
     };
-    progress.health = inferHealth(project.targetDate, progress, overdueTasks);
-
     const status = inferProjectStatus(progress, project.statusOverride as ProjectStatus | null);
+    const recentlyCompletedTasks = projectTasks.filter((task) => (
+      task.status === 'done'
+      && task.completedAt
+      && new Date(task.completedAt) >= new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000))
+      && new Date(task.completedAt) <= now
+    )).length;
+    progress.pulse = deriveProjectPulse({
+      totalTasks,
+      completedTasks,
+      percentComplete,
+      overdueTasks,
+      scheduledTasks: projectTasks.filter((task) => Boolean(task.dueDate)).length,
+      targetDate: project.targetDate,
+      lastActivity,
+      recentlyCompletedTasks,
+      lifecycleStatus: status,
+    }, now);
+    progress.health = progress.pulse.legacyHealth;
 
     return { ...project, status, progress };
   });
 
+  const phasesByProject = buildProjectPhaseSummaries(rows.phases, rows.phaseItems, taskMap);
+
   // Get tags (already batched)
-  const projectTagsMap = await getProjectTagsMap(projectIds);
+  const projectTagsMap = getProjectTagsMap(rows.tags as Array<Tag & { projectId: string }>);
 
   // Enrich with tags
   const enrichedProjects = projectsWithProgress.map(p => ({
     ...p,
+    phases: phasesByProject.get(p.id) ?? [],
     tags: projectTagsMap[p.id] || [],
     sourceBindings: (p.sourceBindings as unknown) || [],
     autoIncludeRules: (p.autoIncludeRules as unknown) || [],
     kanbanColumns: (p.kanbanColumns as unknown) || [],
     metadata: (p.metadata as Record<string, unknown>) || {},
-  })) as unknown as (HubProject & { progress: ProjectProgress })[];
+  })) as unknown as OverviewProject[];
 
   // Group by category
-  const categoryMap = new Map<string, (HubProject & { progress: ProjectProgress })[]>();
-  const uncategorized: (HubProject & { progress: ProjectProgress })[] = [];
+  const categoryMap = new Map<string, OverviewProject[]>();
+  const uncategorized: OverviewProject[] = [];
 
   for (const project of enrichedProjects) {
     if (project.category) {

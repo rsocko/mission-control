@@ -1,10 +1,11 @@
 'use client';
 
 import Link from 'next/link';
-import { CalendarDays, Check, Circle, ExternalLink } from 'lucide-react';
+import { CalendarDays, ExternalLink } from 'lucide-react';
 import { formatToolDate } from '@/lib/ai/chatFormatters';
 import type { TaskReference } from '@/lib/ai/toolResultSchemas';
 import { getTaskPriorityVisual } from '@/lib/constants/task-formatting';
+import { TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 
 export function TaskReferenceRow({
   task,
@@ -31,9 +32,12 @@ export function TaskReferenceRow({
       className="group flex min-h-11 items-start gap-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-0)] p-2.5 text-left transition-colors hover:border-[var(--accent-400)] hover:bg-[var(--surface-2)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-400)]"
       aria-label={`Open task: ${task.title}`}
     >
-      <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border ${done ? 'border-emerald-400 bg-emerald-400 text-white' : 'border-[var(--border-strong)] text-[var(--text-muted)]'}`}>
-        {done ? <Check size={12} /> : index ? <span className="text-[10px] font-semibold">{index}</span> : <Circle size={9} />}
-      </span>
+      <TaskStatusIndicator
+        status={task.status ?? 'todo'}
+        microStatus={task.microStatus}
+        idleContent={index ? <span className="text-[10px] font-semibold">{index}</span> : null}
+        className="mt-0.5"
+      />
       <span className="min-w-0 flex-1">
         <span className={`block truncate text-sm font-medium ${done ? 'text-[var(--text-muted)] line-through' : 'text-[var(--text-primary)]'}`}>
           {task.title}

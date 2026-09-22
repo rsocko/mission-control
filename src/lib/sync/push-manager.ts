@@ -1,10 +1,8 @@
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem } from '@/types';
 import type { SyncAuditEntry } from './index';
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { eq, and, or, like, not, inArray } from 'drizzle-orm';
-import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
+import type { ConnectorTaskRecord } from '@/db/persistence/connector-execution';
+import { resolvePersistedConnectorCapabilities } from '@/lib/connectors/resolved-capabilities';
 import { syncLogger } from '@/lib/logger';
 import { isDemoMode } from '@/lib/mode';
 import {
@@ -18,7 +16,7 @@ import {
 import {
   ConnectorOperationBusyError,
   runWithConnectorOperationLease,
-} from './connector-lock';
+} from './connector-lock-runtime';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
   authorizeGitHubWrite,
@@ -33,10 +31,15 @@ import {
   finishGitHubWriteCycle,
   GitHubWriteFenceError,
   GitHubUnknownWriteOutcomeError,
-  persistExternalIdentityBatch,
-  type GitHubStableIdentityRuntime,
   type GitHubWriteAuthorization,
-} from '@/lib/external-identities';
+} from '@/lib/external-identities/github-write-fence';
+import type {
+  GitHubStableIdentityRuntime,
+} from '@/lib/external-identities/stable-identity-runtime';
+import {
+  persistGitHubPrimaryIdentityBatch,
+} from '@/lib/external-identities/primary-identity';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /** Maximum number of push retries before marking a task as permanently failed */
 const MAX_PUSH_RETRIES = 5;
@@ -96,6 +99,9 @@ async function pushPendingChangesWithLease(
   taskIds?: string[],
   options?: PushPendingOptions,
 ): Promise<{ pushed: number; errors: string[] }> {
+  const repositories = await getWorkerPersistenceRepositories();
+  const execution = repositories.execution;
+  execution.support.assertConnectorSupported(connector);
   if (isDemoMode()) {
     return { pushed: 0, errors: [] };
   }
@@ -104,8 +110,16 @@ async function pushPendingChangesWithLease(
   const pushFailures: unknown[] = [];
   const audit = auditLog || [];
   let pushed = 0;
+  const persistence = execution.pushes;
 
-  const caps = await getConnectorCapabilities(connectorId);
+  const persistedConnector = await repositories.connectors.get(connectorId);
+  const caps = persistedConnector
+    ? resolvePersistedConnectorCapabilities({
+        type: persistedConnector.type,
+        capabilities: persistedConnector.capabilities,
+        settings: persistedConnector.settings,
+      })
+    : connector.capabilities ?? null;
   const canWrite = !caps || caps.write !== false;
   const canCreate = !caps || (
     caps.notificationOnly !== true
@@ -119,45 +133,23 @@ async function pushPendingChangesWithLease(
     return { pushed: 0, errors: [] };
   }
 
-  const pendingPredicate = and(
-    eq(tasks.connectorInstanceId, connectorId),
-    or(
-      eq(tasks.syncStatus, 'pending_push'),
-      eq(tasks.syncStatus, 'push_error'),
-      ...(fencedGitHubPush ? [eq(tasks.syncStatus, 'pushing')] : []),
-      like(tasks.sourceId, 'local:%'),
-      and(
-        eq(tasks.isChecklistItem, true),
-        eq(tasks.sourceId, tasks.id),
-        not(eq(tasks.syncStatus, 'push_failed')),
-      ),
-    ),
-  );
-
-  const pendingTasks = await db.select()
-    .from(tasks)
-    .where(
-      taskIds
-        ? and(pendingPredicate, inArray(tasks.id, taskIds))
-        : pendingPredicate,
-    );
+  const pendingTasks = await persistence.listCandidates({
+    connectorId,
+    taskIds,
+    includePushing: true,
+  });
   await Promise.all(pendingTasks
     .filter((task) => task.sourceId.startsWith('checklist:'))
-    .map((task) => db.update(tasks).set({
-      syncStatus: 'synced',
-      lastSyncedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, task.id))));
+    .map((task) => persistence.markSynced(task.id, new Date().toISOString())));
   const parentIds = [...new Set(pendingTasks
     .filter((task) => task.isChecklistItem && task.parentId)
     .map((task) => task.parentId!))];
   const parentTasks = parentIds.length === 0
     ? []
-    : await db.select({ id: tasks.id, sourceId: tasks.sourceId })
-      .from(tasks)
-      .where(inArray(tasks.id, parentIds));
+    : await persistence.listSourceIds(parentIds);
   const parentSourceIds = new Map(parentTasks.map((task) => [task.id, task.sourceId]));
   const pushLeaseTokens = new Map<string, string>();
-  const claimedTasksById = new Map<string, typeof tasks.$inferSelect>();
+  const claimedTasksById = new Map<string, ConnectorTaskRecord>();
   if (fencedGitHubPush) {
     for (const task of pendingTasks) {
       const operation = remoteDispatchOperation(
@@ -171,7 +163,7 @@ async function pushPendingChangesWithLease(
       if (!token) continue;
       const claimedTask = await loadClaimedTaskForPush(task.id, token);
       if (!claimedTask) continue;
-      if (hasSucceededGitHubWrite({
+      if (await hasSucceededGitHubWrite({
         connectorInstanceId: connectorId,
         taskId: claimedTask.id,
         operation,
@@ -224,15 +216,13 @@ async function pushPendingChangesWithLease(
     }
     const claimedTasks = (await Promise.all([...pushLeaseTokens].map(
       async ([taskId, token]) => loadClaimedTaskForPush(taskId, token),
-    ))).filter((task): task is typeof tasks.$inferSelect => task !== null);
+    ))).filter((task): task is ConnectorTaskRecord => task !== null);
     const claimedParentIds = [...new Set(claimedTasks
       .filter((task) => task.isChecklistItem && task.parentId)
       .map((task) => task.parentId!))];
     const claimedParents = claimedParentIds.length === 0
       ? []
-      : await db.select({ id: tasks.id, sourceId: tasks.sourceId })
-        .from(tasks)
-        .where(inArray(tasks.id, claimedParentIds));
+      : await persistence.listSourceIds(claimedParentIds);
     const claimedParentSourceIds = new Map(
       claimedParents.map((task) => [task.id, task.sourceId]),
     );
@@ -264,7 +254,7 @@ async function pushPendingChangesWithLease(
   let writeCycleId: string | null = null;
   if (fencedGitHubPush) {
     try {
-      writeCycleId = beginGitHubWriteCycle({
+      writeCycleId = await beginGitHubWriteCycle({
         connectorInstanceId: connectorId,
         modeSnapshot: options!.identityMode!,
         jobId: options?.jobId,
@@ -325,6 +315,21 @@ async function pushPendingChangesWithLease(
       }
       task = claimedTask;
     }
+    if (
+      !pushLeaseToken
+      && remoteDispatchOperation(
+        task,
+        connector,
+        { canWrite, canCreate, canDelete },
+        parentSourceIds,
+      )
+    ) {
+      pushLeaseToken = await claimTaskForPush(task.id);
+      if (!pushLeaseToken) continue;
+      const claimedTask = await loadClaimedTaskForPush(task.id, pushLeaseToken);
+      if (!claimedTask) continue;
+      task = claimedTask;
+    }
     const isPendingCreate = task.sourceId.startsWith('local:')
       || (task.isChecklistItem && task.sourceId === task.id);
     // Yield every 5 tasks to keep healthchecks responsive
@@ -339,10 +344,7 @@ async function pushPendingChangesWithLease(
       // Legacy checklist items (body checkboxes) can't be pushed individually —
       // they're synced as part of the parent issue's description.
       if (task.sourceId.startsWith('checklist:')) {
-        await db.update(tasks).set({
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        }).where(eq(tasks.id, task.id));
+        await persistence.markSynced(task.id, new Date().toISOString());
         continue;
       }
 
@@ -380,7 +382,7 @@ async function pushPendingChangesWithLease(
             }),
           );
 
-          persistCreatedGitHubIdentity(
+          await persistCreatedGitHubIdentity(
             connectorId,
             task.id,
             created,
@@ -393,6 +395,7 @@ async function pushPendingChangesWithLease(
             created.metadata,
             undefined,
             task.updatedAt,
+            task.sourceId,
           );
           if (!finalized) continue;
 
@@ -413,7 +416,7 @@ async function pushPendingChangesWithLease(
           continue;
         }
         if (connector.createSubTask) {
-          const [parentTask] = await db.select({ id: tasks.id, sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, task.parentId));
+          const [parentTask] = await persistence.listSourceIds([task.parentId]);
           if (parentTask && !parentTask.sourceId.startsWith('local:') && parentTask.sourceId !== task.parentId) {
             pushLeaseToken ??= await claimTaskForPush(task.id);
             if (!pushLeaseToken) {
@@ -428,7 +431,7 @@ async function pushPendingChangesWithLease(
               }),
             );
 
-            persistCreatedGitHubIdentity(
+            await persistCreatedGitHubIdentity(
               connectorId,
               task.id,
               created,
@@ -441,6 +444,7 @@ async function pushPendingChangesWithLease(
               created.metadata,
               undefined,
               task.updatedAt,
+              task.sourceId,
             );
             if (!finalized) continue;
 
@@ -455,10 +459,7 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
         }
       } else if (task.status === 'done' && task.isChecklistItem && task.parentId && connector.completeSubTask) {
@@ -466,7 +467,7 @@ async function pushPendingChangesWithLease(
           audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Write disabled for connector' });
           continue;
         }
-        const [parentTask] = await db.select({ id: tasks.id, sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, task.parentId));
+        const [parentTask] = await persistence.listSourceIds([task.parentId]);
         if (parentTask && !parentTask.sourceId.startsWith('local:') && parentTask.sourceId !== task.parentId) {
           await dispatchGitHubWrite(
             connectorId, connector, task, pushLeaseToken, 'sub_issue', options, cycleOutcome,
@@ -478,10 +479,7 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked checklist item complete on remote' });
@@ -502,13 +500,28 @@ async function pushPendingChangesWithLease(
             task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
           )) continue;
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'synced',
-            lastSyncedAt: new Date().toISOString(),
-          }).where(eq(tasks.id, task.id));
+          await persistence.markSynced(task.id, new Date().toISOString());
         }
         pushed++;
         audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked complete on remote' });
+      } else if (task.status === 'cancelled' && connector.cancelTask) {
+        if (!canWrite) {
+          audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Write disabled for connector' });
+          continue;
+        }
+        await dispatchGitHubWrite(
+          connectorId, connector, task, pushLeaseToken, 'complete', options, cycleOutcome, [],
+          () => connector.cancelTask!(task.sourceId),
+        );
+        if (pushLeaseToken) {
+          if (!await completeTaskPush(
+            task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
+          )) continue;
+        } else {
+          await persistence.markSynced(task.id, new Date().toISOString());
+        }
+        pushed++;
+        audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Marked complete on remote while retaining local cancellation' });
       } else if (task.status === 'cancelled' && connector.deleteTask) {
         if (!canDelete) {
           audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Delete disabled for connector' });
@@ -523,10 +536,7 @@ async function pushPendingChangesWithLease(
             task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
           )) continue;
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'synced',
-            lastSyncedAt: new Date().toISOString(),
-          }).where(eq(tasks.id, task.id));
+          await persistence.markSynced(task.id, new Date().toISOString());
         }
         pushed++;
         audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Deleted on remote' });
@@ -535,7 +545,7 @@ async function pushPendingChangesWithLease(
           audit.push({ action: 'protected', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Write disabled for connector' });
           continue;
         }
-        const [parentTask] = await db.select({ id: tasks.id, sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, task.parentId));
+        const [parentTask] = await persistence.listSourceIds([task.parentId]);
         if (parentTask && !parentTask.sourceId.startsWith('local:') && parentTask.sourceId !== task.parentId) {
           await dispatchGitHubWrite(
             connectorId, connector, task, pushLeaseToken, 'sub_issue', options, cycleOutcome,
@@ -550,10 +560,7 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Updated checklist item on remote' });
@@ -599,12 +606,10 @@ async function pushPendingChangesWithLease(
               task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
+            await persistence.markSynced(task.id, new Date().toISOString(), {
               status: remoteResult.status,
               completedAt: remoteResult.completedAt || new Date().toISOString(),
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            });
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: `Remote is ${remoteResult.status} — applied terminal status from remote` });
@@ -614,19 +619,13 @@ async function pushPendingChangesWithLease(
               task.id, pushLeaseToken, task.sourceId, undefined, undefined, task.updatedAt,
             )) continue;
           } else {
-            await db.update(tasks).set({
-              syncStatus: 'synced',
-              lastSyncedAt: new Date().toISOString(),
-            }).where(eq(tasks.id, task.id));
+            await persistence.markSynced(task.id, new Date().toISOString());
           }
           pushed++;
           audit.push({ action: 'pushed', taskTitle: task.title, taskSourceId: task.sourceId, taskId: task.id, reason: 'Updated on remote' });
         }
       } else {
-        await db.update(tasks).set({
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        }).where(eq(tasks.id, task.id));
+        await persistence.markSynced(task.id, new Date().toISOString());
       }
     } catch (err) {
       pushFailures.push(err);
@@ -755,10 +754,7 @@ async function pushPendingChangesWithLease(
             task.updatedAt,
           );
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'push_failed',
-            pushRetryCount: newRetryCount,
-          }).where(eq(tasks.id, task.id));
+          await persistence.markFailure(task.id, 'push_failed', newRetryCount);
         }
         syncLogger.warn({ taskId: task.id, title: task.title, retries: newRetryCount }, 'Push permanently failed after max retries');
       } else {
@@ -771,10 +767,7 @@ async function pushPendingChangesWithLease(
             task.updatedAt,
           );
         } else {
-          await db.update(tasks).set({
-            syncStatus: 'push_error',
-            pushRetryCount: newRetryCount,
-          }).where(eq(tasks.id, task.id));
+          await persistence.markFailure(task.id, 'push_error', newRetryCount);
         }
       }
     } finally {
@@ -790,7 +783,7 @@ async function pushPendingChangesWithLease(
   }
 
   if (writeCycleId) {
-    if (!finishGitHubWriteCycle(writeCycleId, cycleOutcome)) {
+    if (!(await finishGitHubWriteCycle(writeCycleId, cycleOutcome))) {
       syncLogger.error({
         connectorId,
         writeCycleId,
@@ -803,7 +796,7 @@ async function pushPendingChangesWithLease(
 }
 
 function remoteDispatchOperation(
-  task: typeof tasks.$inferSelect,
+  task: ConnectorTaskRecord,
   connector: IConnector,
   capabilities: { canWrite: boolean; canCreate: boolean; canDelete: boolean },
   parentSourceIds: ReadonlyMap<string, string>,
@@ -835,6 +828,7 @@ function remoteDispatchOperation(
     return capabilities.canWrite && connector.completeTask ? 'complete' : null;
   }
   if (task.status === 'cancelled') {
+    if (capabilities.canWrite && connector.cancelTask) return 'complete';
     return capabilities.canDelete && connector.deleteTask ? 'delete' : null;
   }
   if (task.isChecklistItem && task.parentId) {
@@ -850,7 +844,7 @@ function releaseStatusFor(syncStatus: string | undefined): string {
 async function dispatchGitHubWrite<T>(
   connectorId: string,
   connector: IConnector,
-  task: typeof tasks.$inferSelect,
+  task: ConnectorTaskRecord,
   taskPushLeaseToken: string | null,
   operation: 'create' | 'update' | 'complete' | 'delete' | 'sub_issue',
   options: Parameters<typeof pushPendingChanges>[4],
@@ -870,7 +864,7 @@ async function dispatchGitHubWrite<T>(
     throw new GitHubWriteFenceError('missing_frozen_identity_mode');
   }
 
-  const authorization = authorizeGitHubWrite({
+  const authorization = await authorizeGitHubWrite({
     connectorInstanceId: connectorId,
     taskId: task.id,
     operation,
@@ -898,38 +892,41 @@ async function dispatchGitHubWrite<T>(
     if (!preflight.runAuthorizedWrite) {
       throw new GitHubWriteFenceError('missing_authorized_write_wrapper');
     }
-    assertGitHubWriteCycleCurrent(authorization);
+    await assertGitHubWriteCycleCurrent(authorization);
     const observed = await preflight.preflightWriteRoute(authorization);
-    verifyGitHubWritePreflight(authorization, observed);
-    confirmGitHubWriteDispatch(authorization);
+    await verifyGitHubWritePreflight(authorization, observed);
+    await confirmGitHubWriteDispatch(authorization);
     dispatched = true;
     const result = await preflight.runAuthorizedWrite(authorization, dispatch);
-    finalizeGitHubWrite(authorization, 'succeeded', undefined, result);
+    await finalizeGitHubWrite(authorization, 'succeeded', undefined, result);
     cycle.applied++;
     return result;
   } catch (error) {
     if (dispatched) {
-      quarantineUnknownGitHubWrite(authorization, error);
+      await quarantineUnknownGitHubWrite(authorization, error);
     }
     if (error instanceof GitHubWriteFenceError) {
-      finalizeUndispatchedFence(authorization, error.code);
+      await finalizeUndispatchedFence(authorization, error.code);
       throw error;
     }
-    finalizeGitHubWrite(authorization, 'failed', 'definitive_remote_failure');
+    await finalizeGitHubWrite(authorization, 'failed', 'definitive_remote_failure');
     throw error;
   }
 }
 
-function persistCreatedGitHubIdentity(
+async function persistCreatedGitHubIdentity(
   connectorInstanceId: string,
   taskId: string,
   created: TaskItem,
   runtime?: GitHubStableIdentityRuntime,
-): void {
-  if (!runtime || !created.externalIdentity) return;
+): Promise<void> {
+  if (!runtime) return;
   try {
-    runtime.assertCurrentMode();
-    persistExternalIdentityBatch([{
+    if (!created.externalIdentity) {
+      throw new GitHubWriteFenceError('created_identity_evidence_missing');
+    }
+    await runtime.assertCurrentMode();
+    const [result] = await persistGitHubPrimaryIdentityBatch([{
       target: {
         connectorInstanceId,
         bindingType: 'task',
@@ -938,14 +935,20 @@ function persistCreatedGitHubIdentity(
       },
       evidence: created.externalIdentity,
     }], runtime.modeSnapshot);
+    if (result?.state !== 'bound') {
+      throw new GitHubWriteFenceError(
+        result?.collisionCategory ?? 'created_identity_binding_failed',
+      );
+    }
   } catch (error) {
-    syncLogger.error(
-      { err: error, connectorId: connectorInstanceId, taskId },
-      'Created GitHub task returned without a usable stable binding; future mutations are fenced',
-    );
+    runtime.markBlocked('created_identity_persistence_failed');
+    throw error;
   }
 }
 
-function finalizeUndispatchedFence(authorization: GitHubWriteAuthorization, code: string): void {
-  blockGitHubWrite(authorization.leaseId, authorization.token, code);
+async function finalizeUndispatchedFence(
+  authorization: GitHubWriteAuthorization,
+  code: string,
+): Promise<void> {
+  await blockGitHubWrite(authorization.leaseId, authorization.token, code);
 }

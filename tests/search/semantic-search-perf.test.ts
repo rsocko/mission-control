@@ -1,60 +1,73 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { resetProcessRuntimeRegistries } from '../helpers/process-runtime-registries';
 
 /**
- * Semantic search performance tests.
+ * Semantic embedding performance and shared-infrastructure tests.
  *
- * - Unit tests run with mocked fetch (no Ollama needed).
- * - The "live" describe block is skipped by default; enable with
- *   OLLAMA_LIVE=1 to test against a real Ollama instance.
+ * The corpus rebuild these tests used to exercise no longer exists: the durable
+ * index worker owns corpus work (issue #1664), so `rebuildEmbeddingIndex` only
+ * schedules a run. What remains here is the part that is still shared, still
+ * interactive, and still latency-sensitive:
+ *
+ * - `generateEmbedding` as infrastructure that outlives search enrichment;
+ * - the bounded retry/timeout envelope around one embedding request; and
+ * - the synthetic cosine scan, which is the cheap half of a semantic query.
+ *
+ * Unit tests run with mocked fetch (no Ollama needed). The "live" describe block
+ * is skipped by default; enable it with OLLAMA_LIVE=1.
  */
 
-// Mock the db/schema imports before importing semantic module
-vi.mock('@/db', () => {
-  const prepareFn = vi.fn().mockReturnValue({
-    run: vi.fn(),
-    all: vi.fn().mockReturnValue([]),
-    get: vi.fn().mockReturnValue({ count: 0 }),
-  });
-  const fakeDb = {
-    select: vi.fn().mockReturnValue({ from: vi.fn().mockResolvedValue([]) }),
-  };
+const mocks = vi.hoisted(() => ({
+  contextSources: [] as string[],
+  scheduleSemanticBackfill: vi.fn(),
+  semanticSearchEnabled: true,
+}));
+
+vi.mock('@/lib/ai/provider-routing-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/ai/provider-routing-core')>();
   return {
-    default: fakeDb,
-    sqlite: { exec: vi.fn(), prepare: prepareFn },
+    ...actual,
+    createConfiguredAIRequestContext: (
+      ...args: Parameters<typeof actual.createConfiguredAIRequestContext>
+    ) => {
+      mocks.contextSources = args[2]?.sources ?? [];
+      return actual.createConfiguredAIRequestContext(...args);
+    },
   };
 });
 
-vi.mock('@/db/schema', () => ({
-  tasks: 'tasks',
-  notifications: 'notifications',
-}));
-
-vi.mock('@/lib/ai', () => ({
-  AIRoutingDeniedError: class AIRoutingDeniedError extends Error {},
-  getResolvedAIConfig: vi.fn().mockReturnValue({
-    provider: 'ollama',
-    configured: true,
-    baseUrl: 'http://localhost:11434/v1',
-    apiKey: undefined,
-    embeddingModel: 'nomic-embed-text',
-    semanticSearchEnabled: true,
+vi.mock('@/lib/ai/provider-configuration-service', () => ({
+  loadAIProviderConfiguration: async () => ({
+    resolved: {
+      provider: 'ollama',
+      configured: true,
+      baseUrl: 'http://localhost:11434/v1',
+      apiKey: undefined,
+      embeddingProvider: 'ollama',
+      embeddingModel: 'nomic-embed-text',
+      embeddingBaseUrl: 'http://localhost:11434/v1',
+      embeddingConfigured: true,
+      semanticSearchEnabled: mocks.semanticSearchEnabled,
+      houstonMemoryEnabled: false,
+    },
+    routingPolicy: {
+      policies: {
+        standard: { allowedRoutes: ['ollama'] },
+        restricted: { allowedRoutes: ['ollama'] },
+        'local-only': { allowedRoutes: ['ollama'] },
+      },
+      featureDefaults: {},
+      sourceDefaults: { rymessage: 'local-only' },
+    },
   }),
-  getAIRequestContext: vi.fn(() => ({
-    featureId: 'semantic-embedding',
-    sensitivity: 'restricted',
-    allowedRoutes: ['ollama'],
-    correlationId: 'test-correlation',
-  })),
-  getAIRoutingHeaders: vi.fn(() => ({})),
-  getAIRouteOutcome: vi.fn(() => ({
-    provider: 'ollama',
-    model: 'nomic-embed-text',
-    fallbackOccurred: false,
-  })),
 }));
 
 vi.mock('@/lib/logger', () => ({
   aiLogger: { info: vi.fn(), warn: vi.fn() },
+  requestContext: { getStore: vi.fn(() => undefined) },
+  semanticIndexLogger: {
+    debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn(),
+  },
 }));
 
 // Fake embedding (768 dims like nomic-embed-text)
@@ -63,8 +76,21 @@ function fakeEmbedding(seed = 0): number[] {
 }
 
 describe('Semantic search — unit tests (mocked)', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    resetProcessRuntimeRegistries();
     vi.restoreAllMocks();
+    mocks.contextSources = [];
+    mocks.scheduleSemanticBackfill.mockReset();
+    mocks.semanticSearchEnabled = true;
+    vi.stubEnv('MC_EMBEDDING_REQUEST_MAX_RETRIES', '2');
+    vi.stubEnv('MC_EMBEDDING_REQUEST_RETRY_BASE_MS', '1');
+    const semantic = await import('@/lib/search/semantic');
+    semantic.registerSemanticSearchRuntime({
+      resolve: async () => {
+        throw new Error('the semantic index runtime must not be touched by these tests');
+      },
+      scheduleBackfill: mocks.scheduleSemanticBackfill,
+    });
   });
 
   it('generateEmbedding calls Ollama with correct payload', async () => {
@@ -89,24 +115,31 @@ describe('Semantic search — unit tests (mocked)', () => {
   });
 
   it('generateEmbedding returns [] on timeout/error', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('timeout'));
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('timeout'));
 
     const { generateEmbedding } = await import('@/lib/search/semantic');
     const result = await generateEmbedding('test');
     expect(result).toEqual([]);
   });
 
+  it('bounds retries for a persistently failing provider', async () => {
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('', { status: 503 }),
+    );
+
+    const { generateEmbedding } = await import('@/lib/search/semantic');
+    await expect(generateEmbedding('bounded')).resolves.toEqual([]);
+
+    // One attempt plus MC_EMBEDDING_REQUEST_MAX_RETRIES; an interactive caller
+    // must never sit in an unbounded retry loop.
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    expect(
+      fetchSpy.mock.calls.every(([, init]) => init?.signal instanceof AbortSignal),
+    ).toBe(true);
+  });
+
   it('keeps shared embedding infrastructure available when search enrichment is disabled', async () => {
-    const ai = await import('@/lib/ai');
-    vi.mocked(ai.getResolvedAIConfig).mockReturnValueOnce({
-      provider: 'ollama',
-      configured: true,
-      baseUrl: 'http://localhost:11434/v1',
-      apiKey: undefined,
-      model: 'llama3.1:8b',
-      embeddingModel: 'nomic-embed-text',
-      semanticSearchEnabled: false,
-    });
+    mocks.semanticSearchEnabled = false;
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding(7) }] }), {
         status: 200,
@@ -122,15 +155,11 @@ describe('Semantic search — unit tests (mocked)', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding() }] }), { status: 200 }),
     );
-    const ai = await import('@/lib/ai');
     const { generateEmbedding } = await import('@/lib/search/semantic');
 
     await generateEmbedding('private message', { sources: ['rymessage'] });
 
-    expect(ai.getAIRequestContext).toHaveBeenCalledWith(
-      'semantic-embedding',
-      { sources: ['rymessage'] },
-    );
+    expect(mocks.contextSources).toEqual(['rymessage']);
   });
 
   it('cosine similarity computation is fast for 1000 items', () => {
@@ -155,72 +184,27 @@ describe('Semantic search — unit tests (mocked)', () => {
     expect(scores).toHaveLength(1000);
   });
 
-  it('rebuild with 0 entities completes instantly', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding() }] }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      }),
-    );
+  it('returns from a rebuild request without embedding a corpus', async () => {
+    mocks.scheduleSemanticBackfill.mockResolvedValue({
+      status: 'scheduled',
+      indexId: 'idx-1',
+      runId: 'run-1',
+      runStatus: 'queued',
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
 
     const { rebuildEmbeddingIndex } = await import('@/lib/search/semantic');
     const start = performance.now();
-    await rebuildEmbeddingIndex();
+    await expect(rebuildEmbeddingIndex()).resolves.toMatchObject({
+      status: 'scheduled',
+      runId: 'run-1',
+    });
     const elapsed = performance.now() - start;
 
-    // With no entities, rebuild should be near-instant
+    // Scheduling is a single durable write: it must not depend on corpus size,
+    // and it must not issue a provider request from the request path.
     expect(elapsed).toBeLessThan(500);
-  });
-
-  it('coalesces normalized interactive queries without rebuilding the index', async () => {
-    const mockEmbedding = fakeEmbedding(9);
-    let resolveFetch!: (response: Response) => void;
-    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementationOnce(
-      () => new Promise<Response>((resolve) => {
-        resolveFetch = resolve;
-      }),
-    );
-    const dbModule = await import('@/db');
-    const { semanticSearch } = await import('@/lib/search/semantic');
-    vi.mocked(dbModule.sqlite.exec).mockClear();
-
-    const first = semanticSearch('  Urgent   BUG ');
-    const second = semanticSearch('urgent bug');
-    await vi.waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
-    resolveFetch(new Response(
-      JSON.stringify({ data: [{ embedding: mockEmbedding }] }),
-      { status: 200 },
-    ));
-
-    await expect(Promise.all([first, second])).resolves.toEqual([[], []]);
-    expect(dbModule.sqlite.exec).not.toHaveBeenCalledWith(
-      expect.stringContaining('search_embeddings_rebuild'),
-    );
-  });
-
-  it('pushes optional filters into semantic candidate selection', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ data: [{ embedding: fakeEmbedding(12) }] }), {
-        status: 200,
-      }),
-    );
-    const dbModule = await import('@/db');
-    const { semanticSearch } = await import('@/lib/search/semantic');
-    vi.mocked(dbModule.sqlite.prepare).mockClear();
-
-    await semanticSearch('filtered query', {
-      source: 'Project Alpha',
-      status: 'in_progress',
-      excludeDone: true,
-    });
-
-    const candidateSql = vi.mocked(dbModule.sqlite.prepare).mock.calls
-      .map(([sql]) => String(sql))
-      .find((sql) => sql.includes('LEFT JOIN tasks t'));
-    expect(candidateSql).toContain('t.source_list_name = ? OR t.connector_type = ?');
-    expect(candidateSql).toContain('n.connector_type = ?');
-    expect(candidateSql).toContain('COALESCE(t.status, n.category) = ?');
-    expect(candidateSql).toContain("<> 'done'");
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });
 
@@ -305,6 +289,7 @@ describe.skipIf(!process.env.OLLAMA_LIVE)(
         embedding.map(() => Math.random()),
       );
       const scanStart = performance.now();
+      let scoreTotal = 0;
       for (const cached of fakeCache) {
         let dot = 0, normA = 0, normB = 0;
         for (let j = 0; j < embedding.length; j++) {
@@ -312,6 +297,7 @@ describe.skipIf(!process.env.OLLAMA_LIVE)(
           normA += embedding[j] * embedding[j];
           normB += cached[j] * cached[j];
         }
+        scoreTotal += dot / (Math.sqrt(normA) * Math.sqrt(normB));
       }
       const scanMs = Math.round(performance.now() - scanStart);
 
@@ -319,6 +305,7 @@ describe.skipIf(!process.env.OLLAMA_LIVE)(
       console.log(`  → Embedding is ${Math.round(embedMs / Math.max(scanMs, 1))}x slower than scan`);
 
       // The scan should be WAY faster than the embedding call
+      expect(Number.isFinite(scoreTotal)).toBe(true);
       expect(scanMs).toBeLessThan(embedMs);
     }, 60_000);
   },

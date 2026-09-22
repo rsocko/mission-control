@@ -1,59 +1,104 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import {
-  tasks,
-  taskTags,
-  taskProjects,
-  taskSchedules,
-  taskFieldStates,
-  prioritySyncLog,
-  myDayItems,
-  tags as tagsTable,
-} from '@/db/schema';
-import { and, eq, inArray } from 'drizzle-orm';
+import { formatInTimeZone } from 'date-fns-tz';
 import { resolveOutboundPriority } from '@/lib/priority';
 import { randomUUID } from 'crypto';
-import { emitEvent } from '@/lib/events';
-import { connectorRegistry } from '@/lib/connectors';
-import { syncScheduler, logWriteThrough } from '@/lib/sync';
+import { getOrInitializeConnector } from '@/lib/connectors/runtime';
+import { logWriteThrough } from '@/lib/sync/write-through-log';
 import { ApiErrors } from '@/lib/api-error';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { getLocalToday } from '@/lib/utils/date';
 import { buildDeepLinkUrl } from '@/lib/utils/deep-links';
 import logger from '@/lib/logger';
 import { getStatusLifecycleUpdates } from '@/lib/tasks/status-lifecycle';
-import { isDemoMode } from '@/lib/mode';
+import { getTimezone, isDemoMode } from '@/lib/mode';
 import {
   resolveTaskFieldPolicy,
   type FieldPolicy,
 } from '@/lib/tasks/field-policy';
 import { isNotificationOnlyConnectorType } from '@/lib/connectors/task-source-profiles';
-import { indexTaskSearch } from '@/lib/search';
+import {
+  indexTask as indexTaskKeyword,
+  removeTaskFromIndex,
+  type SearchableTaskRecord,
+} from '@/lib/search/fts';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication-service';
 import { resolveTaskEditPolicy } from '@/lib/tasks/edit-policy';
 import {
   isMergeableTaskField,
   resolveLocalOverrideChange,
   type LocalOverrideChange,
-  type TaskFieldStateRecord,
 } from '@/lib/tasks/field-state';
 import { parseTaskPatchInput, type TaskPatchInput } from '@/lib/tasks/task-patch';
 import { parseTaskMetadataCompat } from '@/lib/tasks/metadata-compat';
-import { deleteTaskLocally } from '@/lib/tasks/local-task-lifecycle';
 import type { TaskField, TaskItem, TaskPriority } from '@/types';
-import {
-  suppressAutoCompletionAfterReopen,
-  supersedePendingReconciliationSuggestions,
-  wasTaskAutoCompletedByReconciliation,
-} from '@/lib/connectors/scout/reconciliation-service';
 import { evaluateRulesForTasks } from '@/lib/rules';
+import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
+import { computeRelativeReminderAt, isReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import { getCompletionAnchoredDueDate } from '@/lib/utils/recurrence';
+import {
+  canonicalizeLegacyRecurrence,
+  extractRecurrenceLocalTime,
+  readRecurrenceMetadata,
+  writeRecurrenceMetadata,
+} from '@/lib/recurrence/canonical';
+import {
+  applyRecurrenceEditorOptions,
+  getRecurrenceControlState,
+} from '@/lib/recurrence/editor';
 import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import type {
+  TaskCoreTaskPatch,
+  TaskCoreTaskRow,
+  TaskMutationRequest,
+} from '@/lib/tasks/core/contracts';
+import {
+  claimTaskForPush,
+  completeTaskPush,
+  failTaskPush,
+  heartbeatTaskPush,
+  loadClaimedTaskForPush,
+  releaseTaskPush,
+} from '@/lib/sync/push-lease';
+
+async function indexTaskSearch(task: SearchableTaskRecord): Promise<void> {
+  await indexTaskKeyword(task);
+  await publishSemanticEntityUpsert('task', task.id);
+}
+
+async function publishTaskSemanticUpdate(taskId: string): Promise<void> {
+  await publishSemanticEntityUpsert('task', taskId);
+}
+
+async function removeTaskSearch(taskId: string): Promise<void> {
+  await removeTaskFromIndex(taskId);
+  await publishSemanticEntityDelete('task', taskId);
+}
 
 const taskWriteThroughQueues = new Map<string, Promise<void>>();
 
-class TaskRevisionConflictError extends Error {}
+function normalizeStoredRecurrence(value: string): string {
+  const match = value.trim().match(
+    /^FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)(?:;INTERVAL=(\d+))?$/i,
+  );
+  if (!match) return value;
+  const unit = match[1].toLowerCase();
+  const interval = match[2] ? Number(match[2]) : 1;
+  if (interval === 1) return unit;
+  const plural = {
+    daily: 'days',
+    weekly: 'weeks',
+    monthly: 'months',
+    yearly: 'years',
+  }[unit];
+  return `every ${interval} ${plural}`;
+}
 
 function enqueueTaskWriteThrough(taskId: string, write: () => Promise<void>): Promise<void> {
   const previous = taskWriteThroughQueues.get(taskId) ?? Promise.resolve();
@@ -81,17 +126,17 @@ export async function PATCH(
 
   try {
     const parsed = parseTaskPatchInput(await request.json());
-    if (!parsed.success) {
-      return ApiErrors.badRequest(parsed.error);
-    }
+    if (!parsed.success) return ApiErrors.badRequest(parsed.error);
     const input = parsed.input;
-
-    const [currentTask] = await db.select().from(tasks).where(eq(tasks.id, id));
-    if (!currentTask) {
-      return ApiErrors.notFound('Task');
-    }
-    const expectedUpdatedAt = request.headers.get('x-expected-task-updated-at');
-    if (expectedUpdatedAt && currentTask.updatedAt !== expectedUpdatedAt) {
+    const persistence = await getTaskCorePersistence();
+    const writeContext = await persistence.mutations.getTaskWriteContext(id, parsed.input.tags);
+    if (!writeContext) return ApiErrors.notFound('Task');
+    const currentTask = writeContext.task;
+    const currentSchedule = writeContext.schedule;
+    const parsedCurrentMetadata = parseTaskMetadataCompat(currentTask.metadata);
+    const currentCanonical = readRecurrenceMetadata(parsedCurrentMetadata.metadata);
+    const requestedVersion = request.headers.get('x-expected-task-updated-at');
+    if (requestedVersion && currentTask.updatedAt !== requestedVersion) {
       return NextResponse.json({
         error: 'Task changed before this update could be applied',
         code: 'TASK_REVISION_CONFLICT',
@@ -107,10 +152,7 @@ export async function PATCH(
         code: 'FORBIDDEN',
       }, { status: 403 });
     }
-    if (
-      currentTask.connectorType === 'microsoft-todo-work'
-      && input.status === 'cancelled'
-    ) {
+    if (currentTask.connectorType === 'microsoft-todo-work' && input.status === 'cancelled') {
       return NextResponse.json({
         error: 'Microsoft To Do tasks cannot be cancelled through this bridge',
         code: 'FORBIDDEN',
@@ -119,6 +161,38 @@ export async function PATCH(
 
     const localIdentity = currentTask.sourceId.startsWith('local:')
       || currentTask.connectorType === 'local';
+    if (input.recurrenceMode === 'completion' && !localIdentity) {
+      return ApiErrors.badRequest(
+        'Completion-anchored recurrence is available only for local tasks',
+      );
+    }
+    if (
+      input.recurrenceMode === 'completion'
+      && !(input.recurrence ?? currentSchedule?.recurrence)
+    ) {
+      return ApiErrors.badRequest(
+        'Choose a recurrence interval before anchoring it to completion',
+      );
+    }
+    if (
+      (input.recurrenceSkipDates !== undefined || input.recurrenceCatchUp !== undefined)
+      && !(input.recurrence ?? currentSchedule?.recurrence)
+    ) {
+      return ApiErrors.badRequest('Choose a recurrence interval before setting recurrence options');
+    }
+    if (
+      parsed.fields.includes('recurrence')
+      && (
+        currentCanonical.status === 'invalid'
+        || currentCanonical.rule?.source.owner === 'connector'
+      )
+    ) {
+      return ApiErrors.forbidden(
+        currentCanonical.status === 'invalid'
+          ? 'This recurrence cannot be edited because its stored rule is invalid'
+          : 'This recurrence is owned by its provider and must be changed there',
+      );
+    }
     const [capabilities, connectorEnabled] = localIdentity
       ? [null, true] as const
       : await Promise.all([
@@ -131,6 +205,15 @@ export async function PATCH(
       connectorEnabled,
       forceLocal: isDemoMode(),
     };
+    if (
+      input.status !== undefined
+      && capabilities?.supportedTaskStatuses
+      && !capabilities.supportedTaskStatuses.includes(input.status)
+    ) {
+      return ApiErrors.validation(
+        `This task source does not support status "${input.status}"`,
+      );
+    }
     const policies = new Map<TaskField, FieldPolicy>(
       parsed.fields.map((field) => [
         field,
@@ -174,30 +257,15 @@ export async function PATCH(
 
     let tagWriteThrough: WriteThroughUpdates['tags'];
     if (input.tags !== undefined && policies.get('tags')?.mutation === 'write-through') {
-      const currentLinks = await db.select({ tagId: taskTags.tagId })
-        .from(taskTags)
-        .where(eq(taskTags.taskId, id));
-      const currentIds = new Set(currentLinks.map((link) => link.tagId));
+      const currentIds = new Set(writeContext.tagIds);
       const requestedIds = new Set(input.tags);
-      const changedIds = [
-        ...new Set([
-          ...input.tags.filter((tagId) => !currentIds.has(tagId)),
-          ...currentLinks.filter((link) => !requestedIds.has(link.tagId)).map((link) => link.tagId),
-        ]),
-      ];
-      const changedTags = changedIds.length > 0
-        ? await db.select({ id: tagsTable.id, name: tagsTable.name })
-            .from(tagsTable)
-            .where(inArray(tagsTable.id, changedIds))
-        : [];
-      const namesById = new Map(changedTags.map((tag) => [tag.id, tag.name]));
       tagWriteThrough = {
         add: input.tags
           .filter((tagId) => !currentIds.has(tagId))
-          .flatMap((tagId) => namesById.get(tagId) ?? []),
-        remove: currentLinks
-          .filter((link) => !requestedIds.has(link.tagId))
-          .flatMap((link) => namesById.get(link.tagId) ?? []),
+          .flatMap((tagId) => writeContext.tagNamesById[tagId] ?? []),
+        remove: writeContext.tagIds
+          .filter((tagId) => !requestedIds.has(tagId))
+          .flatMap((tagId) => writeContext.tagNamesById[tagId] ?? []),
       };
     }
 
@@ -206,19 +274,25 @@ export async function PATCH(
       && currentTask.status !== input.status
       && ['done', 'cancelled'].includes(currentTask.status)
       && !['done', 'cancelled'].includes(input.status);
-    const suppressFutureAutoCompletion = isReopening
-      && await wasTaskAutoCompletedByReconciliation(id);
     const isBecomingTerminal = input.status !== undefined
       && currentTask.status !== input.status
       && !['done', 'cancelled'].includes(currentTask.status)
       && ['done', 'cancelled'].includes(input.status);
+    const resultingRecurrence = input.recurrence === undefined
+      ? currentSchedule?.recurrence ?? null
+      : input.recurrence;
+    const resultingRecurrenceMode = input.recurrence === null
+      ? 'schedule'
+      : input.recurrenceMode ?? currentSchedule?.recurrenceMode ?? 'schedule';
+    const shouldReturnCompletionOccurrence = input.status === 'done'
+      && resultingRecurrenceMode === 'completion'
+      && Boolean(resultingRecurrence)
+      && localIdentity;
 
-    const updates: Record<string, unknown> = { updatedAt: now };
+    const updates: Record<string, unknown> = {};
     if (input.title !== undefined) updates.title = input.title;
     if (input.description !== undefined) updates.description = input.description;
-    if (input.localDisposition !== undefined) {
-      updates.localDisposition = input.localDisposition;
-    }
+    if (input.localDisposition !== undefined) updates.localDisposition = input.localDisposition;
     const lifecycleUpdates = getStatusLifecycleUpdates({
       status: input.status,
       explicitReason: input.statusReason,
@@ -227,26 +301,93 @@ export async function PATCH(
       currentCompletedAt: currentTask.completedAt,
       currentStatusReason: currentTask.statusReason,
     });
-    if (
-      input.status !== undefined
-      && statusReasonPolicy?.mutation === 'blocked'
-    ) {
+    if (input.status !== undefined && statusReasonPolicy?.mutation === 'blocked') {
       lifecycleUpdates.statusReason = currentTask.statusReason;
     }
     Object.assign(updates, lifecycleUpdates);
     if (input.priority !== undefined) updates.priority = input.priority;
+    if (input.planningHorizon !== undefined) updates.planningHorizon = input.planningHorizon;
     if (input.dueDate !== undefined) updates.dueDate = input.dueDate;
     if (input.kanbanColumn !== undefined) updates.kanbanColumn = input.kanbanColumn;
     if (input.kanbanOrder !== undefined) updates.kanbanOrder = input.kanbanOrder;
     if (input.microStatus !== undefined) updates.microStatus = input.microStatus;
     if (input.snoozedUntil !== undefined) updates.snoozedUntil = input.snoozedUntil;
     if (input.effort !== undefined) updates.effort = input.effort;
-    if (input.reminderAt !== undefined) updates.reminderAt = input.reminderAt;
-
+    if (
+      input.dueDate !== undefined
+      || input.reminderAt !== undefined
+      || input.reminderRelative !== undefined
+      || input.reminderDueTime !== undefined
+    ) {
+      const reminderMutation = resolveRelativeReminderMutation({
+        current: currentTask,
+        input,
+        timezone: getTimezone(),
+        now: new Date(now),
+      });
+      if (!reminderMutation.success) {
+        return NextResponse.json({
+          error: reminderMutation.error,
+          code: reminderMutation.code,
+        }, { status: reminderMutation.status });
+      }
+      Object.assign(updates, reminderMutation.updates);
+    }
+    const resultingReminderAt = updates.reminderAt !== undefined
+      ? updates.reminderAt as string | null
+      : currentTask.reminderAt;
+    const nagConfigurationChanged = input.reminderNagInterval !== undefined
+      || input.reminderNagStopAt !== undefined;
+    const reminderScheduleChanged = updates.reminderAt !== undefined
+      && updates.reminderAt !== currentTask.reminderAt;
+    if (input.reminderNagInterval !== undefined
+      && input.reminderNagInterval !== null
+      && !resultingReminderAt) {
+      return ApiErrors.badRequest('Set a reminder time before enabling Repeat until done');
+    }
+    if (!resultingReminderAt && (nagConfigurationChanged || reminderScheduleChanged)) {
+      updates.reminderNagInterval = null;
+      updates.reminderNagStopAt = null;
+      updates.reminderNagSeriesId = null;
+      updates.reminderNagSequence = 0;
+    } else if (
+      resultingReminderAt
+      && (nagConfigurationChanged || (reminderScheduleChanged && currentTask.reminderNagInterval))
+    ) {
+      const interval = input.reminderNagInterval !== undefined
+        ? input.reminderNagInterval
+        : currentTask.reminderNagInterval ?? null;
+      const stopAt = input.reminderNagStopAt !== undefined
+        ? input.reminderNagStopAt
+        : currentTask.reminderNagStopAt ?? null;
+      if (interval !== null && stopAt && Date.parse(stopAt) <= Date.parse(resultingReminderAt)) {
+        return ApiErrors.badRequest('Repeat-until-done stop time must be after the reminder');
+      }
+      const startsNewSeries = interval !== null
+        && (currentTask.reminderNagInterval === null || !currentTask.reminderNagSeriesId);
+      updates.reminderNagInterval = interval;
+      updates.reminderNagStopAt = interval === null ? null : stopAt;
+      updates.reminderNagSeriesId = interval === null
+        ? null
+        : startsNewSeries
+          ? randomUUID()
+          : currentTask.reminderNagSeriesId;
+      updates.reminderNagSequence = interval === null || startsNewSeries
+        ? 0
+        : currentTask.reminderNagSequence;
+    }
     if (input.status === 'done' || input.status === 'cancelled') {
       updates.microStatus = null;
       updates.snoozedUntil = null;
       updates.reminderAt = null;
+      updates.reminderNagInterval = null;
+      updates.reminderNagStopAt = null;
+      updates.reminderNagSeriesId = null;
+      updates.reminderNagSequence = 0;
+      if (!currentSchedule?.recurrence) {
+        updates.reminderRelative = null;
+        updates.reminderDueTime = null;
+      }
     }
 
     const shouldWriteThrough = [...policies.values()]
@@ -255,11 +396,7 @@ export async function PATCH(
       updates.syncStatus = 'pending_push';
       updates.pushRetryCount = 0;
       if (currentTask.connectorType === 'microsoft-todo-work') {
-        const metadata = currentTask.metadata
-          && typeof currentTask.metadata === 'object'
-          && !Array.isArray(currentTask.metadata)
-          ? currentTask.metadata as Record<string, unknown>
-          : {};
+        const metadata = currentTask.metadata;
         const priorDirtyFields = Array.isArray(metadata.workTodoDirtyFields)
           ? metadata.workTodoDirtyFields.filter((field): field is string => typeof field === 'string')
           : [];
@@ -276,133 +413,266 @@ export async function PATCH(
         };
       }
     }
+    if (
+      input.recurrence !== undefined
+      || input.recurrenceMode !== undefined
+      || input.recurrenceSkipDates !== undefined
+      || input.recurrenceCatchUp !== undefined
+      || (
+        input.dueDate !== undefined
+        && Boolean(currentSchedule?.recurrence)
+        && (
+          currentCanonical.rule?.source.owner === 'mission-control'
+          || localIdentity
+        )
+      )
+    ) {
+      const parsedMetadata = parsedCurrentMetadata;
+      if (
+        input.recurrence !== undefined
+        && !parsedMetadata.recoveredLegacy
+        && Object.prototype.hasOwnProperty.call(parsedMetadata.metadata, 'recurrence')
+      ) {
+        const metadata = { ...parsedMetadata.metadata };
+        delete metadata.recurrence;
+        updates.metadata = metadata;
+      }
+      const nextMetadata = (updates.metadata ?? parsedMetadata.metadata) as Record<string, unknown>;
+      const nextRecurrence = input.recurrence === undefined
+        ? currentSchedule?.recurrence ?? null
+        : input.recurrence;
+      if (nextRecurrence === null) {
+        updates.metadata = writeRecurrenceMetadata(nextMetadata, null);
+      } else {
+        try {
+          const baseRule = canonicalizeLegacyRecurrence({
+            recurrence: normalizeStoredRecurrence(nextRecurrence),
+            mode: input.recurrenceMode
+              ?? currentSchedule?.recurrenceMode
+              ?? 'schedule',
+            startDate: (
+              input.dueDate
+              ?? currentTask.dueDate
+              ?? currentSchedule?.scheduledDate
+              ?? getLocalToday()
+            ).slice(0, 10),
+            localTime: extractRecurrenceLocalTime(
+              input.dueDate ?? currentTask.dueDate,
+              getTimezone(),
+            ),
+            timezone: getTimezone(),
+            seriesIdentity: currentCanonical.rule?.series.identity ?? {
+              kind: 'mission-control',
+              stableId: currentTask.id,
+              ...(localIdentity
+                ? {}
+                : { connectorInstanceId: currentTask.connectorInstanceId }),
+            },
+            source: currentCanonical.rule?.source,
+          });
+          updates.metadata = writeRecurrenceMetadata(
+            nextMetadata,
+            applyRecurrenceEditorOptions(baseRule, {
+              skipDates: input.recurrenceSkipDates
+                ?? [...(currentCanonical.rule?.semantics.exceptions.skipDates ?? [])],
+              catchUp: input.recurrenceCatchUp
+                ?? currentCanonical.rule?.semantics.materialization.catchUp
+                ?? (baseRule.semantics.mode === 'completion' ? 'none' : 'latest'),
+            }),
+          );
+        } catch (error) {
+          return ApiErrors.badRequest(
+            error instanceof Error ? error.message : 'Invalid recurrence',
+          );
+        }
+      }
+    }
 
     const mergeableFields = parsed.fields.filter(isMergeableTaskField);
     const sourceModel = [...policies.values()][0]?.sourceModel;
-    let overrideChanges: LocalOverrideChange[] = [];
-    runTransaction((tx) => {
-      if (sourceModel === 'ingested' && mergeableFields.length > 0) {
-        const stateRows = tx
-          .select()
-          .from(taskFieldStates)
-          .where(eq(taskFieldStates.taskId, id))
-          .all() as TaskFieldStateRecord[];
-        const statesByField = new Map(stateRows.map((state) => [state.fieldName, state]));
-        overrideChanges = mergeableFields.map((fieldName) => resolveLocalOverrideChange({
+    const overrideChanges: LocalOverrideChange[] = sourceModel === 'ingested'
+      ? mergeableFields.map((fieldName) => resolveLocalOverrideChange({
           taskId: id,
           fieldName,
           newValue: input[fieldName],
           currentSourceValue: currentTask[fieldName],
-          state: statesByField.get(fieldName),
+          state: (() => {
+            const state = writeContext.fieldStates.find(
+              (candidate) => candidate.fieldName === fieldName,
+            );
+            return state ? { ...state, taskId: id } : undefined;
+          })(),
           sourceObservedAt: currentTask.lastSyncedAt,
           now,
-        }));
-      }
+        }))
+      : [];
 
-      if (input.recurrence !== undefined) {
-        const metadataRow = tx
-          .select({ metadata: tasks.metadata })
-          .from(tasks)
-          .where(eq(tasks.id, id))
-          .get();
-        const parsedMetadata = parseTaskMetadataCompat(metadataRow?.metadata);
-        if (
-          !parsedMetadata.recoveredLegacy
-          && Object.prototype.hasOwnProperty.call(parsedMetadata.metadata, 'recurrence')
-        ) {
-          const metadata = { ...parsedMetadata.metadata };
-          delete metadata.recurrence;
-          updates.metadata = JSON.stringify(metadata);
-        }
+    let recurrenceSuccessor: TaskMutationRequest['recurrenceSuccessor'];
+    if (shouldReturnCompletionOccurrence) {
+      const recurrence = normalizeStoredRecurrence(resultingRecurrence!);
+      const nextTaskId = randomUUID();
+      const recurrenceTimezone = getTimezone();
+      let successorRule;
+      try {
+        successorRule = readRecurrenceMetadata(
+          (updates.metadata ?? currentTask.metadata) as Record<string, unknown>,
+        ).rule ?? canonicalizeLegacyRecurrence({
+          recurrence,
+          mode: currentSchedule?.recurrenceMode ?? 'completion',
+          startDate: (
+            currentTask.dueDate
+            ?? currentSchedule?.scheduledDate
+            ?? getLocalToday()
+          ).slice(0, 10),
+          localTime: extractRecurrenceLocalTime(currentTask.dueDate, recurrenceTimezone),
+          timezone: recurrenceTimezone,
+          seriesIdentity: {
+            kind: 'mission-control',
+            stableId: currentTask.id,
+            ...(localIdentity
+              ? {}
+              : { connectorInstanceId: currentTask.connectorInstanceId }),
+          },
+        });
+      } catch (error) {
+        return ApiErrors.badRequest(
+          error instanceof Error ? error.message : 'Invalid recurrence',
+        );
       }
-
-      const updateResult = tx.update(tasks)
-        .set(updates)
-        .where(and(
-          eq(tasks.id, id),
-          expectedUpdatedAt ? eq(tasks.updatedAt, expectedUpdatedAt) : undefined,
-        ))
-        .run();
-      if (expectedUpdatedAt && updateResult.changes === 0) {
-        throw new TaskRevisionConflictError('Task changed during update');
+      const includeCompletionTime = Boolean(
+        currentTask.dueDate?.includes('T') || currentSchedule?.scheduledTime,
+      );
+      const completionAnchor = currentTask.completedAt ?? now;
+      const nextDueDate = getCompletionAnchoredDueDate(
+        completionAnchor,
+        recurrence,
+        recurrenceTimezone,
+        includeCompletionTime,
+      );
+      const nextScheduledDate = nextDueDate.includes('T')
+        ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'yyyy-MM-dd')
+        : nextDueDate;
+      const nextScheduledTime = includeCompletionTime
+        ? formatInTimeZone(nextDueDate, recurrenceTimezone, 'HH:mm')
+        : null;
+      const metadata = { ...parseTaskMetadataCompat(currentTask.metadata).metadata };
+      delete metadata.workTodoDirtyFields;
+      delete metadata.triageItemId;
+      metadata.missionControlTaskId = nextTaskId;
+      metadata.recurrencePreviousTaskId = id;
+      let nextReminderAt: string | null = null;
+      const relativeRule = currentTask.reminderRelative ?? '';
+      if (isReminderRelativeRule(relativeRule) && currentTask.reminderDueTime) {
+        const reminder = computeRelativeReminderAt({
+          dueDate: nextScheduledDate,
+          dueTime: currentTask.reminderDueTime,
+          timezone: recurrenceTimezone,
+          rule: relativeRule,
+        });
+        if (reminder.success) nextReminderAt = reminder.reminderAt;
       }
+      recurrenceSuccessor = {
+        id: nextTaskId,
+        dueDate: nextDueDate,
+        scheduledDate: nextScheduledDate,
+        scheduledTime: nextScheduledTime,
+        reminderAt: nextReminderAt,
+        reminderNagInterval: nextReminderAt ? currentTask.reminderNagInterval ?? null : null,
+        reminderNagStopAt: nextReminderAt && currentTask.reminderNagStopAt && currentTask.reminderAt
+          ? new Date(
+              Date.parse(nextReminderAt)
+              + Math.max(0, Date.parse(currentTask.reminderNagStopAt) - Date.parse(currentTask.reminderAt)),
+            ).toISOString()
+          : null,
+        reminderNagSeriesId: nextReminderAt && currentTask.reminderNagInterval
+          ? randomUUID()
+          : null,
+        rule: successorRule,
+        occurrence: {
+          localDate: nextScheduledDate,
+          instant: nextDueDate.includes('T') ? new Date(nextDueDate).toISOString() : null,
+          occurrenceNumber: null,
+          anchor: {
+            kind: 'completion',
+            completedAt: completionAnchor,
+          },
+        },
+        metadata,
+      };
+    }
 
-      if (input.estimatedDuration !== undefined || input.recurrence !== undefined) {
-        tx.insert(taskSchedules).values({
-          taskId: id,
-          scheduledDate: getLocalToday(),
-          estimatedDuration: input.estimatedDuration,
-          recurrence: input.recurrence,
-          isTimeBlocked: false,
-        }).onConflictDoUpdate({
-          target: taskSchedules.taskId,
-          set: {
+    const priorityLog = input.priority !== undefined && input.priority !== currentTask.priority
+      ? (() => {
+          const outbound = resolveOutboundPriority(
+            currentTask.priority as TaskPriority,
+            input.priority,
+            currentTask.connectorType,
+          );
+          return {
+            id: randomUUID(),
+            previousPriority: currentTask.priority,
+            newPriority: input.priority,
+            writeBackTriggered: policies.get('priority')?.mutation === 'write-through'
+              && outbound.shouldWrite,
+            note: outbound.event?.note || `Priority changed to ${input.priority}`,
+          };
+        })()
+      : undefined;
+    const completedNow = input.status === 'done' && currentTask.status !== 'done';
+    const mutation = await persistence.mutations.mutateTask({
+      taskId: id,
+      expectedUpdatedAt: currentTask.updatedAt,
+      expectedStatusForTerminalTransition: isBecomingTerminal ? currentTask.status : null,
+      now,
+      patch: updates as TaskCoreTaskPatch,
+      ...(input.estimatedDuration !== undefined
+        || input.recurrence !== undefined
+        || input.recurrenceMode !== undefined ? {
+          schedulePatch: {
+            scheduledDate: currentSchedule?.scheduledDate ?? getLocalToday(),
             ...(input.estimatedDuration !== undefined
               ? { estimatedDuration: input.estimatedDuration }
               : {}),
             ...(input.recurrence !== undefined ? { recurrence: input.recurrence } : {}),
+            ...(input.recurrence === null
+              ? { recurrenceMode: 'schedule' as const }
+              : input.recurrenceMode !== undefined
+                ? { recurrenceMode: input.recurrenceMode }
+                : {}),
           },
-        }).run();
-      }
-
-      if (input.tags !== undefined) {
-        tx.delete(taskTags).where(eq(taskTags.taskId, id)).run();
-        if (input.tags.length > 0) {
-          tx.insert(taskTags).values(
-            input.tags.map((tagId) => ({ taskId: id, tagId }))
-          ).run();
-        }
-      }
-
-      for (const change of overrideChanges) {
-        tx.insert(taskFieldStates).values({
-          taskId: id,
-          fieldName: change.fieldName,
-          sourceValue: change.sourceValue,
-          locallyOverridden: change.locallyOverridden,
-          sourceObservedAt: change.sourceObservedAt,
-          localEditedAt: change.localEditedAt,
-          updatedAt: change.updatedAt,
-        }).onConflictDoUpdate({
-          target: [taskFieldStates.taskId, taskFieldStates.fieldName],
-          set: {
-            sourceValue: change.sourceValue,
-            locallyOverridden: change.locallyOverridden,
-            sourceObservedAt: change.sourceObservedAt,
-            localEditedAt: change.localEditedAt,
-            updatedAt: change.updatedAt,
-          },
-        }).run();
-      }
-
-      if (input.priority !== undefined && input.priority !== currentTask.priority) {
-        const outbound = resolveOutboundPriority(
-          currentTask.priority as TaskPriority,
-          input.priority,
-          currentTask.connectorType,
-        );
-
-        tx.insert(prioritySyncLog).values({
-          id: randomUUID(),
-          taskId: id,
+        } : {}),
+      ...(input.tags !== undefined ? { replaceTagIds: input.tags } : {}),
+      fieldStates: overrideChanges,
+      priorityLog,
+      planningHistory: input.planningHorizon !== undefined
+        && input.planningHorizon !== currentTask.planningHorizon ? {
+          previousValue: currentTask.planningHorizon,
+          newValue: input.planningHorizon,
+        } : undefined,
+      suppressAutoCompletionAfterReopen: isReopening
+        && writeContext.wasAutoCompletedByReconciliation,
+      supersedePendingReconciliation: isBecomingTerminal,
+      recurrenceSuccessor,
+      events: completedNow ? [{
+        stableKey: `task-completed:${id}:${currentTask.updatedAt}`,
+        type: 'task.completed',
+        timestamp: now,
+        payload: {
+          id,
+          title: input.title ?? currentTask.title,
           connectorType: currentTask.connectorType,
-          connectorInstanceId: currentTask.connectorInstanceId,
-          previousPriority: currentTask.priority,
-          newPriority: input.priority,
-          direction: 'outbound',
-          writeBackTriggered: policies.get('priority')?.mutation === 'write-through'
-            && outbound.shouldWrite,
-          note: outbound.event?.note || `Priority changed to ${input.priority}`,
-          timestamp: now,
-        }).run();
-      }
-      if (suppressFutureAutoCompletion) {
-        suppressAutoCompletionAfterReopen(tx, id, now);
-      }
-      if (isBecomingTerminal) {
-        supersedePendingReconciliationSuggestions(tx, id, now);
-      }
+          priority: input.priority ?? currentTask.priority,
+          completedAt: updates.completedAt ?? now,
+        },
+      }] : undefined,
     });
+    if (mutation.kind === 'not-found') return ApiErrors.notFound('Task');
+    if (mutation.kind === 'revision-conflict') {
+      return NextResponse.json({
+        error: 'Task changed during update',
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 });
+    }
 
     logger.info({
       taskId: id,
@@ -425,22 +695,9 @@ export async function PATCH(
     }, 'Applied task field policies');
 
     if (input.title !== undefined || input.description !== undefined) {
-      const [updatedTask] = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
-      if (updatedTask) await indexTaskSearch(updatedTask);
-    }
-    const completedNow = input.status === 'done' && currentTask.status !== 'done';
-    if (completedNow) {
-      emitEvent({
-        type: 'task.completed',
-        timestamp: now,
-        payload: {
-          id,
-          title: input.title ?? currentTask.title,
-          connectorType: currentTask.connectorType,
-          priority: input.priority ?? currentTask.priority,
-          completedAt: updates.completedAt ?? now,
-        },
-      }).catch((err) => logger.error({ err, taskId: id }, 'Failed to emit task completed event'));
+      await indexTaskSearch(mutation.task);
+    } else {
+      await publishTaskSemanticUpdate(id);
     }
 
     if (shouldWriteThrough) {
@@ -448,8 +705,11 @@ export async function PATCH(
         ...pickWriteThroughUpdates(input, updates, policies, statusReasonPolicy),
         ...(tagWriteThrough ? { tags: tagWriteThrough } : {}),
       };
-      enqueueTaskWriteThrough(id, () => writeThrough(currentTask, writeThroughUpdates, id)).catch((err) => {
-        logger.error({ err, taskId: id }, 'Write-through task update failed unexpectedly');
+      void enqueueTaskWriteThrough(
+        id,
+        () => writeThrough(currentTask, writeThroughUpdates, id, mutation.task.updatedAt),
+      ).catch((error) => {
+        logger.error({ err: error, taskId: id }, 'Write-through task update failed unexpectedly');
       });
     }
 
@@ -461,6 +721,40 @@ export async function PATCH(
       }
     }
 
+    const reminderChanged = (
+      input.dueDate !== undefined
+      || input.reminderAt !== undefined
+      || input.reminderRelative !== undefined
+      || input.reminderDueTime !== undefined
+      || input.reminderNagInterval !== undefined
+      || input.reminderNagStopAt !== undefined
+      || input.status === 'done'
+      || input.status === 'cancelled'
+    );
+    const reminder = reminderChanged ? {
+      reminderAt: updates.reminderAt !== undefined
+        ? updates.reminderAt
+        : currentTask.reminderAt ?? null,
+      reminderRelative: updates.reminderRelative !== undefined
+        ? updates.reminderRelative
+        : currentTask.reminderRelative ?? null,
+      reminderDueTime: updates.reminderDueTime !== undefined
+        ? updates.reminderDueTime
+        : currentTask.reminderDueTime ?? null,
+      reminderNagInterval: updates.reminderNagInterval !== undefined
+        ? updates.reminderNagInterval
+        : currentTask.reminderNagInterval,
+      reminderNagStopAt: updates.reminderNagStopAt !== undefined
+        ? updates.reminderNagStopAt
+        : currentTask.reminderNagStopAt,
+      reminderNagSeriesId: updates.reminderNagSeriesId !== undefined
+        ? updates.reminderNagSeriesId
+        : currentTask.reminderNagSeriesId,
+      reminderNagSequence: updates.reminderNagSequence !== undefined
+        ? updates.reminderNagSequence
+        : currentTask.reminderNagSequence,
+    } : undefined;
+
     return NextResponse.json({
       success: true,
       fields: Object.fromEntries(
@@ -469,14 +763,12 @@ export async function PATCH(
           { mode: policy.mutation, persisted: true },
         ]),
       ),
+      ...(reminder ? { reminder } : {}),
+      ...(mutation.recurrenceNextTaskId
+        ? { recurrenceNextTaskId: mutation.recurrenceNextTaskId }
+        : {}),
     });
   } catch (error) {
-    if (error instanceof TaskRevisionConflictError) {
-      return NextResponse.json({
-        error: error.message,
-        code: 'TASK_REVISION_CONFLICT',
-      }, { status: 409 });
-    }
     return ApiErrors.internal('Failed to update task', error);
   }
 }
@@ -536,156 +828,161 @@ function pickWriteThroughUpdates(
  * On failure: marks task as pending_push (will retry on next sync).
  */
 async function writeThrough(
-  currentTask: { id: string; sourceId: string; connectorInstanceId: string; connectorType: string; status: string; isChecklistItem: boolean; parentId: string | null; title: string },
+  currentTask: TaskCoreTaskRow,
   updates: WriteThroughUpdates,
   taskId: string,
+  expectedTaskVersion: string,
 ) {
+  let pushLeaseToken: string | null = null;
   try {
-    let connector = connectorRegistry.getConnector(currentTask.connectorInstanceId) ?? null;
-    if (!connector) {
-      connector = await syncScheduler.initializeConnectorFromDb(currentTask.connectorInstanceId);
-    }
-    if (!connector) {
-      // Can't reach connector — leave as pending_push
-      await db.update(tasks).set({ syncStatus: 'pending_push' }).where(eq(tasks.id, taskId));
+    pushLeaseToken = await claimTaskForPush(taskId);
+    if (!pushLeaseToken) return;
+    const claimedTask = await loadClaimedTaskForPush(taskId, pushLeaseToken);
+    if (!claimedTask || claimedTask.updatedAt !== expectedTaskVersion) {
+      await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
       return;
     }
-    if (connector.writeDelivery === 'deferred') {
-      // The bridge change endpoint snapshots this pending task for Scout/Power Automate.
+    const connector = await getOrInitializeConnector(claimedTask.connectorInstanceId);
+    if (!connector || connector.writeDelivery === 'deferred') {
+      await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+      return;
+    }
+    const renewed = await heartbeatTaskPush(taskId, pushLeaseToken);
+    if (!renewed) return;
+    pushLeaseToken = renewed;
+
+    if (claimedTask.sourceId.startsWith('checklist:')) {
+      await completeTaskPush(
+        taskId,
+        pushLeaseToken,
+        claimedTask.sourceId,
+        undefined,
+        undefined,
+        expectedTaskVersion,
+      );
       return;
     }
 
-    // Route to the appropriate connector method
-    // Legacy checklist items (body checkboxes with checklist: sourceIds) can't be
-    // pushed individually — mark as synced since they live in the parent's description.
-    if (currentTask.sourceId.startsWith('checklist:')) {
-      await db.update(tasks).set({ syncStatus: 'synced', lastSyncedAt: new Date().toISOString() }).where(eq(tasks.id, taskId));
-      return;
-    }
-
+    let localUpdates: { status?: 'done' | 'cancelled'; completedAt?: string | null } | undefined;
     const performRemoteWrite = async () => {
-    if (updates.tags) {
-      if (updates.tags.add.length > 0 && !connector.addTagToTask) {
-        throw new Error('Connector does not support adding task tags');
+      if (updates.tags) {
+        if (updates.tags.add.length > 0 && !connector.addTagToTask) {
+          throw new Error('Connector does not support adding task tags');
+        }
+        if (updates.tags.remove.length > 0 && !connector.removeTagFromTask) {
+          throw new Error('Connector does not support removing task tags');
+        }
+        for (const tagName of updates.tags.add) {
+          await connector.addTagToTask!(claimedTask.sourceId, tagName);
+        }
+        for (const tagName of updates.tags.remove) {
+          await connector.removeTagFromTask!(claimedTask.sourceId, tagName);
+        }
       }
-      if (updates.tags.remove.length > 0 && !connector.removeTagFromTask) {
-        throw new Error('Connector does not support removing task tags');
-      }
-      for (const tagName of updates.tags.add) {
-        await connector.addTagToTask!(currentTask.sourceId, tagName);
-      }
-      for (const tagName of updates.tags.remove) {
-        await connector.removeTagFromTask!(currentTask.sourceId, tagName);
-      }
-    }
-    const hasTaskUpdates = Object.entries(updates)
-      .some(([field, value]) => field !== 'tags' && value !== undefined);
-    if (!hasTaskUpdates) {
-      await db.update(tasks).set({
-        syncStatus: 'synced',
-        lastSyncedAt: new Date().toISOString(),
-      }).where(eq(tasks.id, taskId));
-      return;
-    }
+      const hasTaskUpdates = Object.entries(updates)
+        .some(([field, value]) => field !== 'tags' && value !== undefined);
+      if (!hasTaskUpdates) return;
 
-    if (updates.status === 'done' && currentTask.isChecklistItem && currentTask.parentId) {
-      // Checklist item completion — look up parent's sourceId and use completeSubTask
-      const [parentTask] = await db.select({ sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, currentTask.parentId));
-      if (parentTask && parentTask.sourceId.includes(':') && connector.completeSubTask) {
-        await connector.completeSubTask(parentTask.sourceId, currentTask.sourceId);
-      } else if (connector.updateSubTask && parentTask && parentTask.sourceId.includes(':')) {
-        await connector.updateSubTask(parentTask.sourceId, currentTask.sourceId, { status: 'done' });
-      } else if (connector.completeTask) {
-        // Fallback for sub-issues that are real issues (e.g. GH sub-issues)
-        await connector.completeTask(currentTask.sourceId);
-      }
-    } else if (currentTask.isChecklistItem && currentTask.parentId && connector.updateSubTask) {
-      // Checklist item update (title, etc.) — route to updateSubTask
-      const [parentTask] = await db.select({ sourceId: tasks.sourceId }).from(tasks).where(eq(tasks.id, currentTask.parentId));
-      if (parentTask && parentTask.sourceId.includes(':')) {
-        await connector.updateSubTask(parentTask.sourceId, currentTask.sourceId, {
+      if (updates.status === 'done' && claimedTask.isChecklistItem && claimedTask.parentId) {
+        const parent = await (await getTaskCorePersistence()).mutations
+          .getTaskWriteContext(claimedTask.parentId);
+        if (parent?.task.sourceId.includes(':') && connector.completeSubTask) {
+          await connector.completeSubTask(parent.task.sourceId, claimedTask.sourceId);
+        } else if (parent?.task.sourceId.includes(':') && connector.updateSubTask) {
+          await connector.updateSubTask(parent.task.sourceId, claimedTask.sourceId, { status: 'done' });
+        } else if (connector.completeTask) {
+          await connector.completeTask(claimedTask.sourceId);
+        }
+      } else if (claimedTask.isChecklistItem && claimedTask.parentId && connector.updateSubTask) {
+        const parent = await (await getTaskCorePersistence()).mutations
+          .getTaskWriteContext(claimedTask.parentId);
+        if (parent?.task.sourceId.includes(':')) {
+          await connector.updateSubTask(parent.task.sourceId, claimedTask.sourceId, {
+            title: updates.title,
+            description: updates.description === null ? '' : updates.description,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            status: updates.status as any,
+          });
+        }
+      } else if (
+        claimedTask.isChecklistItem
+        && claimedTask.parentId
+        && !connector.updateSubTask
+        && connector.updateTask
+      ) {
+        await connector.updateTask(claimedTask.sourceId, {
           title: updates.title,
-          description: updates.description === null ? '' : updates.description,
+          description: updates.description,
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           status: updates.status as any,
-        });
-      }
-    } else if (currentTask.isChecklistItem && currentTask.parentId && !connector.updateSubTask && connector.updateTask) {
-      // Fallback for sub-issues that are real tasks (e.g. GH sub-issues) — use updateTask directly
-      await connector.updateTask(currentTask.sourceId, {
-        title: updates.title,
-        description: updates.description,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        status: updates.status as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-    } else if (
-      updates.status === 'done'
-      && isConnectorCloseReason(updates.statusReason)
-      && connector.closeTaskWithReason
-    ) {
-      await connector.closeTaskWithReason(currentTask.sourceId, updates.statusReason);
-    } else if (updates.status === 'done') {
-      if (connector.completeTask) {
-        await connector.completeTask(currentTask.sourceId);
-      } else if (connector.updateTask) {
-        await connector.updateTask(currentTask.sourceId, {
-          status: 'done',
-          ...(updates.statusReason !== undefined
-            ? { statusReason: updates.statusReason as TaskItem['statusReason'] }
-            : {}),
-        });
+        } as any);
+      } else if (
+        updates.status === 'done'
+        && isConnectorCloseReason(updates.statusReason)
+        && connector.closeTaskWithReason
+      ) {
+        await connector.closeTaskWithReason(claimedTask.sourceId, updates.statusReason);
+      } else if (updates.status === 'done') {
+        if (connector.completeTask) {
+          await connector.completeTask(claimedTask.sourceId);
+        } else if (connector.updateTask) {
+          await connector.updateTask(claimedTask.sourceId, {
+            status: 'done',
+            ...(updates.statusReason !== undefined
+              ? { statusReason: updates.statusReason as TaskItem['statusReason'] }
+              : {}),
+          });
+        } else {
+          throw new Error('Connector does not support task completion');
+        }
+      } else if (updates.status === 'cancelled' && connector.cancelTask) {
+        await connector.cancelTask(claimedTask.sourceId);
+      } else if (updates.status === 'cancelled' && connector.closeTaskWithReason) {
+        const reason = updates.statusReason === 'duplicate' ? 'duplicate' : 'not_planned';
+        await connector.closeTaskWithReason(claimedTask.sourceId, reason);
       } else {
-        throw new Error('Connector does not support task completion');
-      }
-    } else if (updates.status === 'cancelled' && connector.closeTaskWithReason) {
-      // Map cancelled to a close reason: use provided reason or default to 'not_planned'
-      const reason = updates.statusReason === 'duplicate' ? 'duplicate' : 'not_planned';
-      await connector.closeTaskWithReason(currentTask.sourceId, reason);
-    } else {
-      if (!connector.updateTask) {
-        throw new Error('Connector does not support task updates');
-      }
-      const remoteResult = await connector.updateTask(currentTask.sourceId, {
-        title: updates.title,
-        description: updates.description,
+        if (!connector.updateTask) throw new Error('Connector does not support task updates');
+        const remoteResult = await connector.updateTask(claimedTask.sourceId, {
+          title: updates.title,
+          description: updates.description,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          priority: updates.priority as any,
+          dueDate: updates.dueDate,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          status: updates.status as any,
+          statusReason: updates.statusReason as TaskItem['statusReason'],
+          microStatus: updates.microStatus,
+          ...(updates.recurrence !== undefined
+            ? { metadata: { recurrence: updates.recurrence } }
+            : {}),
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        priority: updates.priority as any,
-        dueDate: updates.dueDate,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        status: updates.status as any,
-        statusReason: updates.statusReason as TaskItem['statusReason'],
-        microStatus: updates.microStatus,
-        ...(updates.recurrence !== undefined ? { metadata: { recurrence: updates.recurrence } } : {}),
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any);
-
-      // If the remote reports a terminal status that differs from local,
-      // apply it immediately. This handles the case where a task is set to
-      // 'in_progress' locally but the upstream issue is already closed — the
-      // write-through learns the truth from the response and corrects locally.
-      const remoteIsTerminal = remoteResult?.status === 'done' || remoteResult?.status === 'cancelled';
-      const localNonTerminal = currentTask.status !== 'done' && currentTask.status !== 'cancelled';
-      const explicitlySettingTerminal = updates.status === 'done' || updates.status === 'cancelled';
-      if (remoteIsTerminal && localNonTerminal && !explicitlySettingTerminal) {
-        await db.update(tasks).set({
-          status: remoteResult.status,
-          completedAt: remoteResult.completedAt || new Date().toISOString(),
-          syncStatus: 'synced',
-          lastSyncedAt: new Date().toISOString(),
-        }).where(eq(tasks.id, taskId));
-        return;
+        } as any);
+        const remoteTerminalStatus = remoteResult?.status === 'done'
+          || remoteResult?.status === 'cancelled'
+          ? remoteResult.status
+          : null;
+        const localNonTerminal = currentTask.status !== 'done'
+          && currentTask.status !== 'cancelled';
+        const explicitlySettingTerminal = updates.status === 'done'
+          || updates.status === 'cancelled';
+        if (remoteTerminalStatus && localNonTerminal && !explicitlySettingTerminal) {
+          localUpdates = {
+            status: remoteTerminalStatus,
+            completedAt: remoteResult.completedAt || new Date().toISOString(),
+          };
+        }
       }
-
-    }
     };
+
     if (connector.type === 'github-issues') {
       const onlyTags = Boolean(updates.tags)
-        && !Object.entries(updates).some(([field, value]) => field !== 'tags' && value !== undefined);
+        && !Object.entries(updates)
+          .some(([field, value]) => field !== 'tags' && value !== undefined);
       await executeFencedGitHubTaskMutation({
-        connectorInstanceId: currentTask.connectorInstanceId,
+        connectorInstanceId: claimedTask.connectorInstanceId,
         taskId,
-        operation: currentTask.isChecklistItem
+        operation: claimedTask.isChecklistItem
           ? 'sub_issue'
           : onlyTags
             ? 'label'
@@ -693,8 +990,8 @@ async function writeThrough(
               ? 'complete'
               : 'update',
         connector,
-        participantTaskIds: currentTask.isChecklistItem && currentTask.parentId
-          ? [{ role: 'parent_issue', taskId: currentTask.parentId }]
+        participantTaskIds: claimedTask.isChecklistItem && claimedTask.parentId
+          ? [{ role: 'parent_issue', taskId: claimedTask.parentId }]
           : undefined,
         write: performRemoteWrite,
       });
@@ -702,26 +999,33 @@ async function writeThrough(
       await performRemoteWrite();
     }
 
-    // Success — mark as synced
-    await db.update(tasks).set({ syncStatus: 'synced', lastSyncedAt: new Date().toISOString() }).where(eq(tasks.id, taskId));
-
-    // Log to sync history so updates (including priority label sync) appear in Sync History
+    const finalized = await completeTaskPush(
+      taskId,
+      pushLeaseToken,
+      claimedTask.sourceId,
+      undefined,
+      localUpdates,
+      expectedTaskVersion,
+    );
+    if (!finalized) return;
     const action = updates.status === 'done' ? 'completed' : 'updated';
     await logWriteThrough({
-      connectorId: currentTask.connectorInstanceId,
+      connectorId: claimedTask.connectorInstanceId,
       action,
-      taskId: currentTask.id,
-      taskTitle: updates.title ?? currentTask.title,
-      taskSourceId: currentTask.sourceId,
-    }).catch((err) => {
-      logger.warn({ err, taskId }, 'Failed to log write-through to sync history');
+      taskId: claimedTask.id,
+      taskTitle: updates.title ?? claimedTask.title,
+      taskSourceId: claimedTask.sourceId,
+    }).catch((error) => {
+      logger.warn({ err: error, taskId }, 'Failed to log write-through to sync history');
     });
-  } catch (err) {
-    logger.error({ err, taskId }, 'Write-through task update failed');
-    await db.update(tasks).set({
-      syncStatus: err instanceof GitHubUnknownWriteOutcomeError ? 'push_failed' : 'pending_push',
-      ...(err instanceof GitHubUnknownWriteOutcomeError ? { pushRetryCount: 5 } : {}),
-    }).where(eq(tasks.id, taskId));
+  } catch (error) {
+    logger.error({ err: error, taskId }, 'Write-through task update failed');
+    if (!pushLeaseToken) return;
+    if (error instanceof GitHubUnknownWriteOutcomeError) {
+      await failTaskPush(taskId, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
+    } else {
+      await releaseTaskPush(taskId, pushLeaseToken, 'pending_push', expectedTaskVersion);
+    }
   }
 }
 
@@ -743,11 +1047,10 @@ export async function DELETE(
   const { id } = await params;
 
   try {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, id));
-    if (!task) {
-      return ApiErrors.notFound('Task');
-    }
-
+    const persistence = await getTaskCorePersistence();
+    const context = await persistence.removals.getTaskRemovalContext(id);
+    if (!context) return ApiErrors.notFound('Task');
+    const task = context.task;
     const isLocalOnly = task.sourceId.startsWith('local:') || task.connectorType === 'local';
     let caps: Awaited<ReturnType<typeof getConnectorCapabilities>> = null;
     let connectorEnabled = true;
@@ -764,24 +1067,30 @@ export async function DELETE(
       forceLocal: isDemoMode(),
     };
     const editPolicy = resolveTaskEditPolicy(taskIdentity, caps);
-    const sourceModel = editPolicy.sourceModel;
-
-    if (
-      caps?.notificationOnly
-      || isNotificationOnlyConnectorType(task.connectorType)
-    ) {
+    if (caps?.notificationOnly || isNotificationOnlyConnectorType(task.connectorType)) {
       return ApiErrors.forbidden('Tasks from notification-only connectors cannot be deleted');
     }
 
-    if (sourceModel === 'remote-mirror') {
-      const now = new Date().toISOString();
-      await db.update(tasks).set({
-        localDisposition: 'dismissed',
-        updatedAt: now,
-      }).where(eq(tasks.id, id));
+    const now = new Date().toISOString();
+    if (editPolicy.sourceModel === 'remote-mirror') {
+      const outcome = await persistence.removals.applyTaskRemoval({
+        taskId: id,
+        expectedUpdatedAt: task.updatedAt,
+        mode: 'mirror-dismiss',
+        now,
+      });
+      if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
+      if (outcome.kind === 'revision-conflict') {
+        return NextResponse.json({
+          error: 'Task changed during deletion',
+          code: 'TASK_REVISION_CONFLICT',
+        }, { status: 409 });
+      }
+      await publishTaskSemanticUpdate(id);
       return NextResponse.json({
         success: true,
         action: 'dismissed',
+        restorable: false,
         connectorType: task.connectorType,
         writeBack: 'none',
       });
@@ -792,27 +1101,24 @@ export async function DELETE(
       if (statusPolicy.mutation === 'blocked') {
         return ApiErrors.forbidden(statusPolicy.reason ?? 'Task cancellation is unavailable');
       }
-      const now = new Date().toISOString();
-      const lifecycleUpdates = getStatusLifecycleUpdates({
-        status: 'cancelled',
-        explicitReason: 'not_planned',
-        completedAt: now,
-        currentStatus: task.status,
-        currentCompletedAt: task.completedAt,
-        currentStatusReason: task.statusReason,
+      const outcome = await persistence.removals.applyTaskRemoval({
+        taskId: id,
+        expectedUpdatedAt: task.updatedAt,
+        mode: 'ingested-cancel',
+        now,
       });
-      runTransaction((tx) => {
-        tx.update(tasks).set({
-          ...lifecycleUpdates,
-          microStatus: null,
-          snoozedUntil: null,
-          reminderAt: null,
-          updatedAt: now,
-        }).where(eq(tasks.id, id)).run();
-      });
+      if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
+      if (outcome.kind === 'revision-conflict') {
+        return NextResponse.json({
+          error: 'Task changed during deletion',
+          code: 'TASK_REVISION_CONFLICT',
+        }, { status: 409 });
+      }
+      await publishTaskSemanticUpdate(id);
       return NextResponse.json({
         success: true,
         action: 'cancelled',
+        restorable: false,
         connectorType: task.connectorType,
         writeBack: statusPolicy.mutation,
       });
@@ -822,74 +1128,91 @@ export async function DELETE(
       return ApiErrors.forbidden(editPolicy.removalReason ?? 'Task removal is unavailable');
     }
 
-    const deleteLocally = editPolicy.removalMode === 'local-delete';
-
-    // If it's a remote task (has a real sourceId), mark for push-delete
-    if (!deleteLocally) {
+    if (editPolicy.removalMode !== 'local-delete') {
       const willClose = editPolicy.removalMode === 'upstream-close';
-
-      // Mark as cancelled locally (optimistic); tag with 'undo' reason when closing
-      await db.update(tasks).set({
-        status: 'cancelled',
-        statusReason: 'undo',
-        updatedAt: new Date().toISOString(),
-      }).where(eq(tasks.id, id));
-
-      // Attempt immediate delete on source
-      writeThroughDelete(task, caps?.delete !== false).catch((err) => {
-        logger.error({ err, taskId: task.id }, 'Write-through task delete failed unexpectedly');
+      const outcome = await persistence.removals.applyTaskRemoval({
+        taskId: id,
+        expectedUpdatedAt: task.updatedAt,
+        mode: 'remote-cancel-intent',
+        now,
       });
-
+      if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
+      if (outcome.kind === 'revision-conflict') {
+        return NextResponse.json({
+          error: 'Task changed during deletion',
+          code: 'TASK_REVISION_CONFLICT',
+        }, { status: 409 });
+      }
+      await publishTaskSemanticUpdate(id);
+      void writeThroughDelete(
+        task,
+        caps?.delete !== false,
+        outcome.taskVersion ?? now,
+      ).catch((error) => {
+        logger.error({ err: error, taskId: task.id }, 'Write-through task delete failed unexpectedly');
+      });
       return NextResponse.json({
         success: true,
         action: willClose ? 'closed' : 'deleted',
+        restorable: false,
         connectorType: task.connectorType,
       });
-    } else {
-      deleteTaskLocally(id);
     }
 
-    return NextResponse.json({ success: true, action: 'deleted' });
+    const outcome = await persistence.removals.applyTaskRemoval({
+      taskId: id,
+      expectedUpdatedAt: task.updatedAt,
+      mode: 'local-delete',
+      now,
+    });
+    if (outcome.kind === 'not-found') return ApiErrors.notFound('Task');
+    if (outcome.kind === 'revision-conflict') {
+      return NextResponse.json({
+        error: 'Task changed during deletion',
+        code: 'TASK_REVISION_CONFLICT',
+      }, { status: 409 });
+    }
+    await removeTaskSearch(id);
+    return NextResponse.json({ success: true, action: 'deleted', restorable: true });
   } catch (error) {
     return ApiErrors.internal('Failed to delete task', error);
   }
 }
 
-/**
- * Attempt immediate delete on source connector.
- * On success: removes the local task entirely.
- * On failure: marks task as pending_push for retry.
- */
 async function writeThroughDelete(
-  task: { id: string; sourceId: string; connectorInstanceId: string },
+  task: TaskCoreTaskRow,
   allowDelete: boolean,
+  expectedTaskVersion: string,
 ) {
+  let pushLeaseToken: string | null = null;
   try {
-    let connector = connectorRegistry.getConnector(task.connectorInstanceId) ?? null;
-    if (!connector) {
-      connector = await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
-    }
-    if (!connector) {
-      await db.update(tasks).set({ syncStatus: 'pending_push' }).where(eq(tasks.id, task.id));
+    pushLeaseToken = await claimTaskForPush(task.id);
+    if (!pushLeaseToken) return;
+    const claimedTask = await loadClaimedTaskForPush(task.id, pushLeaseToken);
+    if (!claimedTask || claimedTask.updatedAt !== expectedTaskVersion) {
+      await releaseTaskPush(task.id, pushLeaseToken, 'pending_push', expectedTaskVersion);
       return;
     }
-    if (connector.writeDelivery === 'deferred') {
-      await db.update(tasks).set({ syncStatus: 'pending_push' }).where(eq(tasks.id, task.id));
+    const connector = await getOrInitializeConnector(claimedTask.connectorInstanceId);
+    if (!connector || connector.writeDelivery === 'deferred') {
+      await releaseTaskPush(task.id, pushLeaseToken, 'pending_push', expectedTaskVersion);
       return;
     }
-
+    const renewed = await heartbeatTaskPush(task.id, pushLeaseToken);
+    if (!renewed) return;
+    pushLeaseToken = renewed;
     const deleteRemote = async () => {
       if (allowDelete && connector.deleteTask) {
-        await connector.deleteTask(task.sourceId);
+        await connector.deleteTask(claimedTask.sourceId);
       } else if (connector.closeTaskWithReason) {
-        await connector.closeTaskWithReason(task.sourceId, 'not_planned');
+        await connector.closeTaskWithReason(claimedTask.sourceId, 'not_planned');
       } else {
         throw new Error('Connector does not support task deletion');
       }
     };
     if (connector.type === 'github-issues') {
       await executeFencedGitHubTaskMutation({
-        connectorInstanceId: task.connectorInstanceId,
+        connectorInstanceId: claimedTask.connectorInstanceId,
         taskId: task.id,
         operation: 'delete',
         connector,
@@ -898,20 +1221,25 @@ async function writeThroughDelete(
     } else {
       await deleteRemote();
     }
-
-    deleteTaskLocally(task.id);
-  } catch (err) {
-    logger.error({ err, taskId: task.id }, 'Write-through task delete failed');
-    await db.update(tasks).set({
-      syncStatus: err instanceof GitHubUnknownWriteOutcomeError ? 'push_failed' : 'pending_push',
-      ...(err instanceof GitHubUnknownWriteOutcomeError ? { pushRetryCount: 5 } : {}),
-    }).where(eq(tasks.id, task.id));
+    const persistence = await getTaskCorePersistence();
+    const finalized = await persistence.removals.finalizeRemoteTaskRemoval({
+      taskId: task.id,
+      leaseToken: pushLeaseToken,
+      expectedUpdatedAt: expectedTaskVersion,
+    });
+    if (finalized.kind === 'committed') await removeTaskSearch(task.id);
+  } catch (error) {
+    logger.error({ err: error, taskId: task.id }, 'Write-through task delete failed');
+    if (!pushLeaseToken) return;
+    if (error instanceof GitHubUnknownWriteOutcomeError) {
+      await failTaskPush(task.id, pushLeaseToken, 'push_failed', 5, expectedTaskVersion);
+    } else {
+      await releaseTaskPush(task.id, pushLeaseToken, 'pending_push', expectedTaskVersion);
+    }
   }
 }
 
-/**
- * GET /api/tasks/[id] — Get a single task with full details
- */
+/** GET /api/tasks/[id] - Get a single task with full details. */
 export async function GET(
   _request: Request,
   { params }: { params: Promise<{ id: string }> }
@@ -919,75 +1247,68 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const task = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
-    if (!task.length) {
-      return ApiErrors.notFound('Task');
-    }
-
-    // Get tags
-    const taskTagRows = await db.select().from(taskTags).where(eq(taskTags.taskId, id));
-
-    // Get projects
-    const taskProjectRows = await db.select().from(taskProjects).where(eq(taskProjects.taskId, id));
-
-    // Get subtasks (children)
-    const subtasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      effort: tasks.effort,
-    }).from(tasks).where(eq(tasks.parentId, id));
-
-    // Get local schedule fields from taskSchedules
-    const scheduleRow = await db.select({
-      estimatedDuration: taskSchedules.estimatedDuration,
-      recurrence: taskSchedules.recurrence,
-    }).from(taskSchedules).where(eq(taskSchedules.taskId, id)).limit(1);
-    const myDayRow = await db.select({ id: myDayItems.id })
-      .from(myDayItems)
-      .where(and(eq(myDayItems.taskId, id), eq(myDayItems.date, getLocalToday())))
-      .limit(1);
-    const legacyMetadata = parseTaskMetadataCompat(task[0].metadata);
+    const persistence = await getTaskCorePersistence();
+    const detail = await persistence.details.getTaskDetail(id, getLocalToday());
+    if (!detail) return ApiErrors.notFound('Task');
+    const task = detail.task;
+    const legacyMetadata = parseTaskMetadataCompat(task.metadata);
     if (legacyMetadata.recoveredLegacy) {
       logger.warn({ taskId: id }, 'Recovered unstructured legacy task metadata');
     }
     const legacyRecurrence = typeof legacyMetadata.metadata.recurrence === 'string'
       ? legacyMetadata.metadata.recurrence
       : null;
-
-    // Compute deep link URL if the connector supports it
-    const localIdentity = task[0].sourceId.startsWith('local:')
-      || task[0].connectorType === 'local';
+    const parsedRecurrence = readRecurrenceMetadata(legacyMetadata.metadata);
+    const localIdentity = task.sourceId.startsWith('local:') || task.connectorType === 'local';
     const [caps, connectorEnabled] = localIdentity
       ? [null, true] as const
       : await Promise.all([
-          getConnectorCapabilities(task[0].connectorInstanceId),
-          isConnectorEnabled(task[0].connectorInstanceId),
+          getConnectorCapabilities(task.connectorInstanceId),
+          isConnectorEnabled(task.connectorInstanceId),
         ]);
     const sourceUrl = caps?.deepLinks
-      ? buildDeepLinkUrl(task[0].connectorType, task[0].sourceId)
+      ? buildDeepLinkUrl(task.connectorType, task.sourceId)
       : null;
     const editPolicy = resolveTaskEditPolicy({
-      sourceId: task[0].sourceId,
-      connectorType: task[0].connectorType,
+      sourceId: task.sourceId,
+      connectorType: task.connectorType,
       connectorEnabled,
       forceLocal: isDemoMode(),
     }, caps);
 
     return NextResponse.json({
       task: {
-        ...task[0],
+        ...task,
         sourceUrl,
-        estimatedDuration: scheduleRow[0]?.estimatedDuration ?? null,
-        recurrence: scheduleRow[0]?.recurrence ?? legacyRecurrence,
-        tagIds: taskTagRows.map(tt => tt.tagId),
-        projectIds: taskProjectRows.map(tp => tp.projectId),
-        subtasks,
-        isInMyDay: myDayRow.length > 0,
+        reminderTimezone: getTimezone(),
+        estimatedDuration: detail.schedule?.estimatedDuration ?? null,
+        recurrence: detail.schedule?.recurrence ?? legacyRecurrence,
+        recurrenceMode: detail.schedule?.recurrenceMode ?? 'schedule',
+        recurrenceControl: parsedRecurrence.status === 'invalid'
+          || (
+            parsedRecurrence.status === 'legacy'
+            && Boolean(legacyRecurrence)
+            && !localIdentity
+          )
+          ? {
+              rule: null,
+              owner: 'provider',
+              support: 'unsupported',
+              reasons: parsedRecurrence.status === 'invalid'
+                ? [...parsedRecurrence.issues]
+                : ['legacy_provider_rule_not_canonical'],
+              timezone: getTimezone(),
+              localTime: null,
+            }
+          : getRecurrenceControlState(parsedRecurrence.rule, getTimezone()),
+        tagIds: detail.tagIds,
+        projectIds: detail.projectIds,
+        subtasks: detail.subtasks,
+        subtaskOrderRevision: detail.subtaskOrderRevision,
+        isInMyDay: detail.isInMyDay,
         taskSourceModel: editPolicy.sourceModel,
         editPolicy,
+        supportedStatusValues: caps?.supportedTaskStatuses,
       },
     });
   } catch (error) {

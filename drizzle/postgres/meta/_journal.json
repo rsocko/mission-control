@@ -1,0 +1,104 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1788051882260,
+      "tag": "0000_handy_orphan",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788375712263,
+      "tag": "0001_lame_bucky",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1788400000000,
+      "tag": "0002_connector_last_test_result",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788486400000,
+      "tag": "0003_semantic_idempotency_key_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788572800000,
+      "tag": "0004_project_hierarchy_integrity",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1789005149455,
+      "tag": "0005_cool_nocturne",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1789053000000,
+      "tag": "0006_dedupe_outlook_calendar_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789240953502,
+      "tag": "0007_next_tomas",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789246534719,
+      "tag": "0008_slow_killer_shrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789246535001,
+      "tag": "0009_context_appearance",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789675534304,
+      "tag": "0010_certain_warhawk",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1789690503955,
+      "tag": "0011_recurring_occurrence_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789743022168,
+      "tag": "0012_task_time_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1789760745129,
+      "tag": "0013_recurrence_backfill_decisions",
+      "breakpoints": true
+    }
+  ]
+}

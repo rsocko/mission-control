@@ -21,9 +21,48 @@ function chainable<T>(terminal: T) {
   return chain;
 }
 
-const mockInsert = vi.fn(() => chainable([]));
-const mockSelect = vi.fn(() => chainable([]));
-const mockUpdate = vi.fn(() => chainable(undefined));
+const mockInsert = vi.fn((...args: unknown[]) => {
+  void args;
+  return chainable([]);
+});
+const mockSelect = vi.fn((...args: unknown[]) => {
+  void args;
+  return chainable([]);
+});
+const mockUpdate = vi.fn((...args: unknown[]) => {
+  void args;
+  return chainable(undefined);
+});
+const aiWorkflowMocks = vi.hoisted(() => ({
+  getTask: vi.fn(async (taskId: string): Promise<{
+    id: string;
+    title: string;
+    description: string | null;
+    connectorType: string;
+  } | null> => {
+    void taskId;
+    return null;
+  }),
+  listTaskTags: vi.fn(async (taskId: string) => {
+    void taskId;
+    return [];
+  }),
+  listLinkedProjects: vi.fn(async (taskId: string) => {
+    void taskId;
+    return [];
+  }),
+  listExistingProjects: vi.fn(async (limit: number) => {
+    void limit;
+    return [];
+  }),
+  getAsyncAIProviderConfiguration: vi.fn(async () => ({ configured: true })),
+  listGoalTasks: vi.fn(async () => [] as unknown[]),
+  countGoalTags: vi.fn(async () => ({ goal: 0, idea: 0, brainstorm: 0 })),
+  promoteGoal: vi.fn(async (): Promise<
+    | { kind: 'not-found' }
+    | { kind: 'promoted'; projectId: string; tasksCreated: string[] }
+  > => ({ kind: 'not-found' })),
+}));
 
 vi.mock('@/db', () => {
   // Deep chainable proxy: every property access and every function call
@@ -71,8 +110,11 @@ vi.mock('@/lib/logger', () => ({
   requestContext: { getStore: vi.fn(() => undefined) },
 }));
 
-vi.mock('@/lib/ai', () => ({
+vi.mock('@/lib/ai/config-resolver', () => ({
   getResolvedAIConfig: vi.fn(() => ({ configured: true })),
+}));
+
+vi.mock('@/lib/ai/provider-factory', () => ({
   getAIModel: vi.fn(() => ({
     model: 'mock-model',
     context: {
@@ -87,6 +129,54 @@ vi.mock('@/lib/ai', () => ({
     model: 'mock-model-id',
     fallbackOccurred: false,
   })),
+}));
+
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIProviderConfiguration: aiWorkflowMocks.getAsyncAIProviderConfiguration,
+  getAsyncAIModel: vi.fn(async () => ({
+    model: 'mock-model',
+    context: {
+      featureId: 'goal-development',
+      sensitivity: 'standard',
+      allowedRoutes: ['openai'],
+      correlationId: 'test-correlation',
+    },
+    configured: { provider: 'openai', model: 'mock-model' },
+  })),
+  getAsyncAIRouteOutcome: vi.fn(() => ({
+    provider: 'openai',
+    model: 'mock-model-id',
+    fallbackOccurred: false,
+  })),
+}));
+
+vi.mock('@/lib/ai/workflow-persistence', () => ({
+  getAIWorkflowPersistence: async () => ({
+    goals: {
+      getTask: aiWorkflowMocks.getTask,
+      listTaskTags: aiWorkflowMocks.listTaskTags,
+      listLinkedProjects: aiWorkflowMocks.listLinkedProjects,
+      listExistingProjects: aiWorkflowMocks.listExistingProjects,
+    },
+    goalsBoard: {
+      listGoalTasks: aiWorkflowMocks.listGoalTasks,
+      countGoalTags: aiWorkflowMocks.countGoalTags,
+      promoteGoal: aiWorkflowMocks.promoteGoal,
+    },
+  }),
+}));
+
+vi.mock('@/lib/projects/organization-service', () => ({
+  getGoalDevelopmentContext: async (taskId: string, projectLimit: number) => {
+    const task = await aiWorkflowMocks.getTask(taskId);
+    if (!task) return null;
+    return {
+      task,
+      tags: await aiWorkflowMocks.listTaskTags(taskId),
+      linkedProjects: await aiWorkflowMocks.listLinkedProjects(taskId),
+      existingProjects: await aiWorkflowMocks.listExistingProjects(projectLimit),
+    };
+  },
 }));
 
 vi.mock('ai', () => ({
@@ -114,11 +204,16 @@ vi.mock('ai', () => ({
 describe('GET /api/goals', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    aiWorkflowMocks.getAsyncAIProviderConfiguration.mockResolvedValue({ configured: true });
+    aiWorkflowMocks.getTask.mockResolvedValue(null);
+    aiWorkflowMocks.listTaskTags.mockResolvedValue([]);
+    aiWorkflowMocks.listLinkedProjects.mockResolvedValue([]);
+    aiWorkflowMocks.listExistingProjects.mockResolvedValue([]);
+    aiWorkflowMocks.listGoalTasks.mockResolvedValue([]);
+    aiWorkflowMocks.countGoalTags.mockResolvedValue({ goal: 0, idea: 0, brainstorm: 0 });
   });
 
   it('should return empty items when no matching tags exist', async () => {
-    mockSelect.mockImplementation(() => chainable([]));
-
     const { GET } = await import('@/app/api/goals/route');
     const request = new Request('http://localhost:3099/api/goals');
     const response = await GET(request);
@@ -130,28 +225,30 @@ describe('GET /api/goals', () => {
   });
 
   it('should accept filter query param', async () => {
-    mockSelect.mockImplementation(() => chainable([]));
-
     const { GET } = await import('@/app/api/goals/route');
     const request = new Request('http://localhost:3099/api/goals?filter=goal');
     const response = await GET(request);
     expect(response.status).toBe(200);
     const data = await response.json();
     expect(data).toHaveProperty('items');
+    expect(aiWorkflowMocks.listGoalTasks).toHaveBeenCalledWith({
+      tagSlugs: ['goal'],
+      projectId: null,
+    });
   });
 
   it('should accept project query param', async () => {
-    mockSelect.mockImplementation(() => chainable([]));
-
     const { GET } = await import('@/app/api/goals/route');
     const request = new Request('http://localhost:3099/api/goals?project=proj-1');
     const response = await GET(request);
     expect(response.status).toBe(200);
+    expect(aiWorkflowMocks.listGoalTasks).toHaveBeenCalledWith({
+      tagSlugs: ['goal', 'idea', 'brainstorm'],
+      projectId: 'proj-1',
+    });
   });
 
   it('should default filter to all when not specified', async () => {
-    mockSelect.mockImplementation(() => chainable([]));
-
     const { GET } = await import('@/app/api/goals/route');
     const request = new Request('http://localhost:3099/api/goals');
     const response = await GET(request);
@@ -159,9 +256,7 @@ describe('GET /api/goals', () => {
   });
 
   it('should return 500 on internal error', async () => {
-    mockSelect.mockImplementation(() => {
-      throw new Error('DB failure');
-    });
+    aiWorkflowMocks.listGoalTasks.mockRejectedValueOnce(new Error('DB failure'));
 
     const { GET } = await import('@/app/api/goals/route');
     const request = new Request('http://localhost:3099/api/goals');
@@ -183,6 +278,11 @@ describe('GET /api/goals', () => {
 describe('POST /api/goals/develop', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    aiWorkflowMocks.getAsyncAIProviderConfiguration.mockResolvedValue({ configured: true });
+    aiWorkflowMocks.getTask.mockResolvedValue(null);
+    aiWorkflowMocks.listTaskTags.mockResolvedValue([]);
+    aiWorkflowMocks.listLinkedProjects.mockResolvedValue([]);
+    aiWorkflowMocks.listExistingProjects.mockResolvedValue([]);
   });
 
   it('should return 400 when taskId is missing', async () => {
@@ -212,8 +312,9 @@ describe('POST /api/goals/develop', () => {
   });
 
   it('should return 503 when AI not configured', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai');
-    vi.mocked(getResolvedAIConfig).mockReturnValueOnce({ configured: false } as ReturnType<typeof getResolvedAIConfig>);
+    aiWorkflowMocks.getAsyncAIProviderConfiguration.mockResolvedValueOnce({
+      configured: false,
+    });
 
     const { POST } = await import('@/app/api/goals/develop/route');
     const request = new Request('http://localhost:3099/api/goals/develop', {
@@ -226,18 +327,11 @@ describe('POST /api/goals/develop', () => {
   });
 
   it('should return a proposal when task exists', async () => {
-    // First call: task lookup returns a task; subsequent calls return empty arrays
-    let callCount = 0;
-    mockSelect.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return chainable([{
-          id: 'task-1', title: 'Build a dashboard', description: 'Analytics dashboard',
-          status: 'todo', priority: 'high', createdAt: '2026-01-01', updatedAt: '2026-01-01',
-          metadata: {},
-        }]);
-      }
-      return chainable([]);
+    aiWorkflowMocks.getTask.mockResolvedValue({
+      id: 'task-1',
+      title: 'Build a dashboard',
+      description: 'Analytics dashboard',
+      connectorType: 'local',
     });
 
     const { POST } = await import('@/app/api/goals/develop/route');
@@ -294,7 +388,7 @@ describe('POST /api/goals/promote', () => {
   });
 
   it('should return 404 when task not found', async () => {
-    mockSelect.mockImplementation(() => chainable([]));
+    aiWorkflowMocks.promoteGoal.mockResolvedValueOnce({ kind: 'not-found' });
 
     const { POST } = await import('@/app/api/goals/promote/route');
     const request = new Request('http://localhost:3099/api/goals/promote', {
@@ -307,11 +401,11 @@ describe('POST /api/goals/promote', () => {
   });
 
   it('should create project from goal with phases and tasks', async () => {
-    mockSelect.mockImplementation(() => chainable([{
-      id: 'task-1', title: 'Build dashboard', description: 'Analytics',
-      status: 'todo', priority: 'high', metadata: {},
-      createdAt: '2026-01-01', updatedAt: '2026-01-01',
-    }]));
+    aiWorkflowMocks.promoteGoal.mockResolvedValueOnce({
+      kind: 'promoted',
+      projectId: 'proj-dashboard-project',
+      tasksCreated: ['mc-goal-1', 'mc-goal-2', 'mc-goal-3'],
+    });
 
     const { POST } = await import('@/app/api/goals/promote/route');
     const request = new Request('http://localhost:3099/api/goals/promote', {
@@ -351,11 +445,11 @@ describe('POST /api/goals/promote', () => {
   });
 
   it('should create project without phases', async () => {
-    mockSelect.mockImplementation(() => chainable([{
-      id: 'task-2', title: 'Quick idea', description: null,
-      status: 'todo', priority: 'low', metadata: {},
-      createdAt: '2026-01-01', updatedAt: '2026-01-01',
-    }]));
+    aiWorkflowMocks.promoteGoal.mockResolvedValueOnce({
+      kind: 'promoted',
+      projectId: 'proj-quick-project',
+      tasksCreated: [],
+    });
 
     const { POST } = await import('@/app/api/goals/promote/route');
     const request = new Request('http://localhost:3099/api/goals/promote', {

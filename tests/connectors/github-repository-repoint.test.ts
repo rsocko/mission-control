@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { eq } from 'drizzle-orm';
 import type {
   ExternalIdentityObservation,
@@ -25,7 +26,11 @@ let identities: typeof import('@/lib/external-identities');
 let service: typeof import('@/lib/connectors/github-issues/repoint-service');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
+  const { registerSqliteGitHubRepointBackupVerifier } = await import(
+    '@/lib/connectors/github-issues/backup-verifier'
+  );
+  registerSqliteGitHubRepointBackupVerifier();
   schema = await import('@/db/schema');
   identities = await import('@/lib/external-identities');
   service = await import('@/lib/connectors/github-issues/repoint-service');
@@ -93,8 +98,29 @@ describe('GitHub repository repoint service', () => {
       .rejects.toThrow('must not be the active');
   });
 
+  it('enforces SQLite snapshot age and future-clock boundaries', async () => {
+    const backupPath = join(directory, 'freshness-backup.db');
+    const now = new Date('2026-08-30T20:00:00.000Z');
+    await database.sqlite.backup(backupPath);
+
+    const exactBoundary = new Date(now.getTime() - 24 * 60 * 60_000);
+    utimesSync(backupPath, exactBoundary, exactBoundary);
+    await expect(service.inspectGitHubRepointBackup(backupPath, now))
+      .resolves.toMatchObject({ modifiedAt: exactBoundary.toISOString() });
+
+    const oldSnapshot = new Date(exactBoundary.getTime() - 1);
+    utimesSync(backupPath, oldSnapshot, oldSnapshot);
+    await expect(service.inspectGitHubRepointBackup(backupPath, now))
+      .rejects.toThrow('older than 24 hours');
+
+    const futureSnapshot = new Date(now.getTime() + 5 * 60_000 + 1);
+    utimesSync(backupPath, futureSnapshot, futureSnapshot);
+    await expect(service.inspectGitHubRepointBackup(backupPath, now))
+      .rejects.toThrow('future');
+  });
+
   it('repoints a rename atomically, verifies identities, and preserves local relationships', async () => {
-    const seeded = seedRepository('rename', 'old-owner/repo', 'R_rename', 'I_rename');
+    const seeded = await seedRepository('rename', 'old-owner/repo', 'R_rename', 'I_rename');
     const remote = stableRemote('old-owner/repo', 'new-owner/repo', 'R_rename', 'I_rename');
 
     const preflight = await service.preflightGitHubRepositoryRepoint(
@@ -144,7 +170,7 @@ describe('GitHub repository repoint service', () => {
 
     const issueBinding = database.default.select().from(schema.externalEntityBindings)
       .where(eq(schema.externalEntityBindings.localId, seeded.taskId)).get()!;
-    const locatorHistory = identities.listExternalEntityLocatorHistory(issueBinding.externalEntityId);
+    const locatorHistory = await identities.listExternalEntityLocatorHistory(issueBinding.externalEntityId);
     expect(locatorHistory.map((locator) => `${locator.owner}/${locator.repository}`)).toEqual([
       'old-owner/repo',
       'new-owner/repo',
@@ -167,13 +193,13 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('accepts an owner transfer but rejects path reuse and clean replacements', async () => {
-    seedRepository('transfer', 'source/repo', 'R_transfer', 'I_transfer');
+    await seedRepository('transfer', 'source/repo', 'R_transfer', 'I_transfer');
     expect((await service.preflightGitHubRepositoryRepoint(
       input('transfer', 'source/repo', 'destination/repo'),
       dependencies(stableRemote('source/repo', 'destination/repo', 'R_transfer', 'I_transfer')),
     )).go).toBe(true);
 
-    seedRepository('reused', 'reused-old/repo', 'R_expected', 'I_expected');
+    await seedRepository('reused', 'reused-old/repo', 'R_expected', 'I_expected');
     const reused = stableRemote('reused-old/repo', 'reused-new/repo', 'R_expected', 'I_expected', {
       oldStableId: 'R_replacement',
     });
@@ -186,7 +212,7 @@ describe('GitHub repository repoint service', () => {
       reasons: expect.arrayContaining(['old_repository_path_has_been_reused']),
     });
 
-    seedRepository('replacement', 'replacement-old/repo', 'R_original', 'I_original');
+    await seedRepository('replacement', 'replacement-old/repo', 'R_original', 'I_original');
     const replacement = stableRemote(
       'replacement-old/repo',
       'replacement-new/repo',
@@ -202,7 +228,7 @@ describe('GitHub repository repoint service', () => {
       reasons: expect.arrayContaining(['target_repository_is_a_replacement']),
     });
 
-    seedRepository('inaccessible', 'inaccessible-old/repo', 'R_inaccessible', 'I_inaccessible');
+    await seedRepository('inaccessible', 'inaccessible-old/repo', 'R_inaccessible', 'I_inaccessible');
     const inaccessible: GitHubRepositoryRepointRemote = {
       async resolveRepository(repository) {
         if (repository === 'inaccessible-new/repo') return null;
@@ -222,7 +248,7 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('reports every mutable-state blocker with exact counts', async () => {
-    const seeded = seedRepository('blocked', 'blocked-old/repo', 'R_blocked', 'I_blocked');
+    const seeded = await seedRepository('blocked', 'blocked-old/repo', 'R_blocked', 'I_blocked');
     database.default.update(schema.tasks).set({ syncStatus: 'pending_push' })
       .where(eq(schema.tasks.id, seeded.taskId)).run();
     database.default.update(schema.tasks).set({ syncStatus: 'push_failed' })
@@ -251,7 +277,7 @@ describe('GitHub repository repoint service', () => {
     }).run();
     const issueBinding = database.default.select().from(schema.externalEntityBindings)
       .where(eq(schema.externalEntityBindings.localId, seeded.taskId)).get()!;
-    identities.recordExternalIdentityCollision({
+    await identities.recordExternalIdentityCollision({
       connectorInstanceId: 'blocked',
       category: 'stable_legacy_disagree',
       bindingType: 'task',
@@ -302,7 +328,7 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('resumes verification after interruption with the same idempotency key', async () => {
-    seedRepository('resume', 'resume-old/repo', 'R_resume', 'I_resume');
+    await seedRepository('resume', 'resume-old/repo', 'R_resume', 'I_resume');
     const base = stableRemote('resume-old/repo', 'resume-new/repo', 'R_resume', 'I_resume');
     let repositoryCalls = 0;
     const interrupted: GitHubRepositoryRepointRemote = {
@@ -324,7 +350,7 @@ describe('GitHub repository repoint service', () => {
     )).rejects.toThrow('simulated verification interruption');
     const operation = database.default.select().from(schema.githubRepositoryRepoints)
       .where(eq(schema.githubRepositoryRepoints.connectorInstanceId, 'resume')).get()!;
-    expect(service.getGitHubRepositoryRepointStatus(operation.id)).toMatchObject({
+    expect(await service.getGitHubRepositoryRepointStatus(operation.id)).toMatchObject({
       phase: 'verifying',
       connectorLocked: true,
     });
@@ -335,7 +361,7 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('resumes an operation interrupted immediately after durable lock acquisition', async () => {
-    seedRepository(
+    await seedRepository(
       'locked-resume',
       'locked-old/repo',
       'R_locked',
@@ -368,7 +394,7 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('never verifies a failed apply and recovers it only through guarded rollback', async () => {
-    seedRepository('failed-apply', 'failed-old/repo', 'R_failed', 'I_failed');
+    await seedRepository('failed-apply', 'failed-old/repo', 'R_failed', 'I_failed');
     const executeInput = {
       ...input('failed-apply', 'failed-old/repo', 'failed-new/repo'),
       idempotencyKey: 'failed-1',
@@ -397,7 +423,7 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('leaves verification failures disabled and supports guarded rollback', async () => {
-    const seeded = seedRepository('rollback', 'rollback-old/repo', 'R_rollback', 'I_rollback');
+    const seeded = await seedRepository('rollback', 'rollback-old/repo', 'R_rollback', 'I_rollback');
     const base = stableRemote('rollback-old/repo', 'rollback-new/repo', 'R_rollback', 'I_rollback');
     let issueCalls = 0;
     const mismatching: GitHubRepositoryRepointRemote = {
@@ -439,7 +465,7 @@ describe('GitHub repository repoint service', () => {
         { oldStableId: 'R_reused' },
       )),
     )).rejects.toThrow('Rollback source repository identity verification failed');
-    expect(service.getGitHubRepositoryRepointStatus(failed.id))
+    expect(await service.getGitHubRepositoryRepointStatus(failed.id))
       .toMatchObject({ phase: 'verification_failed', connectorLocked: true });
 
     const rolledBack = await service.rollbackGitHubRepositoryRepoint(
@@ -508,8 +534,8 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('transfers an issue only after stable identity checks and writes parser-safe routing', async () => {
-    const seeded = seedRepository('native', 'native/repo-a', 'R_native_a', 'I_native');
-    seedTargetRepository('native', 'native/repo-b', 'R_native_b');
+    const seeded = await seedRepository('native', 'native/repo-a', 'R_native_a', 'I_native');
+    await seedTargetRepository('native', 'native/repo-b', 'R_native_b');
     database.default.update(schema.tasks).set({
       metadata: {
         issueNumber: 17,
@@ -574,8 +600,8 @@ describe('GitHub repository repoint service', () => {
   });
 
   it('waits for the transferred issue to become visible in the target repository', async () => {
-    const seeded = seedRepository('eventual', 'eventual/repo-a', 'R_eventual_a', 'I_eventual');
-    seedTargetRepository('eventual', 'eventual/repo-b', 'R_eventual_b');
+    const seeded = await seedRepository('eventual', 'eventual/repo-a', 'R_eventual_a', 'I_eventual');
+    await seedTargetRepository('eventual', 'eventual/repo-b', 'R_eventual_b');
     let destinationLookups = 0;
     const sleep = vi.fn(async () => {});
     const remote: GitHubRepositoryRepointRemote = {
@@ -628,7 +654,7 @@ describe('GitHub repository repoint service', () => {
   });
 });
 
-function seedRepository(
+async function seedRepository(
   connectorId: string,
   repository: string,
   repositoryStableId: string,
@@ -681,7 +707,7 @@ function seedRepository(
   }).run();
 
   const [owner, name] = repository.split('/');
-  identities.persistExternalIdentityBatch([
+  await identities.persistExternalIdentityBatch([
     {
       target: {
         connectorInstanceId: connectorId,
@@ -715,11 +741,11 @@ function taskRow(id: string, connectorId: string, sourceId: string, repository: 
   };
 }
 
-function seedTargetRepository(
+async function seedTargetRepository(
   connectorId: string,
   repository: string,
   repositoryStableId: string,
-): void {
+): Promise<void> {
   const sourceListId = `${connectorId}:repo:${repository}`;
   database.default.insert(schema.sourceLists).values({
     id: sourceListId,
@@ -731,7 +757,7 @@ function seedTargetRepository(
     lastSyncedAt: observedAt,
   }).run();
   const [owner, name] = repository.split('/');
-  identities.persistExternalIdentityBatch([{
+  await identities.persistExternalIdentityBatch([{
     target: {
       connectorInstanceId: connectorId,
       bindingType: 'source_list',

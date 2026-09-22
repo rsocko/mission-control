@@ -1,64 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => {
-  function chainable() {
-    const chain = new Proxy<Record<PropertyKey, unknown>>({}, {
-      get(_, property) {
-        if (property === 'then') {
-          return (resolve: (value: unknown) => unknown) => resolve([]);
-        }
-        return vi.fn(() => chain);
-      },
-    });
-    return chain;
-  }
-
-  return {
-    select: vi.fn(() => chainable()),
-    getLocalDateBoundsISO: vi.fn((date: string) => ({
-      dayStart: `${date}T04:00:00.000Z`,
-      nextDayStart: `${date}-nextT04:00:00.000Z`,
-    })),
-  };
-});
-
-vi.mock('@/db', () => ({
-  default: { select: mocks.select },
+const mocks = vi.hoisted(() => ({
+  aggregateStats: vi.fn(async () => ({
+    completedTasks: [],
+    createdTaskCount: 0,
+    carriedForwardCount: 0,
+    activeRoutines: [],
+    periodCompletions: [],
+    focusItems: [],
+    staleTasks: [],
+    energyData: [],
+    focusTaskStatuses: [],
+  })),
+  getLocalDateBoundsISO: vi.fn((date: string) => ({
+    dayStart: `${date}T04:00:00.000Z`,
+    nextDayStart: `${date}-nextT04:00:00.000Z`,
+  })),
 }));
 
-vi.mock('@/db/schema', () => ({
-  tasks: {
-    id: 'taskId',
-    title: 'taskTitle',
-    status: 'taskStatus',
-    priority: 'taskPriority',
-    sourceId: 'taskSourceId',
-    connectorType: 'taskConnectorType',
-    connectorInstanceId: 'taskConnectorInstanceId',
-    completedAt: 'taskCompletedAt',
-    createdAt: 'taskCreatedAt',
-    updatedAt: 'taskUpdatedAt',
-  },
-  routines: {
-    id: 'routineId',
-    cadenceType: 'routineCadenceType',
-    isActive: 'routineActive',
-    isArchived: 'routineArchived',
-  },
-  routineCompletions: {
-    routineId: 'completionRoutineId',
-    date: 'completionDate',
-  },
-  focusItems: {
-    taskId: 'focusTaskId',
-    date: 'focusDate',
-    slot: 'focusSlot',
-    scope: 'focusScope',
-  },
-  energyCheckins: {
-    date: 'energyDate',
-    level: 'energyLevel',
-  },
+vi.mock('@/lib/ai/workflow-persistence', () => ({
+  getAIWorkflowPersistence: async () => ({
+    resets: { aggregateStats: mocks.aggregateStats },
+  }),
 }));
 
 vi.mock('@/lib/utils/date', () => ({
@@ -79,6 +42,17 @@ vi.mock('@/lib/tasks/edit-policy', () => ({
 describe('GET /api/resets/stats timezone boundaries', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.aggregateStats.mockResolvedValue({
+      completedTasks: [],
+      createdTaskCount: 0,
+      carriedForwardCount: 0,
+      activeRoutines: [],
+      periodCompletions: [],
+      focusItems: [],
+      staleTasks: [],
+      energyData: [],
+      focusTaskStatuses: [],
+    });
   });
 
   it('converts weekly and stale calendar cutoffs through configured local bounds', async () => {

@@ -1,11 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Plug, RefreshCw, ChevronRight, Trash2, Loader2, Shield, Circle,
   Plus, AlertTriangle, FolderOpen, Zap, Save, Activity,
   Clock, Check, CheckCircle2, X, XCircle, RotateCcw,
+  Eye, EyeOff, History,
 } from 'lucide-react';
 import {
   Select,
@@ -43,6 +45,12 @@ import {
 } from '@/lib/connectors/scout/settings';
 import { WorkTodoBridgePanel } from './WorkTodoBridgePanel';
 import { defaultTyrionBridgeUrlForEnvironment } from '@/lib/connectors/monarch-money/constants';
+import { FinanceConnectionWarning } from '@/components/finance/FinanceConnectionWarning';
+import {
+  currencySchema,
+  supportedCurrencyCodes,
+} from '@/lib/finance/currency';
+import { ConnectorPushRules } from '@/components/settings/ConnectorPushRules';
 
 const SYNC_MODE_OPTIONS = [
   { value: 'poll', label: 'Polling' },
@@ -70,8 +78,10 @@ const SCOUT_SOURCE_LABELS: Record<ScoutSourceType, string> = {
   'cross-source': 'Cross-source',
 };
 
-function asSettingsRecord(settings: ConnectorConfig['settings']): Record<string, unknown> {
-  if (settings && typeof settings === 'object' && !Array.isArray(settings)) return settings;
+function asSettingsRecord(settings: unknown): Record<string, unknown> {
+  if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+    return settings as Record<string, unknown>;
+  }
   if (typeof settings === 'string') {
     try {
       const parsed = JSON.parse(settings);
@@ -89,7 +99,7 @@ function asSettingsRecord(settings: ConnectorConfig['settings']): Record<string,
 
 function ConnectorsSection({
   connectors, sourceLists, loading, syncing, onToggle, onSync, onDelete, onUpdate, onPurgeSourceList, onAdd, selectedConnector, onSelect,
-  deletedConnectors, onRestore, onPermanentDelete,
+  deletedConnectors, onRestore, onPermanentDelete, onTested,
 }: {
   connectors: ConnectorConfig[];
   sourceLists: SourceList[];
@@ -106,6 +116,9 @@ function ConnectorsSection({
   deletedConnectors: ConnectorConfig[];
   onRestore: (id: string) => void;
   onPermanentDelete: (id: string) => void;
+  /** Called after a manual "Test Connection" click so the connector list (and its
+   * connection badge) refreshes with the latest test outcome. */
+  onTested?: () => void | Promise<void>;
 }) {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ open: boolean; title: string; message: string; confirmLabel: string; variant: 'danger' | 'warning'; onConfirm: () => void }>({ open: false, title: '', message: '', confirmLabel: '', variant: 'danger', onConfirm: () => {} });
@@ -193,6 +206,15 @@ function ConnectorsSection({
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
+                    <Link
+                      href={`/settings/sync-history?source=${encodeURIComponent(conn.id)}`}
+                      onClick={event => event.stopPropagation()}
+                      className="rounded-md border border-[var(--border)] p-1.5 text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                      title={`View ${getConnectorDisplayName(conn)} sync history`}
+                      aria-label={`View ${getConnectorDisplayName(conn)} sync history`}
+                    >
+                      <History size={12} />
+                    </Link>
                     {conn.enabled && conn.type !== 'scout' && (
                       <button onClick={(e) => { e.stopPropagation(); onSync(conn.id); }}
                         disabled={!!isSyncing}
@@ -235,6 +257,7 @@ function ConnectorsSection({
                         setConfirmDelete={setConfirmDelete}
                         healthState={healthState}
                         onHealthRefresh={refreshHealth}
+                        onTested={onTested}
                       />
                     </motion.div>
                   )}
@@ -656,6 +679,7 @@ type ConnectorEditPanelProps = {
   setConfirmDelete: (id: string | null) => void;
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
+  onTested?: () => void | Promise<void>;
 };
 
 function GitHubConnectorEditPanel(props: ConnectorEditPanelProps) {
@@ -670,9 +694,409 @@ function DocumentIntelligenceConnectorEditPanel(props: ConnectorEditPanelProps) 
   return <DefaultConnectorEditPanel {...props} variant="document-intelligence" />;
 }
 
+function HomeAssistantConnectorEditPanel({
+  connector,
+  sourceLists,
+  onUpdate,
+  onDelete,
+  confirmDelete,
+  setConfirmDelete,
+  onTested,
+}: ConnectorEditPanelProps) {
+  const initial = asSettingsRecord(connector.settings);
+  const initialSources = asSettingsRecord(initial.sources);
+  const initialDelivery = asSettingsRecord(initial.outboundDelivery);
+  const initialActions = asSettingsRecord(initial.actions);
+  const source = (key: string) => asSettingsRecord(initialSources[key]);
+  const [name, setName] = useState(getConnectorDisplayName(connector));
+  const [baseUrl, setBaseUrl] = useState(
+    typeof initial.baseUrl === 'string' ? initial.baseUrl : 'http://homeassistant.local:8123',
+  );
+  const [accessToken, setAccessToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [pollInterval, setPollInterval] = useState(connector.pollIntervalMinutes || 5);
+  const [sources, setSources] = useState({
+    entityAlerts: source('entityAlerts').enabled !== false,
+    updates: source('updates').enabled !== false,
+    persistentNotifications: source('persistentNotifications').enabled !== false,
+    repairs: source('repairs').enabled !== false,
+  });
+  const [criticalUpdates, setCriticalUpdates] = useState(
+    Array.isArray(source('updates').criticalEntityPatterns)
+      ? (source('updates').criticalEntityPatterns as string[]).join(', ')
+      : '',
+  );
+  const [criticalPersistent, setCriticalPersistent] = useState(
+    Array.isArray(source('persistentNotifications').criticalNotificationPatterns)
+      ? (source('persistentNotifications').criticalNotificationPatterns as string[]).join(', ')
+      : '',
+  );
+  const [actionsEnabled, setActionsEnabled] = useState(initialActions.enabled === true);
+  const [updatePush, setUpdatePush] = useState<'immediate' | 'daily_summary' | 'off'>(
+    initialDelivery.updatePush === 'immediate' || initialDelivery.updatePush === 'off'
+      ? initialDelivery.updatePush
+      : 'daily_summary',
+  );
+  const [dailySummaryTime, setDailySummaryTime] = useState(
+    typeof initialDelivery.dailySummaryTime === 'string' ? initialDelivery.dailySummaryTime : '08:00',
+  );
+  const [immediateCriticalUpdates, setImmediateCriticalUpdates] = useState(initialDelivery.immediateCriticalUpdates !== false);
+  const [immediateActionNeededRepairs, setImmediateActionNeededRepairs] = useState(initialDelivery.immediateActionNeededRepairs !== false);
+  const [immediateUrgentEntityAlerts, setImmediateUrgentEntityAlerts] = useState(initialDelivery.immediateUrgentEntityAlerts !== false);
+  const [immediateCriticalPersistent, setImmediateCriticalPersistent] = useState(initialDelivery.immediateCriticalPersistentNotifications !== false);
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState('');
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{
+    success: boolean;
+    details?: string;
+    error?: string;
+    sources?: Record<string, { available?: boolean; count?: number; error?: string }>;
+  } | null>(null);
+  const [testedConnectionFingerprint, setTestedConnectionFingerprint] = useState<string | null>(null);
+
+  function markDirty() {
+    setDirty(true);
+    setSaveError('');
+  }
+
+  const patternList = (value: string) => value.split(',').map(item => item.trim()).filter(Boolean);
+  const settings = {
+    ...initial,
+    schemaVersion: 2,
+    baseUrl: baseUrl.trim().replace(/\/+$/, ''),
+    sources: {
+      ...initialSources,
+      entityAlerts: { ...source('entityAlerts'), enabled: sources.entityAlerts },
+      updates: {
+        ...source('updates'),
+        enabled: sources.updates,
+        criticalEntityPatterns: patternList(criticalUpdates),
+      },
+      persistentNotifications: {
+        ...source('persistentNotifications'),
+        enabled: sources.persistentNotifications,
+        criticalNotificationPatterns: patternList(criticalPersistent),
+      },
+      repairs: { ...source('repairs'), enabled: sources.repairs },
+    },
+    actions: { ...initialActions, enabled: actionsEnabled },
+    outboundDelivery: {
+      ...initialDelivery,
+      updatePush,
+      dailySummaryTime,
+      immediateCriticalUpdates,
+      immediateActionNeededRepairs,
+      immediateUrgentEntityAlerts,
+      immediateCriticalPersistentNotifications: immediateCriticalPersistent,
+    },
+  };
+  const normalizedBaseUrl = baseUrl.trim().replace(/\/+$/, '');
+  const initialSourceEnabled = {
+    entityAlerts: source('entityAlerts').enabled !== false,
+    updates: source('updates').enabled !== false,
+    persistentNotifications: source('persistentNotifications').enabled !== false,
+    repairs: source('repairs').enabled !== false,
+  };
+  const sourcesChanged = Object.entries(sources).some(
+    ([key, enabled]) => initialSourceEnabled[key as keyof typeof initialSourceEnabled] !== enabled,
+  );
+  const connectionChanged = normalizedBaseUrl !== (
+    typeof initial.baseUrl === 'string' ? initial.baseUrl.replace(/\/+$/, '') : ''
+  ) || Boolean(accessToken.trim()) || sourcesChanged;
+  const connectionFingerprint = JSON.stringify({
+    baseUrl: normalizedBaseUrl,
+    accessToken: accessToken.trim() || 'stored',
+    sources,
+  });
+  const connectionTestCurrent = !connectionChanged
+    || (testResult?.success === true && testedConnectionFingerprint === connectionFingerprint);
+
+  async function save() {
+    if (!name.trim() || !connectionTestCurrent) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onUpdate(connector.id, {
+        name: name.trim(),
+        syncMode: 'poll',
+        pollIntervalMinutes: pollInterval,
+        capabilities: { ...connector.capabilities, write: actionsEnabled },
+        settings,
+        ...(accessToken.trim() ? { credentials: { accessToken: accessToken.trim() } } : {}),
+      });
+      setAccessToken('');
+      setDirty(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save connector');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const response = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'home-assistant',
+          connectorId: connector.id,
+          settings,
+          ...(accessToken.trim()
+            ? { credentials: { accessToken: accessToken.trim() } }
+            : {}),
+        }),
+      });
+      const data = await response.json();
+      const sourceAvailable = {
+        entityAlerts: data.sources?.states?.available === true,
+        updates: data.sources?.states?.available === true,
+        persistentNotifications: data.sources?.persistentNotifications?.available === true,
+        repairs: data.sources?.repairs?.available === true,
+      };
+      const enabledReadable = Object.entries(sources).some(
+        ([sourceKey, enabled]) => (
+          enabled && sourceAvailable[sourceKey as keyof typeof sourceAvailable]
+        ),
+      );
+      const successful = response.ok && data.success && enabledReadable;
+      setTestResult(successful
+        ? data
+        : {
+            ...data,
+            success: false,
+            error: data.error || 'None of the enabled notification sources are readable. Disable unavailable sources or update Home Assistant permissions.',
+          });
+      setTestedConnectionFingerprint(successful ? connectionFingerprint : null);
+      await onTested?.();
+    } catch {
+      setTestResult({ success: false, error: 'Connection test request failed' });
+      setTestedConnectionFingerprint(null);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-[var(--border)] bg-[var(--surface-0)]/50 px-4 py-5">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Instance name
+          <input value={name} onChange={event => { setName(event.target.value); markDirty(); }}
+            aria-invalid={!name.trim()}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          {!name.trim() && <span className="mt-1 block text-xs text-red-400">Enter an instance name.</span>}
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Home Assistant URL
+          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); markDirty(); setTestResult(null); setTestedConnectionFingerprint(null); }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Poll interval
+          <Select value={String(pollInterval)} onValueChange={value => { setPollInterval(Number(value)); markDirty(); }}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {POLL_INTERVAL_OPTIONS.map(option => (
+                <SelectItem key={option.value} value={String(option.value)}>{option.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Replace access token
+          <span className="relative mt-1 block">
+            <input type={showToken ? 'text' : 'password'} value={accessToken}
+              onChange={event => { setAccessToken(event.target.value); markDirty(); setTestResult(null); setTestedConnectionFingerprint(null); }}
+              placeholder={connector.hasCredentials ? 'Stored — leave blank to keep' : 'Long-lived access token'}
+              autoComplete="new-password"
+              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)]" />
+            <button type="button" onClick={() => setShowToken(value => !value)}
+              className="absolute inset-y-0 right-0 px-3 text-[var(--text-muted)]" aria-label={showToken ? 'Hide token' : 'Show token'}>
+              {showToken ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          </span>
+        </label>
+      </div>
+
+      <fieldset className="mt-5">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Notification sources</legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          {([
+            ['entityAlerts', 'Polled device rules'],
+            ['updates', 'Updates'],
+            ['persistentNotifications', 'Persistent'],
+            ['repairs', 'Repairs'],
+          ] as const).map(([key, label]) => (
+            <label key={key} className="flex items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-2.5 text-sm text-[var(--text-secondary)]">
+              <input type="checkbox" checked={sources[key]} onChange={event => {
+                setSources(current => ({ ...current, [key]: event.target.checked }));
+                markDirty();
+                setTestResult(null);
+                setTestedConnectionFingerprint(null);
+              }} className="h-4 w-4 accent-blue-500" />
+              {label}
+            </label>
+          ))}
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          {([
+            ['entityAlerts', 'entity-alerts', 'Polled device rules'],
+            ['updates', 'updates', 'Updates'],
+            ['persistentNotifications', 'persistent-notifications', 'Persistent notifications'],
+            ['repairs', 'repairs', 'Repairs'],
+          ] as const).map(([settingKey, sourceId, label]) => {
+              const sourceList = sourceLists.find(item => (
+                item.connectorInstanceId === connector.id && item.sourceId === sourceId
+              ));
+              const status = !sources[settingKey]
+                ? 'disabled'
+                : sourceList?.healthStatus ?? 'pending';
+              const statusLabel = status === 'ok'
+                ? 'Healthy'
+                : status === 'failed'
+                  ? 'Degraded'
+                  : status === 'pending'
+                    ? 'Pending first sync'
+                    : 'Disabled';
+              return (
+                <div key={sourceId} className="min-w-0 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="truncate text-xs font-medium text-[var(--text-secondary)]" title={label}>
+                      {label}
+                    </span>
+                    <span className={`shrink-0 text-xs font-medium ${
+                      status === 'ok'
+                        ? 'text-emerald-400'
+                        : status === 'failed'
+                          ? 'text-red-400'
+                          : 'text-[var(--text-muted)]'
+                    }`}>
+                      {statusLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-xs text-[var(--text-muted)]" title={sourceList?.healthError ?? undefined}>
+                    {status === 'disabled'
+                      ? 'Disabled in this connector.'
+                      : status === 'failed'
+                      ? sourceList?.healthError || 'The latest source check failed.'
+                      : sourceList?.lastSuccessfulAt
+                        ? `Last successful sync ${new Date(sourceList.lastSuccessfulAt).toLocaleString()}`
+                        : 'No successful source sync recorded yet.'}
+                  </p>
+                </div>
+              );
+            })}
+        </div>
+      </fieldset>
+
+      <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Routine update push
+          <Select value={updatePush} onValueChange={value => { setUpdatePush(value as typeof updatePush); markDirty(); }}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">Immediate</SelectItem>
+              <SelectItem value="daily_summary">Daily summary</SelectItem>
+              <SelectItem value="off">No push</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="mt-1 block font-normal text-[var(--text-muted)]">This changes outbound delivery only; items remain separate in Notifications.</span>
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Daily summary time
+          <input type="time" value={dailySummaryTime} disabled={updatePush !== 'daily_summary'}
+            onChange={event => { setDailySummaryTime(event.target.value); markDirty(); }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] disabled:opacity-50" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Critical update entity patterns
+          <input value={criticalUpdates} onChange={event => { setCriticalUpdates(event.target.value); markDirty(); }}
+            placeholder="update.home_assistant_core, update.router_*"
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Critical persistent notification IDs
+          <input value={criticalPersistent} onChange={event => { setCriticalPersistent(event.target.value); markDirty(); }}
+            placeholder="security_*, water_leak"
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+        </label>
+      </div>
+
+      <fieldset className="mt-5">
+        <legend className="text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)]">Immediate push overrides</legend>
+        <div className="mt-2 grid gap-x-4 gap-y-2 sm:grid-cols-2">
+          {([
+            [immediateCriticalUpdates, setImmediateCriticalUpdates, 'Critical updates'],
+            [immediateActionNeededRepairs, setImmediateActionNeededRepairs, 'Action-needed repairs'],
+            [immediateUrgentEntityAlerts, setImmediateUrgentEntityAlerts, 'Urgent device alerts'],
+            [immediateCriticalPersistent, setImmediateCriticalPersistent, 'Critical persistent notifications'],
+          ] as const).map(([checked, setter, label]) => (
+            <label key={label} className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
+              <input type="checkbox" checked={checked} onChange={event => { setter(event.target.checked); markDirty(); }}
+                className="h-4 w-4 accent-amber-500" />
+              {label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <label className="mt-5 flex gap-3 rounded-xl border border-amber-700/30 bg-amber-900/10 p-3">
+        <input type="checkbox" checked={actionsEnabled} onChange={event => { setActionsEnabled(event.target.checked); markDirty(); }}
+          className="mt-0.5 h-4 w-4 accent-amber-500" />
+        <span>
+          <span className="block text-sm font-medium text-[var(--text-primary)]">Allow source actions</span>
+          <span className="block text-xs text-[var(--text-muted)]">Install, skip, dismiss, and ignore actions require confirmation.</span>
+        </span>
+      </label>
+
+      {(saveError || testResult) && (
+        <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${
+          testResult?.success
+            ? 'border-emerald-800/40 bg-emerald-900/20 text-emerald-300'
+            : 'border-red-800/40 bg-red-900/20 text-red-300'
+        }`}>
+          {saveError || testResult?.details || testResult?.error}
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-4">
+        <button onClick={() => confirmDelete === connector.id ? onDelete(connector.id) : setConfirmDelete(connector.id)}
+          className="flex items-center gap-1.5 text-xs text-red-400 hover:text-red-300">
+          <Trash2 size={13} /> {confirmDelete === connector.id ? 'Confirm remove' : 'Remove connector'}
+        </button>
+        <div className="flex gap-2">
+          <button onClick={test} disabled={testing}
+            className="flex items-center gap-2 rounded-lg border border-[var(--border)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50">
+            {testing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />} Test connection
+          </button>
+          <button onClick={save} disabled={!dirty || saving || !name.trim() || !connectionTestCurrent}
+            className="flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white disabled:opacity-50">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save
+          </button>
+        </div>
+      </div>
+      {connectionChanged && !connectionTestCurrent && !testing && (
+        <p className="mt-2 text-end text-xs text-[var(--text-muted)]" role="status">
+          Test the changed connection or source selection successfully before saving.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ConnectorEditPanel(props: ConnectorEditPanelProps) {
+  let panel: React.ReactNode;
   if (props.connector.type === 'scout') {
-    return (
+    panel = (
       <ScoutEditPanel
         connector={props.connector}
         sourceLists={props.sourceLists}
@@ -682,9 +1106,8 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
         setConfirmDelete={props.setConfirmDelete}
       />
     );
-  }
-  if (props.connector.type === 'microsoft-todo-work') {
-    return (
+  } else if (props.connector.type === 'microsoft-todo-work') {
+    panel = (
       <WorkTodoBridgePanel
         connector={props.connector}
         sourceLists={props.sourceLists}
@@ -692,22 +1115,30 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
         onDelete={props.onDelete}
       />
     );
-  }
-  if (props.connector.type === 'github-issues') {
-    return <GitHubConnectorEditPanel {...props} />;
-  }
-  if (isFinanceConnectorType(props.connector.type)) {
-    return <FinanceConnectorEditPanel {...props} />;
-  }
-  if (props.connector.type === 'document-intelligence') {
-    return <DocumentIntelligenceConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'github-issues') {
+    panel = <GitHubConnectorEditPanel {...props} />;
+  } else if (isFinanceConnectorType(props.connector.type)) {
+    panel = <FinanceConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'document-intelligence') {
+    panel = <DocumentIntelligenceConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'home-assistant') {
+    panel = <HomeAssistantConnectorEditPanel {...props} />;
+  } else {
+    panel = <DefaultConnectorEditPanel {...props} />;
   }
 
-  return <DefaultConnectorEditPanel {...props} />;
+  return (
+    <>
+      {panel}
+      <div className="border-t border-[var(--border)] px-4 pb-4">
+        <ConnectorPushRules connectorInstanceId={props.connector.id} />
+      </div>
+    </>
+  );
 }
 
 function DefaultConnectorEditPanel({
-  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, variant,
+  connector, sourceLists, onUpdate, onPurgeSourceList, onDelete, confirmDelete, setConfirmDelete, healthState, onHealthRefresh, onTested, variant,
 }: {
   connector: ConnectorConfig;
   sourceLists: SourceList[];
@@ -718,6 +1149,7 @@ function DefaultConnectorEditPanel({
   setConfirmDelete: (id: string | null) => void;
   healthState?: ConnectorHealthState;
   onHealthRefresh: (id: string) => void;
+  onTested?: () => void | Promise<void>;
   variant?: 'default' | 'github' | 'finance' | 'document-intelligence';
 }) {
   const [editSyncMode, setEditSyncMode] = useState(connector.syncMode);
@@ -744,6 +1176,12 @@ function DefaultConnectorEditPanel({
     typeof connectorSettings.bridgeUrl === 'string'
       ? connectorSettings.bridgeUrl
       : defaultTyrionBridgeUrlForEnvironment(process.env.NODE_ENV)
+  );
+  const persistedHouseholdCurrency = typeof connectorSettings.householdCurrency === 'string'
+    ? connectorSettings.householdCurrency
+    : '';
+  const [editHouseholdCurrency, setEditHouseholdCurrency] = useState(
+    persistedHouseholdCurrency,
   );
   const isGitHubConnector = resolvedVariant === 'github';
   const [editFetchNotifications, setEditFetchNotifications] = useState(
@@ -802,6 +1240,15 @@ function DefaultConnectorEditPanel({
   async function handleSave() {
     setSaving(true);
     setSaveError('');
+    if (
+      isFinanceConnector
+      && editHouseholdCurrency !== persistedHouseholdCurrency
+      && !currencySchema.safeParse(editHouseholdCurrency).success
+    ) {
+      setSaveError('Select a supported household currency');
+      setSaving(false);
+      return;
+    }
     const updates: Partial<ConnectorConfig> = {
       name: getConnectorNameUpdate(connector, editName, editNameChanged),
       syncMode: editSyncMode,
@@ -820,6 +1267,9 @@ function DefaultConnectorEditPanel({
       updates.settings = {
         ...connectorSettings,
         bridgeUrl: editBridgeUrl.trim(),
+        ...(editHouseholdCurrency
+          ? { householdCurrency: editHouseholdCurrency }
+          : {}),
       };
     }
 
@@ -860,6 +1310,9 @@ function DefaultConnectorEditPanel({
       if (isDiConnector) {
         onHealthRefresh(connector.id);
       }
+      // Refresh the connector list so the top-level badge picks up the persisted
+      // test result immediately, instead of only showing it in this inline message.
+      await onTested?.();
     } catch {
       setTestResult({ success: false, error: 'Request failed' });
     }
@@ -920,8 +1373,14 @@ function DefaultConnectorEditPanel({
         <div className="space-y-4">
           {/* Display Name */}
           <div>
-            <label className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">Display Name</label>
+            <label
+              htmlFor={`connector-display-name-${connector.id}`}
+              className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block"
+            >
+              Display Name
+            </label>
             <input
+              id={`connector-display-name-${connector.id}`}
               type="text"
               value={editName}
               onChange={e => { setEditName(e.target.value); setEditNameChanged(true); markDirty(); }}
@@ -930,6 +1389,12 @@ function DefaultConnectorEditPanel({
           </div>
 
           {isFinanceConnector && (
+            <>
+            {connector.configurationState?.status === 'needs-configuration' && (
+              <div role="status" className="rounded-lg border border-amber-700/40 bg-amber-900/20 p-3 text-xs text-amber-300">
+                Needs configuration: select the household currency before Finance Insights can publish.
+              </div>
+            )}
             <div>
               <label htmlFor={`tyrion-bridge-url-${connector.id}`} className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
                 Tyrion Bridge API URL
@@ -947,6 +1412,35 @@ function DefaultConnectorEditPanel({
                 Include the approved versioned gateway path; the bare operations UI and browser proxy are not connector APIs.
               </p>
             </div>
+            <div>
+              <label htmlFor={`tyrion-household-currency-${connector.id}`} className="text-xs font-semibold text-[var(--text-tertiary)] uppercase mb-1.5 block">
+                Household currency
+              </label>
+              <Select
+                value={editHouseholdCurrency}
+                onValueChange={(value) => {
+                setEditHouseholdCurrency(value);
+                markDirty();
+                }}
+              >
+                <SelectTrigger
+                id={`tyrion-household-currency-${connector.id}`}
+                aria-required="true"
+                className="w-full px-3 py-1.5 bg-[var(--surface-0)] border border-[var(--border-strong)] rounded-lg text-sm text-[var(--text-primary)] focus:outline-none"
+                >
+                <SelectValue placeholder="Select an ISO 4217 currency" />
+                </SelectTrigger>
+                <SelectContent>
+                {supportedCurrencyCodes.map((currency) => (
+                  <SelectItem key={currency} value={currency}>{currency}</SelectItem>
+                ))}
+                </SelectContent>
+              </Select>
+              <p className="mt-1 text-xs text-[var(--text-muted)]">
+                Used for bounded Tyrion insight presentation and notification amounts.
+              </p>
+            </div>
+            </>
           )}
 
           {/* Connector Feature Summary */}
@@ -1230,13 +1724,22 @@ function DefaultConnectorEditPanel({
               <Shield size={10} /> Authentication
             </h4>
             {isFinanceConnector ? (
-              <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
-                <p className="text-xs text-[var(--text-secondary)]">
-                  Tyrion owns the Monarch connection. Mission Control syncs bounded transaction snapshots and sends category changes through the bridge.
-                </p>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
-                  No Monarch credentials are stored here. The connector service token remains server-side and is never returned to this browser.
-                </p>
+              <div className="space-y-3">
+                {healthState?.data?.recovery && (
+                  <FinanceConnectionWarning
+                    connectorId={connector.id}
+                    recovery={healthState.data.recovery}
+                    onVerified={() => onHealthRefresh(connector.id)}
+                  />
+                )}
+                <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-1)] p-3">
+                  <p className="text-xs text-[var(--text-secondary)]">
+                    Tyrion owns the Monarch connection. Mission Control syncs bounded transaction snapshots and sends category changes through the bridge.
+                  </p>
+                  <p className="text-xs text-[var(--text-muted)] mt-1">
+                    No Monarch credentials are stored here. The connector service token remains server-side and is never returned to this browser.
+                  </p>
+                </div>
               </div>
             ) : connector.hasCredentials ? (
               <div className="flex items-center gap-2">

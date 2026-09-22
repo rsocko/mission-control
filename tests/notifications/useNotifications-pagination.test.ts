@@ -8,7 +8,10 @@ import { useNotifications } from '@/lib/hooks/useNotifications';
 const mockResponse = (overrides = {}) => ({
   notifications: [],
   stats: { total: 0, unread: 0, urgent: 0, actionNeeded: 0, headsUp: 0, fyi: 0 },
-  facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+  facets: {
+    level: {}, category: {}, source: {}, sourceAccount: [],
+    notificationType: [], state: {}, merchant: [],
+  },
   hasMore: false,
   cursor: null,
   ...overrides,
@@ -122,7 +125,7 @@ describe('useNotifications — sync refresh', () => {
       title: 'Review requested',
       body: '',
       level: 'action_needed',
-      category: 'social',
+      category: 'development',
       state: 'unread',
       receivedAt: '2026-08-11T21:35:48Z',
       connectorType: 'github-issues',

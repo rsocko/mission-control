@@ -38,8 +38,10 @@ const doorOpen = {
 } as const satisfies ConnectorNotificationTypeDefinition;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  const database = await import('@/db');
+  db = database.default;
   ({ connectorConfigs, inboundWebhooks, notificationPushRules } = await import('@/db/schema'));
+  await database.initializeSqlitePersistenceComposition();
   ({ saveNotificationPushRule, resetNotificationPushRule } = await import(
     '@/lib/notifications/push-policy/rules'
   ));

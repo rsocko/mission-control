@@ -1,7 +1,8 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import { sqlite } from '@/db';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { FinanceInsightProjectionFenceError } from '@/db/persistence/finance-insights';
 import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
 import {
   FINANCE_INSIGHT_ITEM_LIMITS,
@@ -15,6 +16,10 @@ import {
   type MonarchTransaction,
 } from './client';
 import { MONARCH_BRIDGE_CONTRACT_VERSION } from './constants';
+import {
+  createFinanceIdentityNamespace,
+  financeConnectorScopedReference,
+} from './identity';
 
 export const FINANCE_INSIGHT_HISTORY_MONTHS = 37;
 export const FINANCE_INSIGHT_HISTORY_MAX_SOURCE_AGE_MS = 48 * 60 * 60 * 1_000;
@@ -103,17 +108,32 @@ function amountMinor(value: number): number {
   return rounded;
 }
 
-function transactionFact(transaction: MonarchTransaction): TransactionSourceFactV1 {
+function transactionFact(
+  identityNamespace: string,
+  transaction: MonarchTransaction,
+): TransactionSourceFactV1 {
   return transactionSourceFactSchema.parse({
-    sourceRef: transaction.id,
+    sourceRef: financeConnectorScopedReference(
+      identityNamespace,
+      'transaction',
+      transaction.id,
+    ),
     occurredOn: transaction.date,
     amountMinor: amountMinor(transaction.amount),
     merchantName: normalizedName(transaction.merchant.name, 160),
-    categoryRef: transaction.category?.id ?? null,
-    accountRef: transaction.account.id,
+    categoryRef: transaction.category
+      ? financeConnectorScopedReference(identityNamespace, 'category', transaction.category.id)
+      : null,
+    accountRef: financeConnectorScopedReference(
+      identityNamespace,
+      'account',
+      transaction.account.id,
+    ),
     isPending: transaction.isPending,
     recurringRef: null,
-    tagRefs: [...new Set(transaction.tagReferences.map((tag) => tag.id))].sort(),
+    tagRefs: [...new Set(transaction.tagReferences.map((tag) => (
+      financeConnectorScopedReference(identityNamespace, 'tag', tag.id)
+    )))].sort(),
   });
 }
 
@@ -165,43 +185,18 @@ export class FinanceInsightHistorySynchronizer {
     coverageEnd: string;
   }> {
     const connectorId = this.config.id;
-    const attemptId = randomUUID();
+    const { finance } = await getWorkerPersistenceRepositories();
     const attemptAt = this.clock().toISOString();
+    const identityNamespace = await finance.identity.ensureNamespace({
+      connectorId,
+      candidate: createFinanceIdentityNamespace(),
+      updatedAt: attemptAt,
+    });
+    const attemptId = randomUUID();
     const coverageEnd = dateOnly(this.clock());
     const windows = buildFinanceInsightHistoryWindows(coverageEnd);
     const coverageStart = windows[0]!.start;
-    sqlite.transaction(() => {
-      sqlite.prepare(`
-        INSERT INTO finance_insight_transaction_projection_state (
-          connector_id, status, current_attempt_id, last_attempt_at,
-          created_at, updated_at
-        ) VALUES (?, 'running', ?, ?, ?, ?)
-        ON CONFLICT(connector_id) DO UPDATE SET
-          status = 'running',
-          current_attempt_id = excluded.current_attempt_id,
-          last_attempt_at = excluded.last_attempt_at,
-          last_error_code = NULL,
-          updated_at = excluded.updated_at
-      `).run(connectorId, attemptId, attemptAt, attemptAt, attemptAt);
-      sqlite.prepare(`
-        DELETE FROM finance_insight_transaction_projection_facts
-        WHERE connector_id = ?
-          AND generation_id <> COALESCE((
-            SELECT successful_generation_id
-            FROM finance_insight_transaction_projection_state
-            WHERE connector_id = ?
-          ), '')
-      `).run(connectorId, connectorId);
-      sqlite.prepare(`
-        DELETE FROM finance_insight_transaction_projection_windows
-        WHERE connector_id = ?
-          AND generation_id <> COALESCE((
-            SELECT successful_generation_id
-            FROM finance_insight_transaction_projection_state
-            WHERE connector_id = ?
-          ), '')
-      `).run(connectorId, connectorId);
-    }).immediate();
+    await finance.insights.projection.startAttempt({ connectorId, attemptId, attemptAt });
 
     try {
       const allFacts: TransactionSourceFactV1[] = [];
@@ -243,7 +238,7 @@ export class FinanceInsightHistorySynchronizer {
                 false,
               );
             }
-            const fact = transactionFact(transaction);
+            const fact = transactionFact(identityNamespace, transaction);
             if (allSourceRefs.has(fact.sourceRef)) {
               throw new MonarchBridgeError(
                 'invalid_contract',
@@ -254,22 +249,15 @@ export class FinanceInsightHistorySynchronizer {
             allSourceRefs.add(fact.sourceRef);
             return fact;
           });
-          sqlite.transaction(() => {
-            const insert = sqlite.prepare(`
-              INSERT INTO finance_insight_transaction_projection_facts (
-                connector_id, generation_id, source_ref, occurred_on, payload
-              ) VALUES (?, ?, ?, ?, ?)
-            `);
-            for (const fact of facts) {
-              insert.run(
-                connectorId,
-                attemptId,
-                fact.sourceRef,
-                fact.occurredOn,
-                JSON.stringify(fact),
-              );
-            }
-          }).immediate();
+          await finance.insights.projection.insertAttemptFacts({
+            connectorId,
+            attemptId,
+            facts: facts.map((fact) => ({
+              sourceRef: fact.sourceRef,
+              occurredOn: fact.occurredOn,
+              payload: fact,
+            })),
+          });
           windowFacts.push(...facts);
           allFacts.push(...facts);
           if (allFacts.length > FINANCE_INSIGHT_ITEM_LIMITS.transaction) {
@@ -312,21 +300,18 @@ export class FinanceInsightHistorySynchronizer {
           digest: financeInsightDigestV1(windowFacts as CanonicalJsonValue),
         };
         windowProofs.push(proof);
-        sqlite.prepare(`
-          INSERT INTO finance_insight_transaction_projection_windows (
-            connector_id, generation_id, window_index, coverage_start,
-            coverage_end, source_as_of, item_count, content_digest
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(
+        await finance.insights.projection.insertAttemptWindowProof({
           connectorId,
           attemptId,
-          proof.index,
-          proof.start,
-          proof.end,
-          proof.sourceAsOf,
-          proof.itemCount,
-          proof.digest,
-        );
+          proof: {
+            index: proof.index,
+            start: proof.start,
+            end: proof.end,
+            sourceAsOf: proof.sourceAsOf,
+            itemCount: proof.itemCount,
+            digest: proof.digest,
+          },
+        });
       }
 
       allFacts.sort(compareSourceRefs);
@@ -361,86 +346,27 @@ export class FinanceInsightHistorySynchronizer {
           false,
         );
       }
-      sqlite.transaction(() => {
-        const stagedFacts = sqlite.prepare(`
-          SELECT payload
-          FROM finance_insight_transaction_projection_facts
-          WHERE connector_id = ? AND generation_id = ?
-          ORDER BY source_ref
-        `).all(connectorId, attemptId) as Array<{ payload: string }>;
-        const verifiedFacts = stagedFacts.map((row) => (
-          transactionSourceFactSchema.parse(JSON.parse(row.payload))
-        ));
-        const stagedWindows = sqlite.prepare(`
-          SELECT window_index AS "index", coverage_start AS start, coverage_end AS end,
-                 source_as_of AS sourceAsOf, item_count AS itemCount,
-                 content_digest AS digest
-          FROM finance_insight_transaction_projection_windows
-          WHERE connector_id = ? AND generation_id = ?
-          ORDER BY window_index
-        `).all(connectorId, attemptId) as WindowProof[];
-        if (
-          verifiedFacts.length !== allFacts.length
-          || financeInsightDigestV1(verifiedFacts as CanonicalJsonValue) !== contentDigest
-          || stagedWindows.length !== windows.length
-          || financeInsightDigestV1(stagedWindows as CanonicalJsonValue) !== windowsDigest
-        ) {
-          throw new Error('finance_insight_history_changed_before_commit');
-        }
-        sqlite.prepare(`
-          DELETE FROM finance_insight_transaction_projection_facts
-          WHERE connector_id = ? AND generation_id = ?
-        `).run(connectorId, stableGenerationId);
-        sqlite.prepare(`
-          DELETE FROM finance_insight_transaction_projection_windows
-          WHERE connector_id = ? AND generation_id = ?
-        `).run(connectorId, stableGenerationId);
-        sqlite.prepare(`
-          UPDATE finance_insight_transaction_projection_facts
-          SET generation_id = ?
-          WHERE connector_id = ? AND generation_id = ?
-        `).run(stableGenerationId, connectorId, attemptId);
-        sqlite.prepare(`
-          UPDATE finance_insight_transaction_projection_windows
-          SET generation_id = ?
-          WHERE connector_id = ? AND generation_id = ?
-        `).run(stableGenerationId, connectorId, attemptId);
-        const promoted = sqlite.prepare(`
-          UPDATE finance_insight_transaction_projection_state
-          SET status = 'succeeded', current_attempt_id = NULL,
-              last_successful_at = ?, successful_generation_id = ?,
-              source_as_of = ?, item_count = ?, content_digest = ?,
-              coverage_start = ?, coverage_end = ?, window_count = ?,
-              windows_digest = ?, bridge_contract_version = ?,
-              last_error_code = NULL, updated_at = ?
-          WHERE connector_id = ? AND current_attempt_id = ?
-        `).run(
+      try {
+        await finance.insights.projection.promoteAttempt({
+          connectorId,
+          attemptId,
+          generationId: stableGenerationId,
           completedAt,
-          stableGenerationId,
           sourceAsOf,
-          allFacts.length,
+          itemCount: allFacts.length,
           contentDigest,
           coverageStart,
           coverageEnd,
-          windowProofs.length,
+          windowCount: windowProofs.length,
           windowsDigest,
-          MONARCH_BRIDGE_CONTRACT_VERSION,
-          completedAt,
-          connectorId,
-          attemptId,
-        );
-        if (promoted.changes !== 1) {
+          bridgeContractVersion: MONARCH_BRIDGE_CONTRACT_VERSION,
+        });
+      } catch (error) {
+        if (error instanceof FinanceInsightProjectionFenceError) {
           throw new Error('finance_insight_history_attempt_superseded');
         }
-        sqlite.prepare(`
-          DELETE FROM finance_insight_transaction_projection_facts
-          WHERE connector_id = ? AND generation_id <> ?
-        `).run(connectorId, stableGenerationId);
-        sqlite.prepare(`
-          DELETE FROM finance_insight_transaction_projection_windows
-          WHERE connector_id = ? AND generation_id <> ?
-        `).run(connectorId, stableGenerationId);
-      }).immediate();
+        throw error;
+      }
       return {
         generationId: stableGenerationId,
         sourceAsOf,
@@ -450,22 +376,12 @@ export class FinanceInsightHistorySynchronizer {
       };
     } catch (error) {
       const failedAt = this.clock().toISOString();
-      sqlite.transaction(() => {
-        sqlite.prepare(`
-          DELETE FROM finance_insight_transaction_projection_facts
-          WHERE connector_id = ? AND generation_id = ?
-        `).run(connectorId, attemptId);
-        sqlite.prepare(`
-          DELETE FROM finance_insight_transaction_projection_windows
-          WHERE connector_id = ? AND generation_id = ?
-        `).run(connectorId, attemptId);
-        sqlite.prepare(`
-          UPDATE finance_insight_transaction_projection_state
-          SET status = 'failed', current_attempt_id = NULL,
-              last_error_code = ?, updated_at = ?
-          WHERE connector_id = ? AND current_attempt_id = ?
-        `).run(failureCode(error), failedAt, connectorId, attemptId);
-      }).immediate();
+      await finance.insights.projection.failAttempt({
+        connectorId,
+        attemptId,
+        failedAt,
+        errorCode: failureCode(error),
+      });
       throw error;
     }
   }

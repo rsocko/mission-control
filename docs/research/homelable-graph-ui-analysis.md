@@ -306,18 +306,18 @@ retain graph context.
 
 | Issue | Purpose |
 |---|---|
-| [#2212](https://github.com/rsocko/mission-control/issues/2212) | Shared Graph Workbench interaction shell |
-| [#2216](https://github.com/rsocko/mission-control/issues/2216) | Keyboard-first direct editing for Ideation |
-| [#2214](https://github.com/rsocko/mission-control/issues/2214) | Search, animated focus, and navigation history |
-| [#2215](https://github.com/rsocko/mission-control/issues/2215) | Saved views, per-view placements, and read-only presentation |
-| [#2213](https://github.com/rsocko/mission-control/issues/2213) | Relationship Workspace / Account Map MVP |
-| [#2211](https://github.com/rsocko/mission-control/issues/2211) | Advanced arrangement and edge routing after durable placements |
+| [#1200](https://github.com/rsocko/mission-control/issues/1200) | Shared Graph Workbench interaction shell |
+| [#1204](https://github.com/rsocko/mission-control/issues/1204) | Keyboard-first direct editing for Ideation |
+| [#1202](https://github.com/rsocko/mission-control/issues/1202) | Search, animated focus, and navigation history |
+| [#1203](https://github.com/rsocko/mission-control/issues/1203) | Saved views, per-view placements, and read-only presentation |
+| [#1201](https://github.com/rsocko/mission-control/issues/1201) | Relationship Workspace / Account Map MVP |
+| [#1199](https://github.com/rsocko/mission-control/issues/1199) | Advanced arrangement and edge routing after durable placements |
 
 Existing issues remain authoritative for
-[Project structure editing](https://github.com/rsocko/mission-control/issues/1826),
-[Universe toolbar information architecture](https://github.com/rsocko/mission-control/issues/1943),
+[Project structure editing](https://github.com/rsocko/mission-control/issues/1021),
+[Universe toolbar information architecture](https://github.com/rsocko/mission-control/issues/1080),
 and
-[Universe relationship editing](https://github.com/rsocko/mission-control/issues/1946).
+[Universe relationship editing](https://github.com/rsocko/mission-control/issues/1083).
 
 ## Conclusion
 

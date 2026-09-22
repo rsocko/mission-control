@@ -1,6 +1,7 @@
 import db from '@/db';
 import * as schema from '@/db/schema';
 import { taskHistoryEvents } from '@/db/schema';
+import type { PlanningSignalInput } from '@/db/persistence/planning-signals';
 import { and, asc, eq, gte, inArray, lt, lte, type SQL } from 'drizzle-orm';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 
@@ -10,16 +11,29 @@ export const TASK_HISTORY_EVENT_TYPES = [
   'micro_status_changed',
   'kanban_column_changed',
   'effort_changed',
+  'planning_horizon_changed',
+  'local_disposition_changed',
   'reopened',
   'project_added',
   'project_removed',
   'phase_added',
   'phase_removed',
+  'due_date_pushed',
+  'my_day_committed',
+  'my_day_withdrawn',
+  'my_day_missed',
+  'focus_committed',
+  'focus_withdrawn',
+  'focus_missed',
+  'snooze_extended',
+  'scheduled_block_elapsed',
+  'became_overdue',
 ] as const;
 
 export type TaskHistoryEventType = typeof TASK_HISTORY_EVENT_TYPES[number];
 export type TaskHistoryEvent = typeof taskHistoryEvents.$inferSelect;
 export type TaskHistoryDatabase = BetterSQLite3Database<typeof schema>;
+type TaskHistoryWriter = Pick<TaskHistoryDatabase, 'insert'>;
 
 export interface TaskHistoryRange {
   start: string;
@@ -36,10 +50,30 @@ export interface TaskStateAtTime {
   microStatus: string | null;
   kanbanColumn: string | null;
   effort: number | null;
+  localDisposition: string;
   projectIds: string[];
   phaseIds: string[];
   asOf: string;
   historicalBoundaryAt: string;
+}
+
+export function appendPlanningSignalInTransaction(
+  database: TaskHistoryWriter,
+  input: PlanningSignalInput,
+): boolean {
+  const result = database.insert(taskHistoryEvents).values({
+    taskId: input.taskId,
+    eventType: input.eventType,
+    fieldName: 'planningDate',
+    previousValue: null,
+    newValue: input.date,
+    occurredAt: input.occurredAt,
+    recordedAt: new Date().toISOString(),
+    provenance: input.provenance,
+    metadata: input.metadata,
+  }).onConflictDoNothing().run();
+
+  return result.changes > 0;
 }
 
 interface BaselineValue {
@@ -47,6 +81,7 @@ interface BaselineValue {
   microStatus?: unknown;
   kanbanColumn?: unknown;
   effort?: unknown;
+  localDisposition?: unknown;
   projectIds?: unknown;
   phaseIds?: unknown;
 }
@@ -137,6 +172,9 @@ export async function getTaskStateAtTime(
     microStatus: typeof baseline.microStatus === 'string' ? baseline.microStatus : null,
     kanbanColumn: typeof baseline.kanbanColumn === 'string' ? baseline.kanbanColumn : null,
     effort: typeof baseline.effort === 'number' ? baseline.effort : null,
+    localDisposition: typeof baseline.localDisposition === 'string'
+      ? baseline.localDisposition
+      : 'active',
     projectIds: [],
     phaseIds: [],
     asOf: at,
@@ -156,6 +194,9 @@ export async function getTaskStateAtTime(
         break;
       case 'effort_changed':
         state.effort = event.newValue === null ? null : Number(event.newValue);
+        break;
+      case 'local_disposition_changed':
+        if (event.newValue !== null) state.localDisposition = event.newValue;
         break;
       case 'project_added':
         if (event.projectId) projectIds.add(event.projectId);

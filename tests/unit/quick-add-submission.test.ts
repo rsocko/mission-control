@@ -201,6 +201,44 @@ describe('Quick Add task creation', () => {
       sourceListName: 'Inbox',
     }));
   });
+
+  it('adds only explicitly starred tasks to My Day in a mixed batch', async () => {
+    let taskSequence = 0;
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input);
+      if (url === '/api/tasks') {
+        taskSequence++;
+        return jsonResponse({ id: `task-${taskSequence}`, editPolicy: editableTaskPolicy });
+      }
+      if (url === '/api/my-day') return jsonResponse({});
+      return jsonResponse({}, 404);
+    });
+    const plan = planQuickAddSubmission({
+      input: '',
+      pendingTasks: [task('Today *'), task('Later')],
+      destination: localDestination,
+      projectsLoadState: 'ready',
+    });
+
+    await submitQuickAdd({ fetcher, getToday: () => '2026-09-17' }, {
+      plan,
+      destination: localDestination,
+      addToMyDay: false,
+      contextProject: null,
+      contextProjectActive: false,
+    });
+
+    const myDayCalls = fetcher.mock.calls.filter(([input]) => String(input) === '/api/my-day');
+    expect(myDayCalls).toHaveLength(1);
+    expect(JSON.parse(String(myDayCalls[0][1]?.body))).toEqual({
+      taskId: 'task-1',
+      date: '2026-09-17',
+    });
+    const taskBodies = fetcher.mock.calls
+      .filter(([input]) => String(input) === '/api/tasks')
+      .map(([, init]) => JSON.parse(String(init?.body)) as { title: string });
+    expect(taskBodies.map(({ title }) => title)).toEqual(['Today', 'Later']);
+  });
 });
 
 describe('Quick Add orchestration', () => {

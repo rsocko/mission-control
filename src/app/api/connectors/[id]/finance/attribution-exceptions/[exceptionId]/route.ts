@@ -42,7 +42,7 @@ export async function POST(
       return NextResponse.json({ error: 'A valid exception action is required' }, { status: 400 });
     }
     const { id, exceptionId } = await params;
-    const result = actOnAttributionException({
+    const result = await actOnAttributionException({
       connectorId: id,
       exceptionId,
       action: body.data.action,
@@ -51,7 +51,9 @@ export async function POST(
       idempotencyKey: request.headers.get('idempotency-key'),
       actorType,
     });
-    if (body.data.action === 'retry') {
+    // Only after the exception transition has committed, and never for an
+    // idempotent replay.
+    if (result.retryScheduled) {
       requestFinanceAttributionRetry(id);
     }
     return NextResponse.json({

@@ -19,6 +19,7 @@ export interface NotificationQuery {
   merchant: string | null;
   source: string | null;
   sourceAccount: string | null;
+  notificationType: string | null;
   state: NotificationState | null;
   actionableOnly: boolean;
   dateRange: NotificationDateRange | null;
@@ -37,6 +38,7 @@ export const DEFAULT_NOTIFICATION_QUERY: NotificationQuery = {
   merchant: null,
   source: null,
   sourceAccount: null,
+  notificationType: null,
   state: null,
   actionableOnly: false,
   dateRange: null,
@@ -56,6 +58,7 @@ const STRING_KEYS = [
   'category',
   'source',
   'sourceAccount',
+  'notificationType',
   'repository',
   'owner',
   'reason',
@@ -157,6 +160,7 @@ export function hasActiveNotificationFilters(query: NotificationQuery): boolean 
     || query.merchant !== null
     || query.source !== null
     || query.sourceAccount !== null
+    || query.notificationType !== null
     || query.state !== null
     || query.actionableOnly
     || query.dateRange !== null

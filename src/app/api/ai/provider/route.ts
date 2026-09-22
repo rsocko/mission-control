@@ -1,33 +1,41 @@
-import db from '@/db';
-import { appSettings } from '@/db/schema';
+import {
+  loadAIProviderConfiguration,
+  saveAIProviderConfiguration,
+} from '@/lib/ai/provider-configuration-service';
+import {
+  createConfiguredAIRequestContext,
+  getConfiguredAIRouteOutcome,
+  getConfiguredAIRoutingHeaders,
+  getConfiguredProviderInfo,
+  getConfiguredProviderOperationalStatus,
+} from '@/lib/ai/provider-routing-core';
+import {
+  getEmbeddingOperationalStatus,
+  testEmbeddingConnection,
+} from '@/lib/search/embedding-provider-status';
 import {
   AIProviderEndpointValidationError,
   AIRoutingPolicyValidationError,
   extractBifrostRoutingMetadata,
-  getAIRequestContext,
-  getAIRouteOutcome,
-  getAIRoutingHeaders,
-  getAIRoutingPolicy,
-  getProviderInfo,
-  getResolvedAIConfig,
-  invalidateAIConfigCache,
   parseBifrostModelId,
   validateProviderEndpoint,
   validateAIRoutingPolicy,
-} from '@/lib/ai';
+} from '@/lib/ai/sensitivity-policy';
 import { ApiErrors } from '@/lib/api-error';
-import { eq } from 'drizzle-orm';
 import { z } from 'zod';
 
-const PROVIDER_SETTINGS_KEY = 'ai_provider_config';
-const ROUTING_POLICY_SETTINGS_KEY = 'ai_routing_policy';
 const REDACTED_API_KEY = '********';
 
 const providerConfigSchema = z.object({
   provider: z.enum(['openai', 'azure', 'ollama', 'bifrost']).default('openai'),
   model: z.string().trim().min(1, 'Model is required').max(200),
+  embeddingProvider: z.enum(['openai', 'azure', 'ollama', 'bifrost']).optional(),
   embeddingModel: z.string().trim().max(200).default(''),
+  embeddingBaseUrl: z.union([z.literal(''), z.url()]).optional(),
+  embeddingApiKey: z.string().max(10_000).optional(),
   semanticSearchEnabled: z.boolean().default(false),
+  houstonMemoryEnabled: z.boolean().default(false),
+  houstonMemoryRetentionDays: z.number().int().min(1).max(365).default(90),
   baseUrl: z.union([z.literal(''), z.url()]).default(''),
   apiKey: z.string().max(10_000).optional(),
   routingPolicy: z.unknown().optional(),
@@ -40,75 +48,24 @@ const providerConfigSchema = z.object({
     });
   }
   if (
-    config.provider === 'bifrost'
+    (config.embeddingProvider ?? config.provider) === 'bifrost'
     && config.embeddingModel
     && !parseBifrostModelId(config.embeddingModel)
   ) {
     context.addIssue({
       code: 'custom',
       path: ['embeddingModel'],
-      message: 'Bifrost embedding model must include a supported provider prefix, such as ollama/nomic-embed-text:latest',
+      message: 'Bifrost embedding model must include a supported provider prefix, such as azure/text-embedding-3-small',
     });
   }
 });
 
-async function loadSavedProviderConfig() {
-  const [row] = await db
-    .select()
-    .from(appSettings)
-    .where(eq(appSettings.key, PROVIDER_SETTINGS_KEY))
-    .limit(1);
-  return row?.value && typeof row.value === 'object'
-    ? row.value as {
-        provider?: string;
-        model?: string;
-        embeddingModel?: string;
-        semanticSearchEnabled?: boolean;
-        baseUrl?: string;
-        apiKey?: string;
-      }
-    : {};
-}
-
-function getOperationalStatus() {
-  const resolved = getResolvedAIConfig();
-  const bifrostRoute = resolved.provider === 'bifrost'
-    ? parseBifrostModelId(resolved.model)?.route
-    : undefined;
-  const routeNames = new Set(
-    Object.values(getAIRoutingPolicy().policies)
-      .flatMap((policy) => policy.allowedRoutes),
-  );
-
-  return {
-    providerHealth: [...routeNames].map((route) => ({
-      route,
-      status: route === resolved.provider
-        || (resolved.provider === 'azure' && route === 'azure-private')
-        || route === bifrostRoute
-        ? (resolved.configured ? 'configured' : 'unavailable')
-        : 'unknown',
-    })),
-    entitlement: {
-      status: resolved.provider === 'bifrost' ? 'managed' : 'not-applicable',
-      detail: resolved.provider === 'bifrost'
-        ? 'Managed by Bifrost; credentials and account identifiers are redacted.'
-        : 'No gateway entitlement is used by the active provider.',
-    },
-    quota: {
-      status: resolved.provider === 'bifrost' ? 'unknown' : 'not-reported',
-      detail: resolved.provider === 'bifrost'
-        ? 'Bifrost has not reported quota state.'
-        : 'The active provider does not expose quota through Mission Control.',
-    },
-  };
-}
-
 export async function GET() {
   try {
-    const info = getProviderInfo();
-    const resolved = getResolvedAIConfig();
-    const savedConfig = await loadSavedProviderConfig();
+    const snapshot = await loadAIProviderConfiguration();
+    const { resolved, saved: savedConfig, routingPolicy } = snapshot;
+    const info = getConfiguredProviderInfo(resolved);
+    const embeddingStatus = await getEmbeddingOperationalStatus(snapshot);
 
     return Response.json({
       ...info,
@@ -116,13 +73,22 @@ export async function GET() {
       savedConfig: {
         provider: savedConfig.provider,
         model: savedConfig.model,
+        embeddingProvider: savedConfig.embeddingProvider || resolved.embeddingProvider,
         embeddingModel: savedConfig.embeddingModel || resolved.embeddingModel,
+        embeddingBaseUrl: savedConfig.embeddingBaseUrl || resolved.embeddingBaseUrl,
         semanticSearchEnabled: savedConfig.semanticSearchEnabled ?? resolved.semanticSearchEnabled,
+        houstonMemoryEnabled: savedConfig.houstonMemoryEnabled ?? resolved.houstonMemoryEnabled,
+        houstonMemoryRetentionDays: savedConfig.houstonMemoryRetentionDays
+          ?? resolved.houstonMemoryRetentionDays,
         baseUrl: savedConfig.baseUrl,
         hasApiKey: Boolean(savedConfig.apiKey || resolved.apiKey),
+        embeddingHasApiKey: Boolean(
+          savedConfig.embeddingApiKey || resolved.embeddingApiKey,
+        ),
       },
-      routingPolicy: getAIRoutingPolicy(),
-      ...getOperationalStatus(),
+      embeddingStatus,
+      routingPolicy,
+      ...getConfiguredProviderOperationalStatus(resolved, routingPolicy),
     });
   } catch (error) {
     return ApiErrors.internal('Failed to load AI configuration', error);
@@ -139,50 +105,79 @@ export async function POST(request: Request) {
       );
     }
 
-    const current = await loadSavedProviderConfig();
+    const snapshot = await loadAIProviderConfiguration({ fresh: true });
+    const current = snapshot.saved;
     const submittedApiKey = parsed.data.apiKey?.trim();
     const sameCredentialTarget = current.provider === parsed.data.provider
       && (current.baseUrl || '') === parsed.data.baseUrl;
     const apiKey = submittedApiKey === REDACTED_API_KEY || parsed.data.apiKey === undefined
       ? (sameCredentialTarget ? current.apiKey || '' : '')
       : submittedApiKey || '';
+    const embeddingProvider = parsed.data.embeddingProvider
+      ?? current.embeddingProvider
+      ?? parsed.data.provider;
+    const legacySharedEmbeddingTarget = parsed.data.embeddingProvider === undefined
+      && current.embeddingProvider === undefined
+      && embeddingProvider === parsed.data.provider;
+    const embeddingBaseUrl = parsed.data.embeddingBaseUrl
+      ?? current.embeddingBaseUrl
+      ?? (legacySharedEmbeddingTarget ? parsed.data.baseUrl : '');
+    const submittedEmbeddingApiKey = parsed.data.embeddingApiKey?.trim();
+    const embeddingTargetFieldsOmitted = parsed.data.embeddingProvider === undefined
+      && parsed.data.embeddingBaseUrl === undefined;
+    const resolvedCurrent = snapshot.resolved;
+    const sameEmbeddingCredentialTarget = resolvedCurrent.embeddingProvider === embeddingProvider
+      && (resolvedCurrent.embeddingBaseUrl || '') === embeddingBaseUrl;
+    const legacyCurrentSharedTarget = current.embeddingProvider === undefined
+      && current.provider === embeddingProvider
+      && (current.baseUrl || '') === embeddingBaseUrl;
+    const embeddingApiKey = submittedEmbeddingApiKey === REDACTED_API_KEY
+      || parsed.data.embeddingApiKey === undefined
+      ? (
+          embeddingTargetFieldsOmitted
+            ? current.embeddingApiKey
+              || (legacyCurrentSharedTarget ? current.apiKey || '' : '')
+            : sameEmbeddingCredentialTarget
+            ? current.embeddingApiKey || (legacyCurrentSharedTarget ? current.apiKey || '' : '')
+            : legacyCurrentSharedTarget
+              ? current.apiKey || ''
+            : legacySharedEmbeddingTarget
+              ? apiKey
+              : ''
+        )
+      : submittedEmbeddingApiKey || '';
     const routingPolicy = parsed.data.routingPolicy
       ? validateAIRoutingPolicy(parsed.data.routingPolicy)
-      : getAIRoutingPolicy();
+      : snapshot.routingPolicy;
     const config = {
       provider: parsed.data.provider,
       model: parsed.data.model,
+      embeddingProvider,
       embeddingModel: parsed.data.embeddingModel,
+      embeddingBaseUrl,
+      embeddingApiKey,
       semanticSearchEnabled: parsed.data.semanticSearchEnabled,
+      houstonMemoryEnabled: parsed.data.houstonMemoryEnabled,
+      houstonMemoryRetentionDays: parsed.data.houstonMemoryRetentionDays,
       baseUrl: parsed.data.baseUrl,
       apiKey,
     };
     validateProviderEndpoint(config.provider, config.baseUrl || undefined, Boolean(config.apiKey));
-    const now = new Date().toISOString();
-
-    db.transaction((tx) => {
-      tx
-        .insert(appSettings)
-        .values({ key: PROVIDER_SETTINGS_KEY, value: config, updatedAt: now })
-        .onConflictDoUpdate({
-          target: appSettings.key,
-          set: { value: config, updatedAt: now },
-        })
-        .run();
-      tx
-        .insert(appSettings)
-        .values({ key: ROUTING_POLICY_SETTINGS_KEY, value: routingPolicy, updatedAt: now })
-        .onConflictDoUpdate({
-          target: appSettings.key,
-          set: { value: routingPolicy, updatedAt: now },
-        })
-        .run();
-    });
-
-    invalidateAIConfigCache();
+    if (config.embeddingBaseUrl || config.semanticSearchEnabled) {
+      validateProviderEndpoint(
+        config.embeddingProvider,
+        config.embeddingBaseUrl || undefined,
+        Boolean(config.embeddingApiKey),
+      );
+    }
+    await saveAIProviderConfiguration(config, routingPolicy);
     return Response.json({
       success: true,
-      config: { ...config, apiKey: apiKey ? REDACTED_API_KEY : '' },
+      config: {
+        ...config,
+        apiKey: apiKey ? REDACTED_API_KEY : '',
+        embeddingApiKey: embeddingApiKey ? REDACTED_API_KEY : '',
+      },
       routingPolicy,
     });
   } catch (error) {
@@ -196,10 +191,17 @@ export async function POST(request: Request) {
   }
 }
 
-export async function PUT() {
+export async function PUT(request?: Request) {
   try {
-    const info = getProviderInfo();
-    const resolved = getResolvedAIConfig();
+    if (
+      request
+      && new URL(request.url).searchParams.get('target') === 'embedding'
+    ) {
+      return Response.json(await testEmbeddingConnection());
+    }
+    const snapshot = await loadAIProviderConfiguration();
+    const { resolved } = snapshot;
+    const info = getConfiguredProviderInfo(resolved);
     const { provider, model, baseUrl, apiKey } = resolved;
 
     if (!resolved.configured) {
@@ -209,7 +211,10 @@ export async function PUT() {
       });
     }
 
-    const context = getAIRequestContext('provider-health-check');
+    const context = createConfiguredAIRequestContext(
+      snapshot.routingPolicy,
+      'provider-health-check',
+    );
     const start = Date.now();
     const url = baseUrl
       ? `${baseUrl.replace(/\/$/, '')}/chat/completions`
@@ -221,7 +226,13 @@ export async function PUT() {
         ...(provider === 'azure'
           ? (apiKey ? { 'api-key': apiKey } : {})
           : (provider !== 'ollama' && apiKey ? { Authorization: `Bearer ${apiKey}` } : {})),
-        ...getAIRoutingHeaders(context, provider, baseUrl, Boolean(apiKey), model),
+        ...getConfiguredAIRoutingHeaders(
+          context,
+          provider,
+          baseUrl,
+          Boolean(apiKey),
+          model,
+        ),
       },
       body: JSON.stringify({
         model,
@@ -238,10 +249,10 @@ export async function PUT() {
         success: true,
         latencyMs,
         model: info.model,
-        routing: getAIRouteOutcome(context, {
+        routing: getConfiguredAIRouteOutcome(context, {
           modelId: model,
           headers: Object.fromEntries(response.headers.entries()),
-        }, provider === 'bifrost' ? extractBifrostRoutingMetadata(payload) : undefined),
+        }, resolved, provider === 'bifrost' ? extractBifrostRoutingMetadata(payload) : undefined),
       });
     }
 

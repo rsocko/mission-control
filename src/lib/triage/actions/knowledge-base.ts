@@ -1,6 +1,5 @@
 import { generateText } from 'ai';
 import { resolveGitHubCredentials } from '../credentials';
-import { getAIModel } from '@/lib/ai/provider-factory';
 import logger from '@/lib/logger';
 import type { TriageItem, TriageActionRecord } from '@/types';
 
@@ -112,7 +111,8 @@ async function generateNoteContent(item: TriageItem, category: string, titleOver
 
   // Try AI extraction if available
   try {
-    const route = getAIModel('knowledge-base-extraction', {
+    const { getAsyncAIModel } = await import('@/lib/ai/provider-runtime');
+    const route = await getAsyncAIModel('knowledge-base-extraction', {
       sources: item.sourcePlatform ? [item.sourcePlatform] : [],
     });
 

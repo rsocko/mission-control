@@ -2,13 +2,13 @@
 title: "Modularity and Architecture Hardening"
 status: active
 created: 2026-08-06
-last_reviewed: 2026-08-06
+last_reviewed: 2026-08-19
 category: architecture
 issues:
-  - "rsocko/mission-control#2243 - program epic"
-  - "rsocko/mission-control#775 - extract Project page tabs"
-  - "rsocko/mission-control#776 - create Project page context"
-  - "rsocko/mission-control#777 - adopt Project task actions hook"
+  - "rsocko/mission-control#1217 - program epic"
+  - "rsocko/mission-control#395 - extract Project page tabs"
+  - "rsocko/mission-control#396 - create Project page context"
+  - "rsocko/mission-control#397 - adopt Project task actions hook"
 ---
 
 # Modularity and Architecture Hardening
@@ -28,9 +28,14 @@ The program prioritizes:
 6. explicit package, type, and public API boundaries.
 
 The implementation is tracked by
-[the modularity epic](https://github.com/rsocko/mission-control/issues/2243)
+[the modularity epic](https://github.com/rsocko/mission-control/issues/1217)
 and organized in the Mission Control project **Modularity & Architecture
 Hardening** under the **Mission Control** category.
+
+The issue numbers in this document are the canonical numbers after the
+repository realignment. As of 2026-08-19, every implementation item is closed
+except #1224. That item targets the removed `runtime/copilot-adapter` package
+and requires an explicit descope decision before the epic can close.
 
 ## Context
 
@@ -127,6 +132,42 @@ Next.js adapters should wrap those cores.
 High-risk extractions must preserve logging, trace context, idempotency,
 transaction boundaries, retries, cancellation, and error contracts.
 
+## Resulting ownership model
+
+The delivered implementation uses these canonical boundaries:
+
+- `src/lib/projects/hierarchy-service.ts` owns Project hierarchy commands and
+  placement authorization.
+- `src/lib/tasks/task-move-service.ts` owns task-move orchestration; both move
+  routes are compatibility adapters.
+- `src/lib/sync/index.ts` composes `SyncCronScheduler`, `SyncQueue`, and
+  `SyncExecutionPipeline`.
+- `src/lib/reconciliation/resumable-engine.ts` owns cursor, retry, and resume
+  behavior shared by Scout and task-dependency reconciliation.
+- `src/lib/ai/index.ts` is the AI public export surface, feature workflows live
+  under `src/lib/ai/features`, and Copilot lifecycle collaborators live beside
+  `copilot-session-lifecycle.ts`.
+- `src/app/projects/[id]/context/ProjectPageContext.tsx` coordinates Project
+  detail data and actions while `src/app/projects/[id]/tabs` owns tab rendering.
+- `src/lib/quick-add/submission.ts` owns Quick Add submission orchestration.
+- `src/app/settings/components/useConnectorCreation.ts` owns connector creation
+  status and error handling, while tag review uses focused data and mutation
+  hooks under `settings/components/tag-review`.
+- `src/lib/graph/project-structure-layout.ts` owns framework-independent graph
+  layout and `src/components/graph` owns rendering.
+
+The closure review also found residual architecture debt that is not evidence
+that the completed extraction issues failed:
+
+- `SyncExecutionPipeline` remains a broad execution coordinator and should be
+  ratcheted into smaller collaborators as follow-up work.
+- incompatible same-named `SourceList` view models remain across domain and UI
+  modules and should be renamed or derived from a canonical type;
+- `ProjectPhasesTab.tsx` has grown as Plan features were added and should be
+  watched for another workflow extraction; and
+- automated import-boundary and module-growth checks would reduce regression
+  risk.
+
 ## Delivery plan
 
 ### Phase 1: Safety and canonical boundaries
@@ -135,9 +176,9 @@ Correctness-sensitive consolidation lands before large UI extraction.
 
 | Issue | Work item | Notes |
 |---|---|---|
-| [#2249](https://github.com/rsocko/mission-control/issues/2249) | Canonicalize Project hierarchy mutations and placement authorization | Must precede adoption of the existing Project task-actions hook. |
-| [#2244](https://github.com/rsocko/mission-control/issues/2244) | Consolidate task move orchestration and reference repointing | Related to, but does not duplicate, attachment bounding in #2193. |
-| [#2246](https://github.com/rsocko/mission-control/issues/2246) | Split database bootstrap, schema safety nets, and repairs | Complements the portable persistence work in #2107. |
+| [#1223](https://github.com/rsocko/mission-control/issues/1223) | Canonicalize Project hierarchy mutations and placement authorization | Must precede adoption of the existing Project task-actions hook. |
+| [#1218](https://github.com/rsocko/mission-control/issues/1218) | Consolidate task move orchestration and reference repointing | Related to, but does not duplicate, attachment bounding work. |
+| [#1220](https://github.com/rsocko/mission-control/issues/1220) | Split database bootstrap, schema safety nets, and repairs | Complements the portable persistence work. |
 
 ### Phase 2: Project feature decomposition
 
@@ -146,11 +187,11 @@ creating duplicates.
 
 | Issue | Work item | Dependency |
 |---|---|---|
-| [#777](https://github.com/rsocko/mission-control/issues/777) | Adopt `useProjectTaskActions` in the live page | After #2249 so the hook uses the canonical hierarchy path. |
-| [#776](https://github.com/rsocko/mission-control/issues/776) | Create scoped Project page context | After the action contract is reconciled. |
-| [#775](https://github.com/rsocko/mission-control/issues/775) | Extract Project page tabs | After #776; tab-local state stays within each tab. |
-| [#2253](https://github.com/rsocko/mission-control/issues/2253) | Share Project AI phase-planning and update contracts | May proceed in parallel with UI extraction. |
-| [#2254](https://github.com/rsocko/mission-control/issues/2254) | Decompose the Project document intake wizard | Lower-risk, independent Project workflow. |
+| [#397](https://github.com/rsocko/mission-control/issues/397) | Adopt `useProjectTaskActions` in the live page | After #1223 so the hook uses the canonical hierarchy path. |
+| [#396](https://github.com/rsocko/mission-control/issues/396) | Create scoped Project page context | After the action contract is reconciled. |
+| [#395](https://github.com/rsocko/mission-control/issues/395) | Extract Project page tabs | After #396; tab-local state stays within each tab. |
+| [#1227](https://github.com/rsocko/mission-control/issues/1227) | Share Project AI phase-planning and update contracts | May proceed in parallel with UI extraction. |
+| [#1228](https://github.com/rsocko/mission-control/issues/1228) | Decompose the Project document intake wizard | Lower-risk, independent Project workflow. |
 
 The intended Project detail structure is:
 
@@ -175,13 +216,13 @@ for every tab's rendering and mutations.
 
 | Issue | Work item |
 |---|---|
-| [#2248](https://github.com/rsocko/mission-control/issues/2248) | Decompose `SyncScheduler` into timing, queue, and execution services |
-| [#2245](https://github.com/rsocko/mission-control/issues/2245) | Split Copilot run lifecycle, lease reaping, and telemetry |
-| [#2250](https://github.com/rsocko/mission-control/issues/2250) | Decompose `CopilotRuntime` and establish its package API |
-| [#2251](https://github.com/rsocko/mission-control/issues/2251) | Split GitHub connector issue, project, and notification capabilities |
-| [#2252](https://github.com/rsocko/mission-control/issues/2252) | Split the triage facade into focused domain modules |
-| [#2247](https://github.com/rsocko/mission-control/issues/2247) | Extract a reusable resumable reconciliation engine |
-| [#2258](https://github.com/rsocko/mission-control/issues/2258) | Split AI feature implementations out of the AI barrel |
+| [#1222](https://github.com/rsocko/mission-control/issues/1222) | Decompose `SyncScheduler` into timing, queue, and execution services |
+| [#1219](https://github.com/rsocko/mission-control/issues/1219) | Split Copilot run lifecycle, lease reaping, and telemetry |
+| [#1224](https://github.com/rsocko/mission-control/issues/1224) | Decompose `CopilotRuntime` and establish its package API |
+| [#1225](https://github.com/rsocko/mission-control/issues/1225) | Split GitHub connector issue, project, and notification capabilities |
+| [#1226](https://github.com/rsocko/mission-control/issues/1226) | Split the triage facade into focused domain modules |
+| [#1221](https://github.com/rsocko/mission-control/issues/1221) | Extract a reusable resumable reconciliation engine |
+| [#1232](https://github.com/rsocko/mission-control/issues/1232) | Split AI feature implementations out of the AI barrel |
 
 These changes should retain compatibility facades until all consumers have
 migrated.
@@ -190,12 +231,12 @@ migrated.
 
 | Issue | Work item |
 |---|---|
-| [#2259](https://github.com/rsocko/mission-control/issues/2259) | Decompose `TaskDetailPanel` |
-| [#2261](https://github.com/rsocko/mission-control/issues/2261) | Extract the Quick Add submission workflow and picker state |
-| [#2264](https://github.com/rsocko/mission-control/issues/2264) | Decompose dashboard state and standardize task actions |
-| [#2257](https://github.com/rsocko/mission-control/issues/2257) | Decompose Settings tag review |
-| [#2255](https://github.com/rsocko/mission-control/issues/2255) | Consolidate Settings connector and triage-source administration |
-| [#2256](https://github.com/rsocko/mission-control/issues/2256) | Extract list-group rename behavior and Settings primitives |
+| [#1233](https://github.com/rsocko/mission-control/issues/1233) | Decompose `TaskDetailPanel` |
+| [#1235](https://github.com/rsocko/mission-control/issues/1235) | Extract the Quick Add submission workflow and picker state |
+| [#1238](https://github.com/rsocko/mission-control/issues/1238) | Decompose dashboard state and standardize task actions |
+| [#1231](https://github.com/rsocko/mission-control/issues/1231) | Decompose Settings tag review |
+| [#1229](https://github.com/rsocko/mission-control/issues/1229) | Consolidate Settings connector and triage-source administration |
+| [#1230](https://github.com/rsocko/mission-control/issues/1230) | Extract list-group rename behavior and Settings primitives |
 
 The first extraction from each large UI module should be its orchestration or
 state-machine boundary. Presentational splitting follows once behavior has
@@ -205,10 +246,10 @@ focused characterization tests.
 
 | Issue | Work item |
 |---|---|
-| [#2263](https://github.com/rsocko/mission-control/issues/2263) | Separate graph feature data, layout, and rendering |
-| [#2262](https://github.com/rsocko/mission-control/issues/2262) | Clarify canonical domain and dashboard view-model types |
-| [#2260](https://github.com/rsocko/mission-control/issues/2260) | Deduplicate browser-extension capture and importer orchestration |
-| [#2265](https://github.com/rsocko/mission-control/issues/2265) | Modularize Copilot comparison, evidence, and worker scripts |
+| [#1237](https://github.com/rsocko/mission-control/issues/1237) | Separate graph feature data, layout, and rendering |
+| [#1236](https://github.com/rsocko/mission-control/issues/1236) | Clarify canonical domain and dashboard view-model types |
+| [#1234](https://github.com/rsocko/mission-control/issues/1234) | Deduplicate browser-extension capture and importer orchestration |
+| [#1239](https://github.com/rsocko/mission-control/issues/1239) | Modularize Copilot comparison, evidence, and worker scripts |
 
 ## Dependency graph
 
@@ -220,11 +261,11 @@ flowchart TD
   P3 --> P4
   P4 --> P5[Phase 5: graph, types, auxiliary tooling]
 
-  H[#2249 hierarchy service] --> A[#777 Project task actions]
-  A --> C[#776 Project context]
-  C --> T[#775 Project tabs]
+  H[#1223 hierarchy service] --> A[#397 Project task actions]
+  A --> C[#396 Project context]
+  C --> T[#395 Project tabs]
 
-  R[#2247 reconciliation engine] --> S[#2248 SyncScheduler decomposition]
+  R[#1221 reconciliation engine] --> S[#1222 SyncScheduler decomposition]
 ```
 
 The phase ordering controls program risk, but independent work within a phase
@@ -280,9 +321,9 @@ Line-count reduction is an expected consequence, not the acceptance metric.
 The planning pass searched existing open and closed GitHub issues by title and
 body before creating work.
 
-- Existing Project modularization issues #775, #776, and #777 were retained.
-- #2193 remains the owner of task-move attachment resource bounds.
-- #2107 remains the owner of portable persistence/repository boundaries.
+- Existing Project modularization issues #395, #396, and #397 were retained.
+- Separate work remains the owner of task-move attachment resource bounds.
+- Separate work remains the owner of portable persistence/repository boundaries.
 - Existing feature requests for Project, graph, Quick Add, and Tag Review were
   not repurposed because they change product behavior rather than module
   ownership.

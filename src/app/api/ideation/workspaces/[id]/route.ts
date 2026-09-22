@@ -10,7 +10,7 @@ type Context = { params: Promise<{ id: string }> };
 
 export async function GET(_request: Request, { params }: Context) {
   try {
-    const workspace = ideationWorkspaceService.get((await params).id);
+    const workspace = await ideationWorkspaceService.get((await params).id);
     return workspace
       ? NextResponse.json({ workspace })
       : ApiErrors.notFound('Ideation workspace');
@@ -27,15 +27,15 @@ export async function PATCH(request: Request, { params }: Context) {
     const body = await request.json();
     let workspace;
     if ('document' in body) {
-      workspace = ideationWorkspaceService.updateContent(
+      workspace = await ideationWorkspaceService.updateContent(
         id,
         body.baseRevision,
         body.document,
       );
     } else if ('name' in body) {
-      workspace = ideationWorkspaceService.rename(id, body.name);
+      workspace = await ideationWorkspaceService.rename(id, body.name);
     } else if ('archived' in body) {
-      workspace = ideationWorkspaceService.setArchived(id, body.archived);
+      workspace = await ideationWorkspaceService.setArchived(id, body.archived);
     } else {
       return ApiErrors.badRequest('A document, name, or archived value is required');
     }
@@ -51,7 +51,7 @@ export async function DELETE(request: Request, { params }: Context) {
   const untrusted = rejectUntrustedWorkspaceMutation(request);
   if (untrusted) return untrusted;
   try {
-    const result = ideationWorkspaceService.deleteArchived((await params).id);
+    const result = await ideationWorkspaceService.deleteArchived((await params).id);
     if (result === 'not-found') return ApiErrors.notFound('Ideation workspace');
     if (result === 'not-archived') {
       return ApiErrors.conflict('Archive the workspace before deleting it permanently');

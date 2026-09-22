@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   effortPosition,
   getMatrixPaginationDecision,
+  horizonPosition,
   markerDensityScale,
   markerDiameter,
   priorityPosition,
+  timingConflict,
   urgencyScore,
 } from '@/lib/matrix/scales';
 import { createMatrixMarks, projectTasks } from '@/lib/matrix/projection';
@@ -20,6 +22,7 @@ function task(overrides: Partial<Task> = {}): Task {
     status: 'todo',
     microStatus: null,
     priority: 'high',
+    planningHorizon: overrides.planningHorizon ?? null,
     dueDate: TODAY,
     connectorType: 'local',
     connectorInstanceId: 'local',
@@ -30,7 +33,6 @@ function task(overrides: Partial<Task> = {}): Task {
     sourceId: null,
     effort: 3,
     smartScore: 64,
-    hasDescription: false,
     editPolicy: editableTaskPolicy,
     ...overrides,
     localDisposition: overrides.localDisposition ?? 'active',
@@ -58,6 +60,32 @@ describe('matrix scales', () => {
     expect(urgencyScore('not-a-date', TODAY)).toMatchObject({ value: null, state: 'invalid' });
   });
 
+  it('keeps planning Horizon independent from due-date urgency', () => {
+    expect(urgencyScore(null, TODAY)).toMatchObject({
+      value: 0,
+      state: 'none',
+      source: 'none',
+    });
+    expect([null, 'someday', 'later', 'soon', 'next'].map((value) => (
+      horizonPosition(value as Parameters<typeof horizonPosition>[0])
+    ))).toEqual([null, 12.5, 37.5, 62.5, 87.5]);
+  });
+
+  it('identifies material conflicts between Horizon and deadlines', () => {
+    expect(timingConflict('later', urgencyScore('2026-07-30', TODAY))).toMatchObject({
+      kind: 'deadline-sooner-than-horizon',
+      label: 'Deadline sooner than Horizon',
+    });
+    expect(timingConflict('someday', urgencyScore('2026-08-02', TODAY))).toMatchObject({
+      kind: 'deadline-sooner-than-horizon',
+    });
+    expect(timingConflict('next', urgencyScore('2026-09-01', TODAY))).toMatchObject({
+      kind: 'deadline-later-than-horizon',
+    });
+    expect(timingConflict('next', urgencyScore(null, TODAY))).toBeNull();
+    expect(timingConflict('soon', urgencyScore('2026-08-05', TODAY))).toBeNull();
+  });
+
   it('maps marker area from the selected metric and exposes missing values', () => {
     expect(markerDiameter(task(), 50, 'uniform')).toEqual({ diameter: 12, missing: false });
     expect(markerDiameter(task({ effort: 1 }), 50, 'effort')).toEqual({ diameter: 8, missing: false });
@@ -81,13 +109,19 @@ describe('matrix projection', () => {
       task({ id: 'effort', effort: null }),
       task({ id: 'date', dueDate: 'invalid' }),
       task({ id: 'no-date', dueDate: null }),
+      task({ id: 'horizon', dueDate: null, planningHorizon: 'next' }),
     ];
     const urgency = projectTasks(tasks, 'priority-urgency', TODAY);
     expect(urgency.tasks.map((item) => item.task.id)).toContain('no-date');
     expect(urgency.needsData.missingPriority).toHaveLength(1);
     expect(urgency.needsData.missingEffort).toHaveLength(2);
-    expect(urgency.needsData.missingDueDate).toHaveLength(2);
+    expect(urgency.needsData.missingHorizon).toHaveLength(5);
     expect(urgency.needsData.invalidDueDate).toHaveLength(1);
+    expect(urgency.tasks.find((item) => item.task.id === 'horizon')).toMatchObject({
+      x: 0,
+      urgency: 0,
+      urgencyState: 'none',
+    });
 
     const effort = projectTasks(tasks, 'priority-effort', TODAY);
     expect(effort.needsData.missingEffort).toHaveLength(2);
@@ -96,6 +130,10 @@ describe('matrix projection', () => {
       urgency: null,
       urgencyState: 'invalid',
     });
+
+    const horizon = projectTasks(tasks, 'priority-horizon', TODAY);
+    expect(horizon.tasks.map((item) => item.task.id)).toEqual(['horizon']);
+    expect(horizon.tasks[0]).toMatchObject({ x: 87.5, urgency: 0 });
   });
 
   describe('matrix pagination', () => {
@@ -159,5 +197,39 @@ describe('matrix projection', () => {
 
     expect(new Set(positions.map(([x, y]) => `${x}:${y}`))).toHaveLength(4);
     expect(positions.every(([x, y]) => x >= 50 && y >= 62.5)).toBe(true);
+  });
+
+  it('keeps collision displacement inside categorical Horizon lanes', () => {
+    const projected = projectTasks(
+      ['a', 'b', 'c', 'd'].map((id) => task({
+        id,
+        dueDate: null,
+        planningHorizon: 'later',
+      })),
+      'priority-horizon',
+      TODAY,
+    ).tasks;
+    const marks = createMatrixMarks(projected, 800, 600, 1);
+
+    expect(marks).toHaveLength(4);
+    expect(marks.every((mark) => mark.x >= 25 && mark.x < 50)).toBe(true);
+  });
+
+  it('reports timing conflicts even when the active axis cannot plot the task', () => {
+    const conflictTask = task({
+      id: 'conflict-without-effort',
+      effort: null,
+      planningHorizon: 'later',
+      dueDate: '2026-07-30',
+    });
+    const projection = projectTasks([conflictTask], 'priority-effort', TODAY);
+
+    expect(projection.tasks).toHaveLength(0);
+    expect(projection.timingConflicts).toEqual([
+      expect.objectContaining({
+        task: expect.objectContaining({ id: 'conflict-without-effort' }),
+        conflict: expect.objectContaining({ kind: 'deadline-sooner-than-horizon' }),
+      }),
+    ]);
   });
 });

@@ -1,11 +1,12 @@
 'use client';
 
-import { Archive, BookOpen, Boxes, Check, Clock3, ListTodo, Play, X } from 'lucide-react';
+import { Archive, Check, Clock3, ListTodo, Play, X } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { SOURCE_META } from '@/components/triage/types';
 import RichPreviewEmbed from '@/components/triage/RichPreviewEmbed';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
 import type { TriageActionType, TriageItem } from '@/types';
+import { getInboxTaskMetadata } from '@/lib/inbox/items';
 
 const QUICK_ACTIONS: Array<{ type: TriageActionType; label: string; icon: typeof Archive; className: string }> = [
   { type: 'save_karakeep', label: 'Karakeep', icon: Archive, className: 'border-blue-800/40 bg-blue-900/20 text-blue-300 hover:bg-blue-900/40' },
@@ -38,6 +39,14 @@ export default function TriageStreamItem({
   const meta = SOURCE_META[item.sourcePlatform] || SOURCE_META.web;
   const embed = item.rawMetadata?.embed as { thumbnail_url?: string; type?: string } | undefined;
   const thumbnailUrl = item.thumbnailUrl || embed?.thumbnail_url;
+  const task = getInboxTaskMetadata(item);
+  const quickActions = task
+    ? [
+        { type: 'complete_action' as const, label: 'Keep task', icon: Check, className: 'border-cyan-800/40 bg-cyan-900/20 text-cyan-300 hover:bg-cyan-900/40' },
+        { type: 'snooze' as const, label: 'Snooze', icon: Clock3, className: 'border-sky-800/40 bg-sky-900/20 text-sky-300 hover:bg-sky-900/40' },
+        { type: 'dismiss' as const, label: 'Dismiss', icon: X, className: 'border-slate-700/40 bg-slate-800/20 text-slate-300 hover:bg-slate-800/40' },
+      ]
+    : QUICK_ACTIONS;
 
   return (
     <div className="flex items-start gap-2">
@@ -50,9 +59,7 @@ export default function TriageStreamItem({
           className="mt-5 h-4 w-4 flex-shrink-0 cursor-pointer rounded border-[var(--border-strong)] accent-[var(--accent-500)]"
         />
       ) : null}
-      <button
-        type="button"
-        onClick={bulkMode ? onBulkToggle : onSelect}
+      <article
         className={cn(
           'w-full rounded-[16px] border px-4 py-4 text-left shadow-[var(--shadow-sm)] transition-[border-color,background-color]',
           isSelected
@@ -62,6 +69,13 @@ export default function TriageStreamItem({
               : 'border-[var(--border)] bg-[var(--surface-0)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-1)]',
         )}
       >
+        <button
+          type="button"
+          aria-label={`Open Inbox item: ${item.title}`}
+          aria-pressed={isSelected}
+          onClick={bulkMode ? onBulkToggle : onSelect}
+          className="w-full text-left"
+        >
         <div className="flex items-start justify-between gap-3">
           {thumbnailUrl ? (
             <div className={cn(
@@ -88,7 +102,11 @@ export default function TriageStreamItem({
               {meta.label}
             </div>
             <h4 className="mt-3 text-sm font-semibold text-[var(--text-primary)] [text-wrap:balance]">{item.title}</h4>
-            <p className="mt-1 line-clamp-2 text-sm text-[var(--text-secondary)] [text-wrap:pretty]">{item.aiSummary || item.description}</p>
+            <p className="mt-1 line-clamp-2 text-sm text-[var(--text-secondary)] [text-wrap:pretty]">
+              {task
+                ? `${task.sourceListName || task.connectorType} · ${task.priority === 'none' ? 'No priority' : `${task.priority} priority`}${task.projectIds.length || task.planningHorizon ? '' : ' · Needs filing'}`
+                : item.aiSummary || item.description}
+            </p>
           </div>
           <div className="text-right">
             <div className="text-xs font-semibold text-[var(--accent-300)] [font-variant-numeric:tabular-nums]">{item.aiRelevanceScore}</div>
@@ -117,17 +135,18 @@ export default function TriageStreamItem({
             ))}
           </div>
         )}
+        </button>
 
         {/* Inline quick actions */}
         {!bulkMode && onAction && (
-          <div className="mt-3 flex flex-wrap gap-1.5" onClick={(e) => e.stopPropagation()}>
-            {QUICK_ACTIONS.map(({ type, label, icon: Icon, className: actionClass }) => {
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {quickActions.map(({ type, label, icon: Icon, className: actionClass }) => {
               const alreadyDone = item.actionsTaken.some((a) => a.actionType === type);
               return (
                 <button
                   key={type}
                   type="button"
-                  onClick={(e) => { e.stopPropagation(); if (!alreadyDone) onAction(item.id, type); }}
+                  onClick={() => { if (!alreadyDone) onAction(item.id, type); }}
                   disabled={alreadyDone}
                   className={cn(
                     'inline-flex items-center gap-1 rounded-[8px] border px-2 py-1 text-xs font-medium transition-colors',
@@ -142,12 +161,12 @@ export default function TriageStreamItem({
           </div>
         )}
 
-        {isSelected && (
+        {isSelected && !task && (
           <div className="mt-3" onClick={(e) => e.stopPropagation()}>
             <RichPreviewEmbed item={item} embedsEnabled={embedsEnabled} variant="compact" maxThumbnailHeight={200} />
           </div>
         )}
-      </button>
+      </article>
     </div>
   );
 }

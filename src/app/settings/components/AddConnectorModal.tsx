@@ -8,6 +8,13 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
   staggerContainer, fadeSlideUp, modalOverlay, modalContent,
 } from '@/lib/motion';
 import type { ConnectorConfig } from './types';
@@ -21,6 +28,10 @@ import { ConnectorBrandIcon } from './ConnectorBrandIcon';
 import { useConnectorCreation } from './useConnectorCreation';
 import { useOAuthConnectorInstanceId } from './useOAuthConnectorInstanceId';
 import { useCloseOnEscape } from '@/lib/hooks/useCloseOnEscape';
+import {
+  currencySchema,
+  supportedCurrencyCodes,
+} from '@/lib/finance/currency';
 
 const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
   process.env.NODE_ENV,
@@ -28,7 +39,7 @@ const DEFAULT_TYRION_SETUP_BRIDGE_URL = defaultTyrionBridgeUrlForEnvironment(
 
 // --- Add Connector Modal --------------------------------------------------
 
-type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-other';
+type ConnectorSetupStep = 'select' | 'configure-mstodo' | 'configure-work-todo' | 'configure-github' | 'configure-finance' | 'configure-doc-intelligence' | 'configure-outlook-email' | 'configure-outlook-calendar' | 'configure-scout' | 'configure-home-assistant' | 'configure-other';
 
 function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
   const [step, setStep] = useState<ConnectorSetupStep>('select');
@@ -53,6 +64,8 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
       setStep('configure-outlook-calendar');
     } else if (type === 'scout') {
       setStep('configure-scout');
+    } else if (type === 'home-assistant') {
+      setStep('configure-home-assistant');
     } else {
       setStep('configure-other');
     }
@@ -75,7 +88,9 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         role="dialog"
         aria-modal="true"
         aria-label="Add connector"
-        className="bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full max-w-lg p-6 border border-[var(--border)]"
+        className={`bg-[var(--surface-1)] rounded-2xl shadow-2xl w-full p-6 border border-[var(--border)] max-h-[90vh] overflow-y-auto ${
+          step === 'configure-home-assistant' ? 'max-w-2xl' : 'max-w-lg'
+        }`}
         onClick={e => e.stopPropagation()}
       >
         <AnimatePresence mode="wait">
@@ -124,6 +139,11 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
               <ScoutSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
             </motion.div>
           )}
+          {step === 'configure-home-assistant' && (
+            <motion.div key="home-assistant" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
+              <HomeAssistantSetup onBack={() => setStep('select')} onClose={onClose} onAdded={onAdded} />
+            </motion.div>
+          )}
           {step === 'configure-other' && (
             <motion.div key="other" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 20 }} transition={{ duration: 0.15 }}>
               <div>
@@ -143,6 +163,295 @@ function AddConnectorModal({ onClose, onAdded }: { onClose: () => void; onAdded:
         </AnimatePresence>
       </motion.div>
     </motion.div>
+  );
+}
+
+const HA_SOURCE_OPTIONS = [
+  { key: 'entityAlerts', label: 'Polled device rules', description: 'Legacy convenience rules for doors, batteries, motion, and package sensors. Prefer Home Assistant automations for custom logic.' },
+  { key: 'updates', label: 'Updates', description: 'One actionable notification for each available update.' },
+  { key: 'persistentNotifications', label: 'Persistent notifications', description: 'Notifications created in Home Assistant.' },
+  { key: 'repairs', label: 'Repairs', description: 'Warnings and errors from Home Assistant Repairs.' },
+] as const;
+
+function HomeAssistantSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose: () => void; onAdded: () => void }) {
+  const creation = useConnectorCreation();
+  const [name, setName] = useState('Home');
+  const [baseUrl, setBaseUrl] = useState('http://homeassistant.local:8123');
+  const [accessToken, setAccessToken] = useState('');
+  const [showToken, setShowToken] = useState(false);
+  const [sources, setSources] = useState<Record<(typeof HA_SOURCE_OPTIONS)[number]['key'], boolean>>({
+    entityAlerts: true,
+    updates: true,
+    persistentNotifications: true,
+    repairs: true,
+  });
+  const [actionsEnabled, setActionsEnabled] = useState(false);
+  const [updatePush, setUpdatePush] = useState<'immediate' | 'daily_summary' | 'off'>('daily_summary');
+  const [dailySummaryTime, setDailySummaryTime] = useState('08:00');
+  const [testState, setTestState] = useState<{
+    status: 'idle' | 'testing' | 'success' | 'error';
+    message?: string;
+    sources?: Record<string, { available?: boolean; count?: number; error?: string }>;
+  }>({ status: 'idle' });
+  const [testedFingerprint, setTestedFingerprint] = useState<string | null>(null);
+
+  const normalizedUrl = baseUrl.trim().replace(/\/+$/, '');
+  let urlError = '';
+  try {
+    const parsed = new URL(normalizedUrl);
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') urlError = 'Use an http or https URL.';
+  } catch {
+    urlError = 'Enter a valid Home Assistant URL.';
+  }
+  const canTest = Boolean(name.trim() && accessToken.trim() && !urlError && Object.values(sources).some(Boolean));
+  const connectionFingerprint = JSON.stringify({
+    baseUrl: normalizedUrl,
+    accessToken,
+    sources,
+  });
+  const canSubmit = canTest
+    && testState.status === 'success'
+    && testedFingerprint === connectionFingerprint;
+
+  function settingsPayload() {
+    return {
+      schemaVersion: 2,
+      baseUrl: normalizedUrl,
+      sources: {
+        entityAlerts: { enabled: sources.entityAlerts },
+        updates: { enabled: sources.updates },
+        persistentNotifications: {
+          enabled: sources.persistentNotifications,
+          criticalNotificationPatterns: [],
+        },
+        repairs: { enabled: sources.repairs },
+      },
+      actions: { enabled: actionsEnabled },
+      outboundDelivery: {
+        updatePush,
+        dailySummaryTime,
+        immediateCriticalUpdates: true,
+        immediateActionNeededRepairs: true,
+        immediateUrgentEntityAlerts: true,
+        immediateCriticalPersistentNotifications: true,
+      },
+    };
+  }
+
+  async function testConnection() {
+    if (!canTest) return;
+    setTestState({ status: 'testing' });
+    try {
+      const response = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          type: 'home-assistant',
+          credentials: { accessToken },
+          settings: settingsPayload(),
+        }),
+      });
+      const data = await response.json();
+      const sourceAvailable = {
+        entityAlerts: data.sources?.states?.available === true,
+        updates: data.sources?.states?.available === true,
+        persistentNotifications: data.sources?.persistentNotifications?.available === true,
+        repairs: data.sources?.repairs?.available === true,
+      };
+      const enabledReadable = Object.entries(sources).some(
+        ([source, enabled]) => enabled && sourceAvailable[source as keyof typeof sourceAvailable],
+      );
+      if (response.ok && data.success && enabledReadable) {
+        setTestState({ status: 'success', message: data.details, sources: data.sources });
+        setTestedFingerprint(connectionFingerprint);
+      } else {
+        setTestState({
+          status: 'error',
+          message: data.error || 'None of the enabled notification sources are readable. Disable unavailable sources or update Home Assistant permissions.',
+          sources: data.sources,
+        });
+        setTestedFingerprint(null);
+      }
+    } catch {
+      setTestState({ status: 'error', message: 'Connection test request failed' });
+      setTestedFingerprint(null);
+    }
+  }
+
+  async function createConnector() {
+    if (!canSubmit) return;
+    try {
+      await creation.create({
+        type: 'home-assistant',
+        name: name.trim(),
+        enabled: true,
+        syncMode: 'poll',
+        pollIntervalMinutes: 5,
+        capabilities: {
+          read: true,
+          write: actionsEnabled,
+          delete: false,
+          sync: true,
+          subtasks: false,
+          lists: true,
+          tags: false,
+          tagWriteBack: false,
+        },
+        credentials: { accessToken },
+        settings: settingsPayload(),
+        syncedLists: [],
+      });
+    } catch {
+      // Shared creation state renders the error.
+    }
+  }
+
+  if (creation.status === 'success') {
+    return (
+      <div className="py-6 text-center">
+        <CheckCircle2 size={40} className="mx-auto mb-3 text-emerald-400" />
+        <h3 className="text-lg font-semibold text-[var(--text-primary)]">{name.trim()} connected</h3>
+        <p className="mt-2 text-sm text-[var(--text-tertiary)]">
+          Home Assistant items will appear individually in Notifications after the first poll.
+        </p>
+        <button onClick={onAdded} className="mt-5 rounded-lg bg-blue-600 px-5 py-2 text-sm font-medium text-white hover:bg-blue-500">Done</button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="mb-5 flex items-center gap-2">
+        <button onClick={onBack} className="rounded p-1 text-[var(--text-muted)] hover:bg-[var(--surface-2)]" aria-label="Back to connector types">
+          <ChevronRight size={16} className="rotate-180" />
+        </button>
+        <ConnectorBrandIcon type="home-assistant" size={22} />
+        <div>
+          <h3 className="text-lg font-semibold text-[var(--text-primary)]">Connect Home Assistant</h3>
+          <p className="text-xs text-[var(--text-tertiary)]">Poll authoritative APIs; use push only for delivery urgency.</p>
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label className="block text-sm font-medium text-[var(--text-secondary)]">
+          Instance name
+          <input value={name} onChange={event => setName(event.target.value)} placeholder="Lake House"
+            className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
+        </label>
+        <label className="block text-sm font-medium text-[var(--text-secondary)]">
+          Home Assistant URL
+          <input value={baseUrl} onChange={event => { setBaseUrl(event.target.value); setTestState({ status: 'idle' }); setTestedFingerprint(null); }}
+            aria-invalid={Boolean(urlError)}
+            className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
+          {urlError && <span className="mt-1 block text-xs text-red-400">{urlError}</span>}
+        </label>
+      </div>
+
+      <label className="mt-4 block text-sm font-medium text-[var(--text-secondary)]">
+        Long-lived access token
+        <span className="relative mt-1 block">
+          <input type={showToken ? 'text' : 'password'} value={accessToken}
+            onChange={event => { setAccessToken(event.target.value); setTestState({ status: 'idle' }); setTestedFingerprint(null); }}
+            autoComplete="new-password" className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 pr-10 text-sm text-[var(--text-primary)] focus:outline-none" />
+          <button type="button" onClick={() => setShowToken(value => !value)}
+            className="absolute inset-y-0 right-0 px-3 text-[var(--text-muted)]" aria-label={showToken ? 'Hide token' : 'Show token'}>
+            {showToken ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+        </span>
+      </label>
+
+      <fieldset className="mt-5">
+        <legend className="text-sm font-semibold text-[var(--text-primary)]">Notification sources</legend>
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {HA_SOURCE_OPTIONS.map(option => (
+            <label key={option.key} className="flex gap-3 rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-3">
+              <input type="checkbox" checked={sources[option.key]}
+                onChange={event => {
+                  setSources(current => ({ ...current, [option.key]: event.target.checked }));
+                  setTestState({ status: 'idle' });
+                  setTestedFingerprint(null);
+                }}
+                className="mt-0.5 h-4 w-4 accent-blue-500" />
+              <span>
+                <span className="block text-sm font-medium text-[var(--text-primary)]">{option.label}</span>
+                <span className="mt-0.5 block text-xs text-[var(--text-muted)]">{option.description}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
+      <div className="mt-5 grid gap-4 sm:grid-cols-[1fr_9rem]">
+        <label className="block text-sm font-medium text-[var(--text-secondary)]">
+          Routine update push
+          <Select value={updatePush} onValueChange={value => setUpdatePush(value as typeof updatePush)}>
+            <SelectTrigger className="mt-1 w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="immediate">Immediate</SelectItem>
+              <SelectItem value="daily_summary">Daily summary</SelectItem>
+              <SelectItem value="off">No push</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="mt-1 block text-xs font-normal text-[var(--text-muted)]">Every update still has its own Notification card.</span>
+        </label>
+        {updatePush === 'daily_summary' && (
+          <label className="block text-sm font-medium text-[var(--text-secondary)]">
+            Summary time
+            <input type="time" value={dailySummaryTime} onChange={event => setDailySummaryTime(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)]" />
+          </label>
+        )}
+      </div>
+
+      <label className="mt-4 flex gap-3 rounded-xl border border-amber-700/30 bg-amber-900/10 p-3">
+        <input type="checkbox" checked={actionsEnabled} onChange={event => setActionsEnabled(event.target.checked)}
+          className="mt-0.5 h-4 w-4 accent-amber-500" />
+        <span>
+          <span className="block text-sm font-medium text-[var(--text-primary)]">Allow actions in Home Assistant</span>
+          <span className="mt-0.5 block text-xs text-[var(--text-muted)]">Enables install, skip, dismiss, and ignore after an explicit confirmation.</span>
+        </span>
+      </label>
+
+      {(testState.message || creation.error) && (
+        <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${
+          testState.status === 'success'
+            ? 'border-emerald-800/40 bg-emerald-900/20 text-emerald-300'
+            : 'border-red-800/40 bg-red-900/20 text-red-300'
+        }`}>
+          {creation.error || testState.message}
+          {testState.sources && (
+            <div className="mt-2 flex flex-wrap gap-2 text-xs">
+              {Object.entries(testState.sources).map(([source, result]) => (
+                <span key={source} className="rounded-full border border-current/20 px-2 py-0.5">
+                  {result.available ? 'Available' : 'Unavailable'} · {source}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
+        <button onClick={onClose} className="px-4 py-2 text-sm text-[var(--text-secondary)]">Cancel</button>
+        <div className="flex gap-2">
+          <button onClick={testConnection} disabled={!canTest || testState.status === 'testing'}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-[var(--border-strong)] px-4 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50 sm:flex-none">
+            {testState.status === 'testing' ? <Loader2 size={14} className="animate-spin" /> : <Wifi size={14} />} Test
+          </button>
+          <button onClick={createConnector} disabled={!canSubmit || creation.status === 'creating'}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50 sm:flex-none">
+            {creation.status === 'creating' ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save connector
+          </button>
+        </div>
+      </div>
+      {canTest && !canSubmit && testState.status !== 'testing' && (
+        <p className="mt-2 text-end text-xs text-[var(--text-muted)]" role="status">
+          Test this configuration successfully before saving.
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -312,6 +621,7 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
   const [instanceName, setInstanceName] = useState('Tyrion');
   const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_TYRION_SETUP_BRIDGE_URL);
   const [serviceToken, setServiceToken] = useState('');
+  const [householdCurrency, setHouseholdCurrency] = useState('');
   const [enabled, setEnabled] = useState(true);
   const [status, setStatus] = useState<'idle' | 'testing' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState('');
@@ -330,7 +640,10 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
         body: JSON.stringify({
           type: 'finance-manager',
           credentials: serviceToken.trim() ? { serviceToken: serviceToken.trim() } : {},
-          settings: { bridgeUrl: bridgeUrl.trim() },
+          settings: {
+            bridgeUrl: bridgeUrl.trim(),
+            householdCurrency,
+          },
         }),
       });
       const data = await res.json();
@@ -350,6 +663,11 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
   async function createConnector() {
     setStatus('idle');
     setErrorMessage('');
+    if (!currencySchema.safeParse(householdCurrency).success) {
+      setStatus('error');
+      setErrorMessage('Select a supported household currency');
+      return;
+    }
     try {
       await creation.create({
         type: 'finance-manager',
@@ -359,7 +677,10 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
         pollIntervalMinutes: 240,
         capabilities: { read: true, write: true, delete: false, sync: true, lists: false, subtasks: false, tags: true, tagWriteBack: false },
         credentials: serviceToken.trim() ? { serviceToken: serviceToken.trim() } : {},
-        settings: { bridgeUrl: bridgeUrl.trim() },
+        settings: {
+          bridgeUrl: bridgeUrl.trim(),
+          householdCurrency,
+        },
         syncedLists: [],
       });
     } catch { /* rendered by the shared creation state */ }
@@ -432,6 +753,32 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
         </div>
 
         <div>
+          <label htmlFor="tyrion-household-currency" className="block text-sm font-medium text-[var(--text-secondary)] mb-1">
+            Household currency
+          </label>
+          <Select
+            value={householdCurrency}
+            onValueChange={setHouseholdCurrency}
+          >
+            <SelectTrigger
+            id="tyrion-household-currency"
+            aria-required="true"
+            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface)] px-3 py-2 text-sm"
+            >
+            <SelectValue placeholder="Select an ISO 4217 currency" />
+            </SelectTrigger>
+            <SelectContent>
+            {supportedCurrencyCodes.map((currency) => (
+              <SelectItem key={currency} value={currency}>{currency}</SelectItem>
+            ))}
+            </SelectContent>
+          </Select>
+          <p className="mt-1 text-xs text-[var(--text-muted)]">
+            Controls bounded Tyrion insight presentation and notification amounts. This is connector configuration, not a secret.
+          </p>
+        </div>
+
+        <div>
           <label className="block text-sm font-medium text-[var(--text-secondary)] mb-1">Display Name</label>
           <input
             type="text"
@@ -494,7 +841,7 @@ function FinanceManagerSetup({ onBack, onClose, onAdded }: { onBack: () => void;
 
           <motion.button
             onClick={createConnector}
-            disabled={creation.status === 'creating'}
+            disabled={creation.status === 'creating' || !currencySchema.safeParse(householdCurrency).success}
             whileTap={{ scale: 0.97 }}
             className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2"
           >

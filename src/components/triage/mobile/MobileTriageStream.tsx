@@ -1,12 +1,15 @@
 'use client';
 
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, ChevronRight, Crosshair, Flame, Loader2, RefreshCw, Sparkles } from 'lucide-react';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { cn } from '@/lib/utils/cn';
 import type { TriageItem, TriageSourcePlatform } from '@/types';
 import { CONTENT_TYPE_OPTIONS, SOURCE_OPTIONS } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
+import { getInboxTaskMetadata, type InboxGroup } from '@/lib/inbox/items';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 
 interface MobileTriageStreamProps {
   items: TriageItem[];
@@ -18,6 +21,9 @@ interface MobileTriageStreamProps {
   onSourceFilterChange: (source: TriageSourcePlatform | 'all') => void;
   activeTypeFilter: string | null;
   onTypeFilterChange: (type: string | null) => void;
+  group?: InboxGroup;
+  onGroupChange?: (group: InboxGroup) => void;
+  groupCounts?: Record<InboxGroup, number>;
 }
 
 type PriorityFilter = 'all' | TriageItem['aiUrgency'];
@@ -31,6 +37,7 @@ const SOURCE_BRAND: Record<string, { bg: string; ring: string; text: string }> =
   facebook: { bg: 'bg-blue-500/15', ring: 'ring-blue-400/30', text: 'text-blue-300' },
   tiktok: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-300' },
   pinterest: { bg: 'bg-rose-500/15', ring: 'ring-rose-400/30', text: 'text-rose-300' },
+  task: { bg: 'bg-cyan-500/15', ring: 'ring-cyan-400/30', text: 'text-cyan-200' },
   web: { bg: 'bg-slate-500/15', ring: 'ring-slate-400/30', text: 'text-slate-300' },
 };
 
@@ -108,9 +115,14 @@ export default function MobileTriageStream({
   onSourceFilterChange,
   activeTypeFilter,
   onTypeFilterChange,
+  group = 'content',
+  onGroupChange,
+  groupCounts = { all: items.length, tasks: 0, content: items.length },
 }: MobileTriageStreamProps) {
   const [activePriorityFilter, setActivePriorityFilter] = useState<PriorityFilter>('all');
   const [filtersExpanded, setFiltersExpanded] = useState(false);
+  const listStartRef = useRef<HTMLDivElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
 
   const handleRefresh = useCallback(async () => {
     await onRefresh?.();
@@ -139,6 +151,27 @@ export default function MobileTriageStream({
       return true;
     });
   }, [activePriorityFilter, activeSourceFilter, activeTypeFilter, items]);
+  const virtualizeItems = shouldVirtualizeList(filteredItems.length);
+  const itemVirtualizer = useVirtualizer({
+    count: virtualizeItems ? filteredItems.length : 0,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => filteredItems[index]?.id ?? index,
+    estimateSize: () => 280,
+    overscan: 4,
+    scrollMargin,
+  });
+
+  useLayoutEffect(() => {
+    if (!virtualizeItems) return;
+    setScrollMargin(listStartRef.current?.offsetTop ?? 0);
+  }, [filtersExpanded, virtualizeItems]);
+
+  const renderedItems = virtualizeItems
+    ? itemVirtualizer.getVirtualItems().map((virtualRow) => ({
+        item: filteredItems[virtualRow.index],
+        virtualRow,
+      }))
+    : filteredItems.map((item) => ({ item, virtualRow: null }));
 
   return (
     <div
@@ -158,11 +191,11 @@ export default function MobileTriageStream({
       )}
 
       <div style={contentStyle}>
-      <div className="sticky top-0 z-20 border-b border-white/5 bg-slate-950/95 pb-4 pt-[calc(env(safe-area-inset-top)+0.75rem)] backdrop-blur-xl">
+      <div className="sticky top-0 z-20 border-b border-white/5 bg-slate-950/95 pb-4 pt-3 backdrop-blur-xl">
         <div className="flex items-start justify-between gap-3 px-4">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">Triage stream</p>
-            <h2 className="mt-1 text-xl font-semibold text-white">Inbox feed</h2>
+            <p className="text-xs font-medium uppercase tracking-[0.28em] text-[var(--text-muted)]">Review and route</p>
+            <h2 className="mt-1 text-xl font-semibold text-white">Inbox</h2>
             <p className="mt-1 text-sm text-slate-400">{filteredItems.length} item{filteredItems.length === 1 ? '' : 's'} in view</p>
           </div>
 
@@ -178,6 +211,29 @@ export default function MobileTriageStream({
         </div>
 
         <div className="mt-3">
+          <FilterRow label="Groups">
+            {([
+              ['all', 'All'],
+              ['tasks', 'Tasks'],
+              ['content', 'Content'],
+            ] as const).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => onGroupChange?.(value)}
+                aria-pressed={group === value}
+                className={cn(
+                  'inline-flex min-h-11 items-center gap-2 rounded-full px-4 text-sm font-medium ring-1 transition',
+                  group === value
+                    ? 'bg-sky-500/15 text-sky-200 ring-sky-400/30'
+                    : 'bg-white/[0.04] text-slate-300 ring-white/8 hover:bg-white/[0.08]',
+                )}
+              >
+                {label}
+                <span className="tabular-nums text-slate-400">{groupCounts[value]}</span>
+              </button>
+            ))}
+          </FilterRow>
           <button
             type="button"
             onClick={() => setFiltersExpanded((v) => !v)}
@@ -193,7 +249,7 @@ export default function MobileTriageStream({
           </button>
           {filtersExpanded && (
             <div className="mt-1 space-y-3 pb-1">
-              <FilterRow label="Sources">
+              {group !== 'tasks' ? <FilterRow label="Content sources">
                 {sourceOptions.map((option) => {
                   const isActive = activeSourceFilter === option.value;
                   const brand = option.value === 'all'
@@ -222,7 +278,7 @@ export default function MobileTriageStream({
                     </button>
                   );
                 })}
-              </FilterRow>
+              </FilterRow> : null}
 
               <FilterRow label="Priority">
                 {PRIORITY_OPTIONS.map((option) => {
@@ -288,7 +344,7 @@ export default function MobileTriageStream({
         </div>
       </div>
 
-      <div className="flex-1 px-4 pb-[calc(env(safe-area-inset-bottom)+5.5rem)] pt-4">
+      <div className="flex-1 px-4 pb-4 pt-4">
         {loading ? (
           <div className="flex min-h-[40vh] items-center justify-center">
             <Loader2 size={24} className="animate-spin text-sky-300" />
@@ -304,63 +360,82 @@ export default function MobileTriageStream({
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {filteredItems.map((item) => {
+          <div
+            ref={listStartRef}
+            data-virtualized={virtualizeItems || undefined}
+            className={cn(virtualizeItems ? 'relative' : 'space-y-3')}
+            style={virtualizeItems ? { height: `${itemVirtualizer.getTotalSize()}px` } : undefined}
+          >
+            {renderedItems.map(({ item, virtualRow }) => {
               const sourceBrand = SOURCE_BRAND[item.sourcePlatform] || SOURCE_BRAND.web;
-              const preview = item.aiSummary || item.description || 'No preview available yet.';
+              const task = getInboxTaskMetadata(item);
+              const preview = task
+                ? `${task.sourceListName || task.connectorType} · ${task.priority === 'none' ? 'No priority' : `${task.priority} priority`}${task.projectIds.length || task.planningHorizon ? '' : ' · Needs filing'}`
+                : item.aiSummary || item.description || 'No preview available yet.';
 
               return (
-                <button
+                <div
                   key={item.id}
-                  type="button"
-                  onClick={() => onItemTap(item.id)}
-                  className={cn(
-                    'w-full rounded-2xl bg-white/[0.04] p-4 text-left backdrop-blur-xl ring-1 ring-white/5 transition active:scale-[0.99]',
-                    'hover:bg-white/[0.06]',
-                  )}
+                  ref={virtualRow ? itemVirtualizer.measureElement : undefined}
+                  data-index={virtualRow?.index}
+                  className={virtualRow ? 'absolute left-0 top-0 w-full pb-3' : undefined}
+                  style={virtualRow
+                    ? { transform: `translateY(${virtualRow.start - scrollMargin}px)` }
+                    : undefined}
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className={cn('inline-flex h-9 w-9 items-center justify-center rounded-full ring-1', sourceBrand.bg, sourceBrand.ring)}>
-                      <TriageSourceIcon source={item.sourcePlatform} size={16} className="shrink-0" />
-                    </div>
-
-                    <div className="flex items-center gap-2 pl-2">
-                      <span className="text-sm font-semibold text-sky-300 [font-variant-numeric:tabular-nums]">
-                        {item.aiRelevanceScore}
-                      </span>
-                      <ChevronRight size={16} className="text-[var(--text-muted)]" />
-                    </div>
-                  </div>
-
-                  <h3 className="mt-3 line-clamp-2 text-base font-semibold text-white">
-                    {item.title}
-                  </h3>
-
-                  {item.thumbnailUrl && (
-                    <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-white/10">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={item.thumbnailUrl}
-                        alt=""
-                        className="h-32 w-full bg-slate-900 object-cover"
-                        loading="lazy"
-                      />
-                    </div>
-                  )}
-
-                  <p className="mt-2 line-clamp-2 text-sm text-slate-400">
-                    {preview}
-                  </p>
-
-                  <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
-                    <span>{formatTimeAgo(item.capturedAt || item.ingestedAt)}</span>
-                    {item.aiUrgency !== 'evergreen' && (
-                      <span className={cn('inline-flex items-center rounded-full border px-2 py-1 font-medium', getUrgencyClasses(item.aiUrgency))}>
-                        {getUrgencyLabel(item.aiUrgency)}
-                      </span>
+                  <button
+                    type="button"
+                    onClick={() => onItemTap(item.id)}
+                    className={cn(
+                      'w-full rounded-2xl bg-white/[0.04] p-4 text-left backdrop-blur-xl ring-1 ring-white/5 transition active:scale-[0.99]',
+                      'hover:bg-white/[0.06]',
                     )}
-                  </div>
-                </button>
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className={cn('inline-flex h-9 w-9 items-center justify-center rounded-full ring-1', sourceBrand.bg, sourceBrand.ring)}>
+                        <TriageSourceIcon source={item.sourcePlatform} size={16} className="shrink-0" />
+                      </div>
+
+                      <div className="flex items-center gap-2 pl-2">
+                        {!task ? (
+                          <span className="text-sm font-semibold text-sky-300 [font-variant-numeric:tabular-nums]">
+                            {item.aiRelevanceScore}
+                          </span>
+                        ) : null}
+                        <ChevronRight size={16} className="text-[var(--text-muted)]" />
+                      </div>
+                    </div>
+
+                    <h3 className="mt-3 line-clamp-2 text-base font-semibold text-white">
+                      {item.title}
+                    </h3>
+
+                    {item.thumbnailUrl && (
+                      <div className="mt-3 overflow-hidden rounded-xl ring-1 ring-white/10">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.thumbnailUrl}
+                          alt=""
+                          className="h-32 w-full bg-slate-900 object-cover"
+                          loading="lazy"
+                        />
+                      </div>
+                    )}
+
+                    <p className="mt-2 line-clamp-2 text-sm text-slate-400">
+                      {preview}
+                    </p>
+
+                    <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                      <span>{formatTimeAgo(item.capturedAt || item.ingestedAt)}</span>
+                      {item.aiUrgency !== 'evergreen' && (
+                        <span className={cn('inline-flex items-center rounded-full border px-2 py-1 font-medium', getUrgencyClasses(item.aiUrgency))}>
+                          {getUrgencyLabel(item.aiUrgency)}
+                        </span>
+                      )}
+                    </div>
+                  </button>
+                </div>
               );
             })}
           </div>

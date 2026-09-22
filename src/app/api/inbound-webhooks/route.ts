@@ -1,22 +1,13 @@
-import db from '@/db';
-import { inboundWebhooks } from '@/db/schema';
-import { desc } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 export async function GET() {
   try {
-    const webhooks = await db
-      .select()
-      .from(inboundWebhooks)
-      .orderBy(desc(inboundWebhooks.createdAt));
+    const repositories = await getWorkerPersistenceRepositories();
+    const webhooks = await repositories.webhookIntegrations.inbound.list();
 
-    return Response.json({
-      webhooks: webhooks.map(({ secret, ...webhook }) => ({
-        ...webhook,
-        hasSecret: Boolean(secret),
-      })),
-    });
+    return Response.json({ webhooks });
   } catch (error) {
     return ApiErrors.internal('Failed to load inbound webhooks', error);
   }
@@ -42,18 +33,15 @@ export async function POST(request: Request) {
 
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
+    const repositories = await getWorkerPersistenceRepositories();
 
-    await db.insert(inboundWebhooks).values({
+    await repositories.webhookIntegrations.inbound.create({
       id,
       name,
       sourceLabel,
       secret: secret || null,
-      enabled: true,
       defaultAction,
       fieldMappings,
-      totalReceived: 0,
-      lastReceivedAt: null,
-      lastStatus: null,
       createdAt: now,
       updatedAt: now,
     });

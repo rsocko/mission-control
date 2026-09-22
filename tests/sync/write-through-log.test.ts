@@ -5,12 +5,11 @@ const mocks = vi.hoisted(() => ({
   error: vi.fn(),
 }));
 
-vi.mock('@/db', () => ({
-  default: {
-    insert: vi.fn(() => ({ values: mocks.values })),
-  },
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    syncRuns: { append: mocks.values },
+  })),
 }));
-vi.mock('@/db/schema', () => ({ syncLog: {} }));
 vi.mock('@/lib/logger', () => ({
   syncLogger: { error: mocks.error },
 }));

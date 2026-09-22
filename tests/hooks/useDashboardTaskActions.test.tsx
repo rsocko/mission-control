@@ -1,4 +1,4 @@
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useRef, useState } from 'react';
 import {
@@ -11,6 +11,7 @@ import type {
   DashboardTaskViewModel as Task,
 } from '@/types/dashboard';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { TASK_CHANGED_EVENT } from '@/lib/task-change-events';
 
 const toast = vi.hoisted(() => ({
   error: vi.fn(),
@@ -28,6 +29,7 @@ const task = {
   taskSourceModel: 'mc-owned',
   microStatus: null,
   priority: 'none',
+  planningHorizon: null,
   dueDate: null,
   connectorType: 'local',
   connectorInstanceId: 'local',
@@ -40,6 +42,7 @@ const task = {
   editPolicy: {
     fields: {
       priority: { mutation: 'local' },
+      status: { mutation: 'local' },
     },
     removalMode: 'local-delete',
   } as Task['editPolicy'],
@@ -54,7 +57,9 @@ const initialResponse: TaskResponse = {
   stats: {
     totalOpen: 1,
     overdue: 0,
+    dueToday: 0,
     dueThisWeek: 0,
+    noDate: 1,
     highPriority: 0,
     assignedToMe: 1,
     myDay: 0,
@@ -65,12 +70,16 @@ const initialResponse: TaskResponse = {
   },
 };
 
-function useHarness(quickFilter: string | null = null) {
+function useHarness(
+  quickFilter: string | null = null,
+  runTaskCompletion = vi.fn(),
+  updateTaskGroupCounts = vi.fn(),
+) {
   const [taskResponse, setTaskResponse] = useState(initialResponse);
   const [, setMyDayTaskIds] = useState(new Set<string>());
   const [myDayItemStatuses, setMyDayItemStatuses] = useState(new Map<string, string>());
   const [, setExitingTasks] = useState<DashboardTaskExit[]>([]);
-  const [, setConfirmDialog] = useState<DashboardTaskConfirmDialog>({
+  const [confirmDialog, setConfirmDialog] = useState<DashboardTaskConfirmDialog>({
     open: false,
     title: '',
     message: '',
@@ -93,11 +102,12 @@ function useHarness(quickFilter: string | null = null) {
     setConfirmDialog,
     listRef,
     completionScopeKey: 'all-tasks',
-    runTaskCompletion: vi.fn(),
+    runTaskCompletion,
     fetchData: vi.fn(),
+    updateTaskGroupCounts,
   });
 
-  return { actions, taskResponse };
+  return { actions, taskResponse, confirmDialog };
 }
 
 afterEach(() => {
@@ -109,6 +119,46 @@ afterEach(() => {
 });
 
 describe('useDashboardTaskActions', () => {
+  it('deletes immediately and restores through the server when undo is clicked', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true, action: 'deleted', restorable: true }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ success: true }),
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    const { result } = renderHook(() => useHarness());
+
+    act(() => result.current.actions.deleteTask('task-1'));
+    act(() => result.current.confirmDialog.onConfirm());
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1',
+      { method: 'DELETE' },
+    ));
+    expect(result.current.taskResponse.tasks).toHaveLength(0);
+
+    const options = toast.success.mock.calls.at(-1)?.[1] as {
+      action: { onClick: () => void };
+    };
+    await act(async () => {
+      options.action.onClick();
+    });
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/tasks/task-1/restore',
+      { method: 'POST' },
+    ));
+    expect(result.current.taskResponse.tasks).toEqual([task]);
+  });
+
   it('keeps the action object and its functions stable across state and option changes', () => {
     const { result, rerender } = renderHook(
       ({ quickFilter }) => useHarness(quickFilter),
@@ -149,6 +199,21 @@ describe('useDashboardTaskActions', () => {
     expect(toast.error).toHaveBeenCalledWith('Failed to update priority');
   });
 
+  it('reports successful list mutations so an open detail panel can refresh', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    const taskChanged = vi.fn();
+    window.addEventListener(TASK_CHANGED_EVENT, taskChanged);
+    const { result } = renderHook(() => useHarness());
+
+    await act(async () => {
+      await result.current.actions.setTaskStatus('task-1', 'in_progress');
+    });
+
+    expect(taskChanged).toHaveBeenCalledOnce();
+    expect((taskChanged.mock.calls[0][0] as CustomEvent).detail).toEqual({ taskId: 'task-1' });
+    window.removeEventListener(TASK_CHANGED_EVENT, taskChanged);
+  });
+
   it('refreshes navigation counts when My Day membership changes', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -164,5 +229,32 @@ describe('useDashboardTaskActions', () => {
 
     expect(refreshListener).toHaveBeenCalledTimes(1);
     window.removeEventListener(NAVIGATION_COUNTS_REFRESH_EVENT, refreshListener);
+  });
+
+  it('updates grouped totals with the optimistic completion', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true }));
+    const updateTaskGroupCounts = vi.fn();
+    const runTaskCompletion = vi.fn(async (
+      _taskId: string,
+      options: {
+        optimisticUpdate: () => void;
+        request: () => Promise<void>;
+      },
+    ) => {
+      options.optimisticUpdate();
+      await options.request();
+      return 'completed' as const;
+    });
+    const { result } = renderHook(() => useHarness(
+      null,
+      runTaskCompletion,
+      updateTaskGroupCounts,
+    ));
+
+    await act(async () => {
+      await result.current.actions.completeTask('task-1');
+    });
+
+    expect(updateTaskGroupCounts).toHaveBeenCalledWith(task, null);
   });
 });

@@ -24,6 +24,66 @@ vi.mock('@/components/ui/ConfirmDialog', () => ({
 describe('Sync History retained items', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.history.replaceState({}, '', '/settings/sync-history');
+  });
+
+  it('loads deep-linked source filters and combines them with result filters', async () => {
+    window.history.replaceState({}, '', '/settings/sync-history?source=doc-1');
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      history: [],
+      hasMore: false,
+    }), { status: 200 }));
+
+    render(<SyncHistorySection connectors={[{
+      id: 'doc-1',
+      type: 'document-intelligence',
+      name: 'Document Intelligence',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true, write: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }, {
+      id: 'email-1',
+      type: 'outlook-email',
+      name: 'Email',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: { read: true },
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: '',
+      updatedAt: '',
+      deletedAt: null,
+    }]} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(String(fetchMock.mock.calls[0][0])).toContain('source=doc-1');
+    expect(screen.getByRole('button', { name: /OWL/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /OWL/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Email' }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: /All results/i }));
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Errors' }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    const filteredUrl = String(fetchMock.mock.calls[2][0]);
+    expect(filteredUrl).toContain('source=doc-1');
+    expect(filteredUrl).toContain('source=email-1');
+    expect(filteredUrl).toContain('result=errors');
+    expect(window.location.search).toContain('source=doc-1');
+    expect(window.location.search).toContain('source=email-1');
+    expect(window.location.search).toContain('result=errors');
+    expect(await screen.findByText('No sync runs match these filters.')).toBeInTheDocument();
   });
 
   it('does not call a notification-producing run "No changes"', async () => {
@@ -493,6 +553,26 @@ describe('Sync History retained items', () => {
           startedAt: '2026-08-03T20:00:30.000Z',
           attempt: 1,
           maxAttempts: 3,
+        }, {
+          id: 'log-canary',
+          connectorId: 'doc-1',
+          success: true,
+          tasksAdded: 0,
+          tasksUpdated: 0,
+          tasksRemoved: 0,
+          tasksPushed: 0,
+          localOnlyProtected: 0,
+          notificationsAdded: 0,
+          errors: [],
+          details: [],
+          syncedAt: '2026-08-03T20:02:00.000Z',
+          durationMs: 1000,
+          jobId: 'job-canary',
+          trigger: 'operator-canary',
+          scheduledFor: '2026-08-03T20:01:00.000Z',
+          startedAt: '2026-08-03T20:01:30.000Z',
+          attempt: 1,
+          maxAttempts: 1,
         }],
         scheduleHealth: {
           status: 'action_required',
@@ -550,6 +630,7 @@ describe('Sync History retained items', () => {
     expect(await screen.findByText('Action required')).toBeInTheDocument();
     expect(screen.getByText(/overdue 5m/i)).toBeInTheDocument();
     expect(screen.getByText('Scheduled')).toBeInTheDocument();
+    expect(screen.getByText('Operator canary')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Sync now' }));
 

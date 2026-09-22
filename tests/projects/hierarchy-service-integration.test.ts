@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 beforeAll(() => {
   process.env.MC_DB_PATH = ':memory:';
@@ -9,7 +10,7 @@ beforeAll(() => {
 
 async function seedProject(suffix: string) {
   const [{ default: db }, schema] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
   ]);
   const now = new Date().toISOString();
@@ -495,7 +496,7 @@ describe('project hierarchy service', () => {
       },
     })).rejects.toThrow('Every task must belong to this project');
 
-    const hierarchy = getProjectHierarchySnapshot(projectId)!;
+    const hierarchy = (await getProjectHierarchySnapshot(projectId))!;
     expect(hierarchy.revision).toBe(0);
     expect(hierarchy.phaseItemsByPhase[phaseIds[0]].map((item) => item.taskId))
       .toEqual([taskIds[0], taskIds[1]]);

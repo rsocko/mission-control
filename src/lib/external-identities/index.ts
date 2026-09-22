@@ -92,6 +92,7 @@ export type {
   GitHubTaskTransferReconciliationResult,
 } from './task-transfer-reconciliation';
 export {
+  assertExternalIdentityBatchWithinLimit,
   createExternalEntityKey,
   createNewGitHubConnectorIdentityState,
   digestExternalIdentifier,

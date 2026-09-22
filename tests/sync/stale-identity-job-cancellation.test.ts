@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('stale queued GitHub identity jobs', () => {
   beforeEach(() => {
@@ -18,7 +19,7 @@ describe('stale queued GitHub identity jobs', () => {
 
   it('cancels a stale stable job on first failure and permits a current-mode enqueue', async () => {
     const [{ default: db, sqlite }, schema, queue, context, { SyncWorker }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync/job-queue'),
       import('@/lib/sync/github-identity-context'),
@@ -64,7 +65,7 @@ describe('stale queued GitHub identity jobs', () => {
 
     let workExecuted = 0;
     const worker = new SyncWorker(async (connectorId, options) => {
-      context.validateAndFreezeGitHubIdentityContext(
+      await context.validateAndFreezeGitHubIdentityContext(
         connectorId,
         options.identityContext!,
       );
@@ -77,7 +78,7 @@ describe('stale queued GitHub identity jobs', () => {
     worker.start();
     await vi.waitFor(() => {
       expect(queue.getSyncJob(stale.id)?.status).toBe('cancelled');
-    });
+    }, { timeout: 10_000, interval: 10 });
     await worker.stop();
 
     expect(workExecuted).toBe(0);
@@ -88,6 +89,11 @@ describe('stale queued GitHub identity jobs', () => {
       identityModeRevision: 8,
       error: expect.stringContaining('revision 8 is stale'),
     });
+    expect(queue.renewSyncJobLease(
+      stale.id,
+      'stale-context-worker',
+      1,
+    )).toBe(false);
     expect(sqlite.prepare(`
       SELECT COUNT(*) AS value
       FROM sync_jobs

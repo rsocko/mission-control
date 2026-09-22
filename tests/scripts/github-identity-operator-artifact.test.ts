@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -135,6 +135,71 @@ describe('production GitHub identity operator artifact', () => {
     expect(result.stderr).not.toContain('operator-secret');
   });
 
+  it('fails closed on the audited SQLite-only surfaces under PostgreSQL, before any connection attempt or SQLite touch', () => {
+    // Every one of these five commands is an audited SQLite-only GitHub
+    // identity operator/recovery surface (`GitHubIdentityOperatorPersistence`):
+    // identity backfill/status, manual exception mutation, unknown-outcome
+    // resolution, and interrupted write-cycle recovery. Under
+    // MC_DATABASE_BACKEND=postgres, `assertSqliteOnlyCommandSupported` must
+    // reject them before `initializeDatabaseWithRetry()` even runs, so
+    // neither a PostgreSQL connection attempt nor any SQLite file access ever
+    // happens - this is stricter than merely failing before a query.
+    for (const command of [
+      'status',
+      'write-cycle-reconcile',
+      'write-outcome-inspect',
+      'write-outcome-resolve',
+      'exception-accept',
+      'exception-revoke',
+    ]) {
+      const sqliteFallbackPath = join(directory, `must-not-create-${command}.db`);
+      const result = runOperatorWithEnvironment({
+        MC_DATABASE_BACKEND: 'postgres',
+        MC_POSTGRES_URL: 'postgres://test:test@127.0.0.1:1/mission_control',
+        MC_DB_PATH: sqliteFallbackPath,
+        MC_DB_STARTUP_MAX_ATTEMPTS: '1',
+      }, command, '--connector', 'operator-artifact');
+
+      expect(result.status, `${command}: exit code`).toBe(4);
+      expect(result.stderr, `${command}: rejection message`).toContain(
+        `Command '${command}' is an audited SQLite-only operator/recovery surface`,
+      );
+      // Never reached the PostgreSQL connection attempt (would otherwise
+      // surface as an ECONNREFUSED failure), and never touched SQLite.
+      expect(result.stderr, `${command}: no PostgreSQL connection attempt`).not.toContain('ECONNREFUSED');
+      expect(result.stderr, `${command}: no worker output`).not.toContain('worker.js');
+      expect(existsSync(sqliteFallbackPath), `${command}: SQLite file must not be created`).toBe(false);
+    }
+  });
+
+  it('does not fail-close the already-portable transfer-reconcile command under PostgreSQL', () => {
+    // transfer-reconcile (historical GitHub issue transfer) is a separate,
+    // already-portable capability, not one of the five audited SQLite-only
+    // surfaces, so it must proceed past the guard and attempt the real
+    // PostgreSQL connection instead of being rejected by
+    // `assertSqliteOnlyCommandSupported`.
+    const sqliteFallbackPath = join(directory, 'must-not-create-transfer-reconcile.db');
+    const result = runOperatorWithEnvironment({
+      MC_DATABASE_BACKEND: 'postgres',
+      MC_POSTGRES_URL: 'postgres://test:test@127.0.0.1:1/mission_control',
+      MC_DB_PATH: sqliteFallbackPath,
+      MC_DB_STARTUP_MAX_ATTEMPTS: '1',
+    },
+    'transfer-reconcile',
+    '--connector', 'operator-artifact',
+    '--source-local-id', 'task-1',
+    '--successor-local-id', 'task-2',
+    '--revision', '4',
+    '--actor', 'artifact-test',
+    '--reason', 'Reconcile historical transfer',
+    '--idempotency-key', 'artifact-transfer-reconciliation-pg');
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('connect ECONNREFUSED 127.0.0.1:1');
+    expect(result.stderr).not.toContain('worker.js');
+    expect(existsSync(sqliteFallbackPath)).toBe(false);
+  });
+
   it('requires explicit pre-dispatch confirmation for interrupted cycles', () => {
     const result = runOperator(
       'write-cycle-reconcile',
@@ -202,12 +267,19 @@ describe('production GitHub identity operator artifact', () => {
 });
 
 function runOperator(...args: string[]) {
+  return runOperatorWithEnvironment({}, ...args);
+}
+
+function runOperatorWithEnvironment(
+  overrides: Partial<NodeJS.ProcessEnv>,
+  ...args: string[]
+) {
   return spawnSync(
     process.execPath,
     ['--conditions=react-server', artifactPath, ...args],
     {
       cwd: process.cwd(),
-      env: environment,
+      env: { ...environment, ...overrides },
       encoding: 'utf8',
       timeout: 15_000,
     },

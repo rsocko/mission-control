@@ -9,6 +9,9 @@ const createTriageImageCapture = vi.fn();
 const findTriageImageCaptureByRequestId = vi.fn();
 const findTriageImageCaptureByImageUrl = vi.fn();
 
+vi.mock('@/db', () => {
+  throw new Error('SQLite must not load in portable triage image routes');
+});
 vi.mock('@/lib/triage/capture-image-storage', () => ({
   getCaptureImageStorage: () => storage,
 }));

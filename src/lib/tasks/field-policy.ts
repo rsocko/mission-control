@@ -19,6 +19,7 @@ export const TASK_FIELDS = [
   'status',
   'statusReason',
   'priority',
+  'planningHorizon',
   'dueDate',
   'effort',
   'estimatedDuration',
@@ -163,6 +164,14 @@ export function resolveTaskFieldPolicy(
   field: TaskField,
 ): FieldPolicy {
   const sourceModel = defaultSourceModel(task, capabilities);
+  if (field === 'planningHorizon') {
+    return {
+      field,
+      sourceModel,
+      mutation: 'local',
+      inbound: 'local-wins',
+    };
+  }
   if (
     capabilities?.notificationOnly
     || isNotificationOnlyConnectorType(task.connectorType)

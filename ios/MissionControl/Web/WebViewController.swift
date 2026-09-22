@@ -52,6 +52,9 @@ final class WebViewController: UIViewController {
         self.eventDispatcher = eventDispatcher ?? bridge
         shareCaptureEventSender = bridge
         let webView = WKWebView(frame: .zero, configuration: webConfiguration)
+        // CSS env(safe-area-inset-*) owns edge-to-edge layout for trusted app content.
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
+        webView.scrollView.automaticallyAdjustsScrollIndicatorInsets = false
         self.webView = webView
 
         super.init(nibName: nil, bundle: nil)

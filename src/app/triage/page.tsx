@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, Clock, Grid3x3, Inbox, List, Loader2, Maximize2, RefreshCw, Sparkles, X } from 'lucide-react';
 import { useListAnimate } from '@/lib/hooks/useListAnimate';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
@@ -21,10 +22,19 @@ import { MobileTriageView } from '@/components/triage/mobile';
 import { ACTION_META, SORT_OPTIONS, type TriageSortOption, type ViewMode } from '@/components/triage/types';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { useTriageData } from '@/lib/hooks/useTriageData';
+import { useInboxTasks } from '@/lib/hooks/useInboxTasks';
+import {
+  getInboxTaskActionMutation,
+  getInboxTaskMetadata,
+  isInboxTask,
+  isOtherContentType,
+  type InboxGroup,
+} from '@/lib/inbox/items';
 import { cn } from '@/lib/utils/cn';
 import { buildActionTitle } from '@/lib/triage/actions/build-task-title';
 import { toast } from 'sonner';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {
   TriageActionRecord,
   TriageActionType,
@@ -92,6 +102,7 @@ const readStored = <T extends string>(key: string, values: readonly T[], fallbac
 const readStoredFlag = (key: string, fallback: boolean) => typeof window === 'undefined' ? fallback : localStorage.getItem(key) !== 'false';
 
 export default function TriagePage() {
+  const [group, setGroup] = useState<InboxGroup>('all');
   const [status, setStatus] = useState<TriageStatus | 'all'>('pending');
   const [source, setSource] = useState<TriageSourcePlatform | 'all'>('all');
   const [query, setQuery] = useState('');
@@ -106,14 +117,84 @@ export default function TriagePage() {
   const [sortBy, setSortBy] = useState<TriageSortOption>(() => readStored('mc-triage-sort-by', ['relevance', 'newest', 'oldest', 'score'] as const, 'relevance'));
   const [contentTypeFilter, setContentTypeFilter] = useState<string | null>(null);
   const [actionTypeFilter, setActionTypeFilter] = useState<TriageActionType | null>(null);
-  const [embedsEnabled, setEmbedsEnabled] = useState(() => readStoredFlag('mc-triage-embeds-enabled', true));
+  const [embedsEnabled] = useState(() => readStoredFlag('mc-triage-embeds-enabled', true));
   const [showAutoTriage, setShowAutoTriage] = useState(false);
   const inFlightActionItemsRef = useRef(new Set<string>());
   const queuedActionItemsRef = useRef(new Set<string>());
   const actionMutationQueueRef = useRef(Promise.resolve());
   const bulk = useBulkSelection();
   const [triageListRef] = useListAnimate();
-  const { items, stats, selectedId, setSelectedId, selectedItem, loading, loadingMore, hasMore, totalFiltered, loadItems, loadMore } = useTriageData({ status, source, query, sortBy });
+  const {
+    items: contentItems,
+    stats: contentStats,
+    loading: contentLoading,
+    loadingMore,
+    hasMore,
+    totalFiltered: contentTotalFiltered,
+    loadItems: loadContentItems,
+    loadMore,
+  } = useTriageData({ status, source, query, sortBy });
+  const {
+    items: taskItems,
+    loading: tasksLoading,
+    error: taskLoadError,
+    loadItems: loadTaskItems,
+  } = useInboxTasks({ query, status });
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  const items = useMemo(() => {
+    const next = group === 'tasks'
+      ? taskItems
+      : group === 'content'
+        ? contentItems
+        : [...taskItems, ...contentItems];
+    if (group === 'content') return next;
+    const statusRank: Record<TriageStatus, number> = {
+      pending: 0,
+      snoozed: 1,
+      actioned: 2,
+      dismissed: 3,
+    };
+    return [...next].sort((left, right) => {
+      if (sortBy === 'oldest') return left.capturedAt.localeCompare(right.capturedAt);
+      if (sortBy === 'score' || sortBy === 'relevance') {
+        const statusDifference = statusRank[left.status] - statusRank[right.status];
+        if (statusDifference !== 0) return statusDifference;
+        const scoreDifference = right.aiRelevanceScore - left.aiRelevanceScore;
+        if (scoreDifference !== 0) return scoreDifference;
+      }
+      return right.capturedAt.localeCompare(left.capturedAt);
+    });
+  }, [contentItems, group, sortBy, taskItems]);
+
+  const selectedItem = useMemo(
+    () => items.find((item) => item.id === selectedId) ?? items[0] ?? null,
+    [items, selectedId],
+  );
+  const loading = contentLoading || tasksLoading;
+  const loadItems = useCallback(async () => {
+    await Promise.all([loadContentItems(), loadTaskItems()]);
+  }, [loadContentItems, loadTaskItems]);
+  const taskCount = taskItems.length;
+  const groupCounts = useMemo(() => ({
+    all: contentStats.total + taskCount,
+    tasks: taskCount,
+    content: contentStats.total,
+  }), [contentStats.total, taskCount]);
+  const stats = useMemo(() => ({
+    ...contentStats,
+    total: contentStats.total + taskCount,
+    pending: contentStats.pending + taskItems.filter((item) => item.status === 'pending').length,
+    snoozed: contentStats.snoozed + taskItems.filter((item) => item.status === 'snoozed').length,
+  }), [contentStats, taskCount, taskItems]);
+  const totalFiltered = contentTotalFiltered + (group === 'content' ? 0 : taskCount);
+  const canLoadMore = group !== 'tasks' && hasMore;
+
+  useEffect(() => {
+    setSelectedId((current) => current && items.some((item) => item.id === current)
+      ? current
+      : items[0]?.id ?? null);
+  }, [items]);
 
   // Pull-to-refresh for mobile
   const onTriageRefresh = useCallback(async () => { await loadItems(); }, [loadItems]);
@@ -121,15 +202,28 @@ export default function TriagePage() {
 
   const filteredItems = useMemo(() => {
     let result = items;
-    if (contentTypeFilter) result = result.filter((item) => item.contentType === contentTypeFilter);
-    if (actionTypeFilter) result = result.filter((item) => item.actionsTaken.some((a) => a.actionType === actionTypeFilter));
+    if (contentTypeFilter === 'other') {
+      result = result.filter((item) => !isInboxTask(item) && isOtherContentType(item.contentType));
+    } else if (contentTypeFilter) {
+      result = result.filter((item) => item.contentType === contentTypeFilter);
+    }
+    if (actionTypeFilter) result = result.filter((item) => !isInboxTask(item) && item.actionsTaken.some((a) => a.actionType === actionTypeFilter));
     return result;
   }, [items, contentTypeFilter, actionTypeFilter]);
+  const virtualizeStream = viewMode === 'stream' && shouldVirtualizeList(filteredItems.length);
+  const streamVirtualizer = useVirtualizer({
+    count: virtualizeStream ? filteredItems.length : 0,
+    getScrollElement: () => triagePullRef.current,
+    getItemKey: (index) => filteredItems[index]?.id ?? index,
+    estimateSize: () => 280,
+    overscan: 4,
+  });
 
   const contentTypeCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const item of items) {
-      counts[item.contentType] = (counts[item.contentType] || 0) + 1;
+      const type = !isInboxTask(item) && isOtherContentType(item.contentType) ? 'other' : item.contentType;
+      counts[type] = (counts[type] || 0) + 1;
     }
     return counts;
   }, [items]);
@@ -148,6 +242,13 @@ export default function TriagePage() {
   const toggleViewMode = useCallback(() => { setStoredViewMode(viewMode === 'stream' ? 'gallery' : viewMode === 'gallery' ? 'focus' : 'stream'); }, [setStoredViewMode, viewMode]);
   const updateDensity = useCallback((next: GalleryDensity) => { setGalleryDensity(next); localStorage.setItem('mc-triage-gallery-density', next); }, []);
   const updateSortBy = useCallback((next: TriageSortOption) => { setSortBy(next); localStorage.setItem('mc-triage-sort-by', next); }, []);
+  const handleGroupChange = useCallback((next: InboxGroup) => {
+    setGroup(next);
+    setSource('all');
+    setActionTypeFilter(null);
+    if (next === 'tasks') setContentTypeFilter(null);
+    bulk.clearSelection();
+  }, [bulk]);
 
   const acquireItemMutation = useCallback(async (itemId: string): Promise<(() => void) | null> => {
     if (queuedActionItemsRef.current.has(itemId)) return null;
@@ -190,6 +291,47 @@ export default function TriagePage() {
     if (!finishMutation) return null;
 
     try {
+      const target = items.find((item) => item.id === itemId);
+      const taskMetadata = target ? getInboxTaskMetadata(target) : null;
+      if (taskMetadata) {
+        const mutation = getInboxTaskActionMutation(taskMetadata, actionType);
+        if (!mutation) {
+          toast.error('That action is not available for tasks');
+          return null;
+        }
+        setSelectedId(itemId);
+        setBusyAction(actionType);
+        let response: Response;
+        try {
+          response = await fetch(`/api/tasks/${taskMetadata.taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(mutation.update),
+          });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Network error — task action failed');
+          return null;
+        }
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({ error: `Request failed (${response.status})` }));
+          toast.error(data.error || `Task action failed (${response.status})`);
+          return null;
+        }
+        const label = actionType === 'complete_action' ? 'Task filed' : actionType === 'dismiss' ? 'Task dismissed' : 'Task snoozed';
+        if (options?.showSuccessToast !== false) toast.success(label);
+        await loadItems();
+        window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+        return {
+          id: `task-action:${taskMetadata.taskId}:${Date.now()}`,
+          actionType,
+          appliedAt: new Date().toISOString(),
+          metadata: {
+            taskId: taskMetadata.taskId,
+            undoPatch: mutation.undoPatch,
+          },
+        };
+      }
+
       // For open_document, open the document URL in a new tab
       if (actionType === 'open_document') {
         const target = items.find((i) => i.id === itemId);
@@ -232,6 +374,39 @@ export default function TriagePage() {
     itemId: string,
     action: TriageActionRecord,
   ): Promise<boolean> => {
+    const taskId = typeof action.metadata?.taskId === 'string' ? action.metadata.taskId : null;
+    if (taskId) {
+      setBusyAction('undo');
+      try {
+        const undoPatch = action.metadata?.undoPatch;
+        if (!undoPatch || typeof undoPatch !== 'object' || Array.isArray(undoPatch)) {
+          toast.error('This task action can no longer be undone');
+          return false;
+        }
+        let response: Response;
+        try {
+          response = await fetch(`/api/tasks/${taskId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(undoPatch),
+          });
+        } catch (error) {
+          toast.error(error instanceof Error ? error.message : 'Network error — undo failed');
+          return false;
+        }
+        if (!response.ok) {
+          const data = await response.json().catch(() => ({ error: `Undo failed (${response.status})` }));
+          toast.error(data.error || `Undo failed (${response.status})`);
+          return false;
+        }
+        await loadItems();
+        window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
+        toast.success('Action undone');
+        return true;
+      } finally {
+        setBusyAction(null);
+      }
+    }
     if (!action.id) {
       toast.error('This action can no longer be undone');
       return false;
@@ -276,21 +451,30 @@ export default function TriagePage() {
   }, [loadItems, setSelectedId]);
 
   const handleBatchAction = useCallback(async (itemIds: string[], actionType: TriageActionType) => {
+    const taskIds = itemIds.filter((id) => id.startsWith('task:'));
+    const contentIds = itemIds.filter((id) => !id.startsWith('task:'));
+    if (taskIds.length > 0) {
+      await Promise.all(taskIds.map((id) => handleItemAction(id, actionType, { showSuccessToast: false })));
+    }
+    if (contentIds.length === 0) {
+      bulk.clearSelection();
+      return;
+    }
     const label = ACTION_META[actionType].label;
     const { succeeded } = await executeBulkOperation(
-      itemIds,
+      contentIds,
       (id) => fetch(`/api/triage/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ actionType }),
       }),
-      `Routed ${itemIds.length} item${itemIds.length === 1 ? '' : 's'} to ${label}`,
+      `Routed ${contentIds.length} item${contentIds.length === 1 ? '' : 's'} to ${label}`,
       { onRefresh: loadItems },
     );
     if (succeeded.length > 0) {
       window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
     }
-  }, [loadItems]);
+  }, [bulk, handleItemAction, loadItems]);
 
   const handleAutoTriageExecute = useCallback(async (plan: Array<{ actionType: TriageActionType; itemIds: string[] }>) => {
     let totalProcessed = 0;
@@ -375,7 +559,7 @@ export default function TriagePage() {
     return prefill;
   }
 
-  const handleCreateTask = useCallback((item: TriageItem, _preferredAction?: TriageActionType) => {
+  const handleCreateTask = useCallback((item: TriageItem) => {
     setTaskPrefill(buildTaskPrefill(item));
     setTaskModalItem(item);
   }, []);
@@ -399,6 +583,9 @@ export default function TriagePage() {
         busyAction={busyAction}
         onRefresh={onTriageRefresh}
         stats={{ processedToday: stats.actioned + stats.dismissed, streak: 0, totalProcessed: stats.actioned + stats.dismissed }}
+        group={group}
+        onGroupChange={handleGroupChange}
+        groupCounts={groupCounts}
       />
     );
   }
@@ -414,6 +601,9 @@ export default function TriagePage() {
               query={query}
               onQueryChange={setQuery}
               onRefresh={() => void loadItems()}
+              group={group}
+              onGroupChange={handleGroupChange}
+              groupCounts={groupCounts}
               status={status}
               onStatusChange={setStatus}
               source={source}
@@ -437,7 +627,7 @@ export default function TriagePage() {
 
           {/* Queue header */}
           <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Queue</h3>
+            <h3 className="text-sm font-semibold text-[var(--text-primary)]">Inbox</h3>
             <span className="text-xs tabular-nums text-[var(--text-tertiary)]">{stats.pending} pending</span>
 
             <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -446,7 +636,7 @@ export default function TriagePage() {
                 value={sortBy}
                 onValueChange={(value) => updateSortBy(value as TriageSortOption)}
               >
-                <SelectTrigger variant="inline" aria-label="Sort triage queue">
+                <SelectTrigger variant="inline" aria-label="Sort inbox">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -460,10 +650,11 @@ export default function TriagePage() {
               <button
                 type="button"
                 onClick={() => setShowAutoTriage(true)}
-                className="inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-600)]"
+                disabled={!filteredItems.some((item) => !isInboxTask(item))}
+                className="inline-flex items-center gap-1.5 rounded-[8px] bg-[var(--accent)] px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-600)] disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Sparkles size={12} />
-                Auto-Triage
+                Auto-triage content
               </button>
 
               {/* Gallery density (only in gallery mode) */}
@@ -515,11 +706,8 @@ export default function TriagePage() {
             <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
               <button
                 onClick={async () => {
-                  const ids = Array.from(bulk.bulkSelected);
-                  const { failed } = await executeBulkOperation(ids, (id) => fetch(`/api/triage/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actionType: 'dismiss' }) }), `Dismissed ${ids.length} item${ids.length > 1 ? 's' : ''}`);
-                  if (failed.length > 0) bulk.setBulkSelected(new Set(failed));
-                  else bulk.clearSelection();
-                  await loadItems();
+                  await handleBatchAction(Array.from(bulk.bulkSelected), 'dismiss');
+                  bulk.clearSelection();
                 }}
                 className="rounded-[var(--radius-sm)] border border-slate-800/40 bg-slate-900/30 px-2 py-1 text-xs text-slate-300 transition-colors duration-100 hover:bg-slate-900/50"
               >
@@ -527,11 +715,8 @@ export default function TriagePage() {
               </button>
               <button
                 onClick={async () => {
-                  const ids = Array.from(bulk.bulkSelected);
-                  const { failed } = await executeBulkOperation(ids, (id) => fetch(`/api/triage/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ actionType: 'snooze' }) }), `Snoozed ${ids.length} item${ids.length > 1 ? 's' : ''}`);
-                  if (failed.length > 0) bulk.setBulkSelected(new Set(failed));
-                  else bulk.clearSelection();
-                  await loadItems();
+                  await handleBatchAction(Array.from(bulk.bulkSelected), 'snooze');
+                  bulk.clearSelection();
                 }}
                 className="rounded-[var(--radius-sm)] border border-sky-800/40 bg-sky-900/30 px-2 py-1 text-xs text-sky-300 transition-colors duration-100 hover:bg-sky-900/50"
               >
@@ -539,7 +724,11 @@ export default function TriagePage() {
               </button>
               <button
                 onClick={async () => {
-                  const ids = Array.from(bulk.bulkSelected);
+                  const ids = Array.from(bulk.bulkSelected).filter((id) => !id.startsWith('task:'));
+                  if (ids.length === 0) {
+                    toast.info('Content classification is not available for tasks');
+                    return;
+                  }
                   setBusyAction('reclassify');
                   try {
                     const res = await fetch('/api/triage/reclassify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'auto', ids }) });
@@ -560,7 +749,11 @@ export default function TriagePage() {
               </button>
               <BulkSetTypeDropdown
                 onSelect={async (contentType) => {
-                  const ids = Array.from(bulk.bulkSelected);
+                  const ids = Array.from(bulk.bulkSelected).filter((id) => !id.startsWith('task:'));
+                  if (ids.length === 0) {
+                    toast.info('Content classification is not available for tasks');
+                    return;
+                  }
                   setBusyAction('set_type');
                   try {
                     const res = await fetch('/api/triage/reclassify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'set_type', ids, contentType }) });
@@ -580,7 +773,7 @@ export default function TriagePage() {
           ) : null}
 
           {/* Scrollable queue content */}
-          <div className="relative flex-1 overflow-auto p-3" ref={triagePullRef} {...triagePullProps}>
+          <div className="relative flex-1 overflow-auto p-3" ref={triagePullRef} data-triage-scroll {...triagePullProps}>
             {/* Pull-to-refresh indicator — absolutely positioned */}
             {triagePullDistance > 0 && (
               <div className="absolute left-0 right-0 top-0 z-50 flex items-center justify-center pointer-events-none sm:hidden" style={{ height: `${triagePullDistance}px` }}>
@@ -588,20 +781,48 @@ export default function TriagePage() {
               </div>
             )}
             <div style={triagePullContentStyle}>
+            {taskLoadError && group !== 'content' ? (
+              <div className="mb-3 flex items-center justify-between gap-3 rounded-[12px] border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+                <span>Tasks could not be loaded. Content items are still available.</span>
+                <button type="button" onClick={() => void loadTaskItems()} className="shrink-0 font-medium underline underline-offset-2">Retry</button>
+              </div>
+            ) : null}
             {viewMode === 'gallery' ? (
-              <TriageGalleryView items={filteredItems} selectedId={selectedId} onSelect={setSelectedId} onAction={(id, actionType) => void handleItemAction(id, actionType)} busyAction={busyAction} loading={loading} density={galleryDensity} onDensityChange={updateDensity} />
+              <TriageGalleryView items={filteredItems} selectedId={selectedId} onSelect={setSelectedId} onAction={(id, actionType) => void handleItemAction(id, actionType)} busyAction={busyAction} loading={loading} density={galleryDensity} onDensityChange={updateDensity} scrollRef={triagePullRef} />
             ) : viewMode === 'focus' ? (
               <FocusView items={filteredItems} selectedId={selectedId} onSelect={setSelectedId} onAction={(id, actionType) => void handleItemAction(id, actionType)} busyAction={busyAction} loading={loading} embedsEnabled={embedsEnabled} />
             ) : loading ? (
               <div className="flex min-h-[240px] items-center justify-center text-[var(--text-tertiary)]"><Loader2 className="animate-spin" size={18} /></div>
             ) : filteredItems.length === 0 ? (
-              <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center"><Inbox size={24} className="text-[var(--text-tertiary)]" /><div className="text-sm font-medium text-[var(--text-primary)]">No triage items match these filters.</div><div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture a new URL above.</div></div>
+              <div className="flex min-h-[240px] flex-col items-center justify-center gap-2 text-center"><Inbox size={24} className="text-[var(--text-tertiary)]" /><div className="text-sm font-medium text-[var(--text-primary)]">No inbox items match these filters.</div><div className="text-xs text-[var(--text-tertiary)]">Clear filters or capture something new.</div></div>
             ) : (
-              <div ref={triageListRef} className="space-y-3">
-                {filteredItems.map((item) => (
+              <div ref={virtualizeStream ? undefined : triageListRef} className={virtualizeStream ? '' : 'space-y-3'}>
+                {virtualizeStream ? (
+                  <div
+                    role="presentation"
+                    data-virtualized="true"
+                    className="relative w-full"
+                    style={{ height: `${streamVirtualizer.getTotalSize()}px` }}
+                  >
+                    {streamVirtualizer.getVirtualItems().map((virtualRow) => {
+                      const item = filteredItems[virtualRow.index];
+                      return (
+                        <div
+                          key={virtualRow.key}
+                          ref={streamVirtualizer.measureElement}
+                          data-index={virtualRow.index}
+                          className="absolute left-0 top-0 w-full pb-3"
+                          style={{ transform: `translateY(${virtualRow.start}px)` }}
+                        >
+                          <TriageStreamItem item={item} isSelected={selectedItem?.id === item.id} isBulkSelected={bulk.bulkSelected.has(item.id)} bulkMode={bulk.bulkMode} onSelect={() => setSelectedId(item.id)} onBulkToggle={() => bulk.toggleItem(item.id)} onAction={(id, actionType) => void handleItemAction(id, actionType)} embedsEnabled={embedsEnabled} />
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : filteredItems.map((item) => (
                   <TriageStreamItem key={item.id} item={item} isSelected={selectedItem?.id === item.id} isBulkSelected={bulk.bulkSelected.has(item.id)} bulkMode={bulk.bulkMode} onSelect={() => setSelectedId(item.id)} onBulkToggle={() => bulk.toggleItem(item.id)} onAction={(id, actionType) => void handleItemAction(id, actionType)} embedsEnabled={embedsEnabled} />
                 ))}
-                {hasMore ? (
+                {canLoadMore ? (
                   <div className="flex items-center justify-center py-4">
                     <button type="button" onClick={() => void loadMore()} disabled={loadingMore} className="flex items-center gap-2 rounded-[8px] border border-[var(--border)] bg-[var(--surface-2)] px-4 py-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--accent)] hover:text-[var(--accent-400)] disabled:opacity-50">
                       {loadingMore ? <Loader2 size={12} className="animate-spin" /> : null}
@@ -617,7 +838,7 @@ export default function TriagePage() {
 
         <div className="hidden lg:block w-[420px] min-w-[340px] shrink-0 overflow-y-auto space-y-3">
           <TriageQuickStats stats={stats} items={items} />
-          <TriageAIInsights items={items} onBatchAction={(ids, actionType) => void handleBatchAction(ids, actionType)} />
+          <TriageAIInsights items={contentItems} onBatchAction={(ids, actionType) => void handleBatchAction(ids, actionType)} />
           <DecisionPanel selectedItem={selectedItem} onAction={(itemId, actionType) => void handleItemAction(itemId, actionType)} onCreateTask={handleCreateTask} onDelete={(itemId) => void handleDeleteItem(itemId)} onItemUpdated={() => void loadItems()} busyAction={busyAction} embedsEnabled={embedsEnabled} />
         </div>
       </div>
@@ -625,7 +846,7 @@ export default function TriagePage() {
       <AutoTriageModal
         open={showAutoTriage}
         onClose={() => setShowAutoTriage(false)}
-        items={items}
+        items={items.filter((item) => !isInboxTask(item))}
         onExecute={handleAutoTriageExecute}
       />
 

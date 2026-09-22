@@ -12,6 +12,7 @@ process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
 
 let db: typeof import('@/db').default;
+let sqlite: typeof import('@/db').sqlite;
 let triageItems: typeof import('@/db/schema').triageItems;
 let listTriageItems: typeof import('@/lib/triage/query').listTriageItems;
 let getTriageItemById: typeof import('@/lib/triage/query').getTriageItemById;
@@ -19,8 +20,15 @@ let isValidTriageStatus: typeof import('@/lib/triage/query').isValidTriageStatus
 let isValidTriageSource: typeof import('@/lib/triage/query').isValidTriageSource;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db, sqlite } = await import('@/db'));
   ({ triageItems } = await import('@/db/schema'));
+  const { createSqliteTriagePersistenceRepositories } = await import(
+    '@/db/persistence/sqlite-triage-repositories'
+  );
+  const { registerTriagePersistenceRepositories } = await import('@/lib/triage/persistence');
+  registerTriagePersistenceRepositories(
+    createSqliteTriagePersistenceRepositories(sqlite),
+  );
   ({ listTriageItems, getTriageItemById, isValidTriageStatus, isValidTriageSource } = await import('@/lib/triage/query'));
 
   await db.insert(triageItems).values([

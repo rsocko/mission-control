@@ -4,24 +4,14 @@ const credentialId = '83c45840-a47f-4269-aae9-5a3f4fbd220b';
 const token = `mc_share_v1.${credentialId}.${'a'.repeat(43)}`;
 const rows: Record<string, unknown>[] = [];
 
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          limit: vi.fn(async () => rows),
-        })),
-      })),
-    })),
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  nativeShareCredentials: { id: 'id' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn(() => 'eq'),
+vi.mock('@/lib/triage/persistence', () => ({
+  getTriagePersistenceRepositories: vi.fn(() => ({
+    native: {
+      credentials: {
+        findShareCredential: vi.fn(async () => rows[0] ?? null),
+      },
+    },
+  })),
 }));
 
 import {
@@ -57,18 +47,19 @@ describe('native Share Sheet credential authentication', () => {
       revokedAt: null,
     });
     const wrong = `mc_share_v1.${credentialId}.${'b'.repeat(43)}`;
-    await expect(authenticateNativeShareCredential(`Bearer ${wrong}`)).resolves.toEqual({
+    const now = new Date('2026-08-01');
+    await expect(authenticateNativeShareCredential(`Bearer ${wrong}`, now)).resolves.toEqual({
       status: 'unauthorized',
     });
 
     rows[0].revokedAt = '2026-08-01T00:00:00.000Z';
-    await expect(authenticateNativeShareCredential(`Bearer ${token}`)).resolves.toEqual({
+    await expect(authenticateNativeShareCredential(`Bearer ${token}`, now)).resolves.toEqual({
       status: 'unauthorized',
     });
 
     rows[0].revokedAt = null;
     rows[0].scope = 'push:register';
-    await expect(authenticateNativeShareCredential(`Bearer ${token}`)).resolves.toEqual({
+    await expect(authenticateNativeShareCredential(`Bearer ${token}`, now)).resolves.toEqual({
       status: 'forbidden',
     });
   });

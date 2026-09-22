@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
-import { getProjectSubgraph } from '@/lib/graph/service';
+import { getProjectSubgraph } from '@/lib/graph/project-service';
 import {
   GraphQueryValidationError,
   normalizeGraphBudgets,

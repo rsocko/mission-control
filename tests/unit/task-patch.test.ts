@@ -37,4 +37,63 @@ describe('parseTaskPatchInput', () => {
     expect(parsed.success).toBe(false);
     if (!parsed.success) expect(parsed.error).toContain('Invalid effort');
   });
+
+  it('accepts planning horizons and clearing the field', () => {
+    expect(parseTaskPatchInput({ planningHorizon: 'next' })).toMatchObject({
+      success: true,
+      fields: ['planningHorizon'],
+    });
+    expect(parseTaskPatchInput({ planningHorizon: null })).toMatchObject({
+      success: true,
+      fields: ['planningHorizon'],
+    });
+    expect(parseTaskPatchInput({ planningHorizon: 'today' }).success).toBe(false);
+    expect(parseTaskPatchInput({ planningHorizon: 'now' }).success).toBe(false);
+  });
+
+  it('maps relative reminder configuration to reminder edit policy', () => {
+    const parsed = parseTaskPatchInput({
+      reminderRelative: '1_day_before',
+      reminderDueTime: '09:00',
+    });
+    expect(parsed).toMatchObject({ success: true, fields: ['reminderAt'] });
+  });
+
+  it('rejects unsupported relative reminder rules and due times', () => {
+    expect(parseTaskPatchInput({
+      reminderRelative: '2_days_before',
+      reminderDueTime: '25:00',
+    }).success).toBe(false);
+  });
+
+  it('accepts only supported persistent reminder intervals', () => {
+    expect(parseTaskPatchInput({
+      reminderNagInterval: 5,
+      reminderNagStopAt: '2026-09-01T12:00:00-04:00',
+    })).toMatchObject({
+      success: true,
+      input: {
+        reminderNagInterval: 5,
+        reminderNagStopAt: '2026-09-01T16:00:00.000Z',
+      },
+      fields: ['reminderAt'],
+    });
+    expect(parseTaskPatchInput({ reminderNagInterval: 2 }).success).toBe(false);
+  });
+
+  it('maps validated recurrence options to recurrence policy', () => {
+    expect(parseTaskPatchInput({
+      recurrenceSkipDates: ['2026-09-28'],
+      recurrenceCatchUp: 'none',
+    })).toMatchObject({
+      success: true,
+      fields: ['recurrence'],
+    });
+    expect(parseTaskPatchInput({
+      recurrenceSkipDates: ['September 28'],
+    }).success).toBe(false);
+    expect(parseTaskPatchInput({
+      recurrenceCatchUp: 'all',
+    }).success).toBe(false);
+  });
 });

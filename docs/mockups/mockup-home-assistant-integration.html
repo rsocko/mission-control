@@ -1,0 +1,3223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home Assistant integration — Mission Control design mockup</title>
+<style>
+  /* ---------------------------------------------------------------------
+     Tokens are lifted from DESIGN.md so this artifact reads as the shipped
+     Mission Control surface, not a speculative rebrand.
+     --------------------------------------------------------------------- */
+  :root {
+    color-scheme: dark;
+
+    --bg: #020617;
+    --s0: #0b1120;
+    --s1: #111827;
+    --s2: #1e293b;
+    --s3: #334155;
+
+    --border: #1e293b;
+    --border-subtle: #162032;
+    --border-strong: #334155;
+
+    --text: #f8fafc;
+    --text-2: #94a3b8;
+    --text-3: #8b9ab5;
+    --text-muted: #8190a6;
+
+    --accent: #3b82f6;
+    --accent-soft: #60a5fa;
+    --accent-text: #bfdbfe;
+    --accent-action: #2563eb;
+    --accent-muted: #1e3a8a;
+
+    --success: #10b981;
+    --success-text: #6ee7b7;
+    --warning: #f59e0b;
+    --warning-text: #fcd34d;
+    --danger: #ef4444;
+    --danger-text: #fca5a5;
+    --danger-text-2: #fecaca;
+    --info: #06b6d4;
+
+    /* Provenance only: the connector mark and the two example instances. */
+    --ha: #38bdf8;
+    --instance-lake: #38bdf8;
+    --instance-condo: #a78bfa;
+
+    --r-sm: 6px;
+    --r-md: 8px;
+    --r-lg: 12px;
+    --r-xl: 16px;
+    --r-full: 9999px;
+
+    --shadow-sm: 0 1px 2px rgba(2, 6, 23, .55);
+    --shadow-md: 0 6px 16px -4px rgba(2, 6, 23, .7);
+    --shadow-lg: 0 20px 44px -12px rgba(2, 6, 23, .82);
+    --focus-glow: 0 0 0 3px rgba(59, 130, 246, .28);
+
+    --sans: "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --mono: "Geist Mono", ui-monospace, SFMono-Regular, "Cascadia Mono", Consolas, monospace;
+
+    --ease: cubic-bezier(.16, 1, .3, 1);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { scrollbar-color: var(--s3) var(--bg); }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 400 14px/1.5 var(--sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: rgba(59, 130, 246, .32); color: var(--text); }
+  ::-webkit-scrollbar { width: 11px; height: 11px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--s3); border: 3px solid var(--bg); border-radius: var(--r-full); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+
+  button, input, select, textarea { font: inherit; color: inherit; }
+  input, textarea { caret-color: var(--accent-soft); }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: var(--r-sm);
+  }
+
+  h1, h2, h3, h4 { margin: 0; letter-spacing: -.02em; font-weight: 600; }
+  p { margin: 0; }
+  time, .tabular { font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: var(--mono); overflow-wrap: anywhere; }
+
+  .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .ico {
+    width: 1em; height: 1em;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .ico-lg { width: 1.25em; height: 1.25em; }
+
+  .skip-link {
+    position: absolute;
+    left: 12px; top: -60px;
+    z-index: 60;
+    padding: 10px 16px;
+    border-radius: var(--r-md);
+    background: var(--accent-action);
+    color: var(--text);
+    font-weight: 500;
+    text-decoration: none;
+    transition: top .15s var(--ease);
+  }
+  .skip-link:focus { top: 12px; }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px; height: 1px;
+    margin: -1px; padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  /* ── Document chrome ─────────────────────────────────────────────── */
+
+  .doc-head {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    border-bottom: 1px solid var(--border);
+    background: rgba(11, 17, 32, .93);
+    backdrop-filter: blur(10px);
+  }
+  .doc-head-inner {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px 20px;
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 14px 24px;
+  }
+  .doc-mark {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-right: auto;
+    min-width: 0;
+  }
+  .doc-mark-tile {
+    display: grid;
+    place-items: center;
+    width: 34px; height: 34px;
+    border: 1px solid rgba(56, 189, 248, .34);
+    border-radius: var(--r-md);
+    background: rgba(56, 189, 248, .12);
+    color: var(--ha);
+    font-size: 16px;
+  }
+  .doc-mark h1 { font-size: 16px; line-height: 1.25; }
+  .doc-mark p { color: var(--text-muted); font-size: 12px; }
+
+  .switcher {
+    display: flex;
+    gap: 3px;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s0);
+  }
+  .switcher button {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 30px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s var(--ease), color .15s var(--ease);
+  }
+  .switcher button:hover { background: var(--s2); color: var(--text); }
+  .switcher button[aria-selected="true"],
+  .switcher button[aria-pressed="true"] {
+    background: var(--s2);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .field-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--text-2);
+  }
+
+  select.control, input.control {
+    height: 32px;
+    padding: 0 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--text);
+    font-size: 14px;
+  }
+  select.control { padding-right: 26px; cursor: pointer; }
+  input.control:focus, select.control:focus, textarea:focus {
+    border-color: var(--accent);
+    outline: none;
+    box-shadow: var(--focus-glow);
+  }
+
+  /* ── Page frame ──────────────────────────────────────────────────── */
+
+  main { max-width: 1320px; margin: 0 auto; padding: 32px 24px 96px; }
+
+  .lede { max-width: 68ch; color: var(--text-2); line-height: 1.65; }
+  .lede + .lede { margin-top: 12px; }
+
+  .flow-head { margin-bottom: 20px; }
+  .flow-head h2 { font-size: 20px; margin-bottom: 8px; }
+
+  .section { margin-top: 56px; }
+  .section > h2 { font-size: 20px; }
+  .section > .lede { margin-top: 10px; }
+
+  .rule {
+    height: 1px;
+    margin: 44px 0 0;
+    border: 0;
+    background: var(--border);
+  }
+
+  /* ── Prototype rail (mockup-only controls, visibly non-product) ──── */
+
+  .rail {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 18px;
+    margin-bottom: 16px;
+    padding: 12px 14px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    background: repeating-linear-gradient(135deg, transparent 0 9px, rgba(51, 65, 85, .13) 9px 18px), var(--s0);
+  }
+  .rail-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .rail-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; max-width: 100%; }
+  .rail-group > span { color: var(--text-muted); font-size: 12px; }
+
+  .segmented {
+    display: inline-flex;
+    flex-wrap: wrap;
+    max-width: 100%;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s1);
+  }
+  .segmented label {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 11px;
+    border-radius: var(--r-sm);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s var(--ease), color .15s var(--ease);
+  }
+  .segmented input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .segmented label:hover { color: var(--text); }
+  .segmented input:checked + span { color: var(--text); }
+  .segmented label:has(input:checked) { background: var(--s2); color: var(--text); }
+  .segmented label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+  /* ── App stage ───────────────────────────────────────────────────── */
+
+  .stage-wrap { container-type: inline-size; }
+  .stage {
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--r-xl);
+    background: var(--bg);
+    box-shadow: var(--shadow-lg);
+  }
+  [data-viewport="mobile"] .stage {
+    max-width: 402px;
+    margin: 0 auto;
+    border-radius: var(--r-xl);
+    border-color: var(--border-strong);
+  }
+  .device-caption {
+    max-width: 402px;
+    margin: 10px auto 0;
+    color: var(--text-muted);
+    font-size: 11px;
+    text-align: center;
+  }
+  [data-viewport="desktop"] .device-caption { display: none; }
+
+  .app-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--s0);
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .app-bar .crumb { color: var(--text-2); }
+  .app-bar .crumb-now { color: var(--text); font-weight: 500; }
+  .app-bar .spacer { margin-left: auto; }
+
+  .app-body { padding: 20px; }
+  [data-viewport="mobile"] .app-body { padding: 14px; }
+
+  /* ── Buttons ─────────────────────────────────────────────────────── */
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid transparent;
+    border-radius: var(--r-md);
+    background: var(--s2);
+    color: var(--text-2);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .15s var(--ease), color .15s var(--ease), border-color .15s var(--ease), transform .12s var(--ease);
+  }
+  .btn:hover { background: var(--s3); color: var(--text); }
+  .btn:active { transform: scale(.97); }
+  .btn[disabled] { opacity: .45; cursor: not-allowed; transform: none; }
+  .btn[disabled]:hover { background: var(--s2); color: var(--text-2); }
+
+  .btn-primary { background: var(--accent-action); color: var(--text); box-shadow: var(--shadow-sm); }
+  .btn-primary:hover { background: var(--accent); color: var(--text); }
+  .btn-primary[disabled]:hover { background: var(--accent-action); }
+
+  .btn-outline { background: transparent; border-color: var(--border-strong); }
+  .btn-outline:hover { background: var(--s2); }
+
+  .btn-ghost { background: transparent; color: var(--text-3); }
+  .btn-ghost:hover { background: var(--s2); color: var(--text); }
+
+  .btn-danger { background: rgba(153, 27, 27, .3); border-color: rgba(239, 68, 68, .38); color: var(--danger-text-2); }
+  .btn-danger:hover { background: rgba(153, 27, 27, .45); color: var(--danger-text-2); }
+
+  .btn-sm { height: 28px; padding: 0 10px; border-radius: var(--r-sm); font-size: 12px; }
+  .btn-block { width: 100%; }
+
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    width: 30px; height: 30px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background .15s var(--ease), color .15s var(--ease);
+  }
+  .icon-btn:hover { background: var(--s2); color: var(--text); }
+
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Pills, chips, badges ────────────────────────────────────────── */
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-full);
+    background: var(--s2);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.45;
+    white-space: nowrap;
+  }
+  .pill-urgent { background: rgba(153, 27, 27, .4); border-color: rgba(153, 27, 27, .55); color: var(--danger-text); }
+  .pill-action { background: rgba(146, 64, 14, .34); border-color: rgba(146, 64, 14, .55); color: var(--warning-text); }
+  .pill-heads { background: rgba(30, 58, 138, .38); border-color: rgba(30, 58, 138, .6); color: var(--accent-text); }
+  .pill-fyi { background: rgba(30, 41, 59, .8); border-color: var(--border-strong); color: var(--text-2); }
+  .pill-ok { background: rgba(6, 95, 70, .35); border-color: rgba(6, 95, 70, .6); color: var(--success-text); }
+
+  .instance-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 9px 2px 7px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-full);
+    background: var(--s0);
+    color: var(--text-2);
+    font-size: 12px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .dot { width: 7px; height: 7px; border-radius: var(--r-full); flex: none; }
+
+  .data-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--s2);
+    color: var(--text-2);
+    font-size: 12px;
+  }
+
+  .health {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border: 1px solid;
+    border-radius: var(--r-full);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .health-ok { background: rgba(6, 95, 70, .3); border-color: rgba(6, 95, 70, .55); color: var(--success-text); }
+  .health-degraded { background: rgba(146, 64, 14, .3); border-color: rgba(146, 64, 14, .55); color: var(--warning-text); }
+  .health-off { background: rgba(30, 41, 59, .7); border-color: var(--border-strong); color: var(--text-3); }
+  .health-error { background: rgba(127, 29, 29, .34); border-color: rgba(127, 29, 29, .6); color: var(--danger-text); }
+
+  /* ── Notices ─────────────────────────────────────────────────────── */
+
+  .notice {
+    display: flex;
+    gap: 10px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s0);
+    color: var(--text-2);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .notice .ico { margin-top: 2px; }
+  .notice strong { display: block; margin-bottom: 3px; color: var(--text); font-weight: 600; }
+  .notice-warn { border-color: rgba(146, 64, 14, .55); background: rgba(146, 64, 14, .14); color: var(--warning-text); }
+  .notice-warn strong { color: var(--warning-text); }
+  .notice-danger { border-color: rgba(153, 27, 27, .55); background: rgba(153, 27, 27, .16); color: var(--danger-text); }
+  .notice-danger strong { color: var(--danger-text); }
+  .notice-ok { border-color: rgba(6, 95, 70, .55); background: rgba(6, 95, 70, .16); color: var(--success-text); }
+  .notice-ok strong { color: var(--success-text); }
+  .notice-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+
+  /* ── Forms ───────────────────────────────────────────────────────── */
+
+  .field { margin-bottom: 16px; }
+  .field-label {
+    display: block;
+    margin-bottom: 6px;
+    color: var(--text-3);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .01em;
+    text-transform: uppercase;
+  }
+  .field-hint { margin-top: 6px; color: var(--text-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+  .field-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    margin-top: 6px;
+    color: var(--danger-text);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .text-input {
+    width: 100%;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--text);
+    font-size: 14px;
+    transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
+  }
+  .text-input::placeholder { color: var(--text-muted); }
+  .text-input:focus { border-color: var(--accent); outline: none; box-shadow: var(--focus-glow); }
+  .text-input[aria-invalid="true"] { border-color: rgba(239, 68, 68, .7); }
+  .input-wrap { position: relative; }
+  .input-wrap .text-input { padding-right: 40px; }
+  .input-affix {
+    position: absolute;
+    top: 50%; right: 6px;
+    transform: translateY(-50%);
+    display: grid;
+    place-items: center;
+    width: 28px; height: 28px;
+    border: 0;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+  }
+  .input-affix:hover { background: var(--s2); color: var(--text-2); }
+
+  /* Switch rows reuse the shipped connector toggle vocabulary. */
+  .switch-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s0);
+    transition: border-color .15s var(--ease), background .15s var(--ease);
+  }
+  .switch-row + .switch-row { margin-top: 8px; }
+  .switch-row:hover:not([data-locked="true"]) { border-color: var(--border-strong); }
+  .switch-row[data-locked="true"] { opacity: .72; }
+  .switch-row .row-body { flex: 1; min-width: 0; }
+  .switch-row .row-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .switch-row .row-desc { margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+  .switch-row .row-meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+  .switch { position: relative; display: inline-flex; flex: none; margin-top: 2px; }
+  .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+  .switch input[disabled] { cursor: not-allowed; }
+  .switch-track {
+    position: relative;
+    width: 36px; height: 20px;
+    border-radius: var(--r-full);
+    background: var(--s3);
+    transition: background .15s var(--ease);
+  }
+  .switch-track::after {
+    content: "";
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 16px; height: 16px;
+    border-radius: var(--r-full);
+    background: var(--text);
+    transition: transform .18s var(--ease);
+  }
+  .switch input:checked + .switch-track { background: var(--accent-action); }
+  .switch input:checked + .switch-track::after { transform: translateX(16px); }
+  .switch input:focus-visible + .switch-track { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .switch input[disabled] + .switch-track { opacity: .5; }
+
+  .lock-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--warning-text);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .001ms !important;
+    }
+  }
+</style>
+<style>
+  /* ── Connector list ──────────────────────────────────────────────── */
+
+  .settings-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .settings-head h3 { font-size: 16px; }
+  .settings-head p { margin-top: 4px; color: var(--text-muted); font-size: 12px; }
+
+  .connector-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .connector-row {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s1);
+    text-align: left;
+    cursor: pointer;
+    transition: background .15s var(--ease), border-color .15s var(--ease);
+  }
+  .connector-row:hover { background: var(--s2); }
+  .connector-row[aria-expanded="true"] { border-color: rgba(59, 130, 246, .45); background: var(--s2); }
+  .connector-row[data-enabled="false"] .conn-name { color: var(--text-2); }
+  .connector-tile {
+    display: grid;
+    place-items: center;
+    width: 34px; height: 34px;
+    flex: none;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--ha);
+    font-size: 16px;
+  }
+  .connector-row[data-enabled="false"] .connector-tile { color: var(--text-3); }
+  .conn-main { flex: 1; min-width: 0; }
+  .conn-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: var(--text);
+    font-size: 14px;
+    font-weight: 500;
+  }
+  .conn-name > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conn-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    margin-top: 4px;
+    min-width: 0;
+    color: var(--text-muted);
+    font-size: 12px;
+  }
+  .conn-meta .mono { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conn-meta .sep { color: var(--border-strong); }
+  .conn-side { display: flex; align-items: center; gap: 8px; flex: none; }
+  .chevron { color: var(--text-muted); transition: transform .2s var(--ease); }
+  .connector-row[aria-expanded="true"] .chevron { transform: rotate(90deg); }
+
+  .add-instance {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 12px 14px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--r-lg);
+    background: transparent;
+    color: var(--text-2);
+    text-align: left;
+    cursor: pointer;
+    transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+  }
+  .add-instance:hover { border-color: var(--accent); background: rgba(30, 58, 138, .18); color: var(--text); }
+  .add-instance span:last-child { color: var(--text-muted); font-size: 12px; }
+
+  /* ── Editor panel ────────────────────────────────────────────────── */
+
+  .editor {
+    margin-top: 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s0);
+    overflow: hidden;
+  }
+  .editor-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--s1);
+  }
+  .editor-head h4 { font-size: 14px; }
+  .editor-head .spacer { margin-left: auto; }
+  .editor-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    padding: 18px 16px;
+  }
+  .editor-col { min-width: 0; }
+  .editor-col h5 {
+    margin-bottom: 10px;
+    color: var(--text-3);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .editor-col h5 + .field, .editor-col h5 + .notice { margin-top: 0; }
+  .editor-block + .editor-block { margin-top: 22px; }
+
+  .editor-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 16px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--s1);
+  }
+  .editor-foot .spacer { margin-left: auto; }
+  .save-state { color: var(--text-muted); font-size: 12px; min-height: 18px; }
+
+  @container (max-width: 780px) {
+    .editor-grid { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  }
+  [data-viewport="mobile"] .editor-grid { grid-template-columns: minmax(0, 1fr); gap: 22px; padding: 14px; }
+
+  .digest-preview {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 10px;
+    padding: 11px 13px;
+    border: 1px solid rgba(30, 58, 138, .55);
+    border-radius: var(--r-lg);
+    background: rgba(30, 58, 138, .16);
+    color: var(--accent-text);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .digest-preview strong { color: var(--text); font-weight: 600; }
+
+  .override-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .override-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-width: 0;
+    padding: 3px 4px 3px 9px;
+    border: 1px solid rgba(146, 64, 14, .55);
+    border-radius: var(--r-full);
+    background: rgba(146, 64, 14, .2);
+    color: var(--warning-text);
+    font-size: 12px;
+  }
+  .override-chip code { color: inherit; min-width: 0; overflow-wrap: anywhere; }
+  .override-chip button {
+    display: grid;
+    place-items: center;
+    width: 18px; height: 18px;
+    border: 0;
+    border-radius: var(--r-full);
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+  }
+  .override-chip button:hover { background: rgba(146, 64, 14, .5); }
+
+  .kv { display: grid; gap: 7px; margin-top: 4px; }
+  .kv div { display: flex; gap: 10px; justify-content: space-between; font-size: 12px; }
+  .kv dt { color: var(--text-muted); }
+  .kv dd { margin: 0; color: var(--text-2); text-align: right; }
+</style>
+<style>
+  /* ── Notification surfaces ───────────────────────────────────────── */
+
+  .notify-split {
+    display: grid;
+    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+    align-items: stretch;
+    gap: 16px;
+    height: min(74vh, 660px);
+    min-height: 420px;
+  }
+  .notify-split > .panel,
+  .notify-split > .detail { min-height: 0; }
+  .notify-split .panel { display: flex; flex-direction: column; }
+  .notify-split .panel-head,
+  .notify-split .panel-filters { flex: none; }
+  .notify-split #note-list-root {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .notify-split .detail { overflow-y: auto; overscroll-behavior: contain; }
+
+  /* Below the two-pane threshold the panes stack and scroll with the page. */
+  @container (max-width: 1000px) {
+    .notify-split { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+    .notify-split #note-list-root, .notify-split .detail { overflow-y: visible; max-height: none; }
+  }
+  @media (max-width: 1040px) {
+    .notify-split { grid-template-columns: minmax(0, 1fr); height: auto; min-height: 0; }
+    .notify-split #note-list-root, .notify-split .detail { overflow-y: visible; max-height: none; }
+  }
+  [data-viewport="mobile"] .notify-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+    height: auto;
+    min-height: 0;
+  }
+  [data-viewport="mobile"] .notify-split #note-list-root,
+  [data-viewport="mobile"] .notify-split .detail { overflow-y: visible; max-height: none; }
+
+  .panel {
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s1);
+    overflow: hidden;
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--s0);
+  }
+  .panel-head h4 { font-size: 14px; }
+  .panel-head .count { color: var(--text-muted); font-size: 12px; }
+  .panel-head .spacer { margin-left: auto; }
+  .panel-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--s0);
+  }
+  .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-full);
+    background: transparent;
+    color: var(--text-3);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background .15s var(--ease), border-color .15s var(--ease), color .15s var(--ease);
+  }
+  .filter-chip:hover { background: var(--s2); color: var(--text); }
+  .filter-chip[aria-pressed="true"] { border-color: rgba(59, 130, 246, .55); background: rgba(30, 58, 138, .3); color: var(--accent-text); }
+
+  .group-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 14px 6px;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+  }
+  .note-list { padding: 0 10px 12px; }
+  .note-empty {
+    padding: 26px 16px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+  .note-empty .ico { margin-bottom: 8px; color: var(--text-3); }
+
+  .note {
+    position: relative;
+    margin: 6px 0;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s1);
+    transition: background .15s var(--ease), border-color .15s var(--ease), opacity .2s var(--ease);
+  }
+  .note:hover { background: var(--s2); }
+  .note[data-selected="true"] { border-color: rgba(59, 130, 246, .55); background: rgba(30, 58, 138, .18); }
+  .note[data-level="urgent"] { border-color: rgba(239, 68, 68, .42); }
+  .note[data-level="action_needed"] { border-color: rgba(245, 158, 11, .34); }
+  .note[data-state="resolved"], .note[data-state="stale"] { opacity: .66; }
+  .note[data-state="resolved"] .note-title { text-decoration: line-through; text-decoration-color: var(--text-muted); }
+
+  .note-hit {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    border: 0;
+    border-radius: var(--r-lg);
+    background: transparent;
+    cursor: pointer;
+  }
+  .note-inner { position: relative; z-index: 1; display: flex; gap: 10px; pointer-events: none; }
+  .note-inner .note-actions,
+  .note-inner .state-line .line-actions { pointer-events: auto; }
+
+  .note-tile {
+    display: grid;
+    place-items: center;
+    width: 30px; height: 30px;
+    flex: none;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--ha);
+    font-size: 14px;
+  }
+  .note-main { flex: 1; min-width: 0; }
+  .note-titlerow { display: flex; align-items: flex-start; gap: 7px; }
+  .unread { width: 7px; height: 7px; margin-top: 6px; flex: none; border-radius: var(--r-full); background: var(--accent-soft); }
+  .note-title { font-size: 14px; font-weight: 600; line-height: 1.4; }
+  .note-entity { margin-top: 3px; color: var(--text-muted); font-size: 11px; }
+  .note-copy { margin-top: 5px; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+  .note-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+  .note-meta .meta-text { color: var(--text-muted); font-size: 11px; }
+  .note-level-icon { flex: none; }
+  .note[data-level="urgent"] .note-level-icon { color: var(--danger); }
+  .note[data-level="action_needed"] .note-level-icon { color: var(--warning); }
+  .note[data-level="heads_up"] .note-level-icon { color: var(--accent-soft); }
+  .note[data-level="fyi"] .note-level-icon { color: var(--text-3); }
+
+  .note-progress {
+    margin-top: 9px;
+    height: 5px;
+    border-radius: var(--r-full);
+    background: var(--s3);
+    overflow: hidden;
+  }
+  .note-progress i { display: block; height: 100%; border-radius: var(--r-full); background: var(--accent); }
+
+  .note-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; min-width: 0; }
+  .note-actions .btn { max-width: 100%; min-width: 0; text-align: left; }
+  /* Very narrow phones: labels wrap rather than being clipped by the card. */
+  @media (max-width: 380px) {
+    .note-actions .btn { white-space: normal; }
+    .conn-name { flex-wrap: wrap; }
+    .connector-row { flex-wrap: wrap; }
+    .conn-side { width: 100%; justify-content: flex-start; padding-left: 46px; }
+  }
+
+  @keyframes rise { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+
+  /* ── Shared confirmation dialog ──────────────────────────────────── */
+
+  .modal {
+    width: min(540px, calc(100vw - 32px));
+    max-width: none;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text);
+    overflow: visible;
+  }
+  .modal::backdrop { background: rgba(2, 6, 23, .74); }
+  .modal-card {
+    padding: 20px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-xl);
+    background: var(--s1);
+    box-shadow: var(--shadow-lg);
+  }
+  .modal[open] .modal-card { animation: modal-in .22s var(--ease) both; }
+  @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+  .modal-top { display: flex; align-items: flex-start; gap: 12px; }
+  .modal-glyph {
+    display: grid;
+    place-items: center;
+    width: 34px; height: 34px;
+    flex: none;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--warning);
+  }
+  .modal[data-tone="danger"] .modal-glyph { color: var(--danger); border-color: rgba(239, 68, 68, .45); }
+  .modal-title { font-size: 16px; font-weight: 600; line-height: 1.35; }
+  .modal-instance { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 8px; }
+  .modal-desc { margin-top: 12px; color: var(--text-2); font-size: 14px; line-height: 1.6; }
+  .modal-extra { margin-top: 14px; }
+  .modal-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  @media (max-width: 480px) {
+    .modal-actions { flex-direction: column-reverse; align-items: stretch; }
+    .modal-actions .btn { width: 100%; }
+  }
+
+  .version-diff {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s0);
+  }
+  .version-diff .vd-col { display: grid; gap: 3px; }
+  .version-diff .vd-label {
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .version-diff .vd-value { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .version-diff .vd-to { color: var(--success-text); }
+  .version-diff .vd-arrow { color: var(--text-3); }
+
+  .modal-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-top: 12px;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    cursor: pointer;
+  }
+  .modal-check input { margin: 2px 0 0; width: 15px; height: 15px; flex: none; accent-color: var(--accent); cursor: pointer; }
+  .modal-check .mc-title { font-size: 14px; font-weight: 500; }
+  .modal-check .mc-hint { margin-top: 3px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+  .modal-note {
+    display: flex;
+    gap: 9px;
+    margin-top: 12px;
+    padding: 11px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.55;
+  }
+  .modal-note .ico { margin-top: 2px; flex: none; color: var(--text-3); }
+
+  .state-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--s2);
+    color: var(--text-2);
+    font-size: 11px;
+    font-weight: 500;
+  }
+  .state-chip button {
+    height: 18px;
+    padding: 0 6px;
+    border: 1px solid currentColor;
+    border-radius: var(--r-sm);
+    background: transparent;
+    color: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .state-chip button:hover { background: rgba(248, 250, 252, .12); }
+  .state-pending { background: rgba(146, 64, 14, .3); border-color: rgba(146, 64, 14, .55); color: var(--warning-text); }
+  .state-accepted { background: rgba(30, 58, 138, .34); border-color: rgba(30, 58, 138, .62); color: var(--accent-text); }
+  .state-success { background: rgba(6, 95, 70, .3); border-color: rgba(6, 95, 70, .55); color: var(--success-text); }
+  .state-failure { background: rgba(153, 27, 27, .3); border-color: rgba(153, 27, 27, .55); color: var(--danger-text); }
+  .state-denied { background: rgba(146, 64, 14, .26); border-color: rgba(245, 158, 11, .5); color: var(--warning-text); }
+  .state-stale { background: var(--s2); border-color: var(--border-strong); color: var(--text-3); }
+  .state-resolved { background: rgba(6, 95, 70, .18); border-color: rgba(6, 95, 70, .4); color: var(--success-text); }
+
+  .state-line {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 9px;
+    padding: 9px 11px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s0);
+    color: var(--text-2);
+    font-size: 12px;
+    line-height: 1.5;
+    animation: rise .24s var(--ease) both;
+  }
+  .state-line.tone-pending { border-color: rgba(146, 64, 14, .5); background: rgba(146, 64, 14, .13); color: var(--warning-text); }
+  .state-line.tone-accepted { border-color: rgba(30, 58, 138, .6); background: rgba(30, 58, 138, .16); color: var(--accent-text); }
+  .state-line.tone-success { border-color: rgba(6, 95, 70, .5); background: rgba(6, 95, 70, .13); color: var(--success-text); }
+  .state-line.tone-failure { border-color: rgba(153, 27, 27, .5); background: rgba(153, 27, 27, .14); color: var(--danger-text); }
+  .state-line.tone-denied { border-color: rgba(245, 158, 11, .45); background: rgba(146, 64, 14, .12); color: var(--warning-text); }
+  .state-line.tone-stale { border-color: var(--border-strong); background: var(--s1); color: var(--text-3); }
+  .state-line .line-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+
+  /* ── Detail pane ─────────────────────────────────────────────────── */
+
+  .detail {
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s1);
+    padding: 18px;
+  }
+  .detail-crumb { color: var(--text-muted); font-size: 12px; }
+  .detail h4 { margin: 8px 0 0; font-size: 16px; line-height: 1.3; }
+  .detail-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .detail-copy { max-width: 66ch; margin-top: 12px; color: var(--text-2); font-size: 14px; line-height: 1.65; }
+  .detail-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .detail-box {
+    margin-top: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+    background: var(--s0);
+  }
+  .detail-box strong { display: block; margin-bottom: 4px; font-size: 12px; font-weight: 600; }
+  .detail-box p { color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+  .detail-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  .timeline { margin-top: 16px; border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+  .timeline h5 {
+    margin-bottom: 8px;
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .timeline ol { margin: 0; padding: 0; list-style: none; display: grid; gap: 7px; }
+  .timeline li {
+    display: flex;
+    gap: 9px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  .timeline li .ico { margin-top: 2px; flex: none; }
+  .timeline li time { flex: none; margin-left: auto; color: var(--text-3); }
+
+  /* ── State matrix table ──────────────────────────────────────────── */
+
+  .matrix-scroll {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s1);
+  }
+  table.matrix { width: 100%; border-collapse: collapse; min-width: 940px; }
+  table.matrix caption { padding: 14px 16px; color: var(--text-muted); font-size: 12px; text-align: left; }
+  table.matrix th, table.matrix td {
+    padding: 11px 13px;
+    border-top: 1px solid var(--border-subtle);
+    text-align: left;
+    vertical-align: top;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+  table.matrix thead th {
+    position: sticky;
+    top: 0;
+    border-top: 0;
+    background: var(--s0);
+    color: var(--text-3);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+  table.matrix tbody th {
+    background: var(--s1);
+    color: var(--text);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  table.matrix tbody th small { display: block; margin-top: 3px; color: var(--text-muted); font-weight: 400; }
+  table.matrix td { color: var(--text-2); }
+  table.matrix tbody tr:hover td, table.matrix tbody tr:hover th { background: rgba(30, 41, 59, .45); }
+  .cell-chip { display: inline-flex; margin-bottom: 5px; }
+
+  /* ── Decisions ───────────────────────────────────────────────────── */
+
+  .decision-list { display: grid; gap: 0; margin-top: 20px; border-top: 1px solid var(--border); }
+  .decision {
+    display: grid;
+    grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+    gap: 8px 28px;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .decision h3 { font-size: 14px; line-height: 1.4; }
+  .decision-num { display: block; margin-bottom: 6px; color: var(--text-muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .decision p { max-width: 72ch; color: var(--text-2); font-size: 14px; line-height: 1.65; }
+  .decision .consequence {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .decision .consequence .ico { margin-top: 3px; flex: none; color: var(--text-3); }
+  @media (max-width: 720px) {
+    .decision { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  }
+
+  .synthetic-note {
+    display: flex;
+    gap: 10px;
+    margin-top: 40px;
+    padding: 13px 15px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-lg);
+    background: var(--s0);
+    color: var(--text-muted);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .synthetic-note .ico { margin-top: 2px; flex: none; }
+
+  @media (max-width: 640px) {
+    .doc-head-inner { padding: 12px 16px; }
+    main { padding: 24px 16px 72px; }
+    .doc-mark { margin-right: 0; width: 100%; }
+    .switcher { flex: 1; }
+    .switcher button { flex: 1; justify-content: center; }
+  }
+</style>
+</head>
+<body data-viewport="desktop">
+
+<svg class="sprite" aria-hidden="true" focusable="false" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-house" viewBox="0 0 24 24"><path d="M3 10.6 12 3.2l9 7.4"/><path d="M5.5 9.4V20.5h13V9.4"/><path d="M10 20.5v-5.4h4v5.4"/></symbol>
+  <symbol id="i-check-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m8.4 12.3 2.5 2.5 4.7-5"/></symbol>
+  <symbol id="i-alert-triangle" viewBox="0 0 24 24"><path d="M10.3 4.4 2.8 17.6a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4.4a2 2 0 0 0-3.4 0Z"/><path d="M12 9.6v4"/><path d="M12 17h.01"/></symbol>
+  <symbol id="i-alert-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.8v4.6"/><path d="M12 16.2h.01"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16.2v-4.6"/><path d="M12 7.8h.01"/></symbol>
+  <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 11.6a8.4 8.4 0 0 1-12.8 7.5L3 20.8l1.7-5.1A8.4 8.4 0 1 1 21 11.6Z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20.5 12a8.5 8.5 0 1 1-2.5-6"/><path d="M20.5 3.5v6h-6"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M4.6 10.3a11 11 0 0 1 14.8 0"/><path d="M7.8 13.8a6.4 6.4 0 0 1 8.4 0"/><path d="M12 17.8h.01"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M3 12h3.6l2.6 7 5.2-14 2.4 7H21"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2.5 12S6 5.9 12 5.9 21.5 12 21.5 12 18 18.1 12 18.1 2.5 12 2.5 12Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M10.6 6.2A9.8 9.8 0 0 1 12 6c6 0 9.5 6 9.5 6a17.3 17.3 0 0 1-3.3 4"/><path d="M6.7 7.9A16.7 16.7 0 0 0 2.5 12s3.5 6 9.5 6a9.6 9.6 0 0 0 3.6-.7"/><path d="m3.5 3.5 17 17"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4.5h11L19.5 8v11.5H5Z"/><path d="M9 4.5v4.4h6V4.5"/><path d="M8 19.5v-5h8v5"/></symbol>
+  <symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9.5 5 7 7-7 7"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 3.8v10.6"/><path d="m7.6 10.4 4.4 4.4 4.4-4.4"/><path d="M4.6 19.8h14.8"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="m6.5 6.5 11 11"/><path d="m17.5 6.5-11 11"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7.2V12l3 1.9"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3.2 5.2 6v5.8c0 4.4 2.9 7.6 6.8 9 3.9-1.4 6.8-4.6 6.8-9V6Z"/><path d="M12 9v3.6"/><path d="M12 15.8h.01"/></symbol>
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M15.6 3.4a5.1 5.1 0 0 0-6.3 6.6L3.6 15.7a2 2 0 0 0 0 2.8l1.8 1.8a2 2 0 0 0 2.8 0l5.7-5.7a5.1 5.1 0 0 0 6.6-6.3l-2.9 2.9-2.9-2.9Z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M18 9.2a6 6 0 1 0-12 0c0 5.2-2 6.6-2 6.6h16s-2-1.4-2-6.6Z"/><path d="M13.7 19.4a2 2 0 0 1-3.4 0"/></symbol>
+  <symbol id="i-external" viewBox="0 0 24 24"><path d="M14 4.2h5.8V10"/><path d="m19.8 4.2-8.4 8.4"/><path d="M18 14v4.4a1.6 1.6 0 0 1-1.6 1.6H5.8a1.6 1.6 0 0 1-1.6-1.6V7.8a1.6 1.6 0 0 1 1.6-1.6H10"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.2v13.6"/><path d="M5.2 12h13.6"/></symbol>
+  <symbol id="i-loader" viewBox="0 0 24 24"><path d="M12 3.4v3.5"/><path d="M12 17.1v3.5"/><path d="m5.9 5.9 2.5 2.5"/><path d="m15.6 15.6 2.5 2.5"/><path d="M3.4 12h3.5"/><path d="M17.1 12h3.5"/><path d="m5.9 18.1 2.5-2.5"/><path d="m15.6 8.4 2.5-2.5"/></symbol>
+  <symbol id="i-check-square" viewBox="0 0 24 24"><path d="m4 7.4 2 2 3.6-3.8"/><path d="m4 16.4 2 2 3.6-3.8"/><path d="M13 7.4h7"/><path d="M13 16.4h7"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.8 6.8h14.4"/><path d="M9.4 6.8V4.6h5.2v2.2"/><path d="m6.8 6.8 1 12.6h8.4l1-12.6"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8.2" cy="15.6" r="3.6"/><path d="m10.8 13 8-8"/><path d="m16.4 7.4 2.2 2.2"/><path d="m14 9.8 2.2 2.2"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.6" y="10.4" width="14.8" height="9.4" rx="2"/><path d="M7.8 10.4V7.8a4.2 4.2 0 0 1 8.4 0v2.6"/></symbol>
+  <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4.4" width="18" height="12.2" rx="2"/><path d="M9 20h6"/><path d="M12 16.6V20"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24"><rect x="6.6" y="2.6" width="10.8" height="18.8" rx="2.4"/><path d="M11 18.6h2"/></symbol>
+  <symbol id="i-slash" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m6.2 6.2 11.6 11.6"/></symbol>
+  <symbol id="i-x-circle" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6"/><path d="m15 9-6 6"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9.4 3.4v5.4L4.6 17.6a2 2 0 0 0 1.7 3h11.4a2 2 0 0 0 1.7-3l-4.8-8.8V3.4"/><path d="M8.6 3.4h6.8"/><path d="M7.2 14.4h9.6"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M4.6 12h14.8"/><path d="m13.4 6 6 6-6 6"/></symbol>
+  <symbol id="i-package" viewBox="0 0 24 24"><path d="M20.4 8.2 12 3.4 3.6 8.2v7.6L12 20.6l8.4-4.8Z"/><path d="M3.7 8.2 12 12.9l8.3-4.7"/><path d="M12 12.9v7.7"/></symbol>
+</svg>
+
+<a class="skip-link" href="#main">Skip to content</a>
+
+<header class="doc-head">
+  <div class="doc-head-inner">
+    <div class="doc-mark">
+      <span class="doc-mark-tile" aria-hidden="true"><svg class="ico"><use href="#i-house"/></svg></span>
+      <div>
+        <h1>Home Assistant integration</h1>
+        <p>Design mockup &middot; connector setup and notification states &middot; synthetic data</p>
+      </div>
+    </div>
+
+    <div class="switcher" role="tablist" aria-label="Flow">
+      <button role="tab" id="tab-setup" aria-controls="flow-setup" aria-selected="true" type="button">
+        <svg class="ico" aria-hidden="true"><use href="#i-wifi"/></svg> Setup
+      </button>
+      <button role="tab" id="tab-notify" aria-controls="flow-notify" aria-selected="false" tabindex="-1" type="button">
+        <svg class="ico" aria-hidden="true"><use href="#i-bell"/></svg> Notifications
+      </button>
+    </div>
+
+    <div class="switcher" role="group" aria-label="Viewport">
+      <button type="button" id="vp-desktop" data-viewport-btn="desktop" aria-pressed="true">
+        <svg class="ico" aria-hidden="true"><use href="#i-monitor"/></svg> Desktop
+      </button>
+      <button type="button" id="vp-mobile" data-viewport-btn="mobile" aria-pressed="false">
+        <svg class="ico" aria-hidden="true"><use href="#i-phone"/></svg> Mobile
+      </button>
+    </div>
+
+    <div class="field-inline">
+      <label for="instance-picker">Instance</label>
+      <select class="control" id="instance-picker">
+        <option value="lake" selected>Lake House</option>
+        <option value="condo">City Condo</option>
+        <option value="shop">Workshop</option>
+      </select>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+  <section id="flow-setup" role="tabpanel" aria-labelledby="tab-setup" tabindex="-1">
+    <div class="flow-head">
+      <h2>Flow 1 &mdash; Connect a Home Assistant instance</h2>
+      <p class="lede">Two homes, one Mission Control account. Each Home Assistant instance is its own connector row with its own URL, token, source selection, and polling interval. This panel lives inside <span class="mono">Settings &rsaquo; Connectors</span> and reuses the shipped connector row, toggle, and test-connection vocabulary.</p>
+    </div>
+
+    <div class="rail">
+      <span class="rail-label"><svg class="ico" aria-hidden="true"><use href="#i-flask"/></svg> Prototype controls</span>
+      <div class="rail-group">
+        <span id="test-outcome-label">Test connection returns</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="test-outcome-label">
+          <label><input type="radio" name="testOutcome" value="success" checked><span>Success</span></label>
+          <label><input type="radio" name="testOutcome" value="unreachable"><span>Unreachable</span></label>
+          <label><input type="radio" name="testOutcome" value="unauthorized"><span>Token rejected</span></label>
+          <label><input type="radio" name="testOutcome" value="nonadmin"><span>Non-admin</span></label>
+        </div>
+      </div>
+      <button class="btn btn-ghost btn-sm" type="button" id="setup-reset">
+        <svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg> Reset flow
+      </button>
+    </div>
+
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app-bar">
+          <span class="crumb">Settings</span>
+          <svg class="ico" aria-hidden="true" style="color:var(--s3)"><use href="#i-chevron-right"/></svg>
+          <span class="crumb-now">Connectors</span>
+          <span class="spacer"></span>
+          <span class="pill"><span class="dot" style="background:var(--success)"></span> Sync healthy</span>
+        </div>
+
+        <div class="app-body">
+          <div class="settings-head">
+            <div>
+              <h3>Home Assistant</h3>
+              <p>Read-only. Mission Control polls each instance over the REST API and never writes state back to your homes.</p>
+            </div>
+            <span class="data-chip"><svg class="ico" aria-hidden="true"><use href="#i-package"/></svg> 2 instances connected</span>
+          </div>
+
+          <div class="connector-list" id="connector-list">
+            <button class="connector-row" type="button" id="row-lake" data-instance="lake" data-enabled="true" aria-expanded="true" aria-controls="editor-panel">
+              <span class="connector-tile" aria-hidden="true"><svg class="ico"><use href="#i-house"/></svg></span>
+              <span class="conn-main">
+                <span class="conn-name">
+                  Lake House
+                  <span class="health health-ok"><svg class="ico" aria-hidden="true"><use href="#i-check-circle"/></svg> Healthy</span>
+                </span>
+                <span class="conn-meta">
+                  <span class="mono" data-url>https://lake.example-ha.net</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span class="tabular">Every 5 min</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span data-sources>4 sources on</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span>Last sync <time datetime="2025-03-11T14:32">2 min ago</time></span>
+                </span>
+              </span>
+              <span class="conn-side">
+                <span class="pill pill-ok">Enabled</span>
+                <svg class="ico chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </span>
+            </button>
+
+            <button class="connector-row" type="button" id="row-condo" data-instance="condo" data-enabled="true" aria-expanded="false" aria-controls="editor-panel">
+              <span class="connector-tile" aria-hidden="true"><svg class="ico"><use href="#i-house"/></svg></span>
+              <span class="conn-main">
+                <span class="conn-name">
+                  City Condo
+                  <span class="health health-degraded"><svg class="ico" aria-hidden="true"><use href="#i-alert-triangle"/></svg> Degraded</span>
+                </span>
+                <span class="conn-meta">
+                  <span class="mono" data-url>https://condo.example-ha.net</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span class="tabular">Every 15 min</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span data-sources>2 sources on</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span>Token lacks admin scope</span>
+                </span>
+              </span>
+              <span class="conn-side">
+                <span class="pill pill-ok">Enabled</span>
+                <svg class="ico chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </span>
+            </button>
+
+            <button class="connector-row" type="button" id="row-shop" data-instance="shop" data-enabled="false" aria-expanded="false" aria-controls="editor-panel">
+              <span class="connector-tile" aria-hidden="true"><svg class="ico"><use href="#i-house"/></svg></span>
+              <span class="conn-main">
+                <span class="conn-name">
+                  Workshop
+                  <span class="health health-off"><svg class="ico" aria-hidden="true"><use href="#i-slash"/></svg> Disabled</span>
+                </span>
+                <span class="conn-meta">
+                  <span class="mono" data-url>http://192.0.2.44:8123</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span data-sources>1 source on</span>
+                  <span class="sep" aria-hidden="true">&middot;</span>
+                  <span>Paused &mdash; enable to activate syncing</span>
+                </span>
+              </span>
+              <span class="conn-side">
+                <span class="pill">Disabled</span>
+                <svg class="ico chevron" aria-hidden="true"><use href="#i-chevron-right"/></svg>
+              </span>
+            </button>
+
+            <button class="add-instance" type="button" id="add-instance">
+              <svg class="ico ico-lg" aria-hidden="true"><use href="#i-plus"/></svg>
+              <span>Add another Home Assistant</span>
+              <span>Each home needs its own URL and token</span>
+            </button>
+          </div>
+
+          <div class="editor" id="editor-panel" role="region" aria-labelledby="editor-title">
+            <div class="editor-head">
+              <h4 id="editor-title">Lake House</h4>
+              <span class="health health-ok" id="editor-health"><svg class="ico" aria-hidden="true"><use href="#i-check-circle"/></svg> Healthy</span>
+              <span class="spacer"></span>
+              <label class="field-inline" for="instance-enabled">
+                <span>Enabled</span>
+                <span class="switch">
+                  <input type="checkbox" id="instance-enabled" checked>
+                  <span class="switch-track" aria-hidden="true"></span>
+                </span>
+              </label>
+            </div>
+
+            <div class="editor-grid">
+              <div class="editor-col">
+                <div class="editor-block">
+                  <h5>Connection</h5>
+
+                  <div class="field">
+                    <label class="field-label" for="f-name">Instance name</label>
+                    <input class="text-input" id="f-name" type="text" value="Lake House" autocomplete="off" aria-describedby="f-name-hint">
+                    <p class="field-hint" id="f-name-hint">Shown on every notification from this home. Use the name you'd say out loud.</p>
+                  </div>
+
+                  <div class="field">
+                    <label class="field-label" for="f-url">Base URL</label>
+                    <input class="text-input mono" id="f-url" type="url" value="https://lake.example-ha.net" spellcheck="false" autocomplete="off" aria-describedby="f-url-hint">
+                    <p class="field-hint" id="f-url-hint">Include the scheme and port, e.g. <span class="mono">http://homeassistant.local:8123</span>. Mission Control must be able to reach this address.</p>
+                  </div>
+
+                  <div class="field">
+                    <label class="field-label" for="f-token">Long-lived access token</label>
+                    <div class="input-wrap">
+                      <input class="text-input mono" id="f-token" type="password" value="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo" spellcheck="false" autocomplete="off" aria-describedby="f-token-hint">
+                      <button class="input-affix" type="button" id="token-reveal" aria-label="Show token" aria-pressed="false">
+                        <svg class="ico" aria-hidden="true"><use href="#i-eye"/></svg>
+                      </button>
+                    </div>
+                    <p class="field-hint" id="f-token-hint">Home Assistant &rsaquo; your profile &rsaquo; Security &rsaquo; Create token. Tokens inherit your account's permissions and cannot be narrowed &mdash; Updates and Repairs need an administrator account.</p>
+                  </div>
+
+                  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                    <button class="btn btn-outline" type="button" id="test-btn">
+                      <svg class="ico" aria-hidden="true"><use href="#i-activity"/></svg> <span id="test-btn-label">Test connection</span>
+                    </button>
+                    <span class="field-hint" style="margin:0">Runs a read-only probe against <span class="mono">/api/</span>.</span>
+                  </div>
+
+                  <div id="test-result" role="status" aria-live="polite" style="margin-top:12px"></div>
+                </div>
+
+                <div class="editor-block">
+                  <h5>Sync</h5>
+                  <div class="field">
+                    <label class="field-label" for="f-interval">Polling interval</label>
+                    <select class="control" id="f-interval" style="width:100%;height:36px" aria-describedby="f-interval-hint">
+                      <option value="1">Every 1 minute</option>
+                      <option value="5" selected>Every 5 minutes</option>
+                      <option value="15">Every 15 minutes</option>
+                      <option value="30">Every 30 minutes</option>
+                      <option value="60">Every hour</option>
+                    </select>
+                    <p class="field-hint" id="f-interval-hint">Mission Control polls; it does not hold a websocket open. A door left open is reported at most <span id="interval-echo" class="tabular">5</span> minutes late, so keep security-relevant homes at 1&ndash;5 minutes.</p>
+                  </div>
+                  <dl class="kv">
+                    <div><dt>Entities matched</dt><dd class="tabular" id="kv-entities">14</dd></div>
+                    <div><dt>Last successful sync</dt><dd class="tabular">14:32 &middot; 2 min ago</dd></div>
+                    <div><dt>Requests per day at this interval</dt><dd class="tabular" id="kv-requests">288</dd></div>
+                  </dl>
+                </div>
+              </div>
+
+              <div class="editor-col">
+                <div class="editor-block">
+                  <h5>What this home sends</h5>
+
+                  <div class="switch-row" data-source="device">
+                    <span class="switch">
+                      <input type="checkbox" id="src-device" class="source-toggle" data-source="device" checked aria-describedby="src-device-desc">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                    <span class="row-body">
+                      <label class="row-title" for="src-device">
+                        <svg class="ico note-level-icon" aria-hidden="true" style="color:var(--accent-soft)"><use href="#i-shield"/></svg>
+                        Device alerts
+                      </label>
+                      <span class="row-desc" id="src-device-desc">Doors, motion, battery, and offline devices matched by your entity patterns.</span>
+                      <span class="row-meta">
+                        <span class="data-chip">14 entities matched</span>
+                        <span class="pill pill-action">Action Needed</span>
+                        <span class="pill pill-heads">Heads Up</span>
+                      </span>
+                    </span>
+                  </div>
+
+                  <div class="switch-row" data-source="updates">
+                    <span class="switch">
+                      <input type="checkbox" id="src-updates" class="source-toggle" data-source="updates" checked aria-describedby="src-updates-desc">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                    <span class="row-body">
+                      <label class="row-title" for="src-updates">
+                        <svg class="ico note-level-icon" aria-hidden="true" style="color:var(--accent-soft)"><use href="#i-download"/></svg>
+                        Updates
+                      </label>
+                      <span class="row-desc" id="src-updates-desc">Core, OS, and add-on update entities, including release notes and install progress.</span>
+                      <span class="row-meta">
+                        <span class="data-chip">6 update entities</span>
+                        <span class="pill pill-heads">Heads Up</span>
+                        <span class="data-chip"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg> Needs admin</span>
+                      </span>
+                    </span>
+                  </div>
+
+                  <div class="switch-row" data-source="persistent">
+                    <span class="switch">
+                      <input type="checkbox" id="src-persistent" class="source-toggle" data-source="persistent" checked aria-describedby="src-persistent-desc">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                    <span class="row-body">
+                      <label class="row-title" for="src-persistent">
+                        <svg class="ico note-level-icon" aria-hidden="true" style="color:var(--accent-soft)"><use href="#i-message"/></svg>
+                        Persistent notifications
+                      </label>
+                      <span class="row-desc" id="src-persistent-desc">Anything your automations or integrations post to the Home Assistant notification drawer.</span>
+                      <span class="row-meta">
+                        <span class="data-chip">1 open now</span>
+                        <span class="pill pill-fyi">FYI</span>
+                      </span>
+                    </span>
+                  </div>
+
+                  <div class="switch-row" data-source="repairs">
+                    <span class="switch">
+                      <input type="checkbox" id="src-repairs" class="source-toggle" data-source="repairs" checked aria-describedby="src-repairs-desc">
+                      <span class="switch-track" aria-hidden="true"></span>
+                    </span>
+                    <span class="row-body">
+                      <label class="row-title" for="src-repairs">
+                        <svg class="ico note-level-icon" aria-hidden="true" style="color:var(--warning)"><use href="#i-wrench"/></svg>
+                        Repairs
+                      </label>
+                      <span class="row-desc" id="src-repairs-desc">Issues Home Assistant raises about broken or deprecated configuration.</span>
+                      <span class="row-meta">
+                        <span class="data-chip">2 open now</span>
+                        <span class="pill pill-action">Action Needed</span>
+                        <span class="data-chip"><svg class="ico" aria-hidden="true"><use href="#i-lock"/></svg> Needs admin</span>
+                      </span>
+                    </span>
+                  </div>
+
+                  <div id="source-warning" style="margin-top:10px"></div>
+                </div>
+
+                <div class="editor-block">
+                  <h5>Update push delivery</h5>
+                  <div class="segmented" role="radiogroup" aria-label="Update push delivery" style="width:100%">
+                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="every"><span>Immediate</span></label>
+                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="daily" checked><span>Daily summary</span></label>
+                    <label style="flex:1;justify-content:center"><input type="radio" name="digest" value="off"><span>No push</span></label>
+                  </div>
+
+                  <div class="field" id="digest-time-field" style="margin-top:12px">
+                    <label class="field-label" for="f-digest-time">Summary push arrives at</label>
+                    <input class="control tabular" id="f-digest-time" type="time" value="08:00" style="width:100%;height:36px">
+                  </div>
+
+                  <div class="digest-preview" id="digest-preview">
+                    <svg class="ico" aria-hidden="true" style="margin-top:2px"><use href="#i-info"/></svg>
+                    <span id="digest-preview-copy"></span>
+                  </div>
+
+                  <p class="field-hint" style="margin-top:14px">Always push immediately:</p>
+                  <div class="override-list" id="override-list">
+                    <span class="override-chip">
+                      <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
+                      Action-needed repairs
+                    </span>
+                    <span class="override-chip">
+                      <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
+                      Urgent device alerts
+                    </span>
+                    <span class="override-chip">
+                      <svg class="ico" aria-hidden="true"><use href="#i-shield"/></svg>
+                      Critical persistent notifications
+                    </span>
+                    <span class="override-chip">
+                      <code>update.home_assistant_core</code>
+                      <button type="button" aria-label="Remove Home Assistant Core override"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
+                    </span>
+                    <span class="override-chip">
+                      <code>update.home_assistant_operating_system</code>
+                      <button type="button" aria-label="Remove Home Assistant OS override"><svg class="ico" aria-hidden="true"><use href="#i-x"/></svg></button>
+                    </span>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" type="button" id="add-override" style="margin-top:8px">
+                    <svg class="ico" aria-hidden="true"><use href="#i-plus"/></svg> Add override
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div class="editor-foot">
+              <button class="btn btn-danger btn-sm" type="button" id="remove-instance">
+                <svg class="ico" aria-hidden="true"><use href="#i-trash"/></svg> Remove instance
+              </button>
+              <span class="spacer"></span>
+              <span class="save-state" id="save-state" role="status" aria-live="polite"></span>
+              <button class="btn" type="button" id="cancel-btn">Cancel</button>
+              <button class="btn btn-primary" type="button" id="save-btn">
+                <svg class="ico" aria-hidden="true"><use href="#i-save"/></svg> Save instance
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="device-caption">Mobile presentation &mdash; 390&nbsp;&times;&nbsp;844 logical viewport</p>
+    </div>
+  </section>
+
+  <section id="flow-notify" role="tabpanel" aria-labelledby="tab-notify" tabindex="-1" hidden>
+    <div class="flow-head">
+      <h2>Flow 2 &mdash; Home Assistant notification states</h2>
+      <p class="lede">Every Home Assistant notification carries its home's name, because "Update available" means something different at the lake than it does downtown. Actions that change your house ask once before they run, then report what actually happened at the other end.</p>
+    </div>
+
+    <div class="rail">
+      <span class="rail-label"><svg class="ico" aria-hidden="true"><use href="#i-flask"/></svg> Prototype controls</span>
+      <div class="rail-group">
+        <span id="action-outcome-label">Action result</span>
+        <div class="segmented" role="radiogroup" aria-labelledby="action-outcome-label">
+          <label><input type="radio" name="actionOutcome" value="success" checked><span>Success</span></label>
+          <label><input type="radio" name="actionOutcome" value="failure"><span>Failure</span></label>
+          <label><input type="radio" name="actionOutcome" value="denied"><span>Permission denied</span></label>
+        </div>
+      </div>
+      <button class="btn btn-outline btn-sm" type="button" id="go-offline" aria-pressed="false">
+        <svg class="ico" aria-hidden="true"><use href="#i-wifi"/></svg> <span id="go-offline-label">Simulate instance offline</span>
+      </button>
+      <button class="btn btn-ghost btn-sm" type="button" id="notify-reset">
+        <svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg> Reset states
+      </button>
+    </div>
+
+    <div class="stage-wrap">
+      <div class="stage">
+        <div class="app-bar">
+          <span class="crumb">Dashboard</span>
+          <svg class="ico" aria-hidden="true" style="color:var(--s3)"><use href="#i-chevron-right"/></svg>
+          <span class="crumb-now">Notifications</span>
+          <span class="spacer"></span>
+          <span class="pill" id="sync-pill"><span class="dot" style="background:var(--success)"></span> Synced 2 min ago</span>
+        </div>
+
+        <div class="app-body">
+          <div id="offline-banner" style="margin-bottom:14px"></div>
+
+          <div class="notify-split">
+            <div class="panel">
+              <div class="panel-head">
+                <h4>Home Assistant</h4>
+                <span class="count" id="note-count">7 open</span>
+                <span class="spacer"></span>
+                <button class="icon-btn" type="button" id="refresh-notes" aria-label="Refresh notifications">
+                  <svg class="ico" aria-hidden="true"><use href="#i-refresh"/></svg>
+                </button>
+              </div>
+
+              <div class="panel-filters" role="group" aria-label="Filter by instance">
+                <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">All homes</button>
+                <button class="filter-chip" type="button" data-filter="lake" aria-pressed="false">
+                  <span class="dot" style="background:var(--instance-lake)"></span> Lake House
+                </button>
+                <button class="filter-chip" type="button" data-filter="condo" aria-pressed="false">
+                  <span class="dot" style="background:var(--instance-condo)"></span> City Condo
+                </button>
+                <button class="filter-chip" type="button" data-filter="shop" aria-pressed="false">
+                  <span class="dot" style="background:var(--text-3)"></span> Workshop
+                </button>
+              </div>
+
+              <div id="note-list-root"></div>
+            </div>
+
+            <div class="detail" id="detail-pane" role="region" aria-label="Notification detail"></div>
+          </div>
+        </div>
+      </div>
+      <p class="visually-hidden" role="status" id="notify-announcer"></p>
+      <p class="device-caption">Mobile presentation &mdash; list and detail stack; detail opens as a full-width sheet below the list</p>
+    </div>
+
+    <div class="section">
+      <h2>State matrix</h2>
+      <p class="lede">Every Home Assistant event type against every state Mission Control can put it in. Copy in this table is the copy in the prototype above.</p>
+      <div class="matrix-scroll" style="margin-top:16px">
+        <table class="matrix">
+          <caption>Home Assistant notification states. Scroll horizontally to see all outcome columns.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Event</th>
+              <th scope="col">Level</th>
+              <th scope="col">Confirmation dialog</th>
+              <th scope="col">Pending</th>
+              <th scope="col">Accepted &mdash; not yet confirmed</th>
+              <th scope="col">Confirmed by refresh</th>
+              <th scope="col">Failure</th>
+              <th scope="col">Permission denied</th>
+              <th scope="col">Stale</th>
+              <th scope="col">Resolved</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <th scope="row">Update available<small>update.* has a newer version</small></th>
+              <td><span class="pill pill-heads cell-chip">Heads Up</span></td>
+              <td>"Install 2025.8.2?" &middot; Lake House &middot; shows 2025.8.1 &rarr; 2025.8.2, plus an unchecked <em>Create a backup first</em> for Core/Supervisor/OS. Add-on updates say backup isn't available instead.</td>
+              <td>Sending the install request to Lake House&hellip;</td>
+              <td>Lake House started installing 2025.8.2 at 14:41. Still running 2025.8.1 until a poll confirms the install finished.</td>
+              <td>Installed 2025.8.2 &middot; confirmed by the 14:47 poll. Card moves to Resolved today; Install and Skip are not offered again.</td>
+              <td>Install failed: the supervisor returned 500. Lake House is unchanged and still on 2025.8.1.</td>
+              <td>This token can't install updates. Updates need an administrator account.</td>
+              <td>Lake House last responded 14 min ago. Anything that changes it is unavailable.</td>
+              <td>Already on 2025.8.2 &mdash; installed outside Mission Control.</td>
+            </tr>
+            <tr>
+              <th scope="row">Update in progress<small>install started anywhere</small></th>
+              <td><span class="pill pill-heads cell-chip">Heads Up</span></td>
+              <td>None &mdash; already running, and no second install can be started</td>
+              <td>Installing Frigate 0.14.1 &middot; 62%</td>
+              <td>Same as pending &mdash; an install started elsewhere has no separate acceptance step to report</td>
+              <td>Frigate 0.14.1 installed &middot; add-on restarted</td>
+              <td>Install stopped at 62%. Frigate is still on 0.13.2.</td>
+              <td>Not applicable &mdash; the install was started elsewhere</td>
+              <td>Progress last updated 14 min ago.</td>
+              <td>Install finished &middot; this card resolves after the next authoritative poll</td>
+            </tr>
+            <tr>
+              <th scope="row">Repair &mdash; warning<small>issue_registry severity: warning</small></th>
+              <td><span class="pill pill-action cell-chip">Action Needed</span></td>
+              <td>"Ignore this repair?" &middot; Lake House &middot; "It stays ignored inside Home Assistant until someone un-ignores it there."</td>
+              <td>Sending the ignore request to Lake House&hellip;</td>
+              <td>Lake House accepted the request at 14:41. The repair is still listed until a poll confirms it.</td>
+              <td>Repair ignored in Home Assistant &middot; confirmed by the 14:47 poll</td>
+              <td>Couldn't ignore: Home Assistant rejected the request. The repair is still open.</td>
+              <td>This token can't manage repairs. Repairs need an administrator account.</td>
+              <td>Can't reach Lake House to change this repair.</td>
+              <td>Repair fixed in Home Assistant &middot; closed automatically</td>
+            </tr>
+            <tr>
+              <th scope="row">Repair &mdash; error<small>issue_registry severity: error</small></th>
+              <td><span class="pill pill-urgent cell-chip">Urgent</span></td>
+              <td>"Ignore this repair?" &middot; City Condo &middot; Z-Wave devices stay offline until this is fixed</td>
+              <td>Sending the ignore request to City Condo&hellip;</td>
+              <td>City Condo accepted the request at 14:41. The repair is still listed until a poll confirms it.</td>
+              <td>Repair ignored in Home Assistant &middot; confirmed by the 14:47 poll</td>
+              <td>Couldn't ignore: Home Assistant rejected the request. The repair is still open.</td>
+              <td>This token can't manage repairs. Repairs need an administrator account.</td>
+              <td>Can't reach City Condo to change this repair.</td>
+              <td>Z-Wave JS started &middot; repair cleared at the source</td>
+            </tr>
+            <tr>
+              <th scope="row">Persistent notification<small>persistent_notification.*</small></th>
+              <td><span class="pill pill-fyi cell-chip">FYI</span></td>
+              <td>"Dismiss in Home Assistant?" &middot; Lake House &middot; "This clears the notification for everyone in the house, not just here."</td>
+              <td>Sending the dismiss request to Lake House&hellip;</td>
+              <td>Lake House accepted the dismissal at 14:41. It still shows until a poll confirms it cleared.</td>
+              <td>Dismissed in Home Assistant &middot; confirmed by the 14:47 poll</td>
+              <td>Dismiss failed. It's still showing in Home Assistant.</td>
+              <td>Not applicable &mdash; any account can dismiss</td>
+              <td>Can't reach this home to dismiss.</td>
+              <td>Dismissed in Home Assistant by someone else</td>
+            </tr>
+            <tr>
+              <th scope="row">Device-state alert<small>matched entity crossed a rule</small></th>
+              <td><span class="pill pill-action cell-chip">Action Needed</span></td>
+              <td>None for Create task &middot; "Mute this alert for 24 hours?" for Mute</td>
+              <td>Creating the task in Mission Control&hellip;</td>
+              <td>Skipped &mdash; both actions are Mission Control only, so there is no upstream acceptance to wait for</td>
+              <td>Task created in Mission Control. Create task is not offered a second time.</td>
+              <td>Couldn't create the task. Nothing changed in your home.</td>
+              <td>Not applicable &mdash; reading state needs no admin</td>
+              <td>State last read 14 min ago &mdash; the door may already be closed.</td>
+              <td>Side door closed &middot; alert cleared itself</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <hr class="rule">
+
+  <section class="section" id="decisions" aria-labelledby="decisions-title">
+    <h2 id="decisions-title">Settled decisions</h2>
+    <p class="lede">What this mockup fixes, why, and what each choice costs the people who build it. Anything not listed here is still open.</p>
+
+    <div class="decision-list">
+      <div class="decision">
+        <h3><span class="decision-num">01</span>One connector row per home, never one connector with many URLs</h3>
+        <div>
+          <p>Two homes have different tokens, different admin rights, different network reachability, and different urgency. Folding them into a single connector would force every setting to be either global or per-home-with-exceptions. Each instance gets its own row, health badge, sources, push-delivery rule, and polling interval.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Connector storage keys on instance ID, not connector type. The Settings list can show <em>n</em> Home Assistant rows, and health is computed per row.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">02</span>Instance attribution rides on every notification</h3>
+        <div>
+          <p>A name chip with a colour dot sits in the card meta row and repeats in the detail header. Colour never carries the meaning alone &mdash; the home's name is always spelled out, so the chip survives greyscale, colour blindness, and a screen reader.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Notifications need a stable <span class="mono">instanceId</span> and <span class="mono">instanceLabel</span>; renaming an instance must rewrite labels on open notifications, not only new ones.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">03</span>Four sources, each independently switchable</h3>
+        <div>
+          <p>Device alerts, Updates, Persistent notifications, and Repairs answer different questions and have different noise profiles. Each row states what it covers, how many entities currently match, and which notification levels it can produce, so the choice is made on evidence rather than on the label.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> The polling job must be able to skip whole endpoint families. Matched-entity counts come from the last successful test or sync and need a cached value for the pre-save state.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">04</span>Only a confirmed non-admin token locks a source; an unknown answer locks nothing</h3>
+        <div>
+          <p>Home Assistant long-lived tokens inherit the creating account's permissions and cannot be scoped down. A non-admin token can read states but cannot see Updates or Repairs. Hiding those toggles would make a permissions problem look like a missing feature, so they stay visible, disabled, and labelled with the reason and the fix. An unreachable instance or a rejected token is a different answer: nothing was read, so nothing is locked and nothing is claimed &mdash; the panel says source availability is unknown and keeps the choices already made. No help text ever tells you to switch on a control that is disabled.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Test connection must report admin capability separately from reachability, and the connector must persist a <span class="mono">capabilities</span> record with a tri-state &mdash; confirmed, denied, unknown &mdash; so a failed probe never silently downgrades a working configuration. Permission-denied is a first-class action outcome, not a generic failure.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">05</span>Test connection reports findings, not a green tick</h3>
+        <div>
+          <p>A successful probe names the Home Assistant version and counts what it found: matched entities, update entities, open repairs, persistent notifications. That turns an abstract "connected" into a preview of the noise you just signed up for. Each of the four outcomes &mdash; connected, unreachable, token rejected, connected-but-not-admin &mdash; resolves to exactly one health badge, one source posture, and one next move. They are mutually exclusive by construction: an unreachable instance never also reports a permissions verdict.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> The test endpoint does more than one call and needs a bounded timeout with a partial-result shape, because a reachable instance with a valid non-admin token is a success and a warning at the same time &mdash; while a transport failure is neither and must not be reported as one.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">06</span>Every update stays independent; push summaries reduce interruptions</h3>
+        <div>
+          <p>Each update is always its own Mission Control notification, with its own action and reconciliation lifecycle. Daily summary is only an outbound push preference: one device interruption can open the filtered list of six individual updates. Security updates and the named Core/OS entities still push immediately, so batching never delays the one update that mattered.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Summary scheduling is per instance and needs the household's timezone, not the server's. The summary is a delivery event, never a grouped inbox record. Overrides are matched by entity ID, and installing directly in Home Assistant resolves only that entity's notification on the next poll.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">07</span>Polling interval is stated as a delay, not as a frequency</h3>
+        <div>
+          <p>"Every 15 minutes" hides the consequence. The hint states it plainly: a door left open is reported at most 15 minutes late. The request count per day is shown alongside so the cost of a tighter interval is visible in the same glance.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Mission Control polls the REST API and does not hold a websocket, so worst-case latency equals the interval. If push ever lands, this copy and this control both change meaning and must be revisited.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">08</span>Anything that changes the house confirms in one shared dialog</h3>
+        <div>
+          <p>Install update, skip a version, ignore a repair, dismiss at source, mute an alert, and removing an instance all route through a single modal: named consequence, named home, Cancel focused first, Escape to back out. Install adds the version it is on and the version it is offered, plus an unchecked <em>Create a backup first</em> when Home Assistant supports one for that entity &mdash; and says so plainly when it does not. Create task and Open in Home Assistant act immediately, because they change only Mission Control or nothing at all.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Actions need a <span class="mono">confirm</span> descriptor with its own copy per event type, and update payloads must carry both versions and a <span class="mono">backupSupported</span> flag. One dialog component serves every surface: while it is open the triggers underneath are inert, so a confirmation can never be raced by a second click on the card behind it.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">09</span>"Accepted" and "confirmed" are separate states, and the copy never conflates them</h3>
+        <div>
+          <p>Mission Control polls; it does not watch. So a write-back has two truths: Home Assistant took the request, and a later poll saw the result. The card says <em>started installing &hellip; still running 2025.8.1 until a poll confirms it finished</em> and offers <em>Check for confirmation now</em>. Only after that does it say <em>installed</em>, move into Resolved today, and drop out of the open count. From the moment an action starts until it settles, every write-back on that card and in its detail pane is withdrawn from both surfaces, so the same change cannot be sent twice; Open in Home Assistant stays. A confirmed Install or Skip is never offered again. Failures and refusals state what did <em>not</em> change and carry the single recovery path in the state line &mdash; Retry, or a fix for the credential &mdash; so the same action is never offered twice on one card.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Extends the shipped <span class="mono">WritebackStatus</span> with an accepted-but-unconfirmed state; pending must survive a refresh, and reconciliation needs to close the loop from the next poll rather than from the write response. Retryable and terminal failures must be distinguished at the API layer.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">10</span>Stale and resolved are different, and both are honest</h3>
+        <div>
+          <p>When an instance stops answering, its cards dim, every write-back that would touch that home is withdrawn, and a banner states when it last responded &mdash; a door alert from 14 minutes ago may already be wrong. Only that home is affected: the other homes keep their live cards and their full action sets in the same list. When the underlying condition clears at the source, the card resolves itself and says who cleared it, instead of quietly disappearing.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Notifications need a last-observed timestamp separate from created-at, and reconciliation must be able to close a Mission Control notification because the source condition disappeared.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">11</span>Cards use full tinted borders, not a coloured left stripe</h3>
+        <div>
+          <p>The shipped <span class="mono">NotificationCard</span> marks level with a 3px left border. DESIGN.md's Complete Container rule forbids partial coloured edges, so this mockup carries level on a full 1px tinted border plus the level pill and level icon. That is a deliberate deviation from current code toward the written spec.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> Adopting this treatment for Home Assistant alone would split the notification list visually. Either the existing card changes with it, or this decision is reversed before build &mdash; it should not ship half-applied.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">12</span>Adding a second home starts empty and validates before it can save</h3>
+        <div>
+          <p>"Add another Home Assistant" inserts a draft row and clears the editor rather than cloning the first home, because a copied token pointed at a new URL is a silent failure. Save stays disabled until the URL has a scheme and the token is present; errors name the problem and the fix on the field itself.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> The draft row exists in the list before it is persisted, so the list must tolerate an unsaved instance and Cancel must remove it cleanly.</p>
+        </div>
+      </div>
+
+      <div class="decision">
+        <h3><span class="decision-num">13</span>The two-pane list keeps its own scroll; below 1000px it stops being two panes</h3>
+        <div>
+          <p>On a wide screen the list and the detail pane are independently scrollable inside a shared, bounded height, so reading down a long list never strands the reader beside an empty detail column. Between roughly 720px and 1000px there is not enough width for two readable columns, so the layout stacks &mdash; detail below list &mdash; rather than squeezing both. At 320px the card still leads with its home, and the primary action is reachable without a horizontal scroll.</p>
+          <p class="consequence"><svg class="ico" aria-hidden="true"><use href="#i-arrow-right"/></svg> The notification surface needs a container-bounded height rather than page flow, and the stacked breakpoint must select the detail pane into view on tap. Three layouts get tested, not two: stacked mobile, stacked tablet, and side-by-side desktop.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="synthetic-note">
+      <svg class="ico" aria-hidden="true"><use href="#i-info"/></svg>
+      <span>All data in this artifact is synthetic. Hostnames use reserved example domains, the token string is a non-functional placeholder, and every version number, entity ID, and timestamp is invented for review. No external fonts, scripts, styles, or images are loaded &mdash; the file renders offline exactly as it renders online.</span>
+    </div>
+  </section>
+
+</main>
+
+<dialog class="modal" id="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-desc">
+  <div class="modal-card">
+    <div class="modal-top">
+      <span class="modal-glyph" aria-hidden="true"><svg class="ico"><use href="#i-alert-triangle" id="modal-glyph-use"/></svg></span>
+      <div style="min-width:0">
+        <h2 class="modal-title" id="modal-title"></h2>
+        <div class="modal-instance" id="modal-instance"></div>
+      </div>
+    </div>
+    <p class="modal-desc" id="modal-desc"></p>
+    <div class="modal-extra" id="modal-extra"></div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" type="button" id="modal-cancel" autofocus></button>
+      <button class="btn btn-primary" type="button" id="modal-confirm"></button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+
+  var $ = function (sel, root) { return (root || document).querySelector(sel); };
+  var $$ = function (sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); };
+  function ico(id, cls) { return '<svg class="ico ' + (cls || "") + '" aria-hidden="true"><use href="#' + id + '"/></svg>'; }
+
+  /* ── Shared confirmation dialog ────────────────────────────────────
+     One dialog serves every destructive or house-changing confirmation:
+     notification write-backs and connector removal. showModal() puts it in
+     the top layer, so the triggers underneath cannot be clicked or tabbed
+     to while it is open — no duplicate submit is possible. Escape cancels,
+     and focus returns to whatever opened it. */
+
+  var modal = $("#confirm-modal");
+  var modalConfirmBtn = $("#modal-confirm");
+  var modalCancelBtn = $("#modal-cancel");
+  var modalReturnFocus = null;
+  var modalOnConfirm = null;
+  var modalManagesFocus = false;
+
+  function openConfirm(opts) {
+    if (modal.open) return;
+    modalReturnFocus = opts.returnFocus || document.activeElement;
+    modalOnConfirm = opts.onConfirm || null;
+    modalManagesFocus = !!opts.manageFocus;
+    modal.dataset.tone = opts.tone || "warning";
+    $("#modal-glyph-use").setAttribute("href", opts.icon || "#i-alert-triangle");
+    $("#modal-title").textContent = opts.title;
+    $("#modal-instance").innerHTML = opts.instance || "";
+    $("#modal-instance").hidden = !opts.instance;
+    $("#modal-desc").textContent = opts.description;
+    $("#modal-extra").innerHTML = opts.extra || "";
+    $("#modal-extra").hidden = !opts.extra;
+    modalConfirmBtn.textContent = opts.confirmLabel;
+    modalConfirmBtn.className = "btn " + (opts.tone === "danger" ? "btn-danger" : "btn-primary");
+    modalCancelBtn.textContent = opts.cancelLabel || "Cancel";
+
+    if (typeof modal.showModal === "function") modal.showModal();
+    else modal.setAttribute("open", "");
+    modalCancelBtn.focus();
+  }
+
+  function closeConfirm(skipFocusRestore) {
+    if (!modal.open) return;
+    var back = modalReturnFocus;
+    modalReturnFocus = null;
+    modalOnConfirm = null;
+    if (typeof modal.close === "function") modal.close();
+    else modal.removeAttribute("open");
+    $("#modal-extra").innerHTML = "";
+    if (!skipFocusRestore && back && document.contains(back) && typeof back.focus === "function") back.focus();
+  }
+
+  /* Escape is handled through the same path so focus restoration is
+     synchronous and identical however the dialog is dismissed. */
+  modal.addEventListener("cancel", function (e) { e.preventDefault(); closeConfirm(); });
+
+  modal.addEventListener("click", function (e) {
+    if (e.target === modal) closeConfirm();
+  });
+
+  modalCancelBtn.addEventListener("click", function () { closeConfirm(); });
+  modalConfirmBtn.addEventListener("click", function () {
+    var fn = modalOnConfirm;
+    var backupBox = $("#modal-backup");
+    var payload = { backup: !!(backupBox && backupBox.checked) };
+    closeConfirm(modalManagesFocus);
+    if (fn) fn(payload);
+  });
+
+  /* ── Flow tabs ─────────────────────────────────────────────────── */
+
+  var tabs = $$('[role="tab"]');
+  function selectTab(tab) {
+    tabs.forEach(function (t) {
+      var on = t === tab;
+      t.setAttribute("aria-selected", String(on));
+      t.tabIndex = on ? 0 : -1;
+      var panel = document.getElementById(t.getAttribute("aria-controls"));
+      if (panel) panel.hidden = !on;
+    });
+  }
+  tabs.forEach(function (tab, i) {
+    tab.addEventListener("click", function () { selectTab(tab); });
+    tab.addEventListener("keydown", function (e) {
+      var next = null;
+      if (e.key === "ArrowRight" || e.key === "ArrowDown") next = tabs[(i + 1) % tabs.length];
+      if (e.key === "ArrowLeft" || e.key === "ArrowUp") next = tabs[(i - 1 + tabs.length) % tabs.length];
+      if (e.key === "Home") next = tabs[0];
+      if (e.key === "End") next = tabs[tabs.length - 1];
+      if (!next) return;
+      e.preventDefault();
+      selectTab(next);
+      next.focus();
+    });
+  });
+
+  /* ── Viewport presentation ─────────────────────────────────────── */
+
+  var vpButtons = $$("[data-viewport-btn]");
+  vpButtons.forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      document.body.dataset.viewport = btn.dataset.viewportBtn;
+      vpButtons.forEach(function (b) { b.setAttribute("aria-pressed", String(b === btn)); });
+    });
+  });
+
+  /* ── Instances ─────────────────────────────────────────────────── */
+
+  var INSTANCES = {
+    lake: {
+      id: "lake", name: "Lake House", url: "https://lake.example-ha.net",
+      token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo", interval: "5",
+      enabled: true, health: "ok", admin: true, testState: "ok", entities: 14, updateCount: 6,
+      sources: { device: true, updates: true, persistent: true, repairs: true },
+      digest: "daily", digestTime: "08:00", color: "var(--instance-lake)", draft: false
+    },
+    condo: {
+      id: "condo", name: "City Condo", url: "https://condo.example-ha.net",
+      token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo2", interval: "15",
+      enabled: true, health: "degraded", admin: false, testState: "nonadmin", entities: 9, updateCount: 4,
+      sources: { device: true, updates: false, persistent: true, repairs: false },
+      digest: "every", digestTime: "08:00", color: "var(--instance-condo)", draft: false
+    },
+    shop: {
+      id: "shop", name: "Workshop", url: "http://192.0.2.44:8123",
+      token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo3", interval: "30",
+      enabled: false, health: "off", admin: true, testState: "untested", entities: 3, updateCount: 2,
+      sources: { device: true, updates: false, persistent: false, repairs: false },
+      digest: "off", digestTime: "09:00", color: "var(--text-3)", draft: false
+    }
+  };
+  var BASELINE = JSON.parse(JSON.stringify(INSTANCES));
+  var current = "lake";
+
+  var picker = $("#instance-picker");
+  var editorTitle = $("#editor-title");
+  var editorHealth = $("#editor-health");
+
+  var HEALTH = {
+    ok: { cls: "health-ok", icon: "i-check-circle", label: "Healthy" },
+    degraded: { cls: "health-degraded", icon: "i-alert-triangle", label: "Degraded" },
+    off: { cls: "health-off", icon: "i-slash", label: "Disabled" },
+    error: { cls: "health-error", icon: "i-x-circle", label: "Not connecting" },
+    untested: { cls: "health-off", icon: "i-info", label: "Not tested" },
+    draft: { cls: "health-off", icon: "i-info", label: "Not saved yet" }
+  };
+
+  function instanceRow(id) { return $('.connector-row[data-instance="' + id + '"]'); }
+
+  function loadInstance(id) {
+    var inst = INSTANCES[id];
+    if (!inst) return;
+    current = id;
+
+    $$(".connector-row").forEach(function (row) {
+      row.setAttribute("aria-expanded", String(row.dataset.instance === id));
+    });
+    if (picker && picker.value !== id && $('#instance-picker option[value="' + id + '"]')) picker.value = id;
+
+    editorTitle.textContent = inst.draft ? "New Home Assistant instance" : inst.name;
+    var h = HEALTH[inst.draft ? "draft" : inst.health];
+    editorHealth.className = "health " + h.cls;
+    editorHealth.innerHTML = ico(h.icon) + " " + h.label;
+
+    $("#f-name").value = inst.name;
+    $("#f-url").value = inst.url;
+    $("#f-token").value = inst.token;
+    $("#f-interval").value = inst.interval;
+    $("#instance-enabled").checked = inst.enabled;
+    $("#f-digest-time").value = inst.digestTime;
+    $$('input[name="digest"]').forEach(function (r) { r.checked = r.value === inst.digest; });
+    Object.keys(inst.sources).forEach(function (key) {
+      $("#src-" + key).checked = !!inst.sources[key];
+    });
+    $("#kv-entities").textContent = inst.draft ? "—" : String(inst.entities);
+    $("#test-result").innerHTML = "";
+    $("#save-state").textContent = "";
+    closeConfirm();
+    applySourceLocks();
+    syncInterval();
+    syncDigest();
+    validate();
+  }
+
+  if (picker) picker.addEventListener("change", function () {
+    loadInstance(picker.value);
+    renderNotes();
+    renderOfflineBanner();
+  });
+
+  $$(".connector-row").forEach(function (row) {
+    row.addEventListener("click", function () { loadInstance(row.dataset.instance); });
+  });
+
+  /* ── Field behaviour ───────────────────────────────────────────── */
+
+  var reveal = $("#token-reveal");
+  reveal.addEventListener("click", function () {
+    var input = $("#f-token");
+    var shown = input.type === "text";
+    input.type = shown ? "password" : "text";
+    reveal.setAttribute("aria-pressed", String(!shown));
+    reveal.setAttribute("aria-label", shown ? "Show token" : "Hide token");
+    reveal.innerHTML = ico(shown ? "i-eye" : "i-eye-off");
+  });
+
+  function fieldError(input, message) {
+    var id = input.id + "-err";
+    var existing = document.getElementById(id);
+    if (!message) {
+      input.removeAttribute("aria-invalid");
+      if (existing) existing.remove();
+      return;
+    }
+    input.setAttribute("aria-invalid", "true");
+    if (!existing) {
+      existing = document.createElement("p");
+      existing.className = "field-error";
+      existing.id = id;
+      input.closest(".field").appendChild(existing);
+    }
+    existing.innerHTML = ico("i-alert-circle") + "<span>" + message + "</span>";
+  }
+
+  var touched = {};
+  function validate() {
+    var url = $("#f-url").value.trim();
+    var token = $("#f-token").value.trim();
+    var name = $("#f-name").value.trim();
+
+    var urlBad = !/^https?:\/\/[^\s]+$/i.test(url)
+      ? (url ? "Start the address with http:// or https:// and include the port if it isn't 443." : "Enter the address of your Home Assistant instance.")
+      : "";
+    var tokenBad = token.length < 20 ? (token ? "That token looks too short. Copy the full token from Home Assistant." : "Paste a long-lived access token from your Home Assistant profile.") : "";
+    var nameBad = name ? "" : "Give this home a name so you can tell its notifications apart.";
+
+    if (touched.url) fieldError($("#f-url"), urlBad);
+    if (touched.token) fieldError($("#f-token"), tokenBad);
+    if (touched.name) fieldError($("#f-name"), nameBad);
+
+    var ok = !urlBad && !tokenBad && !nameBad;
+    var save = $("#save-btn");
+    save.disabled = !ok;
+    save.title = ok ? "" : "Fix the highlighted fields first";
+    return ok;
+  }
+
+  ["f-url", "f-token", "f-name"].forEach(function (id) {
+    var el = document.getElementById(id);
+    el.addEventListener("input", function () { validate(); });
+    el.addEventListener("blur", function () { touched[id.slice(2)] = true; validate(); });
+  });
+
+  function syncInterval() {
+    var mins = parseInt($("#f-interval").value, 10);
+    $("#interval-echo").textContent = String(mins);
+    $("#kv-requests").textContent = String(Math.round((24 * 60) / mins));
+  }
+  $("#f-interval").addEventListener("change", syncInterval);
+
+  /* ── Source toggles and admin locks ────────────────────────────── */
+
+  var ADMIN_SOURCES = ["updates", "repairs"];
+
+  /* A test outcome resolves to exactly one source posture. Only a confirmed
+     non-administrator token locks anything: if the instance was unreachable
+     or the token was rejected, Mission Control never learned what the
+     account can see, so it says so and locks nothing. */
+  function sourcePosture(inst) {
+    var st = inst.testState || "untested";
+    if (st === "nonadmin") return "locked";
+    if (st === "unreachable" || st === "unauthorized") return "unknown";
+    return "open";
+  }
+
+  function applySourceLocks() {
+    var inst = INSTANCES[current];
+    var posture = sourcePosture(inst);
+    var locked = posture === "locked";
+
+    ADMIN_SOURCES.forEach(function (key) {
+      var input = $("#src-" + key);
+      var row = input.closest(".switch-row");
+      input.disabled = locked;
+      row.dataset.locked = String(locked);
+      if (locked) { input.checked = false; inst.sources[key] = false; }
+    });
+
+    var warn = $("#source-warning");
+    if (posture === "locked") {
+      warn.innerHTML =
+        '<div class="notice notice-warn">' + ico("i-lock") +
+        "<div><strong>Updates and Repairs are locked</strong>" +
+        "This token belongs to a non-administrator account, and Home Assistant tokens can't be given extra rights after the fact. " +
+        "Create a new long-lived token from an administrator profile on " + inst.name + ", paste it above, and test again.</div></div>";
+    } else if (posture === "unknown") {
+      warn.innerHTML =
+        '<div class="notice">' + ico("i-info") +
+        "<div><strong>Source availability is unknown</strong>" +
+        (inst.testState === "unreachable"
+          ? "The last test never reached " + inst.name + ", so Mission Control couldn't read which sources this account can see. "
+          : "The last test was rejected by " + inst.name + ", so Mission Control couldn't read which sources this account can see. ") +
+        "Nothing has been locked and your choices below are kept. Fix the connection above and test again to confirm them.</div></div>";
+    } else {
+      warn.innerHTML = "";
+    }
+    updateSourceCount();
+  }
+
+  function updateSourceCount() {
+    var inst = INSTANCES[current];
+    var on = Object.keys(inst.sources).filter(function (k) { return inst.sources[k]; }).length;
+    var row = instanceRow(current);
+    if (!row) return;
+    var meta = row.querySelector(".conn-meta");
+    var target = meta ? meta.querySelector("[data-sources]") : null;
+    if (target) target.textContent = on + (on === 1 ? " source on" : " sources on");
+  }
+
+  $$(".source-toggle").forEach(function (input) {
+    input.addEventListener("change", function () {
+      INSTANCES[current].sources[input.dataset.source] = input.checked;
+      updateSourceCount();
+      syncDigest();
+      markDirty();
+    });
+  });
+
+  /* ── Digest control ────────────────────────────────────────────── */
+
+  function syncDigest() {
+    var inst = INSTANCES[current];
+    var mode = ($$('input[name="digest"]').filter(function (r) { return r.checked; })[0] || {}).value || "daily";
+    inst.digest = mode;
+    $("#digest-time-field").hidden = mode !== "daily";
+
+    var n = inst.updateCount;
+    var copy;
+    if (!inst.sources.updates) {
+      copy = $("#src-updates").disabled
+        ? "Updates are locked for " + inst.name + " while its token isn't an administrator, so nothing in this section applies yet. Connect an administrator token above to configure update pushes."
+        : "Updates are off for " + inst.name + ", so nothing in this section applies yet. Turn Updates on above to configure update pushes.";
+    } else if (mode === "every") {
+      copy = "All <strong>" + n + " update items remain separate</strong> in Mission Control, and each may send its own push when detected.";
+    } else if (mode === "daily") {
+      copy = "All <strong>" + n + " update items remain separate</strong> in Mission Control. At " + $("#f-digest-time").value +
+        ", one summary push opens the filtered list. Critical overrides still push immediately.";
+    } else {
+      copy = "All <strong>" + n + " update items remain visible</strong> in Mission Control, but routine updates do not send a push. Critical overrides below still push immediately.";
+    }
+    $("#digest-preview-copy").innerHTML = copy;
+  }
+  $$('input[name="digest"]').forEach(function (r) {
+    r.addEventListener("change", function () { syncDigest(); markDirty(); });
+  });
+  $("#f-digest-time").addEventListener("change", function () { syncDigest(); markDirty(); });
+
+  var EXTRA_OVERRIDES = ["update.frigate", "update.zwave_js", "update.esphome"];
+  $("#add-override").addEventListener("click", function () {
+    var next = EXTRA_OVERRIDES.shift();
+    if (!next) return;
+    var chip = document.createElement("span");
+    chip.className = "override-chip";
+    chip.innerHTML = "<code>" + next + "</code>" +
+      '<button type="button" aria-label="Remove ' + next + ' override">' + ico("i-x") + "</button>";
+    $("#override-list").appendChild(chip);
+    if (!EXTRA_OVERRIDES.length) {
+      $("#add-override").disabled = true;
+      $("#add-override").textContent = "All demo overrides added";
+    }
+    markDirty();
+  });
+
+  $("#override-list").addEventListener("click", function (e) {
+    var btn = e.target.closest("button");
+    if (!btn) return;
+    btn.closest(".override-chip").remove();
+    markDirty();
+  });
+
+  /* ── Test connection ───────────────────────────────────────────── */
+
+  var TEST_RESULTS = {
+    success: function (inst) {
+      return '<div class="notice notice-ok">' + ico("i-check-circle") +
+        "<div><strong>Connected to Home Assistant 2025.8.1</strong>" +
+        "Found " + inst.entities + " matching entities, " + inst.updateCount +
+        " update entities, 2 open repairs, and 1 persistent notification. This token has administrator rights, so every source is available.</div></div>";
+    },
+    unreachable: function (inst) {
+      return '<div class="notice notice-danger">' + ico("i-alert-circle") +
+        "<div><strong>Couldn't reach " + inst.url + "</strong>" +
+        "The request timed out after 10 seconds. Check that the address is right, that the instance is running, and that Mission Control can reach it from this network. " +
+        "Nothing was read and nothing was changed &mdash; your source choices below are untouched.</div></div>";
+    },
+    unauthorized: function (inst) {
+      return '<div class="notice notice-danger">' + ico("i-key") +
+        "<div><strong>Home Assistant rejected the token</strong>" +
+        inst.url + " answered, but returned 401 Unauthorized. Long-lived tokens are revoked when their account's password changes &mdash; create a new one and paste it above. " +
+        "Nothing was read and nothing was changed &mdash; your source choices below are untouched.</div></div>";
+    },
+    nonadmin: function (inst) {
+      return '<div class="notice notice-warn">' + ico("i-lock") +
+        "<div><strong>Connected, but this token isn't an administrator</strong>" +
+        "Device alerts and persistent notifications work. Updates and Repairs stay off, because Home Assistant only exposes them to administrator accounts. " +
+        "Create a token from an administrator profile on " + inst.name + " to turn those two on.</div></div>";
+    }
+  };
+
+  var testBtn = $("#test-btn");
+  var testTimer = null;
+  testBtn.addEventListener("click", function () {
+    if (testTimer) return;
+    var inst = INSTANCES[current];
+    var outcome = ($$('input[name="testOutcome"]').filter(function (r) { return r.checked; })[0] || {}).value || "success";
+
+    testBtn.disabled = true;
+    testBtn.innerHTML = ico("i-loader", "spin") + ' <span id="test-btn-label">Testing…</span>';
+    $("#test-result").innerHTML = '<div class="notice">' + ico("i-loader", "spin") +
+      "<div>Probing " + inst.url + " &mdash; reading version, entities, repairs, and notifications.</div></div>";
+
+    testTimer = window.setTimeout(function () {
+      testTimer = null;
+      testBtn.disabled = false;
+      testBtn.innerHTML = ico("i-activity") + ' <span id="test-btn-label">Test connection</span>';
+      $("#test-result").innerHTML = TEST_RESULTS[outcome](inst);
+
+      var wasLocked = sourcePosture(inst) === "locked";
+      inst.testState = outcome === "success" ? "ok" : outcome;
+      inst.admin = outcome === "success";
+
+      if (outcome === "success") {
+        inst.health = "ok";
+        if (wasLocked) {
+          inst.sources.updates = true;
+          inst.sources.repairs = true;
+          $("#src-updates").checked = true;
+          $("#src-repairs").checked = true;
+        }
+      } else if (outcome === "nonadmin") {
+        inst.health = "degraded";
+      } else {
+        inst.health = "error";
+      }
+      var h = HEALTH[inst.health];
+      editorHealth.className = "health " + h.cls;
+      editorHealth.innerHTML = ico(h.icon) + " " + h.label;
+      applySourceLocks();
+      syncDigest();
+    }, 1100);
+  });
+
+  /* ── Save, cancel, remove, add ─────────────────────────────────── */
+
+  function markDirty() {
+    $("#save-state").textContent = "Unsaved changes";
+  }
+  $("#f-name").addEventListener("input", markDirty);
+  $("#f-url").addEventListener("input", markDirty);
+  $("#f-token").addEventListener("input", markDirty);
+  $("#f-interval").addEventListener("change", markDirty);
+  $("#instance-enabled").addEventListener("change", function () {
+    INSTANCES[current].enabled = $("#instance-enabled").checked;
+    markDirty();
+  });
+
+  $("#save-btn").addEventListener("click", function () {
+    if (!validate()) return;
+    var inst = INSTANCES[current];
+    var btn = $("#save-btn");
+    btn.disabled = true;
+    btn.innerHTML = ico("i-loader", "spin") + " Saving…";
+    $("#save-state").textContent = "";
+    window.setTimeout(function () {
+      inst.name = $("#f-name").value.trim();
+      inst.url = $("#f-url").value.trim();
+      inst.token = $("#f-token").value.trim();
+      inst.interval = $("#f-interval").value;
+      inst.draft = false;
+      btn.disabled = false;
+      btn.innerHTML = ico("i-save") + " Save instance";
+      editorTitle.textContent = inst.name;
+      var row = instanceRow(current);
+      if (row) {
+        row.querySelector(".conn-name").childNodes[0].nodeValue = inst.name + " ";
+        var urlNode = row.querySelector("[data-url]");
+        if (urlNode) urlNode.textContent = inst.url;
+        var badge = row.querySelector(".health");
+        if (badge) {
+          var rh = HEALTH[inst.health] || HEALTH.ok;
+          badge.className = "health " + rh.cls;
+          badge.innerHTML = ico(rh.icon) + " " + rh.label;
+        }
+      }
+      $("#save-state").textContent = "Saved · next sync in " + inst.interval + " min";
+      renderNotes();
+    }, 700);
+  });
+
+  $("#cancel-btn").addEventListener("click", function () {
+    var inst = INSTANCES[current];
+    if (inst.draft) {
+      var row = instanceRow(current);
+      if (row) row.remove();
+      delete INSTANCES[current];
+      loadInstance("lake");
+      return;
+    }
+    INSTANCES[current] = JSON.parse(JSON.stringify(BASELINE[current]));
+    loadInstance(current);
+  });
+
+  $("#remove-instance").addEventListener("click", function () {
+    var inst = INSTANCES[current];
+    var label = $("#f-name").value.trim() || inst.name || "this instance";
+    openConfirm({
+      tone: "danger",
+      icon: "i-alert-triangle",
+      title: inst.draft ? "Discard this unsaved instance?" : "Remove " + label + "?",
+      instance: inst.draft ? "" : '<span class="instance-chip"><span class="dot" style="background:' + (inst.color || homeColor(current)) + '"></span>' + label + "</span>",
+      description: inst.draft
+        ? "Nothing has been saved yet, so nothing is disconnected. The details you typed are cleared."
+        : "Mission Control stops polling " + label + " and its open notifications are closed. Nothing changes inside Home Assistant, and the token stays valid until you revoke it there.",
+      confirmLabel: inst.draft ? "Discard" : "Remove instance",
+      cancelLabel: inst.draft ? "Keep editing" : "Keep it",
+      returnFocus: $("#remove-instance"),
+      manageFocus: true,
+      onConfirm: function () {
+        var row = instanceRow(current);
+        if (row) row.remove();
+        delete INSTANCES[current];
+        var first = $(".connector-row");
+        loadInstance(first ? first.dataset.instance : "lake");
+        renderNotes();
+        var focusTarget = $(".connector-row") || $("#add-instance");
+        if (focusTarget) focusTarget.focus();
+      }
+    });
+  });
+
+  var draftSeq = 0;
+  $("#add-instance").addEventListener("click", function () {
+    draftSeq += 1;
+    var id = "draft" + draftSeq;
+    INSTANCES[id] = {
+      id: id, name: "", url: "", token: "", interval: "5", enabled: true,
+      health: "untested", admin: true, testState: "untested", entities: 0, updateCount: 0,
+      sources: { device: true, updates: true, persistent: true, repairs: true },
+      digest: "daily", digestTime: "08:00", color: "var(--text-3)", draft: true
+    };
+    var row = document.createElement("button");
+    row.type = "button";
+    row.className = "connector-row";
+    row.dataset.instance = id;
+    row.dataset.enabled = "true";
+    row.setAttribute("aria-expanded", "false");
+    row.setAttribute("aria-controls", "editor-panel");
+    row.innerHTML =
+      '<span class="connector-tile" aria-hidden="true">' + ico("i-house") + "</span>" +
+      '<span class="conn-main"><span class="conn-name">New instance ' +
+      '<span class="health health-off">' + ico("i-info") + " Not saved yet</span></span>" +
+      '<span class="conn-meta"><span data-url class="mono">No address yet</span></span></span>' +
+      '<span class="conn-side">' + ico("i-chevron-right", "chevron") + "</span>";
+    row.addEventListener("click", function () { loadInstance(id); });
+    $("#add-instance").before(row);
+    touched = {};
+    loadInstance(id);
+    $("#f-name").focus();
+    $("#save-state").textContent = "Not saved yet";
+  });
+
+  $("#setup-reset").addEventListener("click", function () {
+    $$('.connector-row[data-instance^="draft"]').forEach(function (r) { r.remove(); });
+    Object.keys(INSTANCES).forEach(function (k) { if (!BASELINE[k]) delete INSTANCES[k]; });
+    Object.keys(BASELINE).forEach(function (k) {
+      if (!INSTANCES[k]) {
+        INSTANCES[k] = JSON.parse(JSON.stringify(BASELINE[k]));
+      } else {
+        INSTANCES[k] = JSON.parse(JSON.stringify(BASELINE[k]));
+      }
+    });
+    touched = {};
+    loadInstance("lake");
+  });
+
+  /* ── Notification data ─────────────────────────────────────────── */
+
+  var LEVELS = {
+    urgent: { label: "Urgent", pill: "pill-urgent", icon: "i-alert-circle" },
+    action_needed: { label: "Action Needed", pill: "pill-action", icon: "i-alert-triangle" },
+    heads_up: { label: "Heads Up", pill: "pill-heads", icon: "i-info" },
+    fyi: { label: "FYI", pill: "pill-fyi", icon: "i-message" }
+  };
+
+  /* Every write-back moves through pending → accepted → confirmed.
+     "Accepted" means Home Assistant took the request; "confirmed" means a
+     later poll saw the result. Copy never claims the second while it is
+     only at the first. Actions marked `local` happen entirely inside
+     Mission Control, so they have no accepted phase to report. */
+  var ACTIONS = {
+    install: {
+      label: "Install update", icon: "i-download", style: "btn-primary", admin: true,
+      confirm: function (n, home) { return "Home Assistant restarts on " + home + " and automations pause for about two minutes."; },
+      confirmTitle: function (n) { return "Install " + n.version + "?"; },
+      confirmLabel: "Install now",
+      pending: function (n, home, o) {
+        return o && o.backup
+          ? "Backing up " + home + " first, then installing " + n.version + "…"
+          : "Sending the install request to " + home + "…";
+      },
+      accepted: function (n, home, o) {
+        return (o && o.backup ? "Backup finished. " : "") + home + " started installing " + n.version + " at 14:41. Still running " +
+          n.currentVersion + " until a poll confirms the install finished.";
+      },
+      confirmed: function (n) { return "Installed " + n.version + " · confirmed by the 14:47 poll"; },
+      failure: function (n, home) { return "Install failed: the supervisor returned 500. " + home + " is unchanged and still on " + n.currentVersion + "."; },
+      denied: "This token can't install updates. Updates need an administrator account in Home Assistant.",
+      resolves: true
+    },
+    skip: {
+      label: "Skip this version", icon: "i-slash", style: "btn-outline", admin: true,
+      confirm: function (n) { return "You won't hear about " + n.version + " again, but the next release will still reach you."; },
+      confirmTitle: function (n) { return "Skip " + n.version + "?"; },
+      confirmLabel: "Skip version",
+      pending: function (n, home) { return "Sending the skip request to " + home + "…"; },
+      accepted: function (n, home) { return home + " accepted the skip at 14:41. " + n.version + " is still offered until a poll confirms it."; },
+      confirmed: function (n) { return n.version + " marked as skipped · confirmed by the 14:47 poll"; },
+      failure: function (n, home) { return "Couldn't skip: " + home + " rejected the request. The update is still offered."; },
+      denied: "This token can't change update entities. Updates need an administrator account in Home Assistant.",
+      resolves: true
+    },
+    ignore: {
+      label: "Ignore repair", icon: "i-slash", style: "btn-outline", admin: true,
+      confirm: function (n, home) { return "It stays ignored inside Home Assistant on " + home + " until someone un-ignores it there."; },
+      confirmTitle: function () { return "Ignore this repair?"; },
+      confirmLabel: "Ignore repair",
+      pending: function (n, home) { return "Sending the ignore request to " + home + "…"; },
+      accepted: function (n, home) { return home + " accepted the request at 14:41. The repair is still listed until a poll confirms it."; },
+      confirmed: function () { return "Repair ignored in Home Assistant · confirmed by the 14:47 poll"; },
+      failure: function () { return "Couldn't ignore: Home Assistant rejected the request. The repair is still open."; },
+      denied: "This token can't manage repairs. Repairs need an administrator account in Home Assistant.",
+      resolves: true
+    },
+    dismiss: {
+      label: "Dismiss at source", icon: "i-x", style: "btn-outline", admin: false,
+      confirm: function () { return "This clears the notification for everyone in the house, not just here."; },
+      confirmTitle: function () { return "Dismiss in Home Assistant?"; },
+      confirmLabel: "Dismiss everywhere",
+      pending: function (n, home) { return "Sending the dismiss request to " + home + "…"; },
+      accepted: function (n, home) { return home + " accepted the dismissal at 14:41. It still shows until a poll confirms it cleared."; },
+      confirmed: function () { return "Dismissed in Home Assistant · confirmed by the 14:47 poll"; },
+      failure: function () { return "Dismiss failed. It's still showing in Home Assistant."; },
+      denied: "Not applicable — any Home Assistant account can dismiss a persistent notification.",
+      resolves: true
+    },
+    snooze: {
+      label: "Mute for 24h", icon: "i-clock", style: "btn-outline", admin: false, local: true,
+      confirm: function (n) { return "You won't be told if " + n.entity + " opens again today. Nothing changes inside Home Assistant."; },
+      confirmTitle: function () { return "Mute this alert for 24 hours?"; },
+      confirmLabel: "Mute 24 hours",
+      pending: function () { return "Muting this rule in Mission Control…"; },
+      confirmed: function () { return "Muted until 14:47 tomorrow · Mission Control only"; },
+      failure: function () { return "Couldn't save the mute. The rule is still active."; },
+      denied: "Not applicable — muting happens in Mission Control, not in Home Assistant.",
+      resolves: true
+    },
+    task: {
+      label: "Create task", icon: "i-check-square", style: "btn", admin: false, local: true,
+      pending: function () { return "Creating the task in Mission Control…"; },
+      confirmed: function () { return "Task created in Mission Control"; },
+      failure: function () { return "Couldn't create the task. Nothing changed in your home."; },
+      denied: "Not applicable — creating a task never touches Home Assistant.",
+      resolves: false
+    },
+    open: {
+      label: "Open in Home Assistant", icon: "i-external", style: "btn-ghost", admin: false, demoOnly: true
+    }
+  };
+
+  var NOTES_SEED = [
+    {
+      id: "n1", instance: "lake", kind: "update", level: "heads_up",
+      tile: "i-download", title: "Home Assistant Core 2025.8.2 available",
+      entity: "update.home_assistant_core", version: "2025.8.2", currentVersion: "2025.8.1", backupSupported: true,
+      copy: "Release notes call out a fix for recorder purge failures on SQLite. This entity matches a configured critical pattern, so it pushes immediately even though this home uses a daily summary.",
+      time: "14:29", unread: true, actions: ["install", "skip", "task", "open"],
+      detail: { heading: "Why this pushed immediately", body: "Daily summary is on for Lake House, but update.home_assistant_core is in the critical-pattern list. The item is still an ordinary individual notification; only its outbound delivery bypasses batching." }
+    },
+    {
+      id: "n2", instance: "lake", kind: "update", level: "heads_up",
+      tile: "i-package", title: "Installing Frigate 0.14.1",
+      entity: "update.frigate", version: "0.14.1", currentVersion: "0.13.2",
+      copy: "Started from Mission Control at 14:41. The add-on restarts on its own when the install finishes.",
+      time: "14:41", progress: 62, state: "pending", pendingText: "Installing Frigate 0.14.1 · 62%",
+      actions: ["open"],
+      detail: { heading: "In-progress installs are read-only here", body: "Mission Control polls the update entity for progress. Cancelling mid-install is not exposed, because Home Assistant cannot roll an add-on back cleanly once the container is replaced." }
+    },
+    {
+      id: "n3", instance: "lake", kind: "repair", level: "action_needed",
+      tile: "i-wrench", title: "Deprecated template sensor syntax",
+      entity: "repair.template_legacy_syntax",
+      copy: "Two template sensors still use the legacy YAML format. They keep working until Home Assistant 2026.2, then they stop loading.",
+      time: "Yesterday 09:12", actions: ["ignore", "task", "open"],
+      detail: { heading: "Repairs are warnings until they aren't", body: "Home Assistant marks this severity as warning, so it lands as Action Needed rather than Urgent. It becomes Urgent only if the integration actually fails to load." }
+    },
+    {
+      id: "n4", instance: "condo", kind: "repair", level: "urgent",
+      tile: "i-wrench", title: "Z-Wave JS failed to start",
+      entity: "repair.zwave_js_startup_failed",
+      copy: "The Z-Wave controller did not respond on startup. 11 devices are offline until this is fixed, including both door locks.",
+      time: "12:04", unread: true, actions: ["ignore", "task", "open"],
+      detail: { heading: "Urgent because devices are down", body: "Action-needed repairs are configured as immediate push triggers. The notification still follows the same individual lifecycle as every other Home Assistant item." }
+    },
+    {
+      id: "n5", instance: "lake", kind: "persistent", level: "fyi",
+      tile: "i-message", title: "Backup completed with 2 warnings",
+      entity: "persistent_notification.backup_2025_03_11",
+      copy: "Two add-on folders were skipped because they were locked during the backup window. The backup itself succeeded.",
+      time: "03:15", actions: ["dismiss", "task", "open"],
+      detail: { heading: "Dismissing is shared", body: "Persistent notifications live in Home Assistant, not in Mission Control. Dismissing here clears them for everyone in the house, which is why it confirms first." }
+    },
+    {
+      id: "n6", instance: "lake", kind: "device", level: "action_needed",
+      tile: "i-shield", title: "Garage side door open 34 minutes",
+      entity: "binary_sensor.garage_side_door",
+      copy: "Open since 14:01. Presence sensors report nobody home, and the forecast has rain from 16:00.",
+      time: "14:35", unread: true, actions: ["task", "snooze", "open"],
+      detail: { heading: "Read-only by design", body: "Mission Control never closes a door, arms an alarm, or calls a service. Every device action here creates work in Mission Control or opens Home Assistant." }
+    },
+    {
+      id: "n7", instance: "condo", kind: "device", level: "fyi",
+      tile: "i-shield", title: "Side door closed",
+      entity: "binary_sensor.condo_side_door",
+      copy: "Was open for 6 minutes. Closed at 13:58.",
+      time: "13:58", state: "resolved", resolvedText: "Resolved at the source · the door closed on its own",
+      actions: ["open"],
+      detail: { heading: "Resolved, not deleted", body: "When the underlying condition clears, the card resolves in place and says who cleared it. Push-summary timing never changes this authoritative notification lifecycle." }
+    },
+    {
+      id: "n8", instance: "condo", kind: "update", level: "heads_up",
+      tile: "i-package", title: "ESPHome 2025.7.3 available",
+      entity: "update.esphome", version: "2025.7.3", currentVersion: "2025.6.0", backupSupported: false,
+      copy: "Adds support for two new sensor platforms. It is visible and actionable here immediately; City Condo is configured not to send a routine push.",
+      time: "11:02", actions: ["install", "skip", "task", "open"],
+      detail: { heading: "Add-ons can't be backed up first", body: "Home Assistant only exposes the backup-before-update option for Core, Supervisor, and OS updates. For an add-on the install confirmation says so instead of offering a checkbox it cannot honour." }
+    }
+  ];
+
+  var notes = JSON.parse(JSON.stringify(NOTES_SEED));
+  var selectedNote = "n1";
+  var filter = "all";
+  var offlineInstance = null;
+
+  function homeName(id) { return (INSTANCES[id] && INSTANCES[id].name) || (BASELINE[id] && BASELINE[id].name) || "This home"; }
+  function homeColor(id) { return (BASELINE[id] && BASELINE[id].color) || "var(--text-3)"; }
+  function outcomeChoice() {
+    var r = $$('input[name="actionOutcome"]').filter(function (x) { return x.checked; })[0];
+    return r ? r.value : "success";
+  }
+  function noteById(id) { return notes.filter(function (n) { return n.id === id; })[0]; }
+  function isStale(n) { return offlineInstance === n.instance && n.state !== "resolved"; }
+
+  /* ── Notification rendering ────────────────────────────────────── */
+
+  /* One rule decides what a card and its detail pane may offer.
+     Anything that changes a house is withdrawn while a request is in
+     flight, while the home is stale, once the card is resolved, or once
+     that same action has already been confirmed — so no write-back can be
+     submitted twice. Navigation stays available in every state. */
+  function offeredActions(n, state) {
+    var done = n.completed || [];
+    var frozen = state === "pending" || state === "accepted" || state === "stale" || state === "resolved";
+    return (n.actions || []).filter(function (k) {
+      var a = ACTIONS[k];
+      if (!a) return false;
+      if (a.demoOnly) return true;
+      if (frozen) return false;
+      /* After a failure or a refusal the state line owns the single
+         recovery path, so the same action is not offered twice. */
+      if ((state === "failure" || state === "denied") && k === n.activeAction) return false;
+      return done.indexOf(k) === -1;
+    });
+  }
+
+  function frozenHint(n, state) {
+    var home = homeName(n.instance);
+    if (state === "pending" || state === "accepted") {
+      return "Actions that change " + home + " are withdrawn until this request settles, so the same change can't be sent twice.";
+    }
+    if (state === "stale") return "Actions that change " + home + " return when it reconnects.";
+    if (state === "resolved") return "This one is closed. Opening it in Home Assistant still works.";
+    return "";
+  }
+
+  function actionButton(n, key) {
+    var a = ACTIONS[key];
+    return '<button class="btn btn-sm ' + a.style + '" type="button" data-note="' + n.id + '" data-action="' + key + '">' +
+      ico(a.icon) + " " + a.label + "</button>";
+  }
+
+  function lineBox(tone, icon, body, actions, spin) {
+    return '<div class="state-line ' + tone + '">' + ico(icon, spin ? "spin" : "") +
+      "<div>" + body + (actions ? '<div class="line-actions">' + actions + "</div>" : "") + "</div></div>";
+  }
+
+  function stateLine(n) {
+    var a = n.activeAction ? ACTIONS[n.activeAction] : null;
+    var home = homeName(n.instance);
+    var opts = n.actionOpts || {};
+
+    if (isStale(n)) {
+      return lineBox("tone-stale", "i-wifi",
+        home + " last responded 14 minutes ago. This may already be out of date, so anything that changes " + home + " is unavailable until it reconnects.", "");
+    }
+    if (n.state === "resolved") {
+      return lineBox("tone-success", "i-check-circle", n.resolvedText || "Resolved at the source", "");
+    }
+    if (n.state === "pending") {
+      return lineBox("tone-pending", "i-loader", n.pendingText || (a ? a.pending(n, home, opts) : "Working…"), "", true);
+    }
+    if (n.state === "accepted" && a) {
+      return lineBox("tone-accepted", "i-clock", a.accepted(n, home, opts),
+        '<button class="btn btn-sm btn-outline" type="button" data-note="' + n.id + '" data-action="check-now">' +
+        ico("i-refresh") + " Check for confirmation now</button>");
+    }
+    if (n.state === "success" && a) {
+      return lineBox("tone-success", "i-check-circle", a.confirmed(n, home, opts), "");
+    }
+    if (n.state === "failure" && a) {
+      return lineBox("tone-failure", "i-alert-circle", a.failure(n, home),
+        '<button class="btn btn-sm btn-outline" type="button" data-note="' + n.id + '" data-action="' + n.activeAction + '" data-retry="1">' +
+        ico("i-refresh") + " Retry</button>");
+    }
+    if (n.state === "denied" && a) {
+      return lineBox("tone-denied", "i-lock", a.denied,
+        (a.admin ? '<button class="btn btn-sm btn-outline" type="button" data-goto-setup="1">' + ico("i-key") + " Update this token</button>" : "") +
+        '<button class="btn btn-sm btn-ghost" type="button" data-note="' + n.id + '" data-action="reset-state">Dismiss message</button>');
+    }
+    if (n.state === "demo") {
+      var haUrl = (INSTANCES[n.instance] ? INSTANCES[n.instance].url : "") + "/config/updates";
+      return lineBox("", "i-external",
+        'Would open <span class="mono">' + haUrl + "</span> in a new tab. Navigation is disabled in this mockup.",
+        '<button class="btn btn-sm btn-ghost" type="button" data-note="' + n.id + '" data-action="reset-state">Dismiss message</button>');
+    }
+    return "";
+  }
+
+  function noteMarkup(n) {
+    var lvl = LEVELS[n.level];
+    var stale = isStale(n);
+    var state = stale ? "stale" : (n.state || "ready");
+    var chip = "";
+    if (state === "pending") chip = '<span class="state-chip state-pending">' + ico("i-loader", "spin") + " Provider update pending</span>";
+    if (state === "accepted") chip = '<span class="state-chip state-accepted">' + ico("i-clock") + " Waiting for confirmation</span>";
+    if (state === "success") chip = '<span class="state-chip state-success">' + ico("i-check-circle") + " Synced</span>";
+    if (state === "failure") chip = '<span class="state-chip state-failure">' + ico("i-alert-circle") + " Sync failed</span>";
+    if (state === "denied") chip = '<span class="state-chip state-denied">' + ico("i-lock") + " Permission denied</span>";
+    if (state === "stale") chip = '<span class="state-chip state-stale">' + ico("i-wifi") + " Stale</span>";
+    if (state === "resolved") chip = '<span class="state-chip state-resolved">' + ico("i-check-circle") + " Resolved</span>";
+
+    var offered = offeredActions(n, state);
+    var actions = offered.length
+      ? '<div class="note-actions">' + offered.map(function (k) { return actionButton(n, k); }).join("") + "</div>"
+      : "";
+
+    return '<article class="note" data-level="' + n.level + '" data-state="' + state + '" data-id="' + n.id + '"' +
+      (selectedNote === n.id ? ' data-selected="true"' : "") + ">" +
+      '<button class="note-hit" type="button" data-select="' + n.id + '" aria-label="Open ' + n.title + ' from ' + homeName(n.instance) + '"></button>' +
+      '<div class="note-inner">' +
+      '<span class="note-tile" aria-hidden="true">' + ico(n.tile) + "</span>" +
+      '<div class="note-main">' +
+      '<div class="note-titlerow">' +
+      (n.unread && state === "ready" ? '<span class="unread" aria-hidden="true"></span>' : "") +
+      '<h5 class="note-title">' + n.title + "</h5></div>" +
+      '<p class="note-entity mono">' + n.entity + "</p>" +
+      '<p class="note-copy">' + n.copy + "</p>" +
+      (n.progress !== undefined && state === "pending"
+        ? '<div class="note-progress" role="progressbar" aria-valuenow="' + n.progress + '" aria-valuemin="0" aria-valuemax="100" aria-label="Install progress"><i style="width:' + n.progress + '%"></i></div>'
+        : "") +
+      '<div class="note-meta">' +
+      '<span class="instance-chip"><span class="dot" style="background:' + homeColor(n.instance) + '"></span>' + homeName(n.instance) + "</span>" +
+      '<span class="pill ' + lvl.pill + '">' + ico(lvl.icon, "note-level-icon") + " " + lvl.label + "</span>" +
+      chip +
+      '<span class="meta-text tabular">' + n.time + "</span>" +
+      "</div>" +
+      stateLine(n) +
+      actions +
+      "</div></div></article>";
+  }
+
+  function visibleNotes() {
+    return notes.filter(function (n) { return filter === "all" || n.instance === filter; });
+  }
+
+  function renderNotes() {
+    var root = $("#note-list-root");
+    var list = visibleNotes();
+    var open = list.filter(function (n) { return n.state !== "resolved"; });
+    var done = list.filter(function (n) { return n.state === "resolved"; });
+
+    $("#note-count").textContent = open.length + " open";
+
+    if (!list.length) {
+      root.innerHTML = '<div class="note-empty">' + ico("i-bell", "ico-lg") +
+        "<p>No Home Assistant notifications for this home.</p>" +
+        '<p style="margin-top:6px">Sources are on and the last sync succeeded — there is simply nothing to report.</p></div>';
+      renderDetail();
+      return;
+    }
+
+    var html = "";
+    if (open.length) {
+      html += '<div class="group-label"><span>Open</span><span class="tabular">' + open.length + "</span></div>";
+      html += '<div class="note-list">' + open.map(noteMarkup).join("") + "</div>";
+    }
+    if (done.length) {
+      html += '<div class="group-label"><span>Resolved today</span><span class="tabular">' + done.length + "</span></div>";
+      html += '<div class="note-list">' + done.map(noteMarkup).join("") + "</div>";
+    }
+    root.innerHTML = html;
+
+    if (!list.filter(function (n) { return n.id === selectedNote; }).length) {
+      selectedNote = list[0].id;
+      root.innerHTML = html;
+      $$(".note", root).forEach(function (el) {
+        el.dataset.selected = String(el.dataset.id === selectedNote);
+      });
+    }
+    renderDetail();
+  }
+
+  function renderDetail() {
+    var pane = $("#detail-pane");
+    var n = noteById(selectedNote);
+    if (!n || !visibleNotes().filter(function (x) { return x.id === n.id; }).length) {
+      pane.innerHTML = '<p class="detail-crumb">Nothing selected</p><h4>Pick a notification</h4>' +
+        '<p class="detail-copy">Select a card to see its full context, the actions available for that event type, and what each one changes inside Home Assistant.</p>';
+      return;
+    }
+    var lvl = LEVELS[n.level];
+    var stale = isStale(n);
+    var state = stale ? "stale" : (n.state || "ready");
+    var offered = offeredActions(n, state);
+    var hint = frozenHint(n, state);
+
+    pane.innerHTML =
+      '<p class="detail-crumb">Home Assistant · ' + homeName(n.instance) + "</p>" +
+      "<h4>" + n.title + "</h4>" +
+      '<div class="detail-meta">' +
+      '<span class="instance-chip"><span class="dot" style="background:' + homeColor(n.instance) + '"></span>' + homeName(n.instance) + "</span>" +
+      '<span class="pill ' + lvl.pill + '">' + ico(lvl.icon, "note-level-icon") + " " + lvl.label + "</span>" +
+      '<span class="data-chip mono">' + n.entity + "</span>" +
+      '<span class="data-chip tabular">' + n.time + "</span>" +
+      "</div>" +
+      '<p class="detail-copy">' + n.copy + "</p>" +
+      '<div class="detail-box"><strong>' + n.detail.heading + "</strong><p>" + n.detail.body + "</p></div>" +
+      stateLine(n) +
+      '<div class="detail-actions">' +
+      (offered.length
+        ? offered.map(function (k) { return actionButton(n, k); }).join("")
+        : '<span class="field-hint" style="margin:0">No actions — this one is informational.</span>') +
+      "</div>" +
+      (hint ? '<p class="field-hint" style="margin:9px 0 0">' + hint + "</p>" : "") +
+      '<div class="timeline"><h5>What happened</h5><ol>' +
+      "<li>" + ico("i-wifi") + "<span>Polled " + homeName(n.instance) + " over the REST API</span><time>14:29</time></li>" +
+      "<li>" + ico("i-bell") + "<span>Matched a rule and created this notification</span><time>14:29</time></li>" +
+      (state === "pending" ? "<li>" + ico("i-loader", "spin") + "<span>Request sent, waiting for Home Assistant to accept it</span><time>14:41</time></li>" : "") +
+      (state === "accepted" ? "<li>" + ico("i-check-circle") + "<span>Home Assistant accepted the request</span><time>14:41</time></li>" +
+        "<li>" + ico("i-clock") + "<span>Waiting for a poll to confirm the result</span><time>next poll</time></li>" : "") +
+      (state === "success" || state === "resolved" ? "<li>" + ico("i-check-circle") + "<span>Home Assistant accepted the request</span><time>14:41</time></li>" : "") +
+      (state === "success" ? "<li>" + ico("i-check-circle") + "<span>A later poll confirmed the change landed</span><time>14:47</time></li>" : "") +
+      (state === "failure" ? "<li>" + ico("i-alert-circle") + "<span>Home Assistant returned an error — nothing changed</span><time>14:47</time></li>" : "") +
+      (state === "denied" ? "<li>" + ico("i-lock") + "<span>Rejected: this token is not an administrator</span><time>14:47</time></li>" : "") +
+      (state === "stale" ? "<li>" + ico("i-alert-triangle") + "<span>Last successful poll — nothing newer than this</span><time>14:33</time></li>" : "") +
+      (state === "resolved" ? "<li>" + ico("i-check-circle") + "<span>" + (n.activeAction ? "A later poll confirmed the change landed" : "Condition cleared at the source") + "</span><time>" + (n.activeAction ? "14:47" : "13:58") + "</time></li>" : "") +
+      "</ol></div>";
+  }
+
+  /* ── Notification interactions ─────────────────────────────────── */
+
+  var actionTimers = {};
+  function clearNoteTimer(id) {
+    if (actionTimers[id]) { window.clearTimeout(actionTimers[id]); delete actionTimers[id]; }
+  }
+
+  function confirmWriteback(n, key) {
+    var a = ACTIONS[key];
+    clearNoteTimer(n.id);
+    n.completed = (n.completed || []).concat([key]);
+    if (a.resolves) {
+      n.state = "resolved";
+      n.resolvedText = a.confirmed(n, homeName(n.instance), n.actionOpts || {});
+    } else {
+      n.state = "success";
+    }
+    renderNotes();
+    announce(outcomeAnnouncement(n, key, "confirmed"));
+  }
+
+  function runAction(n, key, opts) {
+    var a = ACTIONS[key];
+    if (a.demoOnly) {
+      n.state = "demo";
+      n.activeAction = key;
+      renderNotes();
+      return;
+    }
+    /* Hard stop on a second submit, whichever surface it came from. */
+    if (n.state === "pending" || n.state === "accepted") return;
+
+    var outcome = outcomeChoice();
+    var home = homeName(n.instance);
+    n.activeAction = key;
+    n.actionOpts = opts || {};
+    n.unread = false;
+    n.state = "pending";
+    n.pendingText = a.pending(n, home, n.actionOpts);
+    renderNotes();
+    announce(n.pendingText);
+
+    clearNoteTimer(n.id);
+    actionTimers[n.id] = window.setTimeout(function () {
+      delete actionTimers[n.id];
+      var live = noteById(n.id);
+      if (!live || live.state !== "pending") return;
+
+      if (outcome === "failure" || outcome === "denied") {
+        live.state = outcome;
+        renderNotes();
+        announce(outcomeAnnouncement(live, key, outcome));
+        return;
+      }
+      /* Local actions never leave Mission Control, so there is no upstream
+         acceptance to wait on — they settle in one step. */
+      if (a.local) { confirmWriteback(live, key); return; }
+
+      live.state = "accepted";
+      renderNotes();
+      announce(a.accepted(live, home, live.actionOpts || {}));
+
+      actionTimers[live.id] = window.setTimeout(function () {
+        delete actionTimers[live.id];
+        var settled = noteById(live.id);
+        if (settled && settled.state === "accepted") confirmWriteback(settled, key);
+      }, 2600);
+    }, 1200);
+  }
+
+  function announce(msg) {
+    var el = $("#notify-announcer");
+    if (el) el.textContent = msg;
+  }
+
+  function outcomeAnnouncement(n, key, outcome) {
+    var a = ACTIONS[key];
+    var home = homeName(n.instance);
+    if (outcome === "denied") return (a.admin ? "Permission denied. " : "") + a.denied;
+    if (outcome === "failure") return "Failed. " + a.failure(n, home);
+    return "Confirmed. " + a.confirmed(n, home, n.actionOpts || {});
+  }
+
+  /* ── Install confirmation extras ───────────────────────────────── */
+
+  function installExtra(n, home) {
+    var html =
+      '<div class="version-diff">' +
+      '<span class="vd-col"><span class="vd-label">Installed now</span><span class="vd-value mono">' + n.currentVersion + "</span></span>" +
+      '<svg class="ico vd-arrow" aria-hidden="true"><use href="#i-arrow-right"/></svg>' +
+      '<span class="vd-col"><span class="vd-label">Offered</span><span class="vd-value mono vd-to">' + n.version + "</span></span>" +
+      "</div>";
+    if (n.backupSupported) {
+      html += '<label class="modal-check" for="modal-backup">' +
+        '<input type="checkbox" id="modal-backup">' +
+        '<span><span class="mc-title">Create a backup first</span>' +
+        '<span class="mc-hint">Home Assistant takes a full backup of ' + home +
+        " before installing. Adds about four minutes and roughly 1.2 GB of storage.</span></span></label>";
+    } else {
+      html += '<div class="modal-note">' + ico("i-info") +
+        "<span>No pre-install backup is available for this one. Home Assistant only offers backup-before-update for Core, Supervisor, and OS updates &mdash; not for add-ons.</span></div>";
+    }
+    return html;
+  }
+
+  function requestAction(n, key, trigger) {
+    var a = ACTIONS[key];
+    var home = homeName(n.instance);
+    if (!a.confirm) { runAction(n, key); return; }
+    openConfirm({
+      tone: "warning",
+      icon: a.icon,
+      title: a.confirmTitle(n, home),
+      instance: '<span class="instance-chip"><span class="dot" style="background:' + homeColor(n.instance) + '"></span>' + home + "</span>",
+      description: a.confirm(n, home),
+      extra: key === "install" ? installExtra(n, home) : "",
+      confirmLabel: a.confirmLabel,
+      cancelLabel: "Cancel",
+      returnFocus: trigger,
+      manageFocus: true,
+      onConfirm: function (payload) {
+        runAction(n, key, payload);
+        var card = $('.note[data-id="' + n.id + '"] .note-hit');
+        if (card) card.focus();
+      }
+    });
+  }
+
+  document.addEventListener("click", function (e) {
+    var gotoSetup = e.target.closest("[data-goto-setup]");
+    if (gotoSetup) {
+      selectTab($("#tab-setup"));
+      $("#tab-setup").focus();
+      $("#f-token").focus();
+      return;
+    }
+
+    var sel = e.target.closest("[data-select]");
+    if (sel) {
+      selectedNote = sel.dataset.select;
+      renderNotes();
+      return;
+    }
+
+    var actBtn = e.target.closest("[data-action]");
+    if (actBtn && actBtn.dataset.note) {
+      var an = noteById(actBtn.dataset.note);
+      if (!an) return;
+      var key = actBtn.dataset.action;
+      if (key === "reset-state") {
+        an.state = "ready";
+        an.activeAction = null;
+        renderNotes();
+        return;
+      }
+      if (key === "check-now") {
+        if (an.state !== "accepted" || !an.activeAction) return;
+        confirmWriteback(an, an.activeAction);
+        return;
+      }
+      selectedNote = an.id;
+      if (actBtn.dataset.retry) { runAction(an, key, an.actionOpts || {}); return; }
+      requestAction(an, key, actBtn);
+    }
+  });
+
+  $$(".filter-chip").forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      filter = chip.dataset.filter;
+      $$(".filter-chip").forEach(function (c) { c.setAttribute("aria-pressed", String(c === chip)); });
+      renderNotes();
+    });
+  });
+
+  function renderOfflineBanner() {
+    var banner = $("#offline-banner");
+    if (!offlineInstance) { banner.innerHTML = ""; return; }
+    banner.innerHTML = '<div class="notice notice-warn" role="status">' + ico("i-wifi") +
+      "<div><strong>" + homeName(offlineInstance) + " isn't responding</strong>" +
+      "Last successful poll was 14 minutes ago at 14:33. Its notifications are shown as they were then, and actions that touch this home are unavailable until it reconnects." +
+      '<div class="notice-actions"><button class="btn btn-sm btn-outline" type="button" id="retry-poll">' +
+      ico("i-refresh") + " Retry now</button></div></div></div>";
+    $("#retry-poll").addEventListener("click", function () {
+      var was = offlineInstance;
+      offlineInstance = null;
+      $("#go-offline").setAttribute("aria-pressed", "false");
+      $("#go-offline-label").textContent = "Simulate instance offline";
+      renderOfflineBanner();
+      renderNotes();
+      $("#sync-pill").innerHTML = '<span class="dot" style="background:var(--success)"></span> Synced 2 min ago';
+      announce(homeName(was) + " is back online. Notifications are live again.");
+    });
+  }
+
+  $("#go-offline").addEventListener("click", function () {
+    var btn = $("#go-offline");
+    var target = picker ? picker.value : "lake";
+    var wasOffline = offlineInstance;
+    if (offlineInstance) {
+      offlineInstance = null;
+      btn.setAttribute("aria-pressed", "false");
+      $("#go-offline-label").textContent = "Simulate instance offline";
+    } else {
+      offlineInstance = target;
+      btn.setAttribute("aria-pressed", "true");
+      $("#go-offline-label").textContent = "Bring " + homeName(target) + " back online";
+    }
+    renderOfflineBanner();
+    renderNotes();
+    $("#sync-pill").innerHTML = offlineInstance
+      ? '<span class="dot" style="background:var(--warning)"></span> Last synced 14 min ago'
+      : '<span class="dot" style="background:var(--success)"></span> Synced 2 min ago';
+    announce(offlineInstance
+      ? homeName(offlineInstance) + " isn't responding. Its notifications are shown as they were at the last successful poll."
+      : homeName(wasOffline) + " is back online. Notifications are live again.");
+  });
+
+  $("#notify-reset").addEventListener("click", function () {
+    Object.keys(actionTimers).forEach(function (id) { clearNoteTimer(id); });
+    closeConfirm();
+    notes = JSON.parse(JSON.stringify(NOTES_SEED));
+    selectedNote = "n1";
+    offlineInstance = null;
+    filter = "all";
+    $$(".filter-chip").forEach(function (c) { c.setAttribute("aria-pressed", String(c.dataset.filter === "all")); });
+    $("#go-offline").setAttribute("aria-pressed", "false");
+    $("#go-offline-label").textContent = "Simulate instance offline";
+    $("#sync-pill").innerHTML = '<span class="dot" style="background:var(--success)"></span> Synced 2 min ago';
+    renderOfflineBanner();
+    renderNotes();
+    announce("Notification demo reset to its starting state.");
+  });
+
+  $("#refresh-notes").addEventListener("click", function () {
+    var btn = $("#refresh-notes");
+    btn.disabled = true;
+    btn.innerHTML = ico("i-loader", "spin");
+    window.setTimeout(function () {
+      btn.disabled = false;
+      btn.innerHTML = ico("i-refresh");
+      /* A poll is exactly what turns "accepted" into "confirmed". */
+      var settled = notes.filter(function (n) { return n.state === "accepted" && n.activeAction; });
+      settled.forEach(function (n) { confirmWriteback(n, n.activeAction); });
+      if (!settled.length) {
+        renderNotes();
+        announce("Refreshed. Nothing changed since the last poll.");
+      }
+    }, 800);
+  });
+
+  /* ── Boot ──────────────────────────────────────────────────────── */
+
+  loadInstance("lake");
+  renderNotes();
+  renderOfflineBanner();
+})();
+
+</script>
+</body>
+</html>

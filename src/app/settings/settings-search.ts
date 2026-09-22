@@ -13,6 +13,7 @@ export type SettingsSection =
   | 'contentTypes'
   | 'priorityEntities'
   | 'dashboard'
+  | 'contextThemes'
   | 'storage'
   | 'shortcuts'
   | 'notifications'
@@ -39,6 +40,7 @@ export const SETTINGS_SECTION_NAMES: Record<SettingsSection, string> = {
   triageSources: 'Triage Sources',
   priorityEntities: 'Priority Entities',
   dashboard: 'Dashboard',
+  contextThemes: 'Context Themes',
   shortcuts: 'Taskbar Shortcuts',
   ai: 'AI Provider',
   storage: 'Storage & Cache',
@@ -56,10 +58,18 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'n8n', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['automation', 'workflow'] },
   { title: 'Outbound Webhooks', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['events', 'callback'] },
   { title: 'Inbound Webhooks', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['events', 'capture'] },
+  { title: 'Alertmanager', section: 'integrations', sectionLabel: 'Data Sources', keywords: ['homelab', 'prometheus', 'incident', 'webhook'] },
   { title: 'Notification enrichment', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['re-enrichment', 'ai enrichment'] },
   { title: 'Push Notifications', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['alerts', 'browser'] },
+  {
+    title: 'Connector Push Rules',
+    section: 'notifications',
+    sectionLabel: 'Data Sources',
+    target: 'Choose which connector events can interrupt you',
+    keywords: ['source alerts', 'notification types', 'minimum level', 'lock screen preview'],
+  },
   { title: 'Do Not Disturb', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['dnd', 'mute'] },
-  { title: 'Notification Scheduler', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['schedule'] },
+  { title: 'Scheduled Summaries', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['schedule', 'notification scheduler'] },
   { title: 'Morning Summary', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['digest'] },
   { title: 'Triage Nudge', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['reminder'] },
   { title: 'Carry-Forward Reminder', section: 'notifications', sectionLabel: 'Data Sources', keywords: ['reminder'] },
@@ -77,6 +87,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Priority Entities', section: 'priorityEntities', sectionLabel: 'Organization', keywords: ['smart score', 'people', 'projects'] },
 
   { title: 'Dashboard KPIs', section: 'dashboard', sectionLabel: 'Appearance', keywords: ['metrics', 'cards'] },
+  { title: 'Context Themes', section: 'contextThemes', sectionLabel: 'Appearance', keywords: ['project color', 'list color', 'backdrop', 'appearance', 'frame'] },
   { title: 'KPI Rotation', section: 'dashboard', sectionLabel: 'Appearance', target: 'Rotation', keywords: ['cycle', 'dashboard'] },
   { title: 'KPI Auto-surface', section: 'dashboard', sectionLabel: 'Appearance', target: 'Auto-surface', keywords: ['dashboard', 'automatic'] },
   { title: 'Taskbar Shortcuts', section: 'shortcuts', sectionLabel: 'Appearance', keywords: ['pwa', 'quick launch'] },

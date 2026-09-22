@@ -43,6 +43,7 @@ function suggestion(index: number): SuggestionTask {
 
 function suggestionGroups(overdue: SuggestionTask[]): SuggestionGroups {
   return {
+    planningSignals: [],
     yesterday: [],
     overdue,
     dueToday: [],
@@ -55,7 +56,30 @@ function suggestionGroups(overdue: SuggestionTask[]): SuggestionGroups {
   };
 }
 
+function replanningGroups(): SuggestionGroups {
+  return {
+    ...suggestionGroups([]),
+    planningSignals: [suggestion(1)],
+  };
+}
+
 describe('MobileSuggestions pagination', () => {
+  it('labels the rolling due-date group as Next 7 Days', () => {
+    render(
+      <MobileSuggestions
+        suggestions={{
+          ...suggestionGroups([]),
+          dueThisWeek: [suggestion(1)],
+        }}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+        initialExpanded
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: 'Next 7 Days (1)' })).toBeTruthy();
+  });
+
   it('keeps the current page when adding a suggestion changes the task list', () => {
     const onAddToDay = vi.fn();
     const overdue = Array.from({ length: 11 }, (_, index) => suggestion(index + 1));
@@ -87,5 +111,21 @@ describe('MobileSuggestions pagination', () => {
     expect(screen.getByText('2 / 2')).toBeTruthy();
     expect(screen.getByText('Overdue task 7')).toBeTruthy();
     expect(screen.queryByText('Overdue task 1')).toBeNull();
+  });
+
+  it('explains replanning suggestions and links to Insights', () => {
+    render(
+      <MobileSuggestions
+        suggestions={replanningGroups()}
+        onAddToDay={vi.fn()}
+        onSelectTask={vi.fn()}
+        initialExpanded
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'May Need Replanning (1)' }));
+
+    expect(screen.getByText(/Tasks with recent missed commitments/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: 'View planning friction insights' })).toHaveAttribute('href', '/insights#planning-friction');
   });
 });

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DurableAiRunStore } from '@/lib/ai/durable-runs';
+import { getDurableAiRunRepository } from '@/lib/ai/durable-runs';
 import { ApiErrors } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -25,10 +25,10 @@ export async function GET(
   }
 
   try {
-    const store = new DurableAiRunStore();
-    const run = store.getRun(parsed.data.runId);
+    const store = await getDurableAiRunRepository();
+    const run = await store.getRun(parsed.data.runId);
     if (!run) return ApiErrors.notFound('Durable AI run');
-    const fetched = store.getEventsAfter(
+    const fetched = await store.getEventsAfter(
       parsed.data.runId,
       parsed.data.after,
       parsed.data.limit + 1,

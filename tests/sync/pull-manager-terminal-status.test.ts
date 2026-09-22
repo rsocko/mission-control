@@ -8,13 +8,16 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
-import type { TaskItem } from '@/types';
+import type { ConnectorCapabilities, TaskItem } from '@/types';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
 const mockExistingTasks: unknown[] = [];
 const mockUpdateSets: unknown[] = [];
+const mockIdentityWrites: unknown[] = [];
 let selectCallCount = 0;
+let mockCapabilities: ConnectorCapabilities | null = null;
+let mockConcurrentInsertRecord: Record<string, unknown> | null = null;
 
 type AwaitableTagRows = unknown[] & {
   where: ReturnType<typeof vi.fn>;
@@ -69,7 +72,7 @@ vi.mock('@/db/schema', () => ({
 }));
 
 vi.mock('@/lib/connectors/capabilities', () => ({
-  getConnectorCapabilities: vi.fn(async () => null),
+  getConnectorCapabilities: vi.fn(async () => mockCapabilities),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -78,6 +81,13 @@ vi.mock('@/lib/logger', () => ({
 
 vi.mock('@/lib/sync/events', () => ({
   syncEventBus: { emitSyncEvent: vi.fn() },
+}));
+
+vi.mock('@/lib/external-identities/primary-identity', () => ({
+  persistGitHubPrimaryIdentityBatch: vi.fn(async (writes: unknown[]) => {
+    mockIdentityWrites.push(...writes);
+    return writes.map(() => ({ state: 'bound' }));
+  }),
 }));
 
 vi.mock('@/lib/sync/github-hierarchy-reconciliation', () => ({
@@ -117,6 +127,105 @@ vi.mock('@/lib/sync/deletion-detector', () => ({
   detectDeletions: vi.fn(async () => ({ removed: 0, localOnlyProtected: 0 })),
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: {
+      get: vi.fn(async () => mockCapabilities
+        ? { capabilities: mockCapabilities }
+        : null),
+    },
+    execution: {
+      support: { assertConnectorSupported: vi.fn() },
+      pulls: {
+        loadSnapshot: vi.fn(async () => ({
+          tasks: [...mockExistingTasks],
+          tags: [],
+          archivedRecurringDuplicateSourceIds: [],
+          linkedSources: [],
+        })),
+        updateLinkedSourceLocator: vi.fn(async () => undefined),
+        updateTaskSourceId: vi.fn(async (taskId: string, sourceId: string) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === taskId,
+          ) as Record<string, unknown> | undefined;
+          if (task) task.sourceId = sourceId;
+          return Boolean(task);
+        }),
+        adoptLocalTask: vi.fn(async (input: {
+          taskId: string;
+          remoteSourceId: string;
+          hasLocalEdits: boolean;
+          now: string;
+        }) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === input.taskId,
+          ) as Record<string, unknown> | undefined;
+          if (!task) return null;
+          Object.assign(task, {
+            sourceId: input.remoteSourceId,
+            syncStatus: input.hasLocalEdits ? 'pending_push' : 'synced',
+            lastSyncedAt: input.now,
+          });
+          return task;
+        }),
+        insertBatch: vi.fn(async (candidates: Array<{
+          task: Record<string, unknown>;
+        }>) => {
+          if (mockConcurrentInsertRecord) {
+            mockExistingTasks.push(mockConcurrentInsertRecord);
+            return {
+              insertedIds: new Set<string>(),
+              records: [mockConcurrentInsertRecord],
+            };
+          }
+          const insertedIds = new Set<string>();
+          for (const candidate of candidates) {
+            mockExistingTasks.push(candidate.task);
+            insertedIds.add(candidate.task.id as string);
+          }
+          return { insertedIds, records: candidates.map(({ task }) => task) };
+        }),
+        findBySourceIds: vi.fn(async (_connectorId: string, sourceIds: string[]) =>
+          mockExistingTasks.filter((candidate) =>
+            sourceIds.includes((candidate as { sourceId: string }).sourceId))),
+        applyRemoteUpdate: vi.fn(async (input: {
+          taskId: string;
+          expectedSyncStatus: string;
+          values: Record<string, unknown>;
+        }) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === input.taskId,
+          ) as Record<string, unknown> | undefined;
+          if (!task || task.syncStatus !== input.expectedSyncStatus) return false;
+          Object.assign(task, input.values);
+          mockUpdateSets.push(input.values);
+          return true;
+        }),
+        replaceSourceTags: vi.fn(async () => undefined),
+        listChecklistItems: vi.fn(async () => mockExistingTasks
+          .filter((task) => (task as { isChecklistItem?: boolean }).isChecklistItem)
+          .map((task) => ({
+            id: (task as { id: string }).id,
+            sourceId: (task as { sourceId: string }).sourceId,
+            parentId: (task as { parentId?: string | null }).parentId ?? null,
+          }))),
+        correctParents: vi.fn(async (corrections: Array<{ taskId: string; parentId: string }>) => {
+          for (const correction of corrections) {
+            const task = mockExistingTasks.find(
+              (candidate) => (candidate as { id: string }).id === correction.taskId,
+            ) as Record<string, unknown> | undefined;
+            if (task) task.parentId = correction.parentId;
+          }
+        }),
+        listChildren: vi.fn(async (taskId: string) => mockExistingTasks
+          .filter((task) => (task as { parentId?: string }).parentId === taskId)
+          .map((task) => (task as { id: string }).id)),
+        listTasks: vi.fn(async () => [...mockExistingTasks]),
+      },
+    },
+  })),
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
@@ -133,6 +242,7 @@ vi.mock('crypto', async (importOriginal) => {
 });
 
 import { upsertTasks } from '@/lib/sync/pull-manager';
+import { detectDeletions } from '@/lib/sync/deletion-detector';
 
 describe('pull-manager terminal status sync', () => {
   const connectorId = 'gh-conn-1';
@@ -148,7 +258,10 @@ describe('pull-manager terminal status sync', () => {
     vi.clearAllMocks();
     mockExistingTasks.length = 0;
     mockUpdateSets.length = 0;
+    mockIdentityWrites.length = 0;
     selectCallCount = 0;
+    mockCapabilities = null;
+    mockConcurrentInsertRecord = null;
   });
 
   function makeExistingTask(overrides: Record<string, unknown> = {}) {
@@ -245,6 +358,71 @@ describe('pull-manager terminal status sync', () => {
     )).toBe(true);
   });
 
+  it('preserves MC-local snoozes when a connector omits the field', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      snoozedUntil: '2026-08-23T12:00:00Z',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        snoozedUntil: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask()],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      snoozedUntil: '2026-08-23T12:00:00Z',
+    }));
+  });
+
+  it('preserves MC-local status context when the source omits it', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      microStatus: 'waiting',
+      statusReason: 'Waiting for a reply',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      taskFieldProfile: {
+        microStatus: { authority: 'local', writeBack: 'none' },
+        statusReason: { authority: 'local', writeBack: 'none' },
+      },
+    };
+
+    await upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask({ microStatus: undefined, statusReason: undefined })],
+      false,
+      [],
+    );
+
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      microStatus: 'waiting',
+      statusReason: 'Waiting for a reply',
+    }));
+  });
+
   it('forces remote "cancelled" when local is in_progress', async () => {
     mockExistingTasks.push(makeExistingTask({
       status: 'in_progress',
@@ -266,6 +444,59 @@ describe('pull-manager terminal status sync', () => {
     expect(mockUpdateSets).toContainEqual(
       expect.objectContaining({ status: 'cancelled' }),
     );
+  });
+
+  it('reconciles terminal OWL outcomes and preserves disposition metadata', async () => {
+    const owlConnectorId = 'owl-1';
+    const owlConnector = {
+      ...mockConnector,
+      type: 'document-intelligence',
+      displayName: 'OWL',
+    } as unknown as IConnector;
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: true,
+      tags: true,
+      tagWriteBack: false,
+      supportedTaskStatuses: ['todo', 'done', 'cancelled'],
+      taskAbsenceMeansDeleted: false,
+    };
+    mockExistingTasks.push(makeExistingTask({
+      connectorType: 'document-intelligence',
+      connectorInstanceId: owlConnectorId,
+      sourceId: 'owl-action-1',
+      status: 'todo',
+      lastSyncedAt: '2026-08-21T12:00:00Z',
+    }));
+
+    const result = await upsertTasks(
+      owlConnectorId,
+      owlConnector,
+      [makeRemoteTask({
+        connectorType: 'document-intelligence',
+        connectorInstanceId: owlConnectorId,
+        sourceId: 'owl-action-1',
+        status: 'cancelled',
+        updatedAt: '2026-08-21T10:00:00Z',
+        metadata: {
+          owlStatus: 'not_an_action',
+          owlDisposition: 'not_an_action',
+        },
+      })],
+      true,
+      [],
+    );
+
+    expect(result.updated).toBe(1);
+    expect(mockUpdateSets).toContainEqual(expect.objectContaining({
+      status: 'cancelled',
+      metadata: expect.objectContaining({ owlDisposition: 'not_an_action' }),
+    }));
+    expect(detectDeletions).not.toHaveBeenCalled();
   });
 
   it('accepts a remote-mirror transition from in_progress back to todo', async () => {
@@ -320,6 +551,50 @@ describe('pull-manager terminal status sync', () => {
     );
 
     expect(result.updated).toBe(0);
+  });
+
+  it('preserves a Microsoft To Do cancellation represented remotely as completed', async () => {
+    mockExistingTasks.push(makeExistingTask({
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'list-1:task-1',
+      status: 'cancelled',
+      statusReason: 'not_planned',
+    }));
+    mockCapabilities = {
+      read: true,
+      write: true,
+      delete: true,
+      sync: true,
+      subtasks: true,
+      lists: true,
+      tags: true,
+      tagWriteBack: true,
+      taskFieldProfile: {
+        statusReason: { authority: 'source', writeBack: 'direct' },
+      },
+    };
+
+    const result = await upsertTasks(
+      'todo-1',
+      { ...mockConnector, type: 'microsoft-todo' },
+      [makeRemoteTask({
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        sourceId: 'list-1:task-1',
+        status: 'done',
+      })],
+      false,
+      [],
+    );
+
+    expect(result.updated).toBe(1);
+    expect(mockUpdateSets).toContainEqual(
+      expect.objectContaining({
+        status: 'cancelled',
+        statusReason: 'not_planned',
+      }),
+    );
   });
 
   it('forces terminal sync even when task is pending_push', async () => {
@@ -397,7 +672,7 @@ describe('pull-manager terminal status sync', () => {
 
     expect(mockUpdateSets).toContainEqual(
       expect.objectContaining({
-        metadata: JSON.stringify({ recurrence: 'daily', graphId: 'remote-1' }),
+        metadata: { recurrence: 'daily', graphId: 'remote-1' },
       }),
     );
   });
@@ -408,7 +683,7 @@ describe('pull-manager terminal status sync', () => {
       sourceId: 'org/repo:42',
       title: 'Synthetic title',
       description: null,
-      metadata: JSON.stringify({ issueNumber: 42, nodeId: 'I_42' }),
+      metadata: { issueNumber: 42, nodeId: 'I_42' },
       lastSyncedAt: '2026-07-25T12:00:00Z',
     }));
 
@@ -435,12 +710,12 @@ describe('pull-manager terminal status sync', () => {
     expect(mockUpdateSets).toContainEqual(expect.objectContaining({
       title: 'Canonical title',
       description: 'Canonical body',
-      metadata: JSON.stringify({
+      metadata: {
         issueNumber: 42,
         nodeId: 'I_42',
         url: 'https://github.com/org/repo/issues/42',
         githubParent: null,
-      }),
+      },
     }));
   });
 
@@ -471,5 +746,73 @@ describe('pull-manager terminal status sync', () => {
     ));
     expect(update).not.toHaveProperty('parentId');
     expect(update).not.toHaveProperty('depth');
+  });
+
+  it('persists identity after a concurrent task insert is reconciled', async () => {
+    const concurrentTask = makeExistingTask({
+      id: 'concurrent-task',
+      sourceId: 'org/repo:42',
+      status: 'todo',
+    });
+    mockConcurrentInsertRecord = concurrentTask;
+    const identityRuntime = {
+      modeSnapshot: {
+        connectorInstanceId: connectorId,
+        effectiveMode: 'stable',
+        modeRevision: 1,
+        capturedAt: '2026-08-30T00:00:00.000Z',
+      },
+      syncKind: 'incremental',
+      markNetworkPage: vi.fn(),
+      markBlocked: vi.fn(),
+      assertDecisionsCurrent: vi.fn(async () => {}),
+      resolveLinkedSourceBatch: vi.fn(async () => []),
+      resolveBatch: vi.fn(async () => [{
+        candidateKey: 'org/repo:42',
+        surface: 'task',
+        appliedSource: 'stable',
+        outcome: 'resolved',
+        selectedLocalId: 'concurrent-task',
+        selectedAction: 'update',
+      }]),
+    };
+
+    await expect(upsertTasks(
+      connectorId,
+      mockConnector,
+      [makeRemoteTask({
+        status: 'todo',
+        externalIdentity: {
+          entity: {
+            identity: {
+              provider: 'github',
+              hostKey: 'github.com',
+              entityType: 'issue',
+              stableId: 'I_42',
+            },
+            locator: {
+              owner: 'org',
+              repository: 'repo',
+              issueNumber: 42,
+            },
+            observationSource: 'graphql',
+            observedAt: '2026-08-30T00:00:00.000Z',
+          },
+        },
+      })],
+      false,
+      [],
+      undefined,
+      identityRuntime as unknown as import(
+        '@/lib/external-identities/stable-identity-runtime'
+      ).GitHubStableIdentityRuntime,
+    )).resolves.toMatchObject({ added: 0, updated: 1 });
+
+    expect(mockIdentityWrites).toContainEqual(expect.objectContaining({
+      target: expect.objectContaining({
+        localId: 'concurrent-task',
+        legacyIdentity: 'org/repo:42',
+      }),
+    }));
   });
 });

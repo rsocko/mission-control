@@ -1,18 +1,18 @@
 import { performance } from 'node:perf_hooks';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import db, { sqlite, withoutDatabaseObservation } from '@/db';
-import { connectorConfigs, syncLog } from '@/db/schema';
-import { getResolvedAIConfig } from '@/lib/ai/config-resolver';
-import { getProviderInfo } from '@/lib/ai/provider-factory';
+import { resolveDatabaseBackend } from '@/db/runtime-backend';
+import {
+  parseSavedAIProviderConfig,
+  resolveAICompletionConfig,
+} from '@/lib/ai/config-values';
 import { getDisabledConnectorFeatures } from '@/lib/connectors/disabled-features';
 import logger from '@/lib/logger';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
 import { getDependencyRelationshipDegradation } from '@/lib/sync/dependency-health';
 import {
-  getSyncQueueMetrics,
+  getSyncJobRepository,
   type SyncQueueMetrics,
-} from '@/lib/sync/job-queue';
+} from '@/lib/sync/job-runtime';
 import {
-  getDependencyReconciliationHealth,
   type DependencyReconciliationProgress,
 } from '@/lib/sync/task-dependency-manager';
 import { publicRuntimeRelease } from '@/lib/runtime/release';
@@ -30,6 +30,14 @@ import {
   ensureHealthSnapshotCanRun,
   type WorkerHealthSnapshotIdentity,
 } from './health-snapshot-status';
+import { withDatabaseOperation } from './database-operation-context';
+import {
+  databaseHealthProbe,
+} from './database-health-runtime';
+import {
+  readWorkerHealthSnapshot,
+  writeWorkerHealthSnapshot,
+} from './health-snapshot-runtime';
 
 export type ConnectorHealthStatus =
   | 'healthy'
@@ -79,9 +87,7 @@ export interface WorkerHealthSnapshot extends WorkerHealthSnapshotIdentity {
   summary: MaterializedHealthSummary;
 }
 
-const SNAPSHOT_ID = 'current';
 const MAX_CONNECTORS = 1_000;
-
 function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
@@ -92,19 +98,14 @@ export async function buildMaterializedHealthSummary(
 ): Promise<MaterializedHealthSummary> {
   let database: MaterializedHealthSummary['database'];
   try {
-    const { result, pageCount, pageSize } = withoutDatabaseObservation(() => ({
-      result: sqlite.prepare('SELECT 1 as ok').get() as { ok: number } | undefined,
-      pageCount: sqlite.prepare('PRAGMA page_count').get() as
-        | { page_count: number }
-        | undefined,
-      pageSize: sqlite.prepare('PRAGMA page_size').get() as
-        | { page_size: number }
-        | undefined,
-    }));
-    const sizeBytes = (pageCount?.page_count ?? 0) * (pageSize?.page_size ?? 0);
-    database = result?.ok === 1
-      ? { status: 'healthy', message: 'Connected', sizeBytes }
-      : { status: 'error', message: 'Query returned unexpected result' };
+    const result = await databaseHealthProbe.inspect();
+    database = result.connected
+      ? {
+          status: result.severity,
+          message: result.message,
+          sizeBytes: result.sizeBytes,
+        }
+      : { status: result.severity, message: result.message };
   } catch (error) {
     database = {
       status: 'error',
@@ -119,25 +120,57 @@ export async function buildMaterializedHealthSummary(
     dependencyHealth,
     workerProcesses,
     syncQueue,
-  } = await withoutDatabaseObservation(async () => {
-    const configs = await db
-      .select()
-      .from(connectorConfigs)
-      .where(isNull(connectorConfigs.deletedAt))
-      .limit(MAX_CONNECTORS + 1);
-    if (configs.length > MAX_CONNECTORS) {
-      throw new Error(`Health snapshot connector limit of ${MAX_CONNECTORS} exceeded`);
-    }
-    ensureHealthSnapshotCanRun(shouldDefer);
-    const connectorIds = configs.map((config) => config.id);
-    let latestSyncPerConnector: Array<typeof syncLog.$inferSelect> = [];
-    let latestSuccessfulSyncPerConnector: Array<{
-      connectorId: string;
-      syncedAt: string;
-    }> = [];
-    let dependencyHealth = new Map<string, DependencyReconciliationProgress>();
-    if (connectorIds.length > 0) {
-      latestSyncPerConnector = await db
+  } = resolveDatabaseBackend() === 'postgres'
+    ? await (async () => {
+        const [
+          { getPostgresPersistenceBackend },
+          { collectPostgresHealthSnapshotData },
+        ] = await Promise.all([
+          import('@/db/runtime'),
+          import('@/db/postgres/health-snapshot-data'),
+        ]);
+        const snapshot = await collectPostgresHealthSnapshotData(
+          getPostgresPersistenceBackend().context.db,
+          { maxConnectors: MAX_CONNECTORS, shouldDefer },
+        );
+        return {
+          ...snapshot,
+          workerProcesses: (await getRuntimeTelemetry())
+            .filter((runtime) => runtime.role === 'worker'),
+          syncQueue: await (await getSyncJobRepository()).getMetrics(),
+        };
+      })()
+    : await (async () => {
+        const [
+          { default: db, withoutDatabaseObservation },
+          { connectorConfigs, syncLog },
+          { and, eq, inArray, isNull, sql },
+          { getDependencyReconciliationHealth },
+        ] = await Promise.all([
+          import('@/db'),
+          import('@/db/schema'),
+          import('drizzle-orm'),
+          import('@/lib/sync/task-dependency-manager'),
+        ]);
+        return withoutDatabaseObservation(async () => {
+          const configs = await db
+            .select()
+            .from(connectorConfigs)
+            .where(isNull(connectorConfigs.deletedAt))
+            .limit(MAX_CONNECTORS + 1);
+          if (configs.length > MAX_CONNECTORS) {
+            throw new Error(`Health snapshot connector limit of ${MAX_CONNECTORS} exceeded`);
+          }
+          ensureHealthSnapshotCanRun(shouldDefer);
+          const connectorIds = configs.map((config) => config.id);
+          let latestSyncPerConnector: Array<typeof syncLog.$inferSelect> = [];
+          let latestSuccessfulSyncPerConnector: Array<{
+            connectorId: string;
+            syncedAt: string;
+          }> = [];
+          let dependencyHealth = new Map<string, DependencyReconciliationProgress>();
+          if (connectorIds.length > 0) {
+            latestSyncPerConnector = await db
         .select()
         .from(syncLog)
         .where(and(
@@ -147,8 +180,8 @@ export async function buildMaterializedHealthSummary(
             sql`(SELECT id FROM sync_log AS sl WHERE sl.connector_id = ${syncLog.connectorId} ORDER BY sl.synced_at DESC LIMIT 1)`,
           ),
         ));
-      ensureHealthSnapshotCanRun(shouldDefer);
-      latestSuccessfulSyncPerConnector = await db
+            ensureHealthSnapshotCanRun(shouldDefer);
+            latestSuccessfulSyncPerConnector = await db
         .select({
           connectorId: syncLog.connectorId,
           syncedAt: sql<string>`max(${syncLog.syncedAt})`.as('synced_at'),
@@ -159,19 +192,21 @@ export async function buildMaterializedHealthSummary(
           eq(syncLog.success, true),
         ))
         .groupBy(syncLog.connectorId);
-      ensureHealthSnapshotCanRun(shouldDefer);
-      dependencyHealth = await getDependencyReconciliationHealth(connectorIds, shouldDefer);
-      ensureHealthSnapshotCanRun(shouldDefer);
-    }
-    return {
-      configs,
-      latestSyncPerConnector,
-      latestSuccessfulSyncPerConnector,
-      dependencyHealth,
-      workerProcesses: getRuntimeTelemetry().filter((runtime) => runtime.role === 'worker'),
-      syncQueue: getSyncQueueMetrics(),
-    };
-  });
+            ensureHealthSnapshotCanRun(shouldDefer);
+            dependencyHealth = await getDependencyReconciliationHealth(connectorIds, shouldDefer);
+            ensureHealthSnapshotCanRun(shouldDefer);
+          }
+          return {
+            configs,
+            latestSyncPerConnector,
+            latestSuccessfulSyncPerConnector,
+            dependencyHealth,
+            workerProcesses: (await getRuntimeTelemetry())
+              .filter((runtime) => runtime.role === 'worker'),
+            syncQueue: await (await getSyncJobRepository()).getMetrics(),
+          };
+        });
+      })();
 
   const telemetryStaleMs = Math.max(
     30_000,
@@ -192,9 +227,9 @@ export async function buildMaterializedHealthSummary(
   if (database.status !== 'error') {
     const severity = getFreshDatabaseSeverity(workerProcesses, Date.now(), telemetryStaleMs);
     if (severity === 'critical') {
-      database = { ...database, status: 'critical', message: 'Critical SQLite degradation detected' };
+      database = { ...database, status: 'critical', message: 'Critical database degradation detected' };
     } else if (severity === 'degraded') {
-      database = { ...database, status: 'degraded', message: 'SQLite degradation detected' };
+      database = { ...database, status: 'degraded', message: 'Database degradation detected' };
     }
   }
 
@@ -247,18 +282,19 @@ export async function buildMaterializedHealthSummary(
     };
   });
 
-  const aiInfo = getProviderInfo();
-  const aiConfigured = getResolvedAIConfig().configured;
-  const ai = aiConfigured
+  const coreRepositories = await getCorePersistenceRepositoriesForBackend();
+  const savedAIConfig = await coreRepositories.settings.get('ai_provider_config');
+  const aiConfig = resolveAICompletionConfig(parseSavedAIProviderConfig(savedAIConfig));
+  const ai = aiConfig.configured
     ? {
         status: 'healthy' as const,
-        provider: aiInfo.provider,
-        model: aiInfo.model,
+        provider: aiConfig.provider,
+        model: aiConfig.model,
         message: 'Configured',
       }
     : { status: 'disabled' as const, message: 'No AI provider configured' };
   const disabledFeatures = getDisabledConnectorFeatures(configs);
-  if (!aiConfigured) disabledFeatures.push('AI Assistant');
+  if (!aiConfig.configured) disabledFeatures.push('AI Assistant');
   const enabledConnectors = connectors.filter(
     (connector) => connector.status !== 'disabled' && connector.status !== 'unconfigured',
   );
@@ -306,63 +342,18 @@ export async function generateWorkerHealthSnapshot(
     generationDurationMs: Math.round(performance.now() - startedAt),
     summary,
   };
-  withoutDatabaseObservation(() => {
-    const upsert = sqlite.prepare(`
-      INSERT INTO worker_health_snapshot (
-        id, schema_version, generated_at, worker_instance_id,
-        worker_revision, generation_duration_ms, payload
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET
-        schema_version = excluded.schema_version,
-        generated_at = excluded.generated_at,
-        worker_instance_id = excluded.worker_instance_id,
-        worker_revision = excluded.worker_revision,
-        generation_duration_ms = excluded.generation_duration_ms,
-        payload = excluded.payload
-    `);
-    sqlite.transaction(() => {
-      ensureHealthSnapshotCanRun(shouldDefer);
-      upsert.run(
-        SNAPSHOT_ID,
-        snapshot.schemaVersion,
-        snapshot.generatedAt,
-        snapshot.worker.instanceId,
-        snapshot.worker.revision,
-        snapshot.generationDurationMs,
-        JSON.stringify(snapshot.summary),
-      );
-    }).immediate();
-  });
+  await writeWorkerHealthSnapshot(
+    snapshot,
+    () => ensureHealthSnapshotCanRun(shouldDefer),
+  );
   return snapshot;
 }
 
-export function readWorkerHealthSnapshot(): WorkerHealthSnapshot | null {
-  const row = withoutDatabaseObservation(() => sqlite.prepare(`
-    SELECT schema_version AS schemaVersion, generated_at AS generatedAt,
-      worker_instance_id AS workerInstanceId, worker_revision AS workerRevision,
-      generation_duration_ms AS generationDurationMs, payload
-    FROM worker_health_snapshot
-    WHERE id = ?
-  `).get(SNAPSHOT_ID)) as {
-    schemaVersion: number;
-    generatedAt: string;
-    workerInstanceId: string;
-    workerRevision: string;
-    generationDurationMs: number;
-    payload: string;
-  } | undefined;
-  if (!row) return null;
-  return {
-    schemaVersion: row.schemaVersion,
-    generatedAt: row.generatedAt,
-    worker: { instanceId: row.workerInstanceId, revision: row.workerRevision },
-    generationDurationMs: row.generationDurationMs,
-    summary: JSON.parse(row.payload) as MaterializedHealthSummary,
-  };
-}
+export { readWorkerHealthSnapshot };
 
 export class WorkerHealthSnapshotScheduler {
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private activeRun: Promise<void> | null = null;
   private stopping = false;
 
   constructor(
@@ -379,16 +370,21 @@ export class WorkerHealthSnapshotScheduler {
     this.schedule(0);
   }
 
-  stop(): void {
+  async stop(): Promise<void> {
     this.stopping = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
+    await this.activeRun;
   }
 
   private schedule(delayMs: number): void {
     this.timer = setTimeout(() => {
       this.timer = null;
-      void this.run();
+      const run = this.run();
+      this.activeRun = run;
+      void run.finally(() => {
+        if (this.activeRun === run) this.activeRun = null;
+      });
     }, delayMs);
     this.timer.unref();
   }
@@ -401,9 +397,12 @@ export class WorkerHealthSnapshotScheduler {
     }
     let nextDelayMs = this.intervalMs;
     try {
-      const snapshot = await generateWorkerHealthSnapshot(
-        this.workerInstanceId,
-        this.isSyncActive,
+      const snapshot = await withDatabaseOperation(
+        'worker-health-snapshot',
+        () => generateWorkerHealthSnapshot(
+          this.workerInstanceId,
+          this.isSyncActive,
+        ),
       );
       logger.info(
         {

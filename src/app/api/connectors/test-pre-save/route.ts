@@ -9,6 +9,12 @@ import {
 } from '@/lib/connectors/monarch-money/client';
 import { describeTyrionConnectionError } from '@/lib/connectors/monarch-money/connection-error';
 import { sanitizeFinanceConnectorWrite } from '@/lib/connectors/monarch-money/config';
+import { createHAClient } from '@/lib/connectors/home-assistant/ha-client';
+import {
+  normalizeHomeAssistantSettings,
+  readHomeAssistantCredentials,
+} from '@/lib/connectors/home-assistant/settings';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 
 /**
  * POST /api/connectors/test-pre-save
@@ -18,8 +24,9 @@ import { sanitizeFinanceConnectorWrite } from '@/lib/connectors/monarch-money/co
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { type, credentials, settings } = body as {
+    const { type, connectorId, credentials, settings } = body as {
       type: string;
+      connectorId?: string;
       credentials?: Record<string, string>;
       settings?: Record<string, unknown>;
     };
@@ -31,7 +38,21 @@ export async function POST(request: Request) {
       );
     }
 
-    const result = await testUnsavedConnector(type, credentials || {}, settings || {});
+    let effectiveCredentials = credentials || {};
+    if (type === 'home-assistant' && connectorId && !effectiveCredentials.accessToken) {
+      const stored = await getCorePersistenceRepositories().connectors.get(connectorId);
+      if (!stored || stored.type !== 'home-assistant') {
+        return NextResponse.json(
+          { success: false, error: 'Home Assistant connector not found' },
+          { status: 404 },
+        );
+      }
+      effectiveCredentials = {
+        ...stored.credentials,
+        ...effectiveCredentials,
+      };
+    }
+    const result = await testUnsavedConnector(type, effectiveCredentials, settings || {});
     return NextResponse.json(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -46,7 +67,13 @@ async function testUnsavedConnector(
   type: string,
   credentials: Record<string, string>,
   settings: Record<string, unknown>
-): Promise<{ success: boolean; latencyMs: number; error?: string; details?: string }> {
+): Promise<{
+  success: boolean;
+  latencyMs: number;
+  error?: string;
+  details?: string;
+  sources?: Record<string, unknown>;
+}> {
   const start = Date.now();
 
   try {
@@ -94,6 +121,29 @@ async function testUnsavedConnector(
           success: false,
           latencyMs,
           error: 'Tyrion is reachable, but its Monarch session is not authenticated',
+        };
+      }
+
+      case 'home-assistant': {
+        const normalized = normalizeHomeAssistantSettings(settings);
+        const { accessToken } = readHomeAssistantCredentials(credentials, settings);
+        if (!accessToken) {
+          return { success: false, latencyMs: 0, error: 'A long-lived access token is required' };
+        }
+        const result = await createHAClient({
+          baseUrl: normalized.baseUrl,
+          accessToken,
+        }).testConnection();
+        const latencyMs = Date.now() - start;
+        if (!result.ok) {
+          return { success: false, latencyMs, error: result.error || 'Connection failed' };
+        }
+        const available = Object.values(result.sources || {}).filter(source => source.available).length;
+        return {
+          success: true,
+          latencyMs,
+          details: `Connected — ${available} of 3 notification sources available`,
+          sources: result.sources,
         };
       }
 

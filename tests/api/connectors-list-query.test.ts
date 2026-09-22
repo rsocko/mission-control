@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
@@ -15,7 +16,7 @@ let PATCH: typeof import('@/app/api/connectors/route').PATCH;
 let eq: typeof import('drizzle-orm').eq;
 
 beforeAll(async () => {
-  ({ default: db } = await import('@/db'));
+  ({ default: db } = await importInitializedSqliteDatabase());
   ({ connectorConfigs, sourceLists, syncLog, tasks } = await import('@/db/schema'));
   ({ GET, POST, PATCH } = await import('@/app/api/connectors/route'));
   ({ eq } = await import('drizzle-orm'));
@@ -146,6 +147,7 @@ describe('GET /api/connectors list queries', () => {
         credentials: { serviceToken: 'browser-create-token' },
         settings: {
           bridgeUrl: 'http://tyrion-monarch-bridge:8100/',
+          householdCurrency: 'USD',
           apiToken: 'browser-settings-token',
           maxRetries: 2,
         },
@@ -155,9 +157,13 @@ describe('GET /api/connectors list queries', () => {
 
     const [created] = await db.select().from(connectorConfigs)
       .where(eq(connectorConfigs.id, 'finance-new'));
-    expect(created.credentials).toEqual({ serviceToken: 'browser-create-token' });
+    expect(created.credentials).toEqual({
+      serviceToken: 'browser-create-token',
+      identityNamespace: expect.stringMatching(/^[a-f0-9]{64}$/),
+    });
     expect(created.settings).toEqual({
       bridgeUrl: 'http://tyrion-monarch-bridge:8100',
+      householdCurrency: 'USD',
       maxRetries: 2,
     });
 
@@ -178,9 +184,10 @@ describe('GET /api/connectors list queries', () => {
 
     const [updated] = await db.select().from(connectorConfigs)
       .where(eq(connectorConfigs.id, 'finance-new'));
-    expect(updated.credentials).toEqual({ serviceToken: 'browser-create-token' });
+    expect(updated.credentials).toEqual(created.credentials);
     expect(updated.settings).toEqual({
       bridgeUrl: 'http://custom-tyrion-bridge:8100',
+      householdCurrency: 'USD',
       maxRetries: 3,
     });
 
@@ -195,6 +202,7 @@ describe('GET /api/connectors list queries', () => {
         hasCredentials: true,
         settings: {
           bridgeUrl: 'http://custom-tyrion-bridge:8100',
+          householdCurrency: 'USD',
           maxRetries: 3,
         },
       }),

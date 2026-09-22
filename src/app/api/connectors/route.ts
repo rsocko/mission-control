@@ -1,7 +1,4 @@
 import { NextResponse } from 'next/server';
-import db, { runTransaction } from '@/db';
-import { connectorConfigs, financeAccounts, financeAttributionAudit, financeAttributionExceptions, financeAttributionSubjects, financeBudgetSnapshots, financeCategories, financeCategoryGroups, financeDatasetSyncState, financeInsightCutovers, financeInsightOccurrenceCacheState, financeInsightOccurrences, financeInsightPublicationFacts, financeInsightPublications, financeInsightPublicationState, financeInsightTransactionBackfillPlans, financeInsightTransactionProjectionFacts, financeInsightTransactionProjectionState, financeInsightTransactionProjectionWindows, financeInsightTransactionWindowProofs, financeMutationAudit, financeRecurringObligations, financeSyncState, financeTags, financeTransactions, focusItems, hubProjects, myDayItems, notificationPushRules, projectAutoIncludeExclusions, projectPhaseItems, sourceLists, syncLog, taskProjects, taskSchedules, taskTags, tasks, workTodoBridgeState, workTodoListDeltaState, workTodoOutboundChanges } from '@/db/schema';
-import { eq, sql, and, isNull, inArray, notInArray } from 'drizzle-orm';
 import { resolveSourceListDisplayName } from '@/lib/utils/source-list-display-name';
 import { dbLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
@@ -19,24 +16,48 @@ import {
   capabilitiesForWorkTodo,
   workTodoSettingsSchema,
 } from '@/lib/connectors/work-todo/settings';
-import { createNewGitHubConnectorIdentityState } from '@/lib/external-identities';
 import { normalizeGitHubOrigin } from '@/lib/connectors/github-issues/identity';
 import {
+  FinanceConnectorConfigurationError,
   isFinanceConnectorType,
+  preserveFinanceConnectorIdentityCredentials,
+  protectNewFinanceConnectorCredentials,
   sanitizeFinanceConnectorWrite,
+  validateFinanceConnectorSettings,
 } from '@/lib/connectors/monarch-money/config';
 import { TyrionBridgeUrlValidationError } from '@/lib/connectors/monarch-money/bridge-url';
 import { serializeConnectorForBrowser } from '@/lib/connectors/public-config';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
+import type { ManagedConnectorUpdate } from '@/db/persistence/connector-management';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import {
+  normalizeHomeAssistantSettings,
+  readHomeAssistantCredentials,
+} from '@/lib/connectors/home-assistant/settings';
+
+function configsNameMatch(
+  connectors: Array<{ id: string; type: string; name: string; deletedAt?: string | null }>,
+  name: unknown,
+  exceptId?: string,
+): boolean {
+  if (typeof name !== 'string' || !name.trim()) return false;
+  const normalized = name.trim().toLocaleLowerCase();
+  return connectors.some(connector => (
+    connector.id !== exceptId
+    && connector.type === 'home-assistant'
+    && !connector.deletedAt
+    && connector.name.trim().toLocaleLowerCase() === normalized
+  ));
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const includeDeleted = searchParams.get('includeDeleted') === 'true';
 
   try {
-    const configs = await db.select().from(connectorConfigs)
-      .where(includeDeleted ? undefined : isNull(connectorConfigs.deletedAt));
-    let lists = await db.select().from(sourceLists);
+    const persistence = await getConnectorManagementPersistence();
+    let overview = await persistence.getOverview(includeDeleted);
+    let { connectors: configs, sourceLists: lists } = overview;
 
     // Auto-ensure Scout source lists exist if Scout connector is configured
     const scoutConfig = configs.find(c => c.type === 'scout' && !c.deletedAt);
@@ -49,8 +70,7 @@ export async function GET(request: Request) {
       );
       if (missingLists.length > 0) {
         const now = new Date().toISOString();
-        for (const [sourceType, listDef] of missingLists) {
-          await db.insert(sourceLists).values({
+        await persistence.ensureSourceLists(missingLists.map(([sourceType, listDef]) => ({
             id: `sl-scout-${sourceType}`,
             connectorInstanceId: scoutConfig.id,
             sourceId: listDef.id,
@@ -62,30 +82,18 @@ export async function GET(request: Request) {
             hidden: false,
             icon: listDef.icon,
             iconColor: listDef.iconColor,
-          }).onConflictDoNothing();
-        }
-        // Re-fetch lists after creation
-        lists = await db.select().from(sourceLists);
+        })));
+        overview = await persistence.getOverview(includeDeleted);
+        configs = overview.connectors;
+        lists = overview.sourceLists;
       }
     }
 
-    // Compute top-level open task counts per source list.
-    const taskCounts = await db
-      .select({
-        sourceListId: tasks.sourceListId,
-        connectorInstanceId: tasks.connectorInstanceId,
-        count: sql<number>`count(*)`.as('count'),
-      })
-      .from(tasks)
-      .where(and(
-        notInArray(tasks.status, ['done', 'cancelled']),
-        isNull(tasks.parentId),
-        eq(tasks.isChecklistItem, false),
-      ))
-      .groupBy(tasks.sourceListId, tasks.connectorInstanceId);
-
     const countMap = new Map(
-      taskCounts.map(tc => [`${tc.connectorInstanceId}:${tc.sourceListId}`, tc.count])
+      overview.openTaskCounts.map(tc => [
+        `${tc.connectorInstanceId}:${tc.sourceListId}`,
+        tc.count,
+      ]),
     );
 
     // Enrich lists with real task counts and resolved display name
@@ -100,28 +108,33 @@ export async function GET(request: Request) {
       };
     });
 
-    // Get last successful sync time per connector
-    const lastSyncs = await db
-      .select({
-        connectorId: syncLog.connectorId,
-        syncedAt: sql<string>`max(${syncLog.syncedAt})`.as('synced_at'),
-      })
-      .from(syncLog)
-      .where(eq(syncLog.success, true))
-      .groupBy(syncLog.connectorId);
-
     const lastSyncMap = new Map(
-      lastSyncs.map((row) => [row.connectorId, row.syncedAt]),
+      overview.syncOutcomes.map((row) => [row.connectorId, row.lastSyncedAt]),
     );
+
+    // Get the outcome of the most recent sync attempt (success or failure) per
+    // connector, regardless of overall status, so the settings UI can surface an
+    // ongoing failure (e.g. an expired OAuth token) instead of only showing
+    // "credentials stored" as if the connection were healthy.
+    const lastSyncStatusMap = new Map<string, { success: boolean; error: string | null }>();
+    for (const row of overview.syncOutcomes) {
+      lastSyncStatusMap.set(row.connectorId, {
+        success: row.success === true,
+        error: row.error,
+      });
+    }
 
     // Merge lastSyncedAt and capability defaults into connector configs
     const connectors = configs.map(c => {
       const defaults = CAPABILITY_DEFAULTS[c.type] ?? {};
-      const storedCaps = (c.capabilities ?? {}) as Record<string, unknown>;
+      const storedCaps = c.capabilities ?? {};
+      const lastOutcome = lastSyncStatusMap.get(c.id);
       return serializeConnectorForBrowser({
         ...c,
         capabilities: { ...defaults, ...storedCaps },
         lastSyncedAt: lastSyncMap.get(c.id) || null,
+        lastSyncStatus: lastOutcome ? (lastOutcome.success ? 'success' : 'failed') : null,
+        lastSyncError: lastOutcome?.error ?? null,
       });
     });
 
@@ -142,6 +155,7 @@ const SCOUT_SOURCE_LISTS: Record<string, { id: string; name: string; type: strin
 
 export async function POST(request: Request) {
   try {
+    const persistence = await getConnectorManagementPersistence();
     const body = await request.json();
     const sanitizedBody = sanitizeFinanceConnectorWrite(body);
     const { id: requestedId, type, name, enabled, syncMode, pollIntervalMinutes, capabilities, credentials, settings, syncedLists } = sanitizedBody;
@@ -158,6 +172,28 @@ export async function POST(request: Request) {
           : {}
       ),
     };
+    if (isFinanceConnectorType(type)) {
+      connectorSettings = validateFinanceConnectorSettings(connectorSettings, {
+        requireHouseholdCurrency: true,
+      });
+    }
+    if (type === 'home-assistant') {
+      if (typeof name !== 'string' || !name.trim()) {
+        return ApiErrors.badRequest('A Home Assistant instance name is required');
+      }
+      connectorSettings = normalizeHomeAssistantSettings(connectorSettings);
+      const { accessToken } = readHomeAssistantCredentials(credentials || {}, connectorSettings);
+      if (!accessToken) {
+        return ApiErrors.badRequest('A Home Assistant long-lived access token is required');
+      }
+      const duplicate = configsNameMatch(
+        (await persistence.getOverview(false)).connectors,
+        name,
+      );
+      if (duplicate) {
+        return ApiErrors.conflict('A Home Assistant connector with this name already exists');
+      }
+    }
     let workTodoSettings = null;
     if (type === 'scout') {
       const validation = validateScoutSettings(connectorSettings);
@@ -166,11 +202,7 @@ export async function POST(request: Request) {
       }
       connectorSettings = validation.data;
       if (connectorSettings.autoProjectId) {
-        const [project] = await db
-          .select({ id: hubProjects.id })
-          .from(hubProjects)
-          .where(eq(hubProjects.id, connectorSettings.autoProjectId));
-        if (!project) {
+        if (!(await persistence.projectExists(connectorSettings.autoProjectId))) {
           return ApiErrors.badRequest('autoProjectId must reference an existing project');
         }
       }
@@ -197,32 +229,37 @@ export async function POST(request: Request) {
       connectorSettings = validation.data;
     }
 
-    runTransaction((tx) => {
-      const created = tx.insert(connectorConfigs).values({
-        id,
-        type,
-        name,
-        enabled: enabled ?? true,
-        syncMode: syncMode || 'poll',
-        pollIntervalMinutes: pollIntervalMinutes || 5,
-        capabilities: workTodoSettings
-          ? capabilitiesForWorkTodo(workTodoSettings)
-          : capabilities || { read: true, write: false, delete: false, sync: true, subtasks: false, lists: false },
-        credentials: credentials || {},
-        settings: connectorSettings,
-        syncedLists: syncedLists || [],
-        createdAt: now,
-        updatedAt: now,
-      }).onConflictDoNothing().returning({ id: connectorConfigs.id }).get();
-      if (created && type === 'github-issues') {
-        createNewGitHubConnectorIdentityState(tx, created.id, now);
-      }
+    await persistence.createConnector({
+      id,
+      type,
+      name,
+      enabled: enabled ?? true,
+      syncMode: syncMode || 'poll',
+      pollIntervalMinutes: pollIntervalMinutes || 5,
+      capabilities: workTodoSettings
+        ? capabilitiesForWorkTodo(workTodoSettings)
+        : capabilities || {
+            read: true,
+            write: false,
+            delete: false,
+            sync: true,
+            subtasks: false,
+            lists: false,
+            tags: false,
+            tagWriteBack: false,
+          },
+      credentials: isFinanceConnectorType(type)
+        ? protectNewFinanceConnectorCredentials(credentials)
+        : credentials || {},
+      settings: connectorSettings,
+      syncedLists: syncedLists || [],
+      now,
     });
 
     // Auto-create source lists for Scout connector
     if (type === 'scout') {
-      for (const [sourceType, listDef] of Object.entries(SCOUT_SOURCE_LISTS)) {
-        await db.insert(sourceLists).values({
+      await persistence.ensureSourceLists(
+        Object.entries(SCOUT_SOURCE_LISTS).map(([sourceType, listDef]) => ({
           id: `sl-scout-${sourceType}`,
           connectorInstanceId: id,
           sourceId: listDef.id,
@@ -234,23 +271,27 @@ export async function POST(request: Request) {
           hidden: false,
           icon: listDef.icon,
           iconColor: listDef.iconColor,
-        }).onConflictDoNothing();
-      }
+        })),
+      );
     }
     if (workTodoSettings) {
-      await db.insert(workTodoBridgeState).values({
+      await persistence.ensureWorkTodoBridge({
         connectorId: id,
         transport: workTodoSettings.transport,
         capabilityProfile: workTodoSettings.capabilityProfile,
-        resetRequired: false,
-        createdAt: now,
-        updatedAt: now,
-      }).onConflictDoNothing();
+        now,
+      });
     }
 
     await syncScheduler.reconcileScheduleFromDb(id);
     return NextResponse.json({ id }, { status: 201 });
   } catch (error) {
+    if (error instanceof FinanceConnectorConfigurationError) {
+      return NextResponse.json(
+        { error: error.code, code: error.code },
+        { status: 400 },
+      );
+    }
     if (error instanceof TyrionBridgeUrlValidationError) {
       return ApiErrors.badRequest(error.message);
     }
@@ -260,6 +301,7 @@ export async function POST(request: Request) {
 
 export async function PATCH(request: Request) {
   try {
+    const persistence = await getConnectorManagementPersistence();
     const body = await request.json();
     const { id, ...updates } = body;
     let workTodoSettingsUpdate: ReturnType<typeof workTodoSettingsSchema.parse> | null = null;
@@ -268,27 +310,39 @@ export async function PATCH(request: Request) {
       return ApiErrors.badRequest('Missing connector id');
     }
 
-    const [existing] = await db
-      .select({ type: connectorConfigs.type })
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id));
+    const existing = await persistence.getConnector(id);
     if (updates.type !== undefined && updates.type !== existing?.type) {
       return ApiErrors.badRequest('Connector type cannot be changed');
     }
     if (existing && isFinanceConnectorType(existing.type)) {
+      const existingSettings = typeof existing.settings === 'string'
+        ? JSON.parse(existing.settings) as Record<string, unknown>
+        : (existing.settings as Record<string, unknown> | null) ?? {};
+      const requestedSettings = updates.settings === undefined
+        ? undefined
+        : (updates.settings as Record<string, unknown> | null) ?? {};
       const sanitized = sanitizeFinanceConnectorWrite({
         type: existing.type,
         credentials: updates.credentials,
-        settings: updates.settings,
+        settings: requestedSettings === undefined
+          ? undefined
+          : { ...existingSettings, ...requestedSettings },
       });
       if (updates.credentials !== undefined) {
         if ('serviceToken' in sanitized.credentials) {
-          updates.credentials = sanitized.credentials;
+          updates.credentials = preserveFinanceConnectorIdentityCredentials(
+            sanitized.credentials,
+            existing.credentials,
+          );
         } else {
           delete updates.credentials;
         }
       }
-      if (updates.settings !== undefined) updates.settings = sanitized.settings;
+      if (updates.settings !== undefined) {
+        updates.settings = validateFinanceConnectorSettings(sanitized.settings, {
+          requireHouseholdCurrency: false,
+        });
+      }
     }
 
     if (updates.settings !== undefined) {
@@ -298,11 +352,7 @@ export async function PATCH(request: Request) {
           return ApiErrors.badRequest(validation.error);
         }
         if (validation.data.autoProjectId) {
-          const [project] = await db
-            .select({ id: hubProjects.id })
-            .from(hubProjects)
-            .where(eq(hubProjects.id, validation.data.autoProjectId));
-          if (!project) {
+          if (!(await persistence.projectExists(validation.data.autoProjectId))) {
             return ApiErrors.badRequest('autoProjectId must reference an existing project');
           }
         }
@@ -320,45 +370,73 @@ export async function PATCH(request: Request) {
         updates.settings = validation.data;
         updates.capabilities = capabilitiesForWorkTodo(validation.data);
       }
+      if (existing?.type === 'home-assistant') {
+        const existingSettings = typeof existing.settings === 'string'
+          ? JSON.parse(existing.settings) as Record<string, unknown>
+          : existing.settings;
+        updates.settings = normalizeHomeAssistantSettings({
+          ...existingSettings,
+          ...(updates.settings as Record<string, unknown>),
+        });
+      }
+    }
+    if (existing?.type === 'home-assistant' && updates.name !== undefined) {
+      if (typeof updates.name !== 'string' || !updates.name.trim()) {
+        return ApiErrors.badRequest('A Home Assistant instance name is required');
+      }
+      const duplicate = configsNameMatch(
+        (await persistence.getOverview(false)).connectors,
+        updates.name,
+        id,
+      );
+      if (duplicate) {
+        return ApiErrors.conflict('A Home Assistant connector with this name already exists');
+      }
     }
 
     const now = new Date().toISOString();
+    const connectorUpdates: ManagedConnectorUpdate = {};
+    if (updates.name !== undefined) connectorUpdates.name = updates.name;
+    if (updates.enabled !== undefined) connectorUpdates.enabled = updates.enabled;
+    if (updates.syncMode !== undefined) connectorUpdates.syncMode = updates.syncMode;
+    if (updates.pollIntervalMinutes !== undefined) {
+      connectorUpdates.pollIntervalMinutes = updates.pollIntervalMinutes;
+    }
+
+    if (updates.capabilities !== undefined) connectorUpdates.capabilities = updates.capabilities;
+    if (updates.credentials !== undefined) connectorUpdates.credentials = updates.credentials;
+    if (updates.settings !== undefined) connectorUpdates.settings = updates.settings;
+    if (updates.syncedLists !== undefined) connectorUpdates.syncedLists = updates.syncedLists;
+
     if (workTodoSettingsUpdate) {
       const settings = workTodoSettingsUpdate;
-      const updated = runTransaction((tx) => {
-        const bridgeState = tx.select({
-          transport: workTodoBridgeState.transport,
-          capabilityProfile: workTodoBridgeState.capabilityProfile,
-          lastIngestAt: workTodoBridgeState.lastIngestAt,
-        }).from(workTodoBridgeState).where(eq(workTodoBridgeState.connectorId, id)).get();
-        if (
-          bridgeState?.lastIngestAt
-          && (
-            bridgeState.transport !== settings.transport
-            || bridgeState.capabilityProfile !== settings.capabilityProfile
-          )
-        ) {
-          return false;
-        }
-        tx.update(connectorConfigs)
-          .set({ ...updates, updatedAt: now })
-          .where(eq(connectorConfigs.id, id))
-          .run();
-        tx.update(workTodoBridgeState).set({
-          transport: settings.transport,
-          capabilityProfile: settings.capabilityProfile,
-          updatedAt: now,
-        }).where(eq(workTodoBridgeState.connectorId, id)).run();
-        return true;
+      const result = await persistence.updateWorkTodoConnector({
+        connectorId: id,
+        updates: connectorUpdates,
+        transport: settings.transport,
+        capabilityProfile: settings.capabilityProfile,
+        now,
       });
-      if (!updated) {
+      if (result === 'tier-conflict') {
         return ApiErrors.conflict('Bridge tier cannot change after the first baseline');
       }
     } else {
       const applyUpdate = async () => {
-        await db.update(connectorConfigs)
-          .set({ ...updates, updatedAt: now })
-          .where(eq(connectorConfigs.id, id));
+        const updated = await persistence.updateConnector({
+          connectorId: id,
+          updates: connectorUpdates,
+          now,
+          expected: existing && isFinanceConnectorType(existing.type)
+            ? { updatedAt: existing.updatedAt, settings: existing.settings }
+            : undefined,
+        });
+        if (
+          existing
+          && isFinanceConnectorType(existing.type)
+          && !updated
+        ) {
+          throw new ConnectorOperationBusyError('Connector configuration changed; retry');
+        }
       };
       if (
         existing?.type === 'github-issues'
@@ -379,6 +457,12 @@ export async function PATCH(request: Request) {
     if (error instanceof TyrionBridgeUrlValidationError) {
       return ApiErrors.badRequest(error.message);
     }
+    if (error instanceof FinanceConnectorConfigurationError) {
+      return NextResponse.json(
+        { error: error.code, code: error.code },
+        { status: 400 },
+      );
+    }
     return ApiErrors.internal('Failed to update connector', error);
   }
 }
@@ -393,94 +477,12 @@ export async function DELETE(request: Request) {
   }
 
   try {
+    const persistence = await getConnectorManagementPersistence();
     if (permanent) {
       // Hard delete — permanently remove connector and all related data
       try {
         await runWithConnectorOperationLease(id, 'retention', async () => {
-          runTransaction((tx) => {
-            // Gather task IDs so we can clean up junction/state tables
-            const connectorTasks = tx.select({ id: tasks.id })
-              .from(tasks)
-              .where(eq(tasks.connectorInstanceId, id))
-              .all();
-            const taskIds = connectorTasks.map(t => t.id);
-
-            if (taskIds.length > 0) {
-              tx.delete(taskTags).where(inArray(taskTags.taskId, taskIds)).run();
-              tx.delete(projectAutoIncludeExclusions)
-                .where(inArray(projectAutoIncludeExclusions.taskId, taskIds))
-                .run();
-              tx.delete(taskProjects).where(inArray(taskProjects.taskId, taskIds)).run();
-              tx.delete(taskSchedules).where(inArray(taskSchedules.taskId, taskIds)).run();
-              tx.delete(myDayItems).where(inArray(myDayItems.taskId, taskIds)).run();
-              tx.delete(focusItems).where(inArray(focusItems.taskId, taskIds)).run();
-              tx.delete(projectPhaseItems).where(inArray(projectPhaseItems.taskId, taskIds)).run();
-            }
-
-            tx.delete(syncLog).where(eq(syncLog.connectorId, id)).run();
-            tx.delete(workTodoOutboundChanges).where(eq(workTodoOutboundChanges.connectorId, id)).run();
-            tx.delete(workTodoListDeltaState).where(eq(workTodoListDeltaState.connectorId, id)).run();
-            tx.delete(workTodoBridgeState).where(eq(workTodoBridgeState.connectorId, id)).run();
-            tx.delete(sourceLists).where(eq(sourceLists.connectorInstanceId, id)).run();
-            tx.delete(notificationPushRules)
-              .where(eq(notificationPushRules.connectorInstanceId, id))
-              .run();
-            tx.delete(financeAttributionAudit).where(eq(financeAttributionAudit.connectorId, id)).run();
-            tx.delete(financeAttributionExceptions).where(eq(financeAttributionExceptions.connectorId, id)).run();
-            tx.delete(financeAttributionSubjects).where(eq(financeAttributionSubjects.connectorId, id)).run();
-            tx.delete(financeMutationAudit).where(eq(financeMutationAudit.connectorId, id)).run();
-            tx.delete(financeBudgetSnapshots).where(eq(financeBudgetSnapshots.connectorId, id)).run();
-            tx.delete(financeRecurringObligations).where(eq(financeRecurringObligations.connectorId, id)).run();
-            tx.delete(financeTags).where(eq(financeTags.connectorId, id)).run();
-            tx.delete(financeCategories).where(eq(financeCategories.connectorId, id)).run();
-            tx.delete(financeCategoryGroups).where(eq(financeCategoryGroups.connectorId, id)).run();
-            tx.delete(financeAccounts).where(eq(financeAccounts.connectorId, id)).run();
-            tx.delete(financeDatasetSyncState).where(eq(financeDatasetSyncState.connectorId, id)).run();
-            tx.delete(financeInsightOccurrenceCacheState)
-              .where(eq(financeInsightOccurrenceCacheState.connectorId, id))
-              .run();
-            tx.delete(financeInsightOccurrences)
-              .where(eq(financeInsightOccurrences.connectorId, id))
-              .run();
-            tx.delete(financeInsightPublicationFacts)
-              .where(inArray(
-                financeInsightPublicationFacts.publicationId,
-                tx.select({ id: financeInsightPublications.id })
-                  .from(financeInsightPublications)
-                  .where(eq(financeInsightPublications.connectorId, id)),
-              ))
-              .run();
-            tx.delete(financeInsightPublications)
-              .where(eq(financeInsightPublications.connectorId, id))
-              .run();
-            tx.delete(financeInsightPublicationState)
-              .where(eq(financeInsightPublicationState.connectorId, id))
-              .run();
-            tx.delete(financeInsightTransactionProjectionFacts)
-              .where(eq(financeInsightTransactionProjectionFacts.connectorId, id))
-              .run();
-            tx.delete(financeInsightTransactionProjectionWindows)
-              .where(eq(financeInsightTransactionProjectionWindows.connectorId, id))
-              .run();
-            tx.delete(financeInsightTransactionProjectionState)
-              .where(eq(financeInsightTransactionProjectionState.connectorId, id))
-              .run();
-            tx.delete(financeInsightTransactionWindowProofs)
-              .where(eq(financeInsightTransactionWindowProofs.connectorId, id))
-              .run();
-            tx.delete(financeInsightTransactionBackfillPlans)
-              .where(eq(financeInsightTransactionBackfillPlans.connectorId, id))
-              .run();
-            tx.delete(financeInsightCutovers)
-              .where(eq(financeInsightCutovers.connectorId, id))
-              .run();
-            tx.delete(financeSyncState).where(eq(financeSyncState.connectorId, id)).run();
-            tx.delete(financeTransactions)
-              .where(eq(financeTransactions.connectorInstanceId, id))
-              .run();
-            tx.delete(tasks).where(eq(tasks.connectorInstanceId, id)).run();
-            tx.delete(connectorConfigs).where(eq(connectorConfigs.id, id)).run();
-          });
+          await persistence.hardDeleteConnector(id);
           await syncScheduler.reconcileScheduleFromDb(id);
         });
       } catch (err) {
@@ -494,31 +496,26 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ success: true, mode: 'permanent' });
     }
 
-    // Soft delete — mark as deleted, disable sync
+    // Soft delete shares the retention lease with rule edits so a concurrent
+    // settings save cannot land after the connector becomes inactive.
     const now = new Date().toISOString();
-    await db.update(connectorConfigs)
-      .set({ deletedAt: now, enabled: false, updatedAt: now })
-      .where(eq(connectorConfigs.id, id));
-    await syncScheduler.reconcileScheduleFromDb(id);
-
-    // Count affected data for the response
-    const [taskCount] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(tasks)
-      .where(eq(tasks.connectorInstanceId, id));
-    const [listCount] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(sourceLists)
-      .where(eq(sourceLists.connectorInstanceId, id));
+    const affected = await runWithConnectorOperationLease(id, 'retention', async () => {
+      const result = await persistence.softDeleteConnector(id, now);
+      await syncScheduler.reconcileScheduleFromDb(id);
+      return result;
+    });
 
     return NextResponse.json({
       success: true,
       mode: 'soft',
       deletedAt: now,
-      affectedTasks: taskCount?.count || 0,
-      affectedLists: listCount?.count || 0,
+      affectedTasks: affected.affectedTasks,
+      affectedLists: affected.affectedLists,
     });
   } catch (error) {
+    if (error instanceof ConnectorOperationBusyError) {
+      return ApiErrors.conflict('Connector has an active operation');
+    }
     return ApiErrors.internal('Failed to delete connector', error);
   }
 }

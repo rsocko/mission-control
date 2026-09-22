@@ -33,6 +33,7 @@ describe('public demo policy', () => {
     expect(getPublicDemoRestriction('/api/goals/develop', 'POST')).not.toBeNull();
     expect(getPublicDemoRestriction('/api/notifications/triage', 'GET')).not.toBeNull();
     expect(getPublicDemoRestriction('/api/project-phases/ai-suggest', 'POST')).not.toBeNull();
+    expect(getPublicDemoRestriction('/api/project-phases/ai-reorganize', 'POST')).not.toBeNull();
     expect(getPublicDemoRestriction('/api/resets/ai-summary', 'POST')).not.toBeNull();
     expect(getPublicDemoRestriction('/api/tasks/task-1/attachments', 'POST')).not.toBeNull();
     expect(getPublicDemoRestriction('/api/scout/reconciliation/suggestions/scout-1', 'PATCH')).not.toBeNull();

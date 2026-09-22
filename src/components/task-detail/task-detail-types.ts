@@ -1,8 +1,12 @@
 import type {
   LocalDisposition,
+  PlanningHorizon,
   TaskEditPolicy,
+  TaskStatus,
   TaskSourceModel,
 } from '@/types';
+import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import type { RecurrenceControlState } from '@/lib/recurrence/editor-contract';
 
 /** A tag that can be displayed on, added to, or removed from a task. */
 export interface TaskTag {
@@ -24,6 +28,9 @@ export interface Subtask {
   id: string;
   title: string;
   status: string;
+  sourceId?: string;
+  connectorType?: string;
+  siblingOrder?: number | null;
 }
 
 /** Full task record backing the detail panel. */
@@ -35,9 +42,13 @@ export interface TaskDetail {
   microStatus: string | null;
   statusReason: string | null;
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   dueDate: string | null;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  lastSyncedAt?: string;
+  pushRetryCount?: number;
   sourceListId: string | null;
   sourceListName: string | null;
   sourceId: string | null;
@@ -48,15 +59,27 @@ export interface TaskDetail {
   tagIds: string[];
   projectIds: string[];
   subtasks: Subtask[];
+  subtaskOrderRevision?: number;
   metadata: string | null;
   estimatedDuration?: number | null;
   recurrence?: string | null;
+  recurrenceMode?: 'schedule' | 'completion';
+  recurrenceControl?: RecurrenceControlState;
   effort?: number | null;
   reminderAt?: string | null;
+  reminderRelative?: ReminderRelativeRule | null;
+  reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
+  reminderTimezone?: string;
+  snoozedUntil?: string | null;
   isInMyDay?: boolean;
   localDisposition: LocalDisposition;
   taskSourceModel: TaskSourceModel;
   editPolicy: TaskEditPolicy;
+  supportedStatusValues?: TaskStatus[];
 }
 
 /** A list within the task's own source, used for same-source moves. */
@@ -71,7 +94,9 @@ export interface SourceList {
 
 /** Partial field payload reported back to hosts after a successful save. */
 export interface TaskFieldUpdate {
-  [key: string]: string | number | null | undefined;
+  title?: string;
+  tagIds?: readonly string[];
+  [key: string]: unknown;
 }
 
 /** A Mission Control hub project a task can be assigned to. */
@@ -80,6 +105,7 @@ export interface HubProject {
   name: string;
   color: string;
   icon: string | null;
+  category?: string | null;
   hidden?: boolean;
 }
 
@@ -114,6 +140,8 @@ export interface TaskConfirmDialogState {
   confirmLabel: string;
   variant: 'danger' | 'warning';
   onConfirm: () => void;
+  alternateLabel?: string;
+  onAlternate?: () => void;
 }
 
 /** An AI-suggested micro-status for the task. */
@@ -125,19 +153,48 @@ export interface MicroStatusSuggestion {
 /** Metadata fields the panel reads out of a task's JSON metadata blob. */
 export interface TaskDetailMetadata {
   previewUrl?: string;
+  previewType?: 'pdf' | 'iframe' | 'external' | 'image';
   previewLabel?: string;
+  documentUrl?: string;
   documentTitle?: string;
+  documentType?: string;
+  documentId?: string | number;
   docHubUrl?: string;
+  docHubDocumentUrl?: string;
   correspondent?: string;
   amount?: number;
   actionType?: string;
+  category?: string;
   urgency?: string;
+  confidence?: number;
+  actionReady?: boolean;
+  reviewState?: string;
+  reviewUrl?: string;
+  primaryActionId?: string;
+  primaryActionLabel?: string;
+  primaryActionUrl?: string;
+  sourceActions?: Array<{
+    id: string;
+    label: string;
+    method: 'POST';
+    url: string;
+  }>;
+  owlStatus?: string;
+  owlDisposition?: string;
+  owlSnoozedUntil?: string;
+  owlUpdatedAt?: string;
   recurrence?: string;
+  linkedResources?: Array<{
+    id?: string;
+    applicationName?: string;
+    displayName?: string;
+    webUrl?: string;
+  }>;
 }
 
 export interface TaskDetailPanelProps {
   taskId: string;
-  onClose: () => void;
+  onClose: (reason?: 'dismiss' | 'task-removed') => void;
   onUpdate?: (fields?: TaskFieldUpdate) => void;
   onSubtaskCountChange?: (done: number, total: number) => void;
   availableTags?: TaskTag[];
@@ -160,6 +217,10 @@ export interface TaskDetailPanelProps {
   portalDialog?: boolean;
   /** Override the minimum resizable width when a host surface requires more coverage. */
   minPanelWidth?: number;
+  /** Fill a host-owned pane instead of using the user's global side-panel width. */
+  fillContainer?: boolean;
+  /** Additional responsive visibility classes for the embedded document preview. */
+  documentPreviewClassName?: string;
   /** Move keyboard focus into the panel when it opens. */
   focusPanelOnMount?: boolean;
   /** Open the existing expanded Notes dialog after the requested task loads. */
@@ -169,8 +230,14 @@ export interface TaskDetailPanelProps {
 }
 
 /** Parse a task's metadata blob, tolerating absent or malformed JSON. */
-export function parseTaskMetadata(metadata: string | null | undefined): TaskDetailMetadata {
+export function parseTaskMetadata(
+  metadata: string | Record<string, unknown> | null | undefined,
+): TaskDetailMetadata {
   if (!metadata) return {};
+  if (typeof metadata === 'object' && !Array.isArray(metadata)) {
+    return metadata as TaskDetailMetadata;
+  }
+  if (typeof metadata !== 'string') return {};
   try {
     const parsed: unknown = JSON.parse(metadata);
     return parsed && typeof parsed === 'object' ? parsed as TaskDetailMetadata : {};

@@ -1,28 +1,26 @@
 import 'server-only';
 
-import { and, eq, isNull } from 'drizzle-orm';
-import db from '@/db';
 import {
   EXTERNAL_AGENT_AUTH_TYPES,
   EXTERNAL_AGENT_LOCALITIES,
   EXTERNAL_AGENT_TRANSPORTS,
   EXTERNAL_AGENT_TYPES,
-  externalAgents,
-  inboundWebhooks,
   type ExternalAgentAuthType,
   type ExternalAgentCapabilities,
   type ExternalAgentDataPolicy,
   type ExternalAgentLocality,
+  type ExternalAgentRecord,
   type ExternalAgentTransport,
   type ExternalAgentType,
-} from '@/db/schema';
+} from './contracts';
 import { ExternalAgentError } from './errors';
+import { getExternalAgentControlPersistence } from './persistence';
 import {
   DEFAULT_EXTERNAL_AGENT_DATA_POLICY,
   validateDataPolicy,
 } from './policy';
 
-export type ExternalAgent = typeof externalAgents.$inferSelect;
+export type ExternalAgent = ExternalAgentRecord;
 
 export interface ExternalAgentInput {
   id?: string;
@@ -114,7 +112,7 @@ function validateEndpoint(
 }
 
 export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
-  typeof externalAgents.$inferInsert,
+  ExternalAgentRecord,
   'id' | 'createdAt' | 'updatedAt'
 > {
   const name = optionalText(input.name, 'name');
@@ -209,48 +207,25 @@ export function publicExternalAgent(agent: ExternalAgent) {
   };
 }
 
-async function validateInboundWebhookReference(
-  inboundWebhookId: string | null | undefined,
-) {
-  if (!inboundWebhookId) return;
-  const [webhook] = await db.select({
-    enabled: inboundWebhooks.enabled,
-    secret: inboundWebhooks.secret,
-  }).from(inboundWebhooks).where(eq(inboundWebhooks.id, inboundWebhookId)).limit(1);
-  if (!webhook) {
-    throw new ExternalAgentError('Inbound webhook not found', 'VALIDATION_ERROR', 422);
-  }
-  if (!webhook.enabled || !webhook.secret) {
-    throw new ExternalAgentError(
-      'Agent result webhooks must be enabled and HMAC-protected',
-      'VALIDATION_ERROR',
-      422,
-    );
-  }
-}
-
 export async function listExternalAgents(options: { includeDeleted?: boolean } = {}) {
-  const rows = await db.select().from(externalAgents)
-    .where(options.includeDeleted ? undefined : isNull(externalAgents.deletedAt));
+  const rows = await (await getExternalAgentControlPersistence()).registry.list(options);
   return rows.map(publicExternalAgent);
 }
 
 export async function getExternalAgent(id: string, includeDeleted = false) {
-  const [agent] = await db.select().from(externalAgents).where(
-    includeDeleted
-      ? eq(externalAgents.id, id)
-      : and(eq(externalAgents.id, id), isNull(externalAgents.deletedAt)),
-  ).limit(1);
-  return agent ?? null;
+  return (await getExternalAgentControlPersistence()).registry.get(id, includeDeleted);
 }
 
 export async function createExternalAgent(input: ExternalAgentInput) {
   const now = new Date().toISOString();
   const values = validateExternalAgentInput(input);
-  await validateInboundWebhookReference(values.inboundWebhookId);
   const id = optionalText(input.id, 'id') ?? crypto.randomUUID();
-  await db.insert(externalAgents).values({ ...values, id, createdAt: now, updatedAt: now });
-  return (await getExternalAgent(id))!;
+  return (await getExternalAgentControlPersistence()).registry.create({
+    ...values,
+    id,
+    createdAt: now,
+    updatedAt: now,
+  });
 }
 
 export async function updateExternalAgent(id: string, patch: Partial<ExternalAgentInput>) {
@@ -263,20 +238,21 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
     dataPolicy: patch.dataPolicy ?? existing.dataPolicy,
     capabilities: patch.capabilities ?? existing.capabilities,
   });
-  await validateInboundWebhookReference(values.inboundWebhookId);
-  await db.update(externalAgents)
-    .set({ ...values, updatedAt: new Date().toISOString() })
-    .where(eq(externalAgents.id, id));
-  return (await getExternalAgent(id))!;
+  const updated = await (await getExternalAgentControlPersistence()).registry.update(id, {
+    ...values,
+    updatedAt: new Date().toISOString(),
+  });
+  if (!updated) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
+  return updated;
 }
 
 export async function deleteExternalAgent(id: string) {
   const existing = await getExternalAgent(id);
   if (!existing) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
-  const now = new Date().toISOString();
-  await db.update(externalAgents)
-    .set({ enabled: false, deletedAt: now, updatedAt: now })
-    .where(eq(externalAgents.id, id));
+  await (await getExternalAgentControlPersistence()).registry.softDelete(
+    id,
+    new Date().toISOString(),
+  );
 }
 
 export function resolveAgentCredential(reference: string | null): string | null {

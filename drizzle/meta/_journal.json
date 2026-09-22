@@ -750,6 +750,223 @@
       "when": 1787022000000,
       "tag": "0106_task-delay-insights",
       "breakpoints": true
+    },
+    {
+      "idx": 107,
+      "version": "6",
+      "when": 1787084129684,
+      "tag": "0107_github_notification_category",
+      "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1787169600000,
+      "tag": "0108_task_reminder_occurrences",
+      "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1787202000000,
+      "tag": "0109_relative_task_reminders",
+      "breakpoints": true
+    },
+    {
+      "idx": 110,
+      "version": "6",
+      "when": 1787248200000,
+      "tag": "0110_my_day_planning_signals",
+      "breakpoints": true
+    },
+    {
+      "idx": 111,
+      "version": "6",
+      "when": 1787331600000,
+      "tag": "0111_completion_anchored_recurrence",
+      "breakpoints": true
+    },
+    {
+      "idx": 112,
+      "version": "6",
+      "when": 1787422177425,
+      "tag": "0112_finance_connection_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 113,
+      "version": "6",
+      "when": 1787424779698,
+      "tag": "0113_finance_attention_repair",
+      "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1787426400000,
+      "tag": "0114_tyrion_readiness",
+      "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1787450400000,
+      "tag": "0115_homelab_alert_receipts",
+      "breakpoints": true
+    },
+    {
+      "idx": 116,
+      "version": "6",
+      "when": 1787497200000,
+      "tag": "0116_track_task_disposition_history",
+      "breakpoints": true
+    },
+    {
+      "idx": 117,
+      "version": "6",
+      "when": 1787505600000,
+      "tag": "0117_simplify_tyrion_identities",
+      "breakpoints": true
+    },
+    {
+      "idx": 118,
+      "version": "6",
+      "when": 1787616000000,
+      "tag": "0118_add_planning_horizon",
+      "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1787624700000,
+      "tag": "0119_replace_now_horizon_with_soon",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1788012000000,
+      "tag": "0120_houston_pending_approvals",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1788200000000,
+      "tag": "0121_semantic_index",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "6",
+      "when": 1788200001000,
+      "tag": "0122_alertmanager_integration_operations",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1788066000000,
+      "tag": "0123_houston_summary_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 124,
+      "version": "6",
+      "when": 1788205018548,
+      "tag": "0124_notification-delivery-claim-token",
+      "breakpoints": true
+    },
+    {
+      "idx": 125,
+      "version": "6",
+      "when": 1788212099198,
+      "tag": "0125_triage-sync-state-revision",
+      "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "6",
+      "when": 1788298502117,
+      "tag": "0126_event-outbox",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "6",
+      "when": 1788375712264,
+      "tag": "0127_notification-enrichment",
+      "breakpoints": true
+    },
+    {
+      "idx": 128,
+      "version": "6",
+      "when": 1788400000000,
+      "tag": "0128_connector_last_test_result",
+      "breakpoints": true
+    },
+    {
+      "idx": 129,
+      "version": "6",
+      "when": 1789005147983,
+      "tag": "0129_bizarre_quicksilver",
+      "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "6",
+      "when": 1789053000000,
+      "tag": "0130_dedupe_outlook_calendar_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "6",
+      "when": 1789240952279,
+      "tag": "0131_gigantic_toxin",
+      "breakpoints": true
+    },
+    {
+      "idx": 132,
+      "version": "6",
+      "when": 1789246534686,
+      "tag": "0132_nosy_otto_octavius",
+      "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "6",
+      "when": 1789246535000,
+      "tag": "0133_context_appearance",
+      "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "6",
+      "when": 1789675532505,
+      "tag": "0134_low_next_avengers",
+      "breakpoints": true
+    },
+    {
+      "idx": 135,
+      "version": "6",
+      "when": 1789690503921,
+      "tag": "0135_recurring_occurrence_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 136,
+      "version": "6",
+      "when": 1789743022118,
+      "tag": "0136_task_time_activity",
+      "breakpoints": true
+    },
+    {
+      "idx": 137,
+      "version": "6",
+      "when": 1789760745068,
+      "tag": "0137_recurrence_backfill_decisions",
+      "breakpoints": true
     }
   ]
 }

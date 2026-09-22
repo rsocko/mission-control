@@ -1,33 +1,39 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  generateText,
-  InvalidToolApprovalSignatureError,
-  type ModelMessage,
-} from 'ai';
-import { MockLanguageModelV3 } from 'ai/test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import Database from 'better-sqlite3';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FinanceCorePersistence } from '@/db/persistence/finance-worker';
 
-const mutationSpies = vi.hoisted(() => ({
-  assign: vi.fn(),
-  category: vi.fn(),
+vi.unmock('drizzle-orm');
+
+const mocks = vi.hoisted(() => ({
+  finance: null as FinanceCorePersistence | null,
+  sqliteCompatibilityAccess: vi.fn(),
 }));
 
-vi.mock('@/lib/finance/houston-tools', () => ({
-  HoustonFinanceToolError: class HoustonFinanceToolError extends Error {
-    code = 'finance_unavailable';
+vi.mock('@/db', () => {
+  const forbidden = new Proxy({}, {
+    get() {
+      mocks.sqliteCompatibilityAccess();
+      throw new Error('SQLite compatibility persistence was reached');
+    },
+  });
+  return { sqlite: forbidden, db: forbidden, default: forbidden };
+});
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => {
+    if (!mocks.finance) throw new Error('Finance persistence is not registered');
+    return { finance: mocks.finance };
   },
-  getHouseholdFinanceSummary: vi.fn(),
-  searchFinanceTransactions: vi.fn(),
-  getPendingFinanceExceptions: vi.fn(),
-  getKidSpending: vi.fn(),
-  getFinanceObligations: vi.fn(),
-  getFinanceConnectorHealth: vi.fn(),
-  assignFinanceTransactionKid: mutationSpies.assign,
-  updateFinanceTransactionCategory: mutationSpies.category,
 }));
 
-import { createFinanceMutationTools } from '@/lib/ai/tools/finance-tools';
+const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-houston-approval-'));
+const databasePath = join(tempDirectory, 'houston-approval.db');
+let sqlite: Database.Database;
+let store: typeof import('@/lib/ai/finance-approval-store');
 
-const approvalSecret = 'invented-approval-secret-at-least-32-bytes';
 const mutationInput = {
   transactionRef: `txn_${'a'.repeat(43)}`,
   expected: {
@@ -41,163 +47,143 @@ const mutationInput = {
   kidName: 'Avery',
 };
 
-const usage = {
-  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 1, text: 1, reasoning: 0 },
+const approval = {
+  approvalId: 'invented-approval-id',
+  toolCallId: 'invented-call-id',
+  toolName: 'assignFinanceTransactionKid' as const,
+  toolInput: mutationInput,
 };
 
-function toolCallModel() {
-  return new MockLanguageModelV3({
-    doGenerate: {
-      content: [{
-        type: 'tool-call',
-        toolCallId: 'invented-call-id',
-        toolName: 'assignFinanceTransactionKid',
-        input: JSON.stringify(mutationInput),
-      }],
-      finishReason: { unified: 'tool-calls', raw: undefined },
-      usage,
-      warnings: [],
-    },
-  });
+function pendingCount(): number {
+  const row = sqlite.prepare(`
+    SELECT COUNT(*) AS count
+    FROM houston_finance_pending_approvals
+    WHERE approval_id = ?
+  `).get(approval.approvalId) as { count: number };
+  return row.count;
 }
 
-function finalModel() {
-  return new MockLanguageModelV3({
-    doGenerate: {
-      content: [{ type: 'text', text: 'Finished.' }],
-      finishReason: { unified: 'stop', raw: undefined },
-      usage,
-      warnings: [],
-    },
-  });
-}
-
-async function requestApproval() {
-  const result = await generateText({
-    model: toolCallModel(),
-    messages: [{ role: 'user', content: 'Assign this transaction.' }],
-    tools: createFinanceMutationTools(approvalSecret),
-    experimental_toolApprovalSecret: approvalSecret,
-  });
-  const request = result.content.find(part => part.type === 'tool-approval-request');
-  if (!request || request.type !== 'tool-approval-request') {
-    throw new Error('Expected a tool approval request.');
-  }
-  return { result, request };
-}
-
-function approvalMessages(
-  responseMessages: ModelMessage[],
-  approvalId: string,
-  approved: boolean,
-): ModelMessage[] {
-  return [
-    { role: 'user', content: 'Assign this transaction.' },
-    ...responseMessages,
-    {
-      role: 'tool',
-      content: [{
-        type: 'tool-approval-response',
-        approvalId,
-        approved,
-        reason: approved ? 'User approved.' : 'User denied.',
-      }],
-    },
-  ];
-}
-
-beforeEach(() => {
-  mutationSpies.assign.mockReset().mockResolvedValue({
-    kind: 'finance-kid-assignment',
-    status: 'updated',
-    missionControlConfirmed: { kidName: 'Avery' },
-    replayed: false,
-    provenance: [
-      { kind: 'monarch-fact', label: 'Monarch facts via Tyrion Bridge', included: true },
-      { kind: 'tyrion-derived', label: 'Tyrion-derived attribution/conclusions', included: true },
-      { kind: 'mission-control-calculated', label: 'Mission Control-calculated aggregates', included: false },
-      { kind: 'mission-control-confirmed', label: 'Mission Control-confirmed decision', included: true },
-    ],
-  });
-  mutationSpies.category.mockReset();
+beforeAll(async () => {
+  sqlite = new Database(databasePath);
+  sqlite.pragma('foreign_keys = ON');
+  const { runOrderedDatabaseBootstrap } = await import('@/db/bootstrap/registry');
+  runOrderedDatabaseBootstrap(sqlite, resolve(process.cwd(), 'drizzle'));
+  const { createSqliteFinanceWorkerPersistence } = await import(
+    '@/db/persistence/sqlite-finance-worker-repositories'
+  );
+  mocks.finance = createSqliteFinanceWorkerPersistence(sqlite);
+  store = await import('@/lib/ai/finance-approval-store');
 });
 
-describe('Houston signed finance approvals', () => {
-  it('requests a signed approval without executing a mutation', async () => {
-    const { request } = await requestApproval();
-    expect(request.signature).toEqual(expect.any(String));
-    expect(request.signature).not.toContain(approvalSecret);
-    expect(mutationSpies.assign).not.toHaveBeenCalled();
+afterAll(() => {
+  sqlite.close();
+  rmSync(tempDirectory, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  sqlite.prepare('DELETE FROM houston_finance_pending_approvals').run();
+});
+
+describe('Houston persisted finance approvals', () => {
+  it('atomically consumes the server-owned proposal exactly once', async () => {
+    await store.persistHoustonFinanceApproval({
+      ...approval,
+      correlationId: 'invented-correlation',
+    });
+
+    await expect(store.consumeHoustonFinanceApproval(approval)).resolves.toEqual(approval);
+    await expect(store.consumeHoustonFinanceApproval(approval))
+      .rejects.toThrow(store.InvalidHoustonFinanceApprovalError);
+    expect(pendingCount()).toBe(0);
   });
 
-  it('executes exactly once after signed approval and never executes denial', async () => {
-    const approved = await requestApproval();
-    await generateText({
-      model: finalModel(),
-      messages: approvalMessages(
-        approved.result.response.messages,
-        approved.request.approvalId,
-        true,
-      ),
-      tools: createFinanceMutationTools(approvalSecret),
-      experimental_toolApprovalSecret: approvalSecret,
+  it('rejects changed arguments without consuming the proposal', async () => {
+    await store.persistHoustonFinanceApproval({
+      ...approval,
+      correlationId: 'invented-correlation',
     });
-    expect(mutationSpies.assign).toHaveBeenCalledTimes(1);
 
-    mutationSpies.assign.mockClear();
-    const denied = await requestApproval();
-    await generateText({
-      model: finalModel(),
-      messages: approvalMessages(
-        denied.result.response.messages,
-        denied.request.approvalId,
-        false,
-      ),
-      tools: createFinanceMutationTools(approvalSecret),
-      experimental_toolApprovalSecret: approvalSecret,
-    });
-    expect(mutationSpies.assign).not.toHaveBeenCalled();
+    await expect(store.consumeHoustonFinanceApproval({
+      ...approval,
+      toolInput: { ...mutationInput, kidName: 'Mallory' },
+    })).rejects.toThrow(store.InvalidHoustonFinanceApprovalError);
+    expect(pendingCount()).toBe(1);
+    await expect(store.consumeHoustonFinanceApproval(approval)).resolves.toEqual(approval);
   });
 
-  it('rejects changed arguments and tampered signatures before execution', async () => {
-    const approved = await requestApproval();
-    const tamperedArguments = structuredClone(approved.result.response.messages);
-    for (const message of tamperedArguments) {
-      if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
-      const call = message.content.find(part => part.type === 'tool-call');
-      if (call?.type === 'tool-call') {
-        call.input = { ...mutationInput, kidName: 'Mallory' };
-      }
-    }
-    await expect(generateText({
-      model: finalModel(),
-      messages: approvalMessages(
-        tamperedArguments,
-        approved.request.approvalId,
-        true,
-      ),
-      tools: createFinanceMutationTools(approvalSecret),
-      experimental_toolApprovalSecret: approvalSecret,
-    })).rejects.toSatisfy(InvalidToolApprovalSignatureError.isInstance);
-    expect(mutationSpies.assign).not.toHaveBeenCalled();
+  it('rejects a mismatched tool call without consuming the proposal', async () => {
+    await store.persistHoustonFinanceApproval({
+      ...approval,
+      correlationId: 'invented-correlation',
+    });
 
-    const tamperedSignature = structuredClone(approved.result.response.messages);
-    for (const message of tamperedSignature) {
-      if (message.role !== 'assistant' || !Array.isArray(message.content)) continue;
-      const request = message.content.find(part => part.type === 'tool-approval-request');
-      if (request?.type === 'tool-approval-request') request.signature = 'tampered';
-    }
-    await expect(generateText({
-      model: finalModel(),
-      messages: approvalMessages(
-        tamperedSignature,
-        approved.request.approvalId,
-        true,
-      ),
-      tools: createFinanceMutationTools(approvalSecret),
-      experimental_toolApprovalSecret: approvalSecret,
-    })).rejects.toSatisfy(InvalidToolApprovalSignatureError.isInstance);
-    expect(mutationSpies.assign).not.toHaveBeenCalled();
+    await expect(store.consumeHoustonFinanceApproval({
+      ...approval,
+      toolCallId: 'other-call-id',
+    })).rejects.toThrow(store.InvalidHoustonFinanceApprovalError);
+    expect(pendingCount()).toBe(1);
+  });
+
+  it('rejects expired proposals', async () => {
+    const issuedAt = new Date('2026-08-29T12:00:00.000Z');
+    await store.persistHoustonFinanceApproval({
+      ...approval,
+      correlationId: 'invented-correlation',
+      now: issuedAt,
+    });
+
+    await expect(store.consumeHoustonFinanceApproval({
+      ...approval,
+      now: new Date('2026-08-29T13:00:00.001Z'),
+    })).rejects.toThrow(store.InvalidHoustonFinanceApprovalError);
+    expect(pendingCount()).toBe(0);
+  });
+
+  it('rejects an unknown approval identity', async () => {
+    await expect(store.consumeHoustonFinanceApproval(approval))
+      .rejects.toThrow(store.InvalidHoustonFinanceApprovalError);
+  });
+
+  it('allows identical persistence retries and rejects conflicting reuse', async () => {
+    const pending = {
+      ...approval,
+      correlationId: 'invented-correlation',
+    };
+    await store.persistHoustonFinanceApproval(pending);
+    await store.persistHoustonFinanceApproval(pending);
+    expect(pendingCount()).toBe(1);
+
+    await expect(store.persistHoustonFinanceApproval({
+      ...pending,
+      toolInput: { ...mutationInput, kidName: 'Mallory' },
+    })).rejects.toThrow(store.InvalidHoustonFinanceApprovalError);
+    await expect(store.consumeHoustonFinanceApproval(approval)).resolves.toEqual(approval);
+  });
+
+  it('canonicalizes stored arguments so key order never changes identity', async () => {
+    await store.persistHoustonFinanceApproval({
+      ...approval,
+      correlationId: 'invented-correlation',
+    });
+
+    await expect(store.consumeHoustonFinanceApproval({
+      ...approval,
+      toolInput: {
+        kidName: mutationInput.kidName,
+        expected: {
+          stateToken: mutationInput.expected.stateToken,
+          kidName: mutationInput.expected.kidName,
+          category: mutationInput.expected.category,
+          merchant: mutationInput.expected.merchant,
+          amount: mutationInput.expected.amount,
+          date: mutationInput.expected.date,
+        },
+        transactionRef: mutationInput.transactionRef,
+      },
+    })).resolves.toEqual(approval);
+  });
+
+  it('never reaches SQLite compatibility persistence', () => {
+    expect(mocks.sqliteCompatibilityAccess).not.toHaveBeenCalled();
   });
 });

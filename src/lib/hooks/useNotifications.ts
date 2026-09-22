@@ -44,6 +44,8 @@ export interface NotificationFacets {
   level: Record<string, number>;
   category: Record<string, number>;
   source: Record<string, number>;
+  sourceAccount: Array<{ key: string; label: string; source: string; count: number }>;
+  notificationType: Array<{ key: string; label: string; count: number }>;
   state: Record<string, number>;
   merchant: Array<{ key: string; label: string; count: number }>;
 }
@@ -107,6 +109,7 @@ export interface UseNotificationsReturn {
   setReasonFilter: (reason: string | null) => void;
   setSubjectTypeFilter: (subjectType: string | null) => void;
   setSourceAccountFilter: (sourceAccount: string | null) => void;
+  setNotificationTypeFilter: (notificationType: string | null) => void;
   setParticipatingFilter: (participating: boolean) => void;
   replaceFilters: (filters: NotificationsFilters) => void;
   setAttentionView: (view: NotificationAttentionView) => void;
@@ -151,6 +154,7 @@ export interface UseNotificationsReturn {
 
 export interface ActionResult {
   success: boolean;
+  error?: string;
   result?: {
     type: string;
     url?: string;
@@ -205,6 +209,8 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
     level: {},
     category: {},
     source: {},
+    sourceAccount: [],
+    notificationType: [],
     state: {},
     merchant: [],
   });
@@ -262,7 +268,16 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
         digest: 0,
         actionable: 0,
       });
-      setFacets(data.facets || { level: {}, category: {}, source: {}, state: {}, merchant: [] });
+      setFacets({
+        level: {},
+        category: {},
+        source: {},
+        sourceAccount: [],
+        notificationType: [],
+        state: {},
+        merchant: [],
+        ...(data.facets || {}),
+      });
       setMatchingCount(Number(data.matchingCount ?? data.notifications?.length ?? 0));
       setHasMore(data.hasMore || false);
       cursorRef.current = data.cursor || null;
@@ -382,11 +397,15 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(params || {}),
       });
+      const data = await res.json().catch(() => ({
+        success: false,
+        error: `Notification action failed with HTTP ${res.status}`,
+      })) as ActionResult;
       if (!res.ok) {
         cancelExternalNavigation(externalWindow);
-        throw new Error(`HTTP ${res.status}`);
+        console.error('Notification action failed:', data.error || `HTTP ${res.status}`);
+        return data;
       }
-      const data = await res.json();
       setRefreshTrigger(n => n + 1);
       window.dispatchEvent(new Event(NAVIGATION_COUNTS_REFRESH_EVENT));
 
@@ -394,7 +413,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
       if (data.success && data.result) {
         if (data.result.url) {
           if (data.result.target === '_blank' || data.result.type === 'open_url') {
-            completeExternalNavigation(externalWindow, data.result.url);
+            await completeExternalNavigation(externalWindow, data.result.url);
           } else {
             cancelExternalNavigation(externalWindow);
             window.location.href = data.result.url;
@@ -410,8 +429,9 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
       }
 
       return data;
-    } catch {
+    } catch (error) {
       cancelExternalNavigation(externalWindow);
+      console.error('Notification action failed:', error);
       return { success: false };
     }
   }, [notifications]);
@@ -480,7 +500,12 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
     setLevelFilter: (level) => setFilters(f => ({ ...f, level })),
     setCategoryFilter: (category) => setFilters(f => ({ ...f, category })),
     setMerchantFilter: (merchant) => setFilters(f => ({ ...f, merchant })),
-    setSourceFilter: (source) => setFilters(f => ({ ...f, source })),
+    setSourceFilter: (source) => setFilters(f => ({
+      ...f,
+      source,
+      sourceAccount: source === f.source ? f.sourceAccount : null,
+      notificationType: source === f.source ? f.notificationType : null,
+    })),
     setStateFilter: (state) => setFilters(f => ({ ...f, state })),
     setActionableOnly: (actionableOnly) => setFilters(f => ({ ...f, actionableOnly })),
     setDateRangeFilter: (dateRange) => setFilters(f => ({ ...f, dateRange })),
@@ -489,7 +514,12 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
     setOwnerFilter: (owner) => setFilters(f => ({ ...f, owner })),
     setReasonFilter: (reason) => setFilters(f => ({ ...f, reason })),
     setSubjectTypeFilter: (subjectType) => setFilters(f => ({ ...f, subjectType })),
-    setSourceAccountFilter: (sourceAccount) => setFilters(f => ({ ...f, sourceAccount })),
+    setSourceAccountFilter: (sourceAccount) => setFilters(f => ({
+      ...f,
+      sourceAccount,
+      notificationType: sourceAccount === f.sourceAccount ? f.notificationType : null,
+    })),
+    setNotificationTypeFilter: (notificationType) => setFilters(f => ({ ...f, notificationType })),
     setParticipatingFilter: (participating) => setFilters(f => ({ ...f, participating })),
     replaceFilters: setFilters,
     setAttentionView: (view) => setFilters(f => ({

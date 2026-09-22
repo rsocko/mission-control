@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -46,11 +47,25 @@ function metadata(row: { metadata: unknown }): Record<string, unknown> {
 function completeGeneration(
   observations: ReadonlyMap<string, GitHubParentMetadata | null>,
   additionalSourceIds: readonly string[] = [],
-): Map<string, GitHubParentMetadata | null> {
-  const complete = new Map<string, GitHubParentMetadata | null>(
+  siblingOrders: ReadonlyMap<string, number> = new Map(),
+): Map<string, GitHubParentMetadata | null | {
+  childSourceId: string;
+  parent: GitHubParentMetadata | null;
+  siblingOrder: number;
+}> {
+  const complete = new Map<string, GitHubParentMetadata | null | {
+    childSourceId: string;
+    parent: GitHubParentMetadata | null;
+    siblingOrder: number;
+  }>(
     [...baselineSourceIds, ...additionalSourceIds].map((sourceId) => [sourceId, null]),
   );
-  for (const [sourceId, observation] of observations) complete.set(sourceId, observation);
+  for (const [sourceId, observation] of observations) {
+    const siblingOrder = siblingOrders.get(sourceId);
+    complete.set(sourceId, siblingOrder === undefined
+      ? observation
+      : { childSourceId: sourceId, parent: observation, siblingOrder });
+  }
   return complete;
 }
 
@@ -78,7 +93,7 @@ beforeAll(async () => {
   vi.doUnmock('crypto');
   vi.resetModules();
   [dbModule, schema, hierarchy] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/sync/github-hierarchy-reconciliation'),
   ]);
@@ -107,6 +122,10 @@ describe('GitHub hierarchy reconciliation', () => {
         ['acme/app:10', parent('acme/app', 1)],
         ['acme/app:11', parent('other/repo', 2)],
         ['acme/app:12', parent('private/repo', 99)],
+      ]), [], new Map([
+        ['acme/app:10', 1],
+        ['acme/app:11', 0],
+        ['acme/app:12', 2],
       ])),
       new Set(['acme/app', 'other/repo']),
       true,
@@ -115,8 +134,18 @@ describe('GitHub hierarchy reconciliation', () => {
     const byId = new Map(rows.map((row) => [row.id, row]));
 
     expect(result).toEqual({ applied: true, updated: 6 });
-    expect(byId.get('child-same')).toMatchObject({ parentId: 'parent-a', depth: 1 });
-    expect(byId.get('child-cross')).toMatchObject({ parentId: 'parent-b', depth: 1 });
+    expect(byId.get('child-same')).toMatchObject({
+      parentId: 'parent-a',
+      depth: 1,
+      siblingOrder: 1,
+    });
+    expect(byId.get('child-cross')).toMatchObject({
+      parentId: 'parent-b',
+      depth: 1,
+      siblingOrder: 0,
+    });
+    expect(byId.get('parent-a')?.subtaskOrderRevision).toBe(1);
+    expect(byId.get('parent-b')?.subtaskOrderRevision).toBe(1);
     expect(byId.get('child-external')?.parentId).toBeNull();
     expect(metadata(byId.get('child-external')!)).toMatchObject({
       githubParent: {

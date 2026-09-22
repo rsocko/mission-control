@@ -122,6 +122,76 @@ vi.mock('@/lib/sync/deletion-detector', () => ({
   detectDeletions: vi.fn(async () => ({ removed: 0, localOnlyProtected: 0 })),
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: { get: vi.fn(async () => null) },
+    execution: {
+      support: { assertConnectorSupported: vi.fn() },
+      pulls: {
+        loadSnapshot: vi.fn(async () => ({
+          tasks: [...mockExistingTasks],
+          tags: [],
+          archivedRecurringDuplicateSourceIds: [],
+          linkedSources: [],
+        })),
+        updateLinkedSourceLocator: vi.fn(async () => undefined),
+        updateTaskSourceId: vi.fn(async () => true),
+        adoptLocalTask: vi.fn(async (input: {
+          taskId: string;
+          remoteSourceId: string;
+          hasLocalEdits: boolean;
+          now: string;
+        }) => {
+          const task = mockExistingTasks.find(
+            (candidate) => (candidate as { id: string }).id === input.taskId,
+          ) as Record<string, unknown> | undefined;
+          if (!task) return null;
+          Object.assign(task, {
+            sourceId: input.remoteSourceId,
+            syncStatus: input.hasLocalEdits ? 'pending_push' : 'synced',
+            lastSyncedAt: input.now,
+          });
+          return task;
+        }),
+        insertBatch: vi.fn(async (candidates: Array<{
+          task: Record<string, unknown>;
+        }>) => {
+          insertedValues.push(...candidates.map(({ task }) => task));
+          const insertedIds = new Set<string>();
+          const records = candidates.map(({ task }) => {
+            const concurrent = mockConcurrentTasks.find(
+              (existing) => existing.sourceId === task.sourceId,
+            );
+            if (concurrent) return concurrent;
+            insertedIds.add(task.id as string);
+            mockExistingTasks.push(task);
+            return task;
+          });
+          return { insertedIds, records };
+        }),
+        findBySourceIds: vi.fn(async (_connectorId: string, sourceIds: string[]) =>
+          mockConcurrentTasks.filter((task) => sourceIds.includes(task.sourceId as string))),
+        applyRemoteUpdate: vi.fn(async (input: {
+          taskId: string;
+          values: Record<string, unknown>;
+        }) => {
+          mockUpdateSets.push(input.values);
+          const task = [...mockExistingTasks, ...mockConcurrentTasks].find(
+            (candidate) => (candidate as { id: string }).id === input.taskId,
+          ) as Record<string, unknown> | undefined;
+          if (task) Object.assign(task, input.values);
+          return true;
+        }),
+        replaceSourceTags: vi.fn(async () => undefined),
+        listChecklistItems: vi.fn(async () => []),
+        correctParents: vi.fn(async () => undefined),
+        listChildren: vi.fn(async () => []),
+        listTasks: vi.fn(async () => [...mockExistingTasks]),
+      },
+    },
+  })),
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((...args: unknown[]) => args),
   and: vi.fn((...args: unknown[]) => args),
@@ -291,7 +361,7 @@ describe('pull-manager bulk import detection', () => {
 
     expect(result).toEqual(expect.objectContaining({ added: 1, updated: 1 }));
     expect(mockUpdateSets).toContainEqual(expect.objectContaining({
-      metadata: JSON.stringify({ recurrence: 'daily' }),
+      metadata: { recurrence: 'daily' },
     }));
   });
 
@@ -312,7 +382,7 @@ describe('pull-manager bulk import detection', () => {
 
     expect(result.updated).toBe(1);
     expect(mockUpdateSets).toContainEqual(expect.objectContaining({
-      metadata: JSON.stringify({ recurrence: 'daily', recurrenceIdentity: 'daily-pattern' }),
+      metadata: { recurrence: 'daily', recurrenceIdentity: 'daily-pattern' },
     }));
   });
 

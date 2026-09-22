@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { TaskField } from '@/types';
+import { REMINDER_RELATIVE_RULE_VALUES } from '@/lib/tasks/relative-reminder';
 
 const TASK_PATCH_SCHEMA = z.strictObject({
   title: z.string().trim().min(1),
@@ -7,17 +8,30 @@ const TASK_PATCH_SCHEMA = z.strictObject({
   status: z.enum(['todo', 'in_progress', 'done', 'cancelled']),
   localDisposition: z.enum(['active', 'handled', 'dismissed']),
   priority: z.enum(['critical', 'high', 'medium', 'low', 'none']),
+  planningHorizon: z.enum(['next', 'soon', 'later', 'someday']).nullable(),
   dueDate: z.string().nullable(),
   kanbanColumn: z.string().nullable(),
   kanbanOrder: z.number().finite().nullable(),
   tags: z.array(z.string().min(1)),
   recurrence: z.string().nullable(),
+  recurrenceMode: z.enum(['schedule', 'completion']),
+  recurrenceSkipDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(100),
+  recurrenceCatchUp: z.enum(['latest', 'none']),
   estimatedDuration: z.number().int().nonnegative().nullable(),
   microStatus: z.string().nullable(),
   snoozedUntil: z.string().nullable(),
   effort: z.number().int().min(1).max(5).nullable(),
   statusReason: z.enum(['completed', 'not_planned', 'duplicate', 'moved']).nullable(),
-  reminderAt: z.string().nullable(),
+  reminderAt: z.string().datetime({ offset: true })
+    .transform(value => new Date(value).toISOString())
+    .nullable(),
+  reminderRelative: z.enum(REMINDER_RELATIVE_RULE_VALUES).nullable(),
+  reminderDueTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/).nullable(),
+  reminderNagInterval: z.union([z.literal(1), z.literal(5), z.literal(15)]).nullable(),
+  reminderNagStopAt: z.string().datetime({ offset: true })
+    .transform(value => new Date(value).toISOString())
+    .nullable(),
+  relativeReminderDueDateResolution: z.enum(['remove', 'convert_to_absolute']).optional(),
 }).partial();
 
 export type TaskPatchInput = z.infer<typeof TASK_PATCH_SCHEMA>;
@@ -28,17 +42,26 @@ const FIELD_BY_INPUT_KEY = {
   status: 'status',
   localDisposition: 'localDisposition',
   priority: 'priority',
+  planningHorizon: 'planningHorizon',
   dueDate: 'dueDate',
   kanbanColumn: 'kanbanPlacement',
   kanbanOrder: 'kanbanPlacement',
   tags: 'tags',
   recurrence: 'recurrence',
+  recurrenceMode: 'recurrence',
+  recurrenceSkipDates: 'recurrence',
+  recurrenceCatchUp: 'recurrence',
   estimatedDuration: 'estimatedDuration',
   microStatus: 'microStatus',
   snoozedUntil: 'snoozedUntil',
   effort: 'effort',
   statusReason: 'statusReason',
   reminderAt: 'reminderAt',
+  reminderRelative: 'reminderAt',
+  reminderDueTime: 'reminderAt',
+  reminderNagInterval: 'reminderAt',
+  reminderNagStopAt: 'reminderAt',
+  relativeReminderDueDateResolution: 'reminderAt',
 } as const satisfies Record<keyof TaskPatchInput, TaskField>;
 
 const IMMUTABLE_INPUT_FIELDS = new Set([

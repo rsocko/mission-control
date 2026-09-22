@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import type { TaskEditPolicy } from '@/types';
 import { canEditTaskField, taskFieldBlockedReason } from '@/lib/tasks/client-edit-policy';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
@@ -17,6 +18,8 @@ import { formatDueDate } from '@/lib/utils/date-format';
 interface CalmTask {
   id: string;
   title: string;
+  status: string;
+  microStatus?: string | null;
   priority: string;
   dueDate: string | null;
   editPolicy: TaskEditPolicy;
@@ -54,9 +57,11 @@ export function CalmMode() {
         // Scoped to a specific project
         const res = await fetch(`/api/smart-score?limit=5&status=open&projectId=${calmScope.projectId}`);
         const data = await res.json();
-        fetched = (data.scores || []).slice(0, 5).map((s: { taskId: string; task: { title: string; priority: string; dueDate: string | null; editPolicy: TaskEditPolicy } | null }) => ({
+        fetched = (data.scores || []).slice(0, 5).map((s: { taskId: string; task: { title: string; status: string; microStatus?: string | null; priority: string; dueDate: string | null; editPolicy: TaskEditPolicy } | null }) => ({
           id: s.taskId,
           title: s.task?.title || '',
+          status: s.task?.status || 'todo',
+          microStatus: s.task?.microStatus,
           priority: s.task?.priority || 'none',
           dueDate: s.task?.dueDate || null,
           editPolicy: s.task!.editPolicy,
@@ -68,6 +73,8 @@ export function CalmMode() {
         fetched = scopedTasks.map((t) => ({
           id: t.id,
           title: t.title || '',
+          status: t.status || 'todo',
+          microStatus: t.microStatus,
           priority: t.priority || 'none',
           dueDate: t.dueDate || null,
           editPolicy: t.editPolicy,
@@ -76,9 +83,11 @@ export function CalmMode() {
         // Global — top 5 by Smart Score
         const res = await fetch('/api/smart-score?limit=5&status=open');
         const data = await res.json();
-        fetched = (data.scores || []).slice(0, 5).map((s: { taskId: string; task: { title: string; priority: string; dueDate: string | null; editPolicy: TaskEditPolicy } | null }) => ({
+        fetched = (data.scores || []).slice(0, 5).map((s: { taskId: string; task: { title: string; status: string; microStatus?: string | null; priority: string; dueDate: string | null; editPolicy: TaskEditPolicy } | null }) => ({
           id: s.taskId,
           title: s.task?.title || '',
+          status: s.task?.status || 'todo',
+          microStatus: s.task?.microStatus,
           priority: s.task?.priority || 'none',
           dueDate: s.task?.dueDate || null,
           editPolicy: s.task!.editPolicy,
@@ -271,14 +280,15 @@ export function CalmMode() {
                             onClick={() => completeTask(task.id)}
                             disabled={completingIds.size > 0 || !canEditTaskField(task.editPolicy, 'status')}
                             title={!canEditTaskField(task.editPolicy, 'status') ? taskFieldBlockedReason(task.editPolicy, 'status') : undefined}
-                            className={`w-6 h-6 rounded-full border-2 flex-shrink-0 transition-[border-color,background-color,color] duration-200 flex items-center justify-center cursor-pointer ${
-                              isCompleting
-                                ? 'border-green-400 bg-green-400 text-white'
-                                : 'border-slate-600 hover:border-green-500 hover:bg-green-900/30'
-                            }`}
+                            className="group/status flex h-6 w-6 shrink-0 cursor-pointer items-center justify-center"
                             aria-label={`Complete "${task.title}"`}
                           >
-                            {isCompleting && <Check size={12} />}
+                            <TaskStatusIndicator
+                              status={task.status}
+                              microStatus={task.microStatus}
+                              isCompleting={isCompleting}
+                              size="lg"
+                            />
                           </button>
                         </CompletionBurst>
 
@@ -289,6 +299,7 @@ export function CalmMode() {
                         <p className="flex-1 text-[15px] text-slate-300 font-medium leading-snug">
                           {task.title}
                         </p>
+                        <TaskBlockedBadge status={task.status} microStatus={task.microStatus} />
 
                         {/* Due date */}
                         {task.dueDate && (

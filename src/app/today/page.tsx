@@ -5,11 +5,16 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { SaveTemplateModal } from '@/components/add-task';
 import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
-import { TaskDetailPanel, type TaskNotesOpenRequest } from '@/components/task-detail/TaskDetailPanel';
+import {
+  TaskDetailPanel,
+  type TaskFieldUpdate,
+  type TaskNotesOpenRequest,
+} from '@/components/task-detail/TaskDetailPanel';
 import { TodayMainPanel } from '@/components/today/TodayMainPanel';
 import { TodayScheduleModal } from '@/components/today/TodayScheduleModal';
 import { TodaySidebar } from '@/components/today/TodaySidebar';
 import { MobileTodayList } from '@/components/today/MobileTodayList';
+import { applyMyDayTaskFieldUpdate } from '@/components/today/apply-task-field-update';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';
 import { useMyDayData } from '@/lib/hooks/useMyDayData';
@@ -34,8 +39,8 @@ export default function TodayPage() {
   const [pendingMoveDialogTaskId, setPendingMoveDialogTaskId] = useState<string | null>(null);
   const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [selectedSuggestionContext, setSelectedSuggestionContext] = useState<SuggestionTask | null>(null);
-  const { items, scheduled, calendarEvents, suggestions, sourceLists, energyLevel, loading, fetchData, setItems, setEnergyLevel } = useMyDayData(todayISO);
-  const actions = useTodayActions({ items, setItems, scheduled, calendarEvents, sourceLists, energyLevel, setEnergyLevel, todayISO, fetchData });
+  const { items, scheduled, calendarEvents, suggestions, sourceLists, energyLevel, loading, fetchData, setItems, setSuggestions, setEnergyLevel } = useMyDayData(todayISO);
+  const actions = useTodayActions({ items, setItems, suggestions, setSuggestions, scheduled, calendarEvents, sourceLists, energyLevel, setEnergyLevel, todayISO, fetchData });
   async function completeSelectedTask(taskId: string) {
     if (items.some((item) => item.taskId === taskId)) {
       if (await actions.completeTask(taskId)) {
@@ -117,6 +122,18 @@ export default function TodayPage() {
     [selectedSuggestionContext, selectedTaskId, suggestionTasks],
   );
   const selectedTask = useMemo(() => items.find((item) => item.taskId === selectedTaskId) || null, [items, selectedTaskId]);
+  const handleTaskDetailUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    if (selectedTaskId && fields) {
+      setItems((current) => current.map((item) => (
+        applyMyDayTaskFieldUpdate(item, selectedTaskId, fields)
+      )));
+    }
+
+    // An immediate source sync can race the Microsoft To Do title write-through.
+    if (typeof fields?.title !== 'string') {
+      void fetchData({ skipSync: true });
+    }
+  }, [fetchData, selectedTaskId, setItems]);
 
   const getSuggestionContextMenuActions = useCallback((task: SuggestionTask): TaskContextMenuActions => {
     const recurrence = extractRecurrenceFromMetadata(task.metadata);
@@ -203,6 +220,7 @@ export default function TodayPage() {
           connectorInstanceId: 'local',
           sourceListName: detail.sourceListName || null,
           createdAt: new Date().toISOString(),
+          completedAt: null,
           tags: [],
           hasDescription: false,
           localDisposition: detail.localDisposition || 'active',
@@ -290,7 +308,6 @@ export default function TodayPage() {
             else taskSelection.handleTaskClick(taskId);
           },
           doubleClickTask: taskSelection.handleTaskDoubleClick,
-          cancelPendingTaskSelection: taskSelection.cancelPendingDeselect,
         }}
         focus={{
           showTimer: actions.showTimer,
@@ -325,7 +342,7 @@ export default function TodayPage() {
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
-            onUpdate={fetchData}
+            onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
               setItems((prev) => prev.map((item) =>
@@ -357,7 +374,7 @@ export default function TodayPage() {
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
-            onUpdate={fetchData}
+            onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
               setItems((prev) => prev.map((item) =>
@@ -393,7 +410,7 @@ export default function TodayPage() {
             taskId={selectedTaskId}
             mode="mobile"
             onClose={() => { setSelectedTaskId(null); setPendingMoveDialogTaskId(null); }}
-            onUpdate={() => fetchData()}
+            onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
               setItems((prev) => prev.map((item) =>
@@ -428,14 +445,19 @@ export default function TodayPage() {
         totalMinutes={totalMinutes}
         whatsNextLoading={actions.whatsNextLoading}
         onAddToDay={actions.addToDay}
+        onCompleteTask={(task) => {
+          void actions.completeTask(task.id, {
+            title: task.title,
+            status: task.status,
+            editPolicy: task.editPolicy,
+          });
+        }}
+        completingIds={actions.completingIds}
         onSelectTask={(taskId) => {
-          const isClosing = selectedTaskId === taskId;
           setDetailSurface('desktop');
           setDetailMode('panel');
-          taskSelection.toggleTask(taskId);
-          if (!isClosing) {
-            setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
-          }
+          taskSelection.selectTask(taskId);
+          setSelectedSuggestionContext(suggestionTasks.find((task) => task.id === taskId) || null);
         }}
         getContextMenuActions={getSuggestionContextMenuActions}
         sourceLists={sourceLists}

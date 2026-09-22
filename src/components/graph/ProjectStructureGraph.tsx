@@ -31,6 +31,17 @@ import {
   CircleDot,
   Flag,
 } from 'lucide-react';
+import {
+  GraphCanvasRegion,
+  GraphInspectorRegion,
+} from '@rsocko/generic-graph-canvas-shared-workbench/react';
+import {
+  GraphNavigationController,
+  repairHiddenGraphSelection,
+  repairMissingGraphSelection,
+  resolveClickNodeSelection,
+  resolveNodeExpansion,
+} from '@rsocko/generic-graph-canvas-shared-workbench/controllers';
 
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -42,6 +53,10 @@ import {
   type ProjectGraphNodeVisibility,
 } from '@/lib/graph/project-structure-layout';
 import { getConnectedFocus, getSelectionFocus } from '@/lib/graph/focus';
+import {
+  PROJECT_GRAPH_WORKBENCH_CAPABILITIES,
+  projectSubgraphToGraphDocument,
+} from '@/lib/graph-workbench/adapters';
 import type {
   GraphEdge,
   GraphNode,
@@ -322,6 +337,10 @@ export default function ProjectStructureGraph({
   const [focusedNodeId, setFocusedNodeId] = useState<string | null>(null);
   const [hoveredNodeId, setHoveredNodeId] = useState<string | null>(null);
   const [selectedDependencyId, setSelectedDependencyId] = useState<string | null>(null);
+  const [focusNavigation, setFocusNavigation] = useState({
+    canBack: false,
+    canForward: false,
+  });
   const [dependencyToRemove, setDependencyToRemove] = useState<DependencyRemovalTarget | null>(null);
   const [removingDependency, setRemovingDependency] = useState(false);
   const draggedPositionsRef = useRef(new Map<string, { x: number; y: number }>());
@@ -334,8 +353,7 @@ export default function ProjectStructureGraph({
   const viewportControlInteractionRef = useRef(false);
   const focusedNodeIdRef = useRef(focusedNodeId);
   const selectedDependencyIdRef = useRef(selectedDependencyId);
-  focusedNodeIdRef.current = focusedNodeId;
-  selectedDependencyIdRef.current = selectedDependencyId;
+  const navigationRef = useRef(new GraphNavigationController());
 
   const cancelPendingResizeFit = useCallback(() => {
     if (resizeFitTimeoutRef.current !== null) {
@@ -364,8 +382,28 @@ export default function ProjectStructureGraph({
   }, []);
 
   const handleSelect = useCallback((node: GraphNode) => {
-    const isSelected = focusedNodeIdRef.current === node.id;
-    const nextFocusedNodeId = isSelected ? null : node.id;
+    const availableNodeIds = new Set(graph?.nodes.map((candidate) => candidate.id) ?? []);
+    const currentSelection = focusedNodeIdRef.current
+      ? { kind: 'node' as const, id: focusedNodeIdRef.current }
+      : undefined;
+    const nextSelection = focusedNodeIdRef.current === node.id
+      ? undefined
+      : resolveClickNodeSelection(currentSelection, node.id, availableNodeIds);
+    const nextFocusedNodeId = nextSelection?.kind === 'node' ? nextSelection.id : null;
+    const isSelected = nextFocusedNodeId === null;
+    const flow = flowInstanceRef.current;
+    if (nextFocusedNodeId && flow) {
+      const viewport = flow.getViewport();
+      navigationRef.current.visit(
+        projectId,
+        { nodeId: focusedNodeIdRef.current ?? undefined, viewport },
+        { nodeId: nextFocusedNodeId, viewport },
+      );
+      setFocusNavigation({
+        canBack: navigationRef.current.canNavigate(projectId, 'back'),
+        canForward: navigationRef.current.canNavigate(projectId, 'forward'),
+      });
+    }
 
     focusedNodeIdRef.current = nextFocusedNodeId;
     selectedDependencyIdRef.current = null;
@@ -381,22 +419,44 @@ export default function ProjectStructureGraph({
     setEdges((current) => current.map((edge) => (
       edge.selected ? { ...edge, selected: false } : edge
     )));
-  }, [onTaskSelect, setEdges, setNodes]);
+  }, [graph, onTaskSelect, projectId, setEdges, setNodes]);
 
   const handleToggleCollapse = useCallback((phaseId: string) => {
+    if (!graph) return;
+    const document = projectSubgraphToGraphDocument(graph);
+    const result = resolveNodeExpansion(
+      document,
+      [...collapsedPhaseIds],
+      phaseId,
+      collapsedPhaseIds.has(phaseId),
+    );
+    if (!result) return;
     cancelPendingResizeFit();
     userAdjustedViewportRef.current = false;
     draggedPositionsRef.current.clear();
-    setCollapsedPhaseIds((current) => {
-      const next = new Set(current);
-      if (next.has(phaseId)) {
-        next.delete(phaseId);
-      } else {
-        next.add(phaseId);
-      }
-      return next;
+    setCollapsedPhaseIds(new Set(result.collapsedNodeIds));
+    navigationRef.current.reconcile(projectId, result.hierarchy.visibleNodeIds);
+    setFocusNavigation({
+      canBack: navigationRef.current.canNavigate(projectId, 'back'),
+      canForward: navigationRef.current.canNavigate(projectId, 'forward'),
     });
-  }, [cancelPendingResizeFit]);
+
+    const currentSelection = focusedNodeIdRef.current
+      ? { kind: 'node' as const, id: focusedNodeIdRef.current }
+      : undefined;
+    const repaired = repairHiddenGraphSelection(
+      currentSelection,
+      result.hierarchy.hiddenByCollapsedNode,
+    );
+    const nextFocusedNodeId = repaired?.kind === 'node' ? repaired.id : null;
+    if (nextFocusedNodeId !== focusedNodeIdRef.current) {
+      focusedNodeIdRef.current = nextFocusedNodeId;
+      setFocusedNodeId(nextFocusedNodeId);
+      const focusedNode = graph.nodes.find((node) => node.id === nextFocusedNodeId);
+      setSelectedPhase(focusedNode?.kind === 'phase' ? focusedNode : null);
+      onTaskSelect(focusedNode?.kind === 'task' ? focusedNode.entityId : null);
+    }
+  }, [cancelPendingResizeFit, collapsedPhaseIds, graph, onTaskSelect, projectId]);
 
   useEffect(() => {
     const refreshRelationships = (event: Event) => {
@@ -417,10 +477,19 @@ export default function ProjectStructureGraph({
   useEffect(() => {
     if (!graph || graphProjectId !== projectId) return;
     const currentNodeIds = new Set(graph.nodes.map((node) => node.id));
-    setFocusedNodeId((current) => {
-      const nextFocusedNodeId = current && currentNodeIds.has(current) ? current : null;
-      focusedNodeIdRef.current = nextFocusedNodeId;
-      return nextFocusedNodeId;
+    const repaired = repairMissingGraphSelection(
+      focusedNodeIdRef.current
+        ? { kind: 'node', id: focusedNodeIdRef.current }
+        : undefined,
+      projectSubgraphToGraphDocument(graph),
+    );
+    const nextFocusedNodeId = repaired?.kind === 'node' ? repaired.id : null;
+    focusedNodeIdRef.current = nextFocusedNodeId;
+    setFocusedNodeId(nextFocusedNodeId);
+    navigationRef.current.reconcile(projectId, currentNodeIds);
+    setFocusNavigation({
+      canBack: navigationRef.current.canNavigate(projectId, 'back'),
+      canForward: navigationRef.current.canNavigate(projectId, 'forward'),
     });
     setHoveredNodeId((current) => current && currentNodeIds.has(current) ? current : null);
     setSelectedPhase((current) => {
@@ -615,7 +684,7 @@ export default function ProjectStructureGraph({
     } catch {
       toast.error('Failed to create dependency');
     }
-  }, [dependencyType, projectId, relationshipEventSource]);
+  }, [dependencyType, projectId, relationshipEventSource, setGraph]);
 
   const onConnect = useCallback(async (connection: Connection) => {
     if (
@@ -707,6 +776,7 @@ export default function ProjectStructureGraph({
             edges: current.edges.filter((edge) => edge.id !== dependencyToRemove.edgeId),
           }
         : current);
+      selectedDependencyIdRef.current = null;
       setSelectedDependencyId(null);
       setDependencyToRemove(null);
       if (dependencyToRemove.targetKind === 'phase') {
@@ -729,6 +799,7 @@ export default function ProjectStructureGraph({
     projectId,
     relationshipEventSource,
     selectedDependency,
+    setGraph,
   ]);
   const handleNodeDragStop = useCallback<OnNodeDrag<FlowNode>>((_event, node) => {
     draggedPositionsRef.current.set(node.id, node.position);
@@ -748,6 +819,38 @@ export default function ProjectStructureGraph({
       edge.selected ? { ...edge, selected: false } : edge
     )));
   }, [onTaskSelect, setEdges, setNodes]);
+
+  const navigateFocus = useCallback((direction: 'back' | 'forward') => {
+    const flow = flowInstanceRef.current;
+    if (!flow || !graph) return;
+    const destination = navigationRef.current.navigate(projectId, direction, {
+      nodeId: focusedNodeIdRef.current ?? undefined,
+      viewport: flow.getViewport(),
+    });
+    if (!destination) return;
+    const node = destination.nodeId
+      ? graph.nodes.find((candidate) => candidate.id === destination.nodeId)
+      : undefined;
+    focusedNodeIdRef.current = node?.id ?? null;
+    selectedDependencyIdRef.current = null;
+    setFocusedNodeId(node?.id ?? null);
+    setHoveredNodeId(null);
+    setSelectedDependencyId(null);
+    setSelectedPhase(node?.kind === 'phase' ? node : null);
+    onTaskSelect(node?.kind === 'task' ? node.entityId : null);
+    setNodes((current) => current.map((candidate) => {
+      const selected = candidate.id === node?.id;
+      return candidate.selected === selected ? candidate : { ...candidate, selected };
+    }));
+    setEdges((current) => current.map((edge) => (
+      edge.selected ? { ...edge, selected: false } : edge
+    )));
+    void flow.setViewport(destination.viewport);
+    setFocusNavigation({
+      canBack: navigationRef.current.canNavigate(projectId, 'back'),
+      canForward: navigationRef.current.canNavigate(projectId, 'forward'),
+    });
+  }, [graph, onTaskSelect, projectId, setEdges, setNodes]);
 
   const selectDependency = useCallback((edge: FlowEdge) => {
     if (edge.data?.relationshipType !== 'blocks' && edge.data?.relationshipType !== 'related') return;
@@ -891,6 +994,11 @@ export default function ProjectStructureGraph({
         }
       }}
     >
+      <GraphCanvasRegion
+        capabilities={PROJECT_GRAPH_WORKBENCH_CAPABILITIES}
+        className="absolute inset-0"
+        label="Project graph canvas"
+      >
       <ReactFlow
         nodes={displayedNodes}
         edges={displayedEdges}
@@ -938,6 +1046,7 @@ export default function ProjectStructureGraph({
           ariaLabel="Project graph minimap"
         />
       </ReactFlow>
+      </GraphCanvasRegion>
 
       <div className="pointer-events-none absolute inset-x-3 top-3 z-10 space-y-2">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -960,6 +1069,10 @@ export default function ProjectStructureGraph({
         lineStyle={lineStyle}
         showDependencies={showDependencies}
         visibleKinds={visibleKinds}
+        canNavigateBack={focusNavigation.canBack}
+        canNavigateForward={focusNavigation.canForward}
+        onNavigateBack={() => navigateFocus('back')}
+        onNavigateForward={() => navigateFocus('forward')}
         onDirectionChange={changeDirection}
         onLineStyleChange={setLineStyle}
         onToggleDependencies={() => setShowDependencies((current) => !current)}
@@ -968,13 +1081,24 @@ export default function ProjectStructureGraph({
       </div>
 
       {selectedPhase ? (
+        <GraphInspectorRegion
+          capabilities={PROJECT_GRAPH_WORKBENCH_CAPABILITIES}
+          className="contents"
+          label="Selected phase"
+        >
         <ProjectGraphPhaseDetails
           phase={selectedPhase}
           statusLabel={STATUS_STYLES[selectedPhase.status].label}
           onClose={clearFocus}
         />
+        </GraphInspectorRegion>
       ) : null}
       {selectedDependency ? (
+        <GraphInspectorRegion
+          capabilities={PROJECT_GRAPH_WORKBENCH_CAPABILITIES}
+          className="contents"
+          label="Selected dependency"
+        >
         <ProjectGraphDependencyDetails
           dependency={selectedDependency}
           removing={removingDependency}
@@ -985,6 +1109,7 @@ export default function ProjectStructureGraph({
             targetKind: selectedDependency.target.kind,
           })}
         />
+        </GraphInspectorRegion>
       ) : null}
       </div>
 

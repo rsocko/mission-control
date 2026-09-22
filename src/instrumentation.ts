@@ -25,6 +25,26 @@ export async function register() {
     );
     terminateFailedStartup(error);
   }
+  const {
+    pushNotificationScheduler,
+    registerScheduledPushHandlers,
+    scheduledSummariesEnabled,
+  } = await import('@/lib/push/scheduler');
+  const { resolveDatabaseBackend } = await import('@/db/runtime-backend');
+  if (resolveDatabaseBackend() === 'sqlite') {
+    const {
+      triggerMorningNotification,
+      triggerTriageNudge,
+      triggerCarryForwardReminder,
+      triggerHomeAssistantUpdateSummaries,
+    } = await import('@/lib/push/triggers');
+    registerScheduledPushHandlers({
+      triggerMorningNotification,
+      triggerTriageNudge,
+      triggerCarryForwardReminder,
+      triggerHomeAssistantUpdateSummaries,
+    });
+  }
   const { isPublicDemoMode } = await import('@/lib/public-demo');
   if (isPublicDemoMode()) {
     try {
@@ -38,15 +58,18 @@ export async function register() {
       terminateFailedStartup(error);
     }
     const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
-    startRuntimeTelemetry('web');
+    await startRuntimeTelemetry('web');
     markRuntimeReady();
     syncLogger.info('Instrumentation: public demo database reset and seeded');
     return;
   }
 
+  const { wakeNotificationDeliveryDispatcher } = await import(
+    '@/lib/notifications/dispatcher-wake'
+  );
+  wakeNotificationDeliveryDispatcher();
   const { startRuntimeTelemetry } = await import('@/lib/telemetry/runtime');
-  startRuntimeTelemetry('web');
-  const { pushNotificationScheduler } = await import('@/lib/push/scheduler');
+  await startRuntimeTelemetry('web');
   const { wakeNotificationWritebackDispatcher } = await import(
     '@/lib/notifications/notification-writeback'
   );
@@ -69,7 +92,7 @@ export async function register() {
       try {
         await syncScheduler.scheduleAll();
         syncLogger.info(
-          { attempt, scheduledJobs: syncScheduler.getStatus().length },
+          { attempt, scheduledJobs: (await syncScheduler.getStatus()).length },
           'Instrumentation: sync scheduler initialized'
         );
         initialized = true;
@@ -95,6 +118,10 @@ export async function register() {
     }
 
     syncScheduler.startWatchdog();
+    const { financeConnectionRecoveryScheduler } = await import(
+      '@/lib/connectors/monarch-money/recovery-scheduler'
+    );
+    await financeConnectionRecoveryScheduler.start();
 
     try {
       await triageSyncScheduler.initialize();
@@ -106,13 +133,39 @@ export async function register() {
 
   // Initialize push notification scheduler (morning, triage nudge, carry-forward)
   try {
-    await pushNotificationScheduler.start();
+    if (await scheduledSummariesEnabled()) {
+      await pushNotificationScheduler.start();
+    }
     syncLogger.info(
       { jobs: pushNotificationScheduler.getStatus().length },
       'Instrumentation: push notification scheduler initialized',
     );
   } catch (err) {
-    syncLogger.warn({ err }, 'Instrumentation: push notification scheduler init failed (non-fatal)');
+    syncLogger.warn(
+      { errorName: err instanceof Error ? err.name : 'UnknownError' },
+      'Instrumentation: push notification scheduler init failed (non-fatal)',
+    );
+  }
+  if (!durableSyncMode) {
+    try {
+      const { taskReminderScheduler } = await import('@/lib/push/task-reminder-scheduler');
+      await taskReminderScheduler.start();
+      syncLogger.info('Instrumentation: inline task reminder scheduler initialized');
+    } catch (err) {
+      syncLogger.warn({ err }, 'Instrumentation: task reminder scheduler init failed (non-fatal)');
+    }
+    try {
+      const { taskDeletionRetentionScheduler } = await import(
+        '@/lib/tasks/deletion-retention'
+      );
+      await taskDeletionRetentionScheduler.start();
+      syncLogger.info('Instrumentation: task deletion retention scheduler initialized');
+    } catch (err) {
+      syncLogger.warn(
+        { err },
+        'Instrumentation: task deletion retention scheduler init failed (non-fatal)',
+      );
+    }
   }
   markRuntimeReady();
 }

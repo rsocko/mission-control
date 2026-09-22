@@ -14,16 +14,23 @@ Bifrost-qualified model IDs.
 
 ## Why search currently feels slow
 
-The keyword branch is SQLite FTS5 and is already fast. Hybrid mode joins keyword
-and semantic work with `Promise.all`, so completed keyword results wait for route
+The keyword branch uses the selected backend's search repository: PostgreSQL
+full-text search for the approved production target or SQLite FTS5 for the
+compatibility backend. Both are already fast. Hybrid mode joins keyword and
+semantic work with `Promise.all`, so completed keyword results wait for route
 resolution, a query embedding request, a scan of stored vectors, and metadata
-loading. The task-list filter feels faster because it uses deterministic filtering
-and cached React Query state without invoking an embedding provider.
+loading. The task-list filter feels faster because it uses deterministic
+filtering and cached React Query state without invoking an embedding provider.
+See the
+[database scaling and migration strategy](database-scaling-strategy.md) for
+backend and deployment status.
 
-Task and notification embeddings are already persisted in `search_embeddings`.
-Only a previously unseen query phrase must be embedded interactively. Repeated
-query vectors can be reused from a bounded, process-local LRU/TTL cache keyed by
-normalized query and resolved provider/model/policy identity.
+Task and notification embeddings are persisted by the durable semantic index
+(`semantic_documents`/`semantic_vectors`, issue #1664), maintained by the index
+worker rather than by the request path. Only a previously unseen query phrase
+must be embedded interactively. Repeated query vectors can be reused from a
+bounded, process-local LRU/TTL cache keyed by normalized query and the active
+index identity (its provider, model, dimensions, and projection version).
 
 ## Experience contract
 

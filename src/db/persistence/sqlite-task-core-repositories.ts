@@ -1,0 +1,5788 @@
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  like,
+  lte,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from 'drizzle-orm';
+import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
+import db, { runTransaction } from '@/db';
+import * as schema from '@/db/schema';
+import { taskTimeActivities } from '@/db/schema/tasks';
+import {
+  appSettings,
+  connectorConfigs,
+  eventOutbox,
+  eventOutboxDeliveries,
+  focusItems,
+  hubProjects,
+  myDayExclusions,
+  myDayItems,
+  notifications,
+  outboundWebhooks,
+  priorityEntities,
+  prioritySyncLog,
+  projectAutoIncludeExclusions,
+  projectPhaseItems,
+  projectPhases,
+  quickSortLog,
+  quickSortOperations,
+  scoutReconciliationEvaluations,
+  scoutReconciliationSuggestions,
+  scoutReconciliationTaskState,
+  sourceLists,
+  sourceRankings,
+  subtaskTemplates,
+  syncDeletionCandidates,
+  syncDeletionSnapshots,
+  tags,
+  taskAttachments,
+  taskDependencies,
+  taskFieldStates,
+  taskHistoryEvents,
+  taskIngestSuppressions,
+  taskLinkedSources,
+  taskProjects,
+  taskRecurrenceBackfillDecisions,
+  taskRecurrenceOccurrences,
+  taskSchedules,
+  taskTags,
+  tasks,
+  triageActionClaims,
+  triageItems,
+  weeklyOneThing,
+} from '@/db/schema';
+import { detachTaskDescendants } from '@/lib/tasks/task-hierarchy-deletion';
+import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
+import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
+import { eventSubscriptionMatches, parseEventTypes } from './event-outbox';
+import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
+import { decodeLenientJsonArray, decodeLenientJsonObject } from './value-codecs';
+import {
+  reconcileSqliteTaskTransferIdentityRefreshForRepository,
+  resolveSqliteTaskTransferIdentityTargetsForRepository,
+} from './sqlite-task-transfer-identity';
+import {
+  compileCanonicalTaskFilter,
+  compileQuickFilterCondition,
+  enabledGitHubConnectorCondition,
+  withCondition,
+  type CanonicalTaskFilterInputs,
+} from './sqlite-task-filter';
+import {
+  CLOSED_TASK_STATUSES,
+  parseTaskQuickSortAction,
+  parseTaskQuickSortOperationState,
+  parseTaskQuickSortQueueMode,
+  type AvailableTaskTag,
+  type InboxListEntry,
+  type LocalTaskDeletionRequest,
+  type LocalTaskLifecycleRepository,
+  type PendingSyncTaskMoveOutcome,
+  type PendingSyncTaskMoveRequest,
+  type PriorityEntityRepository,
+  type PriorityEntityCreate,
+  type PriorityEntityOptions,
+  type PriorityEntityRow,
+  type PriorityEntityUpdate,
+  type PriorityProjectReference,
+  type PrioritySourceListReference,
+  type PrioritySyncLogRow,
+  type PriorityTagReference,
+  type RetentionTaskIdentity,
+  type RetentionTaskRow,
+  type ScoutHardDeleteOutcome,
+  type ScoutTaskHardDeleteRepository,
+  type SourceListDisplayNameRow,
+  type SourceListNameRepository,
+  type SubtaskTemplateApplicationPlan,
+  type SubtaskTemplateDeleteOutcome,
+  type SubtaskTemplateItem,
+  type SubtaskTemplatePatch,
+  type SubtaskTemplateRow,
+  type SubtaskTemplateSeed,
+  type SubtaskTemplateWorkflowTask,
+  type SubtaskTemplateWrite,
+  type TagConsolidationCandidates,
+  type TagCreateOutcome,
+  type TagDeleteOutcome,
+  type TagIdentityRow,
+  type TagListUsageRow,
+  type TagMergeOutcome,
+  type TagOverviewResult,
+  type TagSourceRemovalContext,
+  type TagUnifyOutcome,
+  type TaskAttachmentContentRow,
+  type TaskAttachmentInsert,
+  type TaskAttachmentInsertOutcome,
+  type TaskAttachmentListContext,
+  type TaskAttachmentDeleteContext,
+  type TaskAttachmentMetadataRow,
+  type TaskAttachmentRow,
+  type TaskAncillaryRepository,
+  type TaskAncillarySubtask,
+  type TaskCollectionProjectPhaseMembership,
+  type TaskCollectionReadRepository,
+  type TaskCollectionResult,
+  type TaskCollectionRow,
+  type TaskCoreEvent,
+  type TaskCoreTaskRow,
+  type TaskCreateInput,
+  type TaskCreateOutcome,
+  type TaskCreateRepository,
+  type TaskCreateTargetOutcome,
+  type TaskCopyOutcome,
+  type TaskCorePersistence,
+  type TaskDetailReadRepository,
+  type TaskDetailResult,
+  type TaskDependencyEndpoints,
+  type TaskDuplicateDetectionRow,
+  type TaskFilterInputRepository,
+  type TaskFilterSpec,
+  type TaskGroupMode,
+  type TaskListPage,
+  type TaskMoveClaimReleaseRequest,
+  type TaskMoveClaimRequest,
+  type TaskMoveDestinationMaterialization,
+  type TaskMoveFinalizationOutcome,
+  type TaskMoveFinalizationRequest,
+  type TaskMoveListRow,
+  type TaskMovePreviewSnapshot,
+  type TaskMoveRepository,
+  type TaskMoveSourceCopyProvenance,
+  type TaskMoveSourceRow,
+  type TaskMoveSourceSyncIntent,
+  type TaskMoveTagRef,
+  type TaskMoveTargetList,
+  type TaskMoveToListTaskRow,
+  type TaskMutationOutcome,
+  type TaskMutationRepository,
+  type TaskMutationRequest,
+  type TaskTimeActivity,
+  type TaskTimeActivityMutationOutcome,
+  type TaskTimeActivityRepository,
+  type TaskTimeActivityStartInput,
+  type TaskTimeActivityTransitionInput,
+  type TaskOccurrenceMaterializationInput,
+  type TaskOccurrenceMaterializationRepository,
+  type TaskRecurrenceBackfillDecision,
+  type TaskRecurrenceBackfillInput,
+  type TaskRecurrenceBackfillOutcome,
+  type RecurrenceBackfillTouchReason,
+  type TaskMoveTaskInsert,
+  type TaskMoveTaskRow,
+  type TaskOrganizationRepository,
+  type TaskPolicyIdentityRepository,
+  type TaskQueryRepository,
+  type TaskQueryScope,
+  type TaskRemovalOutcome,
+  type TaskRemovalRepository,
+  type TaskRestoreOutcome,
+  type TaskQuickSortLogEntry,
+  type TaskQuickSortOperation,
+  type TaskQuickSortOperationReservation,
+  type TaskQuickSortOrder,
+  type TaskQuickSortPersistenceRepository,
+  type TaskQuickSortQueueMode,
+  type TaskQuickSortQueueRow,
+  type TaskQuickSortReservationOutcome,
+  type TaskQuickSortScope,
+  type TaskQuickSortSuggestionInputs,
+  type TaskReadRepository,
+  type TaskRelationshipCandidateRow,
+  type TaskPromoteOutcome,
+  type TaskScheduleRow,
+  type TaskSmartScoreSnapshot,
+  type TaskSourceIdentityRow,
+  type TaskSourceCounts,
+  type TaskStatsResult,
+  type TaskTransferIdentityRepository,
+  type TaskSubtaskCreateOutcome,
+  type TaskSubtaskProposalOutcome,
+  type TaskSubtaskProposalSnapshot,
+  type TaskTagMutationContext,
+  type TaskTagMutationResult,
+  type TemplateSubtaskApplicationOutcome,
+  type TemplateSubtaskInsert,
+  type TemplateWorkflowTaskInsert,
+  type WriteThroughTaskMoveRepository,
+  elapsedTaskTimeAt,
+  normalizeRecurrenceBackfillInstant,
+  planRecurrenceBackfill,
+  validateRecurrenceBackfillAsOf,
+} from '@/lib/tasks/core/contracts';
+import { writeRecurrenceMetadata } from '@/lib/recurrence/canonical';
+import {
+  assertRecurrenceOccurrenceMatches,
+  assertRecurrenceOccurrenceTaskScope,
+  assertRecurrenceOccurrenceTiming,
+  createPersistedRecurrenceOccurrence,
+  deriveRecurrenceOccurrenceProvenance,
+  type PersistedRecurrenceOccurrence,
+  type RecurrenceOccurrenceProvenance,
+} from '@/lib/recurrence/occurrence-persistence';
+import { projectRecurrence } from '@/lib/recurrence/projection';
+
+/**
+ * SQLite implementation of the L04 task-core contracts.
+ *
+ * Every method here is `async` to satisfy the portable contract, but the
+ * SQLite work itself is synchronous: `runTransaction` uses better-sqlite3's
+ * synchronous transaction, and no `await` ever happens inside a transaction
+ * body. That is the honest shape for this driver — the contract does not
+ * pretend SQLite can suspend mid-transaction.
+ */
+
+type SqliteTransaction = BetterSQLite3Database<typeof schema>;
+type Drizzle = BetterSQLite3Database<typeof schema>;
+
+/**
+ * The synchronous transaction runner this composition writes through. It is
+ * injected alongside the database handle so a repository can never write to a
+ * different database than the one it reads from: `createSqliteTaskCorePersistence`
+ * requires both, and no repository falls back to a module-level handle.
+ *
+ * The shape deliberately matches `runTransaction` from `@/db` exactly — a
+ * synchronous callback, not a `Promise`-returning one — because better-sqlite3
+ * cannot hold a transaction open across an `await`. Production passes that
+ * exact function so transaction behavior (`immediate`/`deferred`) and database
+ * telemetry are preserved.
+ */
+export type SqliteTaskCoreTransactionRunner = <T>(
+  fn: (tx: SqliteTransaction) => T,
+  options?: { readOnly?: boolean },
+) => T;
+
+class PendingTaskMoveSourceChangedError extends Error {
+  constructor() {
+    super('Task changed before the move could be committed');
+    this.name = 'PendingTaskMoveSourceChangedError';
+  }
+}
+
+const TASK_HISTORY_DELETE_TRIGGER = `
+  CREATE TRIGGER task_history_immutable_delete
+  BEFORE DELETE ON task_history_events
+  BEGIN
+    SELECT RAISE(ABORT, 'task_history_events is append-only');
+  END
+`;
+
+function parseMetadata(metadata: unknown): Record<string, unknown> {
+  return decodeLenientJsonObject(metadata);
+}
+
+/* ------------------------------------------------------------------ *
+ * Filter inputs
+ * ------------------------------------------------------------------ */
+
+class SqliteTaskFilterInputRepository implements TaskFilterInputRepository {
+  constructor(private readonly database: Drizzle) {}
+
+  async listMyDayTaskIds(date: string): Promise<string[]> {
+    const rows = await this.database
+      .select({ taskId: myDayItems.taskId })
+      .from(myDayItems)
+      .where(eq(myDayItems.date, date));
+    return rows.map((row) => row.taskId);
+  }
+
+  async listAssignedGitHubUsernames(): Promise<string[]> {
+    const rows = await this.database
+      .select({ settings: connectorConfigs.settings })
+      .from(connectorConfigs)
+      .where(enabledGitHubConnectorCondition());
+
+    const usernames: string[] = [];
+    for (const row of rows) {
+      const authenticatedUser = decodeLenientJsonObject(row.settings).authenticatedUser;
+      if (typeof authenticatedUser === 'string' && authenticatedUser) {
+        usernames.push(authenticatedUser);
+      }
+    }
+    return usernames;
+  }
+
+  async listInboxListEntries(): Promise<InboxListEntry[]> {
+    const [row] = await this.database
+      .select({ value: appSettings.value })
+      .from(appSettings)
+      .where(eq(appSettings.key, 'inbox.lists'))
+      .limit(1);
+    if (!row?.value) return [];
+
+    return decodeLenientJsonArray(row.value).flatMap((entry): InboxListEntry[] => {
+      if (!entry || typeof entry !== 'object') return [];
+      const record = entry as Record<string, unknown>;
+      if (typeof record.connectorType !== 'string') return [];
+      return [{
+        connectorType: record.connectorType,
+        sourceListId: typeof record.sourceListId === 'string' ? record.sourceListId : undefined,
+        sourceListName: typeof record.sourceListName === 'string' ? record.sourceListName : undefined,
+      }];
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Queries
+ * ------------------------------------------------------------------ */
+
+const PRIORITY_ORDER_EXPRESSION = sql`CASE ${tasks.priority}
+  WHEN 'critical' THEN 0
+  WHEN 'high' THEN 1
+  WHEN 'medium' THEN 2
+  WHEN 'low' THEN 3
+  ELSE 4 END`;
+
+const EFFORT_ORDER_EXPRESSION = sql`COALESCE(${tasks.effort}, 0)`;
+const PLANNING_HORIZON_ORDER_EXPRESSION = sql`CASE ${tasks.planningHorizon}
+  WHEN 'now' THEN 0 WHEN 'next' THEN 1 WHEN 'later' THEN 2
+  WHEN 'someday' THEN 3 ELSE 4 END`;
+
+/**
+ * Explicit NULL placement for the nullable sort columns (`dueDate`,
+ * `sourceListName`). SQLite treats NULL as the lowest value (NULLs first
+ * ascending, last descending) while PostgreSQL defaults to the opposite
+ * (NULLS LAST ascending, FIRST descending). The observable ordering of the
+ * legacy `/api/tasks` route is the SQLite one, so both adapters state it
+ * explicitly instead of inheriting a dialect default. `effort` needs no rank:
+ * `EFFORT_ORDER_EXPRESSION` coalesces NULL away on both backends.
+ */
+type NullableSortColumn =
+  | typeof tasks.dueDate
+  | typeof tasks.completedAt
+  | typeof tasks.sourceListName;
+
+function nullsLowestRank(column: NullableSortColumn): SQL {
+  return sql`CASE WHEN ${column} IS NULL THEN 0 ELSE 1 END`;
+}
+
+function nullableSortColumn(field: TaskListPage['order']['field']): NullableSortColumn | null {
+  if (field === 'dueDate') return tasks.dueDate;
+  if (field === 'completedAt') return tasks.completedAt;
+  if (field === 'sourceList') return tasks.sourceListName;
+  return null;
+}
+
+class SqliteTaskQueryRepository implements TaskQueryRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly filterInputs: TaskFilterInputRepository,
+  ) {}
+
+  private async resolveInputs(spec: TaskFilterSpec): Promise<CanonicalTaskFilterInputs> {
+    const [myDayTaskIds, assignedGitHubUsernames, inboxListEntries] = await Promise.all([
+      this.filterInputs.listMyDayTaskIds(spec.myDayDate),
+      this.filterInputs.listAssignedGitHubUsernames(),
+      this.filterInputs.listInboxListEntries(),
+    ]);
+    return { myDayTaskIds, assignedGitHubUsernames, inboxListEntries };
+  }
+
+  private async countWhere(where: SQL | undefined): Promise<number> {
+    const [row] = await this.database
+      .select({ count: sql<number>`count(*)` })
+      .from(tasks)
+      .where(where);
+    return Number(row?.count ?? 0);
+  }
+
+  async countTasks(spec: TaskFilterSpec, scope: TaskQueryScope = {}): Promise<number> {
+    const inputs = await this.resolveInputs(spec);
+    const compiled = compileCanonicalTaskFilter(spec, inputs);
+    const where = scope.includeQuickFilter ? compiled.taskWhere : compiled.baseWhere;
+    return this.countWhere(scope.availableAt
+      ? and(where, or(isNull(tasks.snoozedUntil), lte(tasks.snoozedUntil, scope.availableAt)))
+      : where);
+  }
+
+  async listTaskIds(spec: TaskFilterSpec, page: TaskListPage): Promise<string[]> {
+    const inputs = await this.resolveInputs(spec);
+    const compiled = compileCanonicalTaskFilter(spec, inputs);
+    const direction = page.order.direction === 'desc' ? desc : asc;
+    const column = page.order.field === 'dueDate'
+      ? tasks.dueDate
+          : page.order.field === 'planningHorizon'
+            ? PLANNING_HORIZON_ORDER_EXPRESSION
+          : page.order.field === 'title'
+            ? tasks.title
+          : page.order.field === 'createdAt'
+            ? tasks.createdAt
+          : page.order.field === 'completedAt'
+            ? tasks.completedAt
+          : page.order.field === 'updatedAt'
+            || page.order.field === 'updated'
+            ? tasks.updatedAt
+            : page.order.field === 'status'
+              ? tasks.status
+              : page.order.field === 'sourceList'
+                ? tasks.sourceListName
+                : page.order.field === 'effort'
+                  ? EFFORT_ORDER_EXPRESSION
+                  : PRIORITY_ORDER_EXPRESSION;
+    const nullable = nullableSortColumn(page.order.field);
+    const orderedColumn = (
+      page.order.field === 'title'
+      || page.order.field === 'status'
+      || page.order.field === 'sourceList'
+    )
+      ? sql`${column} COLLATE BINARY`
+      : column;
+
+    const smartOrder = page.order.field === 'smartScore'
+      ? [
+          asc(PRIORITY_ORDER_EXPRESSION),
+          asc(sql`CASE WHEN ${tasks.dueDate} IS NULL THEN 1 ELSE 0 END`),
+          asc(tasks.dueDate),
+          desc(tasks.updatedAt),
+          asc(sql`${tasks.id} COLLATE BINARY`),
+        ]
+      : null;
+    const rows = await this.database
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(compiled.taskWhere)
+      // `id` is the deterministic tie-break so two backends can never
+      // disagree about the page boundary for equal sort keys.
+      .orderBy(
+        ...(smartOrder ?? [
+          ...(nullable ? [direction(nullsLowestRank(nullable))] : []),
+          direction(orderedColumn),
+          asc(sql`${tasks.id} COLLATE BINARY`),
+        ]),
+      )
+      .limit(page.limit)
+      .offset(page.offset);
+    return rows.map((row) => row.id);
+  }
+
+  async getStats(spec: TaskFilterSpec): Promise<TaskStatsResult> {
+    const inputs = await this.resolveInputs(spec);
+    const compiled = compileCanonicalTaskFilter(spec, inputs);
+    const openWhere = spec.openOnly
+      ? compiled.baseWhere
+      : withCondition(compiled.baseWhere, notInArray(tasks.status, [...CLOSED_TASK_STATUSES]));
+
+    const quick = (name: Parameters<typeof compileQuickFilterCondition>[0]) =>
+      compileQuickFilterCondition(name, spec, inputs);
+
+    const [
+      totalOpen,
+      overdue,
+      dueToday,
+      dueThisWeek,
+      noDate,
+      highPriority,
+      assignedToMe,
+      myDay,
+      recentlyCreated,
+      recentlyClosed,
+      waiting,
+      inbox,
+    ] = await Promise.all([
+      this.countWhere(openWhere),
+      this.countWhere(withCondition(openWhere, quick('overdue'))),
+      this.countWhere(withCondition(openWhere, quick('today'))),
+      this.countWhere(withCondition(openWhere, quick('week'))),
+      this.countWhere(withCondition(openWhere, quick('noDate'))),
+      this.countWhere(withCondition(openWhere, quick('high'))),
+      this.countWhere(withCondition(openWhere, quick('assigned'))),
+      this.countWhere(withCondition(openWhere, quick('myDay'))),
+      this.countWhere(withCondition(openWhere, quick('recentlyCreated'))),
+      this.countWhere(withCondition(compiled.baseWhere, quick('recentlyClosed'))),
+      this.countWhere(withCondition(openWhere, quick('waiting'))),
+      this.countWhere(withCondition(openWhere, quick('inbox'))),
+    ]);
+
+    return {
+      totalOpen,
+      overdue,
+      dueToday,
+      dueThisWeek,
+      noDate,
+      highPriority,
+      assignedToMe,
+      myDay,
+      recentlyCreated,
+      recentlyClosed,
+      waiting,
+      inbox,
+    };
+  }
+
+  async getSourceCounts(spec: TaskFilterSpec): Promise<TaskSourceCounts> {
+    const inputs = await this.resolveInputs(spec);
+    const compiled = compileCanonicalTaskFilter(spec, inputs);
+    const rows = await this.database
+      .select({ connectorType: tasks.connectorType, count: sql<number>`count(*)` })
+      .from(tasks)
+      .where(compiled.baseWhere)
+      .groupBy(tasks.connectorType);
+
+    return rows.reduce<TaskSourceCounts>((accumulator, row) => {
+      accumulator[row.connectorType] = Number(row.count ?? 0);
+      return accumulator;
+    }, {});
+  }
+
+  async getAvailableTags(spec: TaskFilterSpec): Promise<AvailableTaskTag[]> {
+    const inputs = await this.resolveInputs(spec);
+    const compiled = compileCanonicalTaskFilter(spec, inputs);
+    const rows = await this.database
+      .select({
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        type: tags.type,
+        source: tags.source,
+        color: tags.color,
+        confirmed: tags.confirmed,
+        count: sql<number>`count(*)`,
+      })
+      .from(taskTags)
+      .innerJoin(tags, eq(taskTags.tagId, tags.id))
+      .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+      .where(compiled.baseWhere)
+      .groupBy(tags.id, tags.name, tags.slug, tags.type, tags.source, tags.color, tags.confirmed)
+      .orderBy(
+        asc(sql`${tags.name} COLLATE BINARY`),
+        asc(sql`${tags.id} COLLATE BINARY`),
+      );
+
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      slug: row.slug,
+      type: row.type,
+      source: row.source ?? null,
+      color: row.color ?? null,
+      confirmed: Boolean(row.confirmed),
+      count: Number(row.count ?? 0),
+    }));
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Endpoint-oriented task reads
+ * ------------------------------------------------------------------ */
+
+function sqliteListGroupExpression(): SQL<string> {
+  return sql<string>`COALESCE(
+    NULLIF((
+      SELECT COALESCE(NULLIF(${sourceLists.userDisplayName}, ''), NULLIF(${sourceLists.name}, ''))
+      FROM ${sourceLists}
+      WHERE ${sourceLists.connectorInstanceId} = ${tasks.connectorInstanceId}
+        AND ${sourceLists.sourceId} = ${tasks.sourceListId}
+      LIMIT 1
+    ), ''),
+    NULLIF(${tasks.sourceListName}, ''),
+    'No List'
+  )`;
+}
+
+function sqliteScalarGroupExpression(
+  groupBy: Exclude<TaskGroupMode, 'tag' | 'project' | 'dueDate'>,
+): SQL<string> {
+  if (groupBy === 'status') {
+    return sql<string>`CASE
+      WHEN ${tasks.status} = 'done' THEN 'Completed'
+      WHEN ${tasks.status} = 'cancelled' THEN 'Cancelled'
+      WHEN ${tasks.status} = 'in_progress' THEN 'In Progress'
+      ELSE 'To Do'
+    END`;
+  }
+  if (groupBy === 'priority') {
+    return sql<string>`COALESCE(NULLIF(${tasks.priority}, ''), 'none')`;
+  }
+  if (groupBy === 'planningHorizon') {
+    return sql<string>`CASE ${tasks.planningHorizon}
+      WHEN 'next' THEN 'Next'
+      WHEN 'soon' THEN 'Soon'
+      WHEN 'later' THEN 'Later'
+      WHEN 'someday' THEN 'Someday'
+      ELSE 'Not set'
+    END`;
+  }
+  if (groupBy === 'source') {
+    return sql<string>`COALESCE(NULLIF(${tasks.connectorType}, ''), 'local')`;
+  }
+  if (groupBy === 'list') return sqliteListGroupExpression();
+  if (groupBy === 'effort') {
+    return sql<string>`CASE
+      WHEN ${tasks.effort} IS NULL THEN ${NO_EFFORT_GROUP_LABEL}
+      ELSE CAST(${tasks.effort} AS TEXT)
+    END`;
+  }
+  const exhaustive: never = groupBy;
+  throw new Error(`Unsupported task group: ${exhaustive}`);
+}
+
+class SqliteTaskReadRepository implements TaskReadRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly filterInputs: TaskFilterInputRepository,
+  ) {}
+
+  private async resolveInputs(spec: TaskFilterSpec): Promise<CanonicalTaskFilterInputs> {
+    const [myDayTaskIds, assignedGitHubUsernames, inboxListEntries] = await Promise.all([
+      this.filterInputs.listMyDayTaskIds(spec.myDayDate),
+      this.filterInputs.listAssignedGitHubUsernames(),
+      this.filterInputs.listInboxListEntries(),
+    ]);
+    return { myDayTaskIds, assignedGitHubUsernames, inboxListEntries };
+  }
+
+  async getAttachmentReadContext(taskId: string, attachmentId: string) {
+    const [row] = await this.database.select({
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      attachmentId: taskAttachments.id,
+      attachmentName: taskAttachments.name,
+      attachmentContentType: taskAttachments.contentType,
+      attachmentContentBase64: taskAttachments.contentBase64,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+    }).from(tasks).leftJoin(
+      taskAttachments,
+      and(
+        eq(taskAttachments.taskId, tasks.id),
+        eq(taskAttachments.id, attachmentId),
+      ),
+    ).where(eq(tasks.id, taskId)).limit(1);
+
+    if (!row) return { task: null, attachment: null };
+    return {
+      task: {
+        sourceId: row.sourceId,
+        connectorType: row.connectorType,
+        connectorInstanceId: row.connectorInstanceId,
+      },
+      attachment: row.attachmentId === null
+        ? null
+        : {
+            name: row.attachmentName!,
+            contentType: row.attachmentContentType!,
+            contentBase64: row.attachmentContentBase64 ?? null,
+            sourceAttachmentId: row.sourceAttachmentId ?? null,
+          },
+    };
+  }
+
+  async getDocumentPreviewContext(taskId: string) {
+    const [row] = await this.database.select({
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      metadata: tasks.metadata,
+      documentConnectorId: connectorConfigs.id,
+      credentials: connectorConfigs.credentials,
+      settings: connectorConfigs.settings,
+    }).from(tasks).leftJoin(
+      connectorConfigs,
+      and(
+        eq(tasks.connectorType, 'document-intelligence'),
+        eq(connectorConfigs.id, tasks.connectorInstanceId),
+        eq(connectorConfigs.type, 'document-intelligence'),
+        eq(connectorConfigs.enabled, true),
+        isNull(connectorConfigs.deletedAt),
+      ),
+    ).where(eq(tasks.id, taskId)).limit(1);
+
+    if (!row) return { task: null, connector: null };
+    return {
+      task: {
+        connectorType: row.connectorType,
+        connectorInstanceId: row.connectorInstanceId,
+        metadata: decodeLenientJsonObject(row.metadata),
+      },
+      connector: row.documentConnectorId === null
+        ? null
+        : {
+            credentials: decodeLenientJsonObject(row.credentials),
+            settings: decodeLenientJsonObject(row.settings),
+          },
+    };
+  }
+
+  async listLinkedSources(taskId: string) {
+    const rows = await this.database.select({
+      id: taskLinkedSources.id,
+      taskId: taskLinkedSources.taskId,
+      connectorType: taskLinkedSources.connectorType,
+      connectorInstanceId: taskLinkedSources.connectorInstanceId,
+      sourceId: taskLinkedSources.sourceId,
+      title: taskLinkedSources.title,
+      linkedAt: taskLinkedSources.linkedAt,
+      matchConfidence: taskLinkedSources.matchConfidence,
+      metadata: taskLinkedSources.metadata,
+    }).from(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId));
+
+    return rows.map((row) => ({
+      ...row,
+      matchConfidence: row.matchConfidence ?? null,
+      metadata: decodeLenientJsonObject(row.metadata),
+    }));
+  }
+
+  async searchRelationshipCandidates(input: {
+    readonly taskId: string;
+    readonly query: string;
+    readonly limit: number;
+  }): Promise<TaskRelationshipCandidateRow[] | null> {
+    const [sourceTask] = await this.database
+      .select({ id: tasks.id })
+      .from(tasks)
+      .where(eq(tasks.id, input.taskId))
+      .limit(1);
+    if (!sourceTask) return null;
+
+    const boundedLimit = Math.max(1, Math.min(input.limit, 50));
+    const normalizedQuery = input.query.trim();
+    const candidateRows = await this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      connectorType: tasks.connectorType,
+      sourceListName: tasks.sourceListName,
+    }).from(tasks).where(and(
+      ne(tasks.id, input.taskId),
+      normalizedQuery ? like(tasks.title, `%${normalizedQuery}%`) : undefined,
+    )).orderBy(
+      asc(sql`${tasks.title} COLLATE BINARY`),
+      asc(sql`${tasks.id} COLLATE BINARY`),
+    ).limit(boundedLimit);
+
+    const candidateIds = candidateRows.map((candidate) => candidate.id);
+    if (candidateIds.length === 0) return [];
+    const membershipRows = await this.database.select({
+      taskId: taskProjects.taskId,
+      projectId: taskProjects.projectId,
+    }).from(taskProjects).where(inArray(taskProjects.taskId, candidateIds));
+    const projectIds = [...new Set(membershipRows.map((row) => row.projectId))];
+    const projectRows = projectIds.length > 0
+      ? await this.database.select({
+          id: hubProjects.id,
+          name: hubProjects.name,
+        }).from(hubProjects).where(inArray(hubProjects.id, projectIds))
+      : [];
+    const projectNameById = new Map(projectRows.map((project) => [project.id, project.name]));
+    const membershipsByTask = new Map<string, string[]>();
+    for (const membership of membershipRows) {
+      const ids = membershipsByTask.get(membership.taskId) ?? [];
+      ids.push(membership.projectId);
+      membershipsByTask.set(membership.taskId, ids);
+    }
+
+    return candidateRows.map((candidate) => {
+      const candidateProjectIds = membershipsByTask.get(candidate.id) ?? [];
+      return {
+        ...candidate,
+        sourceListName: candidate.sourceListName ?? null,
+        projectIds: candidateProjectIds,
+        projectNames: candidateProjectIds
+          .map((projectId) => projectNameById.get(projectId))
+          .filter((name): name is string => Boolean(name)),
+      };
+    });
+  }
+
+  async listDuplicateDetectionTasks(input: {
+    readonly includeClosedTasks: boolean;
+  }): Promise<TaskDuplicateDetectionRow[]> {
+    return this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      createdAt: tasks.createdAt,
+    }).from(tasks).where(
+      input.includeClosedTasks
+        ? undefined
+        : inArray(tasks.status, ['todo', 'in_progress']),
+    );
+  }
+
+  async listDistinctTaskAssignees(): Promise<string[]> {
+    const rows = await this.database
+      .select({ assignee: tasks.assignee })
+      .from(tasks)
+      .where(isNotNull(tasks.assignee))
+      .groupBy(tasks.assignee)
+      .orderBy(asc(sql`${tasks.assignee} COLLATE BINARY`));
+    return rows.map((row) => row.assignee!);
+  }
+
+  async getGroupCounts(input: {
+    readonly spec: TaskFilterSpec;
+    readonly groupBy: TaskGroupMode;
+  }): Promise<Record<string, number>> {
+    const compiled = compileCanonicalTaskFilter(
+      input.spec,
+      await this.resolveInputs(input.spec),
+    );
+    const taskWhere = compiled.taskWhere;
+
+    if (input.groupBy === 'tag') {
+      const [taggedRows, untaggedRows] = await Promise.all([
+        this.database.select({
+          group: tags.name,
+          count: sql<number>`count(DISTINCT ${tasks.id})`,
+        }).from(tasks)
+          .innerJoin(taskTags, eq(taskTags.taskId, tasks.id))
+          .innerJoin(tags, eq(tags.id, taskTags.tagId))
+          .where(taskWhere)
+          .groupBy(tags.name),
+        this.database.select({ count: sql<number>`count(*)` })
+          .from(tasks)
+          .where(and(
+            taskWhere,
+            sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`,
+          )),
+      ]);
+      const counts: Record<string, number> = {};
+      for (const row of taggedRows) counts[row.group] = Number(row.count);
+      const untaggedCount = Number(untaggedRows[0]?.count ?? 0);
+      if (untaggedCount > 0) counts.Untagged = untaggedCount;
+      return counts;
+    }
+
+    if (input.groupBy === 'project') {
+      const projectRows = await this.database.select({
+        taskId: taskProjects.taskId,
+        projectId: taskProjects.projectId,
+        projectName: hubProjects.name,
+      }).from(tasks)
+        .innerJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
+        .innerJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
+        .where(taskWhere);
+      const taskIds = [...new Set(projectRows.map((row) => row.taskId))];
+      const phaseRows = taskIds.length > 0
+        ? await this.database.select({
+            taskId: projectPhaseItems.taskId,
+            phaseName: projectPhases.name,
+            projectId: projectPhases.projectId,
+          }).from(projectPhaseItems)
+            .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
+            .where(inArray(projectPhaseItems.taskId, taskIds))
+        : [];
+      const phasesByMembership = new Map<string, string[]>();
+      for (const phase of phaseRows) {
+        if (!phase.projectId) continue;
+        const key = `${phase.taskId}:${phase.projectId}`;
+        const names = phasesByMembership.get(key) ?? [];
+        names.push(phase.phaseName);
+        phasesByMembership.set(key, names);
+      }
+      const taskIdsByGroup = new Map<string, Set<string>>();
+      for (const project of projectRows) {
+        const phaseNames = phasesByMembership.get(`${project.taskId}:${project.projectId}`);
+        for (const group of phaseNames?.length
+          ? phaseNames.map((phaseName) => `${project.projectName} › ${phaseName}`)
+          : [`${project.projectName} › Unphased`]) {
+          const ids = taskIdsByGroup.get(group) ?? new Set<string>();
+          ids.add(project.taskId);
+          taskIdsByGroup.set(group, ids);
+        }
+      }
+      const counts = Object.fromEntries(
+        [...taskIdsByGroup].map(([group, ids]) => [group, ids.size]),
+      );
+      const [unprojected] = await this.database.select({ count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(and(
+          taskWhere,
+          sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`,
+        ));
+      const unprojectedCount = Number(unprojected?.count ?? 0);
+      if (unprojectedCount > 0) counts['No Project'] = unprojectedCount;
+      return counts;
+    }
+
+    const expression = input.groupBy === 'dueDate'
+      ? sql<string>`CASE
+          WHEN ${tasks.dueDate} IS NULL OR ${tasks.dueDate} = '' THEN 'No Due Date'
+          WHEN ${tasks.dueDate} < ${input.spec.today} THEN 'Overdue'
+          WHEN ${tasks.dueDate} = ${input.spec.today} THEN 'Today'
+          ELSE ${tasks.dueDate}
+        END`
+      : sqliteScalarGroupExpression(input.groupBy);
+    const rows = await this.database.select({
+      group: expression.as('group_key'),
+      count: sql<number>`count(*)`,
+    }).from(tasks).where(taskWhere).groupBy(sql`group_key`);
+    return Object.fromEntries(rows.map((row) => [row.group, Number(row.count)]));
+  }
+
+  private quickSortScopeConditions(input: TaskQuickSortScope): SQL[] {
+    const conditions: SQL[] = [
+      sql`${tasks.connectorInstanceId} NOT IN (
+        SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
+        WHERE ${connectorConfigs.deletedAt} IS NOT NULL
+      )`,
+      notInArray(tasks.status, ['done', 'cancelled']),
+      isNull(tasks.parentId),
+      or(isNull(tasks.snoozedUntil), lte(tasks.snoozedUntil, input.now))!,
+      sql`NOT EXISTS (
+        SELECT 1 FROM ${quickSortLog}
+        WHERE ${quickSortLog.taskId} = ${tasks.id}
+          AND ${quickSortLog.action} = 'skipped'
+          AND ${quickSortLog.reversedAt} IS NULL
+          AND ${quickSortLog.triagedAt} > ${input.skipCutoff}
+      )`,
+    ];
+    if (input.sourceTypes.length === 1) {
+      conditions.push(eq(tasks.connectorType, input.sourceTypes[0]));
+    } else if (input.sourceTypes.length > 1) {
+      conditions.push(inArray(tasks.connectorType, [...input.sourceTypes]));
+    }
+    if (input.sourceListId) {
+      conditions.push(eq(tasks.sourceListId, input.sourceListId));
+    } else if (input.sourceListName) {
+      conditions.push(eq(tasks.sourceListName, input.sourceListName));
+    }
+    if (input.connectorInstanceId) {
+      conditions.push(eq(tasks.connectorInstanceId, input.connectorInstanceId));
+    }
+    return conditions;
+  }
+
+  async listQuickSortSources(input: { readonly now: string; readonly skipCutoff: string }) {
+    const scope: TaskQuickSortScope = {
+      ...input,
+      sourceTypes: [],
+      sourceListId: null,
+      sourceListName: null,
+      connectorInstanceId: null,
+    };
+    const rows = await this.database.select({
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
+      sourceListName: tasks.sourceListName,
+      count: sql<number>`count(*)`,
+    }).from(tasks)
+      .where(and(...this.quickSortScopeConditions(scope)))
+      .groupBy(
+        tasks.connectorType,
+        tasks.connectorInstanceId,
+        tasks.sourceListId,
+        tasks.sourceListName,
+      )
+      .orderBy(desc(sql`count(*)`));
+    const definitions = await this.database.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      type: sourceLists.type,
+      icon: sourceLists.icon,
+      iconColor: sourceLists.iconColor,
+      hidden: sourceLists.hidden,
+    }).from(sourceLists);
+    return {
+      rows: rows.map((row) => ({ ...row, count: Number(row.count) })),
+      definitions: definitions.map((definition) => ({
+        ...definition,
+        userDisplayName: definition.userDisplayName ?? null,
+        icon: definition.icon ?? null,
+        iconColor: definition.iconColor ?? null,
+        hidden: Boolean(definition.hidden),
+      })),
+    };
+  }
+
+  async getQuickSortCounts(input: TaskQuickSortScope) {
+    const scope = this.quickSortScopeConditions(input);
+    const countWhere = async (condition: SQL): Promise<number> => {
+      const [row] = await this.database.select({ count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(and(...scope, condition));
+      return Number(row?.count ?? 0);
+    };
+    const [noPriority, noEffort, noTags, noPlanningHorizon] = await Promise.all([
+      countWhere(eq(tasks.priority, 'none')),
+      countWhere(isNull(tasks.effort)),
+      countWhere(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`),
+      countWhere(isNull(tasks.planningHorizon)),
+    ]);
+    return {
+      no_priority: noPriority,
+      quadrant: noPriority,
+      no_effort: noEffort,
+      no_tags: noTags,
+      no_planning_horizon: noPlanningHorizon,
+    };
+  }
+
+  async listQuickSortTasks(
+    input: TaskQuickSortScope & {
+      readonly mode: TaskQuickSortQueueMode;
+      readonly order: TaskQuickSortOrder;
+      readonly limit: number;
+    },
+  ): Promise<TaskQuickSortQueueRow[]> {
+    const conditions = this.quickSortScopeConditions(input);
+    if (input.mode === 'no_priority' || input.mode === 'quadrant') {
+      conditions.push(eq(tasks.priority, 'none'));
+    } else if (input.mode === 'no_effort') {
+      conditions.push(isNull(tasks.effort));
+    } else if (input.mode === 'no_tags') {
+      conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`);
+    } else {
+      conditions.push(isNull(tasks.planningHorizon));
+    }
+
+    const priorityOrder = sql`CASE ${tasks.priority}
+      WHEN 'critical' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3
+      WHEN 'low' THEN 4 ELSE 5 END`;
+    let orderClauses: SQL[];
+    if (input.order === 'priority') {
+      orderClauses = [
+        asc(priorityOrder),
+        desc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE BINARY`),
+      ];
+    } else if (input.order === 'oldest') {
+      orderClauses = [asc(tasks.createdAt), asc(sql`${tasks.id} COLLATE BINARY`)];
+    } else if (input.order === 'newest') {
+      orderClauses = [desc(tasks.createdAt), asc(sql`${tasks.id} COLLATE BINARY`)];
+    } else if (input.order === 'random') {
+      orderClauses = [sql`RANDOM()`];
+    } else if (input.mode === 'no_priority' || input.mode === 'quadrant') {
+      orderClauses = [desc(tasks.createdAt), asc(sql`${tasks.id} COLLATE BINARY`)];
+    } else if (input.mode === 'no_effort' || input.mode === 'no_planning_horizon') {
+      orderClauses = [
+        asc(priorityOrder),
+        desc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE BINARY`),
+      ];
+    } else {
+      orderClauses = [
+        asc(sql`CASE WHEN ${tasks.sourceListName} IS NULL THEN 0 ELSE 1 END`),
+        asc(sql`${tasks.sourceListName} COLLATE BINARY`),
+        desc(tasks.createdAt),
+        asc(sql`${tasks.id} COLLATE BINARY`),
+      ];
+    }
+
+    const rows = await this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      description: tasks.description,
+      priority: tasks.priority,
+      effort: tasks.effort,
+      status: tasks.status,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceId: tasks.sourceId,
+      sourceListId: tasks.sourceListId,
+      sourceListName: tasks.sourceListName,
+      dueDate: tasks.dueDate,
+      planningHorizon: tasks.planningHorizon,
+      createdAt: tasks.createdAt,
+      localDisposition: tasks.localDisposition,
+    }).from(tasks)
+      .where(and(...conditions))
+      .orderBy(...orderClauses)
+      .limit(input.limit);
+    const taskIds = rows.map((row) => row.id);
+    if (taskIds.length === 0) return [];
+
+    const [tagRows, projectRows, phaseRows] = await Promise.all([
+      this.database.select({
+        taskId: taskTags.taskId,
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        color: tags.color,
+      }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(inArray(taskTags.taskId, taskIds)),
+      this.database.select({
+        taskId: taskProjects.taskId,
+        id: hubProjects.id,
+        name: hubProjects.name,
+        color: hubProjects.color,
+      }).from(taskProjects)
+        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+        .where(inArray(taskProjects.taskId, taskIds)),
+      this.database.select({
+        taskId: projectPhaseItems.taskId,
+        id: projectPhases.id,
+        name: projectPhases.name,
+        projectId: projectPhases.projectId,
+      }).from(projectPhaseItems)
+        .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
+        .where(and(
+          inArray(projectPhaseItems.taskId, taskIds),
+          eq(projectPhaseItems.isProposed, false),
+        )),
+    ]);
+
+    const tagsByTask = new Map<string, TaskQuickSortQueueRow['tags']>();
+    for (const { taskId, ...tag } of tagRows) {
+      const entries = tagsByTask.get(taskId) ?? [];
+      entries.push({ ...tag, color: tag.color ?? null });
+      tagsByTask.set(taskId, entries);
+    }
+    const projectsByTask = new Map<string, TaskQuickSortQueueRow['projects']>();
+    for (const { taskId, ...project } of projectRows) {
+      const entries = projectsByTask.get(taskId) ?? [];
+      entries.push(project);
+      projectsByTask.set(taskId, entries);
+    }
+    const phasesByTask = new Map<string, TaskQuickSortQueueRow['phases']>();
+    for (const { taskId, ...phase } of phaseRows) {
+      const entries = phasesByTask.get(taskId) ?? [];
+      entries.push({ ...phase, projectId: phase.projectId ?? null });
+      phasesByTask.set(taskId, entries);
+    }
+
+    return rows.map((row) => ({
+      ...row,
+      description: row.description ?? null,
+      effort: row.effort ?? null,
+      sourceListId: row.sourceListId ?? null,
+      sourceListName: row.sourceListName ?? null,
+      dueDate: row.dueDate ?? null,
+      planningHorizon: row.planningHorizon ?? null,
+      tags: tagsByTask.get(row.id) ?? [],
+      projects: projectsByTask.get(row.id) ?? [],
+      phases: phasesByTask.get(row.id) ?? [],
+    }));
+  }
+
+  async getQuickSortSuggestionInputs(
+    taskIds: readonly string[],
+  ): Promise<TaskQuickSortSuggestionInputs> {
+    if (taskIds.length === 0) {
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+    }
+    const taskRows = await this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      description: tasks.description,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListName: tasks.sourceListName,
+      assignee: tasks.assignee,
+      snoozedUntil: tasks.snoozedUntil,
+      effort: tasks.effort,
+    }).from(tasks).where(inArray(tasks.id, [...taskIds]));
+    if (taskRows.length === 0) {
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+    }
+
+    const [rankingRows, tagRows, assignmentRows] = await Promise.all([
+      this.database.select({
+        id: sourceRankings.id,
+        connectorType: sourceRankings.connectorType,
+        name: sourceRankings.name,
+        rank: sourceRankings.rank,
+        updatedAt: sourceRankings.updatedAt,
+      }).from(sourceRankings),
+      this.database.select({
+        id: tags.id,
+        name: tags.name,
+      }).from(tags).orderBy(asc(sql`${tags.id} COLLATE BINARY`)),
+      this.database.select({
+        taskId: taskTags.taskId,
+        tagId: taskTags.tagId,
+      }).from(taskTags),
+    ]);
+    return {
+      tasks: taskRows.map((row) => ({
+        ...row,
+        description: row.description ?? null,
+        priority: row.priority as TaskQuickSortSuggestionInputs['tasks'][number]['priority'],
+        dueDate: row.dueDate ?? null,
+        sourceListName: row.sourceListName ?? null,
+        assignee: row.assignee ?? null,
+        snoozedUntil: row.snoozedUntil ?? null,
+        effort: row.effort ?? null,
+      })),
+      sourceRankings: rankingRows,
+      tags: tagRows,
+      taskTags: assignmentRows,
+    };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Policy identities
+ * ------------------------------------------------------------------ */
+
+class SqliteTaskPolicyIdentityRepository implements TaskPolicyIdentityRepository {
+  constructor(private readonly database: Drizzle) {}
+
+  async listTaskSourceIdentities(
+    taskIds: readonly string[],
+  ): Promise<TaskSourceIdentityRow[]> {
+    const uniqueIds = [...new Set(taskIds.filter(Boolean))];
+    if (uniqueIds.length === 0) return [];
+    return this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+    }).from(tasks).where(inArray(tasks.id, uniqueIds));
+  }
+
+  async getTaskSourceIdentity(taskId: string): Promise<TaskSourceIdentityRow | null> {
+    const [row] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ?? null;
+  }
+
+  async getDependencyEndpoints(
+    dependencyId: string,
+  ): Promise<TaskDependencyEndpoints | null> {
+    const [row] = await this.database.select({
+      taskId: taskDependencies.taskId,
+      dependsOnTaskId: taskDependencies.dependsOnTaskId,
+    }).from(taskDependencies).where(eq(taskDependencies.id, dependencyId)).limit(1);
+    return row ?? null;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Local task lifecycle
+ * ------------------------------------------------------------------ */
+
+function deleteTaskWithinTransaction(
+  tx: SqliteTransaction,
+  taskId: string,
+  recursive: boolean,
+): void {
+  const childTasks = tx.select({ id: tasks.id })
+    .from(tasks)
+    .where(eq(tasks.parentId, taskId))
+    .all();
+  if (recursive) {
+    for (const childTask of childTasks) {
+      deleteTaskWithinTransaction(tx, childTask.id, recursive);
+    }
+  } else {
+    detachTaskDescendants(tx, taskId);
+  }
+
+  tx.delete(taskTags).where(eq(taskTags.taskId, taskId)).run();
+  tx.delete(projectAutoIncludeExclusions)
+    .where(eq(projectAutoIncludeExclusions.taskId, taskId))
+    .run();
+  tx.delete(taskProjects).where(eq(taskProjects.taskId, taskId)).run();
+  tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId)).run();
+  tx.delete(myDayItems).where(eq(myDayItems.taskId, taskId)).run();
+  tx.delete(myDayExclusions).where(eq(myDayExclusions.taskId, taskId)).run();
+  tx.delete(focusItems).where(eq(focusItems.taskId, taskId)).run();
+  tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, taskId)).run();
+  tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, taskId)).run();
+  tx.delete(quickSortLog).where(eq(quickSortLog.taskId, taskId)).run();
+  tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, taskId)).run();
+  tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId)).run();
+  tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
+  tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId)).run();
+  tx.update(notifications)
+    .set({ relatedTaskId: null })
+    .where(eq(notifications.relatedTaskId, taskId))
+    .run();
+  tx.update(taskRecurrenceBackfillDecisions)
+    .set({ taskId: null })
+    .where(eq(taskRecurrenceBackfillDecisions.taskId, taskId))
+    .run();
+  tx.delete(taskDependencies).where(or(
+    eq(taskDependencies.taskId, taskId),
+    eq(taskDependencies.dependsOnTaskId, taskId),
+  )).run();
+  tx.delete(tasks).where(eq(tasks.id, taskId)).run();
+}
+
+class SqliteLocalTaskLifecycleRepository implements LocalTaskLifecycleRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async deleteTaskLocally(request: LocalTaskDeletionRequest): Promise<void> {
+    this.runTransaction((tx) => {
+      deleteTaskWithinTransaction(tx, request.taskId, request.recursive);
+    });
+  }
+
+  async convertTaskTreeToLocal(
+    taskId: string,
+    resolution: 'keep_local' | 'archive_local',
+    now: string,
+  ): Promise<void> {
+    this.runTransaction((tx) => {
+      const convertTree = (id: string): void => {
+        const [task] = tx.select({
+          id: tasks.id,
+          sourceId: tasks.sourceId,
+          connectorType: tasks.connectorType,
+          connectorInstanceId: tasks.connectorInstanceId,
+          metadata: tasks.metadata,
+        }).from(tasks).where(eq(tasks.id, id)).all();
+        if (!task) return;
+
+        const children = tx.select({ id: tasks.id })
+          .from(tasks)
+          .where(eq(tasks.parentId, id))
+          .all();
+
+        tx.update(tasks).set({
+          sourceId: `local:${task.id}`,
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+          sourceListId: null,
+          sourceListName: null,
+          syncStatus: 'synced',
+          pushRetryCount: 0,
+          updatedAt: now,
+          lastSyncedAt: now,
+          metadata: JSON.stringify({
+            ...parseMetadata(task.metadata),
+            retentionResolution: {
+              action: resolution,
+              resolvedAt: now,
+              previousConnectorType: task.connectorType,
+              previousConnectorInstanceId: task.connectorInstanceId,
+              previousSourceId: task.sourceId,
+            },
+          }),
+        }).where(eq(tasks.id, id)).run();
+
+        for (const child of children) convertTree(child.id);
+      };
+
+      convertTree(taskId);
+    });
+  }
+
+  async findTaskByRetentionIdentity(
+    identity: RetentionTaskIdentity,
+  ): Promise<RetentionTaskRow | null> {
+    const columns = {
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      title: tasks.title,
+      status: tasks.status,
+      updatedAt: tasks.updatedAt,
+      metadata: tasks.metadata,
+    };
+
+    if (identity.taskId) {
+      const [row] = await this.database.select(columns)
+        .from(tasks)
+        .where(eq(tasks.id, identity.taskId));
+      if (
+        row
+        && row.connectorInstanceId === identity.connectorId
+        && row.sourceId === identity.taskSourceId
+      ) {
+        return { ...row, metadata: parseMetadata(row.metadata) };
+      }
+    }
+
+    const candidates = await this.database.select(columns)
+      .from(tasks)
+      .where(eq(tasks.sourceId, identity.taskSourceId));
+    const match = candidates.find(
+      (candidate) => candidate.connectorInstanceId === identity.connectorId,
+    );
+    return match ? { ...match, metadata: parseMetadata(match.metadata) } : null;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Scout hard delete
+ * ------------------------------------------------------------------ */
+
+function collectTaskGraphIds(tx: SqliteTransaction, rootTaskId: string): string[] {
+  const taskIds = new Set([rootTaskId]);
+  let frontier = [rootTaskId];
+
+  while (frontier.length > 0) {
+    const children = tx.select({ id: tasks.id })
+      .from(tasks)
+      .where(inArray(tasks.parentId, frontier))
+      .all();
+    frontier = children
+      .map((child) => child.id)
+      .filter((childId) => {
+        if (taskIds.has(childId)) return false;
+        taskIds.add(childId);
+        return true;
+      });
+  }
+
+  return [...taskIds];
+}
+
+class SqliteScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteRepository {
+  constructor(private readonly runTransaction: SqliteTaskCoreTransactionRunner) {}
+
+  async hardDeleteScoutTask(taskId: string): Promise<ScoutHardDeleteOutcome> {
+    return this.runTransaction((tx): ScoutHardDeleteOutcome => {
+      const task = tx.select({
+        id: tasks.id,
+        sourceId: tasks.sourceId,
+        connectorType: tasks.connectorType,
+        connectorInstanceId: tasks.connectorInstanceId,
+      }).from(tasks).where(eq(tasks.id, taskId)).get();
+      if (!task) return { kind: 'not-found' };
+      if (task.connectorType !== 'scout') return { kind: 'not-scout' };
+
+      const now = new Date().toISOString();
+      const taskIds = collectTaskGraphIds(tx, task.id);
+      const suppressions = tx.select({
+        id: tasks.id,
+        connectorType: tasks.connectorType,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceId: tasks.sourceId,
+      }).from(tasks).where(inArray(tasks.id, taskIds)).all()
+        .filter((candidate) => (
+          candidate.connectorType === 'scout'
+          && (candidate.id === task.id || !candidate.sourceId.startsWith('local:'))
+        ))
+        .map((candidate) => ({
+          connectorInstanceId: candidate.connectorInstanceId,
+          sourceId: candidate.sourceId,
+          reason: 'hard-deleted' as const,
+          createdAt: now,
+        }));
+
+      tx.insert(taskIngestSuppressions).values(suppressions).onConflictDoNothing().run();
+
+      tx.delete(taskDependencies).where(or(
+        inArray(taskDependencies.taskId, taskIds),
+        inArray(taskDependencies.dependsOnTaskId, taskIds),
+      )).run();
+      tx.delete(taskTags).where(inArray(taskTags.taskId, taskIds)).run();
+      tx.delete(projectAutoIncludeExclusions)
+        .where(inArray(projectAutoIncludeExclusions.taskId, taskIds))
+        .run();
+      tx.delete(taskProjects).where(inArray(taskProjects.taskId, taskIds)).run();
+      tx.delete(projectPhaseItems).where(inArray(projectPhaseItems.taskId, taskIds)).run();
+      tx.delete(taskSchedules).where(inArray(taskSchedules.taskId, taskIds)).run();
+      tx.delete(taskFieldStates).where(inArray(taskFieldStates.taskId, taskIds)).run();
+      tx.run(sql.raw('DROP TRIGGER IF EXISTS task_history_immutable_delete'));
+      tx.delete(taskHistoryEvents).where(inArray(taskHistoryEvents.taskId, taskIds)).run();
+      tx.delete(myDayItems).where(inArray(myDayItems.taskId, taskIds)).run();
+      tx.delete(myDayExclusions).where(inArray(myDayExclusions.taskId, taskIds)).run();
+      tx.delete(focusItems).where(inArray(focusItems.taskId, taskIds)).run();
+      tx.delete(weeklyOneThing).where(inArray(weeklyOneThing.taskId, taskIds)).run();
+      tx.delete(prioritySyncLog).where(inArray(prioritySyncLog.taskId, taskIds)).run();
+      tx.delete(quickSortLog).where(inArray(quickSortLog.taskId, taskIds)).run();
+      tx.delete(quickSortOperations).where(inArray(quickSortOperations.taskId, taskIds)).run();
+      tx.delete(scoutReconciliationSuggestions)
+        .where(inArray(scoutReconciliationSuggestions.taskId, taskIds))
+        .run();
+      tx.delete(scoutReconciliationEvaluations)
+        .where(inArray(scoutReconciliationEvaluations.taskId, taskIds))
+        .run();
+      tx.delete(scoutReconciliationTaskState)
+        .where(inArray(scoutReconciliationTaskState.taskId, taskIds))
+        .run();
+      tx.delete(taskAttachments).where(inArray(taskAttachments.taskId, taskIds)).run();
+      tx.delete(taskLinkedSources).where(inArray(taskLinkedSources.taskId, taskIds)).run();
+      tx.delete(syncDeletionCandidates).where(inArray(syncDeletionCandidates.taskId, taskIds)).run();
+      tx.delete(syncDeletionSnapshots)
+        .where(or(
+          inArray(syncDeletionSnapshots.originalTaskId, taskIds),
+          inArray(syncDeletionSnapshots.restoredTaskId, taskIds),
+        ))
+        .run();
+      tx.update(notifications)
+        .set({ relatedTaskId: null })
+        .where(inArray(notifications.relatedTaskId, taskIds))
+        .run();
+      tx.update(taskRecurrenceBackfillDecisions)
+        .set({ taskId: null })
+        .where(inArray(taskRecurrenceBackfillDecisions.taskId, taskIds))
+        .run();
+      tx.delete(tasks).where(inArray(tasks.id, taskIds)).run();
+      tx.run(sql.raw(TASK_HISTORY_DELETE_TRIGGER));
+
+      return {
+        kind: 'deleted',
+        taskId: task.id,
+        sourceId: task.sourceId,
+        deletedTaskIds: taskIds,
+      };
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Task moves
+ * ------------------------------------------------------------------ */
+
+function attachmentSnapshotPredicates(
+  taskId: string,
+  attachments: readonly { id: string; size: number; sourceAttachmentId: string | null }[],
+): SQL[] {
+  return [
+    sql`(
+      SELECT COUNT(*)
+      FROM task_attachments
+      WHERE task_id = ${taskId}
+    ) = ${attachments.length}`,
+    ...attachments.map((attachment) => sql`EXISTS (
+      SELECT 1
+      FROM task_attachments
+      WHERE task_id = ${taskId}
+        AND id = ${attachment.id}
+        AND size = ${attachment.size}
+        AND source_attachment_id IS ${attachment.sourceAttachmentId}
+    )`),
+  ];
+}
+
+class SqliteTaskMoveRepository implements TaskMoveRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async getMoveSource(taskId: string): Promise<TaskMoveSourceRow | null> {
+    const [row] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      title: tasks.title,
+      description: tasks.description,
+      status: tasks.status,
+      priority: tasks.priority,
+      dueDate: tasks.dueDate,
+      createdAt: tasks.createdAt,
+      updatedAt: tasks.updatedAt,
+      completedAt: tasks.completedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ?? null;
+  }
+
+  async listTaskAttachments(taskId: string): Promise<TaskAttachmentRow[]> {
+    const rows = await this.database.select().from(taskAttachments)
+      .where(eq(taskAttachments.taskId, taskId));
+    return rows.map((row) => ({
+      id: row.id,
+      taskId: row.taskId,
+      name: row.name,
+      contentType: row.contentType,
+      size: row.size,
+      contentBase64: row.contentBase64 ?? null,
+      sourceAttachmentId: row.sourceAttachmentId ?? null,
+      createdAt: row.createdAt,
+    }));
+  }
+
+  async taskExists(taskId: string): Promise<boolean> {
+    const [row] = await this.database.select({ id: tasks.id })
+      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return Boolean(row);
+  }
+
+  async findTargetList(
+    connectorInstanceId: string,
+    listIdOrSourceId: string,
+  ): Promise<TaskMoveTargetList | null> {
+    const [row] = await this.database
+      .select({ id: sourceLists.id, sourceId: sourceLists.sourceId })
+      .from(sourceLists)
+      .where(and(
+        eq(sourceLists.connectorInstanceId, connectorInstanceId),
+        or(
+          eq(sourceLists.id, listIdOrSourceId),
+          eq(sourceLists.sourceId, listIdOrSourceId),
+        ),
+      ))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async executePendingSyncMove(
+    request: PendingSyncTaskMoveRequest,
+  ): Promise<PendingSyncTaskMoveOutcome> {
+    const source = await this.getMoveSource(request.sourceTaskId);
+    if (!source) return { kind: 'not-found' };
+    const attachments = await this.listTaskAttachments(request.sourceTaskId);
+
+    try {
+      this.runTransaction((tx) => {
+        const claim = tx.update(tasks).set({
+          updatedAt: sql`${tasks.updatedAt}`,
+        }).where(and(
+          eq(tasks.id, request.sourceTaskId),
+          eq(tasks.sourceId, request.expectedSourceId),
+          eq(tasks.updatedAt, request.expectedUpdatedAt),
+          ...attachmentSnapshotPredicates(
+            request.sourceTaskId,
+            request.attachmentSnapshot,
+          ),
+        )).run();
+        if (claim.changes !== 1) {
+          throw new PendingTaskMoveSourceChangedError();
+        }
+
+        tx.insert(tasks).values({
+          id: request.newTaskId,
+          sourceId: `local:${request.newTaskId}`,
+          connectorType: request.targetConnectorType,
+          connectorInstanceId: request.targetConnectorInstanceId,
+          title: source.title,
+          description: source.description,
+          status: source.status,
+          priority: source.priority,
+          dueDate: source.dueDate,
+          createdAt: source.createdAt,
+          updatedAt: request.now,
+          completedAt: source.completedAt,
+          depth: 0,
+          isChecklistItem: false,
+          sourceListId: request.targetSourceListId ?? undefined,
+          metadata: '{}',
+          syncStatus: 'pending_push',
+          lastSyncedAt: request.now,
+        }).run();
+
+        if (request.keepTags) {
+          const sourceTags = tx.select().from(taskTags)
+            .where(eq(taskTags.taskId, request.sourceTaskId)).all();
+          if (sourceTags.length > 0) {
+            tx.insert(taskTags).values(
+              sourceTags.map((tag) => ({ taskId: request.newTaskId, tagId: tag.tagId })),
+            ).run();
+          }
+        }
+
+        const sourceSchedules = tx.select().from(taskSchedules)
+          .where(eq(taskSchedules.taskId, request.sourceTaskId)).all();
+        if (sourceSchedules.length > 0) {
+          tx.delete(taskSchedules)
+            .where(eq(taskSchedules.taskId, request.sourceTaskId)).run();
+          tx.insert(taskSchedules).values(
+            sourceSchedules.map((schedule) => ({ ...schedule, taskId: request.newTaskId })),
+          ).run();
+        }
+
+        if (attachments.length > 0) {
+          tx.insert(taskAttachments).values(
+            attachments.map((attachment) => ({
+              ...attachment,
+              id: crypto.randomUUID(),
+              taskId: request.newTaskId,
+              sourceAttachmentId: null,
+            })),
+          ).run();
+        }
+
+        repointTaskReferences(tx, request.sourceTaskId, request.newTaskId);
+
+        tx.delete(taskAttachments)
+          .where(eq(taskAttachments.taskId, request.sourceTaskId)).run();
+        tx.delete(taskTags).where(eq(taskTags.taskId, request.sourceTaskId)).run();
+        tx.delete(tasks).where(eq(tasks.id, request.sourceTaskId)).run();
+      });
+    } catch (error) {
+      if (error instanceof PendingTaskMoveSourceChangedError) {
+        return await this.taskExists(request.sourceTaskId)
+          ? { kind: 'source-changed' }
+          : { kind: 'not-found' };
+      }
+      throw error;
+    }
+
+    return { kind: 'moved' };
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Write-through task move
+ * ------------------------------------------------------------------ */
+
+class WriteThroughMoveSourceChangedError extends Error {
+  constructor() {
+    super('Task changed before the move could be finalized');
+    this.name = 'WriteThroughMoveSourceChangedError';
+  }
+}
+
+const MOVE_TASK_COLUMNS = {
+  id: tasks.id,
+  sourceId: tasks.sourceId,
+  connectorType: tasks.connectorType,
+  connectorInstanceId: tasks.connectorInstanceId,
+  title: tasks.title,
+  description: tasks.description,
+  status: tasks.status,
+  localDisposition: tasks.localDisposition,
+  priority: tasks.priority,
+  planningHorizon: tasks.planningHorizon,
+  dueDate: tasks.dueDate,
+  pushCount: tasks.pushCount,
+  createdAt: tasks.createdAt,
+  updatedAt: tasks.updatedAt,
+  completedAt: tasks.completedAt,
+  recurrenceGeneratedFromTaskId: tasks.recurrenceGeneratedFromTaskId,
+  parentId: tasks.parentId,
+  siblingOrder: tasks.siblingOrder,
+  subtaskOrderRevision: tasks.subtaskOrderRevision,
+  depth: tasks.depth,
+  isChecklistItem: tasks.isChecklistItem,
+  sourceListId: tasks.sourceListId,
+  sourceListName: tasks.sourceListName,
+  assignee: tasks.assignee,
+  microStatus: tasks.microStatus,
+  statusReason: tasks.statusReason,
+  metadata: tasks.metadata,
+  syncStatus: tasks.syncStatus,
+  lastSyncedAt: tasks.lastSyncedAt,
+  pushRetryCount: tasks.pushRetryCount,
+  kanbanColumn: tasks.kanbanColumn,
+  kanbanOrder: tasks.kanbanOrder,
+  snoozedUntil: tasks.snoozedUntil,
+  reminderAt: tasks.reminderAt,
+  reminderRelative: tasks.reminderRelative,
+  reminderDueTime: tasks.reminderDueTime,
+  reminderNagInterval: tasks.reminderNagInterval,
+  reminderNagStopAt: tasks.reminderNagStopAt,
+  reminderNagSeriesId: tasks.reminderNagSeriesId,
+  reminderNagSequence: tasks.reminderNagSequence,
+  effort: tasks.effort,
+  isBulkImport: tasks.isBulkImport,
+};
+
+type RawMoveTaskRow = {
+  [K in keyof typeof MOVE_TASK_COLUMNS]: unknown;
+};
+
+function toMoveTaskRow(row: RawMoveTaskRow): TaskMoveTaskRow {
+  return {
+    ...(row as unknown as TaskMoveTaskRow),
+    metadata: parseMetadata(row.metadata),
+  };
+}
+
+function normalizedSnapshot(snapshot: TaskSubtaskProposalSnapshot): TaskSubtaskProposalSnapshot {
+  return {
+    parentUpdatedAt: snapshot.parentUpdatedAt,
+    tagNames: [...snapshot.tagNames].sort(),
+    projectNames: [...snapshot.projectNames].sort(),
+    subtaskTitles: [...snapshot.subtaskTitles].sort(),
+  };
+}
+
+function sameSnapshot(
+  left: TaskSubtaskProposalSnapshot,
+  right: TaskSubtaskProposalSnapshot,
+): boolean {
+  return JSON.stringify(normalizedSnapshot(left)) === JSON.stringify(normalizedSnapshot(right));
+}
+
+/** The insert payload every task write in this repository shares. */
+function moveTaskInsertValues(task: TaskMoveTaskInsert) {
+  return {
+    ...task,
+    planningHorizon: task.planningHorizon ?? null,
+    localDisposition: task.localDisposition,
+    metadata: JSON.stringify(task.metadata),
+  };
+}
+
+function findSqliteRecurrenceOccurrence(
+  tx: SqliteTransaction,
+  provenance: RecurrenceOccurrenceProvenance,
+  taskId: string,
+  generatedFromTaskId: string | null,
+): PersistedRecurrenceOccurrence {
+  const byIdentity = tx.select().from(taskRecurrenceOccurrences).where(and(
+    eq(taskRecurrenceOccurrences.seriesId, provenance.seriesId),
+    eq(taskRecurrenceOccurrences.ruleRevisionId, provenance.ruleRevisionId),
+    eq(taskRecurrenceOccurrences.effectiveKind, provenance.effectiveKind),
+    eq(taskRecurrenceOccurrences.effectiveValue, provenance.effectiveValue),
+  )).get();
+  const byOccurrenceId = byIdentity ? undefined : tx.select().from(taskRecurrenceOccurrences)
+    .where(eq(taskRecurrenceOccurrences.occurrenceId, provenance.occurrenceId))
+    .get();
+  const stored = byIdentity ?? byOccurrenceId ?? tx.select().from(taskRecurrenceOccurrences)
+    .where(eq(taskRecurrenceOccurrences.taskId, taskId))
+    .get();
+  if (!stored) {
+    throw new Error('Recurrence occurrence conflict did not resolve to a stored claim');
+  }
+  assertRecurrenceOccurrenceMatches(stored, provenance);
+  if (stored.generatedFromTaskId !== generatedFromTaskId) {
+    throw new Error('Stored recurrence occurrence conflicts on generatedFromTaskId');
+  }
+  return stored;
+}
+
+function claimSqliteRecurrenceOccurrence(
+  tx: SqliteTransaction,
+  provenance: RecurrenceOccurrenceProvenance,
+  taskId: string,
+  generatedFromTaskId: string | null,
+  createdAt: string,
+): { readonly claimed: true; readonly occurrenceId: string; readonly taskId: string }
+  | { readonly claimed: false; readonly occurrenceId: string; readonly taskId: string } {
+  const claim = createPersistedRecurrenceOccurrence(
+    provenance,
+    taskId,
+    generatedFromTaskId,
+    createdAt,
+  );
+  const inserted = tx.insert(taskRecurrenceOccurrences)
+    .values(claim)
+    .onConflictDoNothing()
+    .run();
+  if (inserted.changes > 0) {
+    return { claimed: true, occurrenceId: provenance.occurrenceId, taskId };
+  }
+  const existing = findSqliteRecurrenceOccurrence(
+    tx,
+    provenance,
+    taskId,
+    generatedFromTaskId,
+  );
+  return {
+    claimed: false,
+    occurrenceId: existing.occurrenceId,
+    taskId: existing.taskId,
+  };
+}
+
+class SqliteTaskAncillaryRepository implements TaskAncillaryRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async getTask(taskId: string): Promise<TaskCoreTaskRow | null> {
+    const [row] = await this.database.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
+    return row ? toMoveTaskRow(row) : null;
+  }
+
+  async getAttachmentListContext(taskId: string): Promise<TaskAttachmentListContext> {
+    const [task] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return { task: null, attachments: [] };
+    const attachments = await this.database.select({
+      id: taskAttachments.id,
+      taskId: taskAttachments.taskId,
+      name: taskAttachments.name,
+      contentType: taskAttachments.contentType,
+      size: taskAttachments.size,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      createdAt: taskAttachments.createdAt,
+      hasLocalContent: sql<number>`CASE WHEN ${taskAttachments.contentBase64} IS NULL THEN 0 ELSE 1 END`,
+    }).from(taskAttachments)
+      .where(eq(taskAttachments.taskId, taskId))
+      .orderBy(asc(taskAttachments.createdAt), asc(taskAttachments.id));
+    return {
+      task,
+      attachments: attachments.map((attachment) => ({
+        ...attachment,
+        hasLocalContent: Boolean(attachment.hasLocalContent),
+      })),
+    };
+  }
+
+  async getAttachmentDeleteContext(
+    taskId: string,
+    attachmentId: string,
+  ): Promise<TaskAttachmentDeleteContext> {
+    const [task] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    const [attachment] = await this.database.select({
+      id: taskAttachments.id,
+      taskId: taskAttachments.taskId,
+      name: taskAttachments.name,
+      contentType: taskAttachments.contentType,
+      size: taskAttachments.size,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      createdAt: taskAttachments.createdAt,
+    }).from(taskAttachments).where(and(
+      eq(taskAttachments.id, attachmentId),
+      eq(taskAttachments.taskId, taskId),
+    )).limit(1);
+    return { task: task ?? null, attachment: attachment ?? null };
+  }
+
+  async insertAttachment(
+    attachment: TaskAttachmentInsert,
+  ): Promise<TaskAttachmentInsertOutcome> {
+    return this.runTransaction((tx) => {
+      const task = tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.id, attachment.taskId)).get();
+      if (!task) return { kind: 'task-not-found' } as const;
+      const existing = tx.select({ id: taskAttachments.id }).from(taskAttachments)
+        .where(eq(taskAttachments.id, attachment.id)).get();
+      if (existing) return { kind: 'already-exists' } as const;
+      tx.insert(taskAttachments).values({ ...attachment }).run();
+      return { kind: 'inserted' } as const;
+    });
+  }
+
+  async deleteAttachment(input: {
+    readonly taskId: string;
+    readonly attachmentId: string;
+    readonly expectedSourceAttachmentId: string | null;
+  }): Promise<boolean> {
+    return this.runTransaction((tx) => {
+      const current = tx.select({
+        sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      }).from(taskAttachments).where(and(
+        eq(taskAttachments.id, input.attachmentId),
+        eq(taskAttachments.taskId, input.taskId),
+      )).get();
+      if (!current || current.sourceAttachmentId !== input.expectedSourceAttachmentId) {
+        return false;
+      }
+      return tx.delete(taskAttachments).where(and(
+        eq(taskAttachments.id, input.attachmentId),
+        eq(taskAttachments.taskId, input.taskId),
+      )).run().changes === 1;
+    });
+  }
+
+  async copyTask(input: {
+    readonly sourceTaskId: string;
+    readonly newTaskId: string;
+    readonly targetConnectorInstanceId: string;
+    readonly targetListId: string | null;
+    readonly keepTags: boolean;
+    readonly now: string;
+  }): Promise<TaskCopyOutcome> {
+    return this.runTransaction((tx) => {
+      const replay = tx.select({
+        connectorType: tasks.connectorType,
+        sourceId: tasks.sourceId,
+      }).from(tasks).where(eq(tasks.id, input.newTaskId)).get();
+      if (replay) {
+        return replay.sourceId === `local:${input.newTaskId}`
+          ? { kind: 'already-committed', connectorType: replay.connectorType } as const
+          : { kind: 'task-not-found' } as const;
+      }
+      const connector = tx.select().from(connectorConfigs)
+        .where(eq(connectorConfigs.id, input.targetConnectorInstanceId)).get();
+      if (!connector) return { kind: 'connector-not-found' } as const;
+
+      let targetSourceListId: string | null = null;
+      if (input.targetListId) {
+        const targetList = tx.select().from(sourceLists).where(and(
+          eq(sourceLists.connectorInstanceId, input.targetConnectorInstanceId),
+          or(eq(sourceLists.id, input.targetListId), eq(sourceLists.sourceId, input.targetListId)),
+        )).get();
+        if (!targetList) return { kind: 'source-list-not-found' } as const;
+        if (!isSourceListSelected(connector, targetList)) {
+          return { kind: 'source-list-not-selected' } as const;
+        }
+        targetSourceListId = targetList.sourceId;
+      }
+
+      const source = tx.select({
+        title: tasks.title,
+        description: tasks.description,
+        priority: tasks.priority,
+        dueDate: tasks.dueDate,
+      }).from(tasks).where(eq(tasks.id, input.sourceTaskId)).get();
+      if (!source) return { kind: 'task-not-found' } as const;
+
+      tx.insert(tasks).values({
+        id: input.newTaskId,
+        sourceId: `local:${input.newTaskId}`,
+        connectorType: connector.type,
+        connectorInstanceId: input.targetConnectorInstanceId,
+        title: source.title,
+        description: source.description,
+        status: 'todo',
+        priority: source.priority,
+        dueDate: source.dueDate,
+        createdAt: input.now,
+        updatedAt: input.now,
+        depth: 0,
+        isChecklistItem: false,
+        sourceListId: targetSourceListId,
+        metadata: {},
+        syncStatus: 'pending_push',
+        lastSyncedAt: input.now,
+      }).run();
+      if (input.keepTags) {
+        const tagRows = tx.select({ tagId: taskTags.tagId }).from(taskTags)
+          .where(eq(taskTags.taskId, input.sourceTaskId)).all();
+        if (tagRows.length) {
+          tx.insert(taskTags).values(tagRows.map(({ tagId }) => ({
+            taskId: input.newTaskId,
+            tagId,
+          }))).run();
+        }
+      }
+      const projectRows = tx.select({ projectId: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, input.sourceTaskId)).all();
+      if (projectRows.length) {
+        tx.insert(taskProjects).values(projectRows.map(({ projectId }) => ({
+          taskId: input.newTaskId,
+          projectId,
+        }))).run();
+      }
+      return { kind: 'committed', connectorType: connector.type } as const;
+    });
+  }
+
+  async promoteSubtask(input: {
+    readonly taskId: string;
+    readonly expectedUpdatedAt: string;
+    readonly now: string;
+  }): Promise<TaskPromoteOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select({
+        parentId: tasks.parentId,
+        isChecklistItem: tasks.isChecklistItem,
+        updatedAt: tasks.updatedAt,
+      }).from(tasks).where(eq(tasks.id, input.taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      if (current.updatedAt !== input.expectedUpdatedAt) {
+        return { kind: 'revision-conflict', currentUpdatedAt: current.updatedAt } as const;
+      }
+      if (!current.isChecklistItem || !current.parentId) {
+        return { kind: 'not-subtask' } as const;
+      }
+      const updated = tx.update(tasks).set({
+        parentId: null,
+        depth: 0,
+        isChecklistItem: false,
+        updatedAt: input.now,
+      }).where(and(
+        eq(tasks.id, input.taskId),
+        eq(tasks.updatedAt, input.expectedUpdatedAt),
+        eq(tasks.parentId, current.parentId),
+        eq(tasks.isChecklistItem, true),
+      )).run();
+      return updated.changes === 1
+        ? { kind: 'promoted', previousParentId: current.parentId } as const
+        : { kind: 'revision-conflict', currentUpdatedAt: current.updatedAt } as const;
+    });
+  }
+
+  async listSubtasks(parentTaskId: string): Promise<TaskAncillarySubtask[]> {
+    return this.database.select({
+      id: tasks.id,
+      title: tasks.title,
+      status: tasks.status,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      priority: tasks.priority,
+      effort: tasks.effort,
+      parentId: tasks.parentId,
+      siblingOrder: tasks.siblingOrder,
+    }).from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      );
+  }
+
+  async getSubtaskOrderState(parentTaskId: string) {
+    const parent = await this.database.select({
+      revision: tasks.subtaskOrderRevision,
+    }).from(tasks).where(eq(tasks.id, parentTaskId)).get();
+    if (!parent) return null;
+    return {
+      revision: parent.revision,
+      subtasks: await this.listSubtasks(parentTaskId),
+    };
+  }
+
+  async reorderSubtasks(input: {
+    readonly parentTaskId: string;
+    readonly orderedChildIds: readonly string[];
+    readonly expectedRevision: number;
+  }) {
+    return this.runTransaction((tx) => {
+      const parent = tx.select({
+        revision: tasks.subtaskOrderRevision,
+      }).from(tasks).where(eq(tasks.id, input.parentTaskId)).get();
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      if (parent.revision !== input.expectedRevision) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+
+      const children = tx.select({ id: tasks.id }).from(tasks)
+        .where(eq(tasks.parentId, input.parentTaskId)).all();
+      const currentIds = new Set(children.map((child) => child.id));
+      const orderedIds = new Set(input.orderedChildIds);
+      if (
+        currentIds.size !== input.orderedChildIds.length
+        || orderedIds.size !== input.orderedChildIds.length
+        || input.orderedChildIds.some((id) => !currentIds.has(id))
+      ) {
+        return { kind: 'invalid-children' } as const;
+      }
+
+      input.orderedChildIds.forEach((taskId, siblingOrder) => {
+        tx.update(tasks).set({ siblingOrder }).where(and(
+          eq(tasks.id, taskId),
+          eq(tasks.parentId, input.parentTaskId),
+        )).run();
+      });
+      const revision = parent.revision + 1;
+      const updated = tx.update(tasks).set({
+        subtaskOrderRevision: revision,
+      }).where(and(
+        eq(tasks.id, input.parentTaskId),
+        eq(tasks.subtaskOrderRevision, input.expectedRevision),
+      )).run();
+      if (updated.changes !== 1) {
+        return {
+          kind: 'revision-conflict',
+          currentRevision: parent.revision,
+        } as const;
+      }
+      return { kind: 'reordered', revision } as const;
+    });
+  }
+
+  private readProposalSnapshot(
+    database: Drizzle | SqliteTransaction,
+    parentTaskId: string,
+  ): TaskSubtaskProposalSnapshot | null {
+    const parent = database.select({ updatedAt: tasks.updatedAt }).from(tasks)
+      .where(eq(tasks.id, parentTaskId)).get();
+    if (!parent) return null;
+    const tagRows = database.select({ name: tags.name }).from(taskTags)
+      .innerJoin(tags, eq(taskTags.tagId, tags.id))
+      .where(eq(taskTags.taskId, parentTaskId))
+      .limit(20).all();
+    const projectRows = database.select({ name: hubProjects.name }).from(taskProjects)
+      .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+      .where(eq(taskProjects.taskId, parentTaskId))
+      .limit(10).all();
+    const subtaskRows = database.select({ title: tasks.title }).from(tasks)
+      .where(eq(tasks.parentId, parentTaskId))
+      .limit(30).all();
+    return normalizedSnapshot({
+      parentUpdatedAt: parent.updatedAt,
+      tagNames: tagRows.map((row) => row.name),
+      projectNames: projectRows.map((row) => row.name),
+      subtaskTitles: subtaskRows.map((row) => row.title),
+    });
+  }
+
+  async getSubtaskProposalSnapshot(
+    parentTaskId: string,
+  ): Promise<TaskSubtaskProposalSnapshot | null> {
+    return this.readProposalSnapshot(this.database, parentTaskId);
+  }
+
+  async createSubtask(input: {
+    readonly task: TaskMoveTaskInsert;
+  }): Promise<TaskSubtaskCreateOutcome> {
+    return this.runTransaction((tx) => {
+      const existing = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.task.id)).get();
+      if (existing) {
+        return existing.parentId === input.task.parentId
+          ? { kind: 'already-created', subtask: toMoveTaskRow(existing) } as const
+          : { kind: 'id-conflict' } as const;
+      }
+      const parent = input.task.parentId
+        ? tx.select({ id: tasks.id }).from(tasks).where(eq(tasks.id, input.task.parentId)).get()
+        : null;
+      if (!parent) return { kind: 'parent-not-found' } as const;
+      const lastSibling = tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId!))
+        .get();
+      tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      }).run();
+      return { kind: 'created' } as const;
+    });
+  }
+
+  async acceptSubtaskProposal(input: {
+    readonly task: TaskMoveTaskInsert;
+    readonly expected: TaskSubtaskProposalSnapshot;
+  }): Promise<TaskSubtaskProposalOutcome> {
+    return this.runTransaction((tx) => {
+      const existing = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.task.id)).get();
+      const current = input.task.parentId
+        ? this.readProposalSnapshot(tx, input.task.parentId)
+        : null;
+      if (!current) return { kind: 'stale' } as const;
+      if (existing) {
+        return existing.parentId === input.task.parentId
+          ? { kind: 'duplicate', subtask: toMoveTaskRow(existing), snapshot: current } as const
+          : { kind: 'id-conflict' } as const;
+      }
+      if (!sameSnapshot(current, input.expected)) return { kind: 'stale' } as const;
+      const lastSibling = tx.select({
+        siblingOrder: sql<number>`COALESCE(MAX(${tasks.siblingOrder}), -1)`,
+      }).from(tasks).where(eq(tasks.parentId, input.task.parentId!))
+        .get();
+      tx.insert(tasks).values({
+        ...moveTaskInsertValues(input.task),
+        siblingOrder: (lastSibling?.siblingOrder ?? -1) + 1,
+      }).run();
+      const snapshot = this.readProposalSnapshot(tx, input.task.parentId!);
+      if (!snapshot) throw new Error('Subtask parent disappeared during proposal acceptance');
+      return { kind: 'created', snapshot } as const;
+    });
+  }
+
+  async completeSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+    readonly sourceId: string;
+    readonly metadata: Record<string, unknown>;
+    readonly now: string;
+  }): Promise<boolean> {
+    return this.database.update(tasks).set({
+      sourceId: input.sourceId,
+      syncStatus: 'synced',
+      lastSyncedAt: input.now,
+      metadata: input.metadata,
+    }).where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.syncStatus, input.expectedSyncStatus),
+    )).run().changes === 1;
+  }
+
+  async failSubtaskWriteThrough(input: {
+    readonly taskId: string;
+    readonly expectedSyncStatus: string;
+  }): Promise<boolean> {
+    return this.database.update(tasks).set({
+      syncStatus: 'push_failed',
+      pushRetryCount: 5,
+    }).where(and(
+      eq(tasks.id, input.taskId),
+      eq(tasks.syncStatus, input.expectedSyncStatus),
+    )).run().changes === 1;
+  }
+
+  async getTagMutationContext(taskId: string): Promise<TaskTagMutationContext> {
+    const [task] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      updatedAt: tasks.updatedAt,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return { task: null, storedCapabilities: {} };
+    const [connector] = await this.database.select({
+      capabilities: connectorConfigs.capabilities,
+    }).from(connectorConfigs)
+      .where(eq(connectorConfigs.id, task.connectorInstanceId)).limit(1);
+    return {
+      task,
+      storedCapabilities: parseMetadata(connector?.capabilities),
+    };
+  }
+
+  async addTaskTags(input: {
+    readonly taskId: string;
+    readonly candidates: readonly { id: string; name: string; slug: string }[];
+    readonly tagCreationMode: 'freeform' | 'predefined';
+    readonly now: string;
+  }): Promise<TaskTagMutationResult> {
+    return this.runTransaction((tx) => {
+      const ordered = [...input.candidates].sort((a, b) => a.slug.localeCompare(b.slug));
+      const existing = ordered.length
+        ? tx.select().from(tags).where(inArray(tags.slug, ordered.map((tag) => tag.slug)))
+          .orderBy(asc(tags.slug), asc(tags.createdAt), asc(tags.id)).all()
+        : [];
+      const bySlug = new Map(existing.map((tag) => [tag.slug, tag]));
+      const rejectedTags: string[] = [];
+      const resolved: Array<{ id: string; name: string }> = [];
+      for (const candidate of ordered) {
+        const match = bySlug.get(candidate.slug);
+        if (match) {
+          resolved.push({ id: match.id, name: match.name });
+        } else if (input.tagCreationMode === 'predefined') {
+          rejectedTags.push(candidate.name);
+        } else {
+          tx.insert(tags).values({
+            id: candidate.id,
+            name: candidate.name,
+            slug: candidate.slug,
+            type: 'ai-inferred',
+            source: 'ai',
+            color: '#64748b',
+            confirmed: false,
+            createdAt: input.now,
+          }).run();
+          resolved.push({ id: candidate.id, name: candidate.name });
+        }
+      }
+      const existingLinks = new Set(tx.select({ tagId: taskTags.tagId }).from(taskTags)
+        .where(eq(taskTags.taskId, input.taskId)).all().map((row) => row.tagId));
+      const addedTags = resolved.filter((tag) => !existingLinks.has(tag.id));
+      if (addedTags.length) {
+        tx.insert(taskTags).values(addedTags.map((tag) => ({
+          taskId: input.taskId,
+          tagId: tag.id,
+        }))).run();
+      }
+      return { addedTags, rejectedTags };
+    });
+  }
+
+  async removeTaskTag(input: {
+    readonly taskId: string;
+    readonly tagId: string;
+  }): Promise<{ readonly removed: boolean; readonly tagName: string | null }> {
+    return this.runTransaction((tx) => {
+      const tag = tx.select({ name: tags.name }).from(tags)
+        .where(eq(tags.id, input.tagId)).get();
+      const result = tx.delete(taskTags).where(and(
+        eq(taskTags.taskId, input.taskId),
+        eq(taskTags.tagId, input.tagId),
+      )).run();
+      return { removed: result.changes > 0, tagName: tag?.name ?? null };
+    });
+  }
+}
+
+function enqueueTaskCoreEvent(tx: SqliteTransaction, event: TaskCoreEvent): void {
+  const inserted = tx.insert(eventOutbox).values({
+    stableKey: event.stableKey,
+    eventType: event.type,
+    payload: event.payload,
+    occurredAt: event.timestamp,
+    createdAt: new Date().toISOString(),
+  }).onConflictDoNothing({ target: eventOutbox.stableKey }).run();
+  if (inserted.changes === 0) return;
+
+  const row = tx.select({ sequence: eventOutbox.sequence }).from(eventOutbox)
+    .where(eq(eventOutbox.stableKey, event.stableKey)).get();
+  if (!row) {
+    throw new Error('Event outbox insert completed without a resolvable sequence');
+  }
+
+  const subscriptions = tx.select({
+    id: outboundWebhooks.id,
+    name: outboundWebhooks.name,
+    url: outboundWebhooks.url,
+    secret: outboundWebhooks.secret,
+    eventTypes: outboundWebhooks.eventTypes,
+    enabled: outboundWebhooks.enabled,
+  }).from(outboundWebhooks).where(eq(outboundWebhooks.enabled, true)).all();
+  const now = new Date().toISOString();
+  const deliveries = subscriptions
+    .filter((subscription) => eventSubscriptionMatches({
+      ...subscription,
+      eventTypes: parseEventTypes(subscription.eventTypes),
+    }, event.type))
+    .map((subscription) => ({
+      id: crypto.randomUUID(),
+      eventSequence: row.sequence,
+      webhookId: subscription.id,
+      status: 'pending',
+      attemptCount: 0,
+      createdAt: now,
+      updatedAt: now,
+    }));
+  if (deliveries.length) {
+    tx.insert(eventOutboxDeliveries).values(deliveries).onConflictDoNothing().run();
+  }
+}
+
+class SqliteTaskDetailReadRepository implements TaskDetailReadRepository {
+  constructor(private readonly database: Drizzle) {}
+
+  async getTaskDetail(taskId: string, myDayDate: string): Promise<TaskDetailResult | null> {
+    const [task] = await this.database.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
+    if (!task) return null;
+    const [tagRows, projectRows, subtasks, scheduleRows, myDayRows] = await Promise.all([
+      this.database.select({ tagId: taskTags.tagId }).from(taskTags)
+        .where(eq(taskTags.taskId, taskId)).orderBy(asc(taskTags.tagId)),
+      this.database.select({ projectId: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, taskId)).orderBy(asc(taskProjects.projectId)),
+      this.database.select({
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        sourceId: tasks.sourceId,
+        connectorType: tasks.connectorType,
+        effort: tasks.effort,
+        siblingOrder: tasks.siblingOrder,
+      }).from(tasks).where(eq(tasks.parentId, taskId)).orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      ),
+      this.database.select({
+        estimatedDuration: taskSchedules.estimatedDuration,
+        recurrence: taskSchedules.recurrence,
+        recurrenceMode: taskSchedules.recurrenceMode,
+      }).from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
+      this.database.select({ id: myDayItems.id }).from(myDayItems).where(and(
+        eq(myDayItems.taskId, taskId),
+        eq(myDayItems.date, myDayDate),
+      )).limit(1),
+    ]);
+    return {
+      task: toMoveTaskRow(task),
+      tagIds: tagRows.map((row) => row.tagId),
+      projectIds: projectRows.map((row) => row.projectId),
+      subtasks,
+      subtaskOrderRevision: task.subtaskOrderRevision ?? 0,
+      schedule: scheduleRows[0] ?? null,
+      isInMyDay: myDayRows.length > 0,
+    };
+  }
+}
+
+class SqliteTaskCollectionReadRepository implements TaskCollectionReadRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly queries: TaskQueryRepository,
+  ) {}
+
+  private async hydrate(taskIds: readonly string[], includeTags: boolean): Promise<{
+    rows: TaskCollectionRow[];
+    connectorContexts: TaskCollectionResult['connectorContexts'];
+  }> {
+    if (taskIds.length === 0) return { rows: [], connectorContexts: [] };
+    const uniqueIds = [...new Set(taskIds)];
+    const rawTasks = await this.database.select(MOVE_TASK_COLUMNS).from(tasks)
+      .where(inArray(tasks.id, uniqueIds));
+    const rawById = new Map(rawTasks.map((row) => [String(row.id), row]));
+    const ordered = taskIds.flatMap((id) => rawById.get(id) ?? []);
+    const parentIds = [...new Set(ordered.flatMap((row) => row.parentId ? [row.parentId] : []))];
+    const connectorIds = [...new Set(ordered
+      .map((row) => String(row.connectorInstanceId))
+      .filter((id) => id !== 'local'))];
+    const [scheduleRows, projectRows, phaseRows, childRows, tagRows, linkedRows, listRows, parentRows, connectorRows] =
+      await Promise.all([
+        this.database.select({
+          taskId: taskSchedules.taskId,
+          estimatedDuration: taskSchedules.estimatedDuration,
+        }).from(taskSchedules).where(inArray(taskSchedules.taskId, uniqueIds)),
+        this.database.select({
+          taskId: taskProjects.taskId,
+          projectId: taskProjects.projectId,
+          projectName: hubProjects.name,
+        }).from(taskProjects).leftJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+          .where(inArray(taskProjects.taskId, uniqueIds))
+          .orderBy(asc(taskProjects.taskId), asc(taskProjects.projectId)),
+        this.database.select({
+          taskId: projectPhaseItems.taskId,
+          phaseId: projectPhaseItems.phaseId,
+          phaseName: projectPhases.name,
+          projectId: projectPhases.projectId,
+        }).from(projectPhaseItems)
+          .innerJoin(projectPhases, eq(projectPhaseItems.phaseId, projectPhases.id))
+          .where(inArray(projectPhaseItems.taskId, uniqueIds))
+          .orderBy(
+            asc(projectPhaseItems.taskId),
+            asc(projectPhases.projectId),
+            asc(projectPhaseItems.phaseId),
+          ),
+        this.database.select({
+          parentId: tasks.parentId,
+          total: sql<number>`COUNT(*)`,
+          done: sql<number>`SUM(CASE WHEN ${tasks.status} = 'done' THEN 1 ELSE 0 END)`,
+        }).from(tasks).where(inArray(tasks.parentId, uniqueIds)).groupBy(tasks.parentId),
+        includeTags
+          ? this.database.select({
+              taskId: taskTags.taskId,
+              id: tags.id,
+              name: tags.name,
+              slug: tags.slug,
+              type: tags.type,
+              source: tags.source,
+              color: tags.color,
+              confirmed: tags.confirmed,
+              unifiedInto: tags.unifiedInto,
+            }).from(taskTags).innerJoin(tags, eq(taskTags.tagId, tags.id))
+              .where(inArray(taskTags.taskId, uniqueIds))
+              .orderBy(asc(taskTags.taskId), asc(tags.id))
+          : Promise.resolve([]),
+        this.database.select({
+          taskId: taskLinkedSources.taskId,
+          count: sql<number>`COUNT(*)`,
+        }).from(taskLinkedSources).where(inArray(taskLinkedSources.taskId, uniqueIds))
+          .groupBy(taskLinkedSources.taskId),
+        this.database.select({
+          connectorInstanceId: sourceLists.connectorInstanceId,
+          sourceId: sourceLists.sourceId,
+          name: sourceLists.name,
+          userDisplayName: sourceLists.userDisplayName,
+        }).from(sourceLists),
+        parentIds.length
+          ? this.database.select({ id: tasks.id, title: tasks.title }).from(tasks)
+              .where(inArray(tasks.id, parentIds))
+          : Promise.resolve([]),
+        connectorIds.length
+          ? this.database.select({
+              id: connectorConfigs.id,
+              type: connectorConfigs.type,
+              enabled: connectorConfigs.enabled,
+              deletedAt: connectorConfigs.deletedAt,
+              capabilities: connectorConfigs.capabilities,
+              settings: connectorConfigs.settings,
+            }).from(connectorConfigs).where(inArray(connectorConfigs.id, connectorIds))
+              .orderBy(asc(connectorConfigs.id))
+          : Promise.resolve([]),
+      ]);
+    const schedules = new Map(scheduleRows.map((row) => [row.taskId, row.estimatedDuration]));
+    const parents = new Map(parentRows.map((row) => [row.id, row.title]));
+    const children = new Map(childRows.map((row) => [
+      row.parentId!,
+      { total: Number(row.total), done: Number(row.done ?? 0) },
+    ]));
+    const linked = new Map(linkedRows.map((row) => [row.taskId, Number(row.count)]));
+    const lists = new Map(listRows.map((row) => [
+      `${row.connectorInstanceId}:${row.sourceId}`,
+      row.userDisplayName || row.name,
+    ]));
+    const projectsByTask = new Map<string, typeof projectRows>();
+    for (const row of projectRows) {
+      const values = projectsByTask.get(row.taskId) ?? [];
+      values.push(row);
+      projectsByTask.set(row.taskId, values);
+    }
+    const phasesByTaskProject = new Map<string, typeof phaseRows>();
+    for (const row of phaseRows) {
+      const key = `${row.taskId}:${row.projectId}`;
+      const values = phasesByTaskProject.get(key) ?? [];
+      values.push(row);
+      phasesByTaskProject.set(key, values);
+    }
+    const tagsByTask = new Map<string, typeof tagRows>();
+    for (const row of tagRows) {
+      const values = tagsByTask.get(row.taskId) ?? [];
+      values.push(row);
+      tagsByTask.set(row.taskId, values);
+    }
+    return {
+      rows: ordered.map((raw) => {
+        const task = toMoveTaskRow(raw);
+        const memberships = (projectsByTask.get(task.id) ?? []).flatMap(
+          (project): TaskCollectionProjectPhaseMembership[] => {
+            const phases = phasesByTaskProject.get(`${task.id}:${project.projectId}`) ?? [];
+            return phases.length
+              ? phases.map((phase) => ({
+                  projectId: project.projectId,
+                  projectName: project.projectName ?? 'Unknown Project',
+                  phaseId: phase.phaseId,
+                  phaseName: phase.phaseName,
+                }))
+              : [{
+                  projectId: project.projectId,
+                  projectName: project.projectName ?? 'Unknown Project',
+                  phaseId: null,
+                  phaseName: null,
+                }];
+          },
+        );
+        return {
+          ...task,
+          parentTitle: task.parentId ? parents.get(task.parentId) ?? null : null,
+          authoritativeSourceListName: task.sourceListId
+            ? lists.get(`${task.connectorInstanceId}:${task.sourceListId}`) ?? null
+            : null,
+          estimatedDuration: schedules.get(task.id) ?? null,
+          subtaskTotal: children.get(task.id)?.total ?? 0,
+          subtaskDone: children.get(task.id)?.done ?? 0,
+          projectIds: (projectsByTask.get(task.id) ?? []).map((row) => row.projectId),
+          projectPhaseMemberships: memberships,
+          linkedSourceCount: linked.get(task.id) ?? 0,
+          tags: (tagsByTask.get(task.id) ?? []).map((tag) => ({
+            ...tag,
+            source: tag.source ?? null,
+            color: tag.color ?? null,
+            confirmed: Boolean(tag.confirmed),
+            unifiedInto: tag.unifiedInto ?? null,
+          })),
+        };
+      }),
+      connectorContexts: connectorRows.map((row) => ({
+        id: row.id,
+        type: row.type,
+        enabled: Boolean(row.enabled),
+        deletedAt: row.deletedAt ?? null,
+        capabilities: parseMetadata(row.capabilities),
+        settings: parseMetadata(row.settings),
+      })),
+    };
+  }
+
+  async readTaskCollection(input: {
+    spec: TaskFilterSpec;
+    page: TaskListPage;
+    includeTags: boolean;
+    includeScoreInputs: boolean;
+    countsOnly: boolean;
+    smartScoreCandidateLimit: number;
+  }): Promise<TaskCollectionResult> {
+    const smart = input.page.order.field === 'smartScore';
+    const [stats, sourceCounts, availableTags, total] = await Promise.all([
+      this.queries.getStats(input.spec),
+      this.queries.getSourceCounts(input.spec),
+      input.countsOnly ? Promise.resolve([]) : this.queries.getAvailableTags(input.spec),
+      this.queries.countTasks(input.spec, { includeQuickFilter: true }),
+    ]);
+    if (input.countsOnly) {
+      return {
+        rows: [],
+        total,
+        stats,
+        sourceCounts,
+        availableTags,
+        connectorContexts: [],
+        smartScore: null,
+      };
+    }
+    const ids = await this.queries.listTaskIds(input.spec, smart
+      ? {
+          order: input.page.order,
+          limit: input.smartScoreCandidateLimit,
+          offset: 0,
+        }
+      : input.page);
+    const hydrated = await this.hydrate(ids, input.includeTags || input.includeScoreInputs || smart);
+    const rankings = smart || input.includeScoreInputs
+      ? await this.database.select().from(sourceRankings)
+          .orderBy(asc(sourceRankings.rank), asc(sourceRankings.id))
+      : [];
+    return {
+      ...hydrated,
+      total,
+      stats,
+      sourceCounts,
+      availableTags,
+      smartScore: smart || input.includeScoreInputs
+        ? { rows: hydrated.rows, sourceRankings: rankings }
+        : null,
+    };
+  }
+}
+
+class SqliteTaskCreateRepository implements TaskCreateRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async resolveTaskCreateTarget(input: {
+    connectorType: string;
+    requestedConnectorInstanceId: string | null;
+    sourceListId: string | null;
+  }): Promise<TaskCreateTargetOutcome> {
+    let connectorInstanceId = input.requestedConnectorInstanceId;
+    if (input.sourceListId) {
+      const matches = await this.database.select({
+        connectorInstanceId: sourceLists.connectorInstanceId,
+      }).from(sourceLists).where(and(
+        eq(sourceLists.sourceId, input.sourceListId),
+        connectorInstanceId
+          ? eq(sourceLists.connectorInstanceId, connectorInstanceId)
+          : undefined,
+      )).limit(2);
+      if (matches.length === 0) return { kind: 'source-list-not-found' };
+      if (!connectorInstanceId && matches.length > 1) return { kind: 'source-list-ambiguous' };
+      connectorInstanceId = matches[0].connectorInstanceId;
+    }
+    if (!connectorInstanceId) {
+      const matches = await this.database.select({ id: connectorConfigs.id })
+        .from(connectorConfigs).where(and(
+          eq(connectorConfigs.type, input.connectorType),
+          eq(connectorConfigs.enabled, true),
+          isNull(connectorConfigs.deletedAt),
+        )).limit(2);
+      if (matches.length === 0) return { kind: 'connector-not-found' };
+      if (matches.length > 1) return { kind: 'connector-ambiguous' };
+      connectorInstanceId = matches[0].id;
+    }
+    const [connector] = await this.database.select().from(connectorConfigs)
+      .where(and(
+        eq(connectorConfigs.id, connectorInstanceId),
+        isNull(connectorConfigs.deletedAt),
+      )).limit(1);
+    if (!connector) return { kind: 'connector-not-found' };
+    if (connector.type !== input.connectorType) return { kind: 'connector-mismatch' };
+    if (!connector.enabled) return { kind: 'connector-disabled' };
+    if (input.sourceListId) {
+      const [sourceList] = await this.database.select({
+        id: sourceLists.id,
+        sourceId: sourceLists.sourceId,
+      }).from(sourceLists).where(and(
+        eq(sourceLists.connectorInstanceId, connectorInstanceId),
+        eq(sourceLists.sourceId, input.sourceListId),
+      )).limit(1);
+      if (!sourceList) return { kind: 'source-list-not-found' };
+      if (!isSourceListSelected(connector, sourceList)) {
+        return { kind: 'source-list-not-selected' };
+      }
+    }
+    return {
+      kind: 'resolved',
+      connectorInstanceId,
+      capabilities: parseMetadata(connector.capabilities),
+      settings: parseMetadata(connector.settings),
+    };
+  }
+
+  async createTask(input: TaskCreateInput): Promise<TaskCreateOutcome> {
+    return this.runTransaction((tx) => {
+      let task = input.task;
+      let triageClaimId = input.triageClaimId;
+      let ownsTriageClaim = false;
+      const reject = <T extends TaskCreateOutcome>(outcome: T): T => {
+        if (ownsTriageClaim && triageClaimId) {
+          tx.delete(triageActionClaims).where(and(
+            eq(triageActionClaims.id, triageClaimId),
+            eq(triageActionClaims.state, 'pending'),
+          )).run();
+          ownsTriageClaim = false;
+        }
+        return outcome;
+      };
+      if (input.triageItemId) {
+        const item = tx.select({
+          id: triageItems.id,
+          actionsTaken: triageItems.actionsTaken,
+        }).from(triageItems).where(eq(triageItems.id, input.triageItemId)).get();
+        if (!item) return { kind: 'triage-not-found' } as const;
+        const replay = decodeLenientJsonArray(item.actionsTaken).find((entry) => (
+          entry && typeof entry === 'object'
+          && (entry as Record<string, unknown>).actionType === 'create_task_todo'
+        )) as Record<string, unknown> | undefined;
+        if (replay) {
+          const metadata = parseMetadata(replay.metadata);
+          return {
+            kind: 'triage-replay',
+            taskId: typeof metadata.mcTaskId === 'string' ? metadata.mcTaskId : null,
+          } as const;
+        }
+        triageClaimId ??= crypto.randomUUID();
+        const claimed = tx.insert(triageActionClaims).values({
+          id: triageClaimId,
+          triageItemId: input.triageItemId,
+          actionType: 'create_task_todo',
+          state: 'pending',
+          claimedAt: input.task.createdAt,
+        }).onConflictDoNothing().run();
+        if (claimed.changes === 0) {
+          const existing = tx.select({
+            state: triageActionClaims.state,
+            result: triageActionClaims.result,
+          }).from(triageActionClaims).where(and(
+            eq(triageActionClaims.triageItemId, input.triageItemId),
+            eq(triageActionClaims.actionType, 'create_task_todo'),
+          )).get();
+          if (existing?.state === 'completed') {
+            const result = parseMetadata(existing.result);
+            const metadata = parseMetadata(result.metadata);
+            return {
+              kind: 'triage-replay',
+              taskId: typeof metadata.mcTaskId === 'string' ? metadata.mcTaskId : null,
+            } as const;
+          }
+          return { kind: 'triage-pending' } as const;
+        }
+        ownsTriageClaim = true;
+      }
+
+      if (task.connectorType !== 'local') {
+        let connectorId = task.connectorInstanceId;
+        if (connectorId === 'local') {
+          const matches = tx.select({ id: connectorConfigs.id }).from(connectorConfigs).where(and(
+            eq(connectorConfigs.type, task.connectorType),
+            eq(connectorConfigs.enabled, true),
+            isNull(connectorConfigs.deletedAt),
+          )).limit(2).all();
+          if (matches.length === 0) return reject({ kind: 'connector-not-found' } as const);
+          if (matches.length > 1) return reject({ kind: 'source-list-ambiguous' } as const);
+          connectorId = matches[0].id;
+          task = { ...task, connectorInstanceId: connectorId };
+        }
+        const connector = tx.select().from(connectorConfigs)
+          .where(eq(connectorConfigs.id, connectorId)).get();
+        if (!connector || connector.deletedAt) return reject({ kind: 'connector-not-found' } as const);
+        if (connector.type !== task.connectorType) return reject({ kind: 'connector-mismatch' } as const);
+        if (input.requireConnectorEnabled && !connector.enabled) {
+          return reject({ kind: 'connector-disabled' } as const);
+        }
+        if (input.requireSelectedSourceList && !task.sourceListId) {
+          return reject({ kind: 'source-list-not-found' } as const);
+        }
+        if (task.sourceListId) {
+          const matches = tx.select({
+            id: sourceLists.id,
+            sourceId: sourceLists.sourceId,
+          }).from(sourceLists).where(and(
+            eq(sourceLists.connectorInstanceId, connectorId),
+            eq(sourceLists.sourceId, task.sourceListId),
+          )).limit(2).all();
+          if (matches.length === 0) return reject({ kind: 'source-list-not-found' } as const);
+          if (matches.length > 1) return reject({ kind: 'source-list-ambiguous' } as const);
+          if (
+            input.requireSelectedSourceList
+            && !isSourceListSelected(connector, matches[0])
+          ) {
+            return reject({ kind: 'source-list-not-selected' } as const);
+          }
+        }
+      }
+
+      for (const projectId of [...new Set(input.projectIds)]) {
+        const project = tx.select({ id: hubProjects.id }).from(hubProjects)
+          .where(eq(hubProjects.id, projectId)).get();
+        if (!project) return reject({ kind: 'project-not-found', projectId } as const);
+      }
+      for (const tagId of [...new Set(input.tagIds)]) {
+        const tag = tx.select({ id: tags.id }).from(tags).where(eq(tags.id, tagId)).get();
+        if (!tag) return reject({ kind: 'tag-not-found', tagId } as const);
+      }
+      const slugTagIds: string[] = [];
+      for (const raw of input.tagSlugs) {
+        const slug = raw.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+        if (!slug) continue;
+        const existing = tx.select({ id: tags.id }).from(tags).where(eq(tags.slug, slug)).get();
+        if (!existing && input.tagCreationMode === 'predefined') continue;
+        const tagId = existing?.id ?? `tag-${slug}`;
+        if (!existing) {
+          tx.insert(tags).values({
+            id: tagId,
+            name: raw,
+            slug,
+            type: 'hub',
+            source: null,
+            color: '#6b7280',
+            confirmed: true,
+            createdAt: task.createdAt,
+          }).onConflictDoNothing().run();
+        }
+        slugTagIds.push(tagId);
+      }
+      tx.insert(tasks).values(moveTaskInsertValues(task)).run();
+      const allTagIds = [...new Set([...input.tagIds, ...slugTagIds])];
+      if (allTagIds.length) {
+        tx.insert(taskTags).values(allTagIds.map((tagId) => ({ taskId: task.id, tagId }))).run();
+      }
+      const projectIds = [...new Set(input.projectIds)];
+      if (projectIds.length) {
+        tx.insert(taskProjects).values(
+          projectIds.map((projectId) => ({ taskId: task.id, projectId })),
+        ).onConflictDoNothing().run();
+      }
+      if (input.schedule) {
+        tx.insert(taskSchedules).values(input.schedule).onConflictDoUpdate({
+          target: taskSchedules.taskId,
+          set: input.schedule,
+        }).run();
+      }
+      if (input.triageItemId && triageClaimId) {
+        const record = {
+          actionType: 'create_task_todo',
+          appliedAt: task.createdAt,
+          note: 'Created task from triage',
+          metadata: {
+            mcTaskId: task.id,
+            connectorType: task.connectorType,
+            sourceListId: task.sourceListId,
+          },
+        };
+        const completed = tx.update(triageActionClaims).set({
+          state: 'completed',
+          completedAt: task.createdAt,
+          result: record,
+        }).where(and(
+          eq(triageActionClaims.id, triageClaimId),
+          eq(triageActionClaims.state, 'pending'),
+        )).run();
+        if (completed.changes !== 1) throw new Error('Triage task creation claim was lost');
+        const item = tx.select({ actionsTaken: triageItems.actionsTaken }).from(triageItems)
+          .where(eq(triageItems.id, input.triageItemId)).get();
+        tx.update(triageItems).set({
+          status: 'actioned',
+          snoozedUntil: null,
+          actionsTaken: [...decodeLenientJsonArray(item?.actionsTaken), record],
+        }).where(eq(triageItems.id, input.triageItemId)).run();
+      }
+      const sourceTagNames = allTagIds.length
+        ? tx.select({ name: tags.name, type: tags.type }).from(tags)
+            .where(inArray(tags.id, allTagIds)).all()
+            .filter((row) => row.type === 'source')
+            .map((row) => row.name)
+        : [];
+      enqueueTaskCoreEvent(tx, input.event);
+      return { kind: 'committed', task, sourceTagNames } as const;
+    });
+  }
+}
+
+function materializeSqliteOccurrence(
+  tx: SqliteTransaction,
+  input: TaskOccurrenceMaterializationInput,
+) {
+  const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+    rule: input.rule,
+    occurrence: input.occurrence,
+  });
+  const task = {
+    ...input.task,
+    metadata: writeRecurrenceMetadata(input.task.metadata, rule),
+  };
+  assertRecurrenceOccurrenceTaskScope(task, provenance);
+  assertRecurrenceOccurrenceTiming(task, input.schedule, provenance, task.id);
+  const generatedFromTaskId = input.generatedFromTaskId ?? null;
+  if (
+    (provenance.materializationStrategy === 'on-completion')
+    !== (generatedFromTaskId !== null)
+  ) {
+    throw new Error('Completion recurrence occurrences require a generating task identity');
+  }
+
+  const claim = claimSqliteRecurrenceOccurrence(
+    tx,
+    provenance,
+    task.id,
+    generatedFromTaskId,
+    task.createdAt,
+  );
+  if (!claim.claimed) {
+    return {
+      kind: 'existing' as const,
+      occurrenceId: claim.occurrenceId,
+      taskId: claim.taskId,
+    };
+  }
+
+  tx.insert(tasks).values(moveTaskInsertValues(task)).run();
+  if (input.tagIds.length) {
+    tx.insert(taskTags).values(
+      [...new Set(input.tagIds)].map((tagId) => ({ taskId: task.id, tagId })),
+    ).onConflictDoNothing().run();
+  }
+  if (input.projectIds.length) {
+    tx.insert(taskProjects).values(
+      [...new Set(input.projectIds)].map((projectId) => ({ taskId: task.id, projectId })),
+    ).onConflictDoNothing().run();
+  }
+  if (input.schedule) tx.insert(taskSchedules).values(input.schedule).run();
+  enqueueTaskCoreEvent(tx, input.event);
+  return {
+    kind: 'created' as const,
+    occurrenceId: claim.occurrenceId,
+    taskId: claim.taskId,
+  };
+}
+
+type SqliteBackfillDecisionRow = typeof taskRecurrenceBackfillDecisions.$inferSelect;
+
+function toBackfillDecision(row: SqliteBackfillDecisionRow): TaskRecurrenceBackfillDecision {
+  return {
+    occurrenceId: row.occurrenceId,
+    decision: row.decision,
+    reason: row.reason,
+    taskId: row.taskId,
+    supersededByOccurrenceId: row.supersededByOccurrenceId,
+    decidedAt: row.decidedAt,
+  };
+}
+
+function markTouched(
+  touched: Map<string, Set<RecurrenceBackfillTouchReason>>,
+  taskIds: readonly string[],
+  reason: RecurrenceBackfillTouchReason,
+): void {
+  for (const taskId of taskIds) {
+    const reasons = touched.get(taskId) ?? new Set<RecurrenceBackfillTouchReason>();
+    reasons.add(reason);
+    touched.set(taskId, reasons);
+  }
+}
+
+class SqliteTaskOccurrenceMaterializationRepository
+implements TaskOccurrenceMaterializationRepository {
+  constructor(
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async materializeOccurrence(input: TaskOccurrenceMaterializationInput) {
+    return this.runTransaction((tx) => materializeSqliteOccurrence(tx, input));
+  }
+
+  async backfillRange(
+    input: TaskRecurrenceBackfillInput,
+  ): Promise<TaskRecurrenceBackfillOutcome> {
+    const asOfIssues = validateRecurrenceBackfillAsOf(input.range, input.asOf);
+    if (asOfIssues.length > 0) return { status: 'invalid', issues: asOfIssues };
+    const decidedAt = normalizeRecurrenceBackfillInstant(input.decidedAt);
+    if (decidedAt === null) {
+      return { status: 'invalid', issues: ['decidedAt must be a valid instant'] };
+    }
+    const projection = projectRecurrence({
+      rule: input.rule,
+      range: input.range,
+      completionAnchors: input.completionAnchors,
+      limits: input.limits,
+    });
+    if (projection.status !== 'success') return projection;
+    if (projection.occurrences.length === 0) {
+      return { status: 'success', iterations: projection.iterations, decisions: [] };
+    }
+
+    const projected = projection.occurrences.map((occurrence) => ({
+      occurrence,
+      provenance: deriveRecurrenceOccurrenceProvenance({
+        rule: input.rule,
+        occurrence,
+      }).provenance,
+    }));
+    const occurrenceIds = projected.map(({ provenance }) => provenance.occurrenceId);
+
+    const decisions = this.runTransaction((tx) => {
+      const existingDecisionRows = tx.select().from(taskRecurrenceBackfillDecisions)
+        .where(inArray(taskRecurrenceBackfillDecisions.occurrenceId, occurrenceIds)).all();
+      const decidedById = new Map(
+        existingDecisionRows.map((row) => [row.occurrenceId, row]),
+      );
+      const undecided = projected.filter(
+        ({ provenance }) => !decidedById.has(provenance.occurrenceId),
+      );
+      if (undecided.length > 0) {
+        const undecidedIds = undecided.map(({ provenance }) => provenance.occurrenceId);
+        const occurrenceRows = tx.select().from(taskRecurrenceOccurrences)
+          .where(inArray(taskRecurrenceOccurrences.occurrenceId, undecidedIds)).all();
+        const taskIds = occurrenceRows.map((row) => row.taskId);
+        const taskRows = taskIds.length === 0
+          ? []
+          : tx.select({
+              id: tasks.id,
+              status: tasks.status,
+              deletedAt: tasks.deletedAt,
+              description: tasks.description,
+              planningHorizon: tasks.planningHorizon,
+              createdAt: tasks.createdAt,
+              updatedAt: tasks.updatedAt,
+            }).from(tasks).where(inArray(tasks.id, taskIds)).all();
+        const taskById = new Map(taskRows.map((row) => [row.id, row]));
+        const touched = new Map<string, Set<RecurrenceBackfillTouchReason>>();
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.description?.trim()).map((row) => row.id),
+          'description',
+        );
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.updatedAt !== row.createdAt).map((row) => row.id),
+          'field-edit',
+        );
+        markTouched(
+          touched,
+          taskRows.filter((row) => row.planningHorizon !== null).map((row) => row.id),
+          'planning-membership',
+        );
+        if (taskIds.length > 0) {
+          markTouched(
+            touched,
+            tx.select({ taskId: taskFieldStates.taskId }).from(taskFieldStates).where(and(
+              inArray(taskFieldStates.taskId, taskIds),
+              isNotNull(taskFieldStates.localEditedAt),
+            )).all().map((row) => row.taskId),
+            'field-edit',
+          );
+          markTouched(
+            touched,
+            tx.select({ taskId: taskHistoryEvents.taskId }).from(taskHistoryEvents).where(and(
+              inArray(taskHistoryEvents.taskId, taskIds),
+              ne(taskHistoryEvents.eventType, 'baseline'),
+            )).all().map((row) => row.taskId),
+            'history',
+          );
+          const planningTaskIds = [
+            ...tx.select({ taskId: taskProjects.taskId }).from(taskProjects)
+              .where(inArray(taskProjects.taskId, taskIds)).all(),
+            ...tx.select({ taskId: projectPhaseItems.taskId }).from(projectPhaseItems)
+              .where(inArray(projectPhaseItems.taskId, taskIds)).all(),
+            ...tx.select({ taskId: myDayItems.taskId }).from(myDayItems)
+              .where(inArray(myDayItems.taskId, taskIds)).all(),
+            ...tx.select({ taskId: focusItems.taskId }).from(focusItems)
+              .where(inArray(focusItems.taskId, taskIds)).all(),
+          ].map((row) => row.taskId);
+          markTouched(touched, planningTaskIds, 'planning-membership');
+          markTouched(
+            touched,
+            tx.select({ taskId: taskAttachments.taskId }).from(taskAttachments)
+              .where(inArray(taskAttachments.taskId, taskIds)).all().map((row) => row.taskId),
+            'attachment',
+          );
+          markTouched(
+            touched,
+            tx.select({ taskId: taskTimeActivities.taskId }).from(taskTimeActivities)
+              .where(and(
+                inArray(taskTimeActivities.taskId, taskIds),
+                or(
+                  ne(taskTimeActivities.state, 'cancelled'),
+                  gte(taskTimeActivities.elapsedSeconds, 1),
+                ),
+              )).all().map((row) => row.taskId),
+            'time-activity',
+          );
+        }
+        const occurrenceById = new Map(
+          occurrenceRows.map((row) => [row.occurrenceId, row]),
+        );
+        const planned = planRecurrenceBackfill({
+          range: input.range,
+          asOf: input.asOf,
+          occurrences: projected.map(({ occurrence, provenance }) => {
+            const decided = decidedById.get(provenance.occurrenceId);
+            if (decided) {
+              const remainsActionable = decided.decision === 'materialized'
+                || decided.decision === 'preserved';
+              return {
+                occurrenceId: provenance.occurrenceId,
+                occurrence,
+                sourceOwner: provenance.sourceOwner,
+                existing: {
+                  taskId: remainsActionable ? decided.taskId : null,
+                  status: remainsActionable ? 'todo' : null,
+                  deletedAt: remainsActionable ? null : decided.decidedAt,
+                  touchReasons: remainsActionable ? ['history' as const] : [],
+                },
+              };
+            }
+            const stored = occurrenceById.get(provenance.occurrenceId);
+            const task = stored ? taskById.get(stored.taskId) : undefined;
+            return {
+              occurrenceId: provenance.occurrenceId,
+              occurrence,
+              sourceOwner: provenance.sourceOwner,
+              existing: stored
+                ? {
+                    taskId: task ? stored.taskId : null,
+                    status: task?.status ?? null,
+                    deletedAt: task?.deletedAt ?? null,
+                    touchReasons: task ? [...(touched.get(task.id) ?? [])] : [],
+                  }
+                : null,
+            };
+          }),
+        }).filter(({ occurrenceId }) => !decidedById.has(occurrenceId));
+        const candidateById = new Map(
+          undecided.map((candidate) => [candidate.provenance.occurrenceId, candidate]),
+        );
+
+        for (const desired of planned) {
+          const candidate = candidateById.get(desired.occurrenceId)!;
+          const materialization = desired.decision === 'materialized'
+            ? input.materializationFor(candidate.occurrence)
+            : null;
+          const proposed = {
+            occurrenceId: candidate.provenance.occurrenceId,
+            seriesId: candidate.provenance.seriesId,
+            ruleRevisionId: candidate.provenance.ruleRevisionId,
+            effectiveKind: candidate.provenance.effectiveKind,
+            effectiveValue: candidate.provenance.effectiveValue,
+            decision: desired.decision,
+            reason: desired.reason,
+            taskId: materialization?.task.id ?? desired.taskId,
+            supersededByOccurrenceId: desired.supersededByOccurrenceId,
+            decidedAt,
+          };
+          const claimed = tx.insert(taskRecurrenceBackfillDecisions).values(proposed)
+            .onConflictDoNothing().run();
+          if (claimed.changes === 0) {
+            const existing = tx.select().from(taskRecurrenceBackfillDecisions)
+              .where(eq(taskRecurrenceBackfillDecisions.occurrenceId, desired.occurrenceId))
+              .get();
+            if (!existing) throw new Error('Backfill decision conflict did not resolve');
+            decidedById.set(existing.occurrenceId, existing);
+            continue;
+          }
+
+          if (materialization) {
+            const outcome = materializeSqliteOccurrence(tx, {
+              ...materialization,
+              rule: input.rule,
+              occurrence: candidate.occurrence,
+            });
+            if (outcome.taskId !== proposed.taskId) {
+              tx.update(taskRecurrenceBackfillDecisions).set({ taskId: outcome.taskId })
+                .where(eq(taskRecurrenceBackfillDecisions.occurrenceId, desired.occurrenceId))
+                .run();
+              proposed.taskId = outcome.taskId;
+            }
+          } else if (desired.decision === 'superseded' && desired.taskId) {
+            const superseded = tx.update(tasks).set({
+              deletedAt: decidedAt,
+              updatedAt: decidedAt,
+            }).where(and(
+              eq(tasks.id, desired.taskId),
+              eq(tasks.connectorType, 'local'),
+              eq(tasks.status, 'todo'),
+              isNull(tasks.deletedAt),
+            )).run();
+            if (superseded.changes !== 1) {
+              throw new Error('Protected recurrence occurrence changed during backfill');
+            }
+          }
+          decidedById.set(proposed.occurrenceId, proposed);
+        }
+      }
+
+      return occurrenceIds.map((occurrenceId) => {
+        const row = decidedById.get(occurrenceId);
+        if (!row) throw new Error('Backfill decision was not persisted');
+        return toBackfillDecision(row);
+      });
+    });
+
+    return { status: 'success', iterations: projection.iterations, decisions };
+  }
+}
+
+type SqliteTaskTimeActivityRow = typeof taskTimeActivities.$inferSelect;
+function toTaskTimeActivity(row: SqliteTaskTimeActivityRow): TaskTimeActivity {
+  return {
+    id: row.id,
+    taskId: row.taskId,
+    mode: row.mode,
+    state: row.state,
+    targetSeconds: row.targetSeconds,
+    elapsedSeconds: row.elapsedSeconds,
+    activeStartedAt: row.activeStartedAt,
+    startedAt: row.startedAt,
+    updatedAt: row.updatedAt,
+    version: row.version,
+  };
+}
+function completeExpiredTaskTimeActivity(
+  tx: SqliteTransaction,
+  row: SqliteTaskTimeActivityRow,
+  serverNow: string,
+): SqliteTaskTimeActivityRow {
+  if (
+    row.activeKey !== 1
+    || elapsedTaskTimeAt(toTaskTimeActivity(row), serverNow) < row.targetSeconds
+  ) {
+    return row;
+  }
+  tx.update(taskTimeActivities).set({
+    state: 'completed',
+    activeKey: null,
+    elapsedSeconds: row.targetSeconds,
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: row.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, row.id),
+    eq(taskTimeActivities.version, row.version),
+  )).run();
+  return tx.select().from(taskTimeActivities)
+    .where(eq(taskTimeActivities.id, row.id)).get() ?? row;
+}
+function cancelActiveTaskTimeActivity(
+  tx: SqliteTransaction,
+  taskId: string,
+  serverNow: string,
+): void {
+  const active = tx.select().from(taskTimeActivities).where(and(
+    eq(taskTimeActivities.taskId, taskId),
+    eq(taskTimeActivities.activeKey, 1),
+  )).get();
+  if (!active) return;
+  tx.update(taskTimeActivities).set({
+    state: 'cancelled',
+    activeKey: null,
+    elapsedSeconds: elapsedTaskTimeAt(toTaskTimeActivity(active), serverNow),
+    activeStartedAt: null,
+    updatedAt: serverNow,
+    version: active.version + 1,
+  }).where(and(
+    eq(taskTimeActivities.id, active.id),
+    eq(taskTimeActivities.version, active.version),
+  )).run();
+}
+class SqliteTaskTimeActivityRepository implements TaskTimeActivityRepository {
+  constructor(private readonly runTransaction: SqliteTaskCoreTransactionRunner) {}
+  async getTaskActivity(taskId: string, serverNow: string) {
+    return this.runTransaction((tx) => {
+      const task = tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, taskId),
+        isNull(tasks.deletedAt),
+      )).get();
+      if (!task) return { taskExists: false, activity: null };
+      const row = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.taskId, taskId))
+        .orderBy(desc(sql`coalesce(${taskTimeActivities.activeKey}, 0)`), desc(taskTimeActivities.startedAt)).limit(1).get();
+      const current = row ? completeExpiredTaskTimeActivity(tx, row, serverNow) : null;
+      return { taskExists: true, activity: current ? toTaskTimeActivity(current) : null };
+    });
+  }
+  async start(input: TaskTimeActivityStartInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.runTransaction((tx) => {
+      const existing = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, input.commandId)).get();
+      if (existing) {
+        return existing.taskId === input.taskId
+          && existing.mode === input.mode
+          && (existing.mode === 'deadline' || existing.targetSeconds === input.targetSeconds)
+          ? { kind: 'replayed', activity: toTaskTimeActivity(existing) }
+          : { kind: 'conflict', reason: 'command' };
+      }
+      const task = tx.select({ id: tasks.id }).from(tasks).where(and(
+        eq(tasks.id, input.taskId),
+        isNull(tasks.deletedAt),
+        notInArray(tasks.status, ['done', 'cancelled']),
+      )).get();
+      if (!task) return { kind: 'task-not-found' };
+      const active = tx.select()
+        .from(taskTimeActivities).where(eq(taskTimeActivities.activeKey, 1)).get();
+      const current = active
+        ? completeExpiredTaskTimeActivity(tx, active, input.serverNow)
+        : null;
+      if (current?.activeKey) {
+        return { kind: 'conflict', reason: 'active-timer', activeTaskId: current.taskId };
+      }
+      tx.insert(taskTimeActivities).values({
+        id: input.commandId,
+        taskId: input.taskId,
+        mode: input.mode,
+        state: 'running',
+        activeKey: 1,
+        targetSeconds: input.targetSeconds,
+        elapsedSeconds: 0,
+        activeStartedAt: input.serverNow,
+        startedAt: input.serverNow,
+        updatedAt: input.serverNow,
+        version: 0,
+        lastCommandId: input.commandId,
+        lastCommandAction: 'start',
+      }).run();
+      const created = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, input.commandId)).get()!;
+      return { kind: 'committed', activity: toTaskTimeActivity(created) };
+    });
+  }
+  async transition(input: TaskTimeActivityTransitionInput): Promise<TaskTimeActivityMutationOutcome> {
+    return this.runTransaction((tx) => {
+      const row = tx.select().from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.id, input.activityId),
+        eq(taskTimeActivities.taskId, input.taskId),
+      )).get();
+      if (!row) return { kind: 'activity-not-found' };
+      if (row.lastCommandId === input.commandId && row.lastCommandAction === input.action) {
+        return { kind: 'replayed', activity: toTaskTimeActivity(row) };
+      }
+      if (row.version !== input.expectedVersion) return { kind: 'conflict', reason: 'version' };
+      const allowed = input.action === 'pause'
+        ? row.state === 'running'
+        : input.action === 'resume'
+          ? row.state === 'paused'
+          : input.action === 'complete'
+            ? row.state === 'running' || row.state === 'paused'
+            : row.state === 'running' || row.state === 'paused' || row.state === 'completed';
+      if (!allowed) return { kind: 'conflict', reason: 'state' };
+      const requestedState = input.action === 'pause'
+        ? 'paused'
+        : input.action === 'resume'
+          ? 'running'
+          : input.action === 'complete'
+            ? 'completed'
+            : 'cancelled';
+      const elapsedSeconds = input.action === 'resume'
+        ? row.elapsedSeconds
+        : elapsedTaskTimeAt(toTaskTimeActivity(row), input.serverNow);
+      const nextState = input.action !== 'cancel' && elapsedSeconds >= row.targetSeconds
+        ? 'completed' : requestedState;
+      tx.update(taskTimeActivities).set({
+        state: nextState,
+        activeKey: nextState === 'running' || nextState === 'paused' ? 1 : null,
+        elapsedSeconds,
+        activeStartedAt: nextState === 'running' ? input.serverNow : null,
+        updatedAt: input.serverNow,
+        version: row.version + 1,
+        lastCommandId: input.commandId,
+        lastCommandAction: input.action,
+      }).where(and(
+        eq(taskTimeActivities.id, row.id),
+        eq(taskTimeActivities.version, row.version),
+      )).run();
+      const updated = tx.select().from(taskTimeActivities)
+        .where(eq(taskTimeActivities.id, row.id)).get()!;
+      return { kind: 'committed', activity: toTaskTimeActivity(updated) };
+    });
+  }
+  async hasDurableTimeActivity(taskId: string): Promise<boolean> {
+    return this.runTransaction((tx) => Boolean(tx.select({ id: taskTimeActivities.id })
+      .from(taskTimeActivities).where(and(
+        eq(taskTimeActivities.taskId, taskId),
+        or(
+          ne(taskTimeActivities.state, 'cancelled'),
+          gte(taskTimeActivities.elapsedSeconds, 1),
+        ),
+      )).limit(1).get()), { readOnly: true });
+  }
+}
+class SqliteTaskMutationRepository implements TaskMutationRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async getTaskWriteContext(taskId: string, requestedTagIds: readonly string[] = []) {
+    const [task, scheduleRows, tagRows, requestedTagRows, stateRows, evaluationRows] = await Promise.all([
+      this.database.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1),
+      this.database.select().from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
+      this.database.select({ id: tags.id, name: tags.name }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id)).where(eq(taskTags.taskId, taskId)),
+      requestedTagIds.length
+        ? this.database.select({ id: tags.id, name: tags.name }).from(tags)
+            .where(inArray(tags.id, [...new Set(requestedTagIds)]))
+        : Promise.resolve([]),
+      this.database.select().from(taskFieldStates).where(eq(taskFieldStates.taskId, taskId)),
+      this.database.select({ id: scoutReconciliationEvaluations.id })
+        .from(scoutReconciliationEvaluations).where(and(
+          eq(scoutReconciliationEvaluations.taskId, taskId),
+          eq(scoutReconciliationEvaluations.action, 'auto-complete'),
+          eq(scoutReconciliationEvaluations.applied, true),
+        )).limit(1),
+    ]);
+    if (!task[0]) return null;
+    return {
+      task: toMoveTaskRow(task[0]),
+      schedule: scheduleRows[0] ? {
+        ...scheduleRows[0],
+        isTimeBlocked: Boolean(scheduleRows[0].isTimeBlocked),
+      } : null,
+      tagIds: tagRows.map((row) => row.id),
+      tagNamesById: Object.fromEntries(
+        [...tagRows, ...requestedTagRows].map((row) => [row.id, row.name]),
+      ),
+      fieldStates: stateRows.map((row) => ({
+        ...row,
+        locallyOverridden: Boolean(row.locallyOverridden),
+      })),
+      wasAutoCompletedByReconciliation: evaluationRows.length > 0,
+    };
+  }
+
+  async mutateTask(request: TaskMutationRequest): Promise<TaskMutationOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, request.taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      const currentTask = toMoveTaskRow(current);
+      if (currentTask.updatedAt !== request.expectedUpdatedAt) {
+        return { kind: 'revision-conflict', currentUpdatedAt: currentTask.updatedAt } as const;
+      }
+      if (
+        request.expectedStatusForTerminalTransition
+        && currentTask.status !== request.expectedStatusForTerminalTransition
+      ) {
+        return { kind: 'revision-conflict', currentUpdatedAt: currentTask.updatedAt } as const;
+      }
+      const changed = tx.update(tasks).set({
+        ...request.patch,
+        ...(request.patch.metadata ? { metadata: JSON.stringify(request.patch.metadata) } : {}),
+        updatedAt: request.now,
+      }).where(and(
+        eq(tasks.id, request.taskId),
+        eq(tasks.updatedAt, request.expectedUpdatedAt),
+        request.expectedStatusForTerminalTransition
+          ? eq(tasks.status, request.expectedStatusForTerminalTransition)
+          : undefined,
+      )).run();
+      if (changed.changes !== 1) {
+        const latest = tx.select({ updatedAt: tasks.updatedAt }).from(tasks)
+          .where(eq(tasks.id, request.taskId)).get();
+        return latest
+          ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
+          : { kind: 'not-found' } as const;
+      }
+      if (request.patch.status === 'done' || request.patch.status === 'cancelled') {
+        cancelActiveTaskTimeActivity(tx, request.taskId, request.now);
+      }
+      if (request.schedulePatch) {
+        tx.insert(taskSchedules).values({
+          taskId: request.taskId,
+          scheduledDate: request.schedulePatch.scheduledDate,
+          estimatedDuration: request.schedulePatch.estimatedDuration ?? null,
+          recurrence: request.schedulePatch.recurrence ?? null,
+          recurrenceMode: request.schedulePatch.recurrenceMode ?? 'schedule',
+          isTimeBlocked: false,
+        }).onConflictDoUpdate({
+          target: taskSchedules.taskId,
+          set: request.schedulePatch,
+        }).run();
+      }
+      if (request.replaceTagIds) {
+        tx.delete(taskTags).where(eq(taskTags.taskId, request.taskId)).run();
+        const ids = [...new Set(request.replaceTagIds)];
+        if (ids.length) {
+          tx.insert(taskTags).values(ids.map((tagId) => ({ taskId: request.taskId, tagId }))).run();
+        }
+      }
+      for (const state of request.fieldStates ?? []) {
+        tx.insert(taskFieldStates).values({
+          taskId: request.taskId,
+          ...state,
+        }).onConflictDoUpdate({
+          target: [taskFieldStates.taskId, taskFieldStates.fieldName],
+          set: state,
+        }).run();
+      }
+      if (request.priorityLog) {
+        tx.insert(prioritySyncLog).values({
+          id: request.priorityLog.id,
+          taskId: request.taskId,
+          connectorType: currentTask.connectorType,
+          connectorInstanceId: currentTask.connectorInstanceId,
+          previousPriority: request.priorityLog.previousPriority,
+          newPriority: request.priorityLog.newPriority,
+          direction: 'outbound',
+          writeBackTriggered: request.priorityLog.writeBackTriggered,
+          note: request.priorityLog.note,
+          timestamp: request.now,
+        }).run();
+      }
+      if (request.planningHistory) {
+        tx.insert(taskHistoryEvents).values({
+          taskId: request.taskId,
+          eventType: 'planning_horizon_changed',
+          fieldName: 'planningHorizon',
+          previousValue: request.planningHistory.previousValue,
+          newValue: request.planningHistory.newValue,
+          occurredAt: request.now,
+          recordedAt: request.now,
+          provenance: 'task-patch',
+        }).run();
+      }
+      if (request.suppressAutoCompletionAfterReopen) {
+        tx.insert(scoutReconciliationTaskState).values({
+          taskId: request.taskId,
+          neverAutoComplete: true,
+          reason: 'reopened_after_auto_completion',
+          updatedAt: request.now,
+          updatedBy: 'task-reopen',
+        }).onConflictDoUpdate({
+          target: scoutReconciliationTaskState.taskId,
+          set: {
+            neverAutoComplete: true,
+            reason: 'reopened_after_auto_completion',
+            updatedAt: request.now,
+            updatedBy: 'task-reopen',
+          },
+        }).run();
+        tx.update(scoutReconciliationSuggestions).set({
+          status: 'dismissed',
+          updatedAt: request.now,
+          actedAt: request.now,
+          actedBy: 'task-reopen',
+        }).where(and(
+          eq(scoutReconciliationSuggestions.taskId, request.taskId),
+          eq(scoutReconciliationSuggestions.status, 'pending'),
+        )).run();
+      }
+      if (request.supersedePendingReconciliation) {
+        tx.update(scoutReconciliationSuggestions).set({
+          status: 'superseded',
+          updatedAt: request.now,
+          actedAt: request.now,
+          actedBy: 'task-terminal',
+        }).where(and(
+          eq(scoutReconciliationSuggestions.taskId, request.taskId),
+          eq(scoutReconciliationSuggestions.status, 'pending'),
+        )).run();
+      }
+      let recurrenceNextTaskId: string | null = null;
+      if (request.recurrenceSuccessor) {
+        const successor = request.recurrenceSuccessor;
+        const historicalSuccessor = tx.select({ id: tasks.id }).from(tasks)
+          .where(eq(tasks.recurrenceGeneratedFromTaskId, request.taskId)).get();
+        const durableSuccessor = tx.select({ taskId: taskRecurrenceOccurrences.taskId })
+          .from(taskRecurrenceOccurrences)
+          .where(eq(taskRecurrenceOccurrences.generatedFromTaskId, request.taskId))
+          .get();
+        if (
+          historicalSuccessor
+          && durableSuccessor
+          && historicalSuccessor.id !== durableSuccessor.taskId
+        ) {
+          throw new Error('Recurrence successor history conflicts with its durable claim');
+        }
+        if (historicalSuccessor || durableSuccessor) {
+          recurrenceNextTaskId = historicalSuccessor?.id ?? durableSuccessor!.taskId;
+        } else {
+          const { provenance, rule } = deriveRecurrenceOccurrenceProvenance({
+            rule: successor.rule,
+            occurrence: successor.occurrence,
+          });
+          const successorTask = {
+            ...currentTask,
+            id: successor.id,
+            sourceId: `local:${successor.id}`,
+            connectorType: 'local',
+            connectorInstanceId: 'local',
+            status: 'todo',
+            localDisposition: 'active',
+            dueDate: successor.dueDate,
+            createdAt: request.now,
+            updatedAt: request.now,
+            completedAt: null,
+            recurrenceGeneratedFromTaskId: request.taskId,
+            metadata: writeRecurrenceMetadata(successor.metadata, rule),
+            syncStatus: 'synced',
+            lastSyncedAt: request.now,
+            pushRetryCount: 0,
+            reminderAt: successor.reminderAt,
+            reminderNagInterval: successor.reminderNagInterval,
+            reminderNagStopAt: successor.reminderNagStopAt,
+            reminderNagSeriesId: successor.reminderNagSeriesId,
+            reminderNagSequence: 0,
+            isBulkImport: false,
+          } satisfies TaskMoveTaskInsert;
+          assertRecurrenceOccurrenceTaskScope(successorTask, provenance);
+          assertRecurrenceOccurrenceTiming(
+            successorTask,
+            { taskId: successor.id, scheduledDate: successor.scheduledDate },
+            provenance,
+            successor.id,
+          );
+          const claim = claimSqliteRecurrenceOccurrence(
+            tx,
+            provenance,
+            successor.id,
+            request.taskId,
+            request.now,
+          );
+          recurrenceNextTaskId = claim.taskId;
+          if (claim.claimed) {
+            tx.insert(tasks).values(moveTaskInsertValues(successorTask)).run();
+            const schedule = tx.select().from(taskSchedules)
+              .where(eq(taskSchedules.taskId, request.taskId)).get();
+            if (schedule) {
+              tx.insert(taskSchedules).values({
+                ...schedule,
+                taskId: successor.id,
+                scheduledDate: successor.scheduledDate,
+                scheduledTime: successor.scheduledTime,
+              }).run();
+            }
+            const sourceTags = tx.select({ tagId: taskTags.tagId }).from(taskTags)
+              .where(eq(taskTags.taskId, request.taskId)).all();
+            if (sourceTags.length) {
+              tx.insert(taskTags).values(sourceTags.map((row) => ({
+                taskId: successor.id,
+                tagId: row.tagId,
+              }))).run();
+            }
+            const sourceProjects = tx.select({ projectId: taskProjects.projectId })
+              .from(taskProjects)
+              .where(eq(taskProjects.taskId, request.taskId)).all();
+            if (sourceProjects.length) {
+              tx.insert(taskProjects).values(sourceProjects.map((row) => ({
+                taskId: successor.id,
+                projectId: row.projectId,
+              }))).run();
+            }
+            const phases = tx.select().from(projectPhaseItems)
+              .where(eq(projectPhaseItems.taskId, request.taskId)).all();
+            if (phases.length) {
+              tx.insert(projectPhaseItems).values(phases.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                createdAt: request.now,
+              }))).run();
+            }
+            const dependencies = tx.select().from(taskDependencies)
+              .where(eq(taskDependencies.taskId, request.taskId)).all();
+            if (dependencies.length) {
+              tx.insert(taskDependencies).values(dependencies.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                syncStatus: 'local' as const,
+                syncAction: null,
+                syncError: null,
+                lastSyncedAt: null,
+                createdAt: request.now,
+              }))).run();
+            }
+            const attachments = tx.select().from(taskAttachments)
+              .where(eq(taskAttachments.taskId, request.taskId)).all();
+            if (attachments.length) {
+              tx.insert(taskAttachments).values(attachments.map((row) => ({
+                ...row,
+                id: crypto.randomUUID(),
+                taskId: successor.id,
+                createdAt: request.now,
+              }))).run();
+            }
+          }
+        }
+      }
+      for (const event of request.events ?? []) {
+        enqueueTaskCoreEvent(tx, event);
+      }
+      const updated = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, request.taskId)).get();
+      if (!updated) return { kind: 'not-found' } as const;
+      return {
+        kind: 'committed',
+        task: toMoveTaskRow(updated),
+        recurrenceNextTaskId,
+      } as const;
+    });
+  }
+}
+
+class SqliteTaskRemovalRepository implements TaskRemovalRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async getTaskRemovalContext(taskId: string) {
+    const [row] = await this.database.select(MOVE_TASK_COLUMNS).from(tasks)
+      .where(and(eq(tasks.id, taskId), isNull(tasks.deletedAt))).limit(1);
+    return row ? { task: toMoveTaskRow(row) } : null;
+  }
+
+  async applyTaskRemoval(input: {
+    taskId: string;
+    expectedUpdatedAt: string;
+    mode: 'mirror-dismiss' | 'ingested-cancel' | 'local-delete' | 'remote-cancel-intent';
+    now: string;
+    events?: readonly TaskCoreEvent[];
+  }): Promise<TaskRemovalOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      if (String(current.updatedAt) !== input.expectedUpdatedAt) {
+        return {
+          kind: 'revision-conflict',
+          currentUpdatedAt: String(current.updatedAt),
+        } as const;
+      }
+      if (input.mode === 'local-delete') {
+        const changed = tx.update(tasks).set({
+          deletedAt: input.now,
+          updatedAt: input.now,
+        }).where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.updatedAt, input.expectedUpdatedAt),
+          isNull(tasks.deletedAt),
+        )).run();
+        if (changed.changes !== 1) {
+          const latest = tx.select({
+            updatedAt: tasks.updatedAt,
+            deletedAt: tasks.deletedAt,
+          }).from(tasks).where(eq(tasks.id, input.taskId)).get();
+          return latest
+            ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
+            : { kind: 'not-found' } as const;
+        }
+      } else {
+        const patch = input.mode === 'mirror-dismiss'
+          ? { localDisposition: 'dismissed' as const, updatedAt: input.now }
+          : input.mode === 'ingested-cancel'
+            ? {
+                status: 'cancelled',
+                statusReason: 'not_planned',
+                completedAt: null,
+                microStatus: null,
+                snoozedUntil: null,
+                reminderAt: null,
+                reminderRelative: null,
+                reminderDueTime: null,
+                updatedAt: input.now,
+              }
+            : {
+                status: 'cancelled',
+                statusReason: 'undo',
+                syncStatus: 'pending_push',
+                pushRetryCount: 0,
+                updatedAt: input.now,
+              };
+        const changed = tx.update(tasks).set(patch).where(and(
+          eq(tasks.id, input.taskId),
+          eq(tasks.updatedAt, input.expectedUpdatedAt),
+        )).run();
+        if (changed.changes !== 1) {
+          const latest = tx.select({ updatedAt: tasks.updatedAt }).from(tasks)
+            .where(eq(tasks.id, input.taskId)).get();
+          return latest
+            ? { kind: 'revision-conflict', currentUpdatedAt: latest.updatedAt } as const
+            : { kind: 'not-found' } as const;
+        }
+      }
+      for (const event of input.events ?? []) {
+        enqueueTaskCoreEvent(tx, event);
+      }
+      cancelActiveTaskTimeActivity(tx, input.taskId, input.now);
+      return {
+        kind: 'committed',
+        action: input.mode === 'mirror-dismiss'
+          ? 'dismissed'
+          : input.mode === 'ingested-cancel'
+            ? 'cancelled'
+            : input.mode === 'local-delete'
+              ? 'deleted'
+              : 'pending-remote',
+        taskVersion: input.now,
+      } as const;
+    });
+  }
+
+  async finalizeRemoteTaskRemoval(input: {
+    taskId: string;
+    leaseToken: string;
+    expectedUpdatedAt: string;
+  }): Promise<TaskRemovalOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select(MOVE_TASK_COLUMNS).from(tasks)
+        .where(eq(tasks.id, input.taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      if (
+        String(current.updatedAt) !== input.expectedUpdatedAt
+        || current.syncStatus !== 'pushing'
+        || current.lastSyncedAt !== input.leaseToken
+      ) {
+        return {
+          kind: 'revision-conflict',
+          currentUpdatedAt: String(current.updatedAt),
+        } as const;
+      }
+      deleteTaskWithinTransaction(tx, input.taskId, false);
+      return { kind: 'committed', action: 'deleted', taskVersion: null } as const;
+    });
+  }
+
+  async restoreTask(taskId: string, now: string): Promise<TaskRestoreOutcome> {
+    return this.runTransaction((tx) => {
+      const current = tx.select({
+        id: tasks.id,
+        title: tasks.title,
+        description: tasks.description,
+        sourceListName: tasks.sourceListName,
+        connectorType: tasks.connectorType,
+        status: tasks.status,
+        deletedAt: tasks.deletedAt,
+      }).from(tasks).where(eq(tasks.id, taskId)).get();
+      if (!current) return { kind: 'not-found' } as const;
+      if (!current.deletedAt) return { kind: 'not-deleted' } as const;
+      tx.update(tasks).set({ deletedAt: null, updatedAt: now })
+        .where(and(eq(tasks.id, taskId), eq(tasks.deletedAt, current.deletedAt))).run();
+      return {
+        kind: 'restored',
+        task: {
+          id: current.id,
+          title: current.title,
+          description: current.description,
+          sourceListName: current.sourceListName,
+          connectorType: current.connectorType,
+          status: current.status,
+        },
+      } as const;
+    });
+  }
+
+  async purgeDeletedBefore(cutoff: string): Promise<readonly string[]> {
+    return this.runTransaction((tx) => {
+      const stale = tx.select({ id: tasks.id }).from(tasks)
+        .where(and(isNotNull(tasks.deletedAt), lte(tasks.deletedAt, cutoff))).all();
+      for (const task of stale) deleteTaskWithinTransaction(tx, task.id, false);
+      return stale.map((task) => task.id);
+    });
+  }
+}
+
+class SqliteWriteThroughTaskMoveRepository implements WriteThroughTaskMoveRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async getTask(taskId: string): Promise<TaskMoveTaskRow | null> {
+    const [row] = await this.database.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ? toMoveTaskRow(row) : null;
+  }
+
+  async listChildTasks(parentTaskId: string, limit: number): Promise<TaskMoveTaskRow[]> {
+    const rows = await this.database.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(eq(tasks.parentId, parentTaskId))
+      .orderBy(
+        sql`CASE WHEN ${tasks.siblingOrder} IS NULL THEN 1 ELSE 0 END`,
+        asc(tasks.siblingOrder),
+        asc(tasks.createdAt),
+        asc(tasks.id),
+      )
+      .limit(limit);
+    return rows.map(toMoveTaskRow);
+  }
+
+  async listTaskTagRefs(taskId: string): Promise<TaskMoveTagRef[]> {
+    const rows = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      slug: tags.slug,
+      type: tags.type,
+      color: tags.color,
+    })
+      .from(taskTags)
+      .innerJoin(tags, eq(taskTags.tagId, tags.id))
+      .where(eq(taskTags.taskId, taskId));
+    return rows.map((row) => ({ ...row, color: row.color ?? null }));
+  }
+
+  async listAttachmentMetadata(
+    taskIds: readonly string[],
+    limit: number,
+  ): Promise<TaskAttachmentMetadataRow[]> {
+    if (taskIds.length === 0) return [];
+    const rows = await this.database.select({
+      id: taskAttachments.id,
+      taskId: taskAttachments.taskId,
+      name: taskAttachments.name,
+      contentType: taskAttachments.contentType,
+      size: taskAttachments.size,
+      sourceAttachmentId: taskAttachments.sourceAttachmentId,
+      createdAt: taskAttachments.createdAt,
+    })
+      .from(taskAttachments)
+      .where(inArray(taskAttachments.taskId, [...taskIds]))
+      .limit(limit);
+    return rows.map((row) => ({ ...row, sourceAttachmentId: row.sourceAttachmentId ?? null }));
+  }
+
+  async listAttachmentContents(
+    attachmentIds: readonly string[],
+  ): Promise<TaskAttachmentContentRow[]> {
+    if (attachmentIds.length === 0) return [];
+    const rows = await this.database.select({
+      id: taskAttachments.id,
+      contentBase64: taskAttachments.contentBase64,
+    })
+      .from(taskAttachments)
+      .where(inArray(taskAttachments.id, [...attachmentIds]));
+    return rows.map((row) => ({ id: row.id, contentBase64: row.contentBase64 ?? null }));
+  }
+
+  async getTaskSchedule(taskId: string): Promise<TaskScheduleRow | null> {
+    const [row] = await this.database.select().from(taskSchedules)
+      .where(eq(taskSchedules.taskId, taskId)).limit(1);
+    return row ?? null;
+  }
+
+  async findTargetListBySourceId(
+    connectorInstanceId: string,
+    sourceListId: string,
+  ): Promise<TaskMoveListRow | null> {
+    const [row] = await this.database
+      .select({ id: sourceLists.id, name: sourceLists.name, sourceId: sourceLists.sourceId })
+      .from(sourceLists)
+      .where(and(
+        eq(sourceLists.connectorInstanceId, connectorInstanceId),
+        eq(sourceLists.sourceId, sourceListId),
+      ))
+      .limit(1);
+    return row ?? null;
+  }
+
+  async findDefaultTargetList(
+    connectorInstanceId: string,
+  ): Promise<TaskMoveListRow | null> {
+    const projection = {
+      id: sourceLists.id,
+      name: sourceLists.name,
+      sourceId: sourceLists.sourceId,
+    };
+    const [defaultList] = await this.database.select(projection)
+      .from(sourceLists)
+      .where(and(
+        eq(sourceLists.connectorInstanceId, connectorInstanceId),
+        eq(sourceLists.wellKnownListName, 'defaultList'),
+      ))
+      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.id))
+      .limit(1);
+    if (defaultList) return defaultList;
+
+    const [firstList] = await this.database.select(projection)
+      .from(sourceLists)
+      .where(eq(sourceLists.connectorInstanceId, connectorInstanceId))
+      .orderBy(asc(sourceLists.sortOrder), asc(sourceLists.id))
+      .limit(1);
+    return firstList ?? null;
+  }
+
+  async claimTaskMove(request: TaskMoveClaimRequest): Promise<boolean> {
+    return this.runTransaction((tx) => {
+      const result = tx.update(tasks).set({
+        syncStatus: request.claimSyncStatus,
+        metadata: request.metadata,
+      }).where(and(
+        eq(tasks.id, request.taskId),
+        eq(tasks.sourceId, request.expectedSourceId),
+        eq(tasks.connectorInstanceId, request.expectedSourceConnectorInstanceId),
+        eq(tasks.syncStatus, request.expectedSyncStatus),
+      )).run();
+      return result.changes === 1;
+    });
+  }
+
+  async releaseTaskMoveClaim(request: TaskMoveClaimReleaseRequest): Promise<void> {
+    this.runTransaction((tx) => {
+      tx.update(tasks).set({
+        syncStatus: request.syncStatus,
+        metadata: request.metadata,
+      }).where(and(
+        eq(tasks.id, request.taskId),
+        sql`json_extract(${tasks.metadata}, '$.taskMoveClaim.token') = ${request.claimToken}`,
+      )).run();
+    });
+  }
+
+  async discardMaterializedDestination(taskId: string): Promise<void> {
+    this.runTransaction((tx) => {
+      tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
+      tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId)).run();
+      tx.delete(taskTags).where(eq(taskTags.taskId, taskId)).run();
+      tx.delete(taskProjects).where(eq(taskProjects.taskId, taskId)).run();
+      tx.delete(tasks).where(eq(tasks.id, taskId)).run();
+    });
+  }
+
+  async materializeDestination(
+    request: TaskMoveDestinationMaterialization,
+  ): Promise<void> {
+    this.runTransaction((tx) => {
+      tx.insert(tasks).values(moveTaskInsertValues(request.task)).run();
+
+      if (request.tagIds.length > 0) {
+        tx.insert(taskTags).values(
+          request.tagIds.map((tagId) => ({ taskId: request.task.id, tagId })),
+        ).run();
+      }
+
+      if (request.copyProjectsFromTaskId) {
+        const sourceProjects = tx.select().from(taskProjects)
+          .where(eq(taskProjects.taskId, request.copyProjectsFromTaskId)).all();
+        if (sourceProjects.length > 0) {
+          tx.insert(taskProjects).values(
+            sourceProjects.map((row) => ({ taskId: request.task.id, projectId: row.projectId })),
+          ).run();
+        }
+      }
+
+      if (request.schedule) {
+        tx.insert(taskSchedules)
+          .values({ ...request.schedule, taskId: request.task.id }).run();
+      }
+
+      if (request.attachments.length > 0) {
+        tx.insert(taskAttachments).values(request.attachments.map(toAttachmentInsert)).run();
+      }
+
+      for (const subtask of request.subtaskCopies) {
+        tx.insert(tasks).values(moveTaskInsertValues(subtask.task)).run();
+
+        const subtaskTags = tx.select().from(taskTags)
+          .where(eq(taskTags.taskId, subtask.copyFromTaskId)).all();
+        if (subtaskTags.length > 0) {
+          tx.insert(taskTags).values(
+            subtaskTags.map((tag) => ({ taskId: subtask.task.id, tagId: tag.tagId })),
+          ).run();
+        }
+
+        const subtaskProjects = tx.select().from(taskProjects)
+          .where(eq(taskProjects.taskId, subtask.copyFromTaskId)).all();
+        if (subtaskProjects.length > 0) {
+          tx.insert(taskProjects).values(
+            subtaskProjects.map((project) => ({
+              taskId: subtask.task.id,
+              projectId: project.projectId,
+            })),
+          ).run();
+        }
+
+        const subtaskSchedules = tx.select().from(taskSchedules)
+          .where(eq(taskSchedules.taskId, subtask.copyFromTaskId)).all();
+        if (subtaskSchedules.length > 0) {
+          tx.insert(taskSchedules).values(
+            subtaskSchedules.map((schedule) => ({ ...schedule, taskId: subtask.task.id })),
+          ).run();
+        }
+
+        if (subtask.attachments.length > 0) {
+          tx.insert(taskAttachments)
+            .values(subtask.attachments.map(toAttachmentInsert)).run();
+        }
+      }
+    });
+  }
+
+  async finalizeMove(
+    request: TaskMoveFinalizationRequest,
+  ): Promise<TaskMoveFinalizationOutcome> {
+    try {
+      this.runTransaction((tx) => {
+        const sourceUnchanged = tx.update(tasks).set({
+          updatedAt: sql`${tasks.updatedAt}`,
+        }).where(and(
+          eq(tasks.id, request.sourceTaskId),
+          sql`json_extract(${tasks.metadata}, '$.taskMoveClaim.token') = ${request.claimToken}`,
+          ...attachmentSnapshotPredicates(
+            request.sourceTaskId,
+            request.attachmentSnapshot,
+          ),
+        )).run();
+        if (sourceUnchanged.changes !== 1) {
+          throw new WriteThroughMoveSourceChangedError();
+        }
+
+        repointTaskReferences(tx, request.sourceTaskId, request.successorTaskId);
+
+        for (const repoint of request.subtaskRepoints) {
+          tx.update(tasks).set({
+            sourceId: repoint.sourceId,
+            connectorType: repoint.connectorType,
+            connectorInstanceId: repoint.connectorInstanceId,
+            sourceListId: repoint.sourceListId,
+            sourceListName: repoint.sourceListName,
+            parentId: repoint.parentId,
+            updatedAt: repoint.updatedAt,
+            syncStatus: repoint.syncStatus,
+            lastSyncedAt: repoint.lastSyncedAt,
+          }).where(eq(tasks.id, repoint.taskId)).run();
+          tx.delete(taskAttachments)
+            .where(eq(taskAttachments.taskId, repoint.taskId)).run();
+          if (repoint.attachments.length > 0) {
+            tx.insert(taskAttachments)
+              .values(repoint.attachments.map(toAttachmentInsert)).run();
+          }
+        }
+
+        tx.delete(taskSchedules)
+          .where(eq(taskSchedules.taskId, request.sourceTaskId)).run();
+        tx.delete(taskAttachments)
+          .where(eq(taskAttachments.taskId, request.sourceTaskId)).run();
+
+        if (request.sourceDisposition.kind === 'delete') {
+          tx.delete(taskTags).where(eq(taskTags.taskId, request.sourceTaskId)).run();
+          tx.delete(tasks).where(eq(tasks.id, request.sourceTaskId)).run();
+        } else {
+          const disposition = request.sourceDisposition;
+          tx.update(tasks).set({
+            status: disposition.status,
+            statusReason: disposition.statusReason,
+            description: disposition.description,
+            updatedAt: disposition.updatedAt,
+            syncStatus: disposition.syncStatus,
+            metadata: JSON.stringify(disposition.metadata),
+          }).where(eq(tasks.id, request.sourceTaskId)).run();
+        }
+      });
+    } catch (error) {
+      if (error instanceof WriteThroughMoveSourceChangedError) {
+        return { kind: 'source-changed' };
+      }
+      throw error;
+    }
+    return { kind: 'finalized' };
+  }
+
+  async recordSourceSyncIntent(request: TaskMoveSourceSyncIntent): Promise<void> {
+    await this.database.update(tasks).set({
+      syncStatus: request.syncStatus,
+      metadata: JSON.stringify(request.metadata),
+    }).where(eq(tasks.id, request.taskId));
+  }
+
+  async recordSourceCopyProvenance(
+    request: TaskMoveSourceCopyProvenance,
+  ): Promise<void> {
+    this.runTransaction((tx) => {
+      const current = tx.select({ metadata: tasks.metadata })
+        .from(tasks)
+        .where(eq(tasks.id, request.taskId))
+        .limit(1)
+        .get();
+      if (!current) return;
+      tx.update(tasks).set({
+        updatedAt: request.updatedAt,
+        metadata: JSON.stringify({
+          ...decodeLenientJsonObject(current.metadata),
+          copiedTo: request.copiedTo,
+        }),
+      }).where(eq(tasks.id, request.taskId)).run();
+    });
+  }
+}
+
+function toAttachmentInsert(attachment: TaskAttachmentInsert) {
+  return {
+    id: attachment.id,
+    taskId: attachment.taskId,
+    name: attachment.name,
+    contentType: attachment.contentType,
+    size: attachment.size,
+    contentBase64: attachment.contentBase64 ?? null,
+    sourceAttachmentId: attachment.sourceAttachmentId ?? null,
+    createdAt: attachment.createdAt,
+  };
+}
+
+/* ------------------------------------------------------------------ *
+ * Priority entities and source-list names
+ * ------------------------------------------------------------------ */
+
+class SqlitePriorityEntityRepository implements PriorityEntityRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async listPriorityEntitiesByRank(): Promise<PriorityEntityRow[]> {
+    const rows = await this.database.select()
+      .from(priorityEntities)
+      .orderBy(
+        asc(priorityEntities.rank),
+        asc(sql`${priorityEntities.id} COLLATE BINARY`),
+      );
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      type: row.type,
+      referenceId: row.referenceId ?? null,
+      description: row.description ?? null,
+      tier: row.tier,
+      color: row.color,
+      rank: row.rank,
+      activeTaskCount: row.activeTaskCount,
+      lastTouchedAt: row.lastTouchedAt ?? null,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    }));
+  }
+
+  async createPriorityEntity(input: PriorityEntityCreate): Promise<PriorityEntityRow> {
+    return this.runTransaction((tx) => {
+      const [current] = tx.select({ rank: priorityEntities.rank })
+        .from(priorityEntities)
+        .orderBy(desc(priorityEntities.rank))
+        .limit(1)
+        .all();
+      return tx.insert(priorityEntities).values({
+        id: input.id,
+        name: input.name,
+        type: input.type,
+        referenceId: input.referenceId ?? null,
+        description: input.description ?? null,
+        tier: input.tier ?? 'standard',
+        color: input.color ?? '#64748b',
+        rank: input.rank ?? (current?.rank ?? 0) + 1,
+        createdAt: input.now,
+        updatedAt: input.now,
+      }).returning().get();
+    });
+  }
+
+  async updatePriorityEntities(inputs: readonly PriorityEntityUpdate[]): Promise<void> {
+    this.runTransaction((tx) => {
+      for (const input of inputs) {
+        const {
+          id,
+          updatedAt,
+          ...changes
+        } = input;
+        tx.update(priorityEntities)
+          .set({ ...changes, updatedAt })
+          .where(eq(priorityEntities.id, id))
+          .run();
+      }
+    });
+  }
+
+  async deletePriorityEntityAndRerank(id: string, updatedAt: string): Promise<void> {
+    this.runTransaction((tx) => {
+      tx.delete(priorityEntities).where(eq(priorityEntities.id, id)).run();
+      const remaining = tx.select({ id: priorityEntities.id })
+        .from(priorityEntities)
+        .orderBy(
+          asc(priorityEntities.rank),
+          asc(sql`${priorityEntities.id} COLLATE BINARY`),
+        )
+        .all();
+      remaining.forEach((row, index) => {
+        tx.update(priorityEntities)
+          .set({ rank: index + 1, updatedAt })
+          .where(eq(priorityEntities.id, row.id))
+          .run();
+      });
+    });
+  }
+
+  async listPriorityEntityOptions(): Promise<PriorityEntityOptions> {
+    const projects = await this.database.select({
+      id: hubProjects.id,
+      name: hubProjects.name,
+      description: hubProjects.description,
+      color: hubProjects.color,
+    }).from(hubProjects)
+      .where(eq(hubProjects.hidden, false))
+      .orderBy(
+        asc(sql`${hubProjects.name} COLLATE BINARY`),
+        asc(sql`${hubProjects.id} COLLATE BINARY`),
+      );
+    const tagRows = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      unifiedInto: tags.unifiedInto,
+    }).from(tags)
+      .where(and(eq(tags.confirmed, true), isNull(tags.unifiedInto)))
+      .orderBy(
+        asc(sql`${tags.name} COLLATE BINARY`),
+        asc(sql`${tags.id} COLLATE BINARY`),
+      );
+    const sources = await this.database.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      color: sourceLists.iconColor,
+      connectorName: connectorConfigs.name,
+      connectorType: connectorConfigs.type,
+    }).from(sourceLists)
+      .innerJoin(connectorConfigs, eq(sourceLists.connectorInstanceId, connectorConfigs.id))
+      .where(and(
+        eq(sourceLists.hidden, false),
+        eq(connectorConfigs.enabled, true),
+        isNull(connectorConfigs.deletedAt),
+      ))
+      .orderBy(
+        asc(sql`${connectorConfigs.name} COLLATE BINARY`),
+        asc(sql`${sourceLists.name} COLLATE BINARY`),
+        asc(sql`${sourceLists.connectorInstanceId} COLLATE BINARY`),
+        asc(sql`${sourceLists.sourceId} COLLATE BINARY`),
+      );
+    return {
+      projects: projects.map((row) => ({ ...row, description: row.description ?? null })),
+      tags: tagRows.map((row) => ({ ...row, color: row.color ?? null, unifiedInto: null })),
+      sources: sources.map((row) => ({
+        ...row,
+        userDisplayName: row.userDisplayName ?? null,
+        color: row.color ?? null,
+      })),
+    };
+  }
+
+  async listPrioritySyncLog(input: {
+    readonly taskId?: string;
+    readonly limit: number;
+  }): Promise<PrioritySyncLogRow[]> {
+    return this.database.select()
+      .from(prioritySyncLog)
+      .where(input.taskId ? eq(prioritySyncLog.taskId, input.taskId) : undefined)
+      .orderBy(
+        desc(prioritySyncLog.timestamp),
+        asc(sql`${prioritySyncLog.id} COLLATE BINARY`),
+      )
+      .limit(input.limit);
+  }
+
+  async getProjectReference(projectId: string): Promise<PriorityProjectReference | null> {
+    const [row] = await this.database.select({
+      id: schema.hubProjects.id,
+      name: schema.hubProjects.name,
+      description: schema.hubProjects.description,
+      color: schema.hubProjects.color,
+    }).from(schema.hubProjects).where(eq(schema.hubProjects.id, projectId)).limit(1);
+    return row
+      ? { id: row.id, name: row.name, description: row.description ?? null, color: row.color ?? null }
+      : null;
+  }
+
+  async getTagReference(tagId: string): Promise<PriorityTagReference | null> {
+    const [row] = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      unifiedInto: tags.unifiedInto,
+    }).from(tags).where(eq(tags.id, tagId)).limit(1);
+    return row
+      ? { id: row.id, name: row.name, color: row.color ?? null, unifiedInto: row.unifiedInto ?? null }
+      : null;
+  }
+
+  async getSourceListReference(
+    connectorInstanceId: string,
+    sourceId: string,
+  ): Promise<PrioritySourceListReference | null> {
+    const [row] = await this.database.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      color: sourceLists.iconColor,
+    }).from(sourceLists).where(and(
+      eq(sourceLists.connectorInstanceId, connectorInstanceId),
+      eq(sourceLists.sourceId, sourceId),
+    )).limit(1);
+    return row
+      ? {
+          connectorInstanceId: row.connectorInstanceId,
+          sourceId: row.sourceId,
+          name: row.name,
+          userDisplayName: row.userDisplayName ?? null,
+          color: row.color ?? null,
+        }
+      : null;
+  }
+
+  async listProjectReferences(): Promise<PriorityProjectReference[]> {
+    const rows = await this.database.select({
+      id: schema.hubProjects.id,
+      name: schema.hubProjects.name,
+      description: schema.hubProjects.description,
+      color: schema.hubProjects.color,
+    }).from(schema.hubProjects);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      description: row.description ?? null,
+      color: row.color ?? null,
+    }));
+  }
+
+  async listTagReferences(): Promise<PriorityTagReference[]> {
+    const rows = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      unifiedInto: tags.unifiedInto,
+    }).from(tags);
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      color: row.color ?? null,
+      unifiedInto: row.unifiedInto ?? null,
+    }));
+  }
+
+  async listSourceListReferences(): Promise<PrioritySourceListReference[]> {
+    const rows = await this.database.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+      color: sourceLists.iconColor,
+    }).from(sourceLists);
+    return rows.map((row) => ({
+      connectorInstanceId: row.connectorInstanceId,
+      sourceId: row.sourceId,
+      name: row.name,
+      userDisplayName: row.userDisplayName ?? null,
+      color: row.color ?? null,
+    }));
+  }
+}
+
+class SqliteSourceListNameRepository implements SourceListNameRepository {
+  constructor(private readonly database: Drizzle) {}
+
+  async listSourceListDisplayNames(
+    sourceListIds: readonly string[],
+  ): Promise<SourceListDisplayNameRow[]> {
+    const uniqueIds = [...new Set(sourceListIds.filter(Boolean))];
+    if (uniqueIds.length === 0) return [];
+    const rows = await this.database.select({
+      connectorInstanceId: sourceLists.connectorInstanceId,
+      sourceId: sourceLists.sourceId,
+      name: sourceLists.name,
+      userDisplayName: sourceLists.userDisplayName,
+    }).from(sourceLists).where(inArray(sourceLists.sourceId, uniqueIds));
+    return rows.map((row) => ({
+      connectorInstanceId: row.connectorInstanceId,
+      sourceId: row.sourceId,
+      name: row.name,
+      userDisplayName: row.userDisplayName ?? null,
+    }));
+  }
+}
+
+class SqliteTaskTransferIdentityRepository implements TaskTransferIdentityRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async resolveIdentityTargets(input: {
+    taskId: string;
+    connectorInstanceId: string;
+    sourceListIds: readonly string[];
+  }): Promise<{
+    taskExists: boolean;
+    taskMetadata: Record<string, unknown>;
+    sourceLists: readonly { sourceId: string; localId: string }[];
+  }> {
+    return resolveSqliteTaskTransferIdentityTargetsForRepository(this.database, input);
+  }
+
+  async reconcileTaskRefresh(input: {
+    taskId: string;
+    connectorInstanceId: string;
+    task: {
+      sourceId: string; sourceListId: string | null; sourceListName: string | null;
+      title: string; description: string | null; status: string; statusReason: string | null;
+      priority: string; effort: number | null; microStatus: string | null; assignee: string | null;
+      updatedAt: string; completedAt: string | null; metadata: Record<string, unknown>;
+    };
+    observedAt: string;
+  }): Promise<boolean> {
+    return reconcileSqliteTaskTransferIdentityRefreshForRepository(
+      this.runTransaction,
+      input,
+    );
+  }
+}
+
+type SqliteQuickSortOperationRow = typeof quickSortOperations.$inferSelect;
+
+function toSqliteQuickSortOperation(
+  row: SqliteQuickSortOperationRow,
+): TaskQuickSortOperation {
+  return {
+    ...row,
+    mode: parseTaskQuickSortQueueMode(row.mode),
+    action: parseTaskQuickSortAction(row.action),
+    state: parseTaskQuickSortOperationState(row.state),
+  };
+}
+
+class SqliteTaskQuickSortRepository implements TaskQuickSortPersistenceRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async captureTask(taskId: string) {
+    const rows = this.database.select({
+      updatedAt: tasks.updatedAt,
+      status: tasks.status,
+      statusReason: tasks.statusReason,
+      localDisposition: tasks.localDisposition,
+      priority: tasks.priority,
+      planningHorizon: tasks.planningHorizon,
+      dueDate: tasks.dueDate,
+      completedAt: tasks.completedAt,
+      microStatus: tasks.microStatus,
+      snoozedUntil: tasks.snoozedUntil,
+      reminderAt: tasks.reminderAt,
+      effort: tasks.effort,
+      tagId: taskTags.tagId,
+    }).from(tasks)
+      .leftJoin(taskTags, eq(taskTags.taskId, tasks.id))
+      .where(eq(tasks.id, taskId))
+      .all();
+    const task = rows[0];
+    if (!task) return null;
+    return {
+      updatedAt: task.updatedAt,
+      status: task.status,
+      statusReason: task.statusReason,
+      localDisposition: task.localDisposition,
+      priority: task.priority,
+      planningHorizon: task.planningHorizon,
+      dueDate: task.dueDate,
+      completedAt: task.completedAt,
+      microStatus: task.microStatus,
+      snoozedUntil: task.snoozedUntil,
+      reminderAt: task.reminderAt,
+      effort: task.effort,
+      tagIds: rows.flatMap((row) => row.tagId === null ? [] : [row.tagId]).sort(),
+    };
+  }
+
+  async getOperation(id: string): Promise<TaskQuickSortOperation | null> {
+    const operation = this.database.select().from(quickSortOperations)
+      .where(eq(quickSortOperations.id, id))
+      .get();
+    return operation ? toSqliteQuickSortOperation(operation) : null;
+  }
+
+  async reserveOperation(
+    input: TaskQuickSortOperationReservation,
+  ): Promise<TaskQuickSortReservationOutcome> {
+    return this.runTransaction((tx) => {
+      const inserted = tx.insert(quickSortOperations).values({
+        ...input,
+        state: 'applying',
+        undoneAt: null,
+      }).onConflictDoNothing().run();
+      const operation: TaskQuickSortOperation = {
+        ...input,
+        state: 'applying',
+        undoneAt: null,
+      };
+      if (inserted.changes === 1) return { kind: 'reserved', operation };
+
+      const existing = tx.select().from(quickSortOperations)
+        .where(eq(quickSortOperations.id, input.id))
+        .get();
+      if (!existing) {
+        throw new Error(`Quick Sort operation ${input.id} conflicted but could not be read`);
+      }
+      return { kind: 'existing', operation: toSqliteQuickSortOperation(existing) };
+    });
+  }
+
+  async discardApplyingOperation(id: string): Promise<boolean> {
+    const deleted = this.database.delete(quickSortOperations).where(and(
+      eq(quickSortOperations.id, id),
+      eq(quickSortOperations.state, 'applying'),
+    )).run();
+    return deleted.changes === 1;
+  }
+
+  async finalizeOperation(
+    id: string,
+    afterSnapshot: TaskQuickSortOperation['afterSnapshot'],
+    logs: readonly TaskQuickSortLogEntry[],
+  ): Promise<TaskQuickSortOperation | null> {
+    return this.runTransaction((tx) => {
+      const changed = tx.update(quickSortOperations).set({
+        afterSnapshot,
+        state: 'applied',
+      }).where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'applying'),
+      )).run();
+      if (changed.changes !== 1) return null;
+      if (logs.length > 0) {
+        tx.insert(quickSortLog).values(logs.map((entry) => ({ ...entry }))).run();
+      }
+      const operation = tx.select().from(quickSortOperations)
+        .where(eq(quickSortOperations.id, id))
+        .get();
+      if (!operation) throw new Error(`Finalized Quick Sort operation ${id} disappeared`);
+      return toSqliteQuickSortOperation(operation);
+    });
+  }
+
+  async claimUndo(id: string): Promise<boolean> {
+    const changed = this.database.update(quickSortOperations)
+      .set({ state: 'undoing' })
+      .where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'applied'),
+        isNull(quickSortOperations.undoneAt),
+      ))
+      .run();
+    return changed.changes === 1;
+  }
+
+  async releaseUndo(id: string): Promise<boolean> {
+    const changed = this.database.update(quickSortOperations)
+      .set({ state: 'applied' })
+      .where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'undoing'),
+        isNull(quickSortOperations.undoneAt),
+      ))
+      .run();
+    return changed.changes === 1;
+  }
+
+  async finalizeUndo(id: string, undoneAt: string): Promise<boolean> {
+    return this.runTransaction((tx) => {
+      const changed = tx.update(quickSortOperations).set({
+        state: 'undone',
+        undoneAt,
+      }).where(and(
+        eq(quickSortOperations.id, id),
+        eq(quickSortOperations.state, 'undoing'),
+        isNull(quickSortOperations.undoneAt),
+      )).run();
+      if (changed.changes !== 1) return false;
+      tx.update(quickSortLog).set({ reversedAt: undoneAt })
+        .where(eq(quickSortLog.operationId, id))
+        .run();
+      return true;
+    });
+  }
+
+  async countActivityByModeSince(since: string) {
+    const rows = this.database.select({
+      mode: quickSortLog.mode,
+      count: sql<number>`count(*)`,
+    }).from(quickSortLog).where(and(
+      gte(quickSortLog.triagedAt, since),
+      isNull(quickSortLog.reversedAt),
+      ne(quickSortLog.action, 'skipped'),
+    )).groupBy(quickSortLog.mode).all();
+    return rows.map((row) => ({
+      mode: parseTaskQuickSortQueueMode(row.mode),
+      count: Number(row.count),
+    }));
+  }
+
+  async listActivityTimestampsSince(since: string): Promise<string[]> {
+    const rows = this.database.select({ triagedAt: quickSortLog.triagedAt })
+      .from(quickSortLog)
+      .where(and(
+        gte(quickSortLog.triagedAt, since),
+        isNull(quickSortLog.reversedAt),
+        ne(quickSortLog.action, 'skipped'),
+      ))
+      .all();
+    return rows.map((row) => row.triagedAt);
+  }
+
+  async recordActivity(entry: TaskQuickSortLogEntry): Promise<void> {
+    this.database.insert(quickSortLog).values({ ...entry }).run();
+  }
+}
+
+/* ------------------------------------------------------------------ */
+
+/** Walks `unified_into` chains and returns the tags that resolve into a root. */
+function collectAliasTagIds(
+  aliases: ReadonlyArray<{ id: string; unifiedInto: string | null }>,
+  consolidationRoots: ReadonlySet<string>,
+  targetTagId: string,
+): string[] {
+  const aliasesById = new Map(aliases.map((tag) => [tag.id, tag]));
+  return aliases.flatMap((tag) => {
+    if (tag.id === targetTagId || !tag.unifiedInto) return [];
+    const visited = new Set<string>([tag.id]);
+    let currentId: string | null = tag.unifiedInto;
+    while (currentId && !visited.has(currentId)) {
+      if (consolidationRoots.has(currentId)) return [tag.id];
+      visited.add(currentId);
+      currentId = aliasesById.get(currentId)?.unifiedInto ?? null;
+    }
+    return [];
+  });
+}
+
+/** The rename/recolor patch a tag consolidation optionally applies. */
+function tagConsolidationRename(input: {
+  readonly newName: string | null;
+  readonly newSlug: string | null;
+  readonly newColor: string | null;
+}): { name?: string; slug?: string; color?: string } {
+  const updates: { name?: string; slug?: string; color?: string } = {};
+  if (input.newName) {
+    updates.name = input.newName;
+    if (input.newSlug) updates.slug = input.newSlug;
+  }
+  if (input.newColor) updates.color = input.newColor;
+  return updates;
+}
+
+function decodeTemplateSubtasks(value: unknown): SubtaskTemplateItem[] {
+  return decodeLenientJsonArray(value).flatMap((entry): SubtaskTemplateItem[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const record: Record<string, unknown> = entry as Record<string, unknown>;
+    if (typeof record.title !== 'string') return [];
+    return [{
+      title: record.title,
+      priority: typeof record.priority === 'string' ? record.priority : null,
+      estimatedMinutes: typeof record.estimatedMinutes === 'number'
+        ? record.estimatedMinutes
+        : null,
+    }];
+  });
+}
+
+function decodeTemplateWorkflowTasks(value: unknown): SubtaskTemplateWorkflowTask[] {
+  return decodeLenientJsonArray(value).flatMap((entry): SubtaskTemplateWorkflowTask[] => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return [];
+    const record: Record<string, unknown> = entry as Record<string, unknown>;
+    if (typeof record.title !== 'string') return [];
+    return [{
+      title: record.title,
+      description: typeof record.description === 'string' ? record.description : null,
+      priority: typeof record.priority === 'string' ? record.priority : null,
+      subtasks: decodeLenientJsonArray(record.subtasks)
+        .filter((title): title is string => typeof title === 'string'),
+    }];
+  });
+}
+
+const SUBTASK_TEMPLATE_COLUMNS = {
+  id: subtaskTemplates.id,
+  name: subtaskTemplates.name,
+  description: subtaskTemplates.description,
+  category: subtaskTemplates.category,
+  type: subtaskTemplates.type,
+  subtasks: subtaskTemplates.subtasks,
+  workflowTasks: subtaskTemplates.workflowTasks,
+  icon: subtaskTemplates.icon,
+  isBuiltIn: subtaskTemplates.isBuiltIn,
+  createdAt: subtaskTemplates.createdAt,
+  updatedAt: subtaskTemplates.updatedAt,
+};
+
+/** Sorted, de-duplicated projection used where SQLite would use GROUP_CONCAT. */
+function sortedUnique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+class SqliteTaskOrganizationRepository implements TaskOrganizationRepository {
+  constructor(
+    private readonly database: Drizzle,
+    private readonly runTransaction: SqliteTaskCoreTransactionRunner,
+  ) {}
+
+  async readTagOverview(input: {
+    readonly type: string | null;
+    readonly source: string | null;
+    readonly listId: string | null;
+    readonly includeUsageBreakdown: boolean;
+  }): Promise<TagOverviewResult> {
+    const conditions: SQL[] = [];
+    if (input.type) conditions.push(eq(tags.type, input.type));
+    if (input.source) {
+      const linkedToConnectorType = this.database
+        .select({ tagId: taskTags.tagId })
+        .from(taskTags)
+        .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+        .where(eq(tasks.connectorType, input.source));
+      conditions.push(
+        or(eq(tags.source, input.source), inArray(tags.id, linkedToConnectorType))!,
+      );
+    }
+    if (input.listId) {
+      const linkedToList = this.database
+        .select({ tagId: taskTags.tagId })
+        .from(taskTags)
+        .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+        .where(eq(tasks.sourceListId, input.listId));
+      conditions.push(inArray(tags.id, linkedToList));
+    }
+
+    const tagRows = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      slug: tags.slug,
+      type: tags.type,
+      source: tags.source,
+      color: tags.color,
+      confirmed: tags.confirmed,
+      createdAt: tags.createdAt,
+      unifiedInto: tags.unifiedInto,
+    }).from(tags)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(asc(tags.type), asc(tags.name), asc(tags.id));
+
+    const tagIds = tagRows.map((tag) => tag.id);
+    if (!tagIds.length) {
+      return { tags: [], sourceTagSlugs: await this.readSourceTagSlugs() };
+    }
+
+    const linkageRows = await this.database.select({
+      tagId: taskTags.tagId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
+      sourceListName: tasks.sourceListName,
+    }).from(taskTags)
+      .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+      .where(inArray(taskTags.tagId, tagIds));
+
+    const usageCounts = new Map<string, number>();
+    const connectorTypesByTag = new Map<string, string[]>();
+    const listNamesByTag = new Map<string, string[]>();
+    const sourceUsageByTag = new Map<string, Map<string, number>>();
+    const listUsageByTag = new Map<string, Map<string, TagListUsageRow>>();
+    for (const row of linkageRows) {
+      usageCounts.set(row.tagId, (usageCounts.get(row.tagId) ?? 0) + 1);
+      connectorTypesByTag.set(row.tagId, [
+        ...(connectorTypesByTag.get(row.tagId) ?? []),
+        row.connectorType,
+      ]);
+      if (row.sourceListName !== null) {
+        listNamesByTag.set(row.tagId, [
+          ...(listNamesByTag.get(row.tagId) ?? []),
+          row.sourceListName,
+        ]);
+      }
+      if (!input.includeUsageBreakdown) continue;
+
+      const bySource = sourceUsageByTag.get(row.tagId) ?? new Map<string, number>();
+      bySource.set(row.connectorType, (bySource.get(row.connectorType) ?? 0) + 1);
+      sourceUsageByTag.set(row.tagId, bySource);
+
+      if (row.sourceListId === null) continue;
+      const byList = listUsageByTag.get(row.tagId) ?? new Map<string, TagListUsageRow>();
+      const key = `${row.connectorInstanceId}\u0000${row.sourceListId}`;
+      const existing = byList.get(key);
+      byList.set(key, {
+        tagId: row.tagId,
+        connectorInstanceId: row.connectorInstanceId,
+        sourceListId: row.sourceListId,
+        usageCount: (existing?.usageCount ?? 0) + 1,
+      });
+      listUsageByTag.set(row.tagId, byList);
+    }
+
+    return {
+      tags: tagRows.map((tag) => {
+        const connectorTypes = sortedUnique(connectorTypesByTag.get(tag.id) ?? []);
+        return {
+          ...tag,
+          usageCount: usageCounts.get(tag.id) ?? 0,
+          sources: connectorTypes.length
+            ? connectorTypes
+            : tag.source ? [tag.source] : [],
+          sourceNames: sortedUnique(listNamesByTag.get(tag.id) ?? []),
+          listUsage: [...(listUsageByTag.get(tag.id)?.values() ?? [])]
+            .sort((left, right) => (
+              left.connectorInstanceId.localeCompare(right.connectorInstanceId)
+              || (left.sourceListId ?? '').localeCompare(right.sourceListId ?? '')
+            )),
+          sourceUsage: [...(sourceUsageByTag.get(tag.id)?.entries() ?? [])]
+            .map(([connectorType, usageCount]) => ({
+              tagId: tag.id,
+              connectorType,
+              usageCount,
+            }))
+            .sort((left, right) => left.connectorType.localeCompare(right.connectorType)),
+        };
+      }),
+      sourceTagSlugs: await this.readSourceTagSlugs(),
+    };
+  }
+
+  private async readSourceTagSlugs(): Promise<string[]> {
+    const rows = await this.database.select({ slug: tags.slug })
+      .from(tags)
+      .where(eq(tags.type, 'source'))
+      .orderBy(asc(tags.slug), asc(tags.id));
+    return rows.map((row) => row.slug);
+  }
+
+  async createHubTag(input: {
+    readonly id: string;
+    readonly name: string;
+    readonly slug: string;
+    readonly color: string;
+    readonly createdAt: string;
+  }): Promise<TagCreateOutcome> {
+    return this.runTransaction<TagCreateOutcome>((tx) => {
+      const existing = tx.select({
+        id: tags.id,
+        name: tags.name,
+        slug: tags.slug,
+        type: tags.type,
+        color: tags.color,
+      }).from(tags).where(eq(tags.slug, input.slug)).limit(1).get();
+      if (existing) return { kind: 'existing', tag: existing };
+
+      tx.insert(tags).values({
+        id: input.id,
+        name: input.name,
+        slug: input.slug,
+        type: 'hub',
+        source: null,
+        color: input.color,
+        confirmed: true,
+        createdAt: input.createdAt,
+      }).run();
+      return {
+        kind: 'created',
+        tag: {
+          id: input.id,
+          name: input.name,
+          slug: input.slug,
+          type: 'hub',
+          color: input.color,
+        },
+      };
+    });
+  }
+
+  async updateTag(input: {
+    readonly tagId: string;
+    readonly name?: string;
+    readonly slug?: string;
+    readonly color?: string;
+    readonly confirmed?: boolean;
+  }): Promise<{ affectedTaskIds: string[] }> {
+    return this.runTransaction((tx) => {
+      const updates: { name?: string; slug?: string; color?: string; confirmed?: boolean } = {};
+      if (input.name !== undefined) updates.name = input.name;
+      if (input.slug !== undefined) updates.slug = input.slug;
+      if (input.color !== undefined) updates.color = input.color;
+      if (input.confirmed !== undefined) updates.confirmed = input.confirmed;
+      if (Object.keys(updates).length > 0) {
+        tx.update(tags).set(updates).where(eq(tags.id, input.tagId)).run();
+      }
+      const affected = tx.select({ taskId: taskTags.taskId })
+        .from(taskTags)
+        .where(eq(taskTags.tagId, input.tagId))
+        .all();
+      return { affectedTaskIds: affected.map((row) => row.taskId) };
+    });
+  }
+
+  async deleteHubTag(tagId: string): Promise<TagDeleteOutcome> {
+    return this.runTransaction<TagDeleteOutcome>((tx) => {
+      const tag = tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(eq(tags.id, tagId)).limit(1).get();
+      if (!tag) return { kind: 'missing' };
+      if (tag.type === 'source') return { kind: 'source-managed' };
+
+      const affected = tx.select({ taskId: taskTags.taskId })
+        .from(taskTags)
+        .where(eq(taskTags.tagId, tagId))
+        .all();
+      tx.delete(taskTags).where(eq(taskTags.tagId, tagId)).run();
+      tx.delete(tags).where(eq(tags.id, tagId)).run();
+      return { kind: 'deleted', affectedTaskIds: affected.map((row) => row.taskId) };
+    });
+  }
+
+  async getTagConsolidationCandidates(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+  }): Promise<TagConsolidationCandidates> {
+    const [target] = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      type: tags.type,
+    }).from(tags).where(eq(tags.id, input.targetTagId)).limit(1);
+    const sources = input.sourceTagIds.length
+      ? await this.database.select({
+          id: tags.id,
+          name: tags.name,
+          type: tags.type,
+        }).from(tags)
+          .where(inArray(tags.id, [...input.sourceTagIds]))
+          .orderBy(asc(tags.id))
+      : [];
+    return { target: target ?? null, sources };
+  }
+
+  async mergeTags(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+    readonly newName: string | null;
+    readonly newSlug: string | null;
+    readonly newColor: string | null;
+  }): Promise<TagMergeOutcome> {
+    const tagsToRemove = [...input.sourceTagIds];
+    return this.runTransaction<TagMergeOutcome>((tx) => {
+      const currentTarget = tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(eq(tags.id, input.targetTagId)).get();
+      const currentSourceTags = tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(inArray(tags.id, tagsToRemove)).all();
+      if (!currentTarget || currentSourceTags.length !== tagsToRemove.length) {
+        return { kind: 'stale' };
+      }
+      if (
+        currentTarget.type === 'source'
+        || currentSourceTags.some((tag) => tag.type === 'source')
+      ) {
+        return { kind: 'source-backed' };
+      }
+
+      const aliasTagIds = collectAliasTagIds(
+        tx.select({ id: tags.id, unifiedInto: tags.unifiedInto }).from(tags).all(),
+        new Set([...tagsToRemove, input.targetTagId]),
+        input.targetTagId,
+      );
+      tx.update(tags).set({ unifiedInto: null })
+        .where(eq(tags.id, input.targetTagId)).run();
+      if (aliasTagIds.length > 0) {
+        tx.update(tags).set({ unifiedInto: input.targetTagId })
+          .where(inArray(tags.id, aliasTagIds)).run();
+      }
+
+      const sourceTaskTags = tx.select({ taskId: taskTags.taskId })
+        .from(taskTags)
+        .where(inArray(taskTags.tagId, [...new Set([...tagsToRemove, ...aliasTagIds])]))
+        .all();
+      const existingTargetLinks = new Set(
+        tx.select({ taskId: taskTags.taskId })
+          .from(taskTags)
+          .where(eq(taskTags.tagId, input.targetTagId))
+          .all()
+          .map((row) => row.taskId),
+      );
+      const uniqueTaskIds = [...new Set(
+        sourceTaskTags
+          .filter((row) => !existingTargetLinks.has(row.taskId))
+          .map((row) => row.taskId),
+      )];
+      if (uniqueTaskIds.length > 0) {
+        tx.insert(taskTags)
+          .values(uniqueTaskIds.map((taskId) => ({ taskId, tagId: input.targetTagId })))
+          .run();
+      }
+
+      tx.delete(taskTags).where(inArray(taskTags.tagId, tagsToRemove)).run();
+      tx.delete(tags).where(inArray(tags.id, tagsToRemove)).run();
+
+      const updates = tagConsolidationRename(input);
+      if (Object.keys(updates).length > 0) {
+        tx.update(tags).set(updates).where(eq(tags.id, input.targetTagId)).run();
+      }
+      return { kind: 'merged', reassigned: uniqueTaskIds.length };
+    });
+  }
+
+  async unifyTags(input: {
+    readonly targetTagId: string;
+    readonly sourceTagIds: readonly string[];
+    readonly newName: string | null;
+    readonly newSlug: string | null;
+    readonly newColor: string | null;
+  }): Promise<TagUnifyOutcome> {
+    const tagsToUnify = [...input.sourceTagIds];
+    return this.runTransaction<TagUnifyOutcome>((tx) => {
+      const currentTarget = tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(eq(tags.id, input.targetTagId)).get();
+      const currentSourceTags = tx.select({ id: tags.id, type: tags.type })
+        .from(tags).where(inArray(tags.id, tagsToUnify)).all();
+      if (!currentTarget || currentSourceTags.length !== tagsToUnify.length) {
+        return { kind: 'stale' };
+      }
+
+      const targetIsSourceBacked = currentTarget.type === 'source';
+      const sourceBackedTagIds = currentSourceTags
+        .filter((tag) => tag.type === 'source')
+        .map((tag) => tag.id);
+      const localTagIds = currentSourceTags
+        .filter((tag) => tag.type !== 'source')
+        .map((tag) => tag.id);
+      const globallyConsolidatedTagIds = targetIsSourceBacked
+        ? sourceBackedTagIds
+        : tagsToUnify;
+
+      const allTagAliases = tx.select({
+        id: tags.id,
+        type: tags.type,
+        unifiedInto: tags.unifiedInto,
+      }).from(tags).all();
+      const aliasTypeById = new Map(allTagAliases.map((tag) => [tag.id, tag.type]));
+      const aliasTagIds = collectAliasTagIds(
+        allTagAliases,
+        new Set([...globallyConsolidatedTagIds, input.targetTagId]),
+        input.targetTagId,
+      );
+      const tagsToCanonicalize = [...new Set([
+        ...globallyConsolidatedTagIds,
+        ...aliasTagIds,
+      ].filter((id) => id !== input.targetTagId))];
+      const selectedSourceTagIds = new Set([
+        input.targetTagId,
+        ...tagsToCanonicalize.filter((id) => aliasTypeById.get(id) === 'source'),
+      ]);
+      const selectedSourceScopeKeys = new Set(
+        tx.select({
+          connectorInstanceId: tasks.connectorInstanceId,
+          sourceListId: tasks.sourceListId,
+        }).from(taskTags)
+          .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+          .where(inArray(taskTags.tagId, [...selectedSourceTagIds]))
+          .all()
+          .map((row) => `${row.connectorInstanceId}\u0000${row.sourceListId ?? ''}`),
+      );
+      if (
+        targetIsSourceBacked
+        && localTagIds.length > 0
+        && selectedSourceScopeKeys.size === 0
+      ) {
+        return { kind: 'missing-source-scope' };
+      }
+
+      tx.update(tags).set({ unifiedInto: null })
+        .where(eq(tags.id, input.targetTagId)).run();
+      if (tagsToCanonicalize.length > 0) {
+        tx.update(tags).set({ unifiedInto: input.targetTagId })
+          .where(inArray(tags.id, tagsToCanonicalize)).run();
+      }
+
+      // A source winner represents only its own connector/list scopes. Shared
+      // local tags must remain available to every other source.
+      const sourceTaskTags = tx.select({
+        taskId: taskTags.taskId,
+        tagId: taskTags.tagId,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+      }).from(taskTags)
+        .innerJoin(tasks, eq(taskTags.taskId, tasks.id))
+        .where(inArray(taskTags.tagId, [...new Set([...tagsToUnify, ...aliasTagIds])]))
+        .all();
+      const existingTargetLinks = new Set(
+        tx.select({ taskId: taskTags.taskId })
+          .from(taskTags)
+          .where(eq(taskTags.tagId, input.targetTagId))
+          .all()
+          .map((row) => row.taskId),
+      );
+
+      const uniqueTaskIds = [...new Set(
+        sourceTaskTags
+          .filter((row) => !targetIsSourceBacked || tagsToCanonicalize.includes(row.tagId))
+          .map((row) => row.taskId)
+          .filter((taskId) => !existingTargetLinks.has(taskId)),
+      )];
+      if (uniqueTaskIds.length > 0) {
+        tx.insert(taskTags)
+          .values(uniqueTaskIds.map((taskId) => ({ taskId, tagId: input.targetTagId })))
+          .run();
+      }
+
+      let detached = 0;
+      let detachedTaskIds: string[] = [];
+      if (localTagIds.length > 0) {
+        if (targetIsSourceBacked) {
+          const sourceBackedTaskIds = new Set(
+            sourceTaskTags
+              .filter((row) => selectedSourceTagIds.has(row.tagId))
+              .map((row) => row.taskId),
+          );
+          const scopedTaskIds = [...new Set(
+            sourceTaskTags
+              .filter((row) =>
+                localTagIds.includes(row.tagId)
+                && selectedSourceScopeKeys.has(
+                  `${row.connectorInstanceId}\u0000${row.sourceListId ?? ''}`,
+                )
+                && (existingTargetLinks.has(row.taskId)
+                  || sourceBackedTaskIds.has(row.taskId)))
+              .map((row) => row.taskId),
+          )];
+          if (scopedTaskIds.length > 0) {
+            const result = tx.delete(taskTags).where(and(
+              inArray(taskTags.tagId, localTagIds),
+              inArray(taskTags.taskId, scopedTaskIds),
+            )).run();
+            detached = result.changes;
+            detachedTaskIds = scopedTaskIds;
+          }
+        } else {
+          tx.delete(taskTags).where(inArray(taskTags.tagId, localTagIds)).run();
+          tx.delete(tags).where(inArray(tags.id, localTagIds)).run();
+        }
+      }
+
+      const updates = tagConsolidationRename(input);
+      if (Object.keys(updates).length > 0) {
+        tx.update(tags).set(updates).where(eq(tags.id, input.targetTagId)).run();
+      }
+
+      return {
+        kind: 'unified',
+        linked: uniqueTaskIds.length,
+        detached,
+        detachedTaskIds,
+        localTagIds,
+        targetIsSourceBacked,
+      };
+    });
+  }
+
+  async listTaskIdsForTag(tagId: string): Promise<string[]> {
+    const rows = await this.database.select({ taskId: taskTags.taskId })
+      .from(taskTags)
+      .where(eq(taskTags.tagId, tagId));
+    return rows.map((row) => row.taskId);
+  }
+
+  async getTagPushSubject(tagId: string): Promise<TagIdentityRow | null> {
+    const [row] = await this.database.select({
+      id: tags.id,
+      name: tags.name,
+      slug: tags.slug,
+      type: tags.type,
+      color: tags.color,
+    }).from(tags).where(eq(tags.id, tagId)).limit(1);
+    return row ?? null;
+  }
+
+  async getTagSourceRemovalContext(tagId: string): Promise<TagSourceRemovalContext> {
+    const [tag] = await this.database.select({ id: tags.id, name: tags.name })
+      .from(tags).where(eq(tags.id, tagId)).limit(1);
+    if (!tag) return { tag: null, tasks: [] };
+
+    const linkedTaskIds = await this.database.select({ taskId: taskTags.taskId })
+      .from(taskTags).where(eq(taskTags.tagId, tagId));
+    if (!linkedTaskIds.length) return { tag, tasks: [] };
+
+    const linkedTasks = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorInstanceId: tasks.connectorInstanceId,
+    }).from(tasks)
+      .where(inArray(tasks.id, linkedTaskIds.map((row) => row.taskId)))
+      .orderBy(asc(tasks.id));
+    return { tag, tasks: linkedTasks };
+  }
+
+  async ensureBuiltInSubtaskTemplates(
+    seeds: readonly SubtaskTemplateSeed[],
+    now: string,
+  ): Promise<void> {
+    if (!seeds.length) return;
+    this.runTransaction((tx) => {
+      const existing = new Set(
+        tx.select({ id: subtaskTemplates.id })
+          .from(subtaskTemplates)
+          .where(inArray(subtaskTemplates.id, seeds.map((seed) => seed.id)))
+          .all()
+          .map((row) => row.id),
+      );
+      const missing = seeds.filter((seed) => !existing.has(seed.id));
+      if (!missing.length) return;
+      tx.insert(subtaskTemplates).values(missing.map((seed) => ({
+        id: seed.id,
+        name: seed.name,
+        description: seed.description,
+        category: seed.category,
+        type: seed.type,
+        icon: seed.icon,
+        subtasks: seed.subtasks,
+        workflowTasks: seed.workflowTasks,
+        isBuiltIn: true,
+        createdAt: now,
+        updatedAt: now,
+      }))).onConflictDoNothing().run();
+    });
+  }
+
+  async listSubtaskTemplates(input: {
+    readonly category: string | null;
+    readonly type: string | null;
+  }): Promise<SubtaskTemplateRow[]> {
+    const conditions: SQL[] = [];
+    if (input.category) conditions.push(eq(subtaskTemplates.category, input.category));
+    if (input.type) conditions.push(eq(subtaskTemplates.type, input.type));
+    return this.database.select(SUBTASK_TEMPLATE_COLUMNS)
+      .from(subtaskTemplates)
+      .where(conditions.length ? and(...conditions) : undefined)
+      .orderBy(asc(subtaskTemplates.id));
+  }
+
+  async getSubtaskTemplate(templateId: string): Promise<SubtaskTemplateRow | null> {
+    const [row] = await this.database.select(SUBTASK_TEMPLATE_COLUMNS)
+      .from(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).limit(1);
+    return row ?? null;
+  }
+
+  async getSubtaskTemplateApplicationPlan(
+    templateId: string,
+  ): Promise<SubtaskTemplateApplicationPlan | null> {
+    const [row] = await this.database.select({
+      id: subtaskTemplates.id,
+      type: subtaskTemplates.type,
+      subtasks: subtaskTemplates.subtasks,
+      workflowTasks: subtaskTemplates.workflowTasks,
+    }).from(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).limit(1);
+    if (!row) return null;
+    return {
+      id: row.id,
+      type: row.type,
+      subtasks: decodeTemplateSubtasks(row.subtasks),
+      workflowTasks: decodeTemplateWorkflowTasks(row.workflowTasks),
+    };
+  }
+
+  async createSubtaskTemplate(input: {
+    readonly id: string;
+    readonly template: SubtaskTemplateWrite;
+    readonly now: string;
+  }): Promise<SubtaskTemplateRow> {
+    return this.runTransaction((tx) => {
+      tx.insert(subtaskTemplates).values({
+        id: input.id,
+        name: input.template.name,
+        description: input.template.description,
+        category: input.template.category,
+        type: input.template.type,
+        icon: input.template.icon,
+        subtasks: input.template.subtasks,
+        workflowTasks: input.template.workflowTasks,
+        isBuiltIn: false,
+        createdAt: input.now,
+        updatedAt: input.now,
+      }).run();
+      return tx.select(SUBTASK_TEMPLATE_COLUMNS)
+        .from(subtaskTemplates)
+        .where(eq(subtaskTemplates.id, input.id))
+        .limit(1)
+        .all()[0];
+    });
+  }
+
+  async updateSubtaskTemplate(input: {
+    readonly id: string;
+    readonly patch: SubtaskTemplatePatch;
+    readonly now: string;
+  }): Promise<SubtaskTemplateRow | null> {
+    return this.runTransaction<SubtaskTemplateRow | null>((tx) => {
+      const existing = tx.select({ id: subtaskTemplates.id })
+        .from(subtaskTemplates).where(eq(subtaskTemplates.id, input.id)).limit(1).get();
+      if (!existing) return null;
+
+      const patch = input.patch;
+      tx.update(subtaskTemplates).set({
+        ...(patch.name !== undefined ? { name: patch.name } : {}),
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+        ...(patch.category !== undefined ? { category: patch.category } : {}),
+        ...(patch.type !== undefined ? { type: patch.type } : {}),
+        ...(patch.icon !== undefined ? { icon: patch.icon } : {}),
+        ...(patch.subtasks !== undefined ? { subtasks: patch.subtasks } : {}),
+        ...(patch.workflowTasks !== undefined ? { workflowTasks: patch.workflowTasks } : {}),
+        updatedAt: input.now,
+      }).where(eq(subtaskTemplates.id, input.id)).run();
+      return tx.select(SUBTASK_TEMPLATE_COLUMNS)
+        .from(subtaskTemplates)
+        .where(eq(subtaskTemplates.id, input.id))
+        .limit(1)
+        .all()[0] ?? null;
+    });
+  }
+
+  async deleteSubtaskTemplate(templateId: string): Promise<SubtaskTemplateDeleteOutcome> {
+    return this.runTransaction<SubtaskTemplateDeleteOutcome>((tx) => {
+      const existing = tx.select({
+        id: subtaskTemplates.id,
+        isBuiltIn: subtaskTemplates.isBuiltIn,
+      }).from(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).limit(1).get();
+      if (!existing) return { kind: 'missing' };
+      if (existing.isBuiltIn) return { kind: 'built-in' };
+      tx.delete(subtaskTemplates).where(eq(subtaskTemplates.id, templateId)).run();
+      return { kind: 'deleted' };
+    });
+  }
+
+  async applyWorkflowTemplate(input: {
+    readonly templateId: string;
+    readonly parentTaskId: string | null;
+    readonly connectorType: string;
+    readonly connectorInstanceId: string;
+    readonly isLocalOnly: boolean;
+    readonly sourceListId: string | null;
+    readonly sourceListName: string | null;
+    readonly now: string;
+    readonly tasks: readonly TemplateWorkflowTaskInsert[];
+  }): Promise<void> {
+    if (!input.tasks.length) return;
+    const syncStatus = input.isLocalOnly ? 'synced' : 'pending_push';
+    const rootDepth = input.parentTaskId ? 1 : 0;
+    this.runTransaction((tx) => {
+      for (const workflowTask of input.tasks) {
+        tx.insert(tasks).values({
+          id: workflowTask.id,
+          sourceId: `template:${workflowTask.id}`,
+          connectorType: input.connectorType,
+          connectorInstanceId: input.connectorInstanceId,
+          title: workflowTask.title,
+          description: workflowTask.description,
+          status: 'todo',
+          priority: workflowTask.priority,
+          parentId: input.parentTaskId,
+          depth: rootDepth,
+          isChecklistItem: false,
+          syncStatus,
+          createdAt: input.now,
+          updatedAt: input.now,
+          metadata: JSON.stringify({
+            fromTemplate: input.templateId,
+            sourceListId: input.sourceListId,
+            sourceListName: input.sourceListName,
+          }),
+          lastSyncedAt: input.now,
+        }).run();
+
+        for (const subtask of workflowTask.subtasks) {
+          tx.insert(tasks).values({
+            id: subtask.id,
+            sourceId: `template:${subtask.id}`,
+            connectorType: input.connectorType,
+            connectorInstanceId: input.connectorInstanceId,
+            title: subtask.title,
+            status: 'todo',
+            priority: 'none',
+            parentId: workflowTask.id,
+            depth: rootDepth + 1,
+            isChecklistItem: true,
+            syncStatus,
+            createdAt: input.now,
+            updatedAt: input.now,
+            metadata: JSON.stringify({ fromTemplate: input.templateId }),
+            lastSyncedAt: input.now,
+          }).run();
+        }
+      }
+    });
+  }
+
+  async applySingleTemplate(input: {
+    readonly templateId: string;
+    readonly parentTaskId: string;
+    readonly now: string;
+    readonly subtasks: readonly TemplateSubtaskInsert[];
+  }): Promise<TemplateSubtaskApplicationOutcome> {
+    return this.runTransaction<TemplateSubtaskApplicationOutcome>((tx) => {
+      const parent = tx.select({
+        sourceId: tasks.sourceId,
+        connectorType: tasks.connectorType,
+        connectorInstanceId: tasks.connectorInstanceId,
+        depth: tasks.depth,
+      }).from(tasks).where(eq(tasks.id, input.parentTaskId)).limit(1).get();
+      if (!parent) return { kind: 'missing-parent' };
+
+      const parentIsLocalOnly = parent.connectorType === 'local'
+        || parent.sourceId.startsWith('local:');
+      for (const subtask of input.subtasks) {
+        tx.insert(tasks).values({
+          id: subtask.id,
+          sourceId: `template:${subtask.id}`,
+          connectorType: parent.connectorType,
+          connectorInstanceId: parent.connectorInstanceId,
+          title: subtask.title,
+          status: 'todo',
+          priority: subtask.priority,
+          parentId: input.parentTaskId,
+          depth: (parent.depth || 0) + 1,
+          isChecklistItem: true,
+          syncStatus: parentIsLocalOnly ? 'synced' : 'pending_push',
+          createdAt: input.now,
+          updatedAt: input.now,
+          metadata: JSON.stringify(subtask.estimatedMinutes === null
+            ? { fromTemplate: input.templateId }
+            : {
+                fromTemplate: input.templateId,
+                estimatedMinutes: subtask.estimatedMinutes,
+              }),
+          lastSyncedAt: input.now,
+        }).run();
+      }
+      return { kind: 'applied' };
+    });
+  }
+
+  async getTaskMoveToListContext(taskId: string): Promise<TaskMoveToListTaskRow | null> {
+    const [row] = await this.database.select({
+      id: tasks.id,
+      sourceId: tasks.sourceId,
+      connectorType: tasks.connectorType,
+      connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
+    }).from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    return row ?? null;
+  }
+
+  async finalizeTaskMoveToList(input: {
+    readonly taskId: string;
+    readonly sourceListId: string;
+    readonly sourceId: string | null;
+    readonly updatedAt: string;
+  }): Promise<void> {
+    await this.database.update(tasks).set({
+      sourceListId: input.sourceListId,
+      ...(input.sourceId ? { sourceId: input.sourceId } : {}),
+      updatedAt: input.updatedAt,
+    }).where(eq(tasks.id, input.taskId));
+  }
+
+  async getTaskMovePreviewSnapshot(taskId: string): Promise<TaskMovePreviewSnapshot | null> {
+    const [task] = await this.database.select(MOVE_TASK_COLUMNS)
+      .from(tasks).where(eq(tasks.id, taskId)).limit(1);
+    if (!task) return null;
+
+    const [tagRows, subtaskRows, schedules, attachments, projectRows] = await Promise.all([
+      this.database.select({ name: tags.name, slug: tags.slug })
+        .from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(eq(taskTags.taskId, taskId))
+        .orderBy(asc(tags.id)),
+      this.database.select({ count: sql<number>`count(*)` })
+        .from(tasks).where(eq(tasks.parentId, taskId)),
+      this.database.select({
+        estimatedDuration: taskSchedules.estimatedDuration,
+        recurrence: taskSchedules.recurrence,
+        scheduledDate: taskSchedules.scheduledDate,
+        scheduledTime: taskSchedules.scheduledTime,
+        isTimeBlocked: taskSchedules.isTimeBlocked,
+      }).from(taskSchedules).where(eq(taskSchedules.taskId, taskId)).limit(1),
+      this.database.select({ sourceAttachmentId: taskAttachments.sourceAttachmentId })
+        .from(taskAttachments).where(eq(taskAttachments.taskId, taskId)),
+      this.database.select({ count: sql<number>`count(*)` })
+        .from(taskProjects).where(eq(taskProjects.taskId, taskId)),
+    ]);
+
+    return {
+      task: toMoveTaskRow(task),
+      tags: tagRows,
+      subtaskCount: Number(subtaskRows[0]?.count ?? 0),
+      schedule: schedules[0] ?? null,
+      storedAttachmentCount: attachments.length,
+      storedAttachmentSourceIds: attachments
+        .map((attachment) => attachment.sourceAttachmentId)
+        .filter((id): id is string => id !== null),
+      projectCount: Number(projectRows[0]?.count ?? 0),
+    };
+  }
+
+  async readSmartScoreInputs(input: {
+    readonly statuses: readonly string[];
+  }): Promise<TaskSmartScoreSnapshot> {
+    const [rankingRows, taskRows] = await Promise.all([
+      this.database.select({
+        id: sourceRankings.id,
+        connectorType: sourceRankings.connectorType,
+        name: sourceRankings.name,
+        rank: sourceRankings.rank,
+        updatedAt: sourceRankings.updatedAt,
+      }).from(sourceRankings).orderBy(asc(sourceRankings.rank), asc(sourceRankings.id)),
+      input.statuses.length
+        ? this.database.select(MOVE_TASK_COLUMNS).from(tasks)
+            .where(inArray(tasks.status, [...input.statuses]))
+            .orderBy(asc(tasks.id))
+        : [],
+    ]);
+
+    const taskIds = taskRows.map((task) => task.id);
+    if (!taskIds.length) {
+      return {
+        tasks: [],
+        sourceRankings: rankingRows,
+        taskTags: [],
+        taskProjects: [],
+        estimatedDurations: [],
+      };
+    }
+
+    const [tagRows, projectRows, scheduleRows] = await Promise.all([
+      this.database.select({
+        taskId: taskTags.taskId,
+        tagId: tags.id,
+        unifiedInto: tags.unifiedInto,
+        tagName: tags.name,
+      }).from(taskTags)
+        .innerJoin(tags, eq(taskTags.tagId, tags.id))
+        .where(inArray(taskTags.taskId, taskIds))
+        .orderBy(asc(taskTags.taskId), asc(tags.id)),
+      this.database.select({
+        taskId: taskProjects.taskId,
+        projectId: hubProjects.id,
+        projectName: hubProjects.name,
+      }).from(taskProjects)
+        .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
+        .where(inArray(taskProjects.taskId, taskIds))
+        .orderBy(asc(taskProjects.taskId), asc(hubProjects.id)),
+      this.database.select({
+        taskId: taskSchedules.taskId,
+        estimatedDuration: taskSchedules.estimatedDuration,
+      }).from(taskSchedules)
+        .where(inArray(taskSchedules.taskId, taskIds))
+        .orderBy(asc(taskSchedules.taskId)),
+    ]);
+
+    return {
+      tasks: taskRows.map(toMoveTaskRow),
+      sourceRankings: rankingRows,
+      taskTags: tagRows.map((row) => ({
+        taskId: row.taskId,
+        tagId: row.unifiedInto || row.tagId,
+        tagName: row.tagName,
+      })),
+      taskProjects: projectRows,
+      estimatedDurations: scheduleRows,
+    };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+
+/**
+ * Builds the SQLite task-core composition. Both the read handle and the
+ * transaction runner are required, and every repository — reader and writer —
+ * is constructed from exactly this pair. There is no module-level fallback, so
+ * an injected database can never be read while writes land somewhere else.
+ */
+export function createSqliteTaskCorePersistence(
+  database: Drizzle,
+  transactionRunner: SqliteTaskCoreTransactionRunner,
+): TaskCorePersistence {
+  const filterInputs = new SqliteTaskFilterInputRepository(database);
+  const queries = new SqliteTaskQueryRepository(database, filterInputs);
+  return {
+    collections: new SqliteTaskCollectionReadRepository(database, queries),
+    details: new SqliteTaskDetailReadRepository(database),
+    creates: new SqliteTaskCreateRepository(database, transactionRunner),
+    occurrences: new SqliteTaskOccurrenceMaterializationRepository(transactionRunner),
+    mutations: new SqliteTaskMutationRepository(database, transactionRunner),
+    timeActivities: new SqliteTaskTimeActivityRepository(transactionRunner),
+    removals: new SqliteTaskRemovalRepository(database, transactionRunner),
+    taskReads: new SqliteTaskReadRepository(database, filterInputs),
+    filterInputs,
+    queries,
+    policyIdentities: new SqliteTaskPolicyIdentityRepository(database),
+    lifecycle: new SqliteLocalTaskLifecycleRepository(database, transactionRunner),
+    scoutDeletion: new SqliteScoutTaskHardDeleteRepository(transactionRunner),
+    moves: new SqliteTaskMoveRepository(database, transactionRunner),
+    writeThroughMoves: new SqliteWriteThroughTaskMoveRepository(database, transactionRunner),
+    priorityEntities: new SqlitePriorityEntityRepository(database, transactionRunner),
+    sourceListNames: new SqliteSourceListNameRepository(database),
+    transferIdentity: new SqliteTaskTransferIdentityRepository(database, transactionRunner),
+    quickSort: new SqliteTaskQuickSortRepository(database, transactionRunner),
+    ancillary: new SqliteTaskAncillaryRepository(database, transactionRunner),
+    organization: new SqliteTaskOrganizationRepository(database, transactionRunner),
+  };
+}
+
+export const sqliteTaskCorePersistence = createSqliteTaskCorePersistence(db, runTransaction);

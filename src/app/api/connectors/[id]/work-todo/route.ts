@@ -36,7 +36,7 @@ export async function POST(
     return NextResponse.json({ error: 'Unsupported action' }, { status: 400 });
   }
   try {
-    return NextResponse.json(resetWorkTodoDelta((await params).id));
+    return NextResponse.json(await resetWorkTodoDelta((await params).id));
   } catch (error) {
     return bridgeError(error);
   }

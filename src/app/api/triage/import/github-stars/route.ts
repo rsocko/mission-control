@@ -29,6 +29,15 @@ export async function POST(request: Request) {
         username,
         incremental: mode === 'incremental',
       });
+      if (result.outcome === 'failure') {
+        throw new Error('GitHub stars full import failed');
+      }
+      if (result.outcome === 'stale') {
+        return NextResponse.json(
+          { error: 'GitHub stars import state changed concurrently' },
+          { status: 409 },
+        );
+      }
       return NextResponse.json({ result, mode });
     }
 

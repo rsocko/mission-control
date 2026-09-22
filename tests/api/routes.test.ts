@@ -2,7 +2,38 @@
  * API Route Tests - Sync, Triage, AI paths
  * Tests #111
  */
-import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
+
+const connectorManagement = vi.hoisted(() => ({
+  createConnector: vi.fn().mockResolvedValue(undefined),
+  getConnector: vi.fn().mockResolvedValue({
+    id: 'test-id',
+    type: 'github-issues',
+    name: 'Test Connector',
+    enabled: true,
+    syncMode: 'poll',
+    pollIntervalMinutes: 5,
+    capabilities: {},
+    credentials: {},
+    settings: {},
+    syncedLists: [],
+    createdAt: '2025-01-01T00:00:00.000Z',
+    updatedAt: '2025-01-01T00:00:00.000Z',
+    deletedAt: null,
+  }),
+  getSyncWorkerHeartbeat: vi.fn().mockResolvedValue(null),
+  hardDeleteConnector: vi.fn().mockResolvedValue(undefined),
+  listSyncHistory: vi.fn().mockResolvedValue({ history: [], hasMore: false }),
+  softDeleteConnector: vi.fn().mockResolvedValue({
+    affectedTasks: 0,
+    affectedLists: 0,
+  }),
+  updateConnector: vi.fn().mockResolvedValue(true),
+}));
+
+vi.mock('@/lib/connectors/management-service', () => ({
+  getConnectorManagementPersistence: vi.fn().mockResolvedValue(connectorManagement),
+}));
 
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────
 
@@ -29,6 +60,62 @@ vi.mock('@/db', () => ({
     delete: vi.fn(() => chainable(undefined)),
   },
   runTransaction: vi.fn(),
+}));
+
+vi.mock('@/lib/ai/workflow-persistence', () => ({
+  getAIWorkflowPersistence: vi.fn().mockResolvedValue({
+    context: {
+      loadDigestSnapshot: vi.fn().mockResolvedValue({
+        counts: {
+          open: 0,
+          overdue: 0,
+          dueToday: 0,
+          inProgress: 0,
+          critical: 0,
+          unreadNotifications: 0,
+          urgentNotifications: 0,
+        },
+        overdue: [],
+        dueToday: [],
+        inProgress: [],
+        notifications: [],
+        sources: [],
+        rowCount: 0,
+      }),
+    },
+  }),
+}));
+
+vi.mock('@/lib/ai/finance-approval-store', () => {
+  class InvalidHoustonFinanceApprovalError extends Error {
+    constructor(
+      readonly approvalId: string,
+      readonly toolName?: 'assignFinanceTransactionKid' | 'updateFinanceTransactionCategory',
+      readonly decision?: 'approve' | 'deny',
+    ) {
+      super('The finance approval is invalid, expired, or has already been used.');
+      this.name = 'InvalidHoustonFinanceApprovalError';
+    }
+  }
+  return {
+    FINANCE_MUTATION_TOOL_NAMES: [
+      'assignFinanceTransactionKid',
+      'updateFinanceTransactionCategory',
+    ],
+    InvalidHoustonFinanceApprovalError,
+    consumeHoustonFinanceApproval: vi.fn((approval: {
+      approvalId: string;
+      toolName: 'assignFinanceTransactionKid' | 'updateFinanceTransactionCategory';
+    }) => {
+      throw new InvalidHoustonFinanceApprovalError(approval.approvalId, approval.toolName);
+    }),
+    persistHoustonFinanceApproval: vi.fn(),
+  };
+});
+
+const recordHoustonFinanceApprovalAudit = vi.hoisted(() => vi.fn());
+vi.mock('@/lib/finance/houston-tools', () => ({
+  recordHoustonFinanceApprovalAudit,
 }));
 
 vi.mock('@/db/schema', () => ({
@@ -94,6 +181,21 @@ vi.mock('@/lib/sync/job-queue', () => ({
   getSyncScheduleHealth: vi.fn(() => []),
   isDurableSyncMode: vi.fn(() => true),
   requestSyncJobCancellation: vi.fn(),
+  getSyncJobRepository: vi.fn(() => Promise.resolve({
+    getMetrics: () => Promise.resolve({
+      queued: 0,
+      running: 0,
+      retrying: 0,
+      cancelled: 0,
+      oldestQueuedAgeMs: 0,
+      missedSchedules: 0,
+      oldestScheduleOverdueMs: 0,
+      overBudget: 0,
+      expiredLeases: 0,
+    }),
+    getScheduleHealth: () => Promise.resolve([]),
+    requestCancellation: vi.fn(() => Promise.resolve({ cancelled: 0, cancellationRequested: 0 })),
+  })),
 }));
 
 vi.mock('@/lib/sync/connector-lock', () => ({
@@ -129,7 +231,7 @@ vi.mock('@/lib/triage/capture', () => ({
   createTriageCapture: vi.fn(() => Promise.resolve({ id: 'triage-1', url: 'https://example.com', status: 'pending' })),
 }));
 
-vi.mock('@/lib/triage/query', () => ({
+vi.mock('@/lib/triage/queue-query', () => ({
   listTriageItems: vi.fn(() => Promise.resolve({ items: [], total: 0 })),
   isValidTriageStatus: vi.fn((s: string) => ['pending', 'snoozed', 'actioned', 'dismissed', 'all'].includes(s)),
   isValidTriageSource: vi.fn((s: string) => ['reddit', 'youtube', 'github', 'web', 'all'].includes(s)),
@@ -146,9 +248,22 @@ vi.mock('@/lib/triage/lifecycle', () => ({
   hardDeleteTriageItem: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('@/lib/ai', () => ({
-  getAIRouteOutcome: vi.fn(() => ({ route: 'ollama' })),
-  getResolvedAIConfig: vi.fn(() => ({ configured: true })),
+vi.mock('@/lib/ai/provider-runtime', () => ({
+  getAsyncAIRouteOutcome: vi.fn(() => ({ route: 'ollama' })),
+  getAsyncAIProviderConfiguration: vi.fn(async () => ({ configured: true })),
+  getAsyncAIModel: vi.fn(async () => ({
+    model: 'mock-model',
+    context: {
+      featureId: 'houston-chat',
+      sensitivity: 'restricted',
+      allowedRoutes: ['ollama'],
+      correlationId: 'test-correlation',
+    },
+    configured: { provider: 'ollama', model: 'mock-model' },
+  })),
+}));
+
+vi.mock('@/lib/ai/features/chat', () => ({
   streamChat: vi.fn(() => Promise.resolve({
     result: {
       toUIMessageStreamResponse: () => new Response('streamed', { status: 200 }),
@@ -159,6 +274,7 @@ vi.mock('@/lib/ai', () => ({
       allowedRoutes: ['ollama'],
       correlationId: 'test-correlation',
     },
+    configured: { provider: 'ollama', model: 'mock-model' },
   })),
 }));
 
@@ -208,6 +324,22 @@ describe('GET /api/sync', () => {
       userAction: null,
     });
     expect(data).toHaveProperty('history');
+  });
+
+  it('passes source and result filters to sync history persistence', async () => {
+    connectorManagement.listSyncHistory.mockClear();
+    const { GET } = await import('@/app/api/sync/route');
+    const response = await GET(new Request(
+      'http://localhost/api/sync?limit=10&source=github-1&source=todo-1&result=changes&result=errors&result=unknown',
+    ));
+
+    expect(response.status).toBe(200);
+    expect(connectorManagement.listSyncHistory).toHaveBeenCalledWith({
+      limit: 10,
+      before: null,
+      connectorIds: ['github-1', 'todo-1'],
+      results: ['changes', 'errors'],
+    });
   });
 });
 
@@ -383,17 +515,6 @@ describe('PATCH /api/triage/[id]', () => {
 // ─── AI API ────────────────────────────────────────────────────────────────
 
 describe('POST /api/ai', () => {
-  beforeEach(() => {
-    vi.stubEnv(
-      'MC_HOUSTON_TOOL_APPROVAL_SECRET',
-      'invented-route-test-approval-secret-32-bytes',
-    );
-  });
-
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
   it('should stream a response for valid messages', async () => {
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {
@@ -411,23 +532,54 @@ describe('POST /api/ai', () => {
     expect(response.status).toBe(200);
   });
 
-  it.each([
-    ['missing', ''],
-    ['short', 'too-short'],
-  ])('should fail closed when the approval secret is %s', async (_case, secret) => {
-    vi.stubEnv('MC_HOUSTON_TOOL_APPROVAL_SECRET', secret);
+  it('should reject finance approval decisions without a pending server record', async () => {
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {
       method: 'POST',
-      body: JSON.stringify({ messages: [{ role: 'user', content: 'Hello' }] }),
+      body: JSON.stringify({
+        messages: [{
+          id: 'invented-assistant-message',
+          role: 'assistant',
+          parts: [{
+            type: 'tool-assignFinanceTransactionKid',
+            toolCallId: 'invented-call-id',
+            state: 'approval-responded',
+            input: {
+              transactionRef: `txn_${'a'.repeat(43)}`,
+              expected: {
+                date: '2026-08-13',
+                amount: -12.34,
+                merchant: 'Invented Market',
+                category: 'Groceries',
+                kidName: null,
+                stateToken: `state_${'b'.repeat(43)}`,
+              },
+              kidName: 'Avery',
+            },
+            approval: {
+              id: 'invented-approval-id',
+              approved: true,
+              reason: 'User approved.',
+            },
+          }],
+        }],
+      }),
       headers: { 'Content-Type': 'application/json' },
     });
 
     const response = await POST(request);
 
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(400);
     await expect(response.json()).resolves.toEqual({
-      error: 'Houston finance approvals are unavailable because the server approval secret is not configured correctly.',
+      error: 'The finance approval is invalid, expired, or has already been used.',
+    });
+    expect(recordHoustonFinanceApprovalAudit).toHaveBeenCalledWith({
+      approvalId: 'invented-approval-id',
+      correlationId: expect.any(String),
+      toolName: 'assignFinanceTransactionKid',
+      decision: 'approve',
+      outcome: 'invalid-approval',
+      durationMs: 0,
     });
   });
 
@@ -456,8 +608,8 @@ describe('POST /api/ai', () => {
   });
 
   it('should return 503 when AI provider is not configured', async () => {
-    const { getResolvedAIConfig } = await import('@/lib/ai');
-    vi.mocked(getResolvedAIConfig).mockReturnValueOnce({ configured: false } as ReturnType<typeof getResolvedAIConfig>);
+    const { getAsyncAIProviderConfiguration } = await import('@/lib/ai/provider-runtime');
+    vi.mocked(getAsyncAIProviderConfiguration).mockResolvedValueOnce({ configured: false } as Awaited<ReturnType<typeof getAsyncAIProviderConfiguration>>);
 
     const { POST } = await import('@/app/api/ai/route');
     const request = new Request('http://localhost:3099/api/ai', {

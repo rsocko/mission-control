@@ -20,6 +20,10 @@ import type {
   TaskTag,
   WritableConnector,
 } from './task-detail-types';
+import {
+  TASK_CHANGED_EVENT,
+  type TaskChangedEventDetail,
+} from '@/lib/task-change-events';
 
 export interface UseTaskDetailDataOptions {
   taskId: string;
@@ -36,6 +40,7 @@ export interface UseTaskDetailDataResult {
   connectorCaps: TagConnectorCaps | null;
   supportsAttachments: boolean;
   supportsSubtasks: boolean;
+  supportsSubtaskOrderWrite: boolean;
   extraTags: TaskTag[];
   setExtraTags: React.Dispatch<React.SetStateAction<TaskTag[]>>;
   potentialDuplicates: DuplicateCandidate[];
@@ -63,6 +68,7 @@ export function useTaskDetailData({
   const [connectorCaps, setConnectorCaps] = useState<TagConnectorCaps | null>(null);
   const [supportsAttachments, setSupportsAttachments] = useState(false);
   const [supportsSubtasks, setSupportsSubtasks] = useState(false);
+  const [supportsSubtaskOrderWrite, setSupportsSubtaskOrderWrite] = useState(false);
   const [extraTags, setExtraTags] = useState<TaskTag[]>([]);
   const [potentialDuplicates, setPotentialDuplicates] = useState<DuplicateCandidate[]>([]);
   const [hubProjects, setHubProjects] = useState<HubProject[]>([]);
@@ -70,6 +76,7 @@ export function useTaskDetailData({
     Record<string, ProjectHierarchySnapshot | null>
   >({});
   const [writableConnectors, setWritableConnectors] = useState<WritableConnector[]>([]);
+  const taskRequestVersionRef = useRef(0);
 
   // Keep host callbacks out of effect dependencies so a new task only reloads
   // when its identifier actually changes.
@@ -89,6 +96,7 @@ export function useTaskDetailData({
 
   // Fetch full task details
   useEffect(() => {
+    const requestVersion = ++taskRequestVersionRef.current;
     setLoading(true);
     setExtraTags([]);
     setConnectorCaps(null);
@@ -96,13 +104,39 @@ export function useTaskDetailData({
     onTaskResetRef.current?.();
     fetchTaskDetail(taskId)
       .then((loaded) => {
-        if (loaded) {
+        if (loaded && requestVersion === taskRequestVersionRef.current) {
           setTask(loaded);
           onTaskLoadedRef.current?.(loaded);
         }
       })
       .catch((err) => { taskLogger.error('Failed to fetch task details', { err, taskId }); })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (requestVersion === taskRequestVersionRef.current) setLoading(false);
+      });
+  }, [taskId]);
+
+  useEffect(() => {
+    const handleTaskChanged = (event: Event) => {
+      const { taskId: changedTaskId } = (event as CustomEvent<TaskChangedEventDetail>).detail;
+      if (changedTaskId !== taskId) return;
+
+      const requestVersion = ++taskRequestVersionRef.current;
+      fetchTaskDetail(taskId)
+        .then((loaded) => {
+          if (!loaded || requestVersion !== taskRequestVersionRef.current) return;
+          setTask(loaded);
+          onTaskLoadedRef.current?.(loaded);
+        })
+        .catch((err) => {
+          taskLogger.error('Failed to refresh changed task details', { err, taskId });
+        })
+        .finally(() => {
+          if (requestVersion === taskRequestVersionRef.current) setLoading(false);
+        });
+    };
+
+    window.addEventListener(TASK_CHANGED_EVENT, handleTaskChanged);
+    return () => window.removeEventListener(TASK_CHANGED_EVENT, handleTaskChanged);
   }, [taskId]);
 
   // Auto-detect potential duplicates for open tasks
@@ -121,6 +155,7 @@ export function useTaskDetailData({
       setConnectorCaps(null);
       setSupportsAttachments(false);
       setSupportsSubtasks(false);
+      setSupportsSubtaskOrderWrite(false);
       return;
     }
     const isLocal = isLocalTaskSource({
@@ -130,15 +165,18 @@ export function useTaskDetailData({
     setConnectorCaps(null);
     setSupportsAttachments(isLocal);
     setSupportsSubtasks(isLocal);
+    setSupportsSubtaskOrderWrite(isLocal);
     const controller = new AbortController();
     const applySupport = (support: {
       connectorCaps: TagConnectorCaps | null;
       supportsAttachments: boolean;
       supportsSubtasks: boolean;
+      supportsSubtaskOrderWrite: boolean;
     }) => {
       setConnectorCaps(support.connectorCaps);
       setSupportsAttachments(support.supportsAttachments);
       setSupportsSubtasks(support.supportsSubtasks);
+      setSupportsSubtaskOrderWrite(support.supportsSubtaskOrderWrite);
     };
     fetchConnectorSupport(taskConnectorInstanceId, isLocal, controller.signal)
       .then(applySupport)
@@ -148,6 +186,7 @@ export function useTaskDetailData({
           connectorCaps: null,
           supportsAttachments: isLocal,
           supportsSubtasks: isLocal,
+          supportsSubtaskOrderWrite: isLocal,
         });
       });
     return () => controller.abort();
@@ -196,6 +235,7 @@ export function useTaskDetailData({
     connectorCaps,
     supportsAttachments,
     supportsSubtasks,
+    supportsSubtaskOrderWrite,
     extraTags,
     setExtraTags,
     potentialDuplicates,

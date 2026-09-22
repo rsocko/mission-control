@@ -11,7 +11,9 @@ import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { DuplicateCandidate } from '@/components/task-detail/DuplicateTaskPreview';
 import type { TaskDetail, TaskTag } from '@/components/task-detail/task-detail-types';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { notifyTaskChanged } from '@/lib/task-change-events';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
+import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
 
 vi.mock('sonner', () => ({
   toast: {
@@ -183,6 +185,29 @@ describe('useTaskDetailData', () => {
     await waitFor(() => expect(result.current.projectHierarchies['project-1']).toBe(hierarchy));
   });
 
+  it('refreshes the open task when another task surface reports a change', async () => {
+    let status = 'todo';
+    let taskFetches = 0;
+    stubFetch((input) => {
+      if (input === '/api/tasks/task-1') {
+        taskFetches += 1;
+        return jsonResponse({ task: { ...baseTask, status } });
+      }
+      return jsonResponse({});
+    });
+
+    const { result } = renderHook(() => useTaskDetailData({ taskId: 'task-1' }));
+    await waitFor(() => expect(result.current.task?.status).toBe('todo'));
+
+    status = 'in_progress';
+    act(() => notifyTaskChanged('another-task'));
+    expect(taskFetches).toBe(1);
+
+    act(() => notifyTaskChanged('task-1'));
+    await waitFor(() => expect(result.current.task?.status).toBe('in_progress'));
+    expect(taskFetches).toBe(2);
+  });
+
   it('resets editors and keeps loading resilient when the task fetch fails', async () => {
     stubFetch((input) => {
       if (input === '/api/tasks/task-1') return Promise.reject(new Error('offline'));
@@ -211,6 +236,131 @@ describe('useTaskDetailData', () => {
 });
 
 describe('useTaskDetailMutations', () => {
+  it('persists recurrence exceptions and catch-up policy through the recurrence field policy', async () => {
+    const rule = canonicalizeLegacyRecurrence({
+      recurrence: 'weekly',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: { kind: 'mission-control', stableId: 'task-1' },
+    });
+    const fetchMock = stubFetch(() => jsonResponse({}));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({
+      task: {
+        ...baseTask,
+        recurrence: 'weekly',
+        recurrenceControl: {
+          rule,
+          owner: 'mission-control',
+          support: 'supported',
+          reasons: [],
+          timezone: 'UTC',
+          localTime: null,
+        },
+      },
+      onUpdate,
+    });
+
+    await act(async () => {
+      await result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-08'],
+        catchUp: 'none',
+      });
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      recurrenceSkipDates: ['2026-08-08'],
+      recurrenceCatchUp: 'none',
+    });
+    expect(result.current.task?.recurrenceControl?.rule?.semantics).toMatchObject({
+      exceptions: { skipDates: ['2026-08-08'] },
+      materialization: { catchUp: 'none' },
+    });
+    expect(onUpdate).toHaveBeenCalledWith({
+      recurrenceSkipDates: ['2026-08-08'],
+      recurrenceCatchUp: 'none',
+    });
+  });
+
+  it('ignores concurrent recurrence option saves that would use stale options', async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderMutations();
+
+    let firstSave: Promise<void>;
+    act(() => {
+      firstSave = result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-08'],
+        catchUp: 'latest',
+      });
+    });
+    expect(result.current.mutations.recurrenceOptionsSaving).toBe(true);
+
+    await act(async () => {
+      await result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-15'],
+        catchUp: 'latest',
+      });
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveRequest?.(jsonResponse({}));
+    await act(async () => {
+      await firstSave!;
+    });
+    expect(result.current.mutations.recurrenceOptionsSaving).toBe(false);
+  });
+
+  it('saves the canonical relative reminder returned by the server', async () => {
+    const reminder = {
+      reminderAt: '2026-08-02T13:00:00.000Z',
+      reminderRelative: '1_day_before' as const,
+      reminderDueTime: '09:00',
+    };
+    const fetchMock = stubFetch(() => jsonResponse({ reminder }));
+    const { result } = renderMutations({
+      task: { ...baseTask, dueDate: '2026-08-03' },
+    });
+
+    await act(async () => {
+      expect(await result.current.mutations.handleReminderChange({
+        reminderRelative: '1_day_before',
+        reminderDueTime: '09:00',
+      })).toBe(true);
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', expect.objectContaining({
+      body: JSON.stringify({
+        reminderRelative: '1_day_before',
+        reminderDueTime: '09:00',
+      }),
+    }));
+    expect(result.current.task).toMatchObject(reminder);
+  });
+
+  it('asks how to resolve a relative reminder before removing its due date', async () => {
+    const task = {
+      ...baseTask,
+      reminderAt: '2026-08-02T13:00:00.000Z',
+      reminderRelative: '1_day_before' as const,
+      reminderDueTime: '09:00',
+    };
+    const { result, confirmRequests } = renderMutations({ task });
+
+    await act(async () => {
+      expect(await result.current.mutations.handleDueDateChange('')).toBe(false);
+    });
+
+    expect(confirmRequests[0]).toMatchObject({
+      confirmLabel: 'Keep reminder time',
+      alternateLabel: 'Remove reminder',
+    });
+  });
+
   it('saves a field and reports the change to the host', async () => {
     const onUpdate = vi.fn();
     const onNavigationCountsRefresh = vi.fn();
@@ -271,6 +421,38 @@ describe('useTaskDetailMutations', () => {
 
     expect(result.current.task?.tagIds).toEqual([]);
     expect(onUpdate).toHaveBeenCalled();
+  });
+
+  it('removes a Microsoft To Do hashtag from the detail and host titles', async () => {
+    const onUpdate = vi.fn();
+    stubFetch(() => jsonResponse({}));
+    const task = {
+      ...baseTask,
+      title: 'Write the migration guide #NEEDS-TRIAGE',
+      connectorType: 'microsoft-todo',
+      sourceId: 'list-1:task-1',
+      taskSourceModel: 'remote-managed' as const,
+    };
+    const availableTags = [{
+      id: 'tag-1',
+      name: 'NEEDS TRIAGE',
+      slug: 'needs-triage',
+      color: null,
+    }];
+    const { result } = renderMutations({ task, availableTags, onUpdate });
+
+    await act(async () => {
+      await result.current.mutations.handleRemoveTag('tag-1');
+    });
+
+    expect(result.current.task).toMatchObject({
+      title: 'Write the migration guide',
+      tagIds: [],
+    });
+    expect(onUpdate).toHaveBeenCalledWith({
+      title: 'Write the migration guide',
+      tagIds: [],
+    });
   });
 
   it('adds a known tag and records it for display', async () => {

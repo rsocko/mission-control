@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('GitHub identity persistence concurrency fences', () => {
   beforeEach(() => {
@@ -15,7 +16,7 @@ describe('GitHub identity persistence concurrency fences', () => {
 
   it('rejects stale identity writes and records, then cancels stale run completion', async () => {
     const [{ default: db }, schema, identity, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/external-identities'),
       import('drizzle-orm'),
@@ -54,7 +55,7 @@ describe('GitHub identity persistence concurrency fences', () => {
       lastSyncedAt: now,
       metadata: {},
     }).run();
-    const snapshot = identity.getGitHubIdentityModeSnapshot('identity-fence');
+    const snapshot = await identity.getGitHubIdentityModeSnapshot('identity-fence');
     const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'identity-fence',
       modeSnapshot: snapshot,
@@ -66,7 +67,7 @@ describe('GitHub identity persistence concurrency fences', () => {
       updatedAt: now,
     }).where(eq(schema.githubIdentityControls.connectorInstanceId, 'identity-fence')).run();
 
-    expect(() => identity.persistExternalIdentityBatch([{
+    await expect(identity.persistExternalIdentityBatch([{
       target: {
         connectorInstanceId: 'identity-fence',
         bindingType: 'task',
@@ -97,13 +98,13 @@ describe('GitHub identity persistence concurrency fences', () => {
           observedAt: now,
         },
       },
-    }], snapshot)).toThrow('revision changed');
+    }], snapshot)).rejects.toThrow('revision changed');
     expect(db.select().from(schema.externalEntities).all()).toEqual([]);
 
     // The stable runtime writes no evidence, so the only durable fence is the
     // identity epoch: a resolution attempt after the bump must fail closed.
-    expect(() => runtime.assertCurrentMode())
-      .toThrow('GitHub identity runtime revision is stale');
+    await expect(runtime.assertCurrentMode())
+      .rejects.toThrow('GitHub identity runtime revision is stale');
     runtime.complete('cancelled', 'identity_context_changed');
   });
 });

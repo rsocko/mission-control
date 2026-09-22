@@ -1,35 +1,19 @@
 /**
- * Tests for PR #292 — Resolve source list display name at query time
+ * Tests for PR #292 — Resolve source list display name at query time.
+ *
+ * Updated for L04: `buildSourceListNameMap` now reads through the portable
+ * task-core `SourceListNameRepository` instead of a Drizzle handle, so the
+ * test registers a fake composition rather than mocking `@/db`.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-vi.mock('@/db', () => {
-  const mockAll = vi.fn(() => []);
-  return {
-    default: {
-      select: vi.fn(() => ({
-        from: vi.fn(() => ({
-          where: vi.fn(() => ({ all: mockAll })),
-          all: mockAll,
-        })),
-      })),
-    },
-    __mockAll: mockAll,
-  };
-});
-
-vi.mock('@/db/schema', () => ({
-  sourceLists: {
-    sourceId: 'source_id',
-    connectorInstanceId: 'connector_instance_id',
-    name: 'name',
-    userDisplayName: 'user_display_name',
-  },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  inArray: vi.fn((col: unknown, vals: unknown) => ({ type: 'inArray', col, vals })),
-}));
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type {
+  SourceListDisplayNameRow,
+  TaskCorePersistence,
+} from '@/lib/tasks/core/contracts';
+import {
+  clearTaskCorePersistence,
+  registerTaskCorePersistence,
+} from '@/lib/tasks/core/runtime';
 
 // Mock the display name resolver
 vi.mock('@/lib/utils/source-list-display-name', () => ({
@@ -38,9 +22,25 @@ vi.mock('@/lib/utils/source-list-display-name', () => ({
   ),
 }));
 
+const listSourceListDisplayNames = vi.fn<
+  (ids: readonly string[]) => Promise<SourceListDisplayNameRow[]>
+>();
+
+function registerFake(): void {
+  registerTaskCorePersistence({
+    sourceListNames: { listSourceListDisplayNames },
+  } as unknown as TaskCorePersistence);
+}
+
 describe('resolve-task-list-names utility (PR #292)', () => {
   beforeEach(() => {
-    vi.resetModules();
+    listSourceListDisplayNames.mockReset();
+    listSourceListDisplayNames.mockResolvedValue([]);
+    registerFake();
+  });
+
+  afterEach(() => {
+    clearTaskCorePersistence();
   });
 
   it('resolveTaskListName should prefer map entry over stale sourceListName', async () => {
@@ -85,27 +85,25 @@ describe('resolve-task-list-names utility (PR #292)', () => {
     expect(result).toBeNull();
   });
 
-  it('buildSourceListNameMap should return empty map when no sourceListIds', async () => {
+  it('buildSourceListNameMap should return empty map without querying when no sourceListIds', async () => {
     const { buildSourceListNameMap } = await import('@/lib/utils/resolve-task-list-names');
 
-    const result = buildSourceListNameMap([
+    const result = await buildSourceListNameMap([
       { sourceListId: null, connectorInstanceId: 'inst-1' },
     ]);
 
     expect(result.size).toBe(0);
+    expect(listSourceListDisplayNames).not.toHaveBeenCalled();
   });
 
   it('buildSourceListNameMap should use userDisplayName when available', async () => {
-    // Re-mock to return source list rows
-    const db = await import('@/db');
-    const mockAll = (db as unknown as { __mockAll: ReturnType<typeof vi.fn> }).__mockAll;
-    mockAll.mockReturnValueOnce([
+    listSourceListDisplayNames.mockResolvedValueOnce([
       { sourceId: 'list-1', connectorInstanceId: 'inst-1', name: 'Original', userDisplayName: 'User Renamed' },
     ]);
 
     const { buildSourceListNameMap } = await import('@/lib/utils/resolve-task-list-names');
 
-    const result = buildSourceListNameMap([
+    const result = await buildSourceListNameMap([
       { sourceListId: 'list-1', connectorInstanceId: 'inst-1' },
     ]);
 
@@ -113,36 +111,33 @@ describe('resolve-task-list-names utility (PR #292)', () => {
   });
 
   it('buildSourceListNameMap should fall back to name when userDisplayName is null', async () => {
-    const db = await import('@/db');
-    const mockAll = (db as unknown as { __mockAll: ReturnType<typeof vi.fn> }).__mockAll;
-    mockAll.mockReturnValueOnce([
+    listSourceListDisplayNames.mockResolvedValueOnce([
       { sourceId: 'list-2', connectorInstanceId: 'inst-1', name: 'Default Name', userDisplayName: null },
     ]);
 
     const { buildSourceListNameMap } = await import('@/lib/utils/resolve-task-list-names');
 
-    const result = buildSourceListNameMap([
+    const result = await buildSourceListNameMap([
       { sourceListId: 'list-2', connectorInstanceId: 'inst-1' },
     ]);
 
     expect(result.get('inst-1:list-2')).toBe('Default Name');
   });
 
-  it('buildSourceListNameMap should deduplicate sourceListIds', async () => {
-    const db = await import('@/db');
-    const mockAll = (db as unknown as { __mockAll: ReturnType<typeof vi.fn> }).__mockAll;
-    mockAll.mockReturnValueOnce([
+  it('buildSourceListNameMap should deduplicate sourceListIds before querying', async () => {
+    listSourceListDisplayNames.mockResolvedValueOnce([
       { sourceId: 'list-1', connectorInstanceId: 'inst-1', name: 'Tasks', userDisplayName: null },
     ]);
 
     const { buildSourceListNameMap } = await import('@/lib/utils/resolve-task-list-names');
 
-    const result = buildSourceListNameMap([
+    const result = await buildSourceListNameMap([
       { sourceListId: 'list-1', connectorInstanceId: 'inst-1' },
       { sourceListId: 'list-1', connectorInstanceId: 'inst-1' },
       { sourceListId: 'list-1', connectorInstanceId: 'inst-1' },
     ]);
 
     expect(result.size).toBe(1);
+    expect(listSourceListDisplayNames).toHaveBeenCalledWith(['list-1']);
   });
 });

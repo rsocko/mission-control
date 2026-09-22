@@ -9,26 +9,21 @@ import type {
   DomainSyncContext,
   DomainSyncResult,
 } from '@/types';
-import db from '@/db';
-import {
-  financeTransactions,
-} from '@/db/schema';
-import { eq, and, gte, lte, sql } from 'drizzle-orm';
 import {
   MonarchBridgeClient,
   MonarchBridgeError,
 } from './client';
-import {
-  FinanceSnapshotSynchronizer,
-  updateFinanceCategory,
-} from './snapshot-sync';
-import { FinanceDatasetSynchronizer } from './dataset-sync';
+import { FinanceSnapshotSynchronizer } from './snapshot-synchronizer';
+import { FinanceDatasetSynchronizer } from './dataset-synchronizer';
 import { FinanceInsightHistorySynchronizer } from './finance-insight-history-sync';
-import { applyManualAttributionDecision } from './attribution-service';
 import { captureFinanceInsightPublication } from '@/lib/finance-insights/publication';
 import { pruneFinanceInsightOccurrenceCache } from '@/lib/finance-insights/occurrence-cache';
 import logger from '@/lib/logger';
 import { FINANCE_NOTIFICATION_TYPES } from '@/lib/notifications/push-policy/catalogs';
+import {
+  queryFinanceTransactions,
+  type FinanceTransactionFilters,
+} from './transaction-query';
 
 export {
   DEFAULT_TYRION_BRIDGE_URL,
@@ -39,15 +34,6 @@ export {
 const activeProjectionSyncs = new Set<string>();
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface TransactionFilters {
-  startDate?: string;
-  endDate?: string;
-  kidId?: string;
-  category?: string;
-  triageStatus?: string;
-  limit?: number;
-}
 
 // ─── Connector ────────────────────────────────────────────────────────────────
 // Mission Control talks to Tyrion here. Tyrion owns the Monarch integration
@@ -144,7 +130,7 @@ export class FinanceManagerConnector implements IConnector {
           if (context.signal?.aborted) throw error;
         }
       }
-      const publication = captureFinanceInsightPublication(config, result);
+      const publication = await captureFinanceInsightPublication(config, result);
       let insightNotificationsAdded = 0;
       try {
         const {
@@ -153,7 +139,7 @@ export class FinanceManagerConnector implements IConnector {
         } = await import('@/lib/finance-insights/orchestrator');
         const insightPublicationId = 'publicationId' in publication
           ? publication.publicationId
-          : findFinanceInsightContinuationPublicationId(config.id);
+          : await findFinanceInsightContinuationPublicationId(config.id);
         if (insightPublicationId) {
           const insightResult = await runFinanceInsightIngestion({
             config,
@@ -170,7 +156,7 @@ export class FinanceManagerConnector implements IConnector {
             const { enqueueFinanceInsightContinuation } = await import(
               '@/lib/finance-insights/continuation'
             );
-            enqueueFinanceInsightContinuation({
+            await enqueueFinanceInsightContinuation({
               connectorId: config.id,
               jobId: context.jobId,
             });
@@ -190,7 +176,7 @@ export class FinanceManagerConnector implements IConnector {
           'Finance insight shadow ingestion failed',
         );
       }
-      pruneFinanceInsightOccurrenceCache();
+      await pruneFinanceInsightOccurrenceCache();
       const { reconcileFinanceAttention } = await import('@/lib/finance/attention-routing');
       const attention = await reconcileFinanceAttention({ connectorId: config.id });
       logger.info(
@@ -249,41 +235,9 @@ export class FinanceManagerConnector implements IConnector {
 
   // ─── Query ─────────────────────────────────────────────────────────────────
 
-  async getTransactions(filters: TransactionFilters = {}) {
+  async getTransactions(filters: FinanceTransactionFilters = {}) {
     const config = this.requireConfig();
-    const conditions = [
-      eq(financeTransactions.connectorInstanceId, config.id),
-      eq(financeTransactions.lifecycleStatus, 'active'),
-    ];
-
-    if (filters.startDate) {
-      conditions.push(gte(financeTransactions.date, filters.startDate));
-    }
-    if (filters.endDate) {
-      conditions.push(lte(financeTransactions.date, filters.endDate));
-    }
-    if (filters.kidId) {
-      conditions.push(eq(financeTransactions.assignedKidId, filters.kidId));
-    }
-    if (filters.category) {
-      conditions.push(eq(financeTransactions.confirmedCategory, filters.category));
-    }
-    if (filters.triageStatus) {
-      conditions.push(eq(financeTransactions.triageStatus, filters.triageStatus));
-    }
-
-    const where = and(...conditions);
-    const limit = typeof filters.limit === 'number'
-      && Number.isSafeInteger(filters.limit)
-      && filters.limit > 0
-      ? Math.min(filters.limit, 500)
-      : 100;
-
-    return db.select()
-      .from(financeTransactions)
-      .where(where)
-      .orderBy(sql`${financeTransactions.date} DESC`)
-      .limit(limit);
+    return queryFinanceTransactions(config.id, filters);
   }
 
   // ─── Write-back ────────────────────────────────────────────────────────────
@@ -294,6 +248,7 @@ export class FinanceManagerConnector implements IConnector {
     idempotencyKey?: string,
     signal?: AbortSignal,
   ): Promise<{ idempotencyKey: string; status: 'updated' }> {
+    const { updateFinanceCategory } = await import('./snapshot-sync');
     return updateFinanceCategory(
       this.requireConfig(),
       transactionId,
@@ -309,6 +264,10 @@ export class FinanceManagerConnector implements IConnector {
     idempotencyKey: string,
     actorType: 'parent-admin' | 'service',
   ) {
+    if (process.env.MC_DATABASE_BACKEND === 'postgres') {
+      throw new Error('Legacy finance attribution write-back is unavailable on PostgreSQL');
+    }
+    const { applyManualAttributionDecision } = await import('./attribution-service');
     return applyManualAttributionDecision({
       connectorId: this.requireConfig().id,
       transactionId,

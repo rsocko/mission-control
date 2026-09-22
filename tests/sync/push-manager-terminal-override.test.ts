@@ -10,6 +10,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
 import type { TaskItem } from '@/types';
+import { GitHubStableIdentityRuntime } from '@/lib/external-identities/stable-identity-runtime';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
@@ -19,10 +20,29 @@ let mockCapabilities: import('@/types').ConnectorCapabilities | null = null;
 const {
   mockCompleteTaskPush,
   mockDelete,
+  mockFailTaskPush,
   mockLoadClaimedTask,
 } = vi.hoisted(() => ({
-  mockCompleteTaskPush: vi.fn(() => Promise.resolve(true)),
+  mockCompleteTaskPush: vi.fn((
+    _taskId: string,
+    _leaseToken: string,
+    _sourceId: string,
+    _metadata?: unknown,
+    _localUpdates?: Record<string, unknown>,
+  ) => {
+    void [_taskId, _leaseToken, _sourceId, _metadata, _localUpdates];
+    return Promise.resolve(true);
+  }),
   mockDelete: vi.fn(() => ({ where: vi.fn() })),
+  mockFailTaskPush: vi.fn((
+    _taskId: string,
+    _leaseToken: string,
+    _syncStatus: string,
+    _pushRetryCount?: number,
+  ) => {
+    void [_taskId, _leaseToken, _syncStatus, _pushRetryCount];
+    return Promise.resolve(true);
+  }),
   mockLoadClaimedTask: vi.fn(),
 }));
 
@@ -54,6 +74,43 @@ vi.mock('@/db/schema', () => ({
   myDayItems: { taskId: 'taskId' },
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: {
+      get: vi.fn(async () => mockCapabilities
+        ? { capabilities: mockCapabilities }
+        : null),
+    },
+    execution: {
+      support: { assertConnectorSupported: vi.fn() },
+      pushes: {
+        listCandidates: vi.fn(async () => [...mockPendingTasks]),
+        listSourceIds: vi.fn(async (ids: string[]) => mockPendingTasks
+          .filter((task) => ids.includes((task as { id: string }).id))
+          .map((task) => ({
+            id: (task as { id: string }).id,
+            sourceId: (task as { sourceId: string }).sourceId,
+          })).concat(
+            mockPendingTasks.some((task) => ids.includes((task as { id: string }).id))
+              ? []
+              : mockPendingTasks.slice(0, 1).map((task) => ({
+                  id: ids[0],
+                  sourceId: (task as { sourceId: string }).sourceId,
+                })),
+          )),
+        markSynced: vi.fn(async (id: string, _now: string, data: unknown = {}) => {
+          mockUpdateSets.push({ data: { ...(data as object), syncStatus: 'synced' }, id });
+          return true;
+        }),
+        markFailure: vi.fn(async (id: string, syncStatus: string, pushRetryCount: number) => {
+          mockUpdateSets.push({ data: { syncStatus, pushRetryCount }, id });
+          return true;
+        }),
+      },
+    },
+  })),
+}));
+
 vi.mock('drizzle-orm', () => ({
   eq: vi.fn((col: string, val: string) => ({ col, val })),
   and: vi.fn((...args: unknown[]) => args),
@@ -78,13 +135,13 @@ vi.mock('@/lib/mode', () => ({
 vi.mock('@/lib/sync/push-lease', () => ({
   claimTaskForPush: vi.fn(() => Promise.resolve('lease-token')),
   completeTaskPush: mockCompleteTaskPush,
-  failTaskPush: vi.fn(() => Promise.resolve(true)),
+  failTaskPush: mockFailTaskPush,
   heartbeatTaskPush: vi.fn(() => Promise.resolve('renewed-lease-token')),
   loadClaimedTaskForPush: mockLoadClaimedTask,
   releaseTaskPush: vi.fn(() => Promise.resolve(true)),
 }));
 
-vi.mock('@/lib/external-identities', () => {
+vi.mock('@/lib/external-identities/github-write-fence', () => {
   class GitHubWriteFenceError extends Error {
     constructor(readonly code: string) {
       super(code);
@@ -106,11 +163,13 @@ vi.mock('@/lib/external-identities', () => {
     GitHubUnknownWriteOutcomeError,
     GitHubWriteFenceError,
     hasSucceededGitHubWrite: vi.fn(() => false),
-    persistExternalIdentityBatch: vi.fn(),
     quarantineUnknownGitHubWrite: vi.fn(),
     verifyGitHubWritePreflight: vi.fn(),
   };
 });
+vi.mock('@/lib/external-identities/primary-identity', () => ({
+  persistGitHubPrimaryIdentityBatch: vi.fn(async () => []),
+}));
 
 // ─── Import after mocks ─────────────────────────────────────────────────────
 
@@ -124,6 +183,31 @@ describe('push-manager terminal status override', () => {
     mockUpdateSets.length = 0;
     mockCapabilities = null;
     vi.clearAllMocks();
+    mockCompleteTaskPush.mockImplementation((
+      taskId: string,
+      _leaseToken: string,
+      _sourceId: string,
+      _metadata?: unknown,
+      localUpdates?: Record<string, unknown>,
+    ) => {
+      mockUpdateSets.push({
+        data: { ...(localUpdates ?? {}), syncStatus: 'synced' },
+        id: taskId,
+      });
+      return Promise.resolve(true);
+    });
+    mockFailTaskPush.mockImplementation((
+      taskId: string,
+      _leaseToken: string,
+      syncStatus: string,
+      pushRetryCount?: number,
+    ) => {
+      mockUpdateSets.push({
+        data: { syncStatus, pushRetryCount },
+        id: taskId,
+      });
+      return Promise.resolve(true);
+    });
     mockLoadClaimedTask.mockImplementation((taskId: string) =>
       Promise.resolve(mockPendingTasks.find(
         (task) => (task as { id: string }).id === taskId,
@@ -176,6 +260,75 @@ describe('push-manager terminal status override', () => {
     expect(createTask).toHaveBeenCalledWith(expect.objectContaining({
       title: 'Create remotely',
     }));
+  });
+
+  it('does not finalize a GitHub create that returns no stable identity evidence', async () => {
+    mockPendingTasks.push({
+      id: 'task-github-create',
+      sourceId: 'local:task-github-create',
+      title: 'Create GitHub issue',
+      description: '',
+      status: 'todo',
+      priority: 'none',
+      effort: null,
+      dueDate: null,
+      syncStatus: 'pending_push',
+      isChecklistItem: false,
+      parentId: null,
+      sourceListId: 'synthetic-owner/synthetic-repo',
+      sourceListName: 'synthetic-owner/synthetic-repo',
+      connectorInstanceId: 'github-create',
+      metadata: '{}',
+      pushRetryCount: 0,
+    });
+    const createTask = vi.fn().mockResolvedValue({
+      sourceId: 'synthetic-owner/synthetic-repo:42',
+      metadata: {},
+    });
+    const identityRuntime = new GitHubStableIdentityRuntime({
+      connectorInstanceId: 'github-create',
+      modeSnapshot: {
+        connectorInstanceId: 'github-create',
+        effectiveMode: 'stable',
+        modeRevision: 1,
+        capturedAt: '2026-08-10T12:00:00.000Z',
+      },
+      syncKind: 'full',
+    });
+
+    const result = await pushPendingChanges(
+      'github-create',
+      {
+        type: 'github-issues',
+        createTask,
+        preflightWriteRoute: vi.fn(async () => ({ state: 'verified' })),
+        runAuthorizedWrite: vi.fn(async (
+          _authorization: unknown,
+          write: () => Promise<TaskItem>,
+        ) => write()),
+      } as Partial<IConnector> as IConnector,
+      [],
+      undefined,
+      {
+        identityRuntime,
+        identityMode: { modeRevision: 1 },
+        connectorOperationLeaseHeld: true,
+      },
+    );
+
+    expect(result.pushed).toBe(0);
+    expect(result.errors.join(' ')).toContain('created_identity_evidence_missing');
+    expect(identityRuntime.blockedReasonCodes).toContain(
+      'created_identity_persistence_failed',
+    );
+    expect(mockCompleteTaskPush).not.toHaveBeenCalled();
+    expect(mockFailTaskPush).toHaveBeenCalledWith(
+      'task-github-create',
+      'renewed-lease-token',
+      'push_error',
+      1,
+      undefined,
+    );
   });
 
   it('does not auto-delete a retained task when a user-triggered retry returns 404', async () => {
@@ -245,6 +398,40 @@ describe('push-manager terminal status override', () => {
     }));
   });
 
+  it('uses a connector cancellation mapping instead of deleting the source task', async () => {
+    mockPendingTasks.push({
+      id: 'todo-cancelled',
+      sourceId: 'list-1:task-1',
+      title: 'Cancelled task',
+      description: '',
+      status: 'cancelled',
+      priority: 'none',
+      effort: null,
+      dueDate: null,
+      syncStatus: 'pending_push',
+      isChecklistItem: false,
+      parentId: null,
+      connectorInstanceId: 'todo-1',
+      metadata: '{}',
+      pushRetryCount: 0,
+    });
+    const cancelTask = vi.fn().mockResolvedValue(undefined);
+    const deleteTask = vi.fn().mockResolvedValue(undefined);
+
+    const result = await pushPendingChanges('todo-1', {
+      type: 'microsoft-todo',
+      cancelTask,
+      deleteTask,
+    } as Partial<IConnector> as IConnector);
+
+    expect(result).toMatchObject({ pushed: 1, errors: [] });
+    expect(cancelTask).toHaveBeenCalledWith('list-1:task-1');
+    expect(deleteTask).not.toHaveBeenCalled();
+    expect(mockUpdateSets.at(-1)?.data).toMatchObject({
+      syncStatus: 'synced',
+    });
+  });
+
   it.each([
     ['update', 'todo', { updateTask: vi.fn().mockResolvedValue({ status: 'todo' }) }],
     ['complete', 'done', { completeTask: vi.fn().mockResolvedValue(undefined) }],
@@ -279,10 +466,10 @@ describe('push-manager terminal status override', () => {
           _authorization: unknown,
           write: () => Promise<unknown>,
         ) => write()),
-      } as Partial<IConnector> as IConnector;
+      } as unknown as Partial<IConnector> as IConnector;
 
       await pushPendingChanges('github-1', connector, [], undefined, {
-        identityMode: { effectiveMode: 'comparison', modeRevision: 1 },
+        identityMode: { modeRevision: 1 },
         connectorOperationLeaseHeld: true,
       });
 

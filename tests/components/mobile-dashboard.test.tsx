@@ -97,7 +97,7 @@ describe('MobileDashboard', () => {
       await waitFor(() => {
         expect(screen.getByText('Needs Attention')).toBeInTheDocument();
       });
-      expect(screen.getByText('Process Triage')).toBeInTheDocument();
+      expect(screen.getByText('Review Inbox')).toBeInTheDocument();
       expect(screen.getByText('7 pending')).toBeInTheDocument();
       expect(screen.getByText('Quick Sort')).toBeInTheDocument();
       expect(screen.getByText('14 unsorted')).toBeInTheDocument();
@@ -108,9 +108,9 @@ describe('MobileDashboard', () => {
     it('renders action queue links to correct pages', async () => {
       render(<MobileDashboard />);
       await waitFor(() => {
-        expect(screen.getByText('Process Triage')).toBeInTheDocument();
+        expect(screen.getByText('Review Inbox')).toBeInTheDocument();
       });
-      const triageLink = screen.getByText('Process Triage').closest('a');
+      const triageLink = screen.getByText('Review Inbox').closest('a');
       expect(triageLink).toHaveAttribute('href', '/triage');
       const sortLink = screen.getByText('Quick Sort').closest('a');
       expect(sortLink).toHaveAttribute('href', '/quick-sort');
@@ -140,7 +140,7 @@ describe('MobileDashboard', () => {
         expect(screen.getByText('Go To')).toBeInTheDocument();
       });
       expect(screen.getByText('My Day')).toBeInTheDocument();
-      expect(screen.getByText('Triage')).toBeInTheDocument();
+      expect(screen.getByText('Inbox')).toBeInTheDocument();
       expect(screen.getByText('Sort')).toBeInTheDocument();
       expect(screen.getByText('Goals')).toBeInTheDocument();
       expect(screen.getByText('Routines')).toBeInTheDocument();

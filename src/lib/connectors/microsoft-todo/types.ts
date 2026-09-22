@@ -21,6 +21,7 @@ export interface GraphTodoTask {
   dueDateTime?: { dateTime: string; timeZone: string };
   categories?: string[];
   hasAttachments?: boolean;
+  linkedResources?: GraphLinkedResource[];
   recurrence?: {
     pattern: {
       type: string;
@@ -33,8 +34,16 @@ export interface GraphTodoTask {
       type: string;
       startDate?: string;
       endDate?: string;
+      numberOfOccurrences?: number;
     };
   } | null;
+}
+
+export interface GraphLinkedResource {
+  id: string;
+  applicationName: string;
+  displayName: string;
+  webUrl?: string;
 }
 
 export interface GraphChecklistItem {

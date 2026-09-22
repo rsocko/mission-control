@@ -1,5 +1,6 @@
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
+import { NEXT_7_DAYS } from '@/lib/tasks/due-window';
 import type {
   DashboardTaskResponseViewModel as TaskResponse,
   DashboardTaskViewModel as Task,
@@ -26,9 +27,15 @@ export function removeTaskFromResponse(response: TaskResponse, taskId: string, t
       overdue: task.dueDate && task.dueDate < getClientToday()
         ? Math.max(0, response.stats.overdue - 1)
         : response.stats.overdue,
+      dueToday: task.dueDate === getClientToday()
+        ? Math.max(0, response.stats.dueToday - 1)
+        : response.stats.dueToday,
       dueThisWeek: task.dueDate && isDueThisWeek(task.dueDate)
         ? Math.max(0, response.stats.dueThisWeek - 1)
         : response.stats.dueThisWeek,
+      noDate: !task.dueDate
+        ? Math.max(0, response.stats.noDate - 1)
+        : response.stats.noDate,
       highPriority: task.priority === 'high' || task.priority === 'critical'
         ? Math.max(0, response.stats.highPriority - 1)
         : response.stats.highPriority,
@@ -59,9 +66,15 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
       overdue: task.dueDate && task.dueDate < getClientToday()
         ? response.stats.overdue + 1
         : response.stats.overdue,
+      dueToday: task.dueDate === getClientToday()
+        ? response.stats.dueToday + 1
+        : response.stats.dueToday,
       dueThisWeek: task.dueDate && isDueThisWeek(task.dueDate)
         ? response.stats.dueThisWeek + 1
         : response.stats.dueThisWeek,
+      noDate: !task.dueDate
+        ? response.stats.noDate + 1
+        : response.stats.noDate,
       highPriority: task.priority === 'high' || task.priority === 'critical'
         ? response.stats.highPriority + 1
         : response.stats.highPriority,
@@ -100,7 +113,7 @@ export function isAssignedToMe(task: Pick<Task, 'connectorType' | 'assignee'>) {
 export function isDueThisWeek(dueDate: string) {
   const today = getClientToday();
   const d = new Date();
-  d.setDate(d.getDate() + 7);
+  d.setDate(d.getDate() + NEXT_7_DAYS);
   const weekFromNow = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   return dueDate >= today && dueDate <= weekFromNow;
 }

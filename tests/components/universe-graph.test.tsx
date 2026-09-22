@@ -309,6 +309,7 @@ describe('UniverseGraph', () => {
     vi.stubGlobal('fetch', vi.fn(mockFetch));
     useUniverseGraphStore.setState({
       dimensions: [...DEFAULT_UNIVERSE_DIMENSIONS],
+      neighborLayers: ['explicit', 'derived'],
       legacyFilters: null,
       selectedNodeIds: [],
     });
@@ -611,6 +612,16 @@ describe('UniverseGraph', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Exit focus' }));
     expect(renderedNodeIds()).toHaveLength(4);
+    fireEvent.click(screen.getByRole('button', { name: 'Dependencies' }));
+    expect(graphMocks.props?.graphData.nodes.map((node) => node.id)).not.toContain('task:task-3');
+    expect(graphMocks.props?.graphData.links).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Dependencies' }));
+    expect(graphMocks.props?.graphData.nodes.map((node) => node.id)).toContain('task:task-3');
+    fireEvent.click(screen.getByRole('button', { name: 'Attributes' }));
+    expect(graphMocks.props?.graphData.nodes.map((node) => node.id)).not.toContain('tag:backend');
+    expect(graphMocks.props?.graphData.nodes.map((node) => node.id)).toContain('task:task-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Attributes' }));
+    expect(graphMocks.props?.graphData.nodes.map((node) => node.id)).toContain('tag:backend');
     fireEvent.click(screen.getByRole('button', { name: 'Load neighbors' }));
     expect(await screen.findByText('No additional neighbors were found.')).toBeInTheDocument();
     expect(graphMocks.props?.graphData.nodes).toHaveLength(4);

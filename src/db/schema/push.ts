@@ -74,6 +74,7 @@ export const notificationDeliveryEvents = sqliteTable('notification_delivery_eve
   attemptCount: integer('attempt_count').notNull().default(0),
   nextAttemptAt: text('next_attempt_at'),
   leaseExpiresAt: text('lease_expires_at'),
+  claimToken: text('claim_token'),
   subscriptionsAttempted: integer('subscriptions_attempted').notNull().default(0),
   subscriptionsSent: integer('subscriptions_sent').notNull().default(0),
   subscriptionsFailed: integer('subscriptions_failed').notNull().default(0),

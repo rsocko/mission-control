@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('local task dependency deletion', () => {
   beforeAll(() => {
@@ -10,7 +11,7 @@ describe('local task dependency deletion', () => {
 
   it('does not infer connector provenance from the linked tasks', async () => {
     const [{ default: db }, schema, manager, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/sync/task-dependency-manager'),
       import('drizzle-orm'),

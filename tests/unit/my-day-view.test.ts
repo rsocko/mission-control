@@ -8,6 +8,7 @@ import {
   reorderMyDayItems,
   resolveMyDayGroupSelection,
   resolveMyDaySortSelection,
+  sortCompletedMyDayItems,
   sortMyDayItems,
 } from '@/lib/utils/my-day-view';
 import { editableTaskPolicy } from '../fixtures/task-edit-policy';
@@ -28,6 +29,7 @@ function makeItem(overrides: Partial<MyDayItem> = {}): MyDayItem {
     sourceId: 'source-1',
     sourceListName: 'Mission Control',
     createdAt: '2026-08-01T12:00:00.000Z',
+    completedAt: null,
     tags: [],
     hasDescription: false,
     localDisposition: 'active',
@@ -68,6 +70,52 @@ describe('My Day view helpers', () => {
 
     expect(sorted.map((item) => item.taskId)).toEqual(['critical', 'low']);
     expect(items.map((item) => item.taskId)).toEqual(['low', 'critical']);
+  });
+
+  it('sorts and groups planning horizons with unreviewed tasks last', () => {
+    const items = [
+      makeItem({ taskId: 'unset', planningHorizon: null }),
+      makeItem({ taskId: 'later', planningHorizon: 'later' }),
+      makeItem({ taskId: 'next', planningHorizon: 'next' }),
+    ];
+
+    expect(sortMyDayItems(items, 'planningHorizon', 'asc').map((item) => item.taskId))
+      .toEqual(['next', 'later', 'unset']);
+    expect(groupMyDayItems(items, 'planningHorizon', []).map((group) => group.label))
+      .toEqual(['Next', 'Later', 'Not set']);
+  });
+
+  it('sorts completed tasks by most recent completion without mutating the source array', () => {
+    const items = [
+      makeItem({
+        taskId: 'first-completed',
+        status: 'done',
+        completedAt: '2026-08-05T13:00:00.000Z',
+      }),
+      makeItem({
+        taskId: 'last-completed',
+        status: 'done',
+        completedAt: '2026-08-05T15:00:00.000Z',
+      }),
+      makeItem({
+        taskId: 'missing-completion-time',
+        status: 'done',
+        addedAt: '2026-08-05T14:00:00.000Z',
+      }),
+    ];
+
+    const sorted = sortCompletedMyDayItems(items);
+
+    expect(sorted.map((item) => item.taskId)).toEqual([
+      'last-completed',
+      'first-completed',
+      'missing-completion-time',
+    ]);
+    expect(items.map((item) => item.taskId)).toEqual([
+      'first-completed',
+      'last-completed',
+      'missing-completion-time',
+    ]);
   });
 
   it('preserves and updates manual order without mutating the source array', () => {

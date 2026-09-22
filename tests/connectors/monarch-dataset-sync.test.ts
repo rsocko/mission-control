@@ -1,8 +1,10 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-monarch-datasets-'));
@@ -17,26 +19,47 @@ let getFinanceDatasetHealth:
 let financeDatasetFreshness:
   typeof import('@/lib/connectors/monarch-money/dataset-sync')['financeDatasetFreshness'];
 
-const connector = (id: string): ConnectorConfig => ({
-  id,
-  type: 'finance-manager',
-  name: id,
-  enabled: true,
-  syncMode: 'poll',
-  capabilities: {
-    read: true,
-    write: true,
-    delete: false,
-    sync: true,
-    subtasks: false,
-    lists: false,
-    tags: true,
-    tagWriteBack: false,
-  },
-  credentials: { serviceToken: 'invented-token' },
-  settings: { bridgeUrl: 'http://localhost:8100', maxRetries: 0 },
-  syncedLists: [],
-});
+const connector = (id: string): ConnectorConfig => {
+  const config: ConnectorConfig = {
+    id,
+    type: 'finance-manager',
+    name: id,
+    enabled: true,
+    syncMode: 'poll',
+    capabilities: {
+      read: true,
+      write: true,
+      delete: false,
+      sync: true,
+      subtasks: false,
+      lists: false,
+      tags: true,
+      tagWriteBack: false,
+    },
+    credentials: {
+      serviceToken: 'invented-token',
+      identityNamespace: createHash('sha256').update(id).digest('hex'),
+    },
+    settings: { bridgeUrl: 'http://localhost:8100', maxRetries: 0 },
+    syncedLists: [],
+  };
+  sqlite.prepare(`
+    INSERT OR IGNORE INTO connector_configs (
+      id, type, name, enabled, sync_mode, capabilities, credentials,
+      settings, synced_lists, created_at, updated_at
+    ) VALUES (?, ?, ?, 1, 'poll', ?, ?, ?, '[]', ?, ?)
+  `).run(
+    config.id,
+    config.type,
+    config.name,
+    JSON.stringify(config.capabilities),
+    JSON.stringify(config.credentials),
+    JSON.stringify(config.settings),
+    now.toISOString(),
+    now.toISOString(),
+  );
+  return config;
+};
 
 function response(path: string, overrides: Record<string, unknown> = {}) {
   const common = {
@@ -126,7 +149,7 @@ function mockDatasets(
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.resetModules();
-  sqlite = (await import('@/db')).sqlite;
+  sqlite = (await importInitializedSqliteDatabase()).sqlite;
   const datasetModule = await import('@/lib/connectors/monarch-money/dataset-sync');
   FinanceDatasetSynchronizer = datasetModule.FinanceDatasetSynchronizer;
   getFinanceDatasetHealth = datasetModule.getFinanceDatasetHealth;
@@ -145,7 +168,19 @@ afterAll(() => {
 
 describe.sequential('FinanceDatasetSynchronizer', () => {
   it('publishes all normalized datasets without retaining account balances', async () => {
-    mockDatasets();
+    mockDatasets({
+      '/accounts': {
+        accounts: [{
+          id: 'account-1',
+          displayName: 'Invented checking',
+          type: 'checking',
+          mask: '1234',
+          institution: 'Invented bank',
+          currentBalance: 123,
+          isActive: true,
+        }],
+      },
+    });
     const result = await new FinanceDatasetSynchronizer(connector('dataset-a'), () => now)
       .sync({ full: true });
 
@@ -203,7 +238,7 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
         bridgeContractVersion: 'bridge-v1',
       },
     ]);
-    expect(getFinanceDatasetHealth('dataset-a', now)).toMatchObject({
+    expect(await getFinanceDatasetHealth('dataset-a', now)).toMatchObject({
       aggregate: 'fresh',
       datasets: expect.arrayContaining([
         expect.objectContaining({
@@ -215,6 +250,12 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       ]),
     });
 
+    const generationsBeforeReplay = sqlite.prepare(`
+      SELECT dataset, current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-a'
+      ORDER BY dataset
+    `).all();
     mockDatasets();
     await expect(new FinanceDatasetSynchronizer(connector('dataset-a'), () => now)
       .sync({ full: true })).resolves.toMatchObject({
@@ -226,6 +267,12 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       SELECT count(DISTINCT generation_id) AS generations
       FROM finance_recurring_obligations WHERE connector_id = 'dataset-a'
     `).get()).toEqual({ generations: 1 });
+    expect(sqlite.prepare(`
+      SELECT dataset, current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-a'
+      ORDER BY dataset
+    `).all()).toEqual(generationsBeforeReplay);
   });
 
   it('soft-deactivates complete missing references and retains current plus previous snapshots', async () => {
@@ -249,7 +296,7 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
              sum(CASE WHEN is_current = 1 THEN 1 ELSE 0 END) AS currentRows
       FROM finance_recurring_obligations WHERE connector_id = 'dataset-a'
     `).get()).toEqual({ generations: 1, currentRows: 0 });
-    expect(getFinanceDatasetHealth('dataset-a', now).datasets)
+    expect((await getFinanceDatasetHealth('dataset-a', now)).datasets)
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ dataset: 'accounts', state: 'fresh', itemCount: 0 }),
         expect.objectContaining({ dataset: 'recurring', state: 'fresh', itemCount: 0 }),
@@ -290,7 +337,7 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       status: 'partial',
       datasetErrors: { tags: 'invalid_contract' },
     });
-    expect(getFinanceDatasetHealth('dataset-b', now)).toMatchObject({
+    expect(await getFinanceDatasetHealth('dataset-b', now)).toMatchObject({
       aggregate: 'partial',
       datasets: expect.arrayContaining([
         expect.objectContaining({ dataset: 'accounts', state: 'fresh', warning: null }),
@@ -338,11 +385,11 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
     mockDatasets();
     await new FinanceDatasetSynchronizer(connector('dataset-c'), () => now)
       .sync({ full: true });
-    expect(getFinanceDatasetHealth(
+    expect((await getFinanceDatasetHealth(
       'dataset-c',
       new Date('2026-08-12T13:00:00.000Z'),
-    ).aggregate).toBe('stale');
-    expect(getFinanceDatasetHealth('not-synchronized', now).aggregate).toBe('unavailable');
+    )).aggregate).toBe('stale');
+    expect((await getFinanceDatasetHealth('not-synchronized', now)).aggregate).toBe('unavailable');
     expect(financeDatasetFreshness({
       currentGenerationId: 'future-generation',
       sourceAsOf: '2026-08-10T12:06:00.000Z',
@@ -355,6 +402,11 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
   });
 
   it('treats reordered mixed-case snapshot identifiers as an idempotent replay', async () => {
+    const tags = ['_x', '1', 'a', 'B'].map((id) => ({
+      id,
+      name: `Invented ${id}`,
+      isActive: true,
+    }));
     const recurring = ['_x', '1', 'a', 'B'].map((id) => ({
       id,
       merchant: `Invented ${id}`,
@@ -372,13 +424,20 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       percentUsed: 0,
     }));
     mockDatasets({
+      '/tags': { tags },
       '/recurring': { recurring },
       '/budgets': { budgets },
     });
     const synchronizer = new FinanceDatasetSynchronizer(connector('dataset-order'), () => now);
     await synchronizer.sync({ full: true });
+    const tagGeneration = sqlite.prepare(`
+      SELECT current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-order' AND dataset = 'tags'
+    `).get();
 
     mockDatasets({
+      '/tags': { tags: [...tags].reverse() },
       '/recurring': { recurring: [...recurring].reverse() },
       '/budgets': { budgets: [...budgets].reverse() },
     });
@@ -387,5 +446,10 @@ describe.sequential('FinanceDatasetSynchronizer', () => {
       itemsUpdated: 0,
       itemsRemoved: 0,
     });
+    expect(sqlite.prepare(`
+      SELECT current_generation_id AS generationId
+      FROM finance_dataset_sync_state
+      WHERE connector_id = 'dataset-order' AND dataset = 'tags'
+    `).get()).toEqual(tagGeneration);
   });
 });

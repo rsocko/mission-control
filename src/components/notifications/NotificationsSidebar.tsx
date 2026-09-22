@@ -6,12 +6,16 @@ import Link from 'next/link';
 import {
   AlertTriangle, ClipboardCheck, BellRing, Info, Newspaper, Inbox,
   ChevronRight, PanelLeftClose, PanelLeftOpen, Globe,
-  Mail, MailOpen, Eye, EyeOff, Settings, Calendar,
-  type LucideIcon,
+  Mail, MailOpen, Eye, EyeOff, Settings, Calendar, Server, Shapes,
+  Radio, Package, Bell, Wrench, CircleAlert, type LucideIcon,
 } from 'lucide-react';
 import type { UseNotificationsReturn } from '@/lib/hooks/useNotifications';
 import type { NotificationLevel, NotificationState } from '@/types';
 import { NOTIFICATION_SOURCE_ICONS } from '@/types/dashboard';
+import {
+  formatNotificationSourceLabel,
+  formatNotificationTypeLabel,
+} from '@/lib/notifications/categories';
 
 // ─── Sidebar item (mirrors dashboard SidebarItem) ────────────────────────────
 
@@ -21,24 +25,27 @@ function SidebarItem({
   count,
   active,
   onClick,
-  color,
+  nested,
+  expanded,
 }: {
   icon: React.ReactNode;
   label: string;
   count: number;
   active?: boolean;
   onClick?: () => void;
-  color?: string;
+  nested?: boolean;
+  expanded?: boolean;
 }) {
   return (
     <button
       type="button"
+      aria-expanded={expanded}
       onClick={onClick}
-      className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer w-full text-left ${
+      className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] ${
         active
           ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
           : 'hover:bg-[var(--surface-2)] text-[var(--text-secondary)]'
-      }`}
+      } ${nested ? 'pl-7' : ''}`}
     >
       <span className="w-5 flex items-center justify-center flex-shrink-0">{icon}</span>
       <span className="text-sm font-medium flex-1 truncate">{label}</span>
@@ -49,8 +56,12 @@ function SidebarItem({
           {count}
         </span>
       )}
-      {color && (
-        <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: color }} />
+      {expanded !== undefined && (
+        <ChevronRight
+          size={12}
+          aria-hidden="true"
+          className={`flex-shrink-0 transition-transform ${expanded ? 'rotate-90' : ''}`}
+        />
       )}
     </button>
   );
@@ -71,8 +82,10 @@ function SectionHeader({
 }) {
   return (
     <button
+      type="button"
+      aria-expanded={!collapsed}
       onClick={onToggle}
-      className="flex-1 flex items-center gap-1 text-xs font-semibold text-[var(--text-tertiary)] uppercase tracking-wide hover:text-[var(--text-secondary)] transition-colors mb-2"
+      className="mb-2 flex flex-1 items-center gap-1 text-xs font-semibold uppercase tracking-wide text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
     >
       <ChevronRight
         size={11}
@@ -88,12 +101,12 @@ function SectionHeader({
 
 // ─── Level config ────────────────────────────────────────────────────────────
 
-const LEVEL_ITEMS: { value: NotificationLevel; label: string; icon: LucideIcon; dotColor: string }[] = [
-  { value: 'urgent', label: 'Urgent', icon: AlertTriangle, dotColor: '#ef4444' },
-  { value: 'action_needed', label: 'Action Needed', icon: ClipboardCheck, dotColor: '#f59e0b' },
-  { value: 'heads_up', label: 'Heads Up', icon: BellRing, dotColor: '#3b82f6' },
-  { value: 'fyi', label: 'FYI', icon: Info, dotColor: '#64748b' },
-  { value: 'digest', label: 'Digest', icon: Newspaper, dotColor: '#a855f7' },
+const LEVEL_ITEMS: { value: NotificationLevel; label: string; icon: LucideIcon; color: string }[] = [
+  { value: 'urgent', label: 'Urgent', icon: AlertTriangle, color: '#ef4444' },
+  { value: 'action_needed', label: 'Action Needed', icon: ClipboardCheck, color: '#f59e0b' },
+  { value: 'heads_up', label: 'Heads Up', icon: BellRing, color: '#3b82f6' },
+  { value: 'fyi', label: 'FYI', icon: Info, color: '#64748b' },
+  { value: 'digest', label: 'Digest', icon: Newspaper, color: '#a855f7' },
 ];
 
 // ─── State config ────────────────────────────────────────────────────────────
@@ -113,19 +126,43 @@ const DATE_RANGE_ITEMS: { value: 'today' | 'week' | 'month' | null; label: strin
   { value: 'month', label: 'Last 30 Days' },
 ];
 
-// ─── Source label helper ─────────────────────────────────────────────────────
-
-function formatSourceLabel(source: string): string {
-  return source
-    .split('-')
-    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
+function notificationTypeIcon(notificationType: string): React.ReactNode {
+  switch (notificationType) {
+    case 'home_assistant_entity_alert':
+      return <Radio size={13} className="text-cyan-400" />;
+    case 'ha_update_available':
+      return <Package size={13} className="text-blue-400" />;
+    case 'ha_update_critical':
+      return <Package size={13} className="text-red-400" />;
+    case 'ha_persistent_notification':
+      return <Bell size={13} className="text-blue-400" />;
+    case 'ha_persistent_critical':
+      return <Bell size={13} className="text-red-400" />;
+    case 'ha_repair_warning':
+      return <Wrench size={13} className="text-amber-400" />;
+    case 'ha_repair_error':
+      return <Wrench size={13} className="text-orange-400" />;
+    case 'ha_repair_critical':
+      return <CircleAlert size={13} className="text-red-400" />;
+    default:
+      return <Shapes size={13} />;
+  }
 }
 
 // ─── Main component ──────────────────────────────────────────────────────────
 
 interface NotificationsSidebarProps {
-  hook: UseNotificationsReturn;
+  hook: Pick<
+    UseNotificationsReturn,
+    | 'facets'
+    | 'filters'
+    | 'setLevelFilter'
+    | 'setSourceFilter'
+    | 'setSourceAccountFilter'
+    | 'setNotificationTypeFilter'
+    | 'setStateFilter'
+    | 'setDateRangeFilter'
+  >;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
   savedViews?: React.ReactNode;
@@ -149,6 +186,7 @@ export function NotificationsSidebar({
     });
 
   const totalCount = Object.values(facets.level).reduce((s, c) => s + c, 0);
+  const visibleTypes = filters.source ? facets.notificationType : [];
 
   // Collapsed mini rail
   if (collapsed) {
@@ -181,7 +219,7 @@ export function NotificationsSidebar({
         >
           <Inbox size={16} />
         </button>
-        {LEVEL_ITEMS.slice(0, 4).map(({ value, label, icon: Icon }) => (
+        {LEVEL_ITEMS.slice(0, 4).map(({ value, label, icon: Icon, color }) => (
           <button
             key={value}
             onClick={() => hook.setLevelFilter(filters.level === value ? null : value)}
@@ -193,7 +231,7 @@ export function NotificationsSidebar({
             title={label}
             aria-label={`Filter by ${label}`}
           >
-            <Icon size={16} />
+            <Icon size={16} style={{ color }} />
           </button>
         ))}
       </aside>
@@ -205,59 +243,26 @@ export function NotificationsSidebar({
       aria-label="Notification filters"
       className="hidden sm:flex flex-col w-56 bg-[var(--surface-1)] border-r border-[var(--border)] p-4 overflow-y-auto overflow-x-hidden flex-shrink-0"
     >
-      {savedViews}
-
-      {/* ── Level section ── */}
-      <div className="mb-4">
-        <div className="flex items-center justify-between">
-          <SectionHeader
-            label="Level"
-            collapsed={collapsedSections.has('level')}
-            onToggle={() => toggleSection('level')}
-            hasActiveFilter={!!filters.level}
-          />
-          <button
-            onClick={onToggleCollapse}
-            className="p-1 rounded text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-100"
-            aria-label="Collapse sidebar"
-            title="Collapse sidebar"
-          >
-            <PanelLeftClose size={13} />
-          </button>
-        </div>
-        {!collapsedSections.has('level') && (
-          <div className="space-y-0.5">
-            <SidebarItem
-              icon={<Inbox size={14} className="text-blue-400" />}
-              label="All"
-              count={totalCount}
-              active={!filters.level}
-              onClick={() => hook.setLevelFilter(null)}
-            />
-            {LEVEL_ITEMS.map(({ value, label, icon: Icon, dotColor }) => (
-              <SidebarItem
-                key={value}
-                icon={<Icon size={14} />}
-                label={label}
-                count={facets.level[value] || 0}
-                active={filters.level === value}
-                onClick={() => hook.setLevelFilter(filters.level === value ? null : value)}
-                color={dotColor}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
       {/* ── Source section ── */}
       {Object.keys(facets.source).length > 0 && (
         <div className="mb-4">
-          <SectionHeader
-            label="Source"
-            collapsed={collapsedSections.has('source')}
-            onToggle={() => toggleSection('source')}
-            hasActiveFilter={!!filters.source}
-          />
+          <div className="flex items-center justify-between">
+            <SectionHeader
+              label="Source"
+              collapsed={collapsedSections.has('source')}
+              onToggle={() => toggleSection('source')}
+              hasActiveFilter={!!filters.source}
+            />
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="rounded p-1 text-[var(--text-muted)] transition-colors duration-100 hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose size={13} />
+            </button>
+          </div>
           {!collapsedSections.has('source') && (
             <div className="space-y-0.5">
               <SidebarItem
@@ -269,33 +274,147 @@ export function NotificationsSidebar({
               />
               {Object.entries(facets.source)
                 .sort(([, a], [, b]) => b - a)
-                .map(([source, count]) => (
-                  <SidebarItem
-                    key={source}
-                    icon={
-                      NOTIFICATION_SOURCE_ICONS[source] ? (
-                        <Image
-                          src={NOTIFICATION_SOURCE_ICONS[source]}
-                          alt={source}
-                          width={14}
-                          height={14}
+                .map(([source, count]) => {
+                  const instances = facets.sourceAccount
+                    .filter(instance => instance.source === source)
+                    .sort((left, right) => left.label.localeCompare(right.label));
+                  const hasMultipleInstances = instances.length > 1;
+                  const expanded = filters.source === source && hasMultipleInstances;
+                  return (
+                    <React.Fragment key={source}>
+                      <SidebarItem
+                        icon={
+                          NOTIFICATION_SOURCE_ICONS[source] ? (
+                            <Image
+                              src={NOTIFICATION_SOURCE_ICONS[source]}
+                              alt=""
+                              width={14}
+                              height={14}
+                            />
+                          ) : (
+                            <Globe size={14} />
+                          )
+                        }
+                        label={formatNotificationSourceLabel(source)}
+                        count={count}
+                        active={
+                          filters.source === source
+                          && (!filters.sourceAccount || !hasMultipleInstances)
+                        }
+                        expanded={hasMultipleInstances ? expanded : undefined}
+                        onClick={() => hook.setSourceFilter(
+                          filters.source === source ? null : source,
+                        )}
+                      />
+                      {expanded && instances.map(instance => (
+                        <SidebarItem
+                          key={instance.key}
+                          icon={<Server size={13} />}
+                          label={instance.label}
+                          count={instance.count}
+                          nested
+                          active={filters.sourceAccount === instance.key}
+                          onClick={() => hook.setSourceAccountFilter(
+                            filters.sourceAccount === instance.key ? null : instance.key,
+                          )}
                         />
-                      ) : (
-                        <Globe size={14} />
-                      )
-                    }
-                    label={formatSourceLabel(source)}
-                    count={count}
-                    active={filters.source === source}
-                    onClick={() =>
-                      hook.setSourceFilter(filters.source === source ? null : source)
-                    }
-                  />
-                ))}
+                      ))}
+                    </React.Fragment>
+                  );
+                })}
             </div>
           )}
         </div>
       )}
+
+      {/* ── Level section ── */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between">
+          <SectionHeader
+            label="Level"
+            collapsed={collapsedSections.has('level')}
+            onToggle={() => toggleSection('level')}
+            hasActiveFilter={!!filters.level}
+          />
+          {Object.keys(facets.source).length === 0 && (
+            <button
+              type="button"
+              onClick={onToggleCollapse}
+              className="rounded p-1 text-[var(--text-muted)] transition-colors duration-100 hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose size={13} />
+            </button>
+          )}
+        </div>
+        {!collapsedSections.has('level') && (
+          <div className="space-y-0.5">
+            <SidebarItem
+              icon={<Inbox size={14} className="text-blue-400" />}
+              label="All"
+              count={totalCount}
+              active={!filters.level}
+              onClick={() => hook.setLevelFilter(null)}
+            />
+            {LEVEL_ITEMS.map(({ value, label, icon: Icon, color }) => (
+              <SidebarItem
+                key={value}
+                icon={<Icon size={14} style={{ color }} />}
+                label={label}
+                count={facets.level[value] || 0}
+                active={filters.level === value}
+                onClick={() => hook.setLevelFilter(filters.level === value ? null : value)}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Type section (scoped to the active source/instance) ── */}
+      <div className="mb-4">
+        <SectionHeader
+          label="Type"
+          collapsed={collapsedSections.has('notificationType')}
+          onToggle={() => toggleSection('notificationType')}
+          hasActiveFilter={!!filters.notificationType}
+        />
+        {!collapsedSections.has('notificationType') && (
+          filters.source && visibleTypes.length > 0 ? (
+            <div className="space-y-0.5">
+              <SidebarItem
+                icon={<Shapes size={14} className="text-blue-400" />}
+                label="All Types"
+                count={visibleTypes.reduce((sum, type) => sum + type.count, 0)}
+                active={!filters.notificationType}
+                onClick={() => hook.setNotificationTypeFilter(null)}
+              />
+              {visibleTypes.map(type => (
+                <SidebarItem
+                  key={type.key}
+                  icon={notificationTypeIcon(type.key)}
+                  label={formatNotificationTypeLabel(type.key)}
+                  count={type.count}
+                  active={filters.notificationType === type.key}
+                  onClick={() => hook.setNotificationTypeFilter(
+                    filters.notificationType === type.key ? null : type.key,
+                  )}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-start gap-2 px-2 py-1.5 text-xs leading-4 text-[var(--text-muted)]">
+              <Shapes size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+              <span>
+                {filters.source
+                  ? 'No notification types for this source.'
+                  : 'Choose a source to see its types.'}
+              </span>
+            </div>
+          ))}
+      </div>
+
+      {savedViews}
 
       {/* ── State section ── */}
       <div className="mb-4">

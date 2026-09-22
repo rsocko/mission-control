@@ -1,31 +1,33 @@
-import { vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
-const orderBy = vi.fn().mockResolvedValue([
-  { assignee: 'alice' },
-  { assignee: ' bob ' },
-  { assignee: null },
-]);
-const where = vi.fn(() => ({ orderBy }));
-const from = vi.fn(() => ({ where }));
-const selectDistinct = vi.fn(() => ({ from }));
-
-vi.mock('@/db', () => ({
-  default: { selectDistinct },
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: { assignee: 'assignee' },
-}));
+const listDistinctTaskAssignees = vi.fn();
 
 describe('GET /api/tasks/filter-options', () => {
-  it('returns distinct normalized assignee options', async () => {
+  beforeEach(() => {
+    listDistinctTaskAssignees.mockReset();
+    listDistinctTaskAssignees.mockResolvedValue(['   ', ' alice', 'alice ', 'bob']);
+    registerFakeTaskCorePersistence({
+      taskReads: { listDistinctTaskAssignees },
+    });
+  });
+
+  it('trims non-empty assignees without collapsing post-trim duplicates', async () => {
     const { GET } = await import('@/app/api/tasks/filter-options/route');
     const response = await GET();
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
-      assignees: ['alice', 'bob'],
+      assignees: ['alice', 'alice', 'bob'],
     });
-    expect(selectDistinct).toHaveBeenCalledWith({ assignee: 'assignee' });
+    expect(listDistinctTaskAssignees).toHaveBeenCalledOnce();
+  });
+
+  it('preserves the existing internal-error response', async () => {
+    listDistinctTaskAssignees.mockRejectedValue(new Error('read failed'));
+    const { GET } = await import('@/app/api/tasks/filter-options/route');
+    const response = await GET();
+
+    expect(response.status).toBe(500);
   });
 });

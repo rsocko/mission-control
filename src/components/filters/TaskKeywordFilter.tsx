@@ -14,6 +14,7 @@ import {
   updateTaskFilterContext,
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
+import { getQuickFilterDefinition } from '@/lib/tasks/quick-filters';
 import { parseFilterQuery, type FilterToken, type FilterTokenType } from '@/lib/utils/parseFilterQuery';
 import type {
   DashboardProjectViewModel as HubProject,
@@ -24,6 +25,10 @@ import type {
 } from '@/types/dashboard';
 import { PRIORITY_LABELS, STATUS_LABELS } from '@/types/dashboard';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import {
+  FILTER_TOKEN_STYLES as TOKEN_STYLES,
+  getFilterTokenDisplayValue as getTokenDisplayValue,
+} from '@/components/filters/filter-token-display';
 
 interface TaskKeywordFilterProps {
   filteredCount: number;
@@ -71,33 +76,6 @@ const FILTER_UNDO_TOAST_ID = 'filter-undo';
 
 // ── Token colour map ─────────────────────────────────────────────────────────
 
-const TOKEN_STYLES: Record<FilterTokenType, { bg: string; text: string; border: string }> = {
-  title:    { bg: 'bg-purple-500/15',  text: 'text-purple-300',  border: 'border-purple-500/30' },
-  tag:      { bg: 'bg-green-500/15',   text: 'text-green-300',   border: 'border-green-500/30' },
-  priority: { bg: 'bg-red-500/20',     text: 'text-red-300',     border: 'border-red-500/30' },
-  status:   { bg: 'bg-yellow-500/15',  text: 'text-yellow-300',  border: 'border-yellow-500/30' },
-  source:   { bg: 'bg-blue-500/15',    text: 'text-blue-300',    border: 'border-blue-500/30' },
-  list:     { bg: 'bg-cyan-500/15',    text: 'text-cyan-300',    border: 'border-cyan-500/30' },
-  listid:   { bg: 'bg-cyan-500/15',    text: 'text-cyan-300',    border: 'border-cyan-500/30' },
-  assignee: { bg: 'bg-orange-500/15',  text: 'text-orange-300',  border: 'border-orange-500/30' },
-  due:      { bg: 'bg-slate-500/15',   text: 'text-slate-300',   border: 'border-slate-500/30' },
-  project:  { bg: 'bg-indigo-500/15',  text: 'text-indigo-300',  border: 'border-indigo-500/30' },
-  phase:    { bg: 'bg-fuchsia-500/15', text: 'text-fuchsia-300', border: 'border-fuchsia-500/30' },
-  disposition: { bg: 'bg-emerald-500/15', text: 'text-emerald-300', border: 'border-emerald-500/30' },
-  text:     { bg: '',                  text: '',                  border: '' },
-};
-
-const QUICK_FILTER_LABELS: Record<string, string> = {
-  myDay: 'My Day',
-  overdue: 'Overdue',
-  high: 'High Priority',
-  week: 'Due This Week',
-  assigned: 'Assigned to Me',
-  recentlyCreated: 'Recently Created',
-  recentlyClosed: 'Recently Closed',
-  waiting: 'Waiting / On Hold',
-};
-
 // ── Autocomplete suggestions ──────────────────────────────────────────────────
 
 interface Suggestion {
@@ -109,6 +87,7 @@ const SUGGESTIONS: Suggestion[] = [
   { prefix: 'title:',    hint: 'Title contains…' },
   { prefix: 'tag:',      hint: 'Exact tag slug' },
   { prefix: 'priority:', hint: 'high / >=high / <=medium' },
+  { prefix: 'horizon:',  hint: 'now / next / later / someday / none' },
   { prefix: 'status:',   hint: 'todo / in_progress…' },
   { prefix: 'source:',   hint: 'Connector type' },
   { prefix: 'list:',     hint: 'List name contains…' },
@@ -126,6 +105,8 @@ const HELP_ROWS: Array<{ token: string; description: string }> = [
   { token: 'tag:slug',             description: 'Exact tag slug' },
   { token: 'priority:high',        description: 'Priority level' },
   { token: 'priority:>=high',      description: 'Priority threshold' },
+  { token: 'horizon:next',         description: 'Horizon' },
+  { token: 'horizon:none',         description: 'Tasks without a horizon' },
   { token: 'status:todo',          description: 'Status value' },
   { token: 'source:github-issues', description: 'Connector type' },
   { token: 'list:backlog',         description: 'List name contains' },
@@ -219,18 +200,18 @@ export function TaskKeywordFilter({
   useEffect(() => {
     controlledContextRef.current = controller?.context;
   }, [controller?.context]);
-  const controlledDashboard = controller
-    ? taskFilterContextToDashboard(controller.context)
-    : null;
-  const textFilter = controller?.context.query ?? storeTextFilter;
-  const sourceFilter = controlledDashboard?.sourceFilter ?? storeSourceFilter;
-  const listFilter = controlledDashboard?.listFilter ?? storeListFilter;
-  const listGroupFilter = controlledDashboard?.listGroupFilter ?? storeListGroupFilter;
-  const tagFilter = controlledDashboard?.tagFilter ?? storeTagFilter;
-  const quickFilter = controlledDashboard?.quickFilter ?? storeQuickFilter;
-  const projectFilter = controlledDashboard?.projectFilter ?? storeProjectFilter;
-  const priorityFilter = controlledDashboard?.priorityFilter ?? storePriorityFilter;
-  const statusFilter = controlledDashboard?.statusFilter ?? storeStatusFilter;
+  const controlledDashboard = taskFilterContextToDashboard(
+    controller?.context ?? EMPTY_TASK_FILTER_CONTEXT,
+  );
+  const textFilter = controller ? controller.context.query : storeTextFilter;
+  const sourceFilter = controller ? controlledDashboard.sourceFilter : storeSourceFilter;
+  const listFilter = controller ? controlledDashboard.listFilter : storeListFilter;
+  const listGroupFilter = controller ? controlledDashboard.listGroupFilter : storeListGroupFilter;
+  const tagFilter = controller ? controlledDashboard.tagFilter : storeTagFilter;
+  const quickFilter = controller ? controlledDashboard.quickFilter : storeQuickFilter;
+  const projectFilter = controller ? controlledDashboard.projectFilter : storeProjectFilter;
+  const priorityFilter = controller ? controlledDashboard.priorityFilter : storePriorityFilter;
+  const statusFilter = controller ? controlledDashboard.statusFilter : storeStatusFilter;
 
   const updateControlledContext = useCallback((
     patch: Partial<Omit<TaskFilterContext, 'version'>>,
@@ -531,7 +512,7 @@ export function TaskKeywordFilter({
     if (quickFilter) {
       filters.push({
         id: `quick-${quickFilter}`,
-        label: `quick:${QUICK_FILTER_LABELS[quickFilter] || quickFilter}`,
+        label: `quick:${getQuickFilterDefinition(quickFilter)?.label || quickFilter}`,
         style: quickFilter === 'high'
           ? TOKEN_STYLES.priority
           : quickFilter === 'assigned'
@@ -925,12 +906,12 @@ export function TaskKeywordFilter({
               <X size={14} />
             </button>
           )}
-          {hasContent && onSaveView && (
+          {onSaveView && (
             <button
               onClick={(e) => { e.stopPropagation(); onSaveView(); }}
               className="p-0.5 rounded hover:bg-[var(--surface-3)] text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
-              title="Save as view"
-              aria-label="Save current filters as a view"
+              title="Save current view"
+              aria-label="Save current view"
             >
               <Save size={13} />
             </button>
@@ -1009,31 +990,6 @@ export function TaskKeywordFilter({
       )}
     </div>
   );
-}
-
-function getTokenDisplayValue(token: FilterToken, projects: HubProject[]): string {
-  if (token.value === 'none') {
-    const noneLabels: Partial<Record<FilterTokenType, string>> = {
-      assignee: 'No assignee',
-      due: 'No due date',
-      list: 'No list',
-      phase: 'No phase',
-      priority: 'No priority',
-      project: 'No project',
-      tag: 'No tags',
-    };
-    return noneLabels[token.type] ?? token.value;
-  }
-  if (token.type === 'project') {
-    return projects.find((project) => project.id === token.value)?.name ?? token.value;
-  }
-  if (token.type === 'phase') {
-    for (const project of projects) {
-      const phase = project.phases?.find((candidate) => candidate.id === token.value);
-      if (phase) return `${project.name} › ${phase.name}`;
-    }
-  }
-  return token.value;
 }
 
 function quoteFilterValue(value: string): string {

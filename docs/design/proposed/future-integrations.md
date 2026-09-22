@@ -150,11 +150,16 @@ Examples: Microsoft Todo, GitHub Issues, Linear, Todoist, Notion.
 
 ### Pattern B: Alert-Only Connector
 Best for: Sources that produce alerts/notifications but don't accept write-back.
-Examples: Outlook Calendar, Outlook Email, Home Assistant, RyMessage.
+Examples: Outlook Calendar, Outlook Email, Home Assistant.
 
 ### Pattern C: Bridge Connector
 Best for: Complex source systems where another app owns the intelligence and MC is the aggregation layer.
-Examples: Finance Manager, Document Intelligence Hub.
+Examples: Finance Manager, Document Intelligence Hub, RyMessage Companion.
+
+RyMessage currently uses an alert-only connector, but its target architecture
+is a bridge: RyMessage extracts task candidates, Companion records
+materialization provenance, and Mission Control consumes the provider-owned
+task. See [RyMessage Task Materialization](rymessage-task-materialization.md).
 
 ### Pattern D: n8n Relay (Zero MC Code)
 Best for: IoT events, webhooks from services without dedicated connectors, quick prototypes.
@@ -180,6 +185,7 @@ When evaluating whether to build a new connector:
 
 ## See Also
 
+- [RyMessage Task Materialization](rymessage-task-materialization.md) — Task defaults, authority, provenance, and Companion boundary
 - [SHIPMENT-TRACKING-DESIGN.md](./SHIPMENT-TRACKING-DESIGN.md) — Design for delivery tracking (implemented via HA connector)
 - [WEBHOOK-SYNC-FUTURE.md](./WEBHOOK-SYNC-FUTURE.md) — Direct webhook receivers (deferred)
 - `experiments/personal-automation/finance-management/docs/CROSS-SYSTEM-INTEGRATION.md` — Finance × Paperless × MC integration architecture

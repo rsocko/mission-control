@@ -13,7 +13,14 @@ All configuration is via environment variables in `.env.local`. Copy from `.env.
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `LOG_LEVEL` | `info` (prod), `debug` (dev) | Logging verbosity: trace, debug, info, warn, error, fatal |
+| `MC_DATABASE_BACKEND` | `sqlite` | Relational backend: `sqlite` or `postgres` |
 | `MC_DB_PATH` | `./data/mission-control.db` | Path to SQLite database file |
+| `MC_POSTGRES_URL` | — | Server-only PostgreSQL connection secret; required for the PostgreSQL backend |
+| `MC_ALERTMANAGER_WEBHOOK_TOKEN` | — | Required scoped bearer token of at least 32 characters for Alertmanager webhook intake |
+| `MC_ALERTMANAGER_INTEGRATION_ID` | `homelab` | Stable namespace used in Alertmanager incident identity |
+
+See [Alertmanager webhook intake](../integrations/alertmanager.md) for the exact
+producer URL, credential-file contract, payload allowlist, and response behavior.
 
 ### SQLite observability
 
@@ -23,6 +30,13 @@ retained. Initial review thresholds are 100 ms at p95, 500 ms at p99, a 5-second
 busy timeout, 64 MiB/256 MiB WAL warning/critical sizes, and checkpoint
 starvation after 60 seconds with at least 1,000 pending frames. Configure these
 with the `MC_DB_*` variables documented in `.env.example`.
+
+### PostgreSQL
+
+PostgreSQL uses an asynchronous connection pool and PostgreSQL-specific
+migrations, search, queue, and health implementations. See
+[PostgreSQL deployment](../operations/postgresql.md) for secret handling, TLS,
+least-privilege roles, pool sizing, startup, backup, and rollback requirements.
 
 ## Microsoft Graph (Todo, Email, Calendar)
 
@@ -85,7 +99,15 @@ private key and token-encryption key in the deployment secret store.
 | `AI_BASE_URL` | `http://localhost:11434/v1` | API endpoint (Ollama default shown) |
 | `AI_MODEL` | `llama3.1:8b` | Model to use for completions |
 | `AI_SEMANTIC_SEARCH_ENABLED` | `false` | Opt in to meaning-based search enrichment. The saved AI setting takes precedence |
-| `AI_EMBEDDING_MODEL` | Auto | Embedding model (defaults: `nomic-embed-text` for Ollama, `ollama/nomic-embed-text:latest` for Bifrost, `text-embedding-3-small` otherwise) |
+| `AI_HOUSTON_MEMORY_ENABLED` | `false` | Opt in to retained, privacy-minimized Houston summaries. Independent from global semantic search; the saved AI setting takes precedence |
+| `AI_HOUSTON_MEMORY_RETENTION_DAYS` | `90` | Retention applied to newly captured Houston summaries, bounded to 1–365 days |
+| `AI_EMBEDDING_PROVIDER` | `bifrost` | Embedding route, independent from `AI_PROVIDER`. Existing installations without this setting continue to inherit `AI_PROVIDER` |
+| `AI_EMBEDDING_MODEL` | `azure/text-embedding-3-small` | Embedding model or deployment. Bifrost IDs must include a provider prefix |
+| `AI_EMBEDDING_BASE_URL` | Provider default | Optional embedding-only endpoint override |
+| `AI_EMBEDDING_API_KEY` | Provider default | Optional embedding-only credential override |
+| `MC_EMBEDDING_REQUEST_TIMEOUT_MS` | `20000` | Timeout for each embedding request attempt |
+| `MC_EMBEDDING_REQUEST_MAX_RETRIES` | `2` | Bounded retries for rate limits, server errors, and transport failures |
+| `MC_EMBEDDING_REQUEST_RETRY_BASE_MS` | `100` | Exponential retry backoff base |
 | `MC_QUERY_EMBEDDING_CACHE_MAX_ENTRIES` | `128` | Maximum successful interactive query vectors retained per process |
 | `MC_QUERY_EMBEDDING_CACHE_TTL_MS` | `300000` | TTL for process-local query vectors; identical in-flight requests are coalesced and failures are not cached |
 | `MC_SEMANTIC_CACHE_MAX_ENTRIES` | `2048` | Maximum number of parsed `Float32` embedding vectors retained by each process |
@@ -96,16 +118,15 @@ private key and token-encryption key in the deployment secret store.
 | `AZURE_OPENAI_API_KEY` | — | API key for direct Azure OpenAI |
 | `BIFROST_BASE_URL` | — | Bifrost OpenAI-compatible endpoint, including `/v1` |
 | `BIFROST_API_KEY` | — | Bifrost virtual key when gateway authentication is enabled |
+| `MC_COPILOT_DURABLE_EXECUTION_ENABLED` | `false` | Opt in to direct, resumable Copilot SDK execution in the packaged worker |
+| `MC_AI_PROVIDER_SESSION_KEY` | — | Dedicated 32-byte base64 or 64-character hex encryption key required only for direct durable Copilot execution |
+| `MC_AI_PROVIDER_SESSION_KEY_VERSION` | `v1` | Version label stored with encrypted direct Copilot provider-session references |
 | `AI_APPROVED_AZURE_HOSTS` | — | Additional trusted Azure endpoint hostnames |
 | `AI_APPROVED_BIFROST_HOSTS` | — | Additional trusted Bifrost endpoint hostnames |
 | `AI_APPROVED_OPENAI_HOSTS` | — | Additional trusted OpenAI-compatible endpoint hostnames |
-| `MC_HOUSTON_TOOL_APPROVAL_SECRET` | — | Required server-only secret of at least 32 bytes for AI SDK-signed Houston finance approvals; use the same secret on every web instance |
-
-Houston refuses AI chat requests when `MC_HOUSTON_TOOL_APPROVAL_SECRET` is
-missing or shorter than 32 UTF-8 bytes. The secret signs approval requests and
-is never returned to the browser or written to logs. Generate it in the
-deployment secret manager and keep the value identical across instances so an
-approval issued by one instance can be verified by another.
+Houston stores finance mutation proposals server-side for up to one hour.
+Approving or denying a proposal atomically consumes it, so browser-submitted
+arguments are never authoritative and an approval cannot be replayed.
 
 :::info[Azure OpenAI]
 For Azure, set `AI_PROVIDER=azure` plus `AZURE_OPENAI_API_KEY` and `AZURE_OPENAI_ENDPOINT`.
@@ -117,14 +138,34 @@ and use a provider-qualified model such as `azure/gpt-4o-mini`. Mission Control
 loads the gateway's model catalog from `/v1/models` and enforces sensitivity
 routing from the model's provider prefix.
 
+Bifrost inference is independent from direct, resumable Copilot SDK sessions.
+`BIFROST_API_KEY` authenticates gateway inference only and must never be reused
+as provider-session encryption material. Direct Copilot execution is disabled
+unless `MC_COPILOT_DURABLE_EXECUTION_ENABLED=true`; when enabled, the packaged
+worker requires a separate valid `MC_AI_PROVIDER_SESSION_KEY`.
+
 Semantic search is a separate, off-by-default feature under **Settings → AI
-Provider**. Its embedding model is independent from the completion model.
-Bifrost embedding IDs must be provider-qualified (for example,
-`ollama/nomic-embed-text:latest`). Entity embeddings remain durable in SQLite,
+Provider**. Its embedding route, endpoint, credential, and model are independent
+from completion settings. The recommended default routes through Bifrost to an
+Azure OpenAI embedding deployment using a provider-qualified ID such as
+`azure/text-embedding-3-small`. Entity embeddings remain durable in SQLite,
+record their resolved provider, model, dimensions, fallback result, and
+correlation identity, and become active only after an atomic staged rebuild,
 while query embeddings are kept only in a bounded in-memory cache and never
 written as query history. Interactive searches report `not-ready` until
 compatible entity embeddings exist; index maintenance runs separately and is
 never triggered by a query.
+
+Retained Houston memory is controlled independently under **Settings → AI
+Provider** and is disabled by default. When enabled, Houston sends bounded
+conversation text through the restricted completion route to produce a minimized
+record containing only a title, short summary, durable decisions, commitments,
+topics, and validated Mission Control entity links. Full transcripts, tool output,
+credentials, and model reasoning are not stored or indexed. The 90-day default
+applies to new summaries; changing it does not rewrite existing expiry dates, and
+disabling memory does not silently delete existing summaries. Users can inspect,
+exclude, or explicitly delete retained memories from Houston. A worker cleanup
+physically deletes expired summaries in bounded batches even while capture is off.
 
 Search requests may include `source`, `status`, and `excludeDone=true`. These
 filters are applied to both keyword and semantic results before they are
@@ -132,10 +173,11 @@ returned. Keyword filtering considers the best 50 FTS candidates; semantic
 filtering is applied in SQLite before the configured candidate limit is scored.
 :::
 
-Settings can also be changed at runtime. `GET /api/ai/provider` returns the
-redacted active configuration, `POST /api/ai/provider` saves provider and
-routing settings in SQLite, and `PUT /api/ai/provider` tests the active
-connection. Saved SQLite values take precedence over environment defaults.
+Settings can also be changed at runtime. `GET /api/ai/provider` returns redacted
+completion and embedding status, `POST /api/ai/provider` saves both routes and
+routing policy in SQLite, `PUT /api/ai/provider` tests completions, and
+`PUT /api/ai/provider?target=embedding` tests only the embedding route. Saved
+SQLite values take precedence over environment defaults.
 
 ## Connected Services
 
@@ -147,12 +189,10 @@ connection. Saved SQLite values take precedence over environment defaults.
 | `TYRION_FINANCE_INSIGHTS_SHADOW_INGEST_ENABLED` | `false` | Enables server-only staged publication, evaluation retry, and bounded occurrence shadow ingestion; notification delivery still requires the per-connector cutover fence |
 | `TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED` | `false` | Enables immediate notifications for eligible fresh large transactions and recurring amount increases |
 | `TYRION_FINANCE_INSIGHTS_MONTHLY_DIGEST_NOTIFICATIONS_ENABLED` | `false` | Enables the grouped high-confidence monthly movers digest after 09:00 on day 2 in the configured household timezone |
-| `TYRION_ATTRIBUTION_FINGERPRINT_KEY` | — | Household deployment secret for irreversible connector-scoped references |
-| `TYRION_ATTRIBUTION_KEY_VERSION` | `1` | Rotation version included in reference derivation; changing it rotates all opaque refs |
-| `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` | — | Optional positive policy fence; blank derives the fence from the first successful batch |
+| `TYRION_ATTRIBUTION_EXPECTED_POLICY_VERSION` | — | Required positive static fence for normal attribution sync and operator readiness; production currently uses policy version `2`, which is independent of attribution contract version `2.0` |
 | `TYRION_ATTRIBUTION_TIMEOUT_MS` | `10000` | Bounded Tyrion attribution request timeout, capped at 30 seconds |
 | `MONARCH_WEB_URL` | `https://app.monarchmoney.com` | Public Monarch origin used for comprehensive finance workflow links |
-| `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Public Tyrion operations origin used only for the `/configuration` link |
+| `TYRION_OPERATIONS_URL` | `https://tyrion.example` | Allowlisted public Tyrion operations root used for configuration and the server-constructed `?source=mission-control` reconnect action |
 | `FINANCE_EXTERNAL_ALLOWED_HOSTS` | — | Additional comma-separated HTTPS hosts approved for public finance links |
 | `FINANCE_OWL_ALLOWED_HOSTS` | — | Additional comma-separated HTTPS hosts approved for mapped OWL document actions |
 | `DOC_INTELLIGENCE_URL` | `http://localhost:8200` | OWL, the Paperless-ngx connector and document agent for Mission Control |
@@ -164,6 +204,22 @@ connection. Saved SQLite values take precedence over environment defaults.
 | `HOME_ASSISTANT_URL` | `http://localhost:8123` | Home Assistant instance |
 | `HOME_ASSISTANT_TOKEN` | — | HA long-lived access token |
 | `HOME_ASSISTANT_ENTITIES` | — | Comma-separated entity globs to monitor |
+
+### Home Assistant alert ownership
+
+Use Home Assistant automations to decide when a device condition deserves an
+alert, including timing, presence checks, suppression, and escalation. Publish
+those outcomes as Home Assistant persistent notifications for Mission Control
+to ingest. Mission Control then owns notification presentation, severity,
+deduplication, and lifecycle.
+
+The optional **Polled device rules** source is a legacy convenience layer with
+built-in rules for open doors, low batteries, motion, and offline devices. It
+can be enabled or disabled as a group in the connector settings, but individual
+rules are not managed in the UI. The built-in open-door rule requires a Home
+Assistant opening device class (`door`, `garage_door`, `opening`, or `window`)
+so entities whose names merely contain `door`, such as doorbell diagnostics,
+are not misclassified.
 
 Finance Insight publication also requires an exact ISO 4217
 `householdCurrency` in the persisted Finance Manager connector settings. There
@@ -179,16 +235,38 @@ queries, fragments, encoded separators, or path traversal. The bare
 versioned gateway. The browser `/api/bridge` proxy and Tyrion auth, session, raw
 bridge, and internal routes are not connector APIs. Connector requests never
 follow redirects.
+
+Mission Control polls normalized Tyrion health every five minutes. Degraded or
+unavailable health remains suppressed for the first 15 minutes; a verified
+`expired` or `unauthenticated` state is immediately actionable. One durable
+outage episode owns one notification and, after four hours, one local task and
+My Day item. Restarting Mission Control does not reset either threshold.
+Recovery is not inferred from navigation: Mission Control requires connected
+live health, performs `POST /sync?days=30` without a request body, and then
+requires a second connected live health response before settling the episode.
+The reconnect action is built only from `TYRION_OPERATIONS_URL`; producer URLs,
+Monarch cookies, `session_id`, `csrftoken`, and reusable session material are
+not accepted.
+
 The attribution client calls only
-`POST http://tyrion-operations-ui:3000/api/internal/v1/attribution/batch` and
+`POST http://tyrion-operations-ui:3000/api/internal/v2/attribution/batch` and
 uses the connector's persisted service token, falling back to
 `FINANCE_MANAGER_API_TOKEN`, as a standard bearer credential. New setup stores
 only the canonical `serviceToken` key; bounded legacy aliases remain readable
 for migration. That path must
 remain absent from public routers. Tyrion fixes the service actor and household
 identity server-side; Mission Control sends no identity, signature, timestamp,
-nonce, or replay metadata. Keep the fingerprint key independent from transport
-credentials and rotate it by incrementing `TYRION_ATTRIBUTION_KEY_VERSION`.
+nonce, or replay metadata. The bearer token is authentication only. Mission
+Control persists a random identity namespace in protected connector credentials
+and uses ordinary SHA-256 derivation to create stable opaque connector-scoped
+source and account references. Raw Monarch identifiers never cross the Tyrion
+service boundary, and the namespace is never returned to browser clients.
+
+Finance Insight source facts use the same protected connector namespace to
+replace raw Monarch transaction, recurring, category, category-group, account,
+and tag identifiers with deterministic connector-scoped references. These
+ordinary identities require no deployment `DATA_KEY`, identity key, or derived
+secret subkey.
 
 ## Bug Snap Widget
 

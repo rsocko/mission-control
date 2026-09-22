@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, taskSchedules, appSettings } from '@/db/schema';
-import { and, eq, gte, desc } from 'drizzle-orm';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type { TaskPriority } from '@/types';
 import logger from '@/lib/logger';
 
@@ -29,6 +28,12 @@ type SnoozeSetting = {
   minCount?: number; // for 'until-noteworthy', how many before showing again
   snoozedAt?: string; // ISO timestamp when snooze was activated
 };
+
+function readSnooze(value: unknown): SnoozeSetting | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as SnoozeSetting
+    : null;
+}
 
 /** Deterministic shuffle using a time-based seed that changes every 30 min */
 function seededShuffle<T>(arr: T[], seed: number): T[] {
@@ -129,75 +134,52 @@ function scoreWin(
 export async function GET() {
   try {
     const now = new Date();
+    const settings = getCorePersistenceRepositories().settings;
+    const { dailyPlanning } = await getWorkerPersistenceRepositories();
+    if (!dailyPlanning) throw new Error('Daily planning persistence is unavailable');
+    const repository = dailyPlanning.recentWins;
 
     // ── Check snooze state ──────────────────────────────────────────────────
-    const [snoozeRow] = await db
-      .select({ value: appSettings.value })
-      .from(appSettings)
-      .where(eq(appSettings.key, SNOOZE_SETTINGS_KEY));
+    const snooze = readSnooze(await settings.get(SNOOZE_SETTINGS_KEY));
 
-    if (snoozeRow) {
-      const snooze = snoozeRow.value as SnoozeSetting;
+    if (snooze) {
       if (snooze.type === 'day' && snooze.until) {
         if (new Date(snooze.until) > now) {
           return NextResponse.json({ totalCount: 0, items: [], groups: [], snoozed: true });
         }
         // Snooze expired — clean it up
-        await db.delete(appSettings).where(eq(appSettings.key, SNOOZE_SETTINGS_KEY));
+        await settings.delete(SNOOZE_SETTINGS_KEY);
       }
       // 'until-noteworthy' is handled below after we know totalCount
     }
 
     // ── Load deprioritized lists ────────────────────────────────────────────
-    const [deprioritizedRow] = await db
-      .select({ value: appSettings.value })
-      .from(appSettings)
-      .where(eq(appSettings.key, DEPRIORITIZED_LISTS_KEY));
-    const deprioritizedLists: string[] = deprioritizedRow
-      ? (deprioritizedRow.value as string[])
+    const deprioritizedValue = await settings.get(DEPRIORITIZED_LISTS_KEY);
+    const deprioritizedLists: string[] = Array.isArray(deprioritizedValue)
+      ? deprioritizedValue as string[]
       : [];
 
     // ── Fetch recent completions ────────────────────────────────────────────
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    const recentWins = await db
-      .select({
-        id: tasks.id,
-        title: tasks.title,
-        priority: tasks.priority,
-        completedAt: tasks.completedAt,
-        connectorType: tasks.connectorType,
-        sourceListName: tasks.sourceListName,
-        dueDate: tasks.dueDate,
-        recurrence: taskSchedules.recurrence,
-      })
-      .from(tasks)
-      .leftJoin(taskSchedules, eq(tasks.id, taskSchedules.taskId))
-      .where(
-        and(
-          eq(tasks.status, 'done'),
-          gte(tasks.completedAt, sevenDaysAgo.toISOString())
-        )
-      )
-      .orderBy(desc(tasks.completedAt));
+    const recentWins = await repository.listRecentCompletions({
+      completedFrom: sevenDaysAgo.toISOString(),
+    });
 
     // ── Handle 'until-noteworthy' snooze ────────────────────────────────────
-    if (snoozeRow) {
-      const snooze = snoozeRow.value as SnoozeSetting;
-      if (snooze.type === 'until-noteworthy') {
-        const threshold = snooze.minCount ?? 5;
-        const snoozedAt = snooze.snoozedAt;
-        // Only count wins completed AFTER snooze was set
-        const winsSinceSnooze = snoozedAt
-          ? recentWins.filter((w) => w.completedAt && w.completedAt > snoozedAt).length
-          : recentWins.length;
-        if (winsSinceSnooze < threshold) {
-          return NextResponse.json({ totalCount: recentWins.length, items: [], groups: [], snoozed: true });
-        }
-        // Enough new wins — clear snooze and show banner
-        await db.delete(appSettings).where(eq(appSettings.key, SNOOZE_SETTINGS_KEY));
+    if (snooze && snooze.type === 'until-noteworthy') {
+      const threshold = snooze.minCount ?? 5;
+      const snoozedAt = snooze.snoozedAt;
+      // Only count wins completed AFTER snooze was set
+      const winsSinceSnooze = snoozedAt
+        ? recentWins.filter((w) => w.completedAt && w.completedAt > snoozedAt).length
+        : recentWins.length;
+      if (winsSinceSnooze < threshold) {
+        return NextResponse.json({ totalCount: recentWins.length, items: [], groups: [], snoozed: true });
       }
+      // Enough new wins — clear snooze and show banner
+      await settings.delete(SNOOZE_SETTINGS_KEY);
     }
 
     // ── Group by connector + list ───────────────────────────────────────────

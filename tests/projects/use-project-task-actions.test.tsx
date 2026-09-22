@@ -123,6 +123,7 @@ function makeTask(overrides: Partial<ProjectTask> = {}): ProjectTask {
       phaseName: 'Plan',
     }],
     localDisposition: 'active',
+    microStatus: null,
     taskSourceModel: 'mc-owned',
     editPolicy: editableTaskPolicy,
     ...overrides,

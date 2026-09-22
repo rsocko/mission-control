@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
-import { eq } from 'drizzle-orm';
-import db from '@/db';
-import { nativeShareCredentials } from '@/db/schema';
 import { safeEqual } from '@/lib/api/trusted-request';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 const nativeShareTokenPattern =
   /^mc_share_v1\.([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\.([A-Za-z0-9_-]{43,128})$/i;
@@ -30,11 +28,10 @@ export async function authenticateNativeShareCredential(
   }
 
   const credentialId = match[1].toLowerCase();
-  const [credential] = await db
-    .select()
-    .from(nativeShareCredentials)
-    .where(eq(nativeShareCredentials.id, credentialId))
-    .limit(1);
+  const credential = await getTriagePersistenceRepositories()
+    .native
+    .credentials
+    .findShareCredential(credentialId);
   if (!credential || credential.revokedAt) {
     return { status: 'unauthorized' };
   }

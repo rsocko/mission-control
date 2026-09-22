@@ -29,6 +29,16 @@ Keep pull requests small enough to review. Explain behavior changes, persistent
 data migrations, compatibility impact, and rollback steps. Maintainers may ask
 for additional threat-model, privacy, or accessibility review.
 
+When a change materially alters a persisted SQLite shape, migration safety net,
+or cutover contract, update or add a checkpoint in
+`tests/fixtures/persisted-state/manifest.ts`, regenerate the frozen synthetic
+databases with `npm run db:fixtures:persisted-state`, and run
+`npm run test:persisted-state`. Retiring a checkpoint requires an intentional
+compatibility-policy and release-note change. Fixtures must contain only
+deterministic synthetic values: never copy a production database, connector
+identifier, credential, webhook secret, repository identity, or personal task
+content.
+
 All changes require review. Security-sensitive paths use CODEOWNERS. Do not
 attempt to bypass required checks, conversation resolution, or branch rules.
 

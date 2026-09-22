@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import type { ConnectorConfig } from './types';
 import type { ConnectorHealthResponse, ConnectorHealthState } from './ConnectionStatus';
+import { isFinanceConnectorType } from './types';
 
 interface HealthTarget {
   id: string;
@@ -18,7 +19,10 @@ export function useConnectorHealth(connectors: ConnectorConfig[]) {
   const [healthRefreshes, setHealthRefreshes] = useState<Record<string, number>>({});
   const targetSignature = JSON.stringify(
     connectors
-      .filter(connector => connector.type === 'document-intelligence' && connector.enabled)
+      .filter(connector => (
+        (connector.type === 'document-intelligence' || isFinanceConnectorType(connector.type))
+        && connector.enabled
+      ))
       .map(connector => ({
         id: connector.id,
         requestKey: buildRequestKey(connector, healthRefreshes[connector.id] || 0),
@@ -110,7 +114,10 @@ export function useConnectorHealth(connectors: ConnectorConfig[]) {
   }, [targetSignature]);
 
   const getHealthState = (connector: ConnectorConfig) => {
-    if (connector.type !== 'document-intelligence') {
+    if (
+      connector.type !== 'document-intelligence'
+      && !isFinanceConnectorType(connector.type)
+    ) {
       return undefined;
     }
 

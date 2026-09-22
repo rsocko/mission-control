@@ -1,16 +1,40 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import Image from 'next/image';
 import { Check, Filter, ListChecks, Loader2, Search } from 'lucide-react';
 import { MobileSwipeTaskRow } from '@/components/today/MobileSwipeTaskRow';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { MobileSheet } from '@/components/ui/MobileSheet';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useDashboardData } from '@/lib/hooks/useDashboardData';
+import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
+import {
+  PLANNING_HORIZONS,
+  PLANNING_HORIZON_LABELS,
+  type PlanningHorizonFilter,
+} from '@/lib/tasks/planning-horizon';
+import { parseFilterQuery, replacePositiveFilterValues } from '@/lib/utils/parseFilterQuery';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
+import {
+  getQuickFilterDefinition,
+  getQuickFilterVisibility,
+  isQuickFilterVisible,
+  QUICK_FILTERS,
+  type QuickFilterVisibility,
+} from '@/lib/tasks/quick-filters';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
+import type { TaskListStatsDto } from '@/types/api';
 import { cn } from '@/lib/utils';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {
   DashboardTaskViewModel as Task,
   EnabledSource,
@@ -21,24 +45,15 @@ import type { MyDayItem } from '@/components/today/types';
 
 const PRIORITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, none: 4 };
 
-type FilterMode = 'all' | 'overdue' | 'due-today' | 'high-priority';
-
-const QUICK_FILTERS: Array<{
-  value: FilterMode;
-  label: string;
-  description: string;
-}> = [
-  { value: 'all', label: 'Any date or priority', description: 'Show every active task' },
-  { value: 'overdue', label: 'Overdue', description: 'Past its due date' },
-  { value: 'due-today', label: 'Due today', description: 'Due before tomorrow' },
-  { value: 'high-priority', label: 'High priority', description: 'Critical and high priority' },
-];
-
 interface TaskGroup {
   key: string;
   label: string;
   items: MyDayItem[];
 }
+
+type MobileTaskListRow =
+  | { type: 'header'; group: TaskGroup }
+  | { type: 'task'; item: MyDayItem };
 
 /** Convert a Task from dashboard data into a MyDayItem shape for swipe rows */
 function taskToMyDayItem(task: Task): MyDayItem {
@@ -51,12 +66,16 @@ function taskToMyDayItem(task: Task): MyDayItem {
     title: task.title,
     status: task.status,
     priority: task.priority,
+    planningHorizon: task.planningHorizon,
     dueDate: task.dueDate,
     connectorType: task.connectorType,
     connectorInstanceId: task.connectorInstanceId,
+    syncStatus: task.syncStatus,
+    pushRetryCount: task.pushRetryCount,
     sourceId: task.sourceId ?? undefined,
     sourceListName: task.sourceListName,
     createdAt: null,
+    completedAt: null,
     tags: task.tags ?? [],
     metadata: task.metadata,
     subtaskTotal: task.subtaskTotal,
@@ -79,24 +98,13 @@ function taskToMyDayItem(task: Task): MyDayItem {
  */
 export function MobileAllTasksList() {
   const { state, actions, computed } = useDashboardData();
+  const textFilter = useDashboardViewStore((viewState) => viewState.textFilter);
+  const setTextFilter = useDashboardViewStore((viewState) => viewState.setTextFilter);
   const selectedTaskId = state.selectedTaskId;
   const setSelectedTaskId = actions.setSelectedTaskId;
-  const [activeFilter, setActiveFilter] = useState<FilterMode>('all');
+  const activeFilter = getQuickFilterDefinition(state.quickFilter)?.id ?? 'all';
   const [activeScheduleTrayId, setActiveScheduleTrayId] = useState<string | null>(null);
   const [showFilters, setShowFilters] = useState(false);
-  const filterHeaderRef = useRef<HTMLDivElement>(null);
-  const [filterHeaderHeight, setFilterHeaderHeight] = useState(0);
-
-  useEffect(() => {
-    const header = filterHeaderRef.current;
-    if (!header) return;
-
-    const observer = new ResizeObserver(() => {
-      setFilterHeaderHeight(header.offsetHeight);
-    });
-    observer.observe(header);
-    return () => observer.disconnect();
-  }, [state.loading]);
 
   const today = getLocalToday();
   const tomorrow = getLocalTomorrow();
@@ -108,27 +116,21 @@ export function MobileAllTasksList() {
   }, [actions]);
   const { containerRef, isRefreshing, pullDistance, containerProps, contentStyle } = usePullToRefresh({ onRefresh, enabled: !isSheetOpen });
 
-  // Filter tasks based on active quick-filter (source filtering is handled server-side via actions.setSourceFilter)
-  const filteredTasks = useMemo(() => {
-    const tasks = state.taskResponse.tasks;
-
-    if (activeFilter === 'overdue') {
-      return tasks.filter((t) => {
-        const d = t.dueDate?.split('T')[0];
-        return d && d < today && t.status !== 'done';
-      });
-    } else if (activeFilter === 'due-today') {
-      return tasks.filter((t) => t.dueDate?.split('T')[0] === today && t.status !== 'done');
-    } else if (activeFilter === 'high-priority') {
-      return tasks.filter((t) => (t.priority === 'critical' || t.priority === 'high') && t.status !== 'done');
-    }
-
-    return tasks;
-  }, [state.taskResponse.tasks, activeFilter, today]);
+  const filteredTasks = state.taskResponse.tasks;
 
   // Group tasks by priority
   const groups: TaskGroup[] = useMemo(() => {
-    const active = filteredTasks.filter((t) => t.status !== 'done');
+    if (activeFilter === 'recentlyClosed') {
+      return filteredTasks.length > 0
+        ? [{
+            key: 'recently-closed',
+            label: 'Recently Closed',
+            items: filteredTasks.map(taskToMyDayItem),
+          }]
+        : [];
+    }
+
+    const active = filteredTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled');
     const sortByPriority = (a: Task, b: Task) =>
       (PRIORITY_ORDER[a.priority] ?? 4) - (PRIORITY_ORDER[b.priority] ?? 4);
 
@@ -161,9 +163,32 @@ export function MobileAllTasksList() {
     if (upcoming.length > 0) result.push({ key: 'upcoming', label: 'Upcoming', items: upcoming.map(taskToMyDayItem) });
     if (noDue.length > 0) result.push({ key: 'no-due', label: 'No Due Date', items: noDue.map(taskToMyDayItem) });
     return result;
-  }, [filteredTasks, today]);
+  }, [activeFilter, filteredTasks, today]);
 
-  const totalActive = useMemo(() => filteredTasks.filter((t) => t.status !== 'done').length, [filteredTasks]);
+  const totalActive = useMemo(
+    () => activeFilter === 'recentlyClosed'
+      ? filteredTasks.length
+      : filteredTasks.filter((t) => t.status !== 'done' && t.status !== 'cancelled').length,
+    [activeFilter, filteredTasks],
+  );
+  const taskRows = useMemo<MobileTaskListRow[]>(
+    () => groups.flatMap((group) => [
+      { type: 'header' as const, group },
+      ...group.items.map((item) => ({ type: 'task' as const, item })),
+    ]),
+    [groups],
+  );
+  const virtualizeTaskRows = shouldVirtualizeList(totalActive);
+  const taskRowVirtualizer = useVirtualizer({
+    count: virtualizeTaskRows ? taskRows.length : 0,
+    getScrollElement: () => containerRef.current,
+    getItemKey: (index) => {
+      const row = taskRows[index];
+      return row?.type === 'header' ? `header-${row.group.key}` : row?.item.id ?? index;
+    },
+    estimateSize: (index) => taskRows[index]?.type === 'header' ? 34 : 76,
+    overscan: 8,
+  });
 
   // Task actions
   const handleSetDueDate = useCallback(async (taskId: string, date: string) => {
@@ -192,19 +217,36 @@ export function MobileAllTasksList() {
     () => state.enabledSources.find((source) => source.type === state.sourceFilter)?.name ?? state.sourceFilter,
     [state.enabledSources, state.sourceFilter]
   );
+  const planningHorizonFilters = useMemo(
+    () => parseFilterQuery(textFilter).horizonTokens.filter(isPlanningHorizonFilter),
+    [textFilter],
+  );
   const activeFilterCount = Number(activeFilter !== 'all')
     + Number(Boolean(state.sourceFilter))
-    + Number(Boolean(state.listFilter));
-  const filterSummary = activeListName
+    + Number(Boolean(state.listFilter))
+    + planningHorizonFilters.length;
+  const planningHorizonSummary = planningHorizonFilters
+    .map((horizon) => horizon === 'none' ? 'Not set' : PLANNING_HORIZON_LABELS[horizon])
+    .join(', ');
+  const filterSummary = planningHorizonSummary
+    || activeListName
     || activeSourceName
-    || QUICK_FILTERS.find((filter) => filter.value === activeFilter)?.label
+    || getQuickFilterDefinition(activeFilter)?.label
     || 'All tasks';
 
   const clearFilters = useCallback(() => {
-    setActiveFilter('all');
+    actions.setQuickFilter(null);
     actions.setSourceFilter(null);
     actions.setListFilter(null);
-  }, [actions]);
+    setTextFilter('');
+  }, [actions, setTextFilter]);
+
+  const togglePlanningHorizon = useCallback((horizon: PlanningHorizonFilter) => {
+    const next = planningHorizonFilters.includes(horizon)
+      ? planningHorizonFilters.filter((value) => value !== horizon)
+      : [...planningHorizonFilters, horizon];
+    setTextFilter(replacePositiveFilterValues(textFilter, 'horizon', next));
+  }, [planningHorizonFilters, setTextFilter, textFilter]);
 
   if (state.loading) {
     return (
@@ -215,21 +257,8 @@ export function MobileAllTasksList() {
   }
 
   return (
-    <div className={`relative h-full overscroll-y-contain ${isSheetOpen ? 'overflow-hidden' : 'overflow-y-auto'}`} ref={containerRef} {...containerProps}>
-      {/* Pull-to-refresh indicator — absolutely positioned */}
-      {(pullDistance > 0 || isRefreshing) && (
-        <div className="absolute left-0 right-0 top-0 z-50 flex items-center justify-center pointer-events-none" style={{ height: `${pullDistance}px` }}>
-          <Loader2
-            size={18}
-            className={`text-[var(--accent-400)] ${isRefreshing ? 'animate-spin' : ''}`}
-            style={{ opacity: Math.min(pullDistance / 32, 1), transform: `rotate(${pullDistance * 3}deg)` }}
-          />
-        </div>
-      )}
-
-      <div style={contentStyle}>
-      {/* Compact filter bar */}
-      <div ref={filterHeaderRef} className="sticky top-0 z-20 flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-2.5">
+    <div className="relative flex h-full flex-col overflow-hidden">
+      <div className="z-20 flex items-center gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-4 py-2.5">
         <button
           type="button"
           onClick={() => setShowFilters(true)}
@@ -261,6 +290,24 @@ export function MobileAllTasksList() {
         </span>
       </div>
 
+      <div
+        className={`relative min-h-0 flex-1 overscroll-y-contain ${isSheetOpen ? 'overflow-hidden' : 'overflow-y-auto'}`}
+        ref={containerRef}
+        data-virtualized={virtualizeTaskRows || undefined}
+        {...containerProps}
+      >
+      {/* Pull-to-refresh indicator — absolutely positioned */}
+      {(pullDistance > 0 || isRefreshing) && (
+        <div className="absolute left-0 right-0 top-0 z-50 flex items-center justify-center pointer-events-none" style={{ height: `${pullDistance}px` }}>
+          <Loader2
+            size={18}
+            className={`text-[var(--accent-400)] ${isRefreshing ? 'animate-spin' : ''}`}
+            style={{ opacity: Math.min(pullDistance / 32, 1), transform: `rotate(${pullDistance * 3}deg)` }}
+          />
+        </div>
+      )}
+
+      <div style={contentStyle}>
       {totalActive === 0 ? (
         <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
           <div className="w-16 h-16 rounded-full bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-500/30 flex items-center justify-center mb-5">
@@ -281,42 +328,61 @@ export function MobileAllTasksList() {
             </button>
           )}
         </div>
+      ) : virtualizeTaskRows ? (
+        <div
+          className="relative w-full"
+          style={{ height: `${taskRowVirtualizer.getTotalSize() + 96}px` }}
+        >
+          {taskRowVirtualizer.getVirtualItems().map((virtualRow) => {
+            const row = taskRows[virtualRow.index];
+            return (
+              <div
+                key={virtualRow.key}
+                ref={taskRowVirtualizer.measureElement}
+                data-index={virtualRow.index}
+                className="absolute left-0 top-0 w-full"
+                style={{ transform: `translateY(${virtualRow.start}px)` }}
+              >
+                {row.type === 'header' ? (
+                  <TaskGroupHeader group={row.group} />
+                ) : (
+                  <MobileAllTasksRow
+                    item={row.item}
+                    actions={actions}
+                    projects={state.projects}
+                    completingIds={state.completingIds}
+                    activeScheduleTrayId={activeScheduleTrayId}
+                    setActiveScheduleTrayId={setActiveScheduleTrayId}
+                    setSelectedTaskId={setSelectedTaskId}
+                    handleSnooze={handleSnooze}
+                    handleScheduleTomorrow={handleScheduleTomorrow}
+                    handleSchedulePickDay={handleSchedulePickDay}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
       ) : (
         <div className="pb-24">
           {groups.map((group) => (
             <section key={group.key} className="mb-1">
-              {/* Section header */}
-              <div className="sticky z-10 bg-[var(--surface-0)]/95 backdrop-blur-sm px-4 py-2 border-b border-[var(--border-subtle)]" style={{ top: filterHeaderHeight }}>
-                <h3 className={`text-xs font-semibold uppercase tracking-wide ${
-                  group.key === 'overdue' ? 'text-red-400' :
-                  group.key === 'due-today' ? 'text-amber-400' :
-                  group.key === 'upcoming' ? 'text-blue-400' :
-                  'text-[var(--text-muted)]'
-                }`}>
-                  {group.label}
-                  <span className="ml-1.5 text-[var(--text-muted)] font-normal">({group.items.length})</span>
-                </h3>
-              </div>
+              <TaskGroupHeader group={group} sticky />
 
               {/* Task rows */}
               {group.items.map((item) => (
-                <MobileSwipeTaskRow
+                <MobileAllTasksRow
                   key={item.id}
                   item={item}
-                  onComplete={(taskId) => { void actions.completeTask(taskId); }}
-                  onRemoveFromDay={(taskId) => { handleSnooze(taskId); }}
-                  onSetLocalDisposition={(taskId, disposition) => {
-                    void actions.setTaskLocalDisposition(taskId, disposition);
-                  }}
-                  onTap={(tappedItem) => { setActiveScheduleTrayId(null); setSelectedTaskId(tappedItem.taskId); }}
-                  onScheduleTomorrow={handleScheduleTomorrow}
-                  onSchedulePickDay={handleSchedulePickDay}
-                  onSnooze={(taskId) => handleSnooze(taskId)}
-                  isCompleting={state.completingIds.has(item.taskId)}
-                  showAiChip={item.priority === 'critical' || item.priority === 'high'}
+                  actions={actions}
                   projects={state.projects}
-                  scheduleTrayOpen={activeScheduleTrayId === item.taskId}
-                  onScheduleTrayChange={(open) => setActiveScheduleTrayId(open ? item.taskId : null)}
+                  completingIds={state.completingIds}
+                  activeScheduleTrayId={activeScheduleTrayId}
+                  setActiveScheduleTrayId={setActiveScheduleTrayId}
+                  setSelectedTaskId={setSelectedTaskId}
+                  handleSnooze={handleSnooze}
+                  handleScheduleTomorrow={handleScheduleTomorrow}
+                  handleSchedulePickDay={handleSchedulePickDay}
                 />
               ))}
             </section>
@@ -325,6 +391,7 @@ export function MobileAllTasksList() {
       )}
 
       {/* Task detail bottom sheet */}
+      </div>
       </div>
       <MobileSheet
         isOpen={!!selectedTaskId}
@@ -360,11 +427,17 @@ export function MobileAllTasksList() {
           activeFilter={activeFilter}
           sourceFilter={state.sourceFilter}
           listFilter={state.listFilter}
+          planningHorizonFilters={planningHorizonFilters}
           sources={state.enabledSources}
           sourceLists={state.sourceLists}
           syncStatus={state.syncStatus}
           sourceCounts={computed.sidebarSourceCounts}
-          onQuickFilterChange={setActiveFilter}
+          stats={state.taskResponse.stats}
+          hiddenQuickFilters={state.hiddenQuickFilters}
+          quickFilterVisibility={state.quickFilterVisibility}
+          loading={state.loading}
+          onQuickFilterChange={(filter) => actions.setQuickFilter(filter === 'all' ? null : filter)}
+          onQuickFilterVisibilityChange={actions.setQuickFilterVisibility}
           onSourceFilterChange={(source) => {
             actions.setSourceFilter(source);
             actions.setListFilter(null);
@@ -373,6 +446,8 @@ export function MobileAllTasksList() {
             actions.setSourceFilter(source);
             actions.setListFilter(list);
           }}
+          onPlanningHorizonToggle={togglePlanningHorizon}
+          onPlanningHorizonClear={() => setTextFilter(replacePositiveFilterValues(textFilter, 'horizon', []))}
           onClear={clearFilters}
         />
       </MobileSheet>
@@ -380,17 +455,92 @@ export function MobileAllTasksList() {
   );
 }
 
+function TaskGroupHeader({ group, sticky = false }: { group: TaskGroup; sticky?: boolean }) {
+  return (
+    <div className={cn(
+      'z-10 border-b border-[var(--border-subtle)] bg-[var(--surface-0)]/95 px-4 py-2 backdrop-blur-sm',
+      sticky && 'sticky top-0',
+    )}>
+      <h3 className={cn(
+        'text-xs font-semibold uppercase tracking-wide',
+        group.key === 'overdue' && 'text-red-400',
+        group.key === 'due-today' && 'text-amber-400',
+        group.key === 'upcoming' && 'text-blue-400',
+        !['overdue', 'due-today', 'upcoming'].includes(group.key) && 'text-[var(--text-muted)]',
+      )}>
+        {group.label}
+        <span className="ml-1.5 font-normal text-[var(--text-muted)]">({group.items.length})</span>
+      </h3>
+    </div>
+  );
+}
+
+function MobileAllTasksRow({
+  item,
+  actions,
+  projects,
+  completingIds,
+  activeScheduleTrayId,
+  setActiveScheduleTrayId,
+  setSelectedTaskId,
+  handleSnooze,
+  handleScheduleTomorrow,
+  handleSchedulePickDay,
+}: {
+  item: MyDayItem;
+  actions: ReturnType<typeof useDashboardData>['actions'];
+  projects: ReturnType<typeof useDashboardData>['state']['projects'];
+  completingIds: ReturnType<typeof useDashboardData>['state']['completingIds'];
+  activeScheduleTrayId: string | null;
+  setActiveScheduleTrayId: (id: string | null) => void;
+  setSelectedTaskId: (id: string | null) => void;
+  handleSnooze: (taskId: string) => void;
+  handleScheduleTomorrow: (taskId: string) => void;
+  handleSchedulePickDay: (taskId: string) => void;
+}) {
+  return (
+    <MobileSwipeTaskRow
+      item={item}
+      onComplete={(taskId) => { void actions.completeTask(taskId); }}
+      onRemoveFromDay={handleSnooze}
+      onSetLocalDisposition={(taskId, disposition) => {
+        void actions.setTaskLocalDisposition(taskId, disposition);
+      }}
+      onTap={(tappedItem) => {
+        setActiveScheduleTrayId(null);
+        setSelectedTaskId(tappedItem.taskId);
+      }}
+      onScheduleTomorrow={handleScheduleTomorrow}
+      onSchedulePickDay={handleSchedulePickDay}
+      onSnooze={handleSnooze}
+      isCompleting={completingIds.has(item.taskId)}
+      showAiChip={item.priority === 'critical' || item.priority === 'high'}
+      projects={projects}
+      scheduleTrayOpen={activeScheduleTrayId === item.taskId}
+      onScheduleTrayChange={(open) => setActiveScheduleTrayId(open ? item.taskId : null)}
+    />
+  );
+}
+
 interface MobileTaskFiltersProps {
-  activeFilter: FilterMode;
+  activeFilter: string;
   sourceFilter: string | null;
   listFilter: string | null;
+  planningHorizonFilters: PlanningHorizonFilter[];
   sources: EnabledSource[];
   sourceLists: SourceList[];
   syncStatus: SyncStatusEntry[];
   sourceCounts: Record<string, number>;
-  onQuickFilterChange: (filter: FilterMode) => void;
+  stats: TaskListStatsDto;
+  hiddenQuickFilters: string[];
+  quickFilterVisibility: Record<string, QuickFilterVisibility>;
+  loading: boolean;
+  onQuickFilterChange: (filter: string) => void;
+  onQuickFilterVisibilityChange: (filter: string, visibility: QuickFilterVisibility) => void;
   onSourceFilterChange: (source: string | null) => void;
   onListFilterChange: (list: string | null, source: string | null) => void;
+  onPlanningHorizonToggle: (horizon: PlanningHorizonFilter) => void;
+  onPlanningHorizonClear: () => void;
   onClear: () => void;
 }
 
@@ -398,16 +548,25 @@ export function MobileTaskFilters({
   activeFilter,
   sourceFilter,
   listFilter,
+  planningHorizonFilters,
   sources,
   sourceLists,
   syncStatus,
   sourceCounts,
+  stats,
+  hiddenQuickFilters,
+  quickFilterVisibility,
+  loading,
   onQuickFilterChange,
+  onQuickFilterVisibilityChange,
   onSourceFilterChange,
   onListFilterChange,
+  onPlanningHorizonToggle,
+  onPlanningHorizonClear,
   onClear,
 }: MobileTaskFiltersProps) {
   const [search, setSearch] = useState('');
+  const listOptionsRef = useRef<HTMLDivElement>(null);
   const normalizedSearch = search.trim().toLowerCase();
   const availableSources = useMemo(
     () => [...new Map(
@@ -428,7 +587,7 @@ export function MobileTaskFilters({
   const filteredSources = availableSources.filter((source) =>
     !normalizedSearch || source.name.toLowerCase().includes(normalizedSearch)
   );
-  const filteredLists = sourceLists
+  const filteredLists = useMemo(() => sourceLists
     .filter((list) => !list.hidden)
     .filter((list) => {
       const sourceType = sourceTypeByConnector.get(list.connectorInstanceId);
@@ -443,8 +602,45 @@ export function MobileTaskFilters({
       return sourceA.localeCompare(sourceB)
         || (a.sortOrder ?? 0) - (b.sortOrder ?? 0)
         || a.name.localeCompare(b.name);
-    });
-  const hasActiveFilters = activeFilter !== 'all' || Boolean(sourceFilter) || Boolean(listFilter);
+    }), [normalizedSearch, sourceLists, sourceNameByType, sourceTypeByConnector]);
+  const virtualizeLists = shouldVirtualizeList(filteredLists.length);
+  const listOptionVirtualizer = useVirtualizer({
+    count: virtualizeLists ? filteredLists.length : 0,
+    getScrollElement: () => listOptionsRef.current,
+    getItemKey: (index) => filteredLists[index]?.id ?? index,
+    estimateSize: () => 52,
+    overscan: 6,
+  });
+  const hasActiveFilters = activeFilter !== 'all'
+    || Boolean(sourceFilter)
+    || Boolean(listFilter)
+    || planningHorizonFilters.length > 0;
+  const visibleQuickFilters = QUICK_FILTERS.filter((filter) => isQuickFilterVisible(
+    filter,
+    stats,
+    quickFilterVisibility,
+    {
+      activeFilter,
+      loading,
+      legacyHiddenFilters: hiddenQuickFilters,
+    },
+  ));
+  const renderListOption = (list: SourceList) => {
+    const sourceType = sourceTypeByConnector.get(list.connectorInstanceId) ?? null;
+    const sourceName = sourceType ? sourceNameByType.get(sourceType) : null;
+    return (
+      <FilterOptionButton
+        key={list.id}
+        active={matchesSourceListFilter(list, listFilter)}
+        label={list.name}
+        detail={`${sourceName ? `${sourceName} · ` : ''}${list.taskCount} tasks`}
+        onClick={() => onListFilterChange(
+          matchesSourceListFilter(list, listFilter) ? null : list.sourceId,
+          sourceType
+        )}
+      />
+    );
+  };
 
   return (
     <div className="px-4 pb-6">
@@ -472,19 +668,77 @@ export function MobileTaskFilters({
       </div>
 
       {!normalizedSearch && (
-        <FilterSection title="Quick filters">
-          <div className="grid grid-cols-2 gap-2">
-            {QUICK_FILTERS.map((filter) => (
+        <>
+          <FilterSection title="Quick filters">
+            <div className="grid grid-cols-2 gap-2">
               <FilterOptionButton
-                key={filter.value}
-                active={activeFilter === filter.value}
-                label={filter.label}
-                detail={filter.description}
-                onClick={() => onQuickFilterChange(filter.value)}
+                active={activeFilter === 'all'}
+                label="All tasks"
+                detail="Any date or priority"
+                onClick={() => onQuickFilterChange('all')}
               />
-            ))}
-          </div>
-        </FilterSection>
+              {visibleQuickFilters.map((filter) => (
+                <FilterOptionButton
+                  key={filter.id}
+                  active={activeFilter === filter.id}
+                  label={filter.label}
+                  detail={filter.description}
+                  onClick={() => onQuickFilterChange(filter.id)}
+                />
+              ))}
+            </div>
+          </FilterSection>
+          <FilterSection title="Horizon">
+            <div className="grid grid-cols-2 gap-2">
+              <FilterOptionButton
+                active={planningHorizonFilters.length === 0}
+                label="Any horizon"
+                detail="Do not limit by plan"
+                onClick={onPlanningHorizonClear}
+              />
+              {[...PLANNING_HORIZONS, 'none' as const].map((horizon) => (
+                <FilterOptionButton
+                  key={horizon}
+                  active={planningHorizonFilters.includes(horizon)}
+                  label={horizon === 'none' ? 'Not set' : PLANNING_HORIZON_LABELS[horizon]}
+                  detail={horizon === 'none' ? 'Needs planning' : `Planned for ${PLANNING_HORIZON_LABELS[horizon].toLowerCase()}`}
+                  onClick={() => onPlanningHorizonToggle(horizon)}
+                />
+              ))}
+            </div>
+          </FilterSection>
+          <details className="mb-5 rounded-xl border border-[var(--border)] bg-[var(--surface-0)]">
+            <summary className="min-h-11 cursor-pointer px-3 py-3 text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)]">
+              Customize quick filters
+            </summary>
+            <div className="space-y-2 border-t border-[var(--border-subtle)] p-3">
+              {QUICK_FILTERS.map((filter) => (
+                <div key={filter.id} className="flex min-h-11 items-center justify-between gap-3 text-sm text-[var(--text-primary)]">
+                  <span>{filter.label}</span>
+                  <Select
+                    value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
+                    onValueChange={(visibility) => onQuickFilterVisibilityChange(
+                      filter.id,
+                      visibility as QuickFilterVisibility,
+                    )}
+                  >
+                    <SelectTrigger
+                      aria-label={`${filter.label} visibility`}
+                      className="min-h-11 w-36 text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="always">Always</SelectItem>
+                      <SelectItem value="when-not-empty">When not empty</SelectItem>
+                      <SelectItem value="hidden">Hidden</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ))}
+            </div>
+          </details>
+        </>
       )}
 
       <FilterSection title="Sources">
@@ -517,22 +771,30 @@ export function MobileTaskFilters({
             onClick={() => onListFilterChange(null, sourceFilter)}
           />
         )}
-        {filteredLists.map((list) => {
-          const sourceType = sourceTypeByConnector.get(list.connectorInstanceId) ?? null;
-          const sourceName = sourceType ? sourceNameByType.get(sourceType) : null;
-          return (
-            <FilterOptionButton
-              key={list.id}
-              active={matchesSourceListFilter(list, listFilter)}
-              label={list.name}
-              detail={`${sourceName ? `${sourceName} · ` : ''}${list.taskCount} tasks`}
-              onClick={() => onListFilterChange(
-                matchesSourceListFilter(list, listFilter) ? null : list.sourceId,
-                sourceType
-              )}
-            />
-          );
-        })}
+        {virtualizeLists ? (
+          <div
+            ref={listOptionsRef}
+            data-virtualized="true"
+            className="max-h-96 overflow-y-auto overscroll-y-contain"
+          >
+            <div
+              className="relative w-full"
+              style={{ height: `${listOptionVirtualizer.getTotalSize()}px` }}
+            >
+              {listOptionVirtualizer.getVirtualItems().map((virtualRow) => (
+                <div
+                  key={virtualRow.key}
+                  ref={listOptionVirtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  className="absolute left-0 top-0 w-full pb-1"
+                  style={{ transform: `translateY(${virtualRow.start}px)` }}
+                >
+                  {renderListOption(filteredLists[virtualRow.index])}
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : filteredLists.map(renderListOption)}
       </FilterSection>
 
       {normalizedSearch && filteredSources.length === 0 && filteredLists.length === 0 && (
@@ -591,4 +853,8 @@ function FilterOptionButton({
 function matchesSourceListFilter(sourceList: SourceList, listFilter: string | null): boolean {
   return listFilter === sourceList.sourceId
     || listFilter === `${sourceList.connectorInstanceId}:${sourceList.sourceId}`;
+}
+
+function isPlanningHorizonFilter(value: string): value is PlanningHorizonFilter {
+  return value === 'none' || (PLANNING_HORIZONS as readonly string[]).includes(value);
 }

@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type KeyboardEventHandler } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { parseJsonEventStream, type ParseResult } from '@ai-sdk/provider-utils';
-import { readUIMessageStream, uiMessageChunkSchema, type UIMessageChunk } from 'ai';
+import { parseJsonEventStream, readUIMessageStream, uiMessageChunkSchema } from 'ai';
 import { AIChatTab } from '@/components/ai/AIChatTab';
 import { AIInsightsPanel } from '@/components/ai/AIInsightsPanel';
 import { HoustonHomeScreen } from '@/components/houston';
@@ -16,8 +15,10 @@ import {
   createAssistantTextMessage,
   createUserMessage,
   getCachedChatMessages,
+  getCachedChatConversationId,
   getChatTaskId,
   setCachedChatMessages,
+  setCachedChatConversationId,
   type AITab,
   type ChatMessage,
   type HubProject,
@@ -36,6 +37,18 @@ const tabs: ReadonlyArray<{ id: AITab; label: string }> = [
   { id: 'insights', label: 'Insights' },
 ];
 
+function getSummaryMessages(messages: ChatMessage[]) {
+  return messages.flatMap((message) => {
+    if (message.role !== 'user' && message.role !== 'assistant') return [];
+    const text = message.parts
+      .filter((part): part is Extract<typeof part, { type: 'text' }> => part.type === 'text')
+      .map((part) => part.text)
+      .join('\n')
+      .trim();
+    return text ? [{ role: message.role, text: text.slice(0, 8_000) }] : [];
+  });
+}
+
 export default function AIPage() {
   const isMobile = useIsMobile();
   const [activeTab, setActiveTab] = useState<AITab>('chat');
@@ -48,6 +61,7 @@ export default function AIPage() {
   const [mobileShowChat, setMobileShowChat] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const conversationIdRef = useRef(getCachedChatConversationId());
   const { isAiActive } = useBackgroundAiTasks();
 
   useEffect(() => setCachedChatMessages(messages), [messages]);
@@ -55,6 +69,25 @@ export default function AIPage() {
   useEffect(() => {
     fetch('/api/hub-projects').then(response => response.json()).then(data => setProjects(data.projects || []));
     fetch('/api/ai/provider').then(response => response.json()).then(setProviderInfo).catch(err => { uiLogger.error('Failed to fetch AI provider info', { err }); });
+  }, []);
+
+  const captureSummary = useCallback((completedMessages: ChatMessage[]) => {
+    const summaryMessages = getSummaryMessages(completedMessages);
+    if (summaryMessages.length < 2) return;
+    void fetch('/api/ai/memories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: conversationIdRef.current,
+        messages: summaryMessages.slice(-50),
+      }),
+    }).then((response) => {
+      if (!response.ok && response.status !== 503) {
+        uiLogger.warn('Houston memory capture was rejected', { status: response.status });
+      }
+    }).catch((err) => {
+      uiLogger.warn('Houston memory capture was unavailable', { err });
+    });
   }, []);
 
   const submitChat = useCallback((
@@ -86,7 +119,7 @@ export default function AIPage() {
         if (!response.body) throw new Error('The response body is empty.');
 
         setMessages(prev => [...prev, assistantMessage]);
-        const chunkStream = parseJsonEventStream({ stream: response.body, schema: uiMessageChunkSchema }).pipeThrough(new TransformStream<ParseResult<UIMessageChunk>, UIMessageChunk>({ transform(chunk, controller) { if (!chunk.success) throw chunk.error; controller.enqueue(chunk.value); } }));
+        const chunkStream = parseJsonEventStream({ stream: response.body, schema: uiMessageChunkSchema }).pipeThrough(new TransformStream({ transform(chunk, controller) { if (!chunk.success) throw chunk.error; controller.enqueue(chunk.value); } }));
         const uiStream = readUIMessageStream({ message: assistantMessage, stream: chunkStream, terminateOnError: true });
 
         let latestMessage = assistantMessage;
@@ -98,6 +131,7 @@ export default function AIPage() {
 
         const finalMessages = [...nextMessages, latestMessage];
         setCachedChatMessages(finalMessages);
+        captureSummary(finalMessages);
         return finalMessages;
       },
     });
@@ -120,7 +154,7 @@ export default function AIPage() {
     };
 
     requestAnimationFrame(waitForTask);
-  }, []);
+  }, [captureSummary]);
 
   const sendMessage = useCallback(async (text?: string) => {
     if (loading) return;
@@ -199,6 +233,8 @@ export default function AIPage() {
   }, [loading]);
 
   const handleMobileNewChat = useCallback(() => {
+    conversationIdRef.current = crypto.randomUUID();
+    setCachedChatConversationId(conversationIdRef.current);
     setMessages([]);
     setCachedChatMessages([]);
     setInput('');

@@ -1,10 +1,33 @@
 import '@testing-library/jest-dom/vitest';
 import { configure } from '@testing-library/dom';
-import { vi } from 'vitest';
+import { afterAll, beforeEach, vi } from 'vitest';
+import {
+  resetProcessRuntimeRegistries,
+  shouldPreserveProcessRuntimeRegistriesAcrossModuleReset,
+} from './helpers/process-runtime-registries';
 
 // Sharded DOM tests can be delayed by runner contention even when the test
 // itself remains within the project's 10-second timeout.
 configure({ asyncUtilTimeout: 5_000 });
+
+const resetModules = vi.resetModules.bind(vi);
+const resetModulesWithProcessRuntimeCleanup: typeof vi.resetModules = () => {
+  if (!shouldPreserveProcessRuntimeRegistriesAcrossModuleReset()) {
+    resetProcessRuntimeRegistries();
+  }
+  return resetModules();
+};
+
+beforeEach(() => {
+  Object.defineProperty(vi, 'resetModules', {
+    configurable: true,
+    value: resetModulesWithProcessRuntimeCleanup,
+  });
+});
+
+afterAll(() => {
+  resetProcessRuntimeRegistries();
+});
 
 type MockSqlExpression = {
   type: string;
@@ -31,7 +54,7 @@ vi.mock('drizzle-orm', () => ({
   gte: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'gte', col, val })),
   ne: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'ne', col, val })),
   not: vi.fn((col: unknown): MockSqlExpression => ({ type: 'not', col })),
-  sql: vi.fn(() => ({})),
+  sql: vi.fn(() => ({ as: vi.fn(() => ({})) })),
   like: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'like', col, val })),
   notLike: vi.fn((col: unknown, val: unknown): MockSqlExpression => ({ type: 'notLike', col, val })),
 }));

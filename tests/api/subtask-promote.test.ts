@@ -3,6 +3,7 @@
  */
 import { NextResponse } from 'next/server';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
 // ─── Shared DB mock ──────────────────────────────────────────────────────────
 
@@ -22,6 +23,8 @@ function chainable<T>(terminal: T) {
 }
 
 const mockUpdate = vi.fn();
+const mockGetTask = vi.fn();
+const mockPromoteSubtask = vi.fn();
 
 const mockDb = {
   select: vi.fn(() => chainable([])),
@@ -56,11 +59,19 @@ const BASE = 'http://localhost:3099';
 beforeEach(() => {
   vi.clearAllMocks();
   mockUpdate.mockReturnValue(chainable(undefined));
+  mockGetTask.mockResolvedValue(null);
+  mockPromoteSubtask.mockResolvedValue({ kind: 'not-found' });
+  registerFakeTaskCorePersistence({
+    ancillary: {
+      getTask: mockGetTask,
+      promoteSubtask: mockPromoteSubtask,
+    },
+  });
 });
 
 describe('POST /api/tasks/[id]/promote', () => {
   it('returns 404 when task does not exist', async () => {
-    mockDb.select.mockImplementation(() => chainable([]));
+    mockGetTask.mockResolvedValue(null);
 
     const { POST } = await import('@/app/api/tasks/[id]/promote/route');
     const request = new Request(`${BASE}/api/tasks/nonexistent/promote`, { method: 'POST' });
@@ -72,14 +83,12 @@ describe('POST /api/tasks/[id]/promote', () => {
   });
 
   it('returns 400 when task is not a checklist item', async () => {
-    mockDb.select.mockImplementation(() =>
-      chainable([{
-        id: 'task-1',
-        isChecklistItem: false,
-        parentId: null,
-        depth: 0,
-      }]),
-    );
+    mockGetTask.mockResolvedValue({
+      id: 'task-1',
+      isChecklistItem: false,
+      parentId: null,
+      depth: 0,
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/promote/route');
     const request = new Request(`${BASE}/api/tasks/task-1/promote`, { method: 'POST' });
@@ -91,14 +100,12 @@ describe('POST /api/tasks/[id]/promote', () => {
   });
 
   it('returns 400 when task has no parentId', async () => {
-    mockDb.select.mockImplementation(() =>
-      chainable([{
-        id: 'task-1',
-        isChecklistItem: true,
-        parentId: null,
-        depth: 1,
-      }]),
-    );
+    mockGetTask.mockResolvedValue({
+      id: 'task-1',
+      isChecklistItem: true,
+      parentId: null,
+      depth: 1,
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/promote/route');
     const request = new Request(`${BASE}/api/tasks/task-1/promote`, { method: 'POST' });
@@ -110,19 +117,19 @@ describe('POST /api/tasks/[id]/promote', () => {
   });
 
   it('promotes a subtask by clearing parentId, depth, and isChecklistItem', async () => {
-    mockDb.select.mockImplementation(() =>
-      chainable([{
-        id: 'sub-1',
-        isChecklistItem: true,
-        parentId: 'parent-task-1',
-        depth: 1,
-        connectorType: 'local',
-        sourceId: 'local:sub-1',
-      }]),
-    );
-
-    const setMock = vi.fn(() => ({ where: vi.fn(() => chainable(undefined)) }));
-    mockUpdate.mockReturnValue({ set: setMock });
+    mockGetTask.mockResolvedValue({
+      id: 'sub-1',
+      isChecklistItem: true,
+      parentId: 'parent-task-1',
+      depth: 1,
+      connectorType: 'local',
+      sourceId: 'local:sub-1',
+      updatedAt: '2026-08-01T12:00:00Z',
+    });
+    mockPromoteSubtask.mockResolvedValue({
+      kind: 'promoted',
+      previousParentId: 'parent-task-1',
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/promote/route');
     const request = new Request(`${BASE}/api/tasks/sub-1/promote`, { method: 'POST' });
@@ -132,30 +139,26 @@ describe('POST /api/tasks/[id]/promote', () => {
     const data = await response.json();
     expect(data.success).toBe(true);
 
-    // Verify the update was called with correct fields
-    expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        parentId: null,
-        depth: 0,
-        isChecklistItem: false,
-      }),
-    );
+    expect(mockPromoteSubtask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'sub-1',
+      expectedUpdatedAt: '2026-08-01T12:00:00Z',
+    }));
   });
 
   it('promotes a source-backed subtask (GitHub sub-issue)', async () => {
-    mockDb.select.mockImplementation(() =>
-      chainable([{
-        id: 'sub-gh-1',
-        isChecklistItem: true,
-        parentId: 'parent-gh-1',
-        depth: 1,
-        connectorType: 'github-issues',
-        sourceId: 'github-issues:owner:repo:456',
-      }]),
-    );
-
-    const setMock = vi.fn(() => ({ where: vi.fn(() => chainable(undefined)) }));
-    mockUpdate.mockReturnValue({ set: setMock });
+    mockGetTask.mockResolvedValue({
+      id: 'sub-gh-1',
+      isChecklistItem: true,
+      parentId: 'parent-gh-1',
+      depth: 1,
+      connectorType: 'github-issues',
+      sourceId: 'github-issues:owner:repo:456',
+      updatedAt: '2026-08-01T12:00:00Z',
+    });
+    mockPromoteSubtask.mockResolvedValue({
+      kind: 'promoted',
+      previousParentId: 'parent-gh-1',
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/promote/route');
     const request = new Request(`${BASE}/api/tasks/sub-gh-1/promote`, { method: 'POST' });
@@ -165,12 +168,8 @@ describe('POST /api/tasks/[id]/promote', () => {
     const data = await response.json();
     expect(data.success).toBe(true);
 
-    expect(setMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        parentId: null,
-        depth: 0,
-        isChecklistItem: false,
-      }),
-    );
+    expect(mockPromoteSubtask).toHaveBeenCalledWith(expect.objectContaining({
+      taskId: 'sub-gh-1',
+    }));
   });
 });

@@ -98,19 +98,26 @@ export function makeTask(id: string, overrides: Partial<ProjectTask> = {}): Proj
   return {
     id,
     title: id,
+    pushCount: 0,
     status: 'todo',
     priority: 'medium',
+    planningHorizon: null,
     dueDate: null,
     updatedAt: '2026-08-14T12:00:00.000Z',
     connectorType: 'local',
     connectorInstanceId: 'local',
     sourceListId: null,
     sourceListName: null,
+    assignee: null,
     tags: [],
+    metadata: null,
+    sourceId: null,
     hubProjectIds: [PROJECT_ID],
     projectPhaseMemberships: [],
     localDisposition: 'active',
+    microStatus: null,
     taskSourceModel: 'mc-owned',
+    hasDescription: false,
     editPolicy: editableTaskPolicy,
     ...overrides,
   };
@@ -409,9 +416,20 @@ export function quickAddContextModule() {
 
 export function taskDetailPanelModule() {
   return {
-    TaskDetailPanel: ({ taskId, onClose }: { taskId: string; onClose: () => void }) => (
+    TaskDetailPanel: ({
+      taskId,
+      onClose,
+      notesOpenRequest,
+    }: {
+      taskId: string;
+      onClose: () => void;
+      notesOpenRequest?: { taskId: string; mode: 'read' | 'edit' } | null;
+    }) => (
       <aside aria-label="Task detail" data-testid={`task-detail-${taskId}`}>
         <p>Detail for {taskId}</p>
+        {notesOpenRequest?.taskId === taskId ? (
+          <div role="dialog" aria-label="Notes" data-mode={notesOpenRequest.mode} />
+        ) : null}
         <button type="button" onClick={onClose}>Close task detail</button>
       </aside>
     ),
@@ -795,6 +813,18 @@ export function installProjectPageHarness(
         }
         break;
       }
+      case 'replace_phase_structure': {
+        phases.splice(0, phases.length, ...command.phases);
+        for (const phaseId of Object.keys(phaseItemsByPhase)) {
+          phaseItemsByPhase[phaseId] = [];
+        }
+        for (const placement of command.placements) {
+          if (placement.phaseId) {
+            attachTasks([placement.taskId], placement.phaseId, placement.index);
+          }
+        }
+        break;
+      }
     }
 
     return {
@@ -1082,7 +1112,7 @@ export function installProjectPageHarness(
 export type ProjectTabName = 'Overview' | 'Plan' | 'Project Tasks' | 'Settings';
 
 export function tabButtonName(tab: ProjectTabName) {
-  return new RegExp(`^${tab}( \\(\\d+\\))?$`);
+  return new RegExp(`^${tab}( \\(\\d+\\))?( \\d+ unphased tasks?)?$`);
 }
 
 export async function projectPageElement(

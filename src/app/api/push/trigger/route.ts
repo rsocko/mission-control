@@ -40,7 +40,7 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json({ type, sent });
-  } catch (error) {
+  } catch {
     return NextResponse.json({ error: 'Failed to trigger notification' }, { status: 500 });
   }
 }

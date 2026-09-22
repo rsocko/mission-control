@@ -226,6 +226,20 @@ describe('Power Automate work To Do bridge', () => {
         ...response.lists[0],
         tasks: [{
           ...response.lists[0].tasks[0],
+          linkedResources: [{
+            id: 'linked-resource-without-url',
+            applicationName: 'Native app',
+            displayName: 'Related item',
+          }],
+        }],
+      }],
+    })).toBe(true);
+    expect(validateResponse({
+      ...response,
+      lists: [{
+        ...response.lists[0],
+        tasks: [{
+          ...response.lists[0].tasks[0],
           contentBytes: 'must-not-cross-scout',
         }],
       }],

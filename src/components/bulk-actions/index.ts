@@ -1,5 +1,6 @@
 export { BulkActionBar } from './BulkActionBar';
 export { BulkMoveDropdown } from './BulkMoveDropdown';
+export { BulkMoveToProjectDropdown } from './BulkMoveToProjectDropdown';
 export { BulkMoveToPhaseDropdown } from './BulkMoveToPhaseDropdown';
 export { BulkMoveToSourceButton } from './BulkMoveToSourceButton';
 export { BulkDueDateDropdown } from './BulkDueDateDropdown';

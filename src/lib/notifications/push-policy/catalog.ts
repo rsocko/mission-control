@@ -1,7 +1,11 @@
 import type { NotificationLevel } from '@/types';
 import { isNotificationLevel } from '@/lib/notifications/levels';
 
-export type PushRecommendation = 'off' | 'urgent_only' | 'action_needed_or_higher';
+export type PushRecommendation =
+  | 'off'
+  | 'urgent_only'
+  | 'action_needed_or_higher'
+  | 'heads_up_or_higher';
 export type PushPreview = 'title_only' | 'title_and_body';
 export type NotificationSensitivity = 'standard' | 'sensitive';
 
@@ -22,6 +26,7 @@ const RECOMMENDATIONS = new Set<PushRecommendation>([
   'off',
   'urgent_only',
   'action_needed_or_higher',
+  'heads_up_or_higher',
 ]);
 const SENSITIVITIES = new Set<NotificationSensitivity>(['standard', 'sensitive']);
 const PREVIEWS = new Set<PushPreview>(['title_only', 'title_and_body']);

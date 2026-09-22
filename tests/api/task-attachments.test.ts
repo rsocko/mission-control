@@ -3,6 +3,25 @@
  * Tests #346
  */
 import { beforeEach, describe, it, expect, vi } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
+
+const taskReadMocks = vi.hoisted(() => ({
+  getAttachmentReadContext: vi.fn(),
+}));
+const ancillaryMocks = vi.hoisted(() => ({
+  getTask: vi.fn(),
+  getAttachmentListContext: vi.fn(),
+  getAttachmentDeleteContext: vi.fn(),
+  insertAttachment: vi.fn(),
+  deleteAttachment: vi.fn(),
+}));
+const connectorRuntimeMocks = vi.hoisted(() => ({
+  getCapabilities: vi.fn(),
+  getConnector: vi.fn(),
+  replaceConnector: vi.fn(),
+  getConfig: vi.fn(),
+  assertConfigSupported: vi.fn(),
+}));
 
 // ─── Shared DB mock (chainable) ─────────────────────────────────────────────
 
@@ -36,15 +55,31 @@ vi.mock('@/db/schema', () => ({
 }));
 
 vi.mock('@/lib/connectors/capabilities', () => ({
-  getConnectorCapabilities: vi.fn().mockResolvedValue(null),
+  getConnectorCapabilities: connectorRuntimeMocks.getCapabilities,
 }));
 
 vi.mock('@/lib/connectors', () => ({
   connectorRegistry: { getConnector: vi.fn(() => null) },
 }));
 
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
+    getConnector: connectorRuntimeMocks.getConnector,
+    replaceConnector: connectorRuntimeMocks.replaceConnector,
+  }),
+}));
+
 vi.mock('@/lib/sync', () => ({
   syncScheduler: { initializeConnectorFromDb: vi.fn().mockResolvedValue(null) },
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    connectors: { get: connectorRuntimeMocks.getConfig },
+    execution: {
+      support: { assertConfigSupported: connectorRuntimeMocks.assertConfigSupported },
+    },
+  }),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -65,12 +100,40 @@ vi.mock('@/lib/api-error', () => ({
 beforeEach(() => {
   vi.clearAllMocks();
   mockDb.select.mockReturnValue(chainable([]));
+  taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+    task: null,
+    attachment: null,
+  });
+  connectorRuntimeMocks.getConnector.mockReturnValue(null);
+  connectorRuntimeMocks.getCapabilities.mockResolvedValue(null);
+  connectorRuntimeMocks.replaceConnector.mockResolvedValue(null);
+  connectorRuntimeMocks.getConfig.mockResolvedValue(null);
+  ancillaryMocks.getTask.mockResolvedValue(null);
+  ancillaryMocks.getAttachmentListContext.mockResolvedValue({ task: null, attachments: [] });
+  ancillaryMocks.getAttachmentDeleteContext.mockResolvedValue({
+    task: null,
+    attachment: null,
+  });
+  ancillaryMocks.insertAttachment.mockResolvedValue({ kind: 'inserted' });
+  ancillaryMocks.deleteAttachment.mockResolvedValue(true);
+  registerFakeTaskCorePersistence({
+    taskReads: {
+      getAttachmentReadContext: taskReadMocks.getAttachmentReadContext,
+    },
+    ancillary: ancillaryMocks,
+  });
 });
 
 describe('POST /api/tasks/[id]/attachments', () => {
   it('returns 400 when required fields are missing', async () => {
     vi.resetModules();
-    mockDb.select.mockReturnValue(chainable([{ sourceId: 'local:123', connectorType: 'local', connectorInstanceId: 'local' }]));
+    ancillaryMocks.getTask.mockResolvedValue({
+      id: 'abc',
+      sourceId: 'local:123',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      updatedAt: '2026-08-01T12:00:00Z',
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/attachments/route');
     const req = new Request('http://localhost/api/tasks/abc/attachments', {
@@ -87,7 +150,13 @@ describe('POST /api/tasks/[id]/attachments', () => {
 
   it('returns 413 when file is too large', async () => {
     vi.resetModules();
-    mockDb.select.mockReturnValue(chainable([{ sourceId: 'local:123', connectorType: 'local', connectorInstanceId: 'local' }]));
+    ancillaryMocks.getTask.mockResolvedValue({
+      id: 'abc',
+      sourceId: 'local:123',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      updatedAt: '2026-08-01T12:00:00Z',
+    });
 
     const { POST } = await import('@/app/api/tasks/[id]/attachments/route');
     // Create a base64 string that represents > 25MB
@@ -107,8 +176,12 @@ describe('POST /api/tasks/[id]/attachments', () => {
     // and type-checked. Here we verify the route accepts valid input and attempts processing.
     // A 500 from the mock is acceptable as the chainable DB mock doesn't fully replicate drizzle.
     vi.resetModules();
-    mockDb.select.mockImplementation(() => {
-      return chainable([{ sourceId: 'local:123', connectorType: 'local', connectorInstanceId: 'local' }]);
+    ancillaryMocks.getTask.mockResolvedValue({
+      id: 'abc',
+      sourceId: 'local:123',
+      connectorType: 'local',
+      connectorInstanceId: 'local',
+      updatedAt: '2026-08-01T12:00:00Z',
     });
 
     const { POST } = await import('@/app/api/tasks/[id]/attachments/route');
@@ -128,8 +201,16 @@ describe('POST /api/tasks/[id]/attachments', () => {
 
 describe('GET /api/tasks/[id]/attachments', () => {
   it('returns empty array for local task with no attachments', async () => {
-    mockDb.select.mockReturnValueOnce(chainable([{ sourceId: 'local:123', connectorType: 'local', connectorInstanceId: 'local' }]));
-    mockDb.select.mockReturnValueOnce(chainable([]));
+    ancillaryMocks.getAttachmentListContext.mockResolvedValue({
+      task: {
+        id: 'abc',
+        sourceId: 'local:123',
+        connectorType: 'local',
+        connectorInstanceId: 'local',
+        updatedAt: '2026-08-01T12:00:00Z',
+      },
+      attachments: [],
+    });
 
     const { GET } = await import('@/app/api/tasks/[id]/attachments/route');
     const req = new Request('http://localhost/api/tasks/abc/attachments');
@@ -144,17 +225,19 @@ describe('GET /api/tasks/[id]/attachments', () => {
 
 describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
     it('returns local attachment content with safe inline headers', async () => {
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'local:123',
-        connectorType: 'local',
-        connectorInstanceId: 'local',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([{
-        name: 'notes.md',
-        contentType: 'text/markdown',
-        contentBase64: 'IyBIZWxsbyE=',
-        sourceAttachmentId: null,
-      }]));
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'local:123',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+        },
+        attachment: {
+          name: 'notes.md',
+          contentType: 'text/markdown',
+          contentBase64: 'IyBIZWxsbyE=',
+          sourceAttachmentId: null,
+        },
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -170,17 +253,19 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
     });
 
     it('forces unknown content types to download', async () => {
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'local:123',
-        connectorType: 'local',
-        connectorInstanceId: 'local',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([{
-        name: 'archive.zip',
-        contentType: 'application/zip',
-        contentBase64: 'UEs=',
-        sourceAttachmentId: null,
-      }]));
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'local:123',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+        },
+        attachment: {
+          name: 'archive.zip',
+          contentType: 'application/zip',
+          contentBase64: 'UEs=',
+          sourceAttachmentId: null,
+        },
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -192,17 +277,19 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
     });
 
     it('forces active image content to download even when inline is requested', async () => {
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'local:123',
-        connectorType: 'local',
-        connectorInstanceId: 'local',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([{
-        name: 'drawing.svg',
-        contentType: 'image/svg+xml',
-        contentBase64: 'PHN2Zz48L3N2Zz4=',
-        sourceAttachmentId: null,
-      }]));
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'local:123',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+        },
+        attachment: {
+          name: 'drawing.svg',
+          contentType: 'image/svg+xml',
+          contentBase64: 'PHN2Zz48L3N2Zz4=',
+          sourceAttachmentId: null,
+        },
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -214,17 +301,19 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
     });
 
     it('verifies generic PDF content before serving it inline', async () => {
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'local:123',
-        connectorType: 'local',
-        connectorInstanceId: 'local',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([{
-        name: 'report.pdf',
-        contentType: 'application/octet-stream',
-        contentBase64: 'JVBERi0xLjc=',
-        sourceAttachmentId: null,
-      }]));
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'local:123',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+        },
+        attachment: {
+          name: 'report.pdf',
+          contentType: 'application/octet-stream',
+          contentBase64: 'JVBERi0xLjc=',
+          sourceAttachmentId: null,
+        },
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -243,19 +332,27 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
           contentType: 'text/plain',
         }),
       };
-      const { connectorRegistry } = await import('@/lib/connectors');
-      vi.mocked(connectorRegistry.getConnector).mockReturnValue(connector as never);
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'todo-list:task',
-        connectorType: 'microsoft-todo',
-        connectorInstanceId: 'microsoft-todo-1',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([{
-        name: 'remote.txt',
-        contentType: 'text/plain',
-        contentBase64: null,
-        sourceAttachmentId: 'remote-attachment-1',
-      }]));
+      connectorRuntimeMocks.getConfig.mockResolvedValue({
+        id: 'microsoft-todo-1',
+        type: 'microsoft-todo',
+        enabled: false,
+        syncMode: '',
+        pollIntervalMinutes: null,
+      });
+      connectorRuntimeMocks.replaceConnector.mockResolvedValue(connector);
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'todo-list:task',
+          connectorType: 'microsoft-todo',
+          connectorInstanceId: 'microsoft-todo-1',
+        },
+        attachment: {
+          name: 'remote.txt',
+          contentType: 'text/plain',
+          contentBase64: null,
+          sourceAttachmentId: 'remote-attachment-1',
+        },
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -264,6 +361,17 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
       );
 
       expect(res.status).toBe(200);
+      expect(connectorRuntimeMocks.getConfig)
+        .toHaveBeenCalledWith('microsoft-todo-1');
+      expect(connectorRuntimeMocks.assertConfigSupported).toHaveBeenCalled();
+      expect(connectorRuntimeMocks.replaceConnector).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'microsoft-todo-1',
+          enabled: false,
+          syncMode: 'poll',
+          pollIntervalMinutes: 5,
+        }),
+      );
       expect(connector.getAttachmentContent).toHaveBeenCalledWith(
         'todo-list:task',
         'remote-attachment-1',
@@ -283,14 +391,15 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
           contentType: 'text/plain',
         }),
       };
-      const { connectorRegistry } = await import('@/lib/connectors');
-      vi.mocked(connectorRegistry.getConnector).mockReturnValue(connector as never);
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'todo-list:task',
-        connectorType: 'microsoft-todo',
-        connectorInstanceId: 'microsoft-todo-1',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([]));
+      connectorRuntimeMocks.getConnector.mockReturnValue(connector);
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'todo-list:task',
+          connectorType: 'microsoft-todo',
+          connectorInstanceId: 'microsoft-todo-1',
+        },
+        attachment: null,
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -308,12 +417,14 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
     });
 
     it('returns 404 when a local attachment has no stored content', async () => {
-      mockDb.select.mockReturnValueOnce(chainable([{
-        sourceId: 'local:123',
-        connectorType: 'local',
-        connectorInstanceId: 'local',
-      }]));
-      mockDb.select.mockReturnValueOnce(chainable([]));
+      taskReadMocks.getAttachmentReadContext.mockResolvedValue({
+        task: {
+          sourceId: 'local:123',
+          connectorType: 'local',
+          connectorInstanceId: 'local',
+        },
+        attachment: null,
+      });
 
       const { GET } = await import('@/app/api/tasks/[id]/attachments/[attachmentId]/route');
       const res = await GET(
@@ -327,19 +438,25 @@ describe('GET /api/tasks/[id]/attachments/[attachmentId]', () => {
 
 describe('GET /api/tasks/[id]/attachments', () => {
   it('does not select attachment Base64 content when listing metadata', async () => {
-    mockDb.select.mockReturnValueOnce(chainable([{
-      sourceId: 'local:123',
-      connectorType: 'local',
-      connectorInstanceId: 'local',
-    }]));
-    mockDb.select.mockReturnValueOnce(chainable([{
-      id: 'attachment-1',
-      name: 'notes.txt',
-      contentType: 'text/plain',
-      size: 5,
-      createdAt: '2026-08-01T12:00:00Z',
-      hasLocalContent: 1,
-    }]));
+    ancillaryMocks.getAttachmentListContext.mockResolvedValue({
+      task: {
+        id: 'abc',
+        sourceId: 'local:123',
+        connectorType: 'local',
+        connectorInstanceId: 'local',
+        updatedAt: '2026-08-01T12:00:00Z',
+      },
+      attachments: [{
+        id: 'attachment-1',
+        taskId: 'abc',
+        name: 'notes.txt',
+        contentType: 'text/plain',
+        size: 5,
+        sourceAttachmentId: null,
+        createdAt: '2026-08-01T12:00:00Z',
+        hasLocalContent: true,
+      }],
+    });
 
     const { GET } = await import('@/app/api/tasks/[id]/attachments/route');
     const res = await GET(
@@ -348,9 +465,6 @@ describe('GET /api/tasks/[id]/attachments', () => {
     );
 
     expect(res.status).toBe(200);
-    const attachmentSelection = (mockDb.select.mock.calls as unknown[][])[1]?.[0];
-    expect(attachmentSelection).not.toHaveProperty('contentBase64');
-    expect(attachmentSelection).toHaveProperty('hasLocalContent');
     expect(await res.json()).toEqual({
       attachments: [{
         id: 'attachment-1',
@@ -363,7 +477,7 @@ describe('GET /api/tasks/[id]/attachments', () => {
   });
 
   it('returns 404 for non-existent task', async () => {
-    mockDb.select.mockReturnValue(chainable([]));
+    ancillaryMocks.getAttachmentListContext.mockResolvedValue({ task: null, attachments: [] });
 
     const { GET } = await import('@/app/api/tasks/[id]/attachments/route');
     const req = new Request('http://localhost/api/tasks/missing/attachments');
@@ -382,5 +496,45 @@ describe('DELETE /api/tasks/[id]/attachments', () => {
     expect(res.status).toBe(400);
     const data = await res.json();
     expect(data.error).toContain('Missing attachmentId');
+  });
+
+  it('deletes from the source before the guarded local record', async () => {
+    const order: string[] = [];
+    const deleteRemote = vi.fn(async () => {
+      order.push('source');
+    });
+    connectorRuntimeMocks.getCapabilities.mockResolvedValue({ attachments: true });
+    connectorRuntimeMocks.getConnector.mockReturnValue({ deleteAttachment: deleteRemote });
+    ancillaryMocks.getAttachmentDeleteContext.mockResolvedValue({
+      task: {
+        id: 'abc',
+        sourceId: 'todo-list:task',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+      },
+      attachment: {
+        id: 'attachment-1',
+        sourceAttachmentId: 'remote-1',
+      },
+    });
+    ancillaryMocks.deleteAttachment.mockImplementationOnce(async () => {
+      order.push('local');
+      return true;
+    });
+
+    const { DELETE } = await import('@/app/api/tasks/[id]/attachments/route');
+    const response = await DELETE(new Request(
+      'http://localhost/api/tasks/abc/attachments?attachmentId=attachment-1',
+      { method: 'DELETE' },
+    ), { params: Promise.resolve({ id: 'abc' }) });
+
+    expect(response.status).toBe(200);
+    expect(deleteRemote).toHaveBeenCalledWith('todo-list:task', 'remote-1');
+    expect(ancillaryMocks.deleteAttachment).toHaveBeenCalledWith({
+      taskId: 'abc',
+      attachmentId: 'attachment-1',
+      expectedSourceAttachmentId: 'remote-1',
+    });
+    expect(order).toEqual(['source', 'local']);
   });
 });

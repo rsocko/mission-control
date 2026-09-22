@@ -1,11 +1,16 @@
 'use client';
 
 import { Bell, FastForward, Repeat } from 'lucide-react';
-import RecurrencePicker, { getRecurrenceDisplayLabel } from '@/components/ui/RecurrencePicker';
+import RecurrencePicker from '@/components/ui/RecurrencePicker';
 import { ReminderPicker } from '@/components/ui/ReminderPicker';
 import { formatShortDate } from '@/lib/utils/task-detail-date';
 import { cn } from '@/lib/utils';
 import type { TaskDetailMode } from './task-detail-types';
+import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
+import type {
+  RecurrenceControlState,
+  RecurrenceEditorOptions,
+} from '@/lib/recurrence/editor-contract';
 
 export interface TaskPlanningSectionProps {
   mode: TaskDetailMode;
@@ -14,18 +19,32 @@ export interface TaskPlanningSectionProps {
   /** Highlights the section briefly after a jump from the due date field. */
   highlighted: boolean;
   reminderAt: string | null;
+  reminderRelative: ReminderRelativeRule | null;
+  reminderDueTime: string | null;
+  reminderNagInterval: 1 | 5 | 15 | null;
+  reminderNagStopAt: string | null;
+  reminderTimezone: string;
+  dueDate: string | null;
+  reminderSaving: boolean;
   canEditReminder: boolean;
   reminderBlockedReason?: string;
   reminderSaveLabel?: string;
-  onReminderChange: (reminderAt: string | null) => void;
+  onReminderChange: React.ComponentProps<typeof ReminderPicker>['onChange'];
   /** Whether the connector accepts recurrence edits. */
   supportsRecurrence: boolean;
   /** Active recurrence rule, or 'none'. */
   currentRecurrence: string;
+  recurrenceMode: 'schedule' | 'completion';
+  completionModeAvailable: boolean;
   canEditRecurrence: boolean;
   recurrenceBlockedReason?: string;
   recurrenceSaveLabel?: string;
+  recurrenceControl?: RecurrenceControlState;
+  recurrenceOptions: RecurrenceEditorOptions;
+  recurrenceOptionsSaving: boolean;
   onRecurrenceChange: (recurrence: string) => void;
+  onRecurrenceModeChange: (mode: 'schedule' | 'completion') => void;
+  onRecurrenceOptionsChange: (options: RecurrenceEditorOptions) => void;
   /** Next occurrence date when the task is overdue and recurring, else null. */
   skipToCurrentDate: string | null;
   skippingToCurrent: boolean;
@@ -41,16 +60,30 @@ export function TaskPlanningSection({
   headingRef,
   highlighted,
   reminderAt,
+  reminderRelative,
+  reminderDueTime,
+  reminderNagInterval,
+  reminderNagStopAt,
+  reminderTimezone,
+  dueDate,
+  reminderSaving,
   canEditReminder,
   reminderBlockedReason,
   reminderSaveLabel,
   onReminderChange,
   supportsRecurrence,
   currentRecurrence,
+  recurrenceMode,
+  completionModeAvailable,
   canEditRecurrence,
   recurrenceBlockedReason,
   recurrenceSaveLabel,
+  recurrenceControl,
+  recurrenceOptions,
+  recurrenceOptionsSaving,
   onRecurrenceChange,
+  onRecurrenceModeChange,
+  onRecurrenceOptionsChange,
   skipToCurrentDate,
   skippingToCurrent,
   canEditDueDate,
@@ -84,7 +117,14 @@ export function TaskPlanningSection({
           <Bell size={13} className={`flex-shrink-0 ${reminderAt ? 'text-purple-400' : 'text-[var(--text-muted)]'}`} />
           <ReminderPicker
             value={reminderAt ?? null}
-            onChange={canEditReminder ? onReminderChange : () => {}}
+            relativeRule={reminderRelative}
+            dueDate={dueDate}
+            dueTime={reminderDueTime}
+            nagInterval={reminderNagInterval}
+            nagStopAt={reminderNagStopAt}
+            timezone={reminderTimezone}
+            saving={reminderSaving}
+            onChange={canEditReminder ? onReminderChange : () => false}
             disabled={!canEditReminder}
           />
         </div>
@@ -98,13 +138,24 @@ export function TaskPlanningSection({
           )}>
             <Repeat size={13} className={`mt-1 flex-shrink-0 ${hasRecurrence ? 'text-blue-400' : 'text-[var(--text-muted)]'}`} />
             <div className="flex-1 min-w-0 space-y-1.5">
-              {supportsRecurrence ? (
-                <div title={!canEditRecurrence ? recurrenceBlockedReason : recurrenceSaveLabel}>
-                  <RecurrencePicker value={currentRecurrence} onChange={onRecurrenceChange} variant="compact" disabled={!canEditRecurrence} />
-                </div>
-              ) : (
-                <span className="text-xs text-blue-400">{getRecurrenceDisplayLabel(currentRecurrence)}</span>
-              )}
+              <div title={!canEditRecurrence ? recurrenceBlockedReason : recurrenceSaveLabel}>
+                <RecurrencePicker
+                  value={currentRecurrence}
+                  onChange={onRecurrenceChange}
+                  mode={recurrenceMode}
+                  onModeChange={onRecurrenceModeChange}
+                  completionModeAvailable={completionModeAvailable}
+                  variant="compact"
+                  disabled={!supportsRecurrence || !canEditRecurrence}
+                  startDate={dueDate}
+                  timezone={reminderTimezone}
+                  options={recurrenceOptions}
+                  onOptionsChange={onRecurrenceOptionsChange}
+                  optionsSaving={recurrenceOptionsSaving}
+                  controlState={recurrenceControl}
+                  advancedEditingAvailable={completionModeAvailable}
+                />
+              </div>
               {skipToCurrentDate && (
                 <button
                   type="button"
@@ -118,7 +169,7 @@ export function TaskPlanningSection({
                 >
                   <FastForward size={12} aria-hidden="true" />
                   Skip to current
-                  <span className="ml-auto text-[10px] font-normal text-[var(--text-muted)]">
+                  <span className="ml-auto text-xs font-normal text-[var(--text-muted)]">
                     Next: {formatShortDate(skipToCurrentDate)}
                   </span>
                 </button>

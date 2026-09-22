@@ -15,6 +15,7 @@ import {
   Search,
   Tag,
   UserRoundCheck,
+  Shapes,
   X,
   Zap,
   type LucideIcon,
@@ -25,6 +26,11 @@ import {
   DEFAULT_NOTIFICATION_QUERY,
   type NotificationQuery,
 } from '@/lib/notifications/query';
+import {
+  formatNotificationCategoryLabel,
+  formatNotificationSourceLabel,
+  formatNotificationTypeLabel,
+} from '@/lib/notifications/categories';
 import { cn } from '@/lib/utils';
 
 type BuilderFilterKey =
@@ -36,6 +42,7 @@ type BuilderFilterKey =
   | 'reason'
   | 'subjectType'
   | 'sourceAccount'
+  | 'notificationType'
   | 'participating'
   | 'actionableOnly';
 
@@ -60,31 +67,18 @@ const FILTER_DEFINITIONS: FilterDefinition[] = [
   { key: 'owner', label: 'Owner', icon: CircleUserRound, kind: 'text' },
   { key: 'reason', label: 'Reason', icon: GitPullRequest, kind: 'text' },
   { key: 'subjectType', label: 'Subject type', icon: Tag, kind: 'text' },
-  { key: 'sourceAccount', label: 'Source account', icon: UserRoundCheck, kind: 'text' },
+  { key: 'sourceAccount', label: 'Source account', icon: UserRoundCheck, kind: 'options' },
+  { key: 'notificationType', label: 'Type', icon: Shapes, kind: 'options' },
   { key: 'participating', label: 'Participating only', icon: UserRoundCheck, kind: 'boolean' },
   { key: 'actionableOnly', label: 'Actionable only', icon: Zap, kind: 'boolean' },
   { key: 'source', label: 'Source', icon: ListFilter, kind: 'options', common: true },
 ];
-
-const CATEGORY_LABELS: Record<string, string> = {
-  ai_insights: 'AI Insights',
-  finance: 'Finance',
-  home: 'Home',
-  packages: 'Packages',
-  social: 'Social',
-  system: 'System',
-  tasks: 'Tasks',
-};
 
 function formatLabel(value: string): string {
   return value
     .split(/[-_]+/)
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ');
-}
-
-function categoryLabel(value: string): string {
-  return CATEGORY_LABELS[value] ?? formatLabel(value);
 }
 
 export interface ActiveNotificationFilter {
@@ -101,7 +95,10 @@ export function activeNotificationFilters(
   if (query.q) filters.push({ key: 'q', label: `Search: ${query.q}` });
   if (query.level) filters.push({ key: 'level', label: `Level: ${formatLabel(query.level)}` });
   if (query.category) {
-    filters.push({ key: 'category', label: `Category: ${categoryLabel(query.category)}` });
+    filters.push({
+      key: 'category',
+      label: `Category: ${formatNotificationCategoryLabel(query.category)}`,
+    });
   }
   if (query.merchant) {
     filters.push({
@@ -109,9 +106,24 @@ export function activeNotificationFilters(
       label: `Merchant: ${merchantLabel ?? 'Unavailable merchant'}`,
     });
   }
-  if (query.source) filters.push({ key: 'source', label: `Source: ${formatLabel(query.source)}` });
+  if (query.source) {
+    filters.push({
+      key: 'source',
+      label: `Source: ${formatNotificationSourceLabel(query.source)}`,
+    });
+  }
   if (query.sourceAccount) {
-    filters.push({ key: 'sourceAccount', label: `Source account: ${query.sourceAccount}` });
+    const account = facets.sourceAccount.find(facet => facet.key === query.sourceAccount);
+    filters.push({
+      key: 'sourceAccount',
+      label: `Source account: ${account?.label ?? query.sourceAccount}`,
+    });
+  }
+  if (query.notificationType) {
+    filters.push({
+      key: 'notificationType',
+      label: `Type: ${formatNotificationTypeLabel(query.notificationType)}`,
+    });
   }
   if (query.state) filters.push({ key: 'state', label: `State: ${formatLabel(query.state)}` });
   if (query.actionableOnly) filters.push({ key: 'actionableOnly', label: 'Actionable only' });
@@ -216,7 +228,19 @@ export function NotificationFilterControls({
   function applyOption(value: string) {
     if (selectedKey === 'category') onChange({ ...query, category: value });
     else if (selectedKey === 'merchant') onChange({ ...query, merchant: value });
-    else if (selectedKey === 'source') onChange({ ...query, source: value });
+    else if (selectedKey === 'source') {
+      onChange({ ...query, source: value, sourceAccount: null, notificationType: null });
+    }
+    else if (selectedKey === 'sourceAccount') {
+      const account = facets.sourceAccount.find(facet => facet.key === value);
+      onChange({
+        ...query,
+        source: account?.source ?? query.source,
+        sourceAccount: value,
+        notificationType: null,
+      });
+    }
+    else if (selectedKey === 'notificationType') onChange({ ...query, notificationType: value });
     else return;
     closeBuilder();
     triggerRef.current?.focus();
@@ -230,7 +254,6 @@ export function NotificationFilterControls({
     else if (selectedKey === 'owner') onChange({ ...query, owner: value });
     else if (selectedKey === 'reason') onChange({ ...query, reason: value });
     else if (selectedKey === 'subjectType') onChange({ ...query, subjectType: value });
-    else if (selectedKey === 'sourceAccount') onChange({ ...query, sourceAccount: value });
     else return;
     closeBuilder();
     triggerRef.current?.focus();
@@ -476,7 +499,7 @@ function filterOptions(
     return uniqueValues(Object.keys(facets.category), query.category)
       .map(value => ({
         value,
-        label: categoryLabel(value),
+        label: formatNotificationCategoryLabel(value),
         count: facets.category[value] ?? 0,
       }));
   }
@@ -484,7 +507,7 @@ function filterOptions(
     return uniqueValues(Object.keys(facets.source), query.source)
       .map(value => ({
         value,
-        label: formatLabel(value),
+        label: formatNotificationSourceLabel(value),
         count: facets.source[value] ?? 0,
       }));
   }
@@ -500,6 +523,18 @@ function filterOptions(
         count: facet.count,
       })),
     ];
+  }
+  if (key === 'sourceAccount') {
+    return facets.sourceAccount
+      .filter(facet => !query.source || facet.source === query.source)
+      .map(facet => ({ value: facet.key, label: facet.label, count: facet.count }));
+  }
+  if (key === 'notificationType') {
+    return facets.notificationType.map(facet => ({
+      value: facet.key,
+      label: formatNotificationTypeLabel(facet.key),
+      count: facet.count,
+    }));
   }
   return [];
 }

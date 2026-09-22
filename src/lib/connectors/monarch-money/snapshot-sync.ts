@@ -1,9 +1,8 @@
 import 'server-only';
 
-import { createHash, randomUUID } from 'node:crypto';
-import { sqlite } from '@/db';
-import { financeInsightDigestV1, type CanonicalJsonValue } from '@/lib/finance-insights/canonical';
-import { loadFinanceInsightProjectionFacts } from '@/lib/finance-insights/publication';
+import { randomUUID } from 'node:crypto';
+import { FinanceWebPersistenceError } from '@/db/persistence/finance-web';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import type {
   ConnectorConfig,
   DomainSyncContext,
@@ -12,13 +11,11 @@ import type {
 import {
   MonarchBridgeClient,
   MonarchBridgeError,
-  type MonarchTransaction,
 } from './client';
 import {
-  MONARCH_BRIDGE_CONTRACT_VERSION,
   MONARCH_TRANSACTION_MAX_BACKFILL_DAYS,
 } from './constants';
-import { FinanceAttributionCoordinator } from './attribution-service';
+import { FinanceAttributionCoordinator } from './attribution-coordinator';
 
 const DEFAULT_BACKFILL_DAYS = 90;
 const DEFAULT_OVERLAP_DAYS = 7;
@@ -45,14 +42,6 @@ function boundedInteger(value: unknown, fallback: number, minimum: number, maxim
     : fallback;
 }
 
-function localTransactionId(connectorId: string, upstreamId: string): string {
-  return `finance:${connectorId}:${upstreamId}`;
-}
-
-function fingerprint(transaction: MonarchTransaction): string {
-  return createHash('sha256').update(JSON.stringify(transaction)).digest('hex');
-}
-
 function errorDetails(error: unknown): { code: string; message: string } {
   if (error instanceof MonarchBridgeError) {
     return { code: error.code, message: error.message };
@@ -69,103 +58,6 @@ function throwIfAborted(signal?: AbortSignal): void {
   }
 }
 
-export function upsertFinanceTransactionPage(
-  connectorId: string,
-  generationId: string,
-  transactions: MonarchTransaction[],
-  provenance: { provider: 'demo' | 'live'; fetchedAt: string },
-  now: string,
-): { added: number; updated: number } {
-  const find = sqlite.prepare(`
-    SELECT id, source_fingerprint AS sourceFingerprint
-    FROM finance_transactions
-    WHERE connector_instance_id = ? AND upstream_transaction_id = ?
-  `);
-  const insert = sqlite.prepare(`
-    INSERT INTO finance_transactions (
-      id, connector_instance_id, upstream_transaction_id, date, amount,
-      merchant_name, merchant_logo_url, category_id, original_category,
-      confirmed_category, account_id, account_name, card_last4,
-      assigned_kid_id, kid_assignment_method, triage_status, flag_reason,
-      is_pending, is_recurring, notes, tags, tag_references, lifecycle_status, deleted_at,
-      provenance_provider, provenance_fetched_at, source_fingerprint, source_url,
-      last_seen_generation_id, first_seen_at, last_seen_at, synced_at
-    ) VALUES (
-      ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?,
-      NULL, NULL, 'pending', NULL, ?, ?, ?, ?, ?, 'active', NULL,
-      ?, ?, ?, NULL, ?, ?, ?, ?
-    )
-  `);
-  const update = sqlite.prepare(`
-    UPDATE finance_transactions
-    SET date = ?, amount = ?, merchant_name = ?, merchant_logo_url = ?,
-        category_id = ?, original_category = ?, account_id = ?, account_name = ?,
-        card_last4 = ?, is_pending = ?, is_recurring = ?, notes = ?, tags = ?,
-        tag_references = ?,
-        lifecycle_status = 'active', deleted_at = NULL, provenance_provider = ?,
-        provenance_fetched_at = ?, source_fingerprint = ?,
-        last_seen_generation_id = ?, last_seen_at = ?, synced_at = ?
-    WHERE connector_instance_id = ? AND upstream_transaction_id = ?
-  `);
-
-  return sqlite.transaction(() => {
-    let added = 0;
-    let updated = 0;
-    for (const transaction of transactions) {
-      const hash = fingerprint(transaction);
-      const existing = find.get(connectorId, transaction.id) as
-        | { id: string; sourceFingerprint: string }
-        | undefined;
-      const values = [
-        transaction.date,
-        transaction.amount,
-        transaction.merchant.name,
-        transaction.merchant.logoUrl,
-        transaction.category?.id ?? null,
-        transaction.category?.name ?? null,
-        transaction.account.id,
-        transaction.account.displayName,
-        transaction.account.mask,
-        transaction.isPending ? 1 : 0,
-        transaction.isRecurring ? 1 : 0,
-        transaction.notes,
-        JSON.stringify(transaction.tags),
-        JSON.stringify(transaction.tagReferences.map((tag) => tag.id)),
-      ] as const;
-      if (!existing) {
-        insert.run(
-          localTransactionId(connectorId, transaction.id),
-          connectorId,
-          transaction.id,
-          ...values,
-          provenance.provider,
-          provenance.fetchedAt,
-          hash,
-          generationId,
-          now,
-          now,
-          now,
-        );
-        added++;
-      } else {
-        update.run(
-          ...values,
-          provenance.provider,
-          provenance.fetchedAt,
-          hash,
-          generationId,
-          now,
-          now,
-          connectorId,
-          transaction.id,
-        );
-        if (existing.sourceFingerprint !== hash) updated++;
-      }
-    }
-    return { added, updated };
-  }).immediate();
-}
-
 export class FinanceSnapshotSynchronizer {
   private readonly client: MonarchBridgeClient;
 
@@ -175,6 +67,7 @@ export class FinanceSnapshotSynchronizer {
 
   async sync(context: DomainSyncContext): Promise<DomainSyncResult> {
     const connectorId = this.config.id;
+    const finance = (await getWorkerPersistenceRepositories()).finance;
     const settings = (this.config.settings ?? {}) as Record<string, unknown>;
     const backfillDays = boundedInteger(
       settings.backfillDays,
@@ -195,18 +88,11 @@ export class FinanceSnapshotSynchronizer {
       today,
       MONARCH_TRANSACTION_MAX_BACKFILL_DAYS - 1,
     );
-    const state = sqlite.prepare(`
-      SELECT last_successful_window_end AS lastSuccessfulWindowEnd
-      FROM finance_sync_state
-      WHERE connector_id = ?
-    `).get(connectorId) as { lastSuccessfulWindowEnd: string | null } | undefined;
-    const needsStableTagBackfill = sqlite.prepare(`
-      SELECT 1
-      FROM finance_transactions
-      WHERE connector_instance_id = ? AND lifecycle_status = 'active'
-        AND date >= ? AND tags <> '[]' AND tag_references = '[]'
-      LIMIT 1
-    `).get(connectorId, stableTagRecoveryStart) !== undefined;
+    const state = await finance.snapshots.readBasis(
+      connectorId,
+      stableTagRecoveryStart,
+    );
+    const needsStableTagBackfill = state.needsStableTagBackfill;
     const mode: SyncMode = context.full
       || !state?.lastSuccessfulWindowEnd
       || needsStableTagBackfill
@@ -222,31 +108,14 @@ export class FinanceSnapshotSynchronizer {
     const generationId = randomUUID();
     const attemptAt = now.toISOString();
 
-    sqlite.prepare(`
-      INSERT INTO finance_sync_state (
-        connector_id, status, current_generation_id, current_window_start,
-        current_window_end, last_mode, last_attempt_at, created_at, updated_at
-      ) VALUES (?, 'running', ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(connector_id) DO UPDATE SET
-        status = 'running',
-        current_generation_id = excluded.current_generation_id,
-        current_window_start = excluded.current_window_start,
-        current_window_end = excluded.current_window_end,
-        last_mode = excluded.last_mode,
-        last_attempt_at = excluded.last_attempt_at,
-        last_error_code = NULL,
-        last_error_message = NULL,
-        updated_at = excluded.updated_at
-    `).run(
+    await finance.snapshots.start({
       connectorId,
       generationId,
       windowStart,
       windowEnd,
       mode,
       attemptAt,
-      attemptAt,
-      attemptAt,
-    );
+    });
 
     let added = 0;
     let updated = 0;
@@ -255,6 +124,8 @@ export class FinanceSnapshotSynchronizer {
     const seenCursors = new Set<string>();
     const attribution = new FinanceAttributionCoordinator(connectorId, {
       financeConfig: this.config,
+      persistence: finance,
+      generationId,
     });
     try {
       for (let pageNumber = 0; pageNumber < MAX_PAGES; pageNumber++) {
@@ -276,13 +147,13 @@ export class FinanceSnapshotSynchronizer {
         ) {
           sourceAsOf = provenance.fetchedAt;
         }
-        const counts = upsertFinanceTransactionPage(
+        const counts = await finance.snapshots.upsertPage({
           connectorId,
           generationId,
-          page.transactions,
+          transactions: page.transactions,
           provenance,
-          new Date().toISOString(),
-        );
+          observedAt: new Date().toISOString(),
+        });
         added += counts.added;
         updated += counts.updated;
         await attribution.attributePage(
@@ -310,93 +181,30 @@ export class FinanceSnapshotSynchronizer {
         );
       }
       const completedAt = new Date().toISOString();
-      const removed = sqlite.transaction(() => {
-        const tombstones = sqlite.prepare(`
-          UPDATE finance_transactions
-          SET lifecycle_status = 'deleted', deleted_at = ?, synced_at = ?
-          WHERE connector_instance_id = ?
-            AND lifecycle_status = 'active'
-            AND date >= ? AND date <= ?
-            AND (last_seen_generation_id IS NULL OR last_seen_generation_id <> ?)
-        `).run(
-          completedAt,
-          completedAt,
-          connectorId,
-          windowStart,
-          windowEnd,
-          generationId,
-        ).changes;
-        sqlite.prepare(`
-          UPDATE finance_attribution_exceptions
-          SET status = 'dismissed', review_state = 'resolved',
-              resolution = 'dismissed', resolved_at = COALESCE(resolved_at, ?),
-              updated_at = ?
-          WHERE connector_id = ?
-            AND transaction_id IN (
-              SELECT id FROM finance_transactions
-              WHERE connector_instance_id = ? AND lifecycle_status = 'deleted'
-                AND deleted_at = ?
-            )
-        `).run(completedAt, completedAt, connectorId, connectorId, completedAt);
-        const insightFacts = loadFinanceInsightProjectionFacts(
-          connectorId,
-          stableTagRecoveryStart,
-          'transaction',
-        ).transaction;
-        const insightDates = insightFacts.map((fact) => fact.occurredOn).sort();
-        const insightCoverageStart = insightDates[0] ?? windowStart;
-        const insightCoverageEnd = insightDates.at(-1) ?? windowEnd;
-        const insightContentDigest = financeInsightDigestV1(
-          insightFacts as CanonicalJsonValue,
-        );
-        sqlite.prepare(`
-          UPDATE finance_sync_state
-          SET status = 'succeeded', current_generation_id = NULL,
-              current_window_start = NULL, current_window_end = NULL,
-              last_successful_generation_id = ?,
-              last_successful_source_as_of = ?, last_successful_sync_at = ?,
-              last_successful_item_count = ?,
-              last_successful_content_digest = ?,
-              last_successful_projection_start_date = ?,
-              last_successful_projection_coverage_start = ?,
-              last_successful_projection_coverage_end = ?,
-              last_successful_bridge_contract_version = ?,
-              last_successful_window_start = ?,
-              last_successful_window_end = ?, last_error_code = NULL,
-              last_error_message = NULL, last_added = ?, last_updated = ?,
-              last_deleted = ?, updated_at = ?
-          WHERE connector_id = ?
-        `).run(
-          generationId,
-          sourceAsOf,
-          completedAt,
-          insightFacts.length,
-          insightContentDigest,
-          stableTagRecoveryStart,
-          insightCoverageStart,
-          insightCoverageEnd,
-          MONARCH_BRIDGE_CONTRACT_VERSION,
-          windowStart,
-          windowEnd,
-          added,
-          updated,
-          tombstones,
-          completedAt,
-          connectorId,
-        );
-        return tombstones;
-      }).immediate();
-      attribution.finish(completedAt);
+      const { removed } = await finance.snapshots.complete({
+        connectorId,
+        generationId,
+        windowStart,
+        windowEnd,
+        projectionStartDate: stableTagRecoveryStart,
+        sourceAsOf,
+        completedAt,
+        added,
+        updated,
+      });
+      await attribution.finish(completedAt);
       return { itemsAdded: added, itemsUpdated: updated, itemsRemoved: removed };
     } catch (error) {
       const failure = errorDetails(error);
       const failedAt = new Date().toISOString();
-      sqlite.prepare(`
-        UPDATE finance_sync_state
-        SET status = 'failed', last_error_code = ?, last_error_message = ?, updated_at = ?
-        WHERE connector_id = ? AND current_generation_id = ?
-      `).run(failure.code, failure.message, failedAt, connectorId, generationId);
-      attribution.finish(failedAt);
+      await finance.snapshots.fail({
+        connectorId,
+        generationId,
+        failedAt,
+        errorCode: failure.code,
+        errorMessage: failure.message,
+      });
+      await attribution.finish(failedAt);
       throw error;
     }
   }
@@ -417,165 +225,66 @@ export async function updateFinanceCategory(
     categoryName: string;
   },
 ): Promise<{ idempotencyKey: string; status: 'updated' }> {
-  const transaction = sqlite.prepare(`
-    SELECT id, upstream_transaction_id AS upstreamTransactionId
-    FROM finance_transactions
-    WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
-  `).get(transactionId, config.id) as
-    | { id: string; upstreamTransactionId: string }
-    | undefined;
-  if (!transaction) {
-    throw new MonarchBridgeError('transaction_not_found', 'Finance transaction was not found', false, 404);
-  }
-
   const now = new Date().toISOString();
-  const claim = sqlite.transaction(() => {
-    const existing = sqlite.prepare(`
-      SELECT transaction_id AS transactionId, requested_value AS requestedValue,
-             status, updated_at AS updatedAt
-      FROM finance_mutation_audit
-      WHERE connector_id = ? AND idempotency_key = ?
-    `).get(config.id, idempotencyKey) as
-      | {
-          transactionId: string;
-          requestedValue: string;
-          status: 'pending' | 'processing' | 'succeeded' | 'failed';
-          updatedAt: string;
-        }
-      | undefined;
-    if (existing && (
-      existing.transactionId !== transactionId
-      || existing.requestedValue !== categoryId
-    )) {
-      return 'conflict' as const;
-    }
-    if (existing?.status === 'succeeded') return 'succeeded' as const;
-    if (expectedTransactionVersion) {
-      const current = sqlite.prepare(`
-        SELECT source_fingerprint AS sourceFingerprint,
-               last_seen_at AS lastSeenAt, assigned_kid_id AS assignedKidId,
-               confirmed_category AS confirmedCategory,
-               manual_decided_at AS manualDecidedAt
-        FROM finance_transactions
-        WHERE id = ? AND connector_instance_id = ? AND lifecycle_status = 'active'
-      `).get(transactionId, config.id) as {
-        sourceFingerprint: string;
-        lastSeenAt: string;
-        assignedKidId: string | null;
-        confirmedCategory: string | null;
-        manualDecidedAt: string | null;
-      } | undefined;
-      if (
-        !current
-        || current.sourceFingerprint !== expectedTransactionVersion.sourceFingerprint
-        || current.lastSeenAt !== expectedTransactionVersion.lastSeenAt
-        || current.assignedKidId !== expectedTransactionVersion.assignedKidId
-        || current.confirmedCategory !== expectedTransactionVersion.confirmedCategory
-        || current.manualDecidedAt !== expectedTransactionVersion.manualDecidedAt
-      ) {
-        return 'transaction-conflict' as const;
-      }
-      const currentCategory = sqlite.prepare(`
-        SELECT name FROM finance_categories
-        WHERE connector_id = ? AND upstream_category_id = ?
-          AND is_active = 1 AND source_is_active = 1
-      `).get(config.id, categoryId) as { name: string } | undefined;
-      if (
-        !currentCategory
-        || currentCategory.name !== expectedTransactionVersion.categoryName
-      ) {
-        return 'category-conflict' as const;
-      }
-    }
-    const otherProcessingMutation = sqlite.prepare(`
-      SELECT 1
-      FROM finance_mutation_audit
-      WHERE connector_id = ? AND transaction_id = ?
-        AND status = 'processing' AND idempotency_key <> ?
-      LIMIT 1
-    `).get(config.id, transactionId, idempotencyKey);
-    if (otherProcessingMutation) return 'processing' as const;
-    if (
-      existing?.status === 'processing'
-      && Date.parse(existing.updatedAt) > Date.now() - MUTATION_CLAIM_STALE_MS
-    ) {
-      return 'processing' as const;
-    }
-    if (existing) {
-      sqlite.prepare(`
-        UPDATE finance_mutation_audit
-        SET status = 'processing', attempt_count = attempt_count + 1,
-            last_error_code = NULL, last_error_message = NULL, updated_at = ?
-        WHERE connector_id = ? AND idempotency_key = ?
-      `).run(now, config.id, idempotencyKey);
-    } else {
-      sqlite.prepare(`
-        INSERT INTO finance_mutation_audit (
-          id, idempotency_key, connector_id, transaction_id,
-          upstream_transaction_id, operation, requested_value, status,
-          attempt_count, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 'category_update', ?, 'processing', 1, ?, ?)
-      `).run(
-        randomUUID(),
-        idempotencyKey,
-        config.id,
-        transactionId,
-        transaction.upstreamTransactionId,
-        categoryId,
-        now,
-        now,
+  const web = (await getWorkerPersistenceRepositories()).finance.web;
+  let claim;
+  try {
+    claim = await web.claimCategoryUpdate({
+      connectorId: config.id,
+      transactionId,
+      categoryId,
+      idempotencyKey,
+      now,
+      staleBefore: new Date(Date.now() - MUTATION_CLAIM_STALE_MS).toISOString(),
+      expectedTransactionVersion,
+    });
+  } catch (error) {
+    if (error instanceof FinanceWebPersistenceError) {
+      throw new MonarchBridgeError(
+        error.code,
+        error.message,
+        error.retryable,
+        error.status,
       );
     }
-    return 'claimed' as const;
-  }).immediate();
-  if (claim === 'succeeded') return { idempotencyKey, status: 'updated' };
-  if (claim === 'conflict') {
-    throw new MonarchBridgeError('idempotency_conflict', 'Idempotency key was already used', false, 409);
+    throw error;
   }
-  if (claim === 'transaction-conflict') {
-    throw new MonarchBridgeError('transaction_conflict', 'Finance transaction changed after approval', false, 409);
-  }
-  if (claim === 'category-conflict') {
-    throw new MonarchBridgeError('category_conflict', 'Finance category changed after approval', false, 409);
-  }
-  if (claim === 'processing') {
-    throw new MonarchBridgeError('mutation_in_progress', 'Category update is already in progress', true, 409);
-  }
+  if (claim.outcome === 'replayed') return { idempotencyKey, status: 'updated' };
 
   try {
     await new MonarchBridgeClient(config).updateCategory(
-      transaction.upstreamTransactionId,
+      claim.upstreamTransactionId,
       categoryId,
       signal,
     );
     const completedAt = new Date().toISOString();
-    sqlite.transaction(() => {
-      sqlite.prepare(`
-        UPDATE finance_transactions
-        SET confirmed_category = ?, triage_status = 'confirmed'
-        WHERE id = ? AND connector_instance_id = ?
-      `).run(categoryId, transactionId, config.id);
-      sqlite.prepare(`
-        UPDATE finance_mutation_audit
-        SET status = 'succeeded', completed_at = ?, updated_at = ?,
-            last_error_code = NULL, last_error_message = NULL
-        WHERE connector_id = ? AND idempotency_key = ?
-      `).run(completedAt, completedAt, config.id, idempotencyKey);
-    }).immediate();
+    const completed = await web.completeCategoryUpdate({
+      connectorId: config.id,
+      transactionId,
+      categoryId,
+      idempotencyKey,
+      claimToken: claim.claimToken,
+      completedAt,
+    });
+    if (!completed) {
+      throw new MonarchBridgeError(
+        'mutation_claim_lost',
+        'Category update claim was superseded',
+        true,
+        409,
+      );
+    }
     return { idempotencyKey, status: 'updated' };
   } catch (error) {
     const failure = errorDetails(error);
-    sqlite.prepare(`
-      UPDATE finance_mutation_audit
-      SET status = 'failed', last_error_code = ?, last_error_message = ?, updated_at = ?
-      WHERE connector_id = ? AND idempotency_key = ?
-    `).run(
-      failure.code,
-      failure.message,
-      new Date().toISOString(),
-      config.id,
+    await web.failCategoryUpdate({
+      connectorId: config.id,
       idempotencyKey,
-    );
+      claimToken: claim.claimToken,
+      errorCode: failure.code,
+      errorMessage: failure.message,
+      failedAt: new Date().toISOString(),
+    });
     throw error;
   }
 }

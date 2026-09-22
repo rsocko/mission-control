@@ -3,23 +3,17 @@ import { randomUUID } from 'node:crypto';
 import { syncLogger } from '@/lib/logger';
 import type { SyncResult } from '@/types';
 import {
-  claimNextSyncJob,
-  completeSyncJob,
-  failSyncJob,
-  enqueueDueSyncSchedules,
   getSyncLeaseMs,
-  getSyncQueueMetrics,
-  isSyncJobCancellationRequested,
-  linkSyncLogToJob,
-  persistSyncJobEvent,
-  pruneSyncJobs,
-  renewSyncJobLease,
+  getSyncJobRepository,
   type SyncJob,
-} from './job-queue';
+} from './job-runtime';
 import { setSyncEventPersistence } from './events';
 import { setQueuedExpensiveOperations } from '@/lib/telemetry/operations';
 import type { GitHubIdentityRunContext } from '@/lib/external-identities';
 import { StaleGitHubIdentityContextError } from './github-identity-context';
+import { withDatabaseOperation } from '@/lib/telemetry/database-operation-context';
+import { buildSyncCompletedEvent, buildSyncFailedEvent } from './terminal-events';
+import { wakeEventOutboxDispatcher } from '@/lib/events/dispatcher-wake';
 
 export type SyncJobExecutor = (
   connectorId: string,
@@ -54,6 +48,8 @@ export class SyncWorker {
   private readonly execute: SyncJobExecutor;
   private readonly pollIntervalMs: number;
   private readonly abortGraceMs: number;
+  private readonly isEnabled: () => boolean;
+  private wakeWaiter: (() => void) | null = null;
   private stopping = false;
   private loopPromise: Promise<void> | null = null;
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
@@ -68,10 +64,16 @@ export class SyncWorker {
     job: SyncJob;
     promise: Promise<void>;
   }>();
+  private lastKnownQueuedCount = 0;
 
   constructor(
     execute: SyncJobExecutor,
-    options: { ownerId?: string; pollIntervalMs?: number; abortGraceMs?: number } = {},
+    options: {
+      ownerId?: string;
+      pollIntervalMs?: number;
+      abortGraceMs?: number;
+      isEnabled?(): boolean;
+    } = {},
   ) {
     this.execute = execute;
     this.ownerId = options.ownerId ?? `${hostname()}:${process.pid}:${randomUUID()}`;
@@ -79,6 +81,7 @@ export class SyncWorker {
       ?? positiveInteger(process.env.MC_SYNC_WORKER_POLL_MS, 500);
     this.abortGraceMs = options.abortGraceMs
       ?? positiveInteger(process.env.MC_SYNC_WORKER_ABORT_GRACE_MS, 30_000);
+    this.isEnabled = options.isEnabled ?? (() => true);
   }
 
   start(): void {
@@ -88,12 +91,28 @@ export class SyncWorker {
       const activeJob = this.active?.job.connectorId === event.connectorId
         ? this.active.job
         : this.abandoned.get(event.connectorId)?.job;
-      if (activeJob) persistSyncJobEvent(activeJob.id, event);
+      if (!activeJob) return;
+      void withDatabaseOperation('sync-job-events', () => getSyncJobRepository()
+        .then((repository) => repository.persistEvent(activeJob.id, event)))
+        .catch((error) => {
+          syncLogger.warn(
+            { err: error, jobId: activeJob.id, connectorId: activeJob.connectorId },
+            'Sync worker could not persist a sync progress event',
+          );
+        });
     });
     const retentionDays = positiveInteger(process.env.MC_SYNC_JOB_RETENTION_DAYS, 14);
-    pruneSyncJobs(retentionDays);
+    const pruneOnce = () => {
+      if (!this.isEnabled()) return;
+      void withDatabaseOperation('sync-job-finalize', () => getSyncJobRepository()
+        .then((repository) => repository.prune(retentionDays)))
+        .catch((error) => {
+          syncLogger.error({ err: error }, 'Sync worker could not prune completed jobs');
+        });
+    };
+    pruneOnce();
     this.pruneTimer = setInterval(
-      () => pruneSyncJobs(retentionDays),
+      pruneOnce,
       positiveInteger(process.env.MC_SYNC_JOB_PRUNE_INTERVAL_MS, 6 * 60 * 60_000),
     );
     this.pruneTimer.unref();
@@ -105,9 +124,24 @@ export class SyncWorker {
   }
 
   private async runLoop(): Promise<void> {
+    const repository = await getSyncJobRepository();
     while (!this.stopping) {
-      const recoveredSchedules = enqueueDueSyncSchedules();
-      setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
+      if (!this.isEnabled()) {
+        await this.delay(this.pollIntervalMs);
+        continue;
+      }
+      const recoveredSchedules = await withDatabaseOperation(
+        'sync-queue-schedule',
+        () => repository.enqueueDueSchedules(),
+      );
+      if (!this.isEnabled()) continue;
+      const queuedCount = await withDatabaseOperation(
+        'sync-queue-count',
+        () => repository.countQueued(),
+      );
+      if (!this.isEnabled()) continue;
+      this.lastKnownQueuedCount = queuedCount;
+      setQueuedExpensiveOperations(queuedCount);
       if (recoveredSchedules.length > 0) {
         syncLogger.warn(
           {
@@ -117,11 +151,18 @@ export class SyncWorker {
           'Recovered overdue sync schedules',
         );
       }
-      const job = claimNextSyncJob(
-        this.ownerId,
-        getSyncLeaseMs(),
-        new Set(this.abandoned.keys()),
+      const job = await withDatabaseOperation(
+        'sync-queue-claim',
+        () => repository.claimNext(
+          this.ownerId,
+          getSyncLeaseMs(),
+          new Set(this.abandoned.keys()),
+        ),
       );
+      if (job && (!this.isEnabled() || this.stopping)) {
+        await repository.release(job.id, this.ownerId, job.attempt, 'worker_deactivated');
+        continue;
+      }
       if (!job) {
         await this.delay(this.pollIntervalMs);
         continue;
@@ -131,25 +172,39 @@ export class SyncWorker {
       this.active = { job, controller, promise };
       await this.waitForJob(job, controller, promise);
       if (this.active?.job.id === job.id) this.active = null;
-      setQueuedExpensiveOperations(getSyncQueueMetrics().queued);
+      const refreshedQueuedCount = await withDatabaseOperation(
+        'sync-queue-count',
+        () => repository.countQueued(),
+      );
+      this.lastKnownQueuedCount = refreshedQueuedCount;
+      setQueuedExpensiveOperations(refreshedQueuedCount);
     }
   }
 
   private async executeJob(job: SyncJob, controller: AbortController): Promise<void> {
+    const repository = await getSyncJobRepository();
     const leaseMs = getSyncLeaseMs();
     const heartbeatMs = Math.max(1, Math.floor(leaseMs / 3));
     const heartbeat = setInterval(() => {
-      try {
-        if (isSyncJobCancellationRequested(job.id, this.ownerId)) {
-          controller.abort(new Error('Sync cancellation requested'));
-          return;
+      void (async () => {
+        try {
+          if (await withDatabaseOperation(
+            'sync-job-lease',
+            () => repository.isCancellationRequested(job.id, this.ownerId, job.attempt),
+          )) {
+            controller.abort(new Error('Sync cancellation requested'));
+            return;
+          }
+          if (!(await withDatabaseOperation(
+            'sync-job-lease',
+            () => repository.renewLease(job.id, this.ownerId, job.attempt, leaseMs),
+          ))) {
+            controller.abort(new Error('Sync job lease ownership lost'));
+          }
+        } catch (error) {
+          controller.abort(error instanceof Error ? error : new Error(String(error)));
         }
-        if (!renewSyncJobLease(job.id, this.ownerId, leaseMs)) {
-          controller.abort(new Error('Sync job lease ownership lost'));
-        }
-      } catch (error) {
-        controller.abort(error instanceof Error ? error : new Error(String(error)));
-      }
+      })();
     }, heartbeatMs);
     heartbeat.unref();
     const executionTimeout = setTimeout(() => {
@@ -177,57 +232,98 @@ export class SyncWorker {
     );
 
     try {
-      const result = await this.execute(job.connectorId, {
-        full: job.full,
-        signal: controller.signal,
-        jobId: job.id,
-        identityContext: job.identityMode === null || job.identityModeRevision === null
-          ? undefined
-          : Object.freeze({
-              connectorInstanceId: job.connectorId,
-              modeRevision: job.identityModeRevision,
-            }),
-      });
+      const result = await withDatabaseOperation('sync-job-execution', () =>
+        this.execute(job.connectorId, {
+          full: job.full,
+          signal: controller.signal,
+          jobId: job.id,
+          identityContext: job.identityMode === null || job.identityModeRevision === null
+            ? undefined
+            : Object.freeze({
+                connectorInstanceId: job.connectorId,
+                modeRevision: job.identityModeRevision,
+              }),
+        }));
       if (controller.signal.aborted) {
-        const cancelled = isSyncJobCancellationRequested(job.id, this.ownerId);
-        failSyncJob(
+        const cancelled = await withDatabaseOperation(
+          'sync-job-lease',
+          () => repository.isCancellationRequested(job.id, this.ownerId, job.attempt),
+        );
+        if (result.syncRunId) {
+          await withDatabaseOperation(
+            'sync-job-finalize',
+            () => repository.linkSyncLog(job, result),
+          );
+        }
+        await withDatabaseOperation('sync-job-finalize', () => repository.fail(
           job,
           this.ownerId,
           controller.signal.reason instanceof Error
             ? controller.signal.reason.message
             : 'Sync cancelled',
-          { retry: !cancelled, cancelled },
-        );
+          {
+            retry: !cancelled,
+            cancelled,
+            events: [buildSyncFailedEvent(job, {
+              errors: result.errors.length > 0 ? result.errors : ['Sync cancelled'],
+              occurredAt: result.syncedAt,
+            })],
+          },
+        ));
       } else if (!result.success) {
-        linkSyncLogToJob(job, result);
-        const status = failSyncJob(
+        await withDatabaseOperation(
+          'sync-job-finalize',
+          () => repository.linkSyncLog(job, result),
+        );
+        const status = await withDatabaseOperation('sync-job-finalize', () => repository.fail(
           job,
           this.ownerId,
           result.errors.join('; ') || 'Connector sync failed',
-        );
+          {
+            events: [buildSyncFailedEvent(job, {
+              errors: result.errors,
+              occurredAt: result.syncedAt,
+            })],
+          },
+        ));
         syncLogger.warn(
           { jobId: job.id, connectorId: job.connectorId, status, attempt: job.attempt },
           'Sync worker job failed',
         );
       } else {
-        linkSyncLogToJob(job, result);
-        completeSyncJob(job.id, this.ownerId, result);
+        await withDatabaseOperation(
+          'sync-job-finalize',
+          () => repository.finalizeSuccess(job, this.ownerId, result, {
+            events: [buildSyncCompletedEvent(job, result)],
+          }),
+        );
         syncLogger.info(
           { jobId: job.id, connectorId: job.connectorId, attempt: job.attempt },
           'Sync worker job completed',
         );
       }
+      wakeEventOutboxDispatcher();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       try {
         const staleIdentityContext = error instanceof StaleGitHubIdentityContextError;
         const cancelled = !staleIdentityContext
-          && isSyncJobCancellationRequested(job.id, this.ownerId);
-        failSyncJob(job, this.ownerId, message, {
-          retry: !staleIdentityContext && !cancelled,
-          cancelled,
-          terminal: staleIdentityContext,
-        });
+          && await withDatabaseOperation(
+            'sync-job-lease',
+            () => repository.isCancellationRequested(job.id, this.ownerId, job.attempt),
+          );
+        await withDatabaseOperation('sync-job-finalize', () => repository.fail(
+          job,
+          this.ownerId,
+          message,
+          {
+            retry: !staleIdentityContext && !cancelled,
+            cancelled,
+            terminal: staleIdentityContext,
+            events: [buildSyncFailedEvent(job, { errors: [message] })],
+          },
+        ));
+        wakeEventOutboxDispatcher();
       } catch (recordError) {
         syncLogger.error(
           { err: recordError, jobId: job.id, connectorId: job.connectorId },
@@ -289,6 +385,7 @@ export class SyncWorker {
   async stop(graceMs = positiveInteger(process.env.MC_SYNC_WORKER_SHUTDOWN_GRACE_MS, 30_000)): Promise<void> {
     if (this.stopping) return;
     this.stopping = true;
+    this.wake();
     if (this.pruneTimer) clearInterval(this.pruneTimer);
     this.pruneTimer = null;
     const active = this.active;
@@ -314,10 +411,27 @@ export class SyncWorker {
   }
 
   hasPendingWork(): boolean {
-    return this.active !== null || getSyncQueueMetrics().queued > 0;
+    if (this.active !== null) return true;
+    // The backend-neutral queue count is refreshed every poll. Avoid running
+    // the full queue-health aggregate from this synchronous health check.
+    return this.lastKnownQueuedCount > 0;
   }
 
   private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    return new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        this.wakeWaiter = null;
+        resolve();
+      }, ms);
+      this.wakeWaiter = () => {
+        clearTimeout(timer);
+        this.wakeWaiter = null;
+        resolve();
+      };
+    });
+  }
+
+  wake(): void {
+    this.wakeWaiter?.();
   }
 }

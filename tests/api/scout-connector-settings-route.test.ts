@@ -1,69 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SCOUT_SETTINGS } from '@/lib/connectors/scout/settings';
 
-const insertValues = vi.fn((value: unknown) => {
-  const result = {
-    run: vi.fn(),
-    returning: vi.fn(() => ({
-      get: vi.fn(() => ({
-        id: (value as { id?: string }).id,
-      })),
-    })),
-  };
-  return {
-    ...result,
-    onConflictDoNothing: vi.fn(() => result),
-  };
-});
-const updateWhere = vi.fn();
-const updateSet = vi.fn(() => ({ where: updateWhere }));
-const selectResults: unknown[][] = [];
+const createConnector = vi.fn(async () => true);
+const ensureSourceLists = vi.fn(async () => undefined);
+const getConnector = vi.fn();
+const updateConnector = vi.fn(async () => true);
+const projectExists = vi.fn(async () => true);
 
-const mockDb = {
-  select: vi.fn(() => ({
-    from: vi.fn(() => ({
-      where: vi.fn(() => selectResults.shift() || []),
-    })),
+vi.mock('@/lib/connectors/management-service', () => ({
+  getConnectorManagementPersistence: vi.fn(async () => ({
+    createConnector,
+    ensureSourceLists,
+    getConnector,
+    updateConnector,
+    projectExists,
   })),
-  insert: vi.fn(() => ({ values: insertValues })),
-  update: vi.fn(() => ({ set: updateSet })),
-};
-
-vi.mock('@/db', () => ({
-  default: mockDb,
-  runTransaction: vi.fn((callback: (tx: typeof mockDb) => unknown) => callback(mockDb)),
-}));
-
-vi.mock('@/db/schema', () => ({
-  connectorConfigs: {
-    id: 'id',
-    type: 'type',
-    settings: 'settings',
-  },
-  githubIdentityMigrations: {},
-  githubIdentityControls: {},
-  focusItems: {},
-  hubProjects: { id: 'id' },
-  myDayItems: {},
-  projectPhaseItems: {},
-  sourceLists: {},
-  syncLog: {},
-  taskProjects: {},
-  taskSchedules: {},
-  taskTags: {},
-  tasks: {},
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((...args: unknown[]) => ({ op: 'eq', args })),
-  desc: vi.fn(),
-  sql: vi.fn(),
-  ne: vi.fn(),
-  and: vi.fn(),
-  isNull: vi.fn(),
-  isNotNull: vi.fn(),
-  lt: vi.fn(),
-  inArray: vi.fn(),
 }));
 
 vi.mock('@/lib/sync', () => ({
@@ -76,7 +27,7 @@ vi.mock('@/lib/sync', () => ({
 describe('Scout connector settings API', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    selectResults.length = 0;
+    getConnector.mockResolvedValue(null);
   });
 
   it('stores complete defaults for new Scout connectors', async () => {
@@ -93,18 +44,16 @@ describe('Scout connector settings API', () => {
     }));
 
     expect(response.status).toBe(201);
-    const connectorInsert = insertValues.mock.calls.find((call: unknown[]) => {
-      const value = call[0] as Record<string, unknown>;
-      return value.type === 'scout';
-    });
-
-    expect(connectorInsert?.[0]).toMatchObject({
+    expect(createConnector).toHaveBeenCalledWith(expect.objectContaining({
       id: 'scout-primary',
       settings: DEFAULT_SCOUT_SETTINGS,
-    });
+    }));
+    expect(ensureSourceLists).toHaveBeenCalledWith(expect.arrayContaining([
+      expect.objectContaining({ connectorInstanceId: 'scout-primary' }),
+    ]));
   });
 
-  it('creates new GitHub connectors with shadow identity state atomically', async () => {
+  it('delegates GitHub creation to the atomic management repository operation', async () => {
     const { POST } = await import('@/app/api/connectors/route');
     const response = await POST(new Request('http://localhost/api/connectors', {
       method: 'POST',
@@ -119,14 +68,11 @@ describe('Scout connector settings API', () => {
     }));
 
     expect(response.status).toBe(201);
-    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({
+    expect(createConnector).toHaveBeenCalledWith(expect.objectContaining({
       id: 'github-primary',
       type: 'github-issues',
     }));
-    expect(insertValues).toHaveBeenCalledWith(expect.objectContaining({
-      connectorInstanceId: 'github-primary',
-      phase: 'shadow_write',
-    }));
+    expect(createConnector).toHaveBeenCalledTimes(1);
   });
 
   it('rejects GitHub connectors with an untrusted identity origin', async () => {
@@ -143,11 +89,16 @@ describe('Scout connector settings API', () => {
     }));
 
     expect(response.status).toBe(400);
-    expect(insertValues).not.toHaveBeenCalled();
+    expect(createConnector).not.toHaveBeenCalled();
   });
 
   it('rejects invalid Scout settings updates', async () => {
-    selectResults.push([{ type: 'scout' }]);
+    getConnector.mockResolvedValue({
+      id: 'scout-primary',
+      type: 'scout',
+      settings: DEFAULT_SCOUT_SETTINGS,
+      updatedAt: '2026-09-04T00:00:00.000Z',
+    });
     const { PATCH } = await import('@/app/api/connectors/route');
     const response = await PATCH(new Request('http://localhost/api/connectors', {
       method: 'PATCH',
@@ -162,11 +113,16 @@ describe('Scout connector settings API', () => {
     }));
 
     expect(response.status).toBe(400);
-    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(updateConnector).not.toHaveBeenCalled();
   });
 
   it('persists validated Scout settings updates', async () => {
-    selectResults.push([{ type: 'scout' }]);
+    getConnector.mockResolvedValue({
+      id: 'scout-primary',
+      type: 'scout',
+      settings: DEFAULT_SCOUT_SETTINGS,
+      updatedAt: '2026-09-04T00:00:00.000Z',
+    });
     const { PATCH } = await import('@/app/api/connectors/route');
     const settings = {
       ...DEFAULT_SCOUT_SETTINGS,
@@ -180,11 +136,14 @@ describe('Scout connector settings API', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(updateSet).toHaveBeenCalledWith(expect.objectContaining({
-      settings: {
-        ...settings,
-        allowedSourceTypes: ['email', 'meeting'],
-      },
+    expect(updateConnector).toHaveBeenCalledWith(expect.objectContaining({
+      connectorId: 'scout-primary',
+      updates: expect.objectContaining({
+        settings: {
+          ...settings,
+          allowedSourceTypes: ['email', 'meeting'],
+        },
+      }),
     }));
   });
 });

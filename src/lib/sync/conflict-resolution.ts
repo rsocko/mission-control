@@ -1,6 +1,5 @@
-import db from '@/db';
-import { tasks, syncLog } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import type { ConnectorTaskRecord } from '@/db/persistence/connector-execution';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 /**
  * Conflict Resolution Engine
@@ -145,40 +144,22 @@ export async function applyResolution(
     ? resolution.localVersion
     : resolution.remoteVersion;
 
-  await db.update(tasks).set({
-    title: winningVersion.title,
-    description: winningVersion.description,
-    status: winningVersion.status,
-    priority: winningVersion.priority,
-    dueDate: winningVersion.dueDate,
-    updatedAt: new Date().toISOString(),
-    syncStatus: 'synced',
-    lastSyncedAt: new Date().toISOString(),
-  }).where(eq(tasks.id, taskId));
-
-  // Log the conflict
-  await db.insert(syncLog).values({
-    id: crypto.randomUUID(),
+  const persistence = (await getWorkerPersistenceRepositories()).execution.conflicts;
+  await persistence.applyResolution({
+    taskId,
     connectorId: resolution.connectorType,
-    success: true,
-    tasksAdded: 0,
-    tasksUpdated: 1,
-    tasksRemoved: 0,
-    notificationsAdded: 0,
-    errors: JSON.stringify([{
-      type: 'conflict_resolved',
-      taskId,
-      resolution: resolution.resolution,
-      localUpdatedAt: resolution.localVersion.updatedAt,
-      remoteUpdatedAt: resolution.remoteVersion.updatedAt,
-    }]),
-    syncedAt: resolution.resolvedAt,
+    winningVersion,
+    resolution: resolution.resolution,
+    localUpdatedAt: resolution.localVersion.updatedAt,
+    remoteUpdatedAt: resolution.remoteVersion.updatedAt,
+    resolvedAt: resolution.resolvedAt,
   });
 }
 
 /**
  * Get all unresolved conflicts (tasks with syncStatus = 'conflict')
  */
-export async function getUnresolvedConflicts() {
-  return db.select().from(tasks).where(eq(tasks.syncStatus, 'conflict'));
+export async function getUnresolvedConflicts(): Promise<ConnectorTaskRecord[]> {
+  const persistence = (await getWorkerPersistenceRepositories()).execution.conflicts;
+  return persistence.listUnresolved();
 }

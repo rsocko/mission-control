@@ -18,6 +18,7 @@ import {
   getConnectorCapabilities,
   isConnectorEnabled,
 } from '@/lib/connectors/capabilities';
+import { TASK_FIELDS } from '@/lib/tasks/field-policy';
 
 function capabilities(
   overrides: Partial<ConnectorCapabilities> = {},
@@ -43,7 +44,7 @@ describe('resolveTaskEditPolicy response contract', () => {
       connectorEnabled: true,
     }, null);
 
-    expect(Object.keys(policy.fields)).toHaveLength(18);
+    expect(Object.keys(policy.fields).sort()).toEqual([...TASK_FIELDS].sort());
     expect(policy.sourceModel).toBe('mc-owned');
     expect(policy.editableFields).toContain('status');
     expect(policy.localDeleteSupported).toBe(true);

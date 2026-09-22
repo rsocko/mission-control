@@ -612,6 +612,8 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     level: {},
     category: {},
     source: {},
+    sourceAccount: [],
+    notificationType: [],
     state: {},
     merchant: [],
   });
@@ -678,7 +680,11 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     const data: NotificationsResponse = await response.json();
     const items = data.notifications ?? [];
     setNotifications(items);
-    setFacets(data.facets ?? { level: {}, category: {}, source: {}, state: {}, merchant: [] });
+    setFacets({
+      level: {}, category: {}, source: {}, sourceAccount: [],
+      notificationType: [], state: {}, merchant: [],
+      ...(data.facets ?? {}),
+    });
     setMatchingCount(Number(data.matchingCount ?? items.length));
     setStats({
       unread: data.stats?.unread ?? items.filter(isNotificationUnread).length,
@@ -884,7 +890,11 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
     [fetchNotifications]
   );
 
-  const executeAction = useCallback(async (notificationId: string, actionId: string) => {
+  const executeAction = useCallback(async (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => {
     const action = notifications
       .find(notification => notification.id === notificationId)
       ?.actions?.find(candidate => candidate.id === actionId);
@@ -893,18 +903,22 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       const response = await fetch(`/api/notifications/${notificationId}/actions/${actionId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: '{}',
+        body: JSON.stringify(params ?? {}),
       });
+      const result = await response.json().catch(() => ({
+        success: false,
+        error: `Notification action failed with HTTP ${response.status}`,
+      }));
       if (!response.ok) {
         cancelExternalNavigation(externalWindow);
-        return { success: false };
+        console.error('Notification action failed:', result.error || `HTTP ${response.status}`);
+        return result;
       }
 
-      const result = await response.json();
       if (result.success && result.result) {
         if (result.result.url) {
           if (result.result.target === '_blank' || result.result.type === 'open_url') {
-            completeExternalNavigation(externalWindow, result.result.url);
+            await completeExternalNavigation(externalWindow, result.result.url);
           } else {
             cancelExternalNavigation(externalWindow);
             router.push(result.result.url);
@@ -920,8 +934,9 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
       }
       await fetchNotifications();
       return result;
-    } catch {
+    } catch (error) {
       cancelExternalNavigation(externalWindow);
+      console.error('Notification action failed:', error);
       return { success: false };
     }
   }, [fetchNotifications, notifications, router]);
@@ -1060,7 +1075,7 @@ export function MobileNotificationsScreen({ onBack }: MobileNotificationsScreenP
           {selectedNotification && (
             <NotificationDetail
               notification={selectedNotification}
-              onExecuteAction={(actionId) => executeAction(selectedNotification.id, actionId)}
+              onExecuteAction={(actionId, params) => executeAction(selectedNotification.id, actionId, params)}
               onMarkRead={async () => {
                 const nextState = isNotificationUnread(selectedNotification) ? 'read' : 'unread';
                 if (nextState === 'read') {

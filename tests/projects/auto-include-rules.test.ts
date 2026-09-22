@@ -1,16 +1,18 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
-beforeAll(() => {
+beforeAll(async () => {
   process.env.MC_DB_PATH = ':memory:';
   vi.doUnmock('drizzle-orm');
   vi.doUnmock('crypto');
   vi.resetModules();
+  await importInitializedSqliteDatabase();
 });
 
 describe('project auto-include rules', () => {
   it('normalizes tag rules, backfills matches on save, and explains qualification', async () => {
     const [{ default: db }, schema, { eq, and }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('drizzle-orm'),
     ]);
@@ -180,7 +182,7 @@ describe('project auto-include rules', () => {
 
   it('uses OR semantics and applies tag rules to sync-time candidate tasks', async () => {
     const [{ default: db }, schema, rules] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/rules'),
     ]);
@@ -246,7 +248,7 @@ describe('project auto-include rules', () => {
     're-evaluates affected tasks after tag %s',
     async (operation) => {
       const [{ default: db }, schema, { eq, and }] = await Promise.all([
-        import('@/db'),
+        importInitializedSqliteDatabase(),
         import('@/db/schema'),
         import('drizzle-orm'),
       ]);
@@ -379,7 +381,7 @@ describe('project auto-include rules', () => {
 
   it('detaches a shared hub tag only from the winning source scope', async () => {
     const [{ default: db }, schema, { and, eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('drizzle-orm'),
     ]);
@@ -553,7 +555,7 @@ describe('project auto-include rules', () => {
 
   it('rejects a source winner without a resolvable task scope', async () => {
     const [{ default: db }, schema, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('drizzle-orm'),
     ]);
@@ -598,7 +600,7 @@ describe('project auto-include rules', () => {
 
   it('uses another selected source scope for an unused source winner', async () => {
     const [{ default: db }, schema, { and, eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('drizzle-orm'),
     ]);
@@ -679,7 +681,7 @@ describe('project auto-include rules', () => {
 
   it('rejects source-backed tags at the destructive merge endpoint', async () => {
     const [{ default: db }, schema] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
     ]);
     const now = new Date().toISOString();
@@ -720,7 +722,7 @@ describe('project auto-include rules', () => {
 
   it('batches large rule backfills', async () => {
     const [{ default: db }, schema, rules, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/rules'),
       import('drizzle-orm'),

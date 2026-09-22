@@ -49,6 +49,15 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
+  GraphCanvasRegion,
+  GraphInspectorRegion,
+  GraphOutlineRegion,
+} from '@rsocko/generic-graph-canvas-shared-workbench/react';
+import {
+  MAX_CANVAS_ZOOM,
+  MIN_CANVAS_ZOOM,
+} from '@rsocko/generic-graph-canvas-shared-workbench/layout';
+import {
   buildIdeationTree,
   IDEATION_KIND_ORDER,
   isIdeationDescendant,
@@ -66,6 +75,7 @@ import {
   serializeIdeationOutline,
 } from '@/lib/ideation/text-outline';
 import { useIdeationStore } from '@/lib/stores/ideationStore';
+import { IDEATION_WORKBENCH_CAPABILITIES } from '@/lib/graph-workbench/adapters';
 import { InlinePropertyEditor } from './InlinePropertyEditor';
 import { IdeationConvertDialog } from './IdeationConvertDialog';
 import { IdeationPropertyPanel } from './IdeationPropertyPanel';
@@ -89,6 +99,7 @@ type IdeationCanvasNode = IdeationNode & {
   proposal?: IdeationExpansionProposal;
   onAcceptProposal?: (proposalId: string) => void;
   onDismissProposal?: (proposalId: string) => void;
+  onUpdateProposal?: (proposalId: string, label: string) => void;
   onExpand?: () => void;
 };
 
@@ -354,10 +365,11 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
   const createNodeAndFocus = (parentId: string, kind: IdeationNodeKind, index?: number) => {
     commitTitle();
     const id = addNode(parentId, kind, 'Untitled', index);
-    focusTitle(id, 'all');
+    if (id) focusTitle(id, 'all');
   };
 
   if (node.data.proposal) {
+    const proposalName = node.data.label.trim() || 'untitled';
     return (
       <div
         style={style}
@@ -367,7 +379,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
         )}
         data-outline-node-id={node.id}
         role="group"
-        aria-label={`AI suggestion: ${node.data.label}`}
+        aria-label={`AI suggestion: ${proposalName}`}
       >
         <OutlineGuides node={node} active={isOnSelectedPath} />
         <div className="flex h-7 w-full items-center gap-2">
@@ -375,7 +387,22 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
             <span className={styles.outlineNodeDot} data-outline-marker="dot" />
           </span>
           <Sparkles size={13} className="shrink-0 text-violet-300" />
-          <span className="min-w-0 flex-1 truncate text-xs font-medium">{node.data.label}</span>
+          <input
+            type="text"
+            value={node.data.label}
+            maxLength={120}
+            onChange={(event) => {
+              node.data.onUpdateProposal?.(
+                node.data.proposal?.id ?? '',
+                event.currentTarget.value,
+              );
+            }}
+            onClick={(event) => event.stopPropagation()}
+            onKeyDown={(event) => event.stopPropagation()}
+            className="min-w-0 flex-1 rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-medium text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50"
+            aria-label={`Edit suggestion ${proposalName} in outline`}
+            aria-invalid={!node.data.label.trim()}
+          />
           <button
             ref={propertyToggleRef}
             type="button"
@@ -383,8 +410,9 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
               event.stopPropagation();
               node.data.onAcceptProposal?.(node.data.proposal?.id ?? '');
             }}
-            className="rounded p-1 text-emerald-300 hover:bg-emerald-500/15"
-            aria-label={`Accept suggestion ${node.data.label} in outline`}
+            disabled={!node.data.label.trim()}
+            className="rounded p-1 text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Accept suggestion ${proposalName} in outline`}
           >
             <Check size={13} />
           </button>
@@ -395,7 +423,7 @@ function OutlineRow({ node, style, dragHandle, tree }: NodeRendererProps<Ideatio
               node.data.onDismissProposal?.(node.data.proposal?.id ?? '');
             }}
             className="rounded p-1 text-[var(--text-tertiary)] hover:bg-white/10 hover:text-white"
-            aria-label={`Dismiss suggestion ${node.data.label} in outline`}
+            aria-label={`Dismiss suggestion ${proposalName} in outline`}
           >
             <X size={13} />
           </button>
@@ -827,8 +855,7 @@ function TextIdeationOutline({ nodes }: { nodes: IdeationNode[] }) {
 
   const commit = useCallback(() => {
     if (!dirty) return;
-    applyTextOutline(draft);
-    setDirty(false);
+    if (applyTextOutline(draft)) setDirty(false);
   }, [applyTextOutline, dirty, draft]);
 
   useEffect(() => {
@@ -895,17 +922,33 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
   const config = KIND_CONFIG[data.node.kind];
   const Icon = config.icon;
   if (data.node.proposal) {
+    const proposalName = data.node.label.trim() || 'untitled';
     return (
       <div
         className="w-48 rounded-xl border border-dashed border-violet-400/70 bg-violet-500/10 px-3 py-2.5 text-left shadow-lg"
         role="group"
-        aria-label={`AI suggestion: ${data.node.label}`}
+        aria-label={`AI suggestion: ${proposalName}`}
       >
         <Handle type="target" position={Position.Left} isConnectable={false} className="!border-0 !bg-violet-400" />
         <span className="flex items-start gap-2">
           <Sparkles size={14} className="mt-0.5 shrink-0 text-violet-300" />
           <span className="min-w-0 flex-1">
-            <span className="block text-xs font-semibold text-violet-100">{data.node.label}</span>
+            <input
+              type="text"
+              value={data.node.label}
+              maxLength={120}
+              onChange={(event) => {
+                data.node.onUpdateProposal?.(
+                  data.node.proposal?.id ?? '',
+                  event.currentTarget.value,
+                );
+              }}
+              onPointerDown={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+              className="nodrag nowheel block w-full rounded border border-transparent bg-transparent px-1 py-0.5 text-xs font-semibold text-violet-100 outline-none transition-colors hover:border-violet-400/40 focus:border-violet-300 focus:bg-violet-950/50"
+              aria-label={`Edit suggestion ${proposalName} in mind map`}
+              aria-invalid={!data.node.label.trim()}
+            />
             <span className="mt-1 block text-[10px] leading-4 text-violet-200/70">{data.node.proposal.rationale}</span>
           </span>
         </span>
@@ -916,8 +959,9 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
               event.stopPropagation();
               data.node.onAcceptProposal?.(data.node.proposal?.id ?? '');
             }}
-            className="rounded-md px-2 py-1 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/15"
-            aria-label={`Accept suggestion ${data.node.label} in mind map`}
+            disabled={!data.node.label.trim()}
+            className="rounded-md px-2 py-1 text-[10px] font-medium text-emerald-300 hover:bg-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-40"
+            aria-label={`Accept suggestion ${proposalName} in mind map`}
           >
             Accept
           </button>
@@ -928,7 +972,7 @@ function MindMapCard({ data, selected }: NodeProps<MindMapNode>) {
               data.node.onDismissProposal?.(data.node.proposal?.id ?? '');
             }}
             className="rounded-md px-2 py-1 text-[10px] text-violet-200/70 hover:bg-white/10"
-            aria-label={`Dismiss suggestion ${data.node.label} in mind map`}
+            aria-label={`Dismiss suggestion ${proposalName} in mind map`}
           >
             Dismiss
           </button>
@@ -1046,8 +1090,8 @@ function IdeationMindMap({ sourceNodes }: { sourceNodes: IdeationCanvasNode[] })
       onNodeDragStop={onNodeDragStop}
       fitView
       fitViewOptions={{ padding: 0.2 }}
-      minZoom={0.2}
-      maxZoom={2}
+      minZoom={MIN_CANVAS_ZOOM}
+      maxZoom={MAX_CANVAS_ZOOM}
       colorMode="dark"
       deleteKeyCode={null}
       proOptions={{ hideAttribution: true }}
@@ -1063,7 +1107,9 @@ export default function IdeationCanvas() {
   const selectedNodeId = useIdeationStore((state) => state.selectedNodeId);
   const addNode = useIdeationStore((state) => state.addNode);
   const undo = useIdeationStore((state) => state.undo);
-  const past = useIdeationStore((state) => state.past);
+  const redo = useIdeationStore((state) => state.redo);
+  const canUndo = useIdeationStore((state) => state.canUndo);
+  const canRedo = useIdeationStore((state) => state.canRedo);
   const [convertOpen, setConvertOpen] = useState(false);
   const [outlineMode, setOutlineMode] = useState<'visual' | 'text'>('visual');
   const root = nodes.find((node) => node.parentId === null);
@@ -1075,6 +1121,7 @@ export default function IdeationCanvas() {
     acceptOne,
     acceptAll,
     dismissOne,
+    updateProposal,
   } = useIdeationExpansion(nodes, selected);
 
   const canvasNodes = useMemo<IdeationCanvasNode[]>(() => {
@@ -1096,9 +1143,18 @@ export default function IdeationCanvas() {
         proposal,
         onAcceptProposal: acceptOne,
         onDismissProposal: dismissOne,
+        onUpdateProposal: updateProposal,
       })),
     ];
-  }, [acceptOne, dismissOne, expandSelected, expansion, nodes, selectedNodeId]);
+  }, [
+    acceptOne,
+    dismissOne,
+    expandSelected,
+    expansion,
+    nodes,
+    selectedNodeId,
+    updateProposal,
+  ]);
 
   useEffect(() => {
     document.body.dataset.ideationActive = 'true';
@@ -1115,7 +1171,16 @@ export default function IdeationCanvas() {
         || target.isContentEditable
         || Boolean(target.closest('[contenteditable="true"]'))
       );
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+      const commandKey = event.ctrlKey || event.metaKey;
+      const redoKey = commandKey && (
+        event.key.toLowerCase() === 'y'
+        || (event.key.toLowerCase() === 'z' && event.shiftKey)
+      );
+      if (redoKey) {
+        if (event.defaultPrevented || isEditableTarget) return;
+        event.preventDefault();
+        redo();
+      } else if (commandKey && event.key.toLowerCase() === 'z') {
         if (event.defaultPrevented || isEditableTarget) return;
         event.preventDefault();
         undo();
@@ -1126,7 +1191,7 @@ export default function IdeationCanvas() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [clearExpansion, expansion.status, undo]);
+  }, [clearExpansion, expansion.status, redo, undo]);
 
   return (
     <div className="flex h-full min-h-[620px] flex-col overflow-hidden bg-[var(--surface-0)]">
@@ -1140,8 +1205,11 @@ export default function IdeationCanvas() {
         <Button size="sm" variant="secondary" onClick={() => addNode(selectedNodeId ?? root?.id ?? null)}>
           <Plus /> Add node
         </Button>
-        <Button size="sm" variant="ghost" onClick={undo} disabled={!past.length} title="Undo (Ctrl+Z)">
+        <Button size="sm" variant="ghost" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)">
           <Redo2 className="-scale-x-100" /> Undo
+        </Button>
+        <Button size="sm" variant="ghost" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)">
+          <Redo2 /> Redo
         </Button>
         {expansion.status === 'loading' ? (
           <Button size="sm" variant="secondary" onClick={clearExpansion}>
@@ -1155,7 +1223,11 @@ export default function IdeationCanvas() {
         )}
         {expansion.status === 'ready' ? (
           <>
-            <Button size="sm" onClick={acceptAll}>
+            <Button
+              size="sm"
+              onClick={acceptAll}
+              disabled={expansion.proposals.some((proposal) => !proposal.label.trim())}
+            >
               <Check /> Accept all ({expansion.proposals.length})
             </Button>
             <Button size="sm" variant="ghost" onClick={clearExpansion}>
@@ -1182,7 +1254,11 @@ export default function IdeationCanvas() {
         </div>
       </header>
       <div className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[340px_minmax(0,1fr)_18rem]">
-        <section className="hidden min-h-0 flex-col border-r border-[var(--border)] bg-[var(--surface-1)] md:flex" aria-label="Outline panel">
+        <GraphOutlineRegion
+          capabilities={IDEATION_WORKBENCH_CAPABILITIES}
+          className="hidden min-h-0 flex-col border-r border-[var(--border)] bg-[var(--surface-1)] md:flex"
+          label="Outline panel"
+        >
           <div className="flex items-start justify-between gap-2 border-b border-[var(--border)] px-3 py-2 text-[10px] text-[var(--text-tertiary)]">
             <div>
               <div className="font-semibold uppercase tracking-wide">Outline</div>
@@ -1211,11 +1287,21 @@ export default function IdeationCanvas() {
               ? <IdeationOutline nodes={canvasNodes} />
               : <TextIdeationOutline nodes={nodes} />}
           </div>
-        </section>
-        <section className="relative min-h-[500px]" aria-label="Mind map panel">
+        </GraphOutlineRegion>
+        <GraphCanvasRegion
+          capabilities={IDEATION_WORKBENCH_CAPABILITIES}
+          className="relative min-h-[500px]"
+          label="Mind map panel"
+        >
           <ReactFlowProvider><IdeationMindMap sourceNodes={canvasNodes} /></ReactFlowProvider>
-        </section>
-        <IdeationPropertyPanel />
+        </GraphCanvasRegion>
+        <GraphInspectorRegion
+          capabilities={IDEATION_WORKBENCH_CAPABILITIES}
+          className="contents"
+          label="Ideation inspector"
+        >
+          <IdeationPropertyPanel />
+        </GraphInspectorRegion>
       </div>
       {convertOpen ? <IdeationConvertDialog onClose={() => setConvertOpen(false)} /> : null}
     </div>

@@ -21,21 +21,40 @@ describe('notification writeback outbox', () => {
     vi.doUnmock('@/db');
     vi.doUnmock('drizzle-orm');
     vi.resetModules();
-    const [database, schemaModule, writeback, connectors] = await Promise.all([
-      import('@/db'),
-      import('@/db/schema'),
+
+    const database = await import('@/db');
+    db = database.default;
+    sqlite = database.sqlite;
+    const schemaModule = await import('@/db/schema');
+    schema = schemaModule;
+
+    // Create a real web repository and mock the worker persistence
+    const { createSqliteNotificationWebRepository } = await import(
+      '@/db/persistence/sqlite-notification-web-repository'
+    );
+    const webRepo = createSqliteNotificationWebRepository(sqlite);
+    vi.doMock('@/lib/persistence/worker-runtime', () => ({
+      getWorkerPersistenceRepositories: () => Promise.resolve({
+        notificationDelivery: { web: webRepo },
+        connectors: { get: () => Promise.resolve(null) },
+      }),
+      assertPersistenceCompositionAccessAllowed: () => {},
+    }));
+    vi.resetModules();
+
+    const [writeback, connectors] = await Promise.all([
       import('@/lib/notifications/notification-writeback'),
       import('@/lib/connectors'),
     ]);
-    db = database.default;
-    sqlite = database.sqlite;
-    schema = schemaModule;
     enqueue = writeback.enqueueNotificationDismissalWritebacks;
     dismissAndEnqueue = writeback.dismissNotificationsAndEnqueueWritebacks;
     mutateAndEnqueue = writeback.mutateNotificationsAndEnqueueWritebacks;
     wakeDispatcher = writeback.wakeNotificationWritebackDispatcher;
     dispatch = writeback.dispatchNotificationWritebacks;
     connectorRegistry = connectors.connectorRegistry;
+
+    // Initialize the cached web persistence by calling resolveWeb
+    await enqueue([]);
 
     const now = new Date().toISOString();
     await db.insert(schema.notifications).values({
@@ -90,25 +109,21 @@ describe('notification writeback outbox', () => {
     expect(job).toEqual({ status: 'pending', attemptCount: 0, completedAt: null });
   });
 
-  it('wakes at lease expiry and recovers a stranded sending job', async () => {
-    vi.useFakeTimers();
+  it('wakes and recovers a stranded job after its lease expires', async () => {
     const connector = {
       dismissAlert: vi.fn().mockResolvedValue(undefined),
     } as unknown as import('@/lib/connectors').IConnector;
     const registrySpy = vi.spyOn(connectorRegistry, 'getConnector')
       .mockImplementation((id) => id === 'docintel-1' ? connector : undefined);
     try {
-      const leaseExpiresAt = new Date(Date.now() + 1_000).toISOString();
+      const leaseExpiresAt = new Date(Date.now() - 1).toISOString();
       sqlite.prepare(`
         UPDATE notification_writeback_jobs
         SET status = 'sending', attempt_count = 1, lease_expires_at = ?
         WHERE notification_id = ?
       `).run(leaseExpiresAt, 'notification-1');
 
-      wakeDispatcher();
-      await vi.advanceTimersByTimeAsync(1_001);
-      await Promise.resolve();
-      await Promise.resolve();
+      await wakeDispatcher();
 
       const job = sqlite.prepare(`
         SELECT status, lease_expires_at AS leaseExpiresAt
@@ -118,7 +133,6 @@ describe('notification writeback outbox', () => {
       expect(job).toEqual({ status: 'succeeded', leaseExpiresAt: null });
     } finally {
       registrySpy.mockRestore();
-      vi.useRealTimers();
     }
   });
 
@@ -128,7 +142,7 @@ describe('notification writeback outbox', () => {
       {
         id: 'notification-serial-1',
         sourceId: 'serial:first',
-        connectorType: 'serial-test',
+        connectorType: 'document-intelligence',
         connectorInstanceId: 'serial-1',
         title: 'First serial dismissal',
         receivedAt: now,
@@ -137,7 +151,7 @@ describe('notification writeback outbox', () => {
       {
         id: 'notification-serial-2',
         sourceId: 'serial:second',
-        connectorType: 'serial-test',
+        connectorType: 'document-intelligence',
         connectorInstanceId: 'serial-1',
         title: 'Second serial dismissal',
         receivedAt: now,
@@ -148,7 +162,7 @@ describe('notification writeback outbox', () => {
     const dismissAlert = vi.fn().mockResolvedValue(undefined);
     const connector: import('@/lib/connectors').IConnector = {
       id: 'serial-1',
-      type: 'serial-test',
+      type: 'document-intelligence',
       displayName: 'Serial test',
       icon: 'test',
       capabilities: { read: true, write: true } as import('@/types').ConnectorCapabilities,
@@ -180,6 +194,99 @@ describe('notification writeback outbox', () => {
       { status: 'succeeded', attemptCount: 1 },
       { status: 'succeeded', attemptCount: 1 },
     ]);
+  });
+
+  it('settles dismissal locally when the connector has no writeback action', async () => {
+    const now = new Date().toISOString();
+    await db.insert(schema.notifications).values({
+      id: 'outlook-local-dismissal',
+      sourceId: 'email:message-1',
+      connectorType: 'outlook-email',
+      connectorInstanceId: 'outlook-1',
+      title: 'Irrelevant email',
+      receivedAt: now,
+      sortAt: now,
+    });
+    expect(dismissAndEnqueue(['outlook-local-dismissal'], now)).toMatchObject({
+      updatedCount: 1,
+      queuedCount: 0,
+    });
+
+    expect(sqlite.prepare(`
+      SELECT disposition, sync_state AS syncState
+      FROM notifications
+      WHERE id = 'outlook-local-dismissal'
+    `).get()).toEqual({ disposition: 'dismissed', syncState: 'synced' });
+    expect(sqlite.prepare(`
+      SELECT status, attempt_count AS attemptCount
+      FROM notification_writeback_jobs
+      WHERE notification_id = 'outlook-local-dismissal'
+    `).get()).toBeUndefined();
+  });
+
+  it('settles a legacy Outlook dismissal job without source writeback', async () => {
+    const now = new Date().toISOString();
+    await db.insert(schema.notifications).values({
+      id: 'outlook-legacy-dismissal',
+      sourceId: 'email:message-legacy',
+      connectorType: 'outlook-email',
+      connectorInstanceId: 'outlook-legacy',
+      title: 'Previously dismissed email',
+      receivedAt: now,
+      sortAt: now,
+      disposition: 'dismissed',
+      state: 'dismissed',
+      syncState: 'pending',
+    });
+    sqlite.prepare(`
+      INSERT INTO notification_writeback_jobs (
+        id, notification_id, connector_instance_id, connector_type, source_id,
+        action_type, dedupe_key, status, retryable, attempt_count, max_attempts,
+        next_attempt_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'mark_done', ?, 'pending', 1, 0, 3, ?, ?, ?)
+    `).run(
+      'outlook-legacy-job',
+      'outlook-legacy-dismissal',
+      'outlook-legacy',
+      'outlook-email',
+      'message-legacy',
+      'dismiss:outlook-legacy-dismissal',
+      now,
+      now,
+      now,
+    );
+    const connector = {
+      id: 'outlook-legacy',
+      type: 'outlook-email',
+      displayName: 'Outlook Email',
+      icon: 'email',
+      capabilities: { read: true, write: false } as import('@/types').ConnectorCapabilities,
+      initialize: vi.fn().mockResolvedValue(undefined),
+      testConnection: vi.fn().mockResolvedValue({ success: true, message: 'ok' }),
+      dispose: vi.fn().mockResolvedValue(undefined),
+      fetchTasks: async function* () {},
+      fetchNotifications: vi.fn().mockResolvedValue([]),
+      fetchSourceLists: vi.fn().mockResolvedValue([]),
+    } satisfies import('@/lib/connectors').IConnector;
+    const registrySpy = vi.spyOn(connectorRegistry, 'getConnector')
+      .mockImplementation((id) => id === connector.id ? connector : undefined);
+
+    try {
+      await dispatch();
+    } finally {
+      registrySpy.mockRestore();
+    }
+
+    expect(sqlite.prepare(`
+      SELECT status, attempt_count AS attemptCount
+      FROM notification_writeback_jobs
+      WHERE id = 'outlook-legacy-job'
+    `).get()).toEqual({ status: 'succeeded', attemptCount: 1 });
+    expect(sqlite.prepare(`
+      SELECT sync_state AS syncState
+      FROM notifications
+      WHERE id = 'outlook-legacy-dismissal'
+    `).get()).toEqual({ syncState: 'synced' });
   });
 
   it('keeps synchronization settled when an already-succeeded dismissal is repeated', async () => {
@@ -273,24 +380,24 @@ describe('notification writeback outbox', () => {
       },
     ]);
 
-    expect(mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
-    expect(mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-read'], 'mark_read', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 0,
     });
-    expect(mutateAndEnqueue(['github-handle'], 'mark_done', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-handle'], 'mark_done', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
-    expect(mutateAndEnqueue(['github-mute'], 'mute', now)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-mute'], 'mute', now)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
     const unmutedAt = now;
-    expect(mutateAndEnqueue(['github-mute'], 'unmute', unmutedAt)).toMatchObject({
+    expect(await mutateAndEnqueue(['github-mute'], 'unmute', unmutedAt)).toMatchObject({
       updatedCount: 1,
       queuedCount: 1,
     });
@@ -363,13 +470,13 @@ describe('notification writeback outbox', () => {
       },
     ]);
 
-    mutateAndEnqueue(['github-independent'], 'mark_read', now);
-    mutateAndEnqueue(
+    await mutateAndEnqueue(['github-independent'], 'mark_read', now);
+    await mutateAndEnqueue(
       ['github-independent'],
       'mark_done',
       new Date(Date.parse(now) + 1).toISOString(),
     );
-    const localResult = mutateAndEnqueue(['local-handle'], 'mark_done', now);
+    const localResult = await mutateAndEnqueue(['local-handle'], 'mark_done', now);
 
     expect(sqlite.prepare(`
       SELECT action_type AS action, status
@@ -443,7 +550,7 @@ describe('notification writeback outbox', () => {
       receivedAt: now,
       sortAt: now,
     });
-    mutateAndEnqueue(['github-auth-failure'], 'mark_done', now);
+    await mutateAndEnqueue(['github-auth-failure'], 'mark_done', now);
     const { ConnectorWritebackError } = await import('@/lib/connectors');
     const connector: import('@/lib/connectors').IConnector = {
       id: 'github-failure',
@@ -491,7 +598,7 @@ describe('notification writeback outbox', () => {
       receivedAt: now,
       sortAt: now,
     });
-    mutateAndEnqueue(['github-isolated'], 'mark_read', now);
+    await mutateAndEnqueue(['github-isolated'], 'mark_read', now);
     sqlite.prepare(`
       UPDATE notification_writeback_jobs
       SET connector_instance_id = 'github-b'

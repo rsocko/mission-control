@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
 const mocks = vi.hoisted(() => ({
   tasks: [] as Array<{
@@ -9,31 +10,7 @@ const mocks = vi.hoisted(() => ({
     connectorType: string;
     createdAt: string;
   }>,
-}));
-
-vi.mock('@/db', () => ({
-  default: {
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(async () => mocks.tasks),
-      })),
-    })),
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: {
-    id: 'id',
-    title: 'title',
-    status: 'status',
-    sourceId: 'sourceId',
-    connectorType: 'connectorType',
-    createdAt: 'createdAt',
-  },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  inArray: vi.fn(() => 'open-tasks'),
+  listDuplicateDetectionTasks: vi.fn(),
 }));
 
 function task(index: number, title = `Task ${index}`) {
@@ -50,6 +27,13 @@ function task(index: number, title = `Task ${index}`) {
 describe('GET /api/tasks/detect-duplicates', () => {
   beforeEach(() => {
     mocks.tasks = [];
+    mocks.listDuplicateDetectionTasks.mockReset();
+    mocks.listDuplicateDetectionTasks.mockImplementation(async () => mocks.tasks);
+    registerFakeTaskCorePersistence({
+      taskReads: {
+        listDuplicateDetectionTasks: mocks.listDuplicateDetectionTasks,
+      },
+    });
   });
 
   it('rejects global scans that exceed the comparison budget', async () => {
@@ -64,6 +48,9 @@ describe('GET /api/tasks/detect-duplicates', () => {
     await expect(response.json()).resolves.toEqual({
       error: expect.stringContaining('Provide taskId'),
       code: 'VALIDATION_ERROR',
+    });
+    expect(mocks.listDuplicateDetectionTasks).toHaveBeenCalledWith({
+      includeClosedTasks: false,
     });
   });
 
@@ -85,6 +72,9 @@ describe('GET /api/tasks/detect-duplicates', () => {
       duplicates: [
         expect.objectContaining({ id: 'task-450', score: 1 }),
       ],
+    });
+    expect(mocks.listDuplicateDetectionTasks).toHaveBeenCalledWith({
+      includeClosedTasks: false,
     });
   });
 

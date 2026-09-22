@@ -1,43 +1,15 @@
-import db from '@/db';
-import { taskTags, tasks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { TASK_QUICK_SORT_QUEUE_MODES } from '@/lib/tasks/core/contracts';
 import type { QuickSortTaskSnapshot } from '@/types/quick-sort';
 
 export type { QuickSortTaskSnapshot } from '@/types/quick-sort';
 
-export const QUICK_SORT_MODES = [
-  'no_priority',
-  'no_effort',
-  'no_tags',
-  'no_due_date',
-] as const;
+export const QUICK_SORT_MODES = TASK_QUICK_SORT_QUEUE_MODES;
 
 export type QuickSortMode = (typeof QUICK_SORT_MODES)[number];
 
 export async function captureQuickSortTask(taskId: string): Promise<QuickSortTaskSnapshot | null> {
-  const [task, links] = await Promise.all([
-    db.select({
-      updatedAt: tasks.updatedAt,
-      status: tasks.status,
-      statusReason: tasks.statusReason,
-      localDisposition: tasks.localDisposition,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      completedAt: tasks.completedAt,
-      microStatus: tasks.microStatus,
-      snoozedUntil: tasks.snoozedUntil,
-      reminderAt: tasks.reminderAt,
-      effort: tasks.effort,
-    }).from(tasks).where(eq(tasks.id, taskId)).get(),
-    db.select({ tagId: taskTags.tagId })
-      .from(taskTags)
-      .where(eq(taskTags.taskId, taskId)),
-  ]);
-  if (!task) return null;
-  return {
-    ...task,
-    tagIds: links.map((link) => link.tagId).sort(),
-  };
+  return (await getTaskCorePersistence()).quickSort.captureTask(taskId);
 }
 
 export function snapshotsMatch(
@@ -49,6 +21,7 @@ export function snapshotsMatch(
     && current.statusReason === expected.statusReason
     && current.localDisposition === expected.localDisposition
     && current.priority === expected.priority
+    && current.planningHorizon === expected.planningHorizon
     && current.dueDate === expected.dueDate
     && current.completedAt === expected.completedAt
     && current.microStatus === expected.microStatus
@@ -68,6 +41,7 @@ export function buildUndoPatch(
     statusReason: before.statusReason,
     localDisposition: before.localDisposition,
     priority: before.priority,
+    planningHorizon: before.planningHorizon,
     dueDate: before.dueDate,
     microStatus: before.microStatus,
     snoozedUntil: before.snoozedUntil,

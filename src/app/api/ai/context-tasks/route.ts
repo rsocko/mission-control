@@ -1,8 +1,7 @@
-import db from '@/db';
-import { tasks } from '@/db/schema';
 import { getLocalToday } from '@/lib/utils/date';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 
 /**
  * GET /api/ai/context-tasks
@@ -10,13 +9,7 @@ import { ApiErrors } from '@/lib/api-error';
  */
 export async function GET() {
   try {
-    const allTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-    }).from(tasks);
+    const allTasks = await (await getAIWorkflowPersistence()).context.listTaskContext();
 
     const today = getLocalToday();
     const open = allTasks.filter(t => t.status !== 'done' && t.status !== 'cancelled');

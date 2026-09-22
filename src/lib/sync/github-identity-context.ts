@@ -1,8 +1,9 @@
 import type {
   GitHubIdentityModeSnapshot,
   GitHubIdentityRunContext,
-} from '@/lib/external-identities';
-import { GITHUB_IDENTITY_MODE, getGitHubIdentityModeSnapshot } from '@/lib/external-identities';
+} from '@/lib/external-identities/stable-identity-types';
+import { GITHUB_IDENTITY_MODE } from '@/lib/external-identities/stable-identity-types';
+import { getGitHubIdentityRepository } from '@/lib/external-identities/worker-persistence';
 
 export class StaleGitHubIdentityContextError extends Error {
   readonly code = 'stale_github_identity_context';
@@ -40,13 +41,14 @@ export function freezeGitHubIdentityContext(
   });
 }
 
-export function validateAndFreezeGitHubIdentityContext(
+export async function validateAndFreezeGitHubIdentityContext(
   connectorId: string,
   context: GitHubIdentityRunContext,
   capturedAt = new Date().toISOString(),
-): GitHubIdentityModeSnapshot {
+): Promise<GitHubIdentityModeSnapshot> {
   const frozen = freezeGitHubIdentityContext(connectorId, context, capturedAt);
-  const current = getGitHubIdentityModeSnapshot(connectorId, capturedAt);
+  const identity = await getGitHubIdentityRepository();
+  const current = await identity.getModeSnapshot(connectorId, capturedAt);
   if (current.modeRevision !== frozen.modeRevision) {
     throw new StaleGitHubIdentityContextError(
       connectorId,

@@ -102,6 +102,11 @@ const mockSelect = vi.fn();
 const mockInsertValues = vi.fn(async (row: Record<string, unknown>) => {
   insertedRows.push(row);
 });
+const mockCreateItem = vi.fn(async (row: Record<string, unknown>) => {
+  insertedRows.push(row);
+  return row;
+});
+const mockSeedIfEmpty = vi.fn(async () => undefined);
 const mockResolveEmbed = vi.fn(() => Promise.resolve({ success: false }));
 
 vi.mock('@/db', () => ({
@@ -115,6 +120,19 @@ vi.mock('@/db', () => ({
 
 vi.mock('@/db/schema', () => ({
   triageItems: { id: 'id', status: 'status', sourcePlatform: 'sourcePlatform', title: 'title', description: 'description', sourceUrl: 'sourceUrl', capturedAt: 'capturedAt', aiRelevanceScore: 'aiRelevanceScore', thumbnailUrl: 'thumbnailUrl', sourceOrder: 'sourceOrder' },
+}));
+
+vi.mock('@/lib/triage/persistence', () => ({
+  getTriagePersistenceRepositories: () => ({
+    items: {
+      create: mockCreateItem,
+      seedIfEmpty: mockSeedIfEmpty,
+    },
+  }),
+}));
+
+vi.mock('@/lib/semantic-index/publication-service', () => ({
+  publishSemanticEntityUpsert: vi.fn(async () => undefined),
 }));
 
 vi.mock('crypto', async (importOriginal) => {
@@ -202,6 +220,8 @@ describe('createTriageCapture', () => {
   beforeEach(() => {
     insertedRows.length = 0;
     mockInsertValues.mockClear();
+    mockCreateItem.mockClear();
+    mockSeedIfEmpty.mockClear();
     mockResolveEmbed.mockClear();
     mockEvaluateRules.mockClear();
     mockSelect.mockImplementation((fields?: unknown) => {

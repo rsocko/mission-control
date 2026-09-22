@@ -1,8 +1,13 @@
 export interface SavedAIProviderConfig {
   provider?: string;
   model?: string;
+  embeddingProvider?: string;
   embeddingModel?: string;
+  embeddingBaseUrl?: string;
+  embeddingApiKey?: string;
   semanticSearchEnabled?: boolean;
+  houstonMemoryEnabled?: boolean;
+  houstonMemoryRetentionDays?: number;
   baseUrl?: string;
   apiKey?: string;
 }
@@ -10,8 +15,14 @@ export interface SavedAIProviderConfig {
 export interface ResolvedAIConfig {
   provider: string;
   model: string;
+  embeddingProvider: string;
   embeddingModel: string;
+  embeddingBaseUrl?: string;
+  embeddingApiKey?: string;
+  embeddingConfigured: boolean;
   semanticSearchEnabled: boolean;
+  houstonMemoryEnabled: boolean;
+  houstonMemoryRetentionDays: number;
   baseUrl?: string;
   apiKey?: string;
   configured: boolean;

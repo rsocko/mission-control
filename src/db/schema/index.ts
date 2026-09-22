@@ -21,6 +21,8 @@ export {
   runtimeTelemetrySamples,
   workerHealthSnapshot,
   syncSchedules,
+  connectorSyncControls,
+  connectorSyncOperatorRuns,
   syncDeletionCandidates,
   syncDeletionSnapshots,
   dependencyReconciliationSnapshots,
@@ -28,6 +30,8 @@ export {
   dependencyReconciliationEdges,
   dependencyReconciliationCandidates,
   outboundWebhooks,
+  eventOutbox,
+  eventOutboxDeliveries,
   integrationConfigs,
   inboundWebhooks,
   inboundWebhookLog,
@@ -39,6 +43,9 @@ export {
 // Tasks, tags, scoring, routines
 export {
   tasks,
+  taskRecurrenceOccurrences,
+  taskRecurrenceBackfillDecisions,
+  taskReminderOccurrences,
   taskSchedules,
   tags,
   taskTags,
@@ -64,6 +71,7 @@ export {
   quickSortOperations,
   taskAttachments,
   taskLinkedSources,
+  taskTimeActivities,
 } from './tasks';
 
 // Triage
@@ -96,6 +104,7 @@ export {
 export {
   notifications,
   notificationActions,
+  notificationEnrichmentJobs,
   notificationSavedViews,
 } from './notifications';
 
@@ -120,6 +129,12 @@ export type {
   AiRunSensitivity,
   AiRunStatus,
 } from './ai-runs';
+
+// Homelab alert lifecycle receipts and integration telemetry
+export {
+  alertmanagerIntegrationEvents,
+  homelabAlertReceipts,
+} from './homelab';
 
 // Durable checkpoints and leases for bounded bulk maintenance agents
 export { maintenanceAgentRuns } from './maintenance-agents';
@@ -242,10 +257,30 @@ export {
   nativePushRequests,
 } from './native';
 
+// Durable versioned semantic index: identities, documents, vectors, intents, runs
+export {
+  semanticIndexIdentities,
+  semanticDocuments,
+  semanticVectors,
+  semanticIntents,
+  semanticRuns,
+} from './semantic-index';
+export type {
+  SemanticIndexStatus,
+  SemanticSensitivity,
+  SemanticIntentKind,
+  SemanticIntentStatus,
+  SemanticRunKind,
+  SemanticRunStatus,
+} from './semantic-index';
+
+export { houstonConversationMemories } from './houston-memory';
+
 // Finance (re-exported from separate file)
 export {
   financeTransactions,
   financeSyncState,
+  financeConnectionOutages,
   financeInsightPublicationState,
   financeInsightPublicationDelivery,
   financeInsightPublications,
@@ -253,6 +288,7 @@ export {
   financeInsightOccurrenceCacheState,
   financeInsightOccurrences,
   financeInsightCutovers,
+  financeInsightCutoverAudit,
   financeInsightTransactionBackfillPlans,
   financeInsightTransactionProjectionFacts,
   financeInsightTransactionProjectionState,
@@ -267,9 +303,11 @@ export {
   financeBudgetSnapshots,
   financeMutationAudit,
   houstonFinanceActionAudit,
+  houstonFinancePendingApprovals,
   financeAttributionSubjects,
   financeAttributionExceptions,
   financeAttributionAudit,
+  financeAttentionRepairAudit,
   kidProfiles,
   kidCardRules,
   kidMerchantRules,

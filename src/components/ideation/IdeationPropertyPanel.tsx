@@ -21,10 +21,36 @@ import {
   IDEATION_SHORTCUT_PROPERTIES,
 } from './ideation-config';
 
+function NodeTitleEditor({ id, label }: { id: string; label: string }) {
+  const updateLabel = useIdeationStore((state) => state.updateLabel);
+  const [draft, setDraft] = useState(label);
+  const commit = () => {
+    const nextLabel = draft.trim();
+    if (nextLabel) updateLabel(id, nextLabel);
+    else setDraft(label);
+  };
+
+  return (
+    <input
+      value={draft}
+      aria-label="Node title"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={commit}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Escape') {
+          setDraft(label);
+          event.currentTarget.blur();
+        }
+      }}
+      className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent-500)]"
+    />
+  );
+}
+
 export function IdeationPropertyPanel() {
   const nodes = useIdeationStore((state) => state.nodes);
   const selectedNodeId = useIdeationStore((state) => state.selectedNodeId);
-  const updateLabel = useIdeationStore((state) => state.updateLabel);
   const updateKind = useIdeationStore((state) => state.updateKind);
   const setProperty = useIdeationStore((state) => state.setProperty);
   const removeProperty = useIdeationStore((state) => state.removeProperty);
@@ -81,11 +107,7 @@ export function IdeationPropertyPanel() {
       <div className="space-y-4">
         <label className="block space-y-1">
           <span className="text-[10px] font-medium uppercase text-[var(--text-tertiary)]">Title</span>
-          <input
-            value={selected.label}
-            onChange={(event) => updateLabel(selected.id, event.target.value)}
-            className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs text-[var(--text-primary)] outline-none focus:border-[var(--accent-500)]"
-          />
+          <NodeTitleEditor key={`${selected.id}:${selected.label}`} id={selected.id} label={selected.label} />
         </label>
         <label className="block space-y-1">
           <span className="text-[10px] font-medium uppercase text-[var(--text-tertiary)]">Type</span>

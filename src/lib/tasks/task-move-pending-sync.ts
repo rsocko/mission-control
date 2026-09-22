@@ -1,16 +1,7 @@
-import db, { runTransaction } from '@/db';
-import {
-  connectorConfigs,
-  sourceLists,
-  taskAttachments,
-  taskSchedules,
-  taskTags,
-  tasks,
-} from '@/db/schema';
-import { and, eq, or, sql } from 'drizzle-orm';
 import { dbLogger } from '@/lib/logger';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
-import { repointTaskReferences } from '@/lib/tasks/task-reference-repoint';
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import type {
   DeferredTaskMoveInput,
   TaskMoveServiceResult,
@@ -21,7 +12,6 @@ import {
   TASK_MOVE_BUDGETS,
   TaskMoveBudgetError,
 } from '@/lib/tasks/task-move-budgets';
-import { taskAttachmentSnapshotPredicates } from '@/lib/tasks/task-move-snapshot';
 
 function serviceResult(
   body: Record<string, unknown>,
@@ -30,13 +20,18 @@ function serviceResult(
   return { body, status };
 }
 
-class PendingTaskMoveSourceChangedError extends Error {
-  constructor() {
-    super('Task changed before the move could be committed');
-    this.name = 'PendingTaskMoveSourceChangedError';
-  }
-}
-
+/**
+ * Deferred ("pending sync") task move.
+ *
+ * Backend-neutral as of L04: validation and budget enforcement happen here,
+ * outside any transaction, and the *whole* state transition — optimistically
+ * claiming the source, materializing the successor with `pending_push` sync
+ * status, repointing every durable reference, and deleting the source — is a
+ * single adapter-owned atomic operation. There is deliberately no connector
+ * or network I/O inside that boundary: this variant defers the upstream write
+ * to the sync pipeline, and the durable `pending_push` intent is what carries
+ * it, so it must land in the same transaction as the move itself.
+ */
 export async function executePendingSyncTaskMove(
   taskId: string,
   input: DeferredTaskMoveInput,
@@ -51,20 +46,24 @@ export async function executePendingSyncTaskMove(
     return serviceResult({ error: 'targetConnectorInstanceId is required' }, 400);
   }
 
-  const [connectorConfig] = await db.select().from(connectorConfigs)
-    .where(eq(connectorConfigs.id, targetConnectorInstanceId)).limit(1);
+  const core = await getCorePersistenceRepositoriesForBackend();
+  // Deliberate tightening: the portable `ConnectorRepository.get` excludes
+  // soft-deleted connectors, so a move whose target connector has been deleted
+  // now fails with 404 instead of silently materializing the successor inside a
+  // connector whose tasks the canonical filter already hides.
+  const connectorConfig = await core.connectors.get(targetConnectorInstanceId);
   if (!connectorConfig) {
     return serviceResult({ error: 'Connector instance not found' }, 404);
   }
 
-  let resolvedTargetListId: string | undefined;
+  const taskCore = await getTaskCorePersistence();
+
+  let resolvedTargetListId: string | null = null;
   if (targetListId) {
-    const [targetList] = await db.select().from(sourceLists)
-      .where(and(
-        eq(sourceLists.connectorInstanceId, targetConnectorInstanceId),
-        or(eq(sourceLists.id, targetListId), eq(sourceLists.sourceId, targetListId)),
-      ))
-      .limit(1);
+    const targetList = await taskCore.moves.findTargetList(
+      targetConnectorInstanceId,
+      targetListId,
+    );
     if (!targetList || !isSourceListSelected(connectorConfig, targetList)) {
       return serviceResult(
         { error: 'Target list is not selected for sync', code: 'BAD_REQUEST' },
@@ -74,7 +73,7 @@ export async function executePendingSyncTaskMove(
     resolvedTargetListId = targetList.sourceId;
   }
 
-  const [sourceTask] = await db.select().from(tasks).where(eq(tasks.id, taskId)).limit(1);
+  const sourceTask = await taskCore.moves.getMoveSource(taskId);
   if (!sourceTask) {
     return serviceResult({ error: 'Task not found' }, 404);
   }
@@ -86,10 +85,9 @@ export async function executePendingSyncTaskMove(
     );
   }
 
-  const sourceAttachments = await db.select().from(taskAttachments)
-    .where(eq(taskAttachments.taskId, taskId));
+  const sourceAttachments = await taskCore.moves.listTaskAttachments(taskId);
   const unavailableAttachment = sourceAttachments.find(
-    (attachment) => !hasMaterializedContent(attachment),
+    (attachment) => attachment.contentBase64 === null,
   );
   if (unavailableAttachment) {
     return serviceResult(
@@ -103,10 +101,13 @@ export async function executePendingSyncTaskMove(
   try {
     assertTaskMoveAttachmentBudget(sourceAttachments);
     assertMaterializedTaskMoveAttachmentBudget(
-      sourceAttachments.filter(hasMaterializedContent).map((attachment) => ({
-        name: attachment.name,
-        contentBase64: attachment.contentBase64,
-      })),
+      sourceAttachments
+        .filter((attachment): attachment is typeof attachment & { contentBase64: string } =>
+          attachment.contentBase64 !== null)
+        .map((attachment) => ({
+          name: attachment.name,
+          contentBase64: attachment.contentBase64,
+        })),
     );
   } catch (error) {
     if (error instanceof TaskMoveBudgetError) {
@@ -125,91 +126,25 @@ export async function executePendingSyncTaskMove(
   const newId = crypto.randomUUID();
   const now = new Date().toISOString();
 
+  let outcome;
   try {
-    runTransaction((tx) => {
-      const claim = tx.update(tasks).set({
-        updatedAt: sql`${tasks.updatedAt}`,
-      }).where(and(
-        eq(tasks.id, taskId),
-        eq(tasks.sourceId, sourceTask.sourceId),
-        eq(tasks.updatedAt, sourceTask.updatedAt),
-        ...taskAttachmentSnapshotPredicates(taskId, sourceAttachments),
-      )).run();
-      if (claim.changes !== 1) {
-        throw new PendingTaskMoveSourceChangedError();
-      }
-
-      tx.insert(tasks).values({
-        id: newId,
-        sourceId: `local:${newId}`,
-        connectorType: connectorConfig.type,
-        connectorInstanceId: targetConnectorInstanceId,
-        title: sourceTask.title,
-        description: sourceTask.description,
-        status: sourceTask.status,
-        priority: sourceTask.priority,
-        dueDate: sourceTask.dueDate,
-        createdAt: sourceTask.createdAt,
-        updatedAt: now,
-        completedAt: sourceTask.completedAt,
-        depth: 0,
-        isChecklistItem: false,
-        sourceListId: resolvedTargetListId,
-        metadata: '{}',
-        syncStatus: 'pending_push',
-        lastSyncedAt: now,
-      }).run();
-
-      if (keepTags) {
-        const sourceTags = tx.select().from(taskTags)
-          .where(eq(taskTags.taskId, taskId)).all();
-        if (sourceTags.length > 0) {
-          tx.insert(taskTags).values(
-            sourceTags.map((tag) => ({ taskId: newId, tagId: tag.tagId })),
-          ).run();
-        }
-      }
-
-      const sourceSchedules = tx.select().from(taskSchedules)
-        .where(eq(taskSchedules.taskId, taskId)).all();
-      if (sourceSchedules.length > 0) {
-        tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId)).run();
-        tx.insert(taskSchedules).values(
-          sourceSchedules.map((schedule) => ({ ...schedule, taskId: newId })),
-        ).run();
-      }
-
-      if (sourceAttachments.length > 0) {
-        tx.insert(taskAttachments).values(
-          sourceAttachments.map((attachment) => ({
-            ...attachment,
-            id: crypto.randomUUID(),
-            taskId: newId,
-            sourceAttachmentId: null,
-          })),
-        ).run();
-      }
-
-      repointTaskReferences(tx, taskId, newId);
-
-      tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
-      tx.delete(taskTags).where(eq(taskTags.taskId, taskId)).run();
-      tx.delete(tasks).where(eq(tasks.id, taskId)).run();
+    outcome = await taskCore.moves.executePendingSyncMove({
+      sourceTaskId: taskId,
+      newTaskId: newId,
+      expectedSourceId: sourceTask.sourceId,
+      expectedUpdatedAt: sourceTask.updatedAt,
+      attachmentSnapshot: sourceAttachments.map((attachment) => ({
+        id: attachment.id,
+        size: attachment.size,
+        sourceAttachmentId: attachment.sourceAttachmentId,
+      })),
+      targetConnectorType: connectorConfig.type,
+      targetConnectorInstanceId,
+      targetSourceListId: resolvedTargetListId,
+      keepTags,
+      now,
     });
   } catch (error) {
-    if (error instanceof PendingTaskMoveSourceChangedError) {
-      const [current] = await db.select({ id: tasks.id }).from(tasks)
-        .where(eq(tasks.id, taskId)).limit(1);
-      return current
-        ? serviceResult(
-            {
-              error: error.message,
-              code: 'TASK_MOVE_SOURCE_CHANGED',
-            },
-            409,
-          )
-        : serviceResult({ error: 'Task not found' }, 404);
-    }
     dbLogger.error(
       {
         err: error,
@@ -223,16 +158,23 @@ export async function executePendingSyncTaskMove(
     throw error;
   }
 
+  if (outcome.kind === 'not-found') {
+    return serviceResult({ error: 'Task not found' }, 404);
+  }
+  if (outcome.kind === 'source-changed') {
+    return serviceResult(
+      {
+        error: 'Task changed before the move could be committed',
+        code: 'TASK_MOVE_SOURCE_CHANGED',
+      },
+      409,
+    );
+  }
+
   return serviceResult({
     id: newId,
     message: `Task moved to ${connectorConfig.type}`,
     previousId: taskId,
     previousSource: sourceTask.connectorType,
   });
-}
-
-function hasMaterializedContent<T extends { contentBase64: string | null }>(
-  attachment: T,
-): attachment is T & { contentBase64: string } {
-  return attachment.contentBase64 !== null;
 }

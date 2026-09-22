@@ -1,21 +1,33 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NavRail } from '@/components/layout/NavRail';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { SYNC_ICON_PREFERENCE_KEY } from '@/lib/hooks/useSyncIconPreference';
+import { initialProgress, type SyncProgress } from '@/lib/hooks/useSyncStream';
 import type { ConnectorHealthInfo } from '@/lib/hooks/useSystemHealth';
 import type { NavigationCounts } from '@/lib/navigation/badges';
+import { RECENT_PROJECT_IDS_STORAGE_KEY } from '@/lib/navigation/recent-projects';
+import { RecentProjectsNavItem } from '@/components/layout/RecentProjectsNavItem';
+import { ChartNetwork } from 'lucide-react';
 
 function renderNavRail({
   isAiActive = false,
   isSyncing = false,
   syncStatus = [],
   counts,
+  syncProgress,
+  onSyncConnector,
+  showSyncBanner,
+  onShowSyncBannerChange,
 }: {
   isAiActive?: boolean;
   isSyncing?: boolean;
   syncStatus?: ConnectorHealthInfo[];
   counts?: NavigationCounts;
+  syncProgress?: SyncProgress;
+  onSyncConnector?: (connectorId: string) => void;
+  showSyncBanner?: boolean;
+  onShowSyncBannerChange?: (show: boolean) => void;
 } = {}) {
   return render(
     <TooltipProvider>
@@ -25,9 +37,58 @@ function renderNavRail({
         isSyncing={isSyncing}
         syncStatus={syncStatus}
         counts={counts}
+        syncProgress={syncProgress}
+        onSyncConnector={onSyncConnector}
+        showSyncBanner={showSyncBanner}
+        onShowSyncBannerChange={onShowSyncBannerChange}
       />
     </TooltipProvider>
   );
+}
+
+function mockAdaptiveNavGeometry(initialFitLevel: number) {
+  let fitLevel = initialFitLevel;
+  let observedTarget: Element | null = null;
+  let observerCallback: ResizeObserverCallback | null = null;
+
+  vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.hasAttribute('data-nav-scroll-region') ? 500 : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    const level = this.getAttribute('data-collapse-level');
+    if (level === null) return 0;
+    return Number(level) < fitLevel ? 560 : 470;
+  });
+  vi.stubGlobal('ResizeObserver', class {
+    constructor(callback: ResizeObserverCallback) {
+      observerCallback = callback;
+    }
+
+    observe(target: Element) {
+      observedTarget = target;
+      observerCallback?.(
+        [{ target, contentRect: { height: 800 } as DOMRectReadOnly } as ResizeObserverEntry],
+        this as unknown as ResizeObserver,
+      );
+    }
+
+    disconnect() {}
+    unobserve() {}
+  });
+
+  return {
+    fitAt(level: number, height: number) {
+      fitLevel = level;
+      if (!observerCallback || !observedTarget) throw new Error('Navigation observer is not ready');
+      observerCallback(
+        [{
+          target: observedTarget,
+          contentRect: { height } as DOMRectReadOnly,
+        } as ResizeObserverEntry],
+        {} as ResizeObserver,
+      );
+    },
+  };
 }
 
 describe('NavRail', () => {
@@ -39,6 +100,7 @@ describe('NavRail', () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('auto-expands after a deliberate hover', () => {
@@ -70,20 +132,143 @@ describe('NavRail', () => {
     expect(nav).toHaveClass('w-16');
   });
 
+  it('does not keep the navigation expanded after pointer navigation', () => {
+    renderNavRail();
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    const projectsLink = screen.getByRole('link', { name: 'Projects' });
+
+    fireEvent.mouseEnter(nav);
+    act(() => vi.advanceTimersByTime(300));
+    expect(nav).toHaveClass('w-[200px]');
+
+    fireEvent.pointerDown(projectsLink);
+    fireEvent.focus(projectsLink);
+    fireEvent.click(projectsLink);
+    fireEvent.mouseLeave(nav);
+    act(() => vi.advanceTimersByTime(200));
+
+    expect(nav).toHaveClass('w-16');
+  });
+
+  it('expands for keyboard focus so secondary navigation controls are reachable', () => {
+    renderNavRail();
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+
+    fireEvent.focus(screen.getByRole('link', { name: 'Projects' }));
+
+    expect(nav).toHaveClass('w-[200px]');
+    expect(screen.getByRole('button', { name: 'Open recent projects' })).toBeInTheDocument();
+  });
+
   it('uses the shared shortcut icon and color for quick-access destinations', () => {
     renderNavRail();
 
     const cases = [
+      ['All Tasks', 'lucide-list-checks', 'text-cyan-400'],
       ['My Day', 'lucide-sun', 'text-amber-400'],
-      ['Triage', 'lucide-inbox', 'text-purple-400'],
+      ['Inbox', 'lucide-inbox', 'text-purple-400'],
       ['Projects', 'lucide-chart-network', 'text-violet-400'],
-      ['Icon Finder', 'lucide-search', 'text-indigo-400'],
     ];
 
     for (const [name, iconClass, colorClass] of cases) {
       const icon = screen.getByRole('link', { name }).querySelector('svg');
       expect(icon).toHaveClass(iconClass, colorClass);
     }
+  });
+
+  it('does not show Icon Finder in the desktop navigation', () => {
+    renderNavRail();
+
+    expect(screen.queryByRole('link', { name: 'Icon Finder' })).not.toBeInTheDocument();
+  });
+
+  it('links the desktop navigation to the all tasks workspace', () => {
+    renderNavRail();
+
+    expect(screen.getByRole('link', { name: 'All Tasks' })).toHaveAttribute('href', '/all-tasks');
+  });
+
+  it('opens recently viewed projects without changing the Projects destination', async () => {
+    vi.useRealTimers();
+    localStorage.setItem(
+      RECENT_PROJECT_IDS_STORAGE_KEY,
+      JSON.stringify(['proj-second', 'proj-first']),
+    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      projects: [
+        { id: 'proj-first', name: 'First project', color: '#3b82f6', icon: null },
+        { id: 'proj-second', name: 'Second project', color: '#a855f7', icon: null },
+      ],
+    }), { status: 200 }));
+    renderNavRail();
+
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    fireEvent.mouseEnter(nav);
+    await waitFor(() => expect(nav).toHaveClass('w-[200px]'));
+
+    const projectsLink = screen.getByRole('link', { name: 'Projects' });
+    expect(projectsLink).toHaveAttribute('href', '/projects');
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open recent projects' }), {
+      key: 'Enter',
+    });
+
+    const menu = await screen.findByRole('menu', { name: 'Recent projects' });
+    await within(menu).findByRole('menuitem', { name: 'Second project' });
+    const recentLinks = within(menu).getAllByRole('menuitem').slice(0, 2);
+    expect(recentLinks.map((link) => link.textContent)).toEqual([
+      'Second project',
+      'First project',
+    ]);
+    expect(recentLinks[0]).toHaveAttribute('href', '/projects/proj-second');
+    expect(within(menu).getByRole('menuitem', { name: 'View all projects' })).toHaveAttribute(
+      'href',
+      '/projects',
+    );
+  });
+
+  it('records project detail visits as recently viewed', async () => {
+    vi.useRealTimers();
+    localStorage.setItem(
+      RECENT_PROJECT_IDS_STORAGE_KEY,
+      JSON.stringify(['proj-older', 'proj-current']),
+    );
+
+    render(
+      <TooltipProvider>
+        <RecentProjectsNavItem
+          active
+          expanded
+          icon={ChartNetwork}
+          open={false}
+          pathname="/projects/proj-current"
+          onOpenChange={() => {}}
+        />
+      </TooltipProvider>,
+    );
+
+    await waitFor(() => {
+      expect(JSON.parse(localStorage.getItem(RECENT_PROJECT_IDS_STORAGE_KEY) || '[]')).toEqual([
+        'proj-current',
+        'proj-older',
+      ]);
+    });
+  });
+
+  it('shows an empty recent-project state without fetching', async () => {
+    vi.useRealTimers();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    renderNavRail();
+
+    const nav = screen.getByRole('navigation', { name: 'Main navigation' });
+    fireEvent.mouseEnter(nav);
+    await waitFor(() => expect(nav).toHaveClass('w-[200px]'));
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open recent projects' }), {
+      key: 'Enter',
+    });
+
+    const menu = await screen.findByRole('menu', { name: 'Recent projects' });
+    expect(await within(menu).findByText('Projects you visit will appear here.')).toBeInTheDocument();
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it('expands immediately when explicitly pinned', () => {
@@ -93,6 +278,26 @@ describe('NavRail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
     expect(nav).toHaveClass('w-[200px]');
+  });
+
+  it('presents pinning as a compact header utility instead of a nav item', () => {
+    renderNavRail();
+    const pinButton = screen.getByRole('button', { name: 'Pin navigation open' });
+
+    expect(pinButton).toHaveClass('absolute', '-right-1', 'top-1.5', 'h-6', 'w-6', 'opacity-0');
+    expect(pinButton.querySelector('svg')).toHaveAttribute('width', '14');
+    expect(screen.queryByText('Pin sidebar')).not.toBeInTheDocument();
+
+    fireEvent.mouseEnter(screen.getByRole('navigation', { name: 'Main navigation' }));
+    act(() => vi.advanceTimersByTime(300));
+
+    expect(pinButton).toHaveClass(
+      'opacity-0',
+      'group-hover:opacity-100',
+      'group-focus-within:opacity-100',
+      'focus:opacity-100',
+      '[@media(hover:none)]:opacity-100',
+    );
   });
 
   it('renders a static brand mark and reveals its name when expanded', () => {
@@ -116,7 +321,13 @@ describe('NavRail', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(brandName.parentElement).toHaveClass('opacity-100', 'max-w-[128px]');
+    expect(brandName.parentElement).toHaveClass(
+      'opacity-100',
+      'max-w-[132px]',
+      'group-hover:max-w-[108px]',
+      'group-focus-within:max-w-[108px]',
+      '[@media(hover:none)]:max-w-[108px]',
+    );
   });
 
   it('reflects active Houston work in the brand subtitle', () => {
@@ -190,8 +401,24 @@ describe('NavRail', () => {
   });
 
   it('opens sync status from the nav and shows active syncing state', () => {
+    const onShowSyncBannerChange = vi.fn();
     renderNavRail({
       isSyncing: true,
+      syncProgress: {
+        ...initialProgress,
+        isSyncing: true,
+        connectorId: 'connector-1',
+        connectorName: 'Microsoft To Do',
+        phase: 'tasks',
+        currentList: 'Work',
+        listIndex: 2,
+        totalLists: 5,
+        totalTasks: 48,
+        parentTasks: 40,
+        subtasks: 8,
+      },
+      showSyncBanner: true,
+      onShowSyncBannerChange,
       syncStatus: [
         {
           id: 'connector-1',
@@ -210,8 +437,75 @@ describe('NavRail', () => {
     expect(heading).toBeInTheDocument();
     expect(screen.getByRole('navigation', { name: 'Main navigation' })).not.toContainElement(heading);
     expect(screen.getAllByText('Syncing…').length).toBeGreaterThan(0);
+    expect(screen.getByText('Microsoft To Do')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
+    expect(screen.getByText('List 2 of 5')).toBeInTheDocument();
+    expect(screen.getByText('40 tasks synced · 8 subtasks')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Sync progress' })).toHaveAttribute('aria-valuenow', '40');
     expect(screen.getByText('Local')).toBeInTheDocument();
     expect(screen.getByText('Never')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Show top sync progress bar' }));
+    expect(onShowSyncBannerChange).toHaveBeenCalledWith(false);
+  });
+
+  it('triggers an incremental sync for an individual connector', () => {
+    const onSyncConnector = vi.fn();
+    renderNavRail({
+      onSyncConnector,
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'github',
+          name: 'GitHub',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sync GitHub' }));
+
+    expect(onSyncConnector).toHaveBeenCalledWith('connector-1');
+  });
+
+  it('disables connector sync controls and spins the active connector during a sync', () => {
+    renderNavRail({
+      isSyncing: true,
+      onSyncConnector: vi.fn(),
+      syncProgress: {
+        ...initialProgress,
+        isSyncing: true,
+        connectorId: 'connector-1',
+      },
+      syncStatus: [
+        {
+          id: 'connector-1',
+          type: 'github',
+          name: 'GitHub',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+        {
+          id: 'connector-2',
+          type: 'mstodo',
+          name: 'To Do',
+          status: 'healthy',
+          message: 'Healthy',
+          lastSyncAt: '2026-09-10T22:00:00.000Z',
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Sync status' }));
+
+    const activeButton = screen.getByRole('button', { name: 'Sync GitHub' });
+    expect(activeButton).toBeDisabled();
+    expect(activeButton.querySelector('svg')).toHaveClass('animate-spin', 'text-blue-400');
+    expect(screen.getByRole('button', { name: 'Sync To Do' })).toBeDisabled();
   });
 
   it('shows inline sync details whenever the navigation is expanded', () => {
@@ -238,7 +532,7 @@ describe('NavRail', () => {
     const popover = screen.getByRole('dialog', { name: 'Sync status details' });
     expect(popover).toBeInTheDocument();
 
-    fireEvent.click(trigger);
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
     expect(popover).toBeInTheDocument();
 
     fireEvent.mouseLeave(trigger);
@@ -256,12 +550,12 @@ describe('NavRail', () => {
     renderNavRail();
 
     expect(screen.getByRole('group', { name: 'Plan' })).toHaveTextContent(
-      'DashboardMy DayProjectsKanbanGoalsTimeline'
+      'DashboardAll TasksMy DayProjectsKanbanGoalsTimeline'
     );
     expect(screen.getByRole('group', { name: 'Operate' })).toHaveTextContent(
-      'NotificationsRoutinesTriageQuick SortReconciliation'
+      'NotificationsRoutinesInboxQuick SortReconciliation'
     );
-    expect(screen.getByRole('group', { name: 'Understand' })).toHaveTextContent(
+    expect(screen.getByRole('group', { name: 'Explore' })).toHaveTextContent(
       'InsightsGraph'
     );
     expect(screen.getByRole('group', { name: 'Domains' })).toHaveTextContent(
@@ -272,7 +566,156 @@ describe('NavRail', () => {
     );
   });
 
-  it('shows pressure bars when collapsed and numeric badges when expanded', () => {
+  it('groups only enough sections to fit, in the configured priority order', () => {
+    mockAdaptiveNavGeometry(2);
+    renderNavRail({
+      isSyncing: true,
+      syncStatus: [{
+        id: 'connector-1',
+        type: 'local',
+        name: 'Local',
+        status: 'healthy',
+        message: 'Healthy',
+        lastSyncAt: undefined,
+      }],
+    });
+
+    const content = screen.getByRole('group', { name: 'Plan' }).parentElement;
+    expect(content?.parentElement).toHaveClass('overflow-hidden');
+    expect(content?.parentElement).not.toHaveClass('overflow-y-auto');
+    expect(content).toHaveAttribute('data-collapsed-groups', 'system operations');
+    expect(screen.getByRole('button', { name: 'Open System navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Operations navigation' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Explore navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Insights' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Kanban' })).toBeInTheDocument();
+  });
+
+  it('opens grouped navigation on hover and stays open while crossing into the menu', () => {
+    mockAdaptiveNavGeometry(2);
+    renderNavRail({ isSyncing: true });
+    const trigger = screen.getByRole('button', { name: 'Open Operations navigation' });
+
+    fireEvent.mouseEnter(trigger);
+
+    const menu = screen.getByRole('menu', { name: 'Operations navigation' });
+    expect(menu).toBeInTheDocument();
+    expect(trigger).toHaveAttribute('data-state', 'open');
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger.querySelector('.lucide-chevron-right')).toHaveClass(
+      'group-data-[state=open]:rotate-90',
+    );
+    expect(menu.querySelector('svg')).toHaveClass(
+      'fill-[var(--surface-1)]',
+      'stroke-[var(--border-strong)]',
+    );
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(trigger);
+    act(() => vi.advanceTimersByTime(50));
+    fireEvent.mouseEnter(menu);
+    act(() => vi.advanceTimersByTime(100));
+    expect(menu).toBeInTheDocument();
+
+    fireEvent.mouseLeave(menu);
+    act(() => vi.advanceTimersByTime(120));
+    expect(screen.queryByRole('menu', { name: 'Operations navigation' })).not.toBeInTheDocument();
+  });
+
+  it('restores direct items when the rail gains enough height', () => {
+    const geometry = mockAdaptiveNavGeometry(2);
+    renderNavRail({ isSyncing: true });
+
+    expect(screen.getByRole('button', { name: 'Open Operations navigation' })).toBeInTheDocument();
+
+    act(() => geometry.fitAt(0, 900));
+
+    expect(screen.queryByRole('button', { name: 'Open System navigation' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open Operations navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sync status' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Routines' })).toBeInTheDocument();
+  });
+
+  it('does not replace a single visible Domain item with a flyout', () => {
+    mockAdaptiveNavGeometry(5);
+    render(
+      <TooltipProvider>
+        <NavRail
+          features={{ aiEnabled: true, financeEnabled: false }}
+          isAiActive={false}
+          isSyncing
+        />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByRole('button', { name: 'Open Domains navigation' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Docs' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Money' })).not.toBeInTheDocument();
+  });
+
+  it('aggregates attention badges on a grouped section and keeps item badges in its menu', () => {
+    vi.useRealTimers();
+    mockAdaptiveNavGeometry(2);
+    renderNavRail({
+      isSyncing: true,
+      counts: {
+        myDay: 0,
+        notifications: 0,
+        triage: 4,
+        quickSort: 0,
+        reconciliation: 2,
+        overdue: 0,
+        unreadNotifications: 0,
+        notificationTone: 'blue',
+      },
+    });
+
+    const trigger = screen.getByRole('button', { name: 'Open Operations navigation' });
+    expect(within(trigger).getByLabelText('6 items need attention')).toBeInTheDocument();
+    expect(trigger.querySelector('.lucide-chevron-right')).toBeInTheDocument();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false, pointerType: 'mouse' });
+
+    const menu = screen.getByRole('menu', { name: 'Operations navigation' });
+    expect(within(menu).getByRole('menuitem', { name: /^Inbox/ })).toHaveAttribute('href', '/triage');
+    expect(within(menu).getByRole('menuitem', { name: /^Reconciliation/ })).toHaveAttribute(
+      'href',
+      '/scout/reconciliation',
+    );
+    expect(within(menu).getByLabelText('4 items need attention')).toBeInTheDocument();
+    expect(within(menu).getByLabelText('2 items need attention')).toBeInTheDocument();
+  });
+
+  it('keeps sync status reachable from the grouped System menu', () => {
+    vi.useRealTimers();
+    mockAdaptiveNavGeometry(1);
+    renderNavRail({
+      isSyncing: true,
+      syncStatus: [{
+        id: 'connector-1',
+        type: 'local',
+        name: 'Local',
+        status: 'healthy',
+        message: 'Healthy',
+        lastSyncAt: undefined,
+      }],
+    });
+
+    fireEvent.pointerDown(screen.getByRole('button', { name: 'Open System navigation' }), {
+      button: 0,
+      ctrlKey: false,
+      pointerType: 'mouse',
+    });
+    fireEvent.click(within(screen.getByRole('menu', { name: 'System navigation' }))
+      .getByRole('menuitem', { name: 'Sync status' }));
+
+    expect(screen.getByRole('dialog', { name: 'Sync status details' })).toBeInTheDocument();
+    expect(screen.getByText('Local')).toBeInTheDocument();
+  });
+
+  it('morphs a single element between collapsed bar and expanded badge', () => {
     renderNavRail({
       counts: {
         myDay: 12,
@@ -286,16 +729,18 @@ describe('NavRail', () => {
       },
     });
 
-    expect(screen.getByLabelText('12 items need attention')).toHaveAttribute(
-      'data-pressure-level',
-      'medium',
-    );
-    expect(screen.queryByText('12')).not.toBeInTheDocument();
+    const morph = screen.getByLabelText('12 items need attention');
+    expect(morph).toHaveAttribute('data-pressure-level', 'medium');
+    expect(morph).toHaveAttribute('data-morph-state', 'bar');
 
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
-    expect(screen.getByText('12')).toHaveAttribute('aria-label', '12 items need attention');
-    expect(screen.queryByTestId('navigation-pressure-bar')).not.toBeInTheDocument();
+    // Same DOM node must survive the transition, otherwise the morph restarts
+    // from a stale frame (the My Day "jump up" regression).
+    const expandedMorph = screen.getByLabelText('12 items need attention');
+    expect(expandedMorph).toBe(morph);
+    expect(expandedMorph).toHaveAttribute('data-morph-state', 'badge');
+    expect(within(expandedMorph).getByText('12')).toBeInTheDocument();
   });
 
   it('pulses only urgent notification indicators', () => {
@@ -321,18 +766,17 @@ describe('NavRail', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pin navigation open' }));
 
     const notificationLink = screen.getByRole('link', { name: /^Notifications/ });
-    expect(within(notificationLink).getByText('4')).toHaveClass(
+    expect(within(notificationLink).getByLabelText('4 items need attention')).toHaveClass(
       'bg-red-500',
       'motion-safe:animate-pulse',
     );
-    expect(screen.queryAllByTestId('navigation-pressure-bar')).toHaveLength(0);
   });
 
-  it('uses distinct colors for adjacent Routines and Triage icons', () => {
+  it('uses distinct colors for adjacent Routines and Inbox icons', () => {
     renderNavRail();
 
     const routinesIcon = screen.getByRole('link', { name: 'Routines' }).querySelector('svg');
-    const triageIcon = screen.getByRole('link', { name: 'Triage' }).querySelector('svg');
+    const triageIcon = screen.getByRole('link', { name: 'Inbox' }).querySelector('svg');
     const quickSortIcon = screen.getByRole('link', { name: 'Quick Sort' }).querySelector('svg');
 
     expect(routinesIcon).toHaveClass('text-emerald-400');

@@ -13,6 +13,7 @@ import {
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { formatTimeAgo } from '@/lib/utils/dashboard-helpers';
 import type { InboundNotification, NotificationItem, NotificationAction } from '@/types';
 import type {
@@ -26,6 +27,9 @@ import {
   NOTIFICATION_SOURCE_ICONS,
   NOTIFICATION_SOURCE_LABELS,
 } from '@/types/dashboard';
+import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
 
 // ─── ICON MAPS ──────────────────────────────────────────────────────────────
 
@@ -40,6 +44,7 @@ const LEVEL_ICONS: Record<string, React.ComponentType<{ size?: number; className
 const CATEGORY_ICONS: Record<string, React.ComponentType<{ size?: number; className?: string }>> = {
   system: Server,
   tasks: CheckSquare,
+  development: GitPullRequest,
   finance: DollarSign,
   home: Home,
   social: AtSign,
@@ -61,7 +66,65 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   run_workflow: Zap,
   dismiss: X,
   snooze: Clock,
+  complete_task: CheckCircle,
+  dismiss_reminder: X,
+  remind_later: Clock,
+  install_update: RefreshCw,
+  skip_update: ArrowRight,
+  dismiss_persistent_notification: X,
+  ignore_repair: EyeOff,
 };
+
+function NotificationActionConfirmation({
+  action,
+  notification,
+  onCancel,
+  onConfirm,
+}: {
+  action: NotificationAction | null;
+  notification: NotificationItem;
+  onCancel: () => void;
+  onConfirm: (input?: Record<string, unknown>) => void;
+}) {
+  const metadata = notification.metadata ?? {};
+  const canBackup = action?.actionType === 'install_update' && metadata.supportsBackup === true;
+  const [createBackup, setCreateBackup] = useState(false);
+  const cancel = () => {
+    setCreateBackup(false);
+    onCancel();
+  };
+  const confirm = () => {
+    const input = canBackup ? { createBackup } : undefined;
+    setCreateBackup(false);
+    onConfirm(input);
+  };
+
+  return (
+    <ConfirmDialog
+      open={action !== null}
+      title={action ? `Confirm ${action.label.toLowerCase()}` : 'Confirm action'}
+      message={
+        action?.actionType === 'install_update'
+          ? `Install ${String(metadata.latestVersion || 'this update')} on ${String(metadata.instanceName || 'Home Assistant')}? Home Assistant acceptance will be confirmed on the next poll.`
+          : action?.actionType === 'dismiss_persistent_notification'
+            ? `Dismiss this notification in ${String(metadata.instanceName || 'Home Assistant')} and remove it from Mission Control?`
+          : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
+      }
+      confirmLabel={action?.label || 'Confirm'}
+      confirmVariant="warning"
+      onCancel={cancel}
+      onConfirm={confirm}
+    >
+      {canBackup && (
+        <label className="flex items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--surface-0)] p-2.5 text-xs text-[var(--text-secondary)]">
+          <input type="checkbox" checked={createBackup} onChange={event => setCreateBackup(event.target.checked)}
+            className="h-4 w-4 accent-blue-500" />
+          Create a backup first
+        </label>
+      )}
+    </ConfirmDialog>
+  );
+}
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
 
@@ -75,7 +138,10 @@ interface NotificationCardProps {
   onHandle?: () => void;
   onSnooze?: (duration: string) => void;
   onMute?: () => void;
-  onExecuteAction?: (actionId: string) => void | Promise<{ success: boolean }>;
+  onExecuteAction?: (
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => void | Promise<{ success: boolean; error?: string }>;
 }
 
 interface PresentationMetadataChip {
@@ -86,12 +152,111 @@ interface PresentationMetadataChip {
 interface NotificationPresentation {
   subtitle?: string;
   sourceName?: string;
+  subjectIcon?: string;
+  subjectIconUrl?: string;
   repository?: string;
   subjectType?: string;
   entityNumber?: number;
   reasonLabel?: string;
   metadataChips?: Array<string | PresentationMetadataChip>;
   richContent?: NotificationRichContent;
+}
+
+function NotificationIdentity({
+  sourceIcon,
+  subjectIcon,
+  subjectIconUrl,
+  sourceName,
+  CategoryIcon,
+  colorClass,
+  size,
+}: {
+  sourceIcon?: string;
+  subjectIcon?: string;
+  subjectIconUrl?: string;
+  sourceName: string;
+  CategoryIcon: React.ComponentType<{ size?: number; className?: string }>;
+  colorClass: string;
+  size: 'card' | 'detail';
+}) {
+  const [failedSubjectIconUrl, setFailedSubjectIconUrl] = useState<string | null>(null);
+  const mainSize = size === 'detail' ? 32 : 24;
+  const wrapperClass = size === 'detail' ? 'h-8 w-8' : 'h-6 w-6';
+  const badgeClass = size === 'detail' ? 'h-4 w-4' : 'h-3.5 w-3.5';
+  const badgeSize = size === 'detail' ? 16 : 14;
+
+  if (subjectIconUrl && failedSubjectIconUrl !== subjectIconUrl) {
+    return (
+      <div className={`relative shrink-0 ${wrapperClass}`} title={sourceName}>
+        <Image
+          src={subjectIconUrl}
+          alt=""
+          width={mainSize}
+          height={mainSize}
+          unoptimized
+          onError={() => setFailedSubjectIconUrl(subjectIconUrl)}
+          className={`${wrapperClass} rounded-md bg-[var(--surface-0)] object-contain`}
+        />
+        {sourceIcon && (
+          <Image
+            src={sourceIcon}
+            alt=""
+            width={badgeSize}
+            height={badgeSize}
+            className={`absolute -bottom-1 -right-1 rounded border-2 border-[var(--surface-1)] bg-[var(--surface-1)] object-contain ${badgeClass}`}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (subjectIcon) {
+    return (
+      <div
+        aria-hidden="true"
+        className={`relative flex shrink-0 items-center justify-center rounded-md bg-sky-500/15 text-sky-400 ${wrapperClass}`}
+        title={sourceName}
+      >
+        <IconRenderer
+          value={subjectIcon}
+          size={size === 'detail' ? 24 : 18}
+          fallback={<CategoryIcon size={size === 'detail' ? 18 : 14} />}
+        />
+        {sourceIcon && (
+          <Image
+            src={sourceIcon}
+            alt=""
+            width={badgeSize}
+            height={badgeSize}
+            className={`absolute -bottom-1 -right-1 rounded border-2 border-[var(--surface-1)] bg-[var(--surface-1)] object-contain ${badgeClass}`}
+          />
+        )}
+      </div>
+    );
+  }
+
+  if (sourceIcon) {
+    return (
+      <Image
+        src={sourceIcon}
+        alt=""
+        title={sourceName}
+        width={mainSize}
+        height={mainSize}
+        className={`${wrapperClass} shrink-0 rounded-md`}
+      />
+    );
+  }
+
+  return (
+    <div
+      title={sourceName}
+      aria-label={sourceName}
+      className={`${wrapperClass} flex shrink-0 items-center justify-center rounded-md bg-[var(--surface-2)] ${colorClass}`}
+    >
+      <CategoryIcon size={size === 'detail' ? 16 : 14} />
+    </div>
+  );
 }
 
 function WritebackStatus({ notification }: { notification: NotificationItem }) {
@@ -347,6 +512,9 @@ export function NotificationCard({
   onExecuteAction,
 }: NotificationCardProps) {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
+  const acceptedSourceAction = acceptedSourceActionFor === notification.id;
+  const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -360,6 +528,8 @@ export function NotificationCard({
     richContent,
   } = useNotificationDisplay(notification);
   const presentationSubtitle = presentation.subtitle || null;
+  const subjectIcon = presentation.subjectIcon?.trim() || undefined;
+  const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
 
   const primaryAction = useMemo(() =>
     notification.actions?.find(a => a.isPrimary),
@@ -373,26 +543,40 @@ export function NotificationCard({
 
   const aiSuggested = notification.aiSuggestedActionId;
 
-  const handleInlineAction = async (action: NotificationAction) => {
+  const executeInlineAction = async (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
     if (!onExecuteAction) return;
-    if (
-      action.requiresConfirmation
-      && !window.confirm(`Are you sure you want to ${action.label.toLowerCase()}?`)
-    ) {
-      return;
-    }
-
     setPendingActionId(action.id);
     try {
-      const result = await onExecuteAction(action.id);
+      const result = params
+        ? await onExecuteAction(action.id, params)
+        : await onExecuteAction(action.id);
       if (result?.success === false) {
-        toast.error(`${action.label} failed`);
+        toast.error(result.error || `${action.label} failed`);
+      } else if (
+        notification.connectorType === 'home-assistant'
+        && action.requiresConfirmation
+      ) {
+        setAcceptedSourceActionFor(notification.id);
       }
     } catch {
       toast.error(`${action.label} failed`);
     } finally {
       setPendingActionId(null);
     }
+  };
+
+  const handleInlineAction = (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
+    if (action.requiresConfirmation) {
+      setConfirmationAction(action);
+      return;
+    }
+    void executeInlineAction(action, params);
   };
 
   return (
@@ -422,24 +606,15 @@ export function NotificationCard({
       <div className="pointer-events-none relative z-10 flex items-start gap-2.5">
         {/* Source icon */}
         <div className="flex-shrink-0 mt-0.5">
-          {sourceIcon ? (
-            <Image
-              src={sourceIcon}
-              alt=""
-              title={sourceName}
-              width={24}
-              height={24}
-              className="w-6 h-6 rounded"
-            />
-          ) : (
-            <div
-              title={sourceName}
-              aria-label={sourceName}
-              className={`w-6 h-6 rounded flex items-center justify-center bg-[var(--surface-2)] ${levelConfig.color}`}
-            >
-              <CategoryIcon size={14} />
-            </div>
-          )}
+          <NotificationIdentity
+            sourceIcon={sourceIcon}
+            subjectIcon={subjectIcon}
+            subjectIconUrl={subjectIconUrl}
+            sourceName={sourceName}
+            CategoryIcon={CategoryIcon}
+            colorClass={levelConfig.color}
+            size="card"
+          />
         </div>
 
         {/* Content */}
@@ -495,7 +670,7 @@ export function NotificationCard({
             <span className="text-[var(--text-muted)]" aria-hidden="true">·</span>
             <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
               <CategoryIcon size={10} className="opacity-60" />
-              {humanizeIdentifier(notification.category)}
+              {formatNotificationCategoryLabel(notification.category)}
             </span>
             <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-md ${levelConfig.pillClass}`}>
               <LevelIcon size={10} />
@@ -520,20 +695,30 @@ export function NotificationCard({
                   levelConfig={levelConfig}
                   isAiSuggested={primaryAction.id === aiSuggested}
                   isLoading={pendingActionId === primaryAction.id}
-                  disabled={pendingActionId !== null}
+                  disabled={pendingActionId !== null || (acceptedSourceAction && primaryAction.requiresConfirmation)}
                   onClick={() => void handleInlineAction(primaryAction)}
                 />
               )}
               {!panel && secondaryActions.map(action => (
-                <ActionButton
-                  key={action.id}
-                  action={action}
-                  levelConfig={levelConfig}
-                  isAiSuggested={action.id === aiSuggested}
-                  isLoading={pendingActionId === action.id}
-                  disabled={pendingActionId !== null}
-                  onClick={() => void handleInlineAction(action)}
-                />
+                action.actionType === 'remind_later' ? (
+                  <RemindLaterButton
+                    key={action.id}
+                    action={action}
+                    disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
+                    isLoading={pendingActionId === action.id}
+                    onSelect={(duration) => void handleInlineAction(action, { duration })}
+                  />
+                ) : (
+                  <ActionButton
+                    key={action.id}
+                    action={action}
+                    levelConfig={levelConfig}
+                    isAiSuggested={action.id === aiSuggested}
+                    isLoading={pendingActionId === action.id}
+                    disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
+                    onClick={() => void handleInlineAction(action)}
+                  />
+                )
               ))}
             </div>
           )}
@@ -545,7 +730,7 @@ export function NotificationCard({
         </div>
       </div>
 
-      {/* Bottom toolbar: mark read, snooze, dismiss, pin — always visible */}
+      {/* Bottom toolbar: read state, snooze, source controls, and disposition */}
       {!compact && !panel && (
       <div className="pointer-events-auto relative z-10 flex items-center gap-1 mt-2.5 pt-2 border-t border-[var(--border)]/50">
         {isUnread ? (
@@ -581,10 +766,10 @@ export function NotificationCard({
             </button>
           </Tooltip>
         )}
-        <Tooltip content="Handle">
+        <Tooltip content="Done — clear until new activity">
           <button
             onClick={(e) => { e.stopPropagation(); onHandle?.(); }}
-            aria-label="Handle notification"
+            aria-label="Mark notification done"
             className="p-1.5 rounded-md text-[var(--text-muted)] hover:text-emerald-400 hover:bg-emerald-900/20 transition-colors"
           >
             <Archive size={15} />
@@ -592,13 +777,26 @@ export function NotificationCard({
         </Tooltip>
       </div>
       )}
+      <NotificationActionConfirmation
+        action={confirmationAction}
+        notification={notification}
+        onCancel={() => setConfirmationAction(null)}
+        onConfirm={(input) => {
+          const action = confirmationAction;
+          setConfirmationAction(null);
+          if (action) void executeInlineAction(action, input);
+        }}
+      />
     </motion.div>
   );
 }
 
 export interface NotificationDetailProps {
   notification: NotificationItem;
-  onExecuteAction: (actionId: string) => Promise<{ success: boolean }>;
+  onExecuteAction: (
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{ success: boolean; error?: string }>;
   onMarkRead?: () => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
   onArchive?: () => void | Promise<void>;
@@ -606,6 +804,96 @@ export interface NotificationDetailProps {
   onMute?: () => void | Promise<void>;
   onClose?: () => void;
   className?: string;
+}
+
+function HomeAssistantReleaseNotes({
+  notification,
+}: {
+  notification: NotificationItem;
+}) {
+  const metadata = notification.metadata ?? {};
+  const enabled = notification.connectorType === 'home-assistant'
+    && metadata.haSource === 'updates'
+    && metadata.supportsReleaseNotes === true;
+  if (!enabled) return null;
+
+  return (
+    <HomeAssistantReleaseNotesLoader
+      key={notification.id}
+      notificationId={notification.id}
+    />
+  );
+}
+
+function HomeAssistantReleaseNotesLoader({
+  notificationId,
+}: {
+  notificationId: string;
+}) {
+  const [requestKey, setRequestKey] = useState(0);
+  const [state, setState] = useState<{
+    status: 'loading' | 'loaded' | 'error';
+    notes: string | null;
+  }>({ status: 'loading', notes: null });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/notifications/${encodeURIComponent(notificationId)}/release-notes`, {
+      signal: controller.signal,
+    })
+      .then(async response => {
+        if (!response.ok) throw new Error('Release notes request failed');
+        const payload = await response.json() as { releaseNotes?: unknown };
+        setState({
+          status: 'loaded',
+          notes: typeof payload.releaseNotes === 'string' && payload.releaseNotes.trim()
+            ? payload.releaseNotes
+            : null,
+        });
+      })
+      .catch(error => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setState({ status: 'error', notes: null });
+      });
+
+    return () => controller.abort();
+  }, [notificationId, requestKey]);
+
+  if (state.status === 'loaded' && !state.notes) return null;
+
+  return (
+    <section className="mt-5 border-t border-[var(--border)] pt-4" aria-labelledby="ha-release-notes-heading">
+      <h3 id="ha-release-notes-heading" className="text-base font-semibold text-[var(--text-primary)]">
+        What&apos;s changed
+      </h3>
+      {state.status === 'loading' && (
+        <div className="mt-3 flex items-center gap-2 text-sm text-[var(--text-secondary)]" role="status">
+          <LoaderCircle size={16} className="animate-spin" />
+          Loading release notes…
+        </div>
+      )}
+      {state.status === 'error' && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-[var(--text-secondary)]" role="alert">
+          <span>Release notes couldn&apos;t be loaded.</span>
+          <button
+            type="button"
+            onClick={() => {
+              setState({ status: 'loading', notes: null });
+              setRequestKey(key => key + 1);
+            }}
+            className="font-medium text-[var(--accent)] underline decoration-[var(--accent)]/50 underline-offset-2 hover:text-[var(--accent-soft)]"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+      {state.status === 'loaded' && state.notes && (
+        <div className="mt-3 max-w-[75ch] overflow-hidden text-[var(--text-secondary)]">
+          <AssistantMarkdown>{state.notes}</AssistantMarkdown>
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function NotificationDetail({
@@ -620,6 +908,9 @@ export function NotificationDetail({
   className = '',
 }: NotificationDetailProps) {
   const [pendingActionId, setPendingActionId] = useState<string | null>(null);
+  const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
+  const acceptedSourceAction = acceptedSourceActionFor === notification.id;
+  const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -631,24 +922,34 @@ export function NotificationDetail({
     metadataChips,
     richContent,
   } = useNotificationDisplay(notification);
+  const subjectIcon = presentation.subjectIcon?.trim() || undefined;
+  const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
 
-  const handleAction = async (action: NotificationAction) => {
-    if (
-      action.requiresConfirmation
-      && !window.confirm(`Are you sure you want to ${action.label.toLowerCase()}?`)
-    ) {
-      return;
-    }
-
+  const executeAction = async (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
     setPendingActionId(action.id);
     try {
-      const result = await onExecuteAction(action.id);
+      const result = params
+        ? await onExecuteAction(action.id, params)
+        : await onExecuteAction(action.id);
       if (result.success) {
-        toast.success(`${action.label} completed`);
+        if (
+          notification.connectorType === 'home-assistant'
+          && action.requiresConfirmation
+        ) {
+          setAcceptedSourceActionFor(notification.id);
+        }
+        toast.success(
+          notification.connectorType === 'home-assistant'
+            ? `${action.label} request accepted`
+            : `${action.label} completed`,
+        );
       } else {
-        toast.error(`${action.label} failed`);
+        toast.error(result.error || `${action.label} failed`);
       }
     } catch {
       toast.error(`${action.label} failed`);
@@ -657,30 +958,34 @@ export function NotificationDetail({
     }
   };
 
+  const handleAction = (
+    action: NotificationAction,
+    params?: Record<string, unknown>,
+  ) => {
+    if (action.requiresConfirmation) {
+      setConfirmationAction(action);
+      return;
+    }
+    void executeAction(action, params);
+  };
+
   return (
     <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] ${className}`}>
       <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
-          {sourceIcon ? (
-            <Image
-              src={sourceIcon}
-              alt=""
-              width={32}
-              height={32}
-              className="h-8 w-8 rounded-md"
-            />
-          ) : (
-            <div
-              aria-label={sourceName}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-[var(--surface-2)] ${levelConfig.color}`}
-            >
-              <CategoryIcon size={16} />
-            </div>
-          )}
+          <NotificationIdentity
+            sourceIcon={sourceIcon}
+            subjectIcon={subjectIcon}
+            subjectIconUrl={subjectIconUrl}
+            sourceName={sourceName}
+            CategoryIcon={CategoryIcon}
+            colorClass={levelConfig.color}
+            size="detail"
+          />
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">{sourceName}</p>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              {humanizeIdentifier(notification.category)} · {formatTimeAgo(notification.receivedAt)}
+              {formatNotificationCategoryLabel(notification.category)} · {formatTimeAgo(notification.receivedAt)}
             </p>
           </div>
         </div>
@@ -743,6 +1048,8 @@ export function NotificationDetail({
           </div>
         )}
 
+        <HomeAssistantReleaseNotes notification={notification} />
+
         {(primaryAction || secondaryActions.length > 0) && (
           <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-[var(--border)] pt-4">
             {primaryAction && (
@@ -752,20 +1059,30 @@ export function NotificationDetail({
                 levelConfig={levelConfig}
                 isAiSuggested={primaryAction.id === notification.aiSuggestedActionId}
                 isLoading={pendingActionId === primaryAction.id}
-                disabled={pendingActionId !== null}
+                disabled={pendingActionId !== null || (acceptedSourceAction && primaryAction.requiresConfirmation)}
                 onClick={() => void handleAction(primaryAction)}
               />
             )}
             {secondaryActions.map(action => (
-              <ActionButton
-                key={action.id}
-                action={action}
-                levelConfig={levelConfig}
-                isAiSuggested={action.id === notification.aiSuggestedActionId}
-                isLoading={pendingActionId === action.id}
-                disabled={pendingActionId !== null}
-                onClick={() => void handleAction(action)}
-              />
+              action.actionType === 'remind_later' ? (
+                <RemindLaterButton
+                  key={action.id}
+                  action={action}
+                  disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
+                  isLoading={pendingActionId === action.id}
+                  onSelect={(duration) => void handleAction(action, { duration })}
+                />
+              ) : (
+                <ActionButton
+                  key={action.id}
+                  action={action}
+                  levelConfig={levelConfig}
+                  isAiSuggested={action.id === notification.aiSuggestedActionId}
+                  isLoading={pendingActionId === action.id}
+                  disabled={pendingActionId !== null || (acceptedSourceAction && action.requiresConfirmation)}
+                  onClick={() => void handleAction(action)}
+                />
+              )
             ))}
           </div>
         )}
@@ -797,16 +1114,18 @@ export function NotificationDetail({
             <button
               type="button"
               onClick={() => void onArchive()}
+              title="Clear from the inbox; new source activity can bring it back"
               className="inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
             >
               <Archive size={13} />
-              Handle
+              Done
             </button>
           )}
           {onDismiss && (
             <button
               type="button"
               onClick={() => void onDismiss()}
+              title="Remove as irrelevant; future source activity will not bring it back"
               className="ml-auto inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-red-900/20 hover:text-red-400"
             >
               <X size={13} />
@@ -815,6 +1134,16 @@ export function NotificationDetail({
           )}
         </div>
       )}
+      <NotificationActionConfirmation
+        action={confirmationAction}
+        notification={notification}
+        onCancel={() => setConfirmationAction(null)}
+        onConfirm={(input) => {
+          const action = confirmationAction;
+          setConfirmationAction(null);
+          if (action) void executeAction(action, input);
+        }}
+      />
     </div>
   );
 }
@@ -973,6 +1302,73 @@ function SnoozeMenu({
                 className="w-full text-left px-3 py-1.5 text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] transition-colors"
               >
                 {opt.label}
+              </button>
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+const REMIND_LATER_OPTIONS = [
+  { label: 'In 15 minutes', value: '15m' },
+  { label: 'In 1 hour', value: '1h' },
+  { label: 'Tomorrow morning', value: 'tomorrow_morning' },
+] as const;
+
+function RemindLaterButton({
+  action,
+  disabled,
+  isLoading,
+  onSelect,
+}: {
+  action: NotificationAction;
+  disabled: boolean;
+  isLoading: boolean;
+  onSelect: (duration: typeof REMIND_LATER_OPTIONS[number]['value']) => void;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={(event) => {
+          event.stopPropagation();
+          setOpen(value => !value);
+        }}
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-wait disabled:opacity-60"
+      >
+        {isLoading ? <LoaderCircle size={13} className="animate-spin" /> : <Clock size={13} />}
+        {action.label}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: -4 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: -4 }}
+            transition={{ duration: 0.12 }}
+            role="menu"
+            className="absolute left-0 top-full z-50 mt-1 min-w-40 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] py-1 shadow-xl shadow-black/40"
+          >
+            {REMIND_LATER_OPTIONS.map(option => (
+              <button
+                key={option.value}
+                type="button"
+                role="menuitem"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setOpen(false);
+                  onSelect(option.value);
+                }}
+                className="w-full px-3 py-1.5 text-left text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              >
+                {option.label}
               </button>
             ))}
           </motion.div>

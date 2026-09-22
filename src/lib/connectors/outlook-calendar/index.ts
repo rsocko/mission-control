@@ -5,10 +5,9 @@ import type {
   ConnectorConfig,
   ConnectorCapabilities,
   SourceList,
-  SyncResult,
 } from '@/types';
-import { randomUUID } from 'crypto';
 import { getTimezone, ianaToWindowsTimezone } from '@/lib/mode';
+import { createGraphClient, type GraphClient } from '../microsoft-todo/graph-client';
 
 /**
  * Outlook Calendar Connector
@@ -20,8 +19,6 @@ import { getTimezone, ianaToWindowsTimezone } from '@/lib/mode';
  * API: https://graph.microsoft.com/v1.0/me/calendarView
  * Permissions: Calendars.Read (delegated)
  */
-
-const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 
 interface OutlookCalendarConfig {
   accessToken?: string;
@@ -50,19 +47,19 @@ export class OutlookCalendarConnector implements IConnector {
   };
 
   private config: ConnectorConfig | null = null;
-  private accessToken: string = '';
+  private hasCredentials: boolean = false;
+  private client: GraphClient | null = null;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
     (this as { id: string }).id = config.id;
     const creds = config.credentials as unknown as OutlookCalendarConfig;
-    if (creds.accessToken) {
-      this.accessToken = creds.accessToken;
-    }
+    this.hasCredentials = !!creds.accessToken;
+    this.client = createGraphClient(this.id);
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    if (!this.accessToken) {
+    if (!this.hasCredentials) {
       return { success: false, message: 'No access token configured' };
     }
     try {
@@ -79,12 +76,19 @@ export class OutlookCalendarConnector implements IConnector {
 
   async dispose(): Promise<void> {
     this.config = null;
-    this.accessToken = '';
+    this.hasCredentials = false;
+    this.client = null;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
     const res = await this.graphFetch('/me/calendars');
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Calendar token expired or invalid — re-authenticate in Settings'
+          : `Outlook Calendar lookup failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     return (data.value || []).map((cal: { id: string; name: string }) => ({
@@ -114,7 +118,13 @@ export class OutlookCalendarConnector implements IConnector {
     const url = `/me/calendarView?startDateTime=${now.toISOString()}&endDateTime=${end.toISOString()}&$top=50&$orderby=start/dateTime&$select=id,subject,start,end,location,organizer,isAllDay,webLink,importance,isCancelled`;
 
     const res = await this.graphFetch(url);
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Calendar token expired or invalid — re-authenticate in Settings'
+          : `Outlook Calendar event fetch failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     const notifications: InboundNotification[] = [];
@@ -139,7 +149,7 @@ export class OutlookCalendarConnector implements IConnector {
         : startTime.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
 
       notifications.push({
-        id: randomUUID(),
+        id: `cal:${event.id}`,
         sourceId: `cal:${event.id}`,
         connectorType: this.type,
         connectorInstanceId: this.id,
@@ -175,12 +185,13 @@ export class OutlookCalendarConnector implements IConnector {
   // ─── Private ──────────────────────────────────────────────────────────────
 
   private async graphFetch(path: string, options?: RequestInit): Promise<Response> {
+    if (!this.client) {
+      throw new Error('Outlook Calendar connector not initialized');
+    }
     const windowsTz = ianaToWindowsTimezone(getTimezone());
-    return fetch(`${GRAPH_BASE_URL}${path}`, {
+    return this.client.graphFetch(path, {
       ...options,
       headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
         Prefer: `outlook.timezone="${windowsTz}"`,
         ...(options?.headers || {}),
       },

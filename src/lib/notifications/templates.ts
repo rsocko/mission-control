@@ -155,10 +155,10 @@ registerTemplate({
   ],
 });
 
-// Social / Code
+// Development
 registerTemplate({
   key: 'pr_review_requested',
-  category: 'social',
+  category: 'development',
   defaultLevel: 'action_needed',
   categoryIcon: 'git-pull-request',
   sourceDisplayMode: 'prominent',
@@ -170,7 +170,7 @@ registerTemplate({
 
 registerTemplate({
   key: 'mention',
-  category: 'social',
+  category: 'development',
   defaultLevel: 'heads_up',
   categoryIcon: 'at-sign',
   sourceDisplayMode: 'compact',
@@ -216,6 +216,17 @@ registerTemplate({
 });
 
 // Tasks
+registerTemplate({
+  key: 'task_reminder',
+  category: 'tasks',
+  defaultLevel: 'heads_up',
+  categoryIcon: 'bell',
+  sourceDisplayMode: 'prominent',
+  defaultActions: [
+    { actionType: 'navigate', label: 'Open Task', icon: 'check-square', variant: 'primary', isPrimary: true },
+  ],
+});
+
 registerTemplate({
   key: 'task_overdue',
   category: 'tasks',

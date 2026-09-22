@@ -1,3 +1,5 @@
+import { formatInTimeZone, fromZonedTime } from 'date-fns-tz';
+
 /**
  * Maximum number of recurrence iterations when advancing past overdue dates.
  * 1000 iterations covers even a daily task that has been overdue for ~2.7 years,
@@ -97,17 +99,26 @@ function formatDateYMD(d: Date): string {
 }
 
 /**
- * Extract the recurrence pattern from a task's JSON metadata string.
+ * Extract the recurrence pattern from a task's metadata. Metadata columns are
+ * stored as JSON in the database (Drizzle's `mode: 'json'`), so API responses
+ * deliver it as an already-parsed object — only some legacy/manual call sites
+ * still pass a raw JSON string. Handle both to avoid silently losing recurrence.
  * Returns null if metadata is absent, malformed, or contains no recurrence.
  */
-export function extractRecurrenceFromMetadata(metadata: string | null | undefined): string | null {
+export function extractRecurrenceFromMetadata(
+  metadata: Record<string, unknown> | string | null | undefined,
+): string | null {
   if (!metadata) return null;
-  try {
-    const parsed = JSON.parse(metadata) as Record<string, unknown>;
-    return typeof parsed?.recurrence === 'string' ? parsed.recurrence : null;
-  } catch {
-    return null;
-  }
+  const parsed = typeof metadata === 'string'
+    ? (() => {
+        try {
+          return JSON.parse(metadata) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })()
+    : metadata;
+  return typeof parsed?.recurrence === 'string' ? parsed.recurrence : null;
 }
 
 /**
@@ -142,4 +153,53 @@ export function getNextRecurringDate(
   }
 
   return formatDateYMD(d);
+}
+
+/**
+ * Advance exactly one interval from the local date/time at which an occurrence
+ * was completed. Date-only tasks remain date-only; timed tasks retain the
+ * completion wall-clock time in the configured timezone.
+ */
+export function getCompletionAnchoredDueDate(
+  completedAt: string,
+  recurrence: string,
+  timezone: string,
+  includeTime: boolean,
+): string {
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  });
+  const parts = Object.fromEntries(
+    formatter.formatToParts(new Date(completedAt))
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, part.value]),
+  );
+  const date = new Date(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+  );
+  advanceDate(date, recurrence);
+  const nextDate = formatDateYMD(date);
+  if (!includeTime) return nextDate;
+
+  const targetWallTime = `${nextDate}T${parts.hour}:${parts.minute}:${parts.second}`;
+  const initial = fromZonedTime(targetWallTime, timezone);
+  const renderedWallTime = formatInTimeZone(initial, timezone, "yyyy-MM-dd'T'HH:mm:ss");
+  if (renderedWallTime === targetWallTime) return initial.toISOString();
+
+  // date-fns-tz resolves spring-forward gaps with the post-transition offset,
+  // which renders before the requested local time. Shift by the gap so a
+  // nonexistent 02:30 becomes 03:30; overlap resolution already selects the
+  // earlier matching offset and reaches the exact-match return above.
+  const requestedAsUtc = new Date(`${targetWallTime}Z`).getTime();
+  const renderedAsUtc = new Date(`${renderedWallTime}Z`).getTime();
+  return new Date(initial.getTime() + Math.abs(requestedAsUtc - renderedAsUtc)).toISOString();
 }

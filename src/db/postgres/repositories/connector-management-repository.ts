@@ -1,0 +1,1105 @@
+import type { Pool, PoolClient } from 'pg';
+import type {
+  BeginSourceListRepair,
+  ConnectorManagementPersistence,
+  FinalizeSourceListRepair,
+  ManagedConnectorRecord,
+  ManagedConnectorUpdate,
+  SourceRankingRecord,
+  SourceListRepairRecord,
+  SyncHistoryRecord,
+} from '@/db/persistence/connector-management';
+import type { SourceListRecord } from '@/db/persistence/connector-execution';
+import { initializePostgresGitHubConnectorIdentityStateInTransaction } from './github-identity-repositories';
+
+type Client = Pool | PoolClient;
+
+interface CountRow {
+  count: string;
+}
+
+async function rows<T>(
+  client: Client,
+  text: string,
+  params: readonly unknown[] = [],
+): Promise<T[]> {
+  return (await client.query(text, [...params])).rows as T[];
+}
+
+async function transaction<T>(
+  pool: Pool,
+  work: (client: PoolClient) => Promise<T>,
+): Promise<T> {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    try {
+      const result = await work(client);
+      await client.query('COMMIT');
+      return result;
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    }
+  } finally {
+    client.release();
+  }
+}
+
+const CONNECTOR_COLUMNS = `
+  id,
+  type,
+  name,
+  enabled,
+  sync_mode AS "syncMode",
+  poll_interval_minutes AS "pollIntervalMinutes",
+  capabilities,
+  credentials,
+  settings,
+  synced_lists AS "syncedLists",
+  created_at AS "createdAt",
+  updated_at AS "updatedAt",
+  deleted_at AS "deletedAt",
+  last_test_status AS "lastTestStatus",
+  last_test_error AS "lastTestError",
+  last_test_at AS "lastTestAt"
+`;
+
+const SOURCE_LIST_COLUMNS = `
+  id,
+  connector_instance_id AS "connectorInstanceId",
+  source_id AS "sourceId",
+  name,
+  type,
+  task_count AS "taskCount",
+  last_synced_at AS "lastSyncedAt",
+  health_status AS "healthStatus",
+  health_error AS "healthError",
+  last_successful_at AS "lastSuccessfulAt",
+  well_known_list_name AS "wellKnownListName",
+  group_id AS "groupId",
+  sort_order AS "sortOrder",
+  hidden,
+  last_known_remote_name AS "lastKnownRemoteName",
+  user_display_name AS "userDisplayName",
+  icon,
+  icon_color AS "iconColor",
+  appearance
+`;
+
+const SYNC_HISTORY_COLUMNS = `
+  id,
+  connector_id AS "connectorId",
+  success,
+  tasks_added AS "tasksAdded",
+  tasks_updated AS "tasksUpdated",
+  tasks_removed AS "tasksRemoved",
+  tasks_pushed AS "tasksPushed",
+  local_only_protected AS "localOnlyProtected",
+  alerts_added AS "notificationsAdded",
+  errors,
+  details,
+  synced_at AS "syncedAt",
+  duration_ms AS "durationMs",
+  job_id AS "jobId",
+  trigger,
+  scheduled_for AS "scheduledFor",
+  started_at AS "startedAt",
+  attempt,
+  max_attempts AS "maxAttempts",
+  identity_mode AS "identityMode",
+  identity_mode_revision AS "identityModeRevision"
+`;
+
+const SOURCE_LIST_REPAIR_COLUMNS = `
+  id,
+  created_at AS "createdAt",
+  strategy,
+  status,
+  original_list_id AS "originalListId",
+  original_source_id AS "originalSourceId",
+  original_name AS "originalName",
+  original_group_id AS "originalGroupId",
+  connector_instance_id AS "connectorInstanceId",
+  new_list_id AS "newListId",
+  new_name AS "newName",
+  task_snapshot AS "taskSnapshot",
+  move_results AS "moveResults",
+  tasks_total AS "tasksTotal",
+  tasks_moved AS "tasksMoved",
+  tasks_failed AS "tasksFailed",
+  old_list_deleted AS "oldListDeleted"
+`;
+
+function mapSourceListRepair(row: SourceListRepairRecord): SourceListRepairRecord {
+  return {
+    ...row,
+    taskSnapshot: Array.isArray(row.taskSnapshot) ? row.taskSnapshot : [],
+    moveResults: Array.isArray(row.moveResults) ? row.moveResults : [],
+  };
+}
+
+function sourceListRepairMatches(
+  repair: SourceListRepairRecord,
+  input: BeginSourceListRepair,
+): boolean {
+  return repair.strategy === input.strategy
+    && repair.originalListId === input.sourceList.id
+    && repair.originalSourceId === input.sourceList.sourceId
+    && repair.originalName === input.sourceList.name
+    && repair.connectorInstanceId === input.sourceList.connectorInstanceId
+    && repair.newName === input.newName;
+}
+
+function updateParts(
+  updates: ManagedConnectorUpdate,
+  firstParameter = 1,
+): { assignments: string[]; values: unknown[]; nextParameter: number } {
+  const assignments: string[] = [];
+  const values: unknown[] = [];
+  let parameter = firstParameter;
+  const add = (column: string, value: unknown, cast = '') => {
+    assignments.push(`${column} = $${parameter}${cast}`);
+    values.push(value);
+    parameter += 1;
+  };
+  if (updates.name !== undefined) add('name', updates.name);
+  if (updates.enabled !== undefined) add('enabled', updates.enabled);
+  if (updates.syncMode !== undefined) add('sync_mode', updates.syncMode);
+  if (updates.pollIntervalMinutes !== undefined) {
+    add('poll_interval_minutes', updates.pollIntervalMinutes);
+  }
+  if (updates.capabilities !== undefined) {
+    add('capabilities', JSON.stringify(updates.capabilities), '::jsonb');
+  }
+  if (updates.credentials !== undefined) {
+    add('credentials', JSON.stringify(updates.credentials), '::jsonb');
+  }
+  if (updates.settings !== undefined) add('settings', JSON.stringify(updates.settings), '::jsonb');
+  if (updates.syncedLists !== undefined) {
+    add('synced_lists', JSON.stringify(updates.syncedLists), '::jsonb');
+  }
+  return { assignments, values, nextParameter: parameter };
+}
+
+export function createPostgresConnectorManagementRepository(
+  pool: Pool,
+): ConnectorManagementPersistence {
+  const listSourceRankings = async (): Promise<SourceRankingRecord[]> => rows<SourceRankingRecord>(
+    pool,
+    `
+      SELECT
+        id,
+        connector_type AS "connectorType",
+        name,
+        rank,
+        updated_at AS "updatedAt"
+      FROM source_rankings
+      ORDER BY rank ASC, id ASC
+    `,
+  );
+
+  return {
+    async getOverview(includeDeleted) {
+      const [connectors, sourceLists, countRows, syncRows] = await Promise.all([
+        rows<ManagedConnectorRecord>(
+          pool,
+          `
+            SELECT ${CONNECTOR_COLUMNS}
+            FROM connector_configs
+            ${includeDeleted ? '' : 'WHERE deleted_at IS NULL'}
+            ORDER BY created_at ASC, id ASC
+          `,
+        ),
+        rows<SourceListRecord>(
+          pool,
+          `
+            SELECT ${SOURCE_LIST_COLUMNS}
+            FROM source_lists
+            ORDER BY sort_order ASC, id ASC
+          `,
+        ),
+        rows<{
+          connectorInstanceId: string;
+          sourceListId: string | null;
+          count: string;
+        }>(
+          pool,
+          `
+            SELECT
+              connector_instance_id AS "connectorInstanceId",
+              source_list_id AS "sourceListId",
+              count(*)::text AS count
+            FROM tasks
+            WHERE status NOT IN ('done', 'cancelled')
+              AND parent_id IS NULL
+              AND is_checklist_item = false
+            GROUP BY connector_instance_id, source_list_id
+          `,
+        ),
+        rows<{
+          connectorId: string;
+          lastSyncedAt: string | null;
+          success: boolean;
+          errors: unknown;
+        }>(
+          pool,
+          `
+            WITH ranked AS (
+              SELECT
+                connector_id AS "connectorId",
+                success,
+                errors,
+                row_number() OVER (
+                  PARTITION BY connector_id
+                  ORDER BY synced_at DESC, id DESC
+                ) AS rn,
+                max(synced_at) FILTER (WHERE success)
+                  OVER (PARTITION BY connector_id) AS "lastSyncedAt"
+              FROM sync_log
+            )
+            SELECT "connectorId", "lastSyncedAt", success, errors
+            FROM ranked
+            WHERE rn = 1
+          `,
+        ),
+      ]);
+      return {
+        connectors,
+        sourceLists,
+        openTaskCounts: countRows.map((row) => ({ ...row, count: Number(row.count) })),
+        syncOutcomes: syncRows.map((row) => {
+          const errors = Array.isArray(row.errors) ? row.errors : [];
+          return {
+            connectorId: row.connectorId,
+            lastSyncedAt: row.lastSyncedAt,
+            success: row.success,
+            error: errors.length > 0 ? String(errors[0]) : null,
+          };
+        }),
+      };
+    },
+
+    async getConnectorListSnapshot(connectorId) {
+      return transaction(pool, async (client) => {
+        await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+        const [connectorRows, sourceLists, countRows, groups] = await Promise.all([
+          rows<ManagedConnectorRecord>(
+            client,
+            `
+              SELECT ${CONNECTOR_COLUMNS}
+              FROM connector_configs
+              WHERE id = $1 AND deleted_at IS NULL
+              LIMIT 1
+            `,
+            [connectorId],
+          ),
+          rows<SourceListRecord>(
+            client,
+            `
+              SELECT ${SOURCE_LIST_COLUMNS}
+              FROM source_lists
+              WHERE connector_instance_id = $1
+              ORDER BY sort_order ASC, name ASC, id ASC
+            `,
+            [connectorId],
+          ),
+          rows<{ sourceListId: string | null; count: string }>(
+            client,
+            `
+              SELECT source_list_id AS "sourceListId", count(*)::text AS count
+              FROM tasks
+              WHERE connector_instance_id = $1
+                AND status NOT IN ('done', 'cancelled')
+                AND parent_id IS NULL
+                AND is_checklist_item = false
+              GROUP BY source_list_id
+              ORDER BY source_list_id ASC
+            `,
+            [connectorId],
+          ),
+          rows<{ id: string; name: string; sortOrder: number }>(
+            client,
+            `
+              SELECT id, name, sort_order AS "sortOrder"
+              FROM list_groups
+              WHERE id IN (
+                SELECT group_id
+                FROM source_lists
+                WHERE connector_instance_id = $1 AND group_id IS NOT NULL
+              )
+              ORDER BY sort_order ASC, id ASC
+            `,
+            [connectorId],
+          ),
+        ]);
+        const connector = connectorRows[0];
+        return {
+          connector: connector
+            ? {
+                id: connector.id,
+                type: connector.type,
+                settings: connector.settings,
+                syncedLists: connector.syncedLists,
+              }
+            : null,
+          sourceLists,
+          openTaskCounts: countRows.map((row) => ({ ...row, count: Number(row.count) })),
+          groups,
+        };
+      });
+    },
+
+    async getGitHubRepositorySnapshot() {
+      return transaction(pool, async (client) => {
+        await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+        const [connectorRows, sourceLists] = await Promise.all([
+          rows<ManagedConnectorRecord>(
+            client,
+            `
+              SELECT ${CONNECTOR_COLUMNS}
+              FROM connector_configs
+              WHERE type = 'github-issues' AND enabled = true AND deleted_at IS NULL
+              ORDER BY created_at ASC, id ASC
+            `,
+          ),
+          rows<{
+            connectorInstanceId: string;
+            sourceId: string;
+            name: string;
+          }>(
+            client,
+            `
+              SELECT
+                sl.connector_instance_id AS "connectorInstanceId",
+                sl.source_id AS "sourceId",
+                sl.name
+              FROM source_lists sl
+              INNER JOIN connector_configs cc ON cc.id = sl.connector_instance_id
+              WHERE sl.type = 'repo'
+                AND cc.type = 'github-issues'
+                AND cc.enabled = true
+                AND cc.deleted_at IS NULL
+              ORDER BY sl.sort_order ASC, sl.name ASC, sl.id ASC
+            `,
+          ),
+        ]);
+        return {
+          connectors: connectorRows.map(({ id, name, settings }) => ({ id, name, settings })),
+          sourceLists,
+        };
+      });
+    },
+
+    async listActiveConnectorsByType(type) {
+      return rows<ManagedConnectorRecord>(
+        pool,
+        `
+          SELECT ${CONNECTOR_COLUMNS}
+          FROM connector_configs
+          WHERE type = $1 AND enabled = true AND deleted_at IS NULL
+          ORDER BY created_at ASC, id ASC
+        `,
+        [type],
+      );
+    },
+
+    async getMicrosoftTodoHealthSnapshot() {
+      return transaction(pool, async (client) => {
+        await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY');
+        const [connectors, sourceLists, countRows] = await Promise.all([
+          rows<ManagedConnectorRecord>(
+            client,
+            `
+              SELECT ${CONNECTOR_COLUMNS}
+              FROM connector_configs
+              WHERE type = 'microsoft-todo' AND deleted_at IS NULL
+              ORDER BY created_at ASC, id ASC
+            `,
+          ),
+          rows<SourceListRecord>(
+            client,
+            `
+              SELECT ${SOURCE_LIST_COLUMNS}
+              FROM source_lists
+              WHERE connector_instance_id IN (
+                SELECT id FROM connector_configs
+                WHERE type = 'microsoft-todo' AND deleted_at IS NULL
+              )
+              ORDER BY sort_order ASC, id ASC
+            `,
+          ),
+          rows<{
+            connectorInstanceId: string;
+            sourceListId: string | null;
+            count: string;
+          }>(
+            client,
+            `
+              SELECT
+                connector_instance_id AS "connectorInstanceId",
+                source_list_id AS "sourceListId",
+                count(*)::text AS count
+              FROM tasks
+              WHERE connector_instance_id IN (
+                SELECT id FROM connector_configs
+                WHERE type = 'microsoft-todo' AND deleted_at IS NULL
+              )
+              GROUP BY connector_instance_id, source_list_id
+              ORDER BY connector_instance_id ASC, source_list_id ASC
+            `,
+          ),
+        ]);
+        return {
+          connectors,
+          sourceLists,
+          taskCounts: countRows.map((row) => ({ ...row, count: Number(row.count) })),
+        };
+      });
+    },
+
+    async projectExists(projectId) {
+      return (await pool.query(
+        'SELECT 1 FROM hub_projects WHERE id = $1 LIMIT 1',
+        [projectId],
+      )).rowCount === 1;
+    },
+
+    async createConnector(input) {
+      return transaction(pool, async (client) => {
+        const result = await client.query(
+          `
+            INSERT INTO connector_configs (
+              id, type, name, enabled, sync_mode, poll_interval_minutes,
+              capabilities, credentials, settings, synced_lists, created_at, updated_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb,
+              $10::jsonb, $11, $11
+            )
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
+          `,
+          [
+            input.id,
+            input.type,
+            input.name,
+            input.enabled,
+            input.syncMode,
+            input.pollIntervalMinutes,
+            JSON.stringify(input.capabilities),
+            JSON.stringify(input.credentials),
+            JSON.stringify(input.settings),
+            JSON.stringify(input.syncedLists),
+            input.now,
+          ],
+        );
+        const created = result.rowCount === 1;
+        if (created && input.type === 'github-issues') {
+          await initializePostgresGitHubConnectorIdentityStateInTransaction(
+            client,
+            input.id,
+            input.now,
+          );
+        }
+        return created;
+      });
+    },
+
+    async ensureSourceLists(lists) {
+      if (lists.length === 0) return;
+      await transaction(pool, async (client) => {
+        for (const list of lists) {
+          await client.query(
+            `
+              INSERT INTO source_lists (
+                id, connector_instance_id, source_id, name, type, task_count,
+                last_synced_at, sort_order, hidden, icon, icon_color
+              ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+              ON CONFLICT (id) DO NOTHING
+            `,
+            [
+              list.id,
+              list.connectorInstanceId,
+              list.sourceId,
+              list.name,
+              list.type,
+              list.taskCount,
+              list.lastSyncedAt,
+              list.sortOrder,
+              list.hidden,
+              list.icon,
+              list.iconColor,
+            ],
+          );
+        }
+      });
+    },
+
+    async ensureWorkTodoBridge(input) {
+      await pool.query(
+        `
+          INSERT INTO work_todo_bridge_state (
+            connector_id, transport, capability_profile, reset_required, created_at, updated_at
+          ) VALUES ($1, $2, $3, false, $4, $4)
+          ON CONFLICT (connector_id) DO NOTHING
+        `,
+        [input.connectorId, input.transport, input.capabilityProfile, input.now],
+      );
+    },
+
+    async getConnector(connectorId) {
+      return (await rows<ManagedConnectorRecord>(
+        pool,
+        `SELECT ${CONNECTOR_COLUMNS} FROM connector_configs WHERE id = $1 LIMIT 1`,
+        [connectorId],
+      ))[0] ?? null;
+    },
+
+    async updateConnector(input) {
+      const parts = updateParts(input.updates);
+      parts.assignments.push(`updated_at = $${parts.nextParameter}`);
+      parts.values.push(input.now);
+      let parameter = parts.nextParameter + 1;
+      let predicate = `id = $${parameter}`;
+      parts.values.push(input.connectorId);
+      parameter += 1;
+      if (input.expected) {
+        predicate += ` AND updated_at = $${parameter} AND settings = $${parameter + 1}::jsonb`;
+        parts.values.push(input.expected.updatedAt, JSON.stringify(input.expected.settings));
+      }
+      return (await pool.query(
+        `UPDATE connector_configs SET ${parts.assignments.join(', ')} WHERE ${predicate}`,
+        parts.values,
+      )).rowCount === 1;
+    },
+
+    async updateWorkTodoConnector(input) {
+      return transaction(pool, async (client) => {
+        const bridgeRows = await rows<{
+          transport: string;
+          capabilityProfile: string;
+          lastIngestAt: string | null;
+        }>(
+          client,
+          `
+            SELECT
+              transport,
+              capability_profile AS "capabilityProfile",
+              last_ingest_at AS "lastIngestAt"
+            FROM work_todo_bridge_state
+            WHERE connector_id = $1
+            FOR UPDATE
+          `,
+          [input.connectorId],
+        );
+        const bridge = bridgeRows[0];
+        if (
+          bridge?.lastIngestAt
+          && (
+            bridge.transport !== input.transport
+            || bridge.capabilityProfile !== input.capabilityProfile
+          )
+        ) return 'tier-conflict';
+        const parts = updateParts(input.updates);
+        parts.assignments.push(`updated_at = $${parts.nextParameter}`);
+        parts.values.push(input.now, input.connectorId);
+        await client.query(
+          `
+            UPDATE connector_configs
+            SET ${parts.assignments.join(', ')}
+            WHERE id = $${parts.nextParameter + 1}
+          `,
+          parts.values,
+        );
+        await client.query(
+          `
+            UPDATE work_todo_bridge_state
+            SET transport = $1, capability_profile = $2, updated_at = $3
+            WHERE connector_id = $4
+          `,
+          [input.transport, input.capabilityProfile, input.now, input.connectorId],
+        );
+        return 'updated';
+      });
+    },
+
+    async softDeleteConnector(connectorId, now) {
+      return transaction(pool, async (client) => {
+        await client.query(
+          `
+            UPDATE connector_configs
+            SET deleted_at = $1, enabled = false, updated_at = $1
+            WHERE id = $2
+          `,
+          [now, connectorId],
+        );
+        const [taskCount] = await rows<CountRow>(
+          client,
+          'SELECT count(*)::text AS count FROM tasks WHERE connector_instance_id = $1',
+          [connectorId],
+        );
+        const [listCount] = await rows<CountRow>(
+          client,
+          'SELECT count(*)::text AS count FROM source_lists WHERE connector_instance_id = $1',
+          [connectorId],
+        );
+        return {
+          affectedTasks: Number(taskCount.count),
+          affectedLists: Number(listCount.count),
+        };
+      });
+    },
+
+    async hardDeleteConnector(connectorId) {
+      await transaction(pool, async (client) => {
+        const taskSubquery = 'SELECT id FROM tasks WHERE connector_instance_id = $1';
+        for (const [table, column] of [
+          ['task_tags', 'task_id'],
+          ['project_auto_include_exclusions', 'task_id'],
+          ['task_projects', 'task_id'],
+          ['task_schedules', 'task_id'],
+          ['my_day_items', 'task_id'],
+          ['focus_items', 'task_id'],
+          ['project_phase_items', 'task_id'],
+        ] as const) {
+          await client.query(
+            `DELETE FROM ${table} WHERE ${column} IN (${taskSubquery})`,
+            [connectorId],
+          );
+        }
+        for (const [table, column] of [
+          ['sync_log', 'connector_id'],
+          ['work_todo_outbound_changes', 'connector_id'],
+          ['work_todo_list_delta_state', 'connector_id'],
+          ['work_todo_bridge_state', 'connector_id'],
+          ['source_lists', 'connector_instance_id'],
+          ['notification_push_rules', 'connector_instance_id'],
+          ['finance_attribution_audit', 'connector_id'],
+          ['finance_attribution_exceptions', 'connector_id'],
+          ['finance_attribution_subjects', 'connector_id'],
+          ['finance_mutation_audit', 'connector_id'],
+          ['finance_budget_snapshots', 'connector_id'],
+          ['finance_recurring_obligations', 'connector_id'],
+          ['finance_tags', 'connector_id'],
+          ['finance_categories', 'connector_id'],
+          ['finance_category_groups', 'connector_id'],
+          ['finance_accounts', 'connector_id'],
+          ['finance_dataset_sync_state', 'connector_id'],
+          ['finance_insight_occurrence_cache_state', 'connector_id'],
+          ['finance_insight_occurrences', 'connector_id'],
+          ['finance_insight_publications', 'connector_id'],
+          ['finance_insight_publication_state', 'connector_id'],
+          ['finance_insight_transaction_projection_facts', 'connector_id'],
+          ['finance_insight_transaction_projection_windows', 'connector_id'],
+          ['finance_insight_transaction_projection_state', 'connector_id'],
+          ['finance_insight_transaction_window_proofs', 'connector_id'],
+          ['finance_insight_transaction_backfill_plans', 'connector_id'],
+          ['finance_insight_cutovers', 'connector_id'],
+          ['finance_sync_state', 'connector_id'],
+          ['finance_transactions', 'connector_instance_id'],
+          ['tasks', 'connector_instance_id'],
+          ['connector_configs', 'id'],
+        ] as const) {
+          if (table === 'finance_insight_publications') {
+            await client.query(
+              `
+                DELETE FROM finance_insight_publication_facts
+                WHERE publication_id IN (
+                  SELECT id FROM finance_insight_publications WHERE connector_id = $1
+                )
+              `,
+              [connectorId],
+            );
+          }
+          await client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [connectorId]);
+        }
+      });
+    },
+
+    async getSourceList(sourceListId) {
+      return (await rows<SourceListRecord>(
+        pool,
+        `SELECT ${SOURCE_LIST_COLUMNS} FROM source_lists WHERE id = $1 LIMIT 1`,
+        [sourceListId],
+      ))[0] ?? null;
+    },
+
+    async listGroupExists(groupId) {
+      return (await pool.query(
+        'SELECT 1 FROM list_groups WHERE id = $1 LIMIT 1',
+        [groupId],
+      )).rowCount === 1;
+    },
+
+    async patchSourceList(input) {
+      const assignments: string[] = [];
+      const values: unknown[] = [];
+      if (input.groupId !== undefined) {
+        values.push(input.groupId);
+        assignments.push(`group_id = $${values.length}`);
+      }
+      if (input.hidden !== undefined) {
+        values.push(input.hidden);
+        assignments.push(`hidden = $${values.length}`);
+      }
+      if (input.appearance !== undefined) {
+        values.push(input.appearance === null ? null : JSON.stringify(input.appearance));
+        assignments.push(`appearance = $${values.length}::jsonb`);
+      }
+      if (assignments.length === 0) return;
+      values.push(input.sourceListId);
+      await pool.query(
+        `UPDATE source_lists SET ${assignments.join(', ')} WHERE id = $${values.length}`,
+        values,
+      );
+    },
+
+    async applyLocalSourceListRename(input) {
+      await transaction(pool, async (client) => {
+        const assignments = ['user_display_name = $1'];
+        const values: unknown[] = [input.name];
+        if (input.icon !== undefined) {
+          values.push(input.icon);
+          assignments.push(`icon = $${values.length}`);
+        }
+        if (input.iconColor !== undefined) {
+          values.push(input.iconColor);
+          assignments.push(`icon_color = $${values.length}`);
+        }
+        values.push(input.sourceListId);
+        await client.query(
+          `UPDATE source_lists SET ${assignments.join(', ')} WHERE id = $${values.length}`,
+          values,
+        );
+        await client.query(
+          `
+            UPDATE tasks
+            SET source_list_name = $1
+            WHERE source_list_id = (
+              SELECT source_id FROM source_lists WHERE id = $2
+            )
+              AND connector_instance_id = (
+                SELECT connector_instance_id FROM source_lists WHERE id = $2
+              )
+          `,
+          [input.name, input.sourceListId],
+        );
+      });
+    },
+
+    async confirmRemoteSourceListRename(sourceListId, name) {
+      await pool.query(
+        `
+          UPDATE source_lists
+          SET name = $1, last_known_remote_name = $1
+          WHERE id = $2
+        `,
+        [name, sourceListId],
+      );
+    },
+
+    async beginSourceListRepair(input) {
+      return transaction(pool, async (client) => {
+        const inserted = await client.query(
+          `
+            INSERT INTO list_fix_audit_log (
+              id, created_at, strategy, status, original_list_id, original_source_id,
+              original_name, original_group_id, connector_instance_id, new_list_id,
+              new_name, task_snapshot, move_results, tasks_total, tasks_moved,
+              tasks_failed, old_list_deleted
+            ) VALUES (
+              $1, $2, $3, 'pending', $4, $5, $6, $7, $8, NULL, $9,
+              '[]'::jsonb, '[]'::jsonb, 0, 0, 0, false
+            )
+            ON CONFLICT (id) DO NOTHING
+            RETURNING id
+          `,
+          [
+            input.id,
+            input.createdAt,
+            input.strategy,
+            input.sourceList.id,
+            input.sourceList.sourceId,
+            input.sourceList.name,
+            input.sourceList.groupId,
+            input.sourceList.connectorInstanceId,
+            input.newName,
+          ],
+        );
+        const repair = mapSourceListRepair((await rows<SourceListRepairRecord>(
+          client,
+          `
+            SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+            FROM list_fix_audit_log
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [input.id],
+        ))[0]);
+        if (!sourceListRepairMatches(repair, input)) {
+          throw new Error('Source list repair idempotency key collision');
+        }
+        return { repair, replayed: inserted.rowCount === 0 };
+      });
+    },
+
+    async getSourceListRepair(id) {
+      const repair = (await rows<SourceListRepairRecord>(
+        pool,
+        `
+          SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+          FROM list_fix_audit_log
+          WHERE id = $1
+          LIMIT 1
+        `,
+        [id],
+      ))[0];
+      return repair ? mapSourceListRepair(repair) : null;
+    },
+
+    async checkpointSourceListRepair(input) {
+      const assignments = ['status = $1'];
+      const values: unknown[] = [input.status];
+      const add = (column: string, value: unknown, cast = '') => {
+        values.push(value);
+        assignments.push(`${column} = $${values.length}${cast}`);
+      };
+      if (input.newListId !== undefined) add('new_list_id', input.newListId);
+      if (input.taskSnapshot !== undefined) {
+        add('task_snapshot', JSON.stringify(input.taskSnapshot), '::jsonb');
+        add('tasks_total', input.taskSnapshot.length);
+      }
+      if (input.moveResults !== undefined) {
+        const moved = input.moveResults.filter((result) => result.success).length;
+        add('move_results', JSON.stringify(input.moveResults), '::jsonb');
+        add('tasks_moved', moved);
+        add('tasks_failed', input.moveResults.length - moved);
+      }
+      if (input.oldListDeleted !== undefined) {
+        add('old_list_deleted', input.oldListDeleted);
+      }
+      values.push(input.id);
+      return (await pool.query(
+        `
+          UPDATE list_fix_audit_log
+          SET ${assignments.join(', ')}
+          WHERE id = $${values.length} AND status <> 'completed'
+        `,
+        values,
+      )).rowCount === 1;
+    },
+
+    async finalizeSourceListRepair(input: FinalizeSourceListRepair) {
+      return transaction(pool, async (client) => {
+        const repairRow = (await rows<SourceListRepairRecord>(
+          client,
+          `
+            SELECT ${SOURCE_LIST_REPAIR_COLUMNS}
+            FROM list_fix_audit_log
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [input.id],
+        ))[0];
+        if (!repairRow) return 'conflict';
+        const repair = mapSourceListRepair(repairRow);
+        if (repair.status === 'completed') return 'replayed';
+        if (
+          repair.strategy !== input.strategy
+          || repair.originalListId !== input.sourceListId
+          || repair.originalName !== input.expectedOriginalName
+        ) return 'conflict';
+        const sourceList = (await rows<{
+          name: string;
+          sourceId: string;
+          connectorInstanceId: string;
+        }>(
+          client,
+          `
+            SELECT
+              name,
+              source_id AS "sourceId",
+              connector_instance_id AS "connectorInstanceId"
+            FROM source_lists
+            WHERE id = $1
+            FOR UPDATE
+          `,
+          [input.sourceListId],
+        ))[0];
+        if (
+          !sourceList
+          || sourceList.name !== input.expectedOriginalName
+          || sourceList.sourceId !== repair.originalSourceId
+          || sourceList.connectorInstanceId !== repair.connectorInstanceId
+        ) {
+          return 'conflict';
+        }
+        if (input.strategy === 'strip-emoji') {
+          await client.query(
+            `
+              UPDATE source_lists
+              SET name = $1,
+                  last_known_remote_name = $1,
+                  user_display_name = CASE
+                    WHEN $2::boolean THEN $3
+                    ELSE user_display_name
+                  END
+              WHERE id = $4
+            `,
+            [
+              input.newName,
+              input.userDisplayName !== undefined,
+              input.userDisplayName ?? null,
+              input.sourceListId,
+            ],
+          );
+          await client.query(
+            "UPDATE list_fix_audit_log SET status = 'completed' WHERE id = $1",
+            [input.id],
+          );
+          return 'completed';
+        }
+        const moved = input.moveResults.filter((result) => result.success).length;
+        if (input.status === 'completed') {
+          await client.query('DELETE FROM source_lists WHERE id = $1', [input.sourceListId]);
+        }
+        await client.query(
+          `
+            UPDATE list_fix_audit_log
+            SET status = $1,
+                new_list_id = $2,
+                task_snapshot = $3::jsonb,
+                move_results = $4::jsonb,
+                tasks_total = $5,
+                tasks_moved = $6,
+                tasks_failed = $7,
+                old_list_deleted = $8
+            WHERE id = $9
+          `,
+          [
+            input.status,
+            input.newListId,
+            JSON.stringify(input.taskSnapshot),
+            JSON.stringify(input.moveResults),
+            input.taskSnapshot.length,
+            moved,
+            input.taskSnapshot.length - moved,
+            input.oldListDeleted,
+            input.id,
+          ],
+        );
+        return 'completed';
+      });
+    },
+
+    async reorderSourceLists(orderedIds) {
+      await transaction(pool, async (client) => {
+        for (const [index, id] of orderedIds.entries()) {
+          await client.query(
+            'UPDATE source_lists SET sort_order = $1 WHERE id = $2',
+            [index, id],
+          );
+        }
+      });
+    },
+
+    listSourceRankings,
+
+    async putSourceRankings(rankings, now) {
+      await transaction(pool, async (client) => {
+        for (const ranking of rankings) {
+          const updated = await client.query(
+            `
+              UPDATE source_rankings
+              SET rank = $1,
+                  name = COALESCE(NULLIF($2, ''), name),
+                  updated_at = $3
+              WHERE id = $4
+            `,
+            [
+              ranking.rank,
+              ranking.name,
+              now,
+              ranking.id,
+            ],
+          );
+          if (updated.rowCount === 0) {
+            await client.query(
+              `
+                INSERT INTO source_rankings (id, connector_type, name, rank, updated_at)
+                VALUES ($1, $2, $3, $4, $5)
+              `,
+              [
+                ranking.id,
+                ranking.connectorType,
+                ranking.name,
+                ranking.rank,
+                now,
+              ],
+            );
+          }
+        }
+      });
+      return listSourceRankings();
+    },
+
+    async listSyncHistory(input) {
+      const conditions: string[] = [];
+      const parameters: unknown[] = [];
+      const bind = (value: unknown) => {
+        parameters.push(value);
+        return `$${parameters.length}`;
+      };
+      if (input.before) {
+        conditions.push(`synced_at < ${bind(input.before)}`);
+      }
+      if (input.connectorIds?.length) {
+        conditions.push(`connector_id = ANY(${bind(input.connectorIds)}::text[])`);
+      }
+      if (input.results?.length) {
+        const resultConditions = input.results.map((result) => {
+          if (result === 'errors') {
+            return `(success = FALSE OR jsonb_array_length(errors) > 0)`;
+          }
+          const hasChanges = `(
+            tasks_added > 0 OR tasks_updated > 0 OR tasks_removed > 0
+            OR tasks_pushed > 0 OR local_only_protected > 0 OR alerts_added > 0
+          )`;
+          if (result === 'changes') return hasChanges;
+          return `(
+            success = TRUE AND NOT ${hasChanges}
+            AND jsonb_array_length(errors) = 0
+          )`;
+        });
+        conditions.push(`(${resultConditions.join(' OR ')})`);
+      }
+      const limitParameter = bind(input.limit + 1);
+      const historyRows = await rows<SyncHistoryRecord>(
+        pool,
+        `
+          SELECT ${SYNC_HISTORY_COLUMNS}
+          FROM sync_log
+          ${conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''}
+          ORDER BY synced_at DESC, id DESC
+          LIMIT ${limitParameter}
+        `,
+        parameters,
+      );
+      const hasMore = historyRows.length > input.limit;
+      return { history: historyRows.slice(0, input.limit), hasMore };
+    },
+
+    async getSyncWorkerHeartbeat() {
+      return (await rows<{ startedAt: string; heartbeatAt: string }>(
+        pool,
+        `
+          SELECT started_at AS "startedAt", heartbeat_at AS "heartbeatAt"
+          FROM runtime_telemetry
+          WHERE role = 'worker'
+          ORDER BY heartbeat_at DESC
+          LIMIT 1
+        `,
+      ))[0] ?? null;
+    },
+  };
+}

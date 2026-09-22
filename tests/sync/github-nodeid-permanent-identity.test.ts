@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
@@ -10,12 +11,16 @@ import {
 type DbModule = typeof import('@/db');
 type SchemaModule = typeof import('@/db/schema');
 type IdentityModule = typeof import('@/lib/external-identities');
+type PullManagerModule = typeof import('@/lib/sync/pull-manager');
+type HierarchyModule = typeof import('@/lib/sync/github-hierarchy-reconciliation');
 
 const dbPath = join(tmpdir(), `mc-nodeid-permanent-${process.pid}.db`);
 const now = '2026-08-16T00:00:00.000Z';
 let database: DbModule;
 let schema: SchemaModule;
 let identity: IdentityModule;
+let pullManager: PullManagerModule;
+let hierarchy: HierarchyModule;
 
 beforeAll(async () => {
   if (existsSync(dbPath)) rmSync(dbPath);
@@ -24,10 +29,12 @@ beforeAll(async () => {
   vi.doUnmock('drizzle-orm');
   vi.doUnmock('crypto');
   vi.resetModules();
-  [database, schema, identity] = await Promise.all([
-    import('@/db'),
+  [database, schema, identity, pullManager, hierarchy] = await Promise.all([
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/external-identities'),
+    import('@/lib/sync/pull-manager'),
+    import('@/lib/sync/github-hierarchy-reconciliation'),
   ]);
   database.default.insert(schema.connectorConfigs).values({
     id: 'github-permanent',
@@ -116,17 +123,17 @@ afterAll(() => {
   if (existsSync(dbPath)) rmSync(dbPath);
 });
 
-function runtime() {
+async function runtime(syncKind: 'full' | 'incremental' = 'full') {
   return new identity.GitHubStableIdentityRuntime({
     connectorInstanceId: 'github-permanent',
-    modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-permanent'),
-    syncKind: 'full',
+    modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-permanent'),
+    syncKind,
   });
 }
 
 describe('permanent GitHub NodeID identity', () => {
-  it('is always stable with no mode or rollback surface', () => {
-    const snapshot = identity.getGitHubIdentityModeSnapshot('github-permanent');
+  it('is always stable with no mode or rollback surface', async () => {
+    const snapshot = await identity.getGitHubIdentityModeSnapshot('github-permanent');
     expect(snapshot).toEqual({
       connectorInstanceId: 'github-permanent',
       effectiveMode: 'stable',
@@ -147,13 +154,13 @@ describe('permanent GitHub NodeID identity', () => {
       expect(identity as Record<string, unknown>).not.toHaveProperty(removed);
     }
     // An unprovisioned connector is stable too — it can never be locator-primary.
-    expect(identity.getGitHubIdentityModeSnapshot('missing-connector'))
+    expect(await identity.getGitHubIdentityModeSnapshot('missing-connector'))
       .toMatchObject({ effectiveMode: 'stable', modeRevision: 0 });
   });
 
-  it('produces no comparison evidence while resolving a normal sync batch', () => {
-    const scope = runtime();
-    const decisions = scope.resolveBatch('task', 'task', [{
+  it('produces no comparison evidence while resolving a normal sync batch', async () => {
+    const scope = await runtime();
+    const decisions = await scope.resolveBatch('task', 'task', [{
       candidateKey: 'acme/app:2',
       locatorMatchedLocalIds: ['task-child'],
       boundAction: 'update',
@@ -186,9 +193,79 @@ describe('permanent GitHub NodeID identity', () => {
     }
   });
 
-  it('resolves a renamed locator by NodeID instead of the mutable source_id', () => {
-    const scope = runtime();
-    const [decision] = scope.resolveBatch('task', 'task', [{
+  it('does not fail an incremental sync for a partial hierarchy population', async () => {
+    const scope = await runtime('incremental');
+    const result = await hierarchy.reconcileGitHubTaskHierarchy(
+      'github-permanent',
+      new Map([
+        ['acme/app:1', {
+          childSourceId: 'acme/app:1',
+          childIdentityEvidence: githubIssueEvidence({
+            issueStableId: 'I_parent',
+            repositoryStableId: 'R_app',
+            owner: 'acme',
+            repository: 'app',
+            issueNumber: 1,
+          }),
+          parent: null,
+        }],
+        ['acme/app:2', {
+          childSourceId: 'acme/app:2',
+          childIdentityEvidence: githubIssueEvidence({
+            issueStableId: 'I_child',
+            repositoryStableId: 'R_app',
+            owner: 'acme',
+            repository: 'app',
+            issueNumber: 2,
+          }),
+          parent: null,
+        }],
+      ]),
+      new Set(['acme/app']),
+      true,
+      new Map(),
+      {
+        identityRuntime: scope,
+        requireCompletePopulation: false,
+      },
+    );
+
+    expect(result).toEqual({ applied: false, updated: 0 });
+    expect(scope.blockedReasonCodes).not.toContain('sub_issue_population_incomplete');
+  });
+
+  it('still blocks a full sync for a partial hierarchy population', async () => {
+    const scope = await runtime('full');
+    await hierarchy.reconcileGitHubTaskHierarchy(
+      'github-permanent',
+      new Map([
+        ['acme/app:1', {
+          childSourceId: 'acme/app:1',
+          childIdentityEvidence: githubIssueEvidence({
+            issueStableId: 'I_parent',
+            repositoryStableId: 'R_app',
+            owner: 'acme',
+            repository: 'app',
+            issueNumber: 1,
+          }),
+          parent: null,
+        }],
+      ]),
+      new Set(['acme/app']),
+      true,
+      new Map(),
+      {
+        identityRuntime: scope,
+        requireCompletePopulation: true,
+      },
+    );
+
+    expect(scope.blockedReasonCodes).toContain('sub_issue_population_incomplete');
+  });
+
+  it('resolves a renamed locator by NodeID instead of the mutable source_id', async () => {
+    const scope = await runtime();
+    const [decision] = await scope.resolveBatch('task', 'task', [{
       candidateKey: 'new-owner/renamed:9',
       // The remote locator moved; no local row matches it any more.
       locatorMatchedLocalIds: [],
@@ -211,9 +288,9 @@ describe('permanent GitHub NodeID identity', () => {
     });
   });
 
-  it('blocks instead of falling back when NodeID evidence is missing', () => {
-    const scope = runtime();
-    const decisions = scope.resolveBatch('task', 'task', [
+  it('blocks instead of falling back when NodeID evidence is missing', async () => {
+    const scope = await runtime();
+    const decisions = await scope.resolveBatch('task', 'task', [
       {
         // No evidence at all: the caller only has the mutable locator.
         candidateKey: 'acme/app:1',
@@ -253,28 +330,135 @@ describe('permanent GitHub NodeID identity', () => {
     ]));
   });
 
-  it('blocks a write when the task has no NodeID binding', () => {
-    const cycleId = identity.beginGitHubWriteCycle({
+  it('ignores retired path locators but blocks active path reuse', async () => {
+    const insertEntity = database.sqlite.prepare(`
+      INSERT INTO external_entities (
+        id, provider, host_key, entity_type, stable_id, identity_version,
+        next_locator_revision, first_seen_at, last_seen_at
+      ) VALUES (?, 'github', 'github.com', 'issue', ?, 1, 2, ?, ?)
+    `);
+    const insertLocator = database.sqlite.prepare(`
+      INSERT INTO external_entity_locators (
+        id, external_entity_id, repository_entity_id, provider, host_key, owner, repository,
+        owner_key, repository_key, issue_number, valid_from, valid_to, last_seen_at,
+        observation_source, locator_revision
+      ) VALUES (?, ?, 'entity-R_app', 'github', 'github.com', 'acme', 'app',
+        'acme', 'app', ?, ?, ?, ?, 'graphql', 1)
+    `);
+    insertEntity.run('entity-I_retired_owner', 'I_retired_owner', now, now);
+    insertLocator.run(
+      'locator-I_retired_owner',
+      'entity-I_retired_owner',
+      90,
+      now,
+      '2026-08-16T01:00:00.000Z',
+      '2026-08-16T01:00:00.000Z',
+    );
+    insertEntity.run('entity-I_active_owner', 'I_active_owner', now, now);
+    insertLocator.run('locator-I_active_owner', 'entity-I_active_owner', 91, now, null, now);
+
+    const scope = await runtime();
+    const decisions = await scope.resolveBatch('task', 'task', [
+      {
+        candidateKey: 'acme/app:90',
+        unboundAction: 'create',
+        evidence: githubIssueEvidence({
+          issueStableId: 'I_replacement_after_retired',
+          repositoryStableId: 'R_app',
+          owner: 'acme',
+          repository: 'app',
+          issueNumber: 90,
+        }),
+      },
+      {
+        candidateKey: 'acme/app:91',
+        unboundAction: 'create',
+        evidence: githubIssueEvidence({
+          issueStableId: 'I_replacement_while_active',
+          repositoryStableId: 'R_app',
+          owner: 'acme',
+          repository: 'app',
+          issueNumber: 91,
+        }),
+      },
+    ]);
+    scope.complete('failed', 'test_probe');
+
+    expect(decisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        candidateKey: 'acme/app:90',
+        appliedSource: 'stable',
+        outcome: 'resolved',
+        selectedAction: 'create',
+      }),
+      expect.objectContaining({
+        candidateKey: 'acme/app:91',
+        appliedSource: 'blocked',
+        outcome: 'path_reuse',
+        selectedAction: 'none',
+      }),
+    ]));
+  });
+
+  it('reports blocked task identity decisions with bounded non-sensitive audit entries', async () => {
+    const scope = await runtime();
+    const [decision] = await scope.resolveBatch('task', 'task', [{
+      candidateKey: 'acme/app:1',
+      locatorMatchedLocalIds: ['task-parent'],
+      localTaskId: 'task-parent',
+    }]);
+    scope.complete('failed', 'test_probe');
+    const audit: import('@/lib/sync').SyncAuditEntry[] = [];
+    const summary: import('@/lib/sync/pull-manager').GitHubTaskIdentityBlockSummary = {
+      count: 0,
+      outcomes: {},
+    };
+
+    for (let index = 0; index < 25; index++) {
+      pullManager.recordBlockedTaskIdentityDecision(
+        { ...decision, candidateKey: `acme/app:${index + 100}` },
+        audit,
+        summary,
+      );
+    }
+
+    expect(summary).toEqual({
+      count: 25,
+      outcomes: { missing_stable_id: 25 },
+    });
+    expect(audit).toHaveLength(20);
+    expect(audit[0]).toEqual({
+      action: 'protected',
+      taskTitle: 'GitHub task identity blocked',
+      taskSourceId: 'acme/app:100',
+      reason: 'Stable identity decision blocked: missing_stable_id',
+    });
+    expect(JSON.stringify(audit)).not.toContain('stableIdDigest');
+    expect(JSON.stringify(audit)).not.toContain('externalEntityId');
+  });
+
+  it('blocks a write when the task has no NodeID binding', async () => {
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-permanent',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-permanent'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-permanent'),
       pendingCandidateCount: 1,
     });
-    const scope = runtime();
-    expect(() => identity.authorizeGitHubWrite({
+    const scope = await runtime();
+    await expect(identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-permanent',
       taskId: 'task-unbound',
       operation: 'update',
       identityRuntime: scope,
       writeCycleId: cycleId,
-    })).toThrow('missing_or_inaccessible_identity');
-    expect(() => identity.authorizeGitHubWrite({
+    })).rejects.toThrow('missing_or_inaccessible_identity');
+    await expect(identity.authorizeGitHubWrite({
       connectorInstanceId: 'github-permanent',
       taskId: 'task-parent',
       operation: 'update',
       identityRuntime: undefined,
       writeCycleId: cycleId,
-    })).toThrow('missing_identity_runtime');
-    identity.finishGitHubWriteCycle(cycleId, {
+    })).rejects.toThrow('missing_identity_runtime');
+    await identity.finishGitHubWriteCycle(cycleId, {
       observed: 0,
       applied: 0,
       blocked: 1,
@@ -303,21 +487,21 @@ describe('permanent GitHub NodeID identity', () => {
     `).run();
   });
 
-  it('keeps the identity epoch as the only durable write fence', () => {
-    const cycleId = identity.beginGitHubWriteCycle({
+  it('keeps the identity epoch as the only durable write fence', async () => {
+    const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-permanent',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-permanent'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-permanent'),
       pendingCandidateCount: 1,
     });
     database.sqlite.prepare(`
       UPDATE github_identity_controls SET mode_revision = 4 WHERE connector_instance_id = ?
     `).run('github-permanent');
-    expect(() => identity.beginGitHubWriteCycle({
+    await expect(identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-permanent',
       modeSnapshot: { modeRevision: 3 },
       pendingCandidateCount: 1,
-    })).toThrow('stale_write_cycle_mode');
-    expect(identity.finishGitHubWriteCycle(cycleId, {
+    })).rejects.toThrow('stale_write_cycle_mode');
+    expect(await identity.finishGitHubWriteCycle(cycleId, {
       observed: 0,
       applied: 0,
       blocked: 0,

@@ -44,6 +44,7 @@ import {
 } from '@/lib/hooks/useSystemHealth';
 import { useNavigationCounts } from '@/lib/hooks/useNavigationBadges';
 import { useAppBadge, useBadgeMode } from '@/lib/hooks/useAppBadge';
+import { useSyncBannerPreference } from '@/lib/hooks/useSyncBannerPreference';
 
 interface FeatureFlags {
   taskCreation: boolean;
@@ -51,11 +52,47 @@ interface FeatureFlags {
   financeEnabled: boolean;
 }
 
+export function ConnectorHealthIssue({
+  connector,
+}: {
+  connector: HealthData['connectors'][number];
+}) {
+  return (
+    <div className="flex items-start gap-1.5">
+      <span
+        className={cn(
+          "mt-1.5 w-1.5 h-1.5 rounded-full shrink-0",
+          connector.status === 'error' ? 'bg-red-500' : 'bg-yellow-500',
+        )}
+        aria-hidden="true"
+      />
+      <div className="min-w-0 flex-1">
+        <div className="flex items-baseline gap-2">
+          <span className="text-xs font-medium text-[var(--text-primary)]">{connector.name}</span>
+          {connector.lastSyncAt && (
+            <span className="text-xs text-[var(--text-tertiary)] ml-auto shrink-0">
+              {new Date(connector.lastSyncAt).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </span>
+          )}
+        </div>
+        <p className="mt-0.5 text-xs leading-4 text-[var(--text-secondary)]">
+          {connector.message}
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function ToolbarRow({
+  features,
   health,
   showHealthTooltip,
   setShowHealthTooltip,
 }: {
+  features: FeatureFlags | null;
   health: HealthData | null;
   showHealthTooltip: boolean;
   setShowHealthTooltip: (v: boolean) => void;
@@ -78,7 +115,7 @@ function ToolbarRow({
       <div className={`${widthClass} flex flex-shrink-0 items-center gap-2 pl-4 transition-[width] duration-200`}>
         <AppHistoryControls />
         <div className="min-w-0 flex-1">
-          <SearchCommand />
+          <SearchCommand features={features} />
         </div>
       </div>
       {/* Center: QuickAddBar */}
@@ -122,7 +159,7 @@ function ToolbarRow({
             <motion.div
               id="health-tooltip"
               role="tooltip"
-              className="absolute right-0 top-full mt-1.5 w-64 bg-[var(--surface-2)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] z-50 p-3"
+              className="absolute right-0 top-full mt-1.5 w-80 max-w-[calc(100vw-1.5rem)] bg-[var(--surface-2)] border border-[var(--border-strong)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] z-50 p-3"
               variants={dropdownVariants}
               initial="hidden"
               animate="show"
@@ -135,19 +172,11 @@ function ToolbarRow({
               {health.connectors.filter(c => c.status === 'error' || c.status === 'degraded').length > 0 && (
                 <div className="border-t border-[var(--border)] pt-2 mt-2">
                   <p className="text-xs font-medium text-[var(--warning)] uppercase mb-1">Connector Sync Issues</p>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-2">
                     {health.connectors
                       .filter(c => c.status === 'error' || c.status === 'degraded')
                       .map(c => (
-                        <div key={c.id} className="flex items-center gap-1.5">
-                          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", c.status === 'error' ? 'bg-red-500' : 'bg-yellow-500')} />
-                          <span className="text-xs text-[var(--text-primary)]">{c.name}</span>
-                          {c.lastSyncAt && (
-                            <span className="text-[11px] text-[var(--text-tertiary)] ml-auto">
-                              {new Date(c.lastSyncAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          )}
-                        </div>
+                        <ConnectorHealthIssue key={c.id} connector={c} />
                       ))}
                   </div>
                 </div>
@@ -255,6 +284,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       showHealthTooltip={showHealthTooltip}
       setShowHealthTooltip={setShowHealthTooltip}
       syncProgress={syncContextValue.progress}
+      onSyncConnector={syncContextValue.triggerSync}
     >
       {children}
     </AppShellInner>
@@ -274,6 +304,7 @@ function AppShellInner({
   showHealthTooltip,
   setShowHealthTooltip,
   syncProgress,
+  onSyncConnector,
   children,
 }: {
   features: FeatureFlags | null;
@@ -282,6 +313,7 @@ function AppShellInner({
   showHealthTooltip: boolean;
   setShowHealthTooltip: (v: boolean) => void;
   syncProgress: import('@/lib/hooks/useSyncStream').SyncProgress;
+  onSyncConnector: (connectorId: string) => void;
   children: React.ReactNode;
 }) {
   const { isDrawerOpen, openDrawer, closeDrawer } = useMobileDrawer();
@@ -291,7 +323,7 @@ function AppShellInner({
   const mainContent = (
     <main
       id="main-content"
-      className="flex-1 overflow-hidden bg-[var(--background)] pb-[calc(3.5rem+var(--safe-area-inset-bottom)+1px)] sm:pb-0"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden bg-[var(--background)]"
     >
       <MobileRouteGate route={routeMetadata}>
         {children}
@@ -301,6 +333,7 @@ function AppShellInner({
   const mobileMenuButtonRef = useRef<HTMLButtonElement>(null);
   const navigationCounts = useNavigationCounts();
   const [badgeMode] = useBadgeMode();
+  const { showBanner: showSyncBanner, setShowBanner: setShowSyncBanner } = useSyncBannerPreference();
   const appBadgeCount = badgeMode === 'unread_notifications'
     ? navigationCounts.unreadNotifications
     : badgeMode === 'myday_incomplete'
@@ -311,7 +344,7 @@ function AppShellInner({
   useAppBadge(appBadgeCount);
 
   return (
-    <div className="flex h-screen bg-[var(--background)]">
+    <div className="app-viewport flex bg-[var(--background)]">
       <PriorityWizardGate />
       <KeyboardShortcuts />
       <DopamineMenu />
@@ -323,12 +356,14 @@ function AppShellInner({
         isSyncing={syncProgress.isSyncing}
         counts={navigationCounts}
         syncStatus={health?.connectors ?? []}
+        syncProgress={syncProgress}
+        onSyncConnector={onSyncConnector}
+        showSyncBanner={showSyncBanner}
+        onShowSyncBannerChange={setShowSyncBanner}
       />
 
       {/* Right area: toolbar + content */}
       <div className="flex flex-col flex-1 min-w-0 min-h-0 overflow-hidden">
-        <DemoModeBanner />
-
         {/* Mobile Header (F-11/F-12/F-13/F-14) */}
         <MobileHeader
           title={mobileTitle}
@@ -338,10 +373,13 @@ function AppShellInner({
           navigationCounts={navigationCounts}
         />
 
+        <DemoModeBanner />
+
         {/* Toolbar: Search + Quick Add + Actions (desktop only) */}
         {features?.taskCreation !== false && (
           <div className="relative z-40 hidden sm:block">
             <ToolbarRow
+              features={features}
               health={health}
               showHealthTooltip={showHealthTooltip}
               setShowHealthTooltip={setShowHealthTooltip}
@@ -350,7 +388,7 @@ function AppShellInner({
         )}
 
         {/* Sync Progress Banner */}
-        <SyncProgressBanner progress={syncProgress} />
+        {showSyncBanner && <SyncProgressBanner progress={syncProgress} />}
 
         {/* Quick Sort keeps a single live queue landmark during route hydration. */}
         {pathname === '/quick-sort' ? (

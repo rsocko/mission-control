@@ -14,7 +14,8 @@ import type {
   CopilotTerminalState,
   CreateCopilotRunInput,
 } from '../copilot-session-lifecycle';
-import { DurableAiRunStore } from './store';
+import type { DurableAiRunRepository } from './repository';
+import { getDurableAiRunRepository } from './runtime';
 import type {
   ClaimedDurableAiRun,
   DurableAiRunEvent,
@@ -165,13 +166,25 @@ function parseRecord(
   };
 }
 
+export interface DurableCopilotWorkerAuthority {
+  runId: string;
+  ownerId: string;
+  attempt: number;
+}
+
 export class DurableCopilotRunStore implements CopilotRunStore {
-  constructor(private readonly durableRuns: DurableAiRunStore) {}
+  constructor(
+    private readonly durableRuns: DurableAiRunRepository,
+    private readonly workerAuthority?: DurableCopilotWorkerAuthority,
+  ) {}
 
   async get(runId: string): Promise<CopilotRunRecord | undefined> {
-    const run = this.durableRuns.getInternalRun(runId);
+    if (this.workerAuthority && runId !== this.workerAuthority.runId) {
+      return undefined;
+    }
+    const run = await this.durableRuns.getInternalRun(runId);
     if (!run?.executionState) return undefined;
-    const providerSession = this.durableRuns.getProviderSession(runId);
+    const providerSession = await this.durableRuns.getProviderSession(runId);
     return parseRecord(
       run.executionState,
       providerSession?.provider === COPILOT_PROVIDER
@@ -181,15 +194,20 @@ export class DurableCopilotRunStore implements CopilotRunStore {
   }
 
   async list(): Promise<CopilotRunRecord[]> {
-    const runs = this.durableRuns.listInternalRunsByRoute(COPILOT_EXECUTION_ROUTE);
+    if (this.workerAuthority) {
+      const record = await this.get(this.workerAuthority.runId);
+      return record ? [record] : [];
+    }
+    const runs = await this.durableRuns.listInternalRunsByRoute(COPILOT_EXECUTION_ROUTE);
     const records = await Promise.all(runs.map((run) => this.get(run.id)));
     return records.filter((record): record is CopilotRunRecord => Boolean(record));
   }
 
   async create(record: CopilotRunRecord): Promise<boolean> {
-    let run = this.durableRuns.getInternalRun(record.runId);
+    let run = await this.durableRuns.getInternalRun(record.runId);
     if (!run) {
-      this.durableRuns.createRun({
+      if (this.workerAuthority) return false;
+      await this.durableRuns.createRun({
         id: record.runId,
         idempotencyKey: `copilot:${record.runId}`,
         featureId: record.featureId,
@@ -202,14 +220,28 @@ export class DurableCopilotRunStore implements CopilotRunStore {
         tracestate: record.traceContext.tracestate,
         now: new Date(record.createdAt),
       });
-      run = this.durableRuns.getInternalRun(record.runId);
+      run = await this.durableRuns.getInternalRun(record.runId);
     }
     if (!run || run.executionState) return false;
-    return this.durableRuns.initializeExecutionState(
+    const initialize = (revision: number) => this.durableRuns.initializeExecutionState(
       record.runId,
       recordState(record),
-      {
-        expectedRevision: run.revision,
+      this.workerAuthority
+        ? {
+            expectedRevision: revision,
+            providerSession: record.providerSessionId
+              ? {
+                  provider: COPILOT_PROVIDER,
+                  reference: record.providerSessionId,
+                }
+              : undefined,
+            requiredLeaseOwner: this.workerAuthority.ownerId,
+            requiredAttempt: this.workerAuthority.attempt,
+            leaseState: 'active',
+            now: new Date(record.updatedAt),
+          }
+        : {
+        expectedRevision: revision,
         status: durableStatus(record.state, record.terminalState),
         traceparent: record.traceContext.traceparent,
         tracestate: record.traceContext.tracestate,
@@ -226,15 +258,74 @@ export class DurableCopilotRunStore implements CopilotRunStore {
         now: new Date(record.updatedAt),
       },
     );
+    if (!this.workerAuthority) return initialize(run.revision);
+    for (let retries = 0; retries < 4; retries += 1) {
+      if (await initialize(run.revision)) return true;
+      run = await this.durableRuns.getInternalRun(record.runId);
+      if (!run || run.executionState) return false;
+    }
+    return false;
   }
 
   async compareAndSet(
     expectedRevision: number,
     record: CopilotRunRecord,
   ): Promise<boolean> {
-    const run = this.durableRuns.getInternalRun(record.runId);
+    const run = await this.durableRuns.getInternalRun(record.runId);
     const current = parseRecord(run?.executionState ?? null);
     if (!run || !current || current.revision !== expectedRevision) return false;
+    if (this.workerAuthority) {
+      if (
+        run.leaseOwner !== this.workerAuthority.ownerId
+        || run.attempt !== this.workerAuthority.attempt
+        || !run.leaseExpiresAt
+      ) {
+        return false;
+      }
+      let durableRun = run;
+      for (let retries = 0; retries < 4; retries += 1) {
+        const latest = parseRecord(durableRun.executionState);
+        if (!latest || latest.revision !== expectedRevision) return false;
+        const updated = await this.durableRuns.compareAndSetExecutionState(
+          record.runId,
+          durableRun.revision,
+          recordState(record),
+          {
+            traceparent: record.traceContext.traceparent,
+            tracestate: record.traceContext.tracestate,
+            owner: durableRun.leaseOwner,
+            leaseExpiresAt: durableRun.leaseExpiresAt,
+            provider: COPILOT_PROVIDER,
+            model: record.model,
+            fallbackState: 'not_used',
+            ...(record.providerSessionId
+              ? {
+                  providerSession: {
+                    provider: COPILOT_PROVIDER,
+                    reference: record.providerSessionId,
+                  },
+                }
+              : {}),
+            allowedCurrentStatuses: [
+              'running',
+              'cancelling',
+              'succeeded',
+              'failed',
+              'cancelled',
+              'timed_out',
+            ],
+            requiredLeaseOwner: this.workerAuthority.ownerId,
+            requiredAttempt: this.workerAuthority.attempt,
+            leaseState: 'active',
+            now: new Date(record.updatedAt),
+          },
+        );
+        if (updated) return true;
+        durableRun = await this.durableRuns.getInternalRun(record.runId)
+          ?? durableRun;
+      }
+      return false;
+    }
     const status = durableStatus(record.state, record.terminalState);
     const guard = transitionGuard(status);
     const now = new Date(record.updatedAt);
@@ -253,7 +344,7 @@ export class DurableCopilotRunStore implements CopilotRunStore {
         leaseState: expired ? 'expired' : 'active',
       };
     }
-    const updated = this.durableRuns.compareAndSetExecutionState(
+    const updated = await this.durableRuns.compareAndSetExecutionState(
       record.runId,
       run.revision,
       recordState(record),
@@ -300,12 +391,13 @@ export class DurableCopilotRunStore implements CopilotRunStore {
 
 export class DurableCopilotEventSink implements HoustonRunEventSink {
   constructor(
-    private readonly durableRuns: DurableAiRunStore,
+    private readonly durableRuns: DurableAiRunRepository,
     private readonly ownerId: string,
+    private readonly attempt?: number,
   ) {}
 
-  emit(event: HoustonRunEvent): void {
-    this.durableRuns.appendEventForExecutionOwner(event.runId, this.ownerId, {
+  async emit(event: HoustonRunEvent): Promise<void> {
+    await this.durableRuns.appendEventForExecutionOwner(event.runId, this.ownerId, {
       eventId: event.eventId,
       idempotencyKey: event.idempotencyKey,
       kind: event.kind,
@@ -314,18 +406,18 @@ export class DurableCopilotEventSink implements HoustonRunEventSink {
       model: event.provider.model,
       fallbackState: 'not_used',
       now: new Date(event.observedAt),
-    });
+    }, new Date(event.observedAt), this.attempt);
   }
 }
 
-export function getDurableCopilotEventCursor(
-  durableRuns: DurableAiRunStore,
+export async function getDurableCopilotEventCursor(
+  durableRuns: DurableAiRunRepository,
   runId: string,
-): HoustonRunEventCursor | undefined {
+): Promise<HoustonRunEventCursor | undefined> {
   const events: DurableAiRunEvent[] = [];
   let cursor = 0;
   while (true) {
-    const page = durableRuns.getEventsAfter(runId, cursor, 1_000);
+    const page = await durableRuns.getEventsAfter(runId, cursor, 1_000);
     events.push(...page.filter((event) =>
       typeof event.payload.sequence === 'number'));
     if (page.length < 1_000) break;
@@ -360,7 +452,7 @@ export function getDurableCopilotEventCursor(
     ...(lastNative && typeof lastNative.payload.timestamp === 'string'
       ? { lastNativeTimestamp: lastNative.payload.timestamp }
       : {}),
-    seenIdempotencyKeys: durableRuns.getEventIdempotencyKeys(runId),
+    seenIdempotencyKeys: await durableRuns.getEventIdempotencyKeys(runId),
   };
 }
 
@@ -386,17 +478,35 @@ export function copilotRunInputFromDurableRun(
   };
 }
 
-export function createDurableCopilotPersistence(
+export async function createDurableCopilotPersistence(
   ownerId: string,
-  durableRuns = new DurableAiRunStore(),
-): {
+  durableRuns?: DurableAiRunRepository,
+  workerAuthority?: DurableCopilotWorkerAuthority,
+): Promise<{
   store: CopilotRunStore;
   eventSink: HoustonRunEventSink;
+  primeEventCursor(runId: string): Promise<void>;
   eventCursor(runId: string): HoustonRunEventCursor | undefined;
-} {
+}> {
+  const repository = durableRuns ?? await getDurableAiRunRepository();
+  const eventCursors = new Map<string, HoustonRunEventCursor | undefined>();
   return {
-    store: new DurableCopilotRunStore(durableRuns),
-    eventSink: new DurableCopilotEventSink(durableRuns, ownerId),
-    eventCursor: (runId) => getDurableCopilotEventCursor(durableRuns, runId),
+    store: new DurableCopilotRunStore(repository, workerAuthority),
+    eventSink: new DurableCopilotEventSink(
+      repository,
+      ownerId,
+      workerAuthority?.attempt,
+    ),
+    primeEventCursor: async (runId) => {
+      eventCursors.set(
+        runId,
+        await getDurableCopilotEventCursor(repository, runId),
+      );
+    },
+    eventCursor: (runId) => {
+      const cursor = eventCursors.get(runId);
+      eventCursors.delete(runId);
+      return cursor;
+    },
   };
 }

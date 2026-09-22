@@ -53,6 +53,8 @@ export interface NotificationProviderPresentation {
   templateKey?: string | null;
   presentation?: Record<string, unknown> & {
     sourceName?: string;
+    subjectIcon?: string;
+    subjectIconUrl?: string;
     subtitle?: string;
     richContent?: NotificationRichContent;
   };
@@ -101,7 +103,7 @@ export interface NotificationProviderActionResult {
   state?: Extract<NotificationState, 'read' | 'resolved' | 'dismissed'>;
   error?: {
     message: string;
-    status: 400 | 409;
+    status: 400 | 409 | 503;
   };
 }
 

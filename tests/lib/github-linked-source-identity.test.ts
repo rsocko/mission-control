@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import { and, eq } from 'drizzle-orm';
 
 vi.unmock('drizzle-orm');
@@ -18,7 +19,7 @@ let identity: typeof import('@/lib/external-identities');
 const now = '2026-08-09T20:00:00.000Z';
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   schema = await import('@/db/schema');
   identity = await import('@/lib/external-identities');
   database.default.insert(schema.connectorConfigs).values([
@@ -41,14 +42,14 @@ afterAll(() => {
 });
 
 describe('GitHub linked-source stable identity', () => {
-  it('associates trusted evidence idempotently and resolves by task ID', () => {
+  it('associates trusted evidence idempotently and resolves by task ID', async () => {
     addTask('local-task-1', 'local', 'local:1');
     addTask('github-primary-1', 'github-a', 'owner/repo:1');
     addLinkedSource('linked-1', 'local-task-1', 'github-a', 'owner/repo:1');
     const evidence = issueEvidence('I_1', 'R_1', 'owner', 'repo', 1);
-    persistPrimary('github-a', 'github-primary-1', evidence);
+    await persistPrimary('github-a', 'github-primary-1', evidence);
 
-    expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
+    expect(await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-1',
       sourceId: 'owner/repo:1',
       evidence,
@@ -56,7 +57,7 @@ describe('GitHub linked-source stable identity', () => {
       linkedSourceId: 'linked-1',
       state: 'associated',
     }]);
-    expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
+    expect(await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-1',
       sourceId: 'owner/repo:1',
       evidence,
@@ -65,13 +66,13 @@ describe('GitHub linked-source stable identity', () => {
       state: 'associated',
     }]);
 
-    const resolved = identity.resolveGitHubLinkedSourceIdentityBatch('github-a', [{
+    const resolved = (await identity.resolveGitHubLinkedSourceIdentityBatch('github-a', [{
       candidateKey: 'linked:linked-1',
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
       sourceId: 'owner/repo:1',
       evidence,
-    }]).resolutions.get('linked:linked-1');
+    }])).resolutions.get('linked:linked-1');
     expect(resolved).toMatchObject({
       selectedLocalIds: ['local-task-1'],
       evidence: 'verified',
@@ -81,7 +82,7 @@ describe('GitHub linked-source stable identity', () => {
     expect(JSON.stringify(resolved)).not.toContain('I_1');
   });
 
-  it('isolates connectors and hosts and rejects duplicate stable associations', () => {
+  it('isolates connectors and hosts and rejects duplicate stable associations', async () => {
     addTask('local-task-2', 'local', 'local:2');
     addTask('local-task-3', 'local', 'local:3');
     addTask('github-primary-b', 'github-b', 'owner/repo:1');
@@ -97,18 +98,18 @@ describe('GitHub linked-source stable identity', () => {
       101,
       'github.example.com',
     );
-    persistPrimary('github-b', 'github-primary-b', githubEvidence);
-    persistPrimary('github-a', 'github-enterprise-primary', enterpriseEvidence);
-    expect(identity.persistGitHubLinkedSourceIdentityBatch('github-b', [{
+    await persistPrimary('github-b', 'github-primary-b', githubEvidence);
+    await persistPrimary('github-a', 'github-enterprise-primary', enterpriseEvidence);
+    expect((await identity.persistGitHubLinkedSourceIdentityBatch('github-b', [{
       linkedSourceId: 'linked-2',
       sourceId: 'owner/repo:1',
       evidence: githubEvidence,
-    }])[0].state).toBe('associated');
-    expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
+    }]))[0].state).toBe('associated');
+    expect((await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-3',
       sourceId: 'owner/repo:101',
       evidence: enterpriseEvidence,
-    }])[0].state).toBe('associated');
+    }]))[0].state).toBe('associated');
 
     addTask('github-primary-duplicate', 'github-a', 'owner/duplicate:2');
     addTask('local-task-duplicate-a', 'local', 'local:duplicate-a');
@@ -127,17 +128,17 @@ describe('GitHub linked-source stable identity', () => {
       'duplicate',
       2,
     );
-    persistPrimary('github-a', 'github-primary-duplicate', duplicateEvidence);
-    expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
+    await persistPrimary('github-a', 'github-primary-duplicate', duplicateEvidence);
+    expect((await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-duplicate-a',
       sourceId: 'owner/duplicate:2',
       evidence: duplicateEvidence,
-    }])[0].state).toBe('associated');
-    expect(identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
+    }]))[0].state).toBe('associated');
+    expect((await identity.persistGitHubLinkedSourceIdentityBatch('github-a', [{
       linkedSourceId: 'linked-4',
       sourceId: 'Owner/Duplicate:2',
       evidence: duplicateEvidence,
-    }])[0].state).toBe('collision');
+    }]))[0].state).toBe('collision');
     expect(database.default.select().from(schema.taskLinkedSourceEntities).where(and(
       eq(schema.taskLinkedSourceEntities.connectorInstanceId, 'github-a'),
       eq(schema.taskLinkedSourceEntities.linkedSourceId, 'linked-4'),
@@ -148,19 +149,19 @@ describe('GitHub linked-source stable identity', () => {
     ['missing', 'missing_stable_id'],
     ['partial', 'partial_fetch'],
     ['inaccessible', 'inaccessible'],
-  ] as const)('blocks on %s evidence without mutating the linked-source locator', (state, outcome) => {
+  ] as const)('blocks on %s evidence without mutating the linked-source locator', async (state, outcome) => {
     const runtime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
-    const decision = runtime.resolveLinkedSourceBatch([{
+    const decision = (await runtime.resolveLinkedSourceBatch([{
       candidateKey: `linked:${state}`,
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
       sourceId: 'owner/repo:1',
       evidenceState: state,
-    }])[0];
+    }]))[0];
     runtime.complete('succeeded');
 
     expect(decision).toMatchObject({
@@ -176,26 +177,26 @@ describe('GitHub linked-source stable identity', () => {
     });
   });
 
-  it('detects locator change and path replacement without rebinding', () => {
+  it('detects locator change and path replacement without rebinding', async () => {
     const renamedEvidence = issueEvidence('I_1', 'R_1', 'new-owner', 'new-repo', 1);
     const locatorRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
-    expect(locatorRuntime.resolveLinkedSourceBatch([{
+    expect((await locatorRuntime.resolveLinkedSourceBatch([{
       candidateKey: 'linked:locator-change',
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
       sourceId: 'owner/repo:1',
       evidence: renamedEvidence,
-    }])[0]).toMatchObject({
+    }]))[0]).toMatchObject({
       outcome: 'locator_change',
       selectedLocalId: 'local-task-1',
     });
     locatorRuntime.complete('succeeded');
 
-    identity.upsertExternalEntity({
+    await identity.upsertExternalEntity({
       identity: {
         provider: 'github',
         hostKey: 'github.com',
@@ -206,16 +207,16 @@ describe('GitHub linked-source stable identity', () => {
     });
     const replacementRuntime = new identity.GitHubStableIdentityRuntime({
       connectorInstanceId: 'github-a',
-      modeSnapshot: identity.getGitHubIdentityModeSnapshot('github-a'),
+      modeSnapshot: await identity.getGitHubIdentityModeSnapshot('github-a'),
       syncKind: 'full',
     });
-    expect(replacementRuntime.resolveLinkedSourceBatch([{
+    expect((await replacementRuntime.resolveLinkedSourceBatch([{
       candidateKey: 'linked:path-reuse',
       linkedSourceId: 'linked-1',
       taskId: 'local-task-1',
       sourceId: 'owner/repo:1',
       evidence: issueEvidence('I_replacement', 'R_1', 'owner', 'repo', 1),
-    }])[0]).toMatchObject({
+    }]))[0]).toMatchObject({
       outcome: 'path_reuse',
       appliedSource: 'blocked',
       selectedLocalId: null,
@@ -228,10 +229,10 @@ describe('GitHub linked-source stable identity', () => {
       });
   });
 
-  it('keeps existing legacy-only rows upgrade compatible and bounded', () => {
+  it('keeps existing legacy-only rows upgrade compatible and bounded', async () => {
     addTask('legacy-task', 'local', 'local:legacy');
     addLinkedSource('linked-legacy', 'legacy-task', 'github-a', 'owner/legacy:9');
-    const result = identity.resolveGitHubLinkedSourceIdentityBatch('github-a', [{
+    const result = await identity.resolveGitHubLinkedSourceIdentityBatch('github-a', [{
       candidateKey: 'linked:legacy',
       linkedSourceId: 'linked-legacy',
       taskId: 'legacy-task',
@@ -244,7 +245,7 @@ describe('GitHub linked-source stable identity', () => {
       evidence: 'missing',
       action: 'none',
     });
-    expect(() => identity.resolveGitHubLinkedSourceIdentityBatch(
+    await expect(identity.resolveGitHubLinkedSourceIdentityBatch(
       'github-a',
       Array.from({ length: 501 }, (_, index) => ({
         candidateKey: `linked:${index}`,
@@ -253,7 +254,7 @@ describe('GitHub linked-source stable identity', () => {
         sourceId: 'owner/legacy:9',
         evidenceState: 'missing' as const,
       })),
-    )).toThrow('maximum of 500');
+    )).rejects.toThrow('maximum of 500');
   });
 });
 
@@ -316,12 +317,12 @@ function addLinkedSource(
   }).run();
 }
 
-function persistPrimary(
+async function persistPrimary(
   connectorInstanceId: string,
   localId: string,
   evidence: ReturnType<typeof issueEvidence>,
-): void {
-  identity.persistExternalIdentityBatch([{
+): Promise<void> {
+  await identity.persistExternalIdentityBatch([{
     target: {
       connectorInstanceId,
       bindingType: 'task',

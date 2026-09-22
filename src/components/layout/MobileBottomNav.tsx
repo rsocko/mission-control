@@ -30,7 +30,7 @@ interface NavTab {
 
 const tabs: NavTab[] = [
   { href: '/today', label: 'Today', icon: Sun, badgeTone: 'amber', badgeKey: 'myDay' },
-  { href: '/triage', label: 'Triage', icon: Layers, badgeTone: 'red', badgeKey: 'triage' },
+  { href: '/triage', label: 'Inbox', icon: Layers, badgeTone: 'red', badgeKey: 'triage' },
   { href: '/capture', label: 'Capture', icon: PlusCircle, elevated: true },
   { href: '/quick-sort', label: 'Sort', icon: Zap, badgeTone: 'amber', badgeKey: 'quickSort' },
   { href: '/ai', label: 'Houston', icon: HoustonIcon },
@@ -78,6 +78,8 @@ function CaptureFab({ href, isActive }: { href: string; isActive: boolean }) {
   });
 
   const isListening = voiceState === 'listening';
+  const isStarting = voiceState === 'starting';
+  const isVoiceActive = isStarting || isListening;
 
   // Clean up timer on unmount
   useEffect(() => {
@@ -149,32 +151,42 @@ function CaptureFab({ href, isActive }: { href: string; isActive: boolean }) {
             'flex items-center justify-center w-12 h-12 rounded-full shadow-lg transition-colors',
             isListening
               ? 'bg-red-500 text-white animate-pulse'
+              : isStarting
+                ? 'bg-[var(--accent-600)] text-white animate-pulse'
               : isActive
                 ? 'bg-[var(--accent-600)] text-white'
                 : 'bg-[var(--accent-600)] text-white opacity-90'
           )}
         >
-          {isListening ? <Mic size={24} /> : <PlusCircle size={24} />}
+          {isVoiceActive ? <Mic size={24} /> : <PlusCircle size={24} />}
         </span>
         <span
           className={cn(
             'text-[11px] font-medium leading-tight',
             isListening
               ? 'text-red-400'
+              : isStarting
+                ? 'text-[var(--accent-400)]'
               : isActive ? 'text-[var(--accent-400)]' : 'text-[var(--text-tertiary)]'
           )}
         >
-          {isListening ? 'Listening…' : 'Capture'}
+          {isListening ? 'Listening…' : isStarting ? 'Starting…' : 'Capture'}
         </span>
       </Link>
 
       {/* Voice dictation sheet */}
       {showVoiceSheet && (
-        <div className="fixed inset-x-0 bottom-16 z-50 flex justify-center px-4 pb-2 safe-area-pb">
+        <div className="fixed inset-x-0 bottom-[calc(3.5rem+var(--safe-area-inset-bottom)+1px)] z-50 flex justify-center px-4 pb-2">
           <div className="w-full max-w-sm rounded-2xl border border-[var(--border)] bg-[var(--surface-1)] p-4 shadow-xl">
             <div className="flex items-center justify-between mb-2">
               <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {isStopping ? 'Stopping…' : isListening ? 'Listening — speak your task' : 'Processing…'}
+                {isStopping
+                  ? 'Stopping…'
+                  : isListening
+                    ? 'Listening — speak your task'
+                    : isStarting
+                      ? 'Preparing microphone…'
+                      : 'Processing…'}
               </span>
               <button
                 type="button"
@@ -214,8 +226,9 @@ export function MobileBottomNav({
 
   return (
     <nav
-      className="fixed bottom-0 inset-x-0 z-40 sm:hidden bg-[var(--surface-1)] border-t border-[var(--border)] safe-area-pb"
+      className="safe-area-pb relative z-40 shrink-0 border-t border-[var(--border)] bg-[var(--surface-1)] sm:hidden"
       aria-label="Mobile navigation"
+      data-mobile-shell-nav
     >
       <div className="flex items-center justify-around h-14">
         {tabs.map((tab) => {

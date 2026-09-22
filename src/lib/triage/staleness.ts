@@ -1,7 +1,4 @@
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { eq, sql } from 'drizzle-orm';
-import type { TriageSourcePlatform } from '@/types';
+import { getTriagePersistenceRepositories } from './persistence';
 
 export interface QueueHealthMetrics {
   totalPending: number;
@@ -29,14 +26,7 @@ export interface QueueHealthMetrics {
 export async function getTriageQueueHealth(): Promise<QueueHealthMetrics> {
   const nowMs = Date.now();
 
-  // Fetch all pending items (only the fields we need)
-  const pendingItems = await db
-    .select({
-      capturedAt: triageItems.capturedAt,
-      sourcePlatform: triageItems.sourcePlatform,
-    })
-    .from(triageItems)
-    .where(eq(triageItems.status, 'pending'));
+  const pendingItems = await getTriagePersistenceRepositories().health.getPendingSnapshot();
 
   if (pendingItems.length === 0) {
     return {

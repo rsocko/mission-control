@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import {
   Timer, Play, Pause, RotateCcw, Target, Clock, AlertTriangle,
@@ -114,6 +114,9 @@ function ProgressRing({ progress, size = 120, strokeWidth = 4, urgency }: {
 // ─── Timer Panel Component ──────────────────────────────────────────────────
 
 interface TimerPanelProps {
+  taskId?: string;
+  hiddenWhenIdle?: boolean;
+  onRestore?: (restored: boolean) => void;
   /** Optional task title to display */
   taskTitle?: string;
   /** Optional deadline ISO string for deadline mode */
@@ -122,7 +125,9 @@ interface TimerPanelProps {
   onComplete?: () => void;
 }
 
-export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelProps) {
+export function TimerPanel({
+  taskId, taskTitle, taskDeadline, hiddenWhenIdle, onRestore, onComplete,
+}: TimerPanelProps) {
   const [mode, setMode] = useState<TimerMode>(taskDeadline ? 'deadline' : 'focus');
   const [focusDuration, setFocusDuration] = useState(25 * 60);
   const onCompleteRef = useRef(onComplete);
@@ -156,20 +161,31 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
     mode,
     duration: focusDuration,
     deadline: mode === 'deadline' ? taskDeadline : undefined,
+    taskId: taskId ?? null,
     onComplete: handleComplete,
     persistKey: 'mission-control:timer',
   });
 
+  useEffect(() => {
+    if (!timer.loading && timer.state !== 'idle') {
+      setMode(timer.mode);
+      onRestore?.(true);
+    }
+  }, [onRestore, timer.loading, timer.mode, timer.state]);
   const urgencyClass = getUrgencyClass(timer.remaining, timer.total);
 
   // Request notification permission on first start (not on mount)
   const handleStart = useCallback(() => {
     ensureNotificationPermission();
-    timer.start();
+    void timer.start();
   }, [timer]);
+  if (hiddenWhenIdle && timer.state === 'idle') return null;
 
   return (
-    <section className="bg-[var(--surface-1)] rounded-lg border border-[var(--border)] overflow-hidden">
+    <section
+      className="bg-[var(--surface-1)] rounded-lg border border-[var(--border)] overflow-hidden"
+      aria-busy={timer.loading || timer.pending}
+    >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-subtle)]">
         <div className="flex items-center gap-2">
@@ -181,7 +197,8 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
         {/* Mode Toggle */}
         <div className="flex bg-[var(--surface-2)] rounded-md p-0.5" role="tablist" aria-label="Timer mode">
           <button
-            onClick={() => { setMode('focus'); timer.reset(); }}
+            onClick={() => { void timer.reset(); setMode('focus'); }}
+            disabled={timer.loading || timer.pending}
             role="tab"
             aria-selected={mode === 'focus'}
             className={`px-2.5 py-1 text-xs rounded transition-[background-color,color,box-shadow] duration-150 flex items-center gap-1 ${
@@ -194,8 +211,8 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
             Focus
           </button>
           <button
-            onClick={() => { setMode('deadline'); timer.reset(); }}
-            disabled={!taskDeadline}
+            onClick={() => { void timer.reset(); setMode('deadline'); }}
+            disabled={!taskDeadline || timer.loading || timer.pending}
             role="tab"
             aria-selected={mode === 'deadline'}
             className={`px-2.5 py-1 text-xs rounded transition-[background-color,color,box-shadow] duration-150 flex items-center gap-1 ${
@@ -274,6 +291,8 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
             <motion.button
               whileTap={{ scale: 0.96 }}
               onClick={handleStart}
+              disabled={!taskId || timer.loading || timer.pending}
+              title={!taskId ? 'Select a task before starting a timer' : undefined}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-md bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-[background-color] duration-150"
             >
               <Play size={12} />
@@ -284,7 +303,8 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
           {timer.state === 'running' && (
             <motion.button
               whileTap={{ scale: 0.96 }}
-              onClick={timer.pause}
+              onClick={() => { void timer.pause(); }}
+              disabled={timer.loading || timer.pending}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-md bg-[var(--surface-2)] text-[var(--text-primary)] hover:bg-[var(--surface-3)] transition-[background-color] duration-150 border border-[var(--border)]"
             >
               <Pause size={12} />
@@ -295,7 +315,8 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
           {timer.state === 'paused' && (
             <motion.button
               whileTap={{ scale: 0.96 }}
-              onClick={timer.resume}
+              onClick={() => { void timer.resume(); }}
+              disabled={timer.loading || timer.pending}
               className="flex items-center gap-1.5 px-4 py-2 text-xs font-medium rounded-md bg-[var(--accent)] text-white hover:bg-[var(--accent-hover)] transition-[background-color] duration-150"
             >
               <Play size={12} />
@@ -306,7 +327,8 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
           {(timer.state === 'paused' || timer.state === 'completed') && (
             <motion.button
               whileTap={{ scale: 0.96 }}
-              onClick={timer.reset}
+              onClick={() => { void timer.reset(); }}
+              disabled={timer.loading || timer.pending}
               className="flex items-center gap-1.5 px-3 py-2 text-xs rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-2)] transition-[background-color,color] duration-150"
             >
               <RotateCcw size={12} />
@@ -314,6 +336,9 @@ export function TimerPanel({ taskTitle, taskDeadline, onComplete }: TimerPanelPr
             </motion.button>
           )}
         </div>
+        {timer.error && (
+          <p className="mt-3 text-xs text-red-400" role="alert">{timer.error}</p>
+        )}
       </div>
     </section>
   );

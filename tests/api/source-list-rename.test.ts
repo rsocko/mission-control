@@ -7,32 +7,20 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ── Mock DB ──────────────────────────────────────────────────────────
-const mockUpdate = vi.fn();
-const mockSet = vi.fn();
-const mockWhere = vi.fn();
-const mockLimit = vi.fn();
-const mockFrom = vi.fn();
+const mockGetSourceList = vi.fn();
+const mockApplyLocalSourceListRename = vi.fn();
+const mockConfirmRemoteSourceListRename = vi.fn();
 type MockConnector = {
   renameList: (sourceId: string, name: string) => Promise<void>;
 } | null;
 const mockGetConnector = vi.fn<(id: string) => MockConnector>(() => null);
 
-vi.mock('@/db', () => ({
-  default: {
-    select: () => ({ from: mockFrom }),
-    update: mockUpdate,
-  },
-}));
-
-vi.mock('@/db/schema', () => ({
-  sourceLists: { id: 'id', userDisplayName: 'user_display_name', name: 'name', lastKnownRemoteName: 'last_known_remote_name', icon: 'icon', iconColor: 'icon_color' },
-  tasks: { sourceListId: 'source_list_id', connectorInstanceId: 'connector_instance_id', sourceListName: 'source_list_name' },
-}));
-
-vi.mock('drizzle-orm', () => ({
-  eq: vi.fn((col: unknown, val: unknown) => ({ type: 'eq', col, val })),
-  and: vi.fn((...args: unknown[]) => ({ type: 'and', args })),
+vi.mock('@/lib/connectors/management-service', () => ({
+  getConnectorManagementPersistence: vi.fn(async () => ({
+    getSourceList: mockGetSourceList,
+    applyLocalSourceListRename: mockApplyLocalSourceListRename,
+    confirmRemoteSourceListRename: mockConfirmRemoteSourceListRename,
+  })),
 }));
 
 vi.mock('@/lib/logger', () => ({
@@ -48,10 +36,10 @@ vi.mock('@/lib/validation/emoji-safety', () => ({
   validateNameForGraphApi: vi.fn(() => null),
 }));
 
-vi.mock('@/lib/connectors', () => ({
-  connectorRegistry: {
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
     getConnector: mockGetConnector,
-  },
+  }),
 }));
 
 // ── Helpers ──────────────────────────────────────────────────────────
@@ -64,14 +52,7 @@ function makeRequest(body: Record<string, unknown>) {
 }
 
 function setupDbMocks(sourceList: Record<string, unknown> | null) {
-  // select().from().where().limit() chain
-  mockFrom.mockReturnValue({ where: mockWhere });
-  mockWhere.mockReturnValue({ limit: mockLimit });
-  mockLimit.mockResolvedValue(sourceList ? [sourceList] : []);
-
-  // update().set().where() chain
-  mockUpdate.mockReturnValue({ set: mockSet });
-  mockSet.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });
+  mockGetSourceList.mockResolvedValue(sourceList);
 }
 
 const DEFAULT_SOURCE_LIST = {
@@ -105,11 +86,12 @@ describe('PUT /api/source-lists/rename (body-based)', () => {
     expect(json.success).toBe(true);
     expect(json.name).toBe('My Renamed Repo');
 
-    // Verify DB update was called with userDisplayName
-    expect(mockUpdate).toHaveBeenCalled();
-    expect(mockSet).toHaveBeenCalledWith(
-      expect.objectContaining({ userDisplayName: 'My Renamed Repo' }),
-    );
+    expect(mockApplyLocalSourceListRename).toHaveBeenCalledWith({
+      sourceListId: DEFAULT_SOURCE_LIST.id,
+      name: 'My Renamed Repo',
+      icon: undefined,
+      iconColor: undefined,
+    });
   });
 
   it('should reject missing id', async () => {
@@ -153,13 +135,12 @@ describe('PUT /api/source-lists/rename (body-based)', () => {
       iconColor: '#ff0000',
     }));
 
-    expect(mockSet).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userDisplayName: 'With Icon',
-        icon: '🚀',
-        iconColor: '#ff0000',
-      }),
-    );
+    expect(mockApplyLocalSourceListRename).toHaveBeenCalledWith({
+      sourceListId: DEFAULT_SOURCE_LIST.id,
+      name: 'With Icon',
+      icon: '🚀',
+      iconColor: '#ff0000',
+    });
   });
 
   it('should not include icon fields when not provided', async () => {
@@ -171,10 +152,12 @@ describe('PUT /api/source-lists/rename (body-based)', () => {
       name: 'No Icon',
     }));
 
-    const setArg = mockSet.mock.calls[0][0];
-    expect(setArg).toEqual({ userDisplayName: 'No Icon' });
-    expect(setArg).not.toHaveProperty('icon');
-    expect(setArg).not.toHaveProperty('iconColor');
+    expect(mockApplyLocalSourceListRename).toHaveBeenCalledWith({
+      sourceListId: DEFAULT_SOURCE_LIST.id,
+      name: 'No Icon',
+      icon: undefined,
+      iconColor: undefined,
+    });
   });
 
   it('persists the local name before waiting for remote write-back', async () => {
@@ -192,12 +175,19 @@ describe('PUT /api/source-lists/rename (body-based)', () => {
     }));
 
     await vi.waitFor(() => expect(renameList).toHaveBeenCalledOnce());
-    expect(mockSet.mock.calls[0][0]).toEqual({
-      userDisplayName: 'Worker-safe name',
+    expect(mockApplyLocalSourceListRename).toHaveBeenCalledWith({
+      sourceListId: DEFAULT_SOURCE_LIST.id,
+      name: 'Worker-safe name',
+      icon: undefined,
+      iconColor: undefined,
     });
 
     finishRemoteRename?.();
     const response = await responsePromise;
     expect(response.status).toBe(200);
+    expect(mockConfirmRemoteSourceListRename).toHaveBeenCalledWith(
+      DEFAULT_SOURCE_LIST.id,
+      'Worker-safe name',
+    );
   });
 });

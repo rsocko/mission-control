@@ -1,31 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { and } from 'drizzle-orm';
 
-function chainable<T>(terminal: T) {
-  const chain = new Proxy({}, {
-    get(_, prop: string | symbol) {
-      if (prop === 'then') return (resolve: (value: T) => unknown) => resolve(terminal);
-      return vi.fn(() => chain);
+const clearExternalThumbnails = vi.fn();
+
+vi.mock('@/lib/triage/persistence', () => ({
+  getTriagePersistenceRepositories: () => ({
+    maintenance: {
+      clearExternalThumbnails,
     },
-  });
-  return chain;
-}
-
-const mockDb = {
-  update: vi.fn(() => chainable({ changes: 2 })),
-  select: vi.fn(() => chainable([])),
-  delete: vi.fn(() => chainable({ changes: 0 })),
-};
-
-vi.mock('@/db', () => ({ default: mockDb }));
-vi.mock('@/db/schema', () => ({
-  triageItems: {
-    id: 'id',
-    status: 'status',
-    sourcePlatform: 'sourcePlatform',
-    sourceUrl: 'sourceUrl',
-    thumbnailUrl: 'thumbnailUrl',
-  },
+  }),
 }));
 vi.mock('@/lib/triage/lifecycle', () => ({
   purgeDismissedItems: vi.fn(),
@@ -45,10 +27,10 @@ vi.mock('@/lib/logger', () => ({
 describe('POST /api/triage/storage image maintenance', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.update.mockReturnValue(chainable({ changes: 2 }));
+    clearExternalThumbnails.mockResolvedValue(2);
   });
 
-  it('excludes managed capture image URLs from clear_expired', async () => {
+  it('returns the adapter-owned clear_expired outcome', async () => {
     const { POST } = await import('@/app/api/triage/storage/route');
     const response = await POST(new Request('http://localhost/api/triage/storage', {
       method: 'POST',
@@ -57,6 +39,7 @@ describe('POST /api/triage/storage image maintenance', () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(vi.mocked(and)).toHaveBeenCalledWith(expect.anything(), expect.anything(), expect.anything());
+    expect(await response.json()).toEqual({ action: 'clear_expired', cleared: 2 });
+    expect(clearExternalThumbnails).toHaveBeenCalledOnce();
   });
 });

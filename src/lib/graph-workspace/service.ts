@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { sqlite } from '@/db';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import {
   ideationWorkspaceDocumentSchema,
   type IdeationWorkspaceDocument,
@@ -8,22 +8,32 @@ import {
   IdeationWorkspaceConflictError,
   type IdeationWorkspaceRepository,
 } from './repository';
-import { SqliteIdeationWorkspaceRepository } from './sqlite-repository';
 
 const nameSchema = z.string().trim().min(1).max(200);
 
+/**
+ * Resolves the composed, backend-selected workspace repository (L16).
+ *
+ * The service holds a resolver rather than a constructed repository so this
+ * module never evaluates a database driver at import time. That is what keeps
+ * the five `/api/ideation/workspaces` routes and their shared error helper out
+ * of the web/API SQLite-taint census entirely.
+ */
+export type IdeationWorkspaceRepositoryResolver =
+  () => Promise<IdeationWorkspaceRepository>;
+
 export class IdeationWorkspaceService {
-  constructor(private readonly repository: IdeationWorkspaceRepository) {}
+  constructor(private readonly resolveRepository: IdeationWorkspaceRepositoryResolver) {}
 
-  list(includeArchived = false) {
-    return this.repository.list(includeArchived);
+  async list(includeArchived = false) {
+    return (await this.resolveRepository()).list(includeArchived);
   }
 
-  get(id: string) {
-    return this.repository.get(id);
+  async get(id: string) {
+    return (await this.resolveRepository()).get(id);
   }
 
-  create(input: {
+  async create(input: {
     name: unknown;
     document: unknown;
     migrationSource?: unknown;
@@ -34,12 +44,13 @@ export class IdeationWorkspaceService {
     const migrationSource = input.migrationSource === undefined
       ? undefined
       : z.string().min(1).max(100).parse(input.migrationSource);
+    const repository = await this.resolveRepository();
     if (migrationSource) {
-      const existing = this.repository.findByMigrationSource(migrationSource);
+      const existing = await repository.findByMigrationSource(migrationSource);
       if (existing) return existing;
     }
     try {
-      return this.repository.create({
+      return await repository.create({
         id: `workspace-${crypto.randomUUID()}`,
         name,
         document,
@@ -50,15 +61,15 @@ export class IdeationWorkspaceService {
     } catch (error) {
       // A concurrent browser tab may win the unique migration-source insert.
       const migrated = migrationSource
-        ? this.repository.findByMigrationSource(migrationSource)
+        ? await repository.findByMigrationSource(migrationSource)
         : null;
       if (migrated) return migrated;
       throw error;
     }
   }
 
-  updateContent(id: string, baseRevision: unknown, document: unknown) {
-    return this.repository.updateContent(
+  async updateContent(id: string, baseRevision: unknown, document: unknown) {
+    return (await this.resolveRepository()).updateContent(
       id,
       z.number().int().positive().parse(baseRevision),
       ideationWorkspaceDocumentSchema.parse(document),
@@ -66,20 +77,24 @@ export class IdeationWorkspaceService {
     );
   }
 
-  rename(id: string, name: unknown) {
-    return this.repository.rename(id, nameSchema.parse(name), new Date().toISOString());
+  async rename(id: string, name: unknown) {
+    return (await this.resolveRepository()).rename(
+      id,
+      nameSchema.parse(name),
+      new Date().toISOString(),
+    );
   }
 
-  setArchived(id: string, archived: unknown) {
-    return this.repository.setArchived(
+  async setArchived(id: string, archived: unknown) {
+    return (await this.resolveRepository()).setArchived(
       id,
       z.boolean().parse(archived),
       new Date().toISOString(),
     );
   }
 
-  duplicate(id: string, name: unknown) {
-    return this.repository.duplicate(
+  async duplicate(id: string, name: unknown) {
+    return (await this.resolveRepository()).duplicate(
       id,
       `workspace-${crypto.randomUUID()}`,
       nameSchema.parse(name),
@@ -87,23 +102,26 @@ export class IdeationWorkspaceService {
     );
   }
 
-  deleteArchived(id: string) {
-    return this.repository.deleteArchived(id);
+  async deleteArchived(id: string) {
+    return (await this.resolveRepository()).deleteArchived(id);
   }
 
-  listVersions(id: string, limit: unknown) {
-    return this.repository.listVersions(
+  async listVersions(id: string, limit: unknown) {
+    return (await this.resolveRepository()).listVersions(
       id,
       z.coerce.number().int().min(1).max(100).default(30).parse(limit),
     );
   }
 
-  getVersion(id: string, revision: unknown) {
-    return this.repository.getVersion(id, z.coerce.number().int().positive().parse(revision));
+  async getVersion(id: string, revision: unknown) {
+    return (await this.resolveRepository()).getVersion(
+      id,
+      z.coerce.number().int().positive().parse(revision),
+    );
   }
 
-  restore(id: string, historicalRevision: unknown, baseRevision: unknown) {
-    return this.repository.restore(
+  async restore(id: string, historicalRevision: unknown, baseRevision: unknown) {
+    return (await this.resolveRepository()).restore(
       id,
       z.number().int().positive().parse(historicalRevision),
       z.number().int().positive().parse(baseRevision),
@@ -113,7 +131,7 @@ export class IdeationWorkspaceService {
 }
 
 export const ideationWorkspaceService = new IdeationWorkspaceService(
-  new SqliteIdeationWorkspaceRepository(sqlite),
+  async () => (await getWorkerPersistenceRepositories()).ideationWorkspaces,
 );
 
 export function isWorkspaceConflict(

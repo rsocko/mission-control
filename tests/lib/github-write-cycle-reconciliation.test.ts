@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { eq } from 'drizzle-orm';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -23,7 +24,7 @@ beforeAll(async () => {
   process.env.LOG_LEVEL = 'silent';
   vi.resetModules();
   [database, schema, identity] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
     import('@/lib/external-identities'),
   ]);
@@ -36,14 +37,14 @@ afterAll(() => {
 });
 
 describe('interrupted GitHub write-cycle reconciliation', () => {
-  it('finalizes route evidence persisted before counters as pre-dispatch retryable', () => {
+  it('finalizes route evidence persisted before counters as pre-dispatch retryable', async () => {
     const fixture = seedInterruptedCycle('route-before-counter', {
       observedRouteCount: 0,
     });
     const reason = 'Verified deployment restart before dispatch secret-token-123';
     const idempotencyKey = 'reconcile-route-before-counter';
 
-    const result = reconcile(fixture, { reason, idempotencyKey });
+    const result = await reconcile(fixture, { reason, idempotencyKey });
     expect(result).toMatchObject({
       ok: true,
       changed: true,
@@ -65,7 +66,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
         syncStatus: 'pending_push',
       });
 
-    const status = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    const status = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       includeEvidence: true,
       limit: 3,
       now,
@@ -97,12 +98,12 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     expect(serialized).not.toContain(fixture.token);
     expect(serialized).not.toContain(fixture.taskId);
 
-    expect(reconcile(fixture, { reason, idempotencyKey })).toMatchObject({
+    expect(await reconcile(fixture, { reason, idempotencyKey })).toMatchObject({
       ok: true,
       changed: false,
       reconciliationState: 'pre_dispatch_retryable',
     });
-    expect(reconcile(fixture, {
+    expect(await reconcile(fixture, {
       reason,
       idempotencyKey: 'different-reconciliation-key',
     })).toMatchObject({
@@ -112,7 +113,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     });
   });
 
-  it('accepts durable observation counters only after the undispatched lease expires', () => {
+  it('accepts durable observation counters only after the undispatched lease expires', async () => {
     const fixture = seedInterruptedCycle('counter-before-dispatch', {
       observedRouteCount: 1,
       cycleObservedAt: '2026-08-10T14:00:00.000Z',
@@ -120,7 +121,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       expiresAt: '2026-08-10T16:00:00.000Z',
     });
 
-    expect(reconcile(fixture)).toMatchObject({
+    expect(await reconcile(fixture)).toMatchObject({
       ok: false,
       changed: false,
       code: 'active_write_lease',
@@ -130,7 +131,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       SET expires_at = '2026-08-10T14:59:59.000Z'
       WHERE id = ?
     `).run(fixture.leaseId);
-    expect(reconcile(fixture)).toMatchObject({
+    expect(await reconcile(fixture)).toMatchObject({
       ok: true,
       changed: true,
       reconciliationState: 'pre_dispatch_retryable',
@@ -138,7 +139,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     });
   });
 
-  it('quarantines every possible post-dispatch outcome and never makes it retryable', () => {
+  it('quarantines every possible post-dispatch outcome and never makes it retryable', async () => {
     const fixture = seedInterruptedCycle('post-dispatch-timeout', {
       observedRouteCount: 1,
       cycleObservedAt: '2026-08-10T14:00:00.000Z',
@@ -146,7 +147,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       dispatchedAt: '2026-08-10T14:00:01.000Z',
     });
 
-    expect(reconcile(fixture)).toMatchObject({
+    expect(await reconcile(fixture)).toMatchObject({
       ok: false,
       changed: true,
       code: 'possible_post_dispatch_outcome',
@@ -164,7 +165,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       reconciliationCode: 'possible_post_dispatch_outcome',
       unknownCount: 1,
     });
-    expect(identity.finishGitHubWriteCycle(fixture.cycleId, {
+    expect(await identity.finishGitHubWriteCycle(fixture.cycleId, {
       observed: 1,
       applied: 1,
       blocked: 0,
@@ -178,7 +179,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
         reconciliationState: 'quarantined',
         unknownCount: 1,
       });
-    const status = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    const status = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       limit: 3,
       now,
     }) as {
@@ -203,7 +204,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     });
   });
 
-  it('returns completed zero-dispatch incomplete cycles in unresolved status details', () => {
+  it('returns completed zero-dispatch incomplete cycles in unresolved status details', async () => {
     const fixture = seedInterruptedCycle('completed-zero-dispatch-status', {
       observedRouteCount: 0,
       leaseState: 'expired',
@@ -213,7 +214,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       completedAt: now,
     }).where(eq(schema.githubIdentityWriteCycles.id, fixture.cycleId)).run();
 
-    const status = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    const status = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       limit: 100,
       now,
     }) as {
@@ -256,7 +257,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       failedCount: 0,
       leaseState: 'expired',
     }],
-  ])('audits completed pre-dispatch cycles with %s as retryable', (suffix, cycleCounts) => {
+  ])('audits completed pre-dispatch cycles with %s as retryable', async (suffix, cycleCounts) => {
     const fixture = seedInterruptedCycle(`completed-${suffix.replaceAll(' ', '-')}`, {
       observedRouteCount: cycleCounts.observedRouteCount,
       leaseState: cycleCounts.leaseState,
@@ -273,14 +274,14 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       updatedAt: now,
     }).where(eq(schema.taskSourceWriteLeases.id, fixture.leaseId)).run();
 
-    const status = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    const status = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       now,
     }) as {
       operationalState: { incompleteWriteCycles: number };
     };
     expect(status.operationalState.incompleteWriteCycles).toBe(1);
 
-    expect(reconcile(fixture, {
+    expect(await reconcile(fixture, {
       reason: `Verified completed ${suffix} had zero dispatch evidence`,
       idempotencyKey: `reconcile-completed-${suffix.replaceAll(' ', '-')}`,
     })).toMatchObject({
@@ -288,7 +289,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       changed: true,
       reconciliationState: 'pre_dispatch_retryable',
     });
-    const reconciledStatus = identity.getGitHubIdentityStatus(fixture.connectorId, {
+    const reconciledStatus = await identity.getGitHubIdentityStatus(fixture.connectorId, {
       now,
     }) as {
       operationalState: { incompleteWriteCycles: number };
@@ -296,7 +297,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     expect(reconciledStatus.operationalState.incompleteWriteCycles).toBe(0);
   });
 
-  it('quarantines a completed cycle when any lease has dispatch evidence', () => {
+  it('quarantines a completed cycle when any lease has dispatch evidence', async () => {
     const fixture = seedInterruptedCycle('completed-dispatched', {
       observedRouteCount: 1,
       cycleObservedAt: '2026-08-10T14:00:00.000Z',
@@ -308,7 +309,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       completedAt: now,
     }).where(eq(schema.githubIdentityWriteCycles.id, fixture.cycleId)).run();
 
-    expect(reconcile(fixture, {
+    expect(await reconcile(fixture, {
       reason: 'Completed cycle retained exact post-dispatch quarantine evidence',
       idempotencyKey: 'reconcile-completed-dispatched',
     })).toMatchObject({
@@ -324,7 +325,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       });
   });
 
-  it('recognizes a later durable successful retry without rewriting the original work', () => {
+  it('recognizes a later durable successful retry without rewriting the original work', async () => {
     const fixture = seedInterruptedCycle('later-success', {
       observedRouteCount: 1,
       cycleObservedAt: '2026-08-10T14:00:00.000Z',
@@ -350,7 +351,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       updatedAt: '2026-08-10T14:30:00.000Z',
     }).run();
 
-    expect(reconcile(fixture)).toMatchObject({
+    expect(await reconcile(fixture)).toMatchObject({
       ok: true,
       changed: true,
       reconciliationState: 'superseded',
@@ -365,12 +366,12 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       });
   });
 
-  it('isolates old revisions and preserves ambiguous leases for explicit remediation', () => {
+  it('isolates old revisions and preserves ambiguous leases for explicit remediation', async () => {
     const old = seedInterruptedCycle('old-revision', {
       modeRevision: 0,
       observedRouteCount: 0,
     });
-    expect(reconcile(old)).toMatchObject({
+    expect(await reconcile(old)).toMatchObject({
       ok: false,
       changed: false,
       code: 'stale_cycle_context',
@@ -378,7 +379,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     expect(database.default.select().from(schema.githubIdentityWriteCycles)
       .where(eq(schema.githubIdentityWriteCycles.id, old.cycleId)).get())
       .toMatchObject({ reconciliationState: 'unresolved' });
-    const oldStatus = identity.getGitHubIdentityStatus(old.connectorId, { now }) as {
+    const oldStatus = await identity.getGitHubIdentityStatus(old.connectorId, { now }) as {
       operationalState: { incompleteWriteCycles: number };
     };
     expect(oldStatus.operationalState.incompleteWriteCycles).toBe(1);
@@ -396,7 +397,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       startedAt: '2026-08-10T13:59:00.000Z',
       completedAt: '2026-08-10T14:01:00.000Z',
     }).run();
-    expect(reconcile(ambiguous)).toMatchObject({
+    expect(await reconcile(ambiguous)).toMatchObject({
       ok: false,
       changed: true,
       code: 'ambiguous_cycle_evidence',
@@ -439,15 +440,15 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
     ]));
   });
 
-  it('keeps one active cycle and rejects an unrelated concurrent comparison owner', () => {
+  it('keeps one active cycle and rejects an unrelated concurrent comparison owner', async () => {
     const fixture = seedInterruptedCycle('single-active-invariant');
-    const snapshot = identity.getGitHubIdentityModeSnapshot(fixture.connectorId);
-    const firstCycle = identity.beginGitHubWriteCycle({
+    const snapshot = await identity.getGitHubIdentityModeSnapshot(fixture.connectorId);
+    const firstCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: fixture.connectorId,
       modeSnapshot: snapshot,
       pendingCandidateCount: 1,
     });
-    const secondCycle = identity.beginGitHubWriteCycle({
+    const secondCycle = await identity.beginGitHubWriteCycle({
       connectorInstanceId: fixture.connectorId,
       modeSnapshot: snapshot,
       pendingCandidateCount: 1,
@@ -468,7 +469,7 @@ describe('interrupted GitHub write-cycle reconciliation', () => {
       FROM github_identity_write_cycles
       WHERE connector_instance_id = ? AND state = 'running'
     `).get(fixture.connectorId)).toEqual({ count: 1 });
-    expect(identity.finishGitHubWriteCycle(secondCycle, {
+    expect(await identity.finishGitHubWriteCycle(secondCycle, {
       observed: 0,
       applied: 0,
       blocked: 0,

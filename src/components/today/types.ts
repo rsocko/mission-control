@@ -22,15 +22,20 @@ export interface MyDayItem {
   status: string;
   statusReason?: TaskItem['statusReason'] | null;
   priority: string;
+  planningHorizon?: TaskItem['planningHorizon'] | null;
   dueDate: string | null;
   pushCount?: number;
+  planningSignalCount?: number;
   connectorType: string;
   connectorInstanceId: string;
+  syncStatus?: string;
+  pushRetryCount?: number;
   sourceId?: string;
   sourceListId?: string | null;
   sourceListName: string | null;
   assignee?: string | null;
   createdAt: string | null;
+  completedAt: string | null;
   tags: TaskTag[];
   metadata?: string | null;
   subtaskTotal?: number;
@@ -68,9 +73,11 @@ export interface SuggestionTask {
   id: string;
   title: string;
   status: string;
+  microStatus?: string | null;
   priority: string;
   dueDate: string | null;
   pushCount?: number;
+  planningSignalCount?: number;
   connectorType: string;
   connectorInstanceId: string;
   sourceId?: string | null;
@@ -82,6 +89,8 @@ export interface SuggestionTask {
 }
 
 export interface SuggestionGroups {
+  planningSignals: SuggestionTask[];
+  planningNext: SuggestionTask[];
   yesterday: SuggestionTask[];
   overdue: SuggestionTask[];
   dueToday: SuggestionTask[];
@@ -92,6 +101,12 @@ export interface SuggestionGroups {
   carriedForward: SuggestionTask[];
   repeatedlyRescheduled: SuggestionTask[];
 }
+
+export const REPLANNING_SUGGESTION = {
+  title: 'May Need Replanning',
+  description: 'Tasks with recent missed commitments, elapsed time blocks, overdue transitions, snooze extensions, or due dates moved later.',
+  insightsHref: '/insights#planning-friction',
+} as const;
 
 export interface CalendarEvent {
   id: string;
@@ -143,6 +158,8 @@ export interface SaveTemplateTask {
 }
 
 export const EMPTY_SUGGESTION_GROUPS: SuggestionGroups = {
+  planningSignals: [],
+  planningNext: [],
   yesterday: [],
   overdue: [],
   dueToday: [],

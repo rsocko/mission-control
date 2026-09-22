@@ -79,6 +79,92 @@ describe('useInlineRename', () => {
     expect(onSave).toHaveBeenCalledWith('Later', '📥', undefined);
   });
 
+  it('does not restore a stale draft when another row updates the source name', () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { rerender, unmount } = renderHook(
+      ({ name }) => useInlineRename({ name, onSave }),
+      { initialProps: { name: 'rsocko/tyrion' } },
+    );
+
+    rerender({ name: 'Tyrion' });
+    unmount();
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('rebases an open untouched editor when another row updates the source name', () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender, unmount } = renderHook(
+      ({ name }) => useInlineRename({ name, onSave }),
+      { initialProps: { name: 'rsocko/tyrion' } },
+    );
+
+    act(() => result.current.startEditing());
+    rerender({ name: 'Tyrion' });
+
+    expect(result.current.name).toBe('Tyrion');
+    unmount();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('rebases to the latest source when a dirty draft returns to its edit base', () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender, unmount } = renderHook(
+      ({ name }) => useInlineRename({ name, onSave }),
+      { initialProps: { name: 'rsocko/tyrion' } },
+    );
+
+    act(() => {
+      result.current.startEditing();
+      result.current.setName('Draft');
+    });
+    rerender({ name: 'Tyrion' });
+    act(() => result.current.setName('rsocko/tyrion'));
+
+    expect(result.current.name).toBe('Tyrion');
+    unmount();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it('persists color-only edits', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderHook(() => useInlineRename({
+      name: 'Tyrion',
+      icon: '📥',
+      iconColor: '#123456',
+      onSave,
+    }));
+
+    act(() => {
+      result.current.startEditing();
+      result.current.setIconColor('#abcdef');
+      void result.current.save();
+    });
+    await act(async () => Promise.resolve());
+
+    expect(onSave).toHaveBeenCalledWith('Tyrion', '📥', '#abcdef');
+  });
+
+  it('does not restore a stale draft after an unchanged edit closes', async () => {
+    const onSave = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender, unmount } = renderHook(
+      ({ name }) => useInlineRename({ name, onSave }),
+      { initialProps: { name: 'rsocko/tyrion' } },
+    );
+
+    act(() => {
+      result.current.startEditing();
+      result.current.scheduleBlur();
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(200));
+
+    expect(result.current.editing).toBe(false);
+    rerender({ name: 'Tyrion' });
+    unmount();
+
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
   it('cancel resets the draft and prevents blur and unmount saves', () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const { result, unmount } = renderHook(() => useInlineRename({

@@ -10,6 +10,7 @@ import { MobileSheet } from '@/components/ui/MobileSheet';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { getTaskPriorityVisual, isInactiveTaskStatus } from '@/lib/constants/task-formatting';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
 import { cn } from '@/lib/utils';
 import type { ProjectProgress } from '@/types';
 import Image from 'next/image';
@@ -43,6 +44,7 @@ interface ProjectTask {
   id: string;
   title: string;
   status: string;
+  microStatus?: string | null;
   priority: string;
 }
 
@@ -60,6 +62,12 @@ function isSyncManaged(project: { metadata?: Record<string, unknown> }): boolean
 
 function getHealthLabel(progress: ProjectProgress): string {
   if (progress.totalTasks === 0) return 'no tasks';
+  if (progress.pulse) {
+    if (progress.pulse.state === 'off_track') return 'off track';
+    if (progress.pulse.state === 'watch') return progress.pulse.freshness.state === 'stale' ? 'watch · stale' : 'watch';
+    if (progress.pulse.state === 'unknown') return 'pulse unknown';
+    return 'on track';
+  }
   const overdue = progress.health === 'behind' || progress.health === 'at_risk';
   if (overdue) return `${progress.totalTasks - progress.completedTasks} remaining`;
   return 'on track';
@@ -321,8 +329,10 @@ function TaskRow({ task }: { task: ProjectTask }) {
 
   return (
     <div className={cn('flex items-center gap-2.5 rounded-lg px-2 py-3 min-h-[44px] hover:bg-[var(--surface-2)]', isInactive && 'opacity-50')}>
+      <TaskStatusIndicator status={task.status} microStatus={task.microStatus} />
       <span className={cn('h-2 w-2 rounded-full flex-shrink-0', getTaskPriorityVisual(task.priority).dotClass)} />
       <span className={cn('text-sm text-[var(--text-primary)] truncate flex-1', isDone && 'line-through')}>{task.title}</span>
+      <TaskBlockedBadge status={task.status} microStatus={task.microStatus} className="max-w-28 truncate" />
     </div>
   );
 }

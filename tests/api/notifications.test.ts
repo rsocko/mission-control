@@ -7,6 +7,24 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Chainable DB mock ──────────────────────────────────────────────────────
 
+const actionMocks = vi.hoisted(() => ({
+  executeNotificationAction: vi.fn(),
+  queueFollowUpSync: vi.fn(),
+}));
+
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn().mockResolvedValue({
+    type: 'home-assistant',
+    executeNotificationAction: actionMocks.executeNotificationAction,
+  }),
+}));
+
+vi.mock('@/lib/sync', () => ({
+  syncScheduler: {
+    queueFollowUpSync: actionMocks.queueFollowUpSync,
+  },
+}));
+
 type ChainableProxy = Record<PropertyKey, unknown>;
 
 function chainable<T>(terminal: T) {
@@ -114,6 +132,61 @@ vi.mock('@/lib/notifications/notification-writeback', () => ({
   wakeNotificationWritebackDispatcher: vi.fn(),
 }));
 
+const mockWebPersistence = {
+  queryNotifications: vi.fn().mockResolvedValue({
+    items: [], actions: [], hasMore: false, cursor: null,
+    stats: { total: 0, unread: 0, attention: 0, urgent: 0, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
+    facets: {
+      level: {}, category: {}, source: {}, sourceAccount: [],
+      notificationType: [], state: {}, merchant: [],
+    },
+    matchingCount: 0,
+  }),
+  recoverStaleActions: vi.fn(),
+  restoreSnapshots: vi.fn().mockResolvedValue({ updatedCount: 1 }),
+  mutateStates: vi.fn().mockResolvedValue({ updatedCount: 1 }),
+  snoozeNotification: vi.fn().mockResolvedValue(true),
+  selectForBulkByIds: vi.fn().mockResolvedValue([]),
+  selectForBulkByQuery: vi.fn().mockResolvedValue([]),
+  validateMerchantExists: vi.fn().mockResolvedValue(true),
+  bulkMarkUnread: vi.fn().mockResolvedValue(0),
+  bulkDismissDemo: vi.fn().mockResolvedValue(0),
+  bulkHandleDemo: vi.fn().mockResolvedValue(0),
+  bulkMarkReadDemo: vi.fn().mockResolvedValue(0),
+  mutateNotificationsAndEnqueueWritebacks: vi.fn((ids: string[]) => ({
+    updatedCount: ids.length, queuedCount: ids.length,
+    results: ids.map((id: string) => ({ id, localStatus: 'updated', writebackStatus: 'pending' })),
+  })),
+  dismissNotificationsAndEnqueueWritebacks: vi.fn(() => ({ updatedCount: 1, queuedCount: 0 })),
+  wakeWritebackDispatcher: vi.fn(),
+  findNotificationForAction: vi.fn(async () => {
+    const rows = await mockDb.select();
+    return rows[0] ?? null;
+  }),
+  findNotificationAction: vi.fn(async () => {
+    const rows = await mockDb.select();
+    return rows[0] ?? null;
+  }),
+  updateNotificationFromAction: vi.fn(async () => {
+    await mockDb.update();
+  }),
+  claimProviderAction: vi.fn().mockResolvedValue(true),
+  finalizeProviderAction: vi.fn().mockResolvedValue(true),
+  claimWorkflowAction: vi.fn(async () => {
+    const result = await mockDb.update();
+    return result.changes === 1;
+  }),
+  finalizeWorkflowAction: vi.fn(async () => {
+    await mockDb.insert({ id: 'id' });
+    await mockDb.insert({ id: 'id' });
+    return true;
+  }),
+};
+
+vi.mock('@/lib/notifications/notification-web-service', () => ({
+  getNotificationWebPersistence: vi.fn(() => Promise.resolve(mockWebPersistence)),
+}));
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('GET /api/notifications', () => {
@@ -129,8 +202,18 @@ describe('GET /api/notifications', () => {
     const mockNotifications = [
       { id: 'n1', title: 'Test', level: 'urgent', state: 'unread', category: 'system', receivedAt: new Date().toISOString(), sortAt: new Date().toISOString(), levelRank: 0 },
     ];
-    mockDb.select.mockImplementationOnce(() => chainable(mockNotifications));
-    mockDb.select.mockImplementationOnce(() => chainable([])); // actions
+    mockWebPersistence.queryNotifications.mockResolvedValueOnce({
+      items: mockNotifications,
+      actions: [],
+      hasMore: false,
+      cursor: null,
+      stats: { total: 1, unread: 1, attention: 1, urgent: 1, actionNeeded: 0, headsUp: 0, fyi: 0, digest: 0, actionable: 0 },
+      facets: {
+        level: { urgent: 1 }, category: { system: 1 }, source: {},
+        sourceAccount: [], notificationType: [], state: { unread: 1 }, merchant: [],
+      },
+      matchingCount: 1,
+    });
 
     const { GET } = await import('@/app/api/notifications/route');
     const req = new Request('http://localhost/api/notifications');
@@ -138,6 +221,49 @@ describe('GET /api/notifications', () => {
     expect(res.status).toBe(200);
     const data = await res.json();
     expect(data).toHaveProperty('notifications');
+  });
+
+  it('hydrates notification-scoped icon URLs with the persisted notification id', async () => {
+    const receivedAt = new Date().toISOString();
+    mockWebPersistence.queryNotifications.mockResolvedValueOnce({
+      items: [{
+        id: 'persisted-notification-id',
+        title: 'Home Assistant update',
+        level: 'heads_up',
+        state: 'unread',
+        readState: 'unread',
+        disposition: 'inbox',
+        sourceState: 'active',
+        category: 'system',
+        receivedAt,
+        sortAt: receivedAt,
+        levelRank: 2,
+        presentation: {
+          subjectIconUrl: '/api/notifications/update%3Aupdate.router%3A2.0/subject-icon',
+        },
+      }],
+      actions: [],
+      hasMore: false,
+      cursor: null,
+      stats: { total: 1, unread: 1, attention: 1, urgent: 0, actionNeeded: 0, headsUp: 1, fyi: 0, digest: 0, actionable: 0 },
+      facets: {
+        level: { heads_up: 1 }, category: { system: 1 }, source: {},
+        sourceAccount: [], notificationType: [], state: { unread: 1 }, merchant: [],
+      },
+      matchingCount: 1,
+    });
+
+    const { GET } = await import('@/app/api/notifications/route');
+    const response = await GET(new Request('http://localhost/api/notifications'));
+
+    await expect(response.json()).resolves.toMatchObject({
+      notifications: [{
+        id: 'persisted-notification-id',
+        presentation: {
+          subjectIconUrl: '/api/notifications/persisted-notification-id/subject-icon',
+        },
+      }],
+    });
   });
 
   it('rejects invalid or duplicate merchant parameters before querying', async () => {
@@ -154,13 +280,37 @@ describe('GET /api/notifications', () => {
         error: 'merchant must be supplied once as a normalized merchant key',
       });
     }
-    expect(mockDb.select).not.toHaveBeenCalled();
+    expect(mockWebPersistence.queryNotifications).not.toHaveBeenCalled();
+  });
+
+  it('rejects a valid-shaped but unknown merchant', async () => {
+    mockWebPersistence.validateMerchantExists.mockResolvedValueOnce(false);
+    const merchant = `merchant-v1_${'Z'.repeat(43)}`;
+    const { GET } = await import('@/app/api/notifications/route');
+    const response = await GET(new Request(`http://localhost/api/notifications?merchant=${merchant}`));
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: 'merchant does not match available normalized notification metadata',
+    });
+    expect(mockWebPersistence.queryNotifications).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty result for a known merchant excluded by other filters', async () => {
+    const merchant = `merchant-v1_${'A'.repeat(43)}`;
+    const { GET } = await import('@/app/api/notifications/route');
+    const response = await GET(new Request(
+      `http://localhost/api/notifications?merchant=${merchant}&q=no-match`,
+    ));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      notifications: [],
+      matchingCount: 0,
+    });
   });
 
   it('restores independent lifecycle dimensions for undo', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([
-      { id: 'n1', sourceState: 'active' },
-    ]));
     const { PATCH } = await import('@/app/api/notifications/route');
     const response = await PATCH(new Request('http://localhost/api/notifications', {
       method: 'PATCH',
@@ -184,7 +334,13 @@ describe('GET /api/notifications', () => {
       success: true,
       updatedCount: 1,
     });
-    expect(mockDb.update).toHaveBeenCalled();
+    expect(mockWebPersistence.restoreSnapshots).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: 'n1',
+        readState: 'unread',
+        disposition: 'inbox',
+      }),
+    ]);
   });
 });
 
@@ -197,7 +353,14 @@ describe('POST /api/notifications/bulk', () => {
   });
 
   it('marks every unread notification read when all is requested', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([{ id: 'n1' }]));
+    mockWebPersistence.selectForBulkByQuery.mockResolvedValueOnce([{
+      id: 'n1',
+      readState: 'unread',
+      disposition: 'inbox',
+      sourceState: 'active',
+      mutedAt: null,
+    }]);
+    mockWebPersistence.bulkMarkReadDemo.mockResolvedValueOnce(1);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const req = new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -220,13 +383,14 @@ describe('POST /api/notifications/bulk', () => {
   });
 
   it('counts already-read notifications as no-ops without mutating them', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([{
+    mockWebPersistence.selectForBulkByIds.mockResolvedValueOnce([{
       id: 'n1',
       state: 'archived',
       readState: 'read',
       disposition: 'handled',
       sourceState: 'active',
-    }]));
+      mutedAt: null,
+    }]);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -244,11 +408,18 @@ describe('POST /api/notifications/bulk', () => {
         noOpCount: 1,
       },
     });
-    expect(mockDb.update).not.toHaveBeenCalled();
+    expect(mockWebPersistence.mutateNotificationsAndEnqueueWritebacks).not.toHaveBeenCalled();
   });
 
   it('resolves all-matching IDs on the server instead of trusting client IDs', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([{ id: 'authorized-id' }]));
+    mockWebPersistence.selectForBulkByQuery.mockResolvedValueOnce([{
+      id: 'authorized-id',
+      readState: 'unread',
+      disposition: 'inbox',
+      sourceState: 'active',
+      mutedAt: null,
+    }]);
+    mockWebPersistence.bulkHandleDemo.mockResolvedValueOnce(1);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -270,9 +441,15 @@ describe('POST /api/notifications/bulk', () => {
   });
 
   it('enforces the existing bulk cap after server-side resolution', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable(
-      Array.from({ length: 501 }, (_, index) => ({ id: `n-${index}` })),
-    ));
+    mockWebPersistence.selectForBulkByQuery.mockResolvedValueOnce(
+      Array.from({ length: 501 }, (_, index) => ({
+        id: `n-${index}`,
+        readState: 'unread',
+        disposition: 'inbox',
+        sourceState: 'active',
+        mutedAt: null,
+      })),
+    );
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -300,11 +477,11 @@ describe('POST /api/notifications/bulk', () => {
     }));
 
     expect(response.status).toBe(400);
-    expect(mockDb.select).not.toHaveBeenCalled();
+    expect(mockWebPersistence.selectForBulkByQuery).not.toHaveBeenCalled();
   });
 
   it('rejects a valid-shaped but unknown merchant in all-matching bulk scope', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([]));
+    mockWebPersistence.validateMerchantExists.mockResolvedValueOnce(false);
     const merchant = `merchant-v1_${'Z'.repeat(43)}`;
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
@@ -324,13 +501,13 @@ describe('POST /api/notifications/bulk', () => {
   });
 
   it('reports queued lifecycle writebacks through the shared bulk outcome', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([{
+    mockWebPersistence.selectForBulkByIds.mockResolvedValueOnce([{
       id: 'n1',
       readState: 'unread',
       disposition: 'inbox',
       sourceState: 'active',
       mutedAt: null,
-    }]));
+    }]);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -360,7 +537,7 @@ describe('POST /api/notifications/bulk', () => {
   });
 
   it('counts missing explicit lifecycle selections as no-ops', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([]));
+    mockWebPersistence.selectForBulkByIds.mockResolvedValueOnce([]);
     const { POST } = await import('@/app/api/notifications/bulk/route');
     const response = await POST(new Request('http://localhost/api/notifications/bulk', {
       method: 'POST',
@@ -382,8 +559,6 @@ describe('POST /api/notifications/bulk', () => {
 describe('POST /api/notifications/[id]/snooze', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockDb.select.mockReset();
-    mockDb.select.mockImplementation(() => chainable([]));
   });
 
   it('should import snooze route module', async () => {
@@ -392,9 +567,6 @@ describe('POST /api/notifications/[id]/snooze', () => {
   });
 
   it('rejects invalid duration', async () => {
-    // Mock notification exists
-    mockDb.select.mockImplementationOnce(() => chainable([{ id: 'n1' }]));
-
     const { POST } = await import('@/app/api/notifications/[id]/snooze/route');
     const req = new Request('http://localhost/api/notifications/n1/snooze', {
       method: 'POST',
@@ -404,14 +576,10 @@ describe('POST /api/notifications/[id]/snooze', () => {
 
     const res = await POST(req, { params: Promise.resolve({ id: 'n1' }) });
     expect(res.status).toBe(400);
+    expect(mockWebPersistence.mutateNotificationsAndEnqueueWritebacks).not.toHaveBeenCalled();
   });
 
   it('accepts valid duration and snoozes', async () => {
-    // Mock notification found
-    mockDb.select.mockImplementationOnce(() => chainable([{ id: 'n1' }]));
-    // Mock read metadata
-    mockDb.select.mockImplementationOnce(() => chainable([{ metadata: '{}' }]));
-
     const { POST } = await import('@/app/api/notifications/[id]/snooze/route');
     const req = new Request('http://localhost/api/notifications/n1/snooze', {
       method: 'POST',
@@ -424,10 +592,14 @@ describe('POST /api/notifications/[id]/snooze', () => {
     const data = await res.json();
     expect(data.success).toBe(true);
     expect(data.snoozedUntil).toBeDefined();
+    expect(mockWebPersistence.snoozeNotification).toHaveBeenCalledWith(
+      'n1',
+      expect.any(String),
+    );
   });
 
   it('returns 404 for missing notification', async () => {
-    mockDb.select.mockImplementationOnce(() => chainable([]));
+    mockWebPersistence.snoozeNotification.mockResolvedValueOnce(false);
     const { POST } = await import('@/app/api/notifications/[id]/snooze/route');
     const req = new Request('http://localhost/api/notifications/missing/snooze', {
       method: 'POST',
@@ -441,7 +613,11 @@ describe('POST /api/notifications/[id]/snooze', () => {
 });
 
 describe('POST /api/notifications/[id]/actions/[actionId]', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    actionMocks.executeNotificationAction.mockResolvedValue(undefined);
+    actionMocks.queueFollowUpSync.mockResolvedValue(undefined);
+  });
 
   it('should import action route module', async () => {
     const routeMod = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
@@ -464,7 +640,7 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
 
   it('handles open_url action', async () => {
     mockDb.select.mockImplementationOnce(() => chainable([{
-      id: 'n1', title: 'Test', body: null, connectorType: 'github', category: 'social', metadata: '{}',
+      id: 'n1', title: 'Test', body: null, connectorType: 'github', category: 'development', metadata: '{}',
     }]));
     mockDb.select.mockImplementationOnce(() => chainable([{
       id: 'a1', notificationId: 'n1', actionType: 'open_url', label: 'Open', payload: '{"url":"https://example.com"}',
@@ -502,6 +678,54 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
 
     const res = await POST(req, { params: Promise.resolve({ id: 'n1', actionId: 'a1' }) });
     expect(res.status).toBe(400);
+  });
+
+  it('dismisses a Home Assistant notification locally and queues reconciliation', async () => {
+    mockWebPersistence.findNotificationForAction.mockResolvedValueOnce({
+      id: 'n1',
+      sourceId: 'water_filter',
+      connectorType: 'home-assistant',
+      connectorInstanceId: 'ha-home',
+      title: 'Replace water filter',
+      body: null,
+      category: 'home',
+      navigationTarget: null,
+      metadata: { notificationId: 'water_filter' },
+      presentation: {},
+    });
+    mockWebPersistence.findNotificationAction.mockResolvedValueOnce({
+      id: 'a1',
+      notificationId: 'n1',
+      actionType: 'dismiss_persistent_notification',
+      payload: {},
+    });
+
+    const { POST } = await import('@/app/api/notifications/[id]/actions/[actionId]/route');
+    const response = await POST(new Request(
+      'http://localhost/api/notifications/n1/actions/a1',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+    ), {
+      params: Promise.resolve({ id: 'n1', actionId: 'a1' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      success: true,
+      result: {
+        type: 'home_assistant_action_accepted',
+        action: 'dismiss_persistent_notification',
+      },
+    });
+    expect(mockWebPersistence.updateNotificationFromAction).toHaveBeenCalledWith({
+      notificationId: 'n1',
+      state: 'dismissed',
+      now: expect.any(String),
+    });
+    expect(actionMocks.queueFollowUpSync).toHaveBeenCalledWith('ha-home');
   });
 
   it.each([
@@ -696,6 +920,7 @@ describe('POST /api/notifications/[id]/actions/[actionId]', () => {
         connectorType: 'github',
         idempotencyKey: 'notification-action:retry',
       }),
+      mockWebPersistence,
     );
   });
 });
@@ -755,28 +980,5 @@ describe('Notification Templates', () => {
 
     expect(getTemplate('test_finance_policy')?.defaultActions.map(action => action.actionType))
       .toEqual(['navigate']);
-  });
-});
-
-describe('Action Plugin Registry', () => {
-  it('registers and retrieves actions', async () => {
-    const { getActionDefinition, getAllRegisteredActions } = await import('@/lib/notifications/action-registry');
-    expect(getActionDefinition('ha_toggle_device')).toBeDefined();
-    expect(getAllRegisteredActions().length).toBeGreaterThan(3);
-  });
-
-  it('filters by connector type', async () => {
-    const { getActionsForConnector } = await import('@/lib/notifications/action-registry');
-    const haActions = getActionsForConnector('home-assistant');
-    expect(haActions.length).toBeGreaterThanOrEqual(2);
-    // Should include at least the HA-specific actions
-    const haSpecific = haActions.filter(a => a.connectorTypes?.includes('home-assistant'));
-    expect(haSpecific.length).toBeGreaterThanOrEqual(2);
-  });
-
-  it('filters by category', async () => {
-    const { getActionsForCategory } = await import('@/lib/notifications/action-registry');
-    const financeActions = getActionsForCategory('finance');
-    expect(financeActions.length).toBeGreaterThanOrEqual(1);
   });
 });

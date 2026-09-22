@@ -11,8 +11,15 @@ interface MockReactFlowProps {
   onNodeMouseLeave?: (event: MouseEvent, node: Node) => void;
   onNodesChange?: (changes: NodeChange<Node>[]) => void;
   onPaneClick?: () => void;
+  onInit?: (instance: {
+    fitView: () => Promise<boolean>;
+    getViewport: () => { x: number; y: number; zoom: number };
+    setViewport: (viewport: { x: number; y: number; zoom: number }) => Promise<boolean>;
+  }) => void;
   children?: ReactNode;
 }
+
+const setViewport = vi.fn(async () => true);
 
 vi.mock('@xyflow/react', async () => {
   const ReactLib = await import('react');
@@ -32,29 +39,49 @@ vi.mock('@xyflow/react', async () => {
       onNodeMouseLeave,
       onNodesChange,
       onPaneClick,
-    }: MockReactFlowProps) => (
-      <div data-testid="graph-pane" onClick={onPaneClick}>
+      onInit,
+    }: MockReactFlowProps) => {
+      onInit?.({
+        fitView: async () => true,
+        getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+        setViewport,
+      });
+      return (
+        <div data-testid="graph-pane" onClick={onPaneClick}>
         {nodes.map((node) => (
-          <button
-            key={node.id}
-            type="button"
-            data-testid={`graph-node-${node.id}`}
-            data-focus={node.data.focusState}
-            data-selected={node.selected}
-            onClick={(event) => {
-              event.stopPropagation();
-              onNodesChange?.([{ id: node.id, type: 'select', selected: true }]);
-              const data = node.data as {
-                graphNode: ProjectSubgraph['nodes'][number];
-                onSelect: (selectedNode: ProjectSubgraph['nodes'][number]) => void;
-              };
-              data.onSelect(data.graphNode);
-            }}
-            onMouseEnter={(event) => onNodeMouseEnter?.(event, node)}
-            onMouseLeave={(event) => onNodeMouseLeave?.(event, node)}
-          >
-            {(node.data.graphNode as ProjectSubgraph['nodes'][number]).label}
-          </button>
+          <React.Fragment key={node.id}>
+            <button
+              type="button"
+              data-testid={`graph-node-${node.id}`}
+              data-focus={node.data.focusState}
+              data-selected={node.selected}
+              onClick={(event) => {
+                event.stopPropagation();
+                onNodesChange?.([{ id: node.id, type: 'select', selected: true }]);
+                const data = node.data as {
+                  graphNode: ProjectSubgraph['nodes'][number];
+                  onSelect: (selectedNode: ProjectSubgraph['nodes'][number]) => void;
+                };
+                data.onSelect(data.graphNode);
+              }}
+              onMouseEnter={(event) => onNodeMouseEnter?.(event, node)}
+              onMouseLeave={(event) => onNodeMouseLeave?.(event, node)}
+            >
+              {(node.data.graphNode as ProjectSubgraph['nodes'][number]).label}
+            </button>
+            {node.data.canCollapse ? (
+              <button
+                type="button"
+                aria-label={`${node.data.isCollapsed ? 'Expand' : 'Collapse'} tasks under ${
+                  (node.data.graphNode as ProjectSubgraph['nodes'][number]).label
+                }`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  (node.data.onToggleCollapse as (nodeId: string) => void)(node.id);
+                }}
+              />
+            ) : null}
+          </React.Fragment>
         ))}
         {edges.map((edge) => (
           <span
@@ -64,8 +91,9 @@ vi.mock('@xyflow/react', async () => {
           />
         ))}
         {children}
-      </div>
-    ),
+        </div>
+      );
+    },
     useEdgesState: <T extends Edge>(initial: T[]) => {
       const [edges, setEdges] = ReactLib.useState(initial);
       return [edges, setEdges, vi.fn()];
@@ -106,6 +134,7 @@ const graph: ProjectSubgraph = {
 
 describe('ProjectStructureGraph focus interactions', () => {
   beforeEach(() => {
+    setViewport.mockClear();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: () => Promise.resolve({ graph }),
@@ -116,6 +145,7 @@ describe('ProjectStructureGraph focus interactions', () => {
     render(<ProjectStructureGraph projectId="1" onTaskSelect={vi.fn()} />);
 
     const phaseOne = await screen.findByTestId('graph-node-phase:1');
+    expect(document.querySelector('[data-workbench-capability="canvas"]')).toBeInTheDocument();
     const project = screen.getByTestId('graph-node-project:1');
     const taskOne = screen.getByTestId('graph-node-task:1');
     const phaseTwo = screen.getByTestId('graph-node-phase:2');
@@ -239,5 +269,40 @@ describe('ProjectStructureGraph focus interactions', () => {
     expect(taskTwo).toHaveAttribute('data-focus', 'emphasized');
     expect(taskTwo).toHaveAttribute('data-selected', 'true');
     expect(onTaskSelect).toHaveBeenLastCalledWith('2');
+  });
+
+  it('navigates backward through shared graph focus history', async () => {
+    render(<ProjectStructureGraph projectId="1" onTaskSelect={vi.fn()} />);
+
+    const phaseOne = await screen.findByTestId('graph-node-phase:1');
+    const taskTwo = screen.getByTestId('graph-node-task:2');
+    fireEvent.click(phaseOne);
+    fireEvent.click(taskTwo);
+
+    const previous = screen.getByRole('button', { name: 'Previous graph focus' });
+    expect(previous).toBeEnabled();
+    fireEvent.click(previous);
+
+    await waitFor(() => expect(phaseOne).toHaveAttribute('data-selected', 'true'));
+    expect(taskTwo).not.toHaveAttribute('data-selected', 'true');
+    expect(setViewport).toHaveBeenCalledWith({ x: 0, y: 0, zoom: 1 });
+  });
+
+  it('retargets hidden task selection to its collapsed phase', async () => {
+    const onTaskSelect = vi.fn();
+    render(<ProjectStructureGraph projectId="1" onTaskSelect={onTaskSelect} />);
+
+    const taskOne = await screen.findByTestId('graph-node-task:1');
+    fireEvent.click(taskOne);
+    expect(onTaskSelect).toHaveBeenLastCalledWith('1');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse tasks under Phase one' }));
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Phase one' })).toBeInTheDocument();
+      expect(screen.queryByTestId('graph-node-task:1')).not.toBeInTheDocument();
+    });
+    expect(onTaskSelect).toHaveBeenLastCalledWith(null);
+    expect(screen.getByRole('button', { name: 'Next graph focus' })).toBeDisabled();
   });
 });

@@ -1,13 +1,14 @@
 'use client';
 
 import Image from 'next/image';
-import { Archive, ArrowLeftRight, ExternalLink, Loader2, Trash2 } from 'lucide-react';
+import { Archive, ArrowLeftRight, ExternalLink, Link2, Loader2, Trash2 } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
-import type { DeepLinkInfo } from '@/lib/utils/deep-links';
+import type { SourceLinkInfo } from '@/lib/utils/deep-links';
 import type { LocalDisposition } from '@/types';
 import { cn } from '@/lib/utils';
 import { MoveToListDropdown } from './MoveToListDropdown';
 import type { SourceList, TaskDetailMode } from './task-detail-types';
+import type { ReactNode } from 'react';
 
 /** One Mission Control disposition the task can be switched to. */
 export interface TaskDispositionOption {
@@ -31,11 +32,13 @@ export interface TaskSourceActionsSectionProps {
   /** Whether any connector can accept a cross-source move. */
   hasWritableConnectors: boolean;
   onOpenMoveDialog: () => void;
-  /** Deep link to the upstream task, when the connector exposes one. */
-  deepLink: DeepLinkInfo | null;
+  /** Link to the task's upstream or related source, when one is available. */
+  deepLink: SourceLinkInfo | null;
   canDeleteTask: boolean;
   deleteLabel: string;
   onDelete: () => void;
+  /** Connector-specific actions that should remain separate from global lifecycle values. */
+  sourceSpecificActions?: ReactNode;
 }
 
 /** Source-level actions: disposition, moves, deep link, and deletion. */
@@ -54,6 +57,7 @@ export function TaskSourceActionsSection({
   canDeleteTask,
   deleteLabel,
   onDelete,
+  sourceSpecificActions,
 }: TaskSourceActionsSectionProps) {
   const showDelete = canDeleteTask && mode !== 'mobile';
   const showMoveToList = supportsMoveToList && Boolean(onMoveToList);
@@ -61,7 +65,8 @@ export function TaskSourceActionsSection({
     || showMoveToList
     || hasWritableConnectors
     || Boolean(deepLink)
-    || showDelete;
+    || showDelete
+    || Boolean(sourceSpecificActions);
   if (!hasAnyAction) return null;
 
   return (
@@ -73,6 +78,7 @@ export function TaskSourceActionsSection({
     )}>
       <h3 className="border-b border-[var(--border-subtle)] px-3 py-2.5 text-xs font-semibold text-[var(--text-secondary)]">Source &amp; actions</h3>
       <div className="flex flex-wrap items-center gap-2 p-3">
+        {sourceSpecificActions}
         {dispositionOptions.length > 0 && (
           <div className="w-full rounded-lg border border-emerald-500/20 bg-emerald-500/[0.06] p-2.5">
             <div className="mb-2 flex items-start gap-2">
@@ -135,7 +141,9 @@ export function TaskSourceActionsSection({
                 rel="noopener noreferrer"
                 className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-500/20 hover:text-blue-300"
               >
-                <Image src={deepLink.icon} alt={deepLink.label} width={14} height={14} className="flex-shrink-0" />
+                {deepLink.icon
+                  ? <Image src={deepLink.icon} alt="" width={14} height={14} className="flex-shrink-0" />
+                  : <Link2 size={14} aria-hidden="true" />}
                 Open in {deepLink.label}
                 <ExternalLink size={11} className="opacity-60" />
               </a>

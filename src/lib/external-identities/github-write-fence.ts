@@ -1,19 +1,16 @@
 import { createHash, randomUUID } from 'crypto';
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import db, { runTransaction, sqlite } from '@/db';
 import { syncLogger } from '@/lib/logger';
-import {
-  connectorOperationLeases,
-  githubIdentityWriteCycles,
-  sourceLists,
-  taskSourceWriteLeaseTargets,
-  taskSourceWriteLeases,
-  tasks,
-  type GitHubTaskWriteOperation,
-} from '@/db/schema';
-import { getGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
+import type { GitHubTaskWriteOperation } from '@/db/schema';
+import type {
+
+  GitHubFenceTargetRole,
+  GitHubFenceTaskRow,
+  GitHubWriteFenceAuthorizationRef,
+} from '@/db/persistence/github-identity';
+
 import { GitHubStableIdentityRuntime } from './stable-identity-runtime';
 import type { GitHubIdentityResolutionDecision } from './stable-identity-types';
+import { getGitHubIdentityRepository, getGitHubWriteFenceRepository } from './worker-persistence';
 
 const LEASE_MS = 60_000;
 
@@ -50,7 +47,7 @@ export interface GitHubWriteAuthorization {
   readonly expectedTaskVersion?: string;
   readonly taskPushLeaseToken?: string;
   readonly targets: ReadonlyArray<{
-    role: IdentityTarget['role'];
+    role: GitHubFenceTargetRole;
     owner: string;
     repository: string;
     issueNumber: number | null;
@@ -68,158 +65,52 @@ export interface FencedGitHubConnector {
   ) => Promise<T>;
 }
 
-interface IdentityTarget {
-  role: 'primary_issue' | 'parent_issue' | 'blocker_issue' | 'blocked_issue' | 'source_repository' | 'target_repository';
-  entityId: string;
-  repositoryEntityId: string | null;
-  hostKey: string;
-  locatorRevision: number;
-  owner: string;
-  repository: string;
-  issueNumber: number | null;
-  bindingRevision: string;
-  bindingState: string;
+/** Builds the fence-authorization reference the port re-checks require. */
+function toAuthorizationRef(
+  authorization: GitHubWriteAuthorization,
+): GitHubWriteFenceAuthorizationRef {
+  return {
+    leaseId: authorization.leaseId,
+    token: authorization.token,
+    connectorInstanceId: authorization.connectorInstanceId,
+    taskId: authorization.taskId,
+    expectedTaskVersion: authorization.expectedTaskVersion,
+    taskPushLeaseToken: authorization.taskPushLeaseToken,
+  };
 }
 
-export function beginGitHubWriteCycle(options: {
+export async function beginGitHubWriteCycle(options: {
   connectorInstanceId: string;
   modeSnapshot: { modeRevision: number };
   jobId?: string;
   pendingCandidateCount: number;
-}): string {
+}): Promise<string> {
   if (!Number.isSafeInteger(options.pendingCandidateCount) || options.pendingCandidateCount < 1) {
     throw new GitHubWriteFenceError('write_cycle_requires_candidates');
   }
   const id = randomUUID();
   const now = new Date().toISOString();
-  return runTransaction((tx) => {
-    const currentMode = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      options.connectorInstanceId,
-      now,
-    );
-    if (currentMode.modeRevision !== options.modeSnapshot.modeRevision) {
-      throw new GitHubWriteFenceError('stale_write_cycle_mode');
-    }
-    const running = tx.select().from(githubIdentityWriteCycles).where(and(
-      eq(githubIdentityWriteCycles.connectorInstanceId, options.connectorInstanceId),
-      eq(githubIdentityWriteCycles.state, 'running'),
-    )).limit(1).get();
-    if (running) {
-      if (running.reconciliationState !== 'unresolved') {
-        throw new GitHubWriteFenceError('write_cycle_reconciliation_owned');
-      }
-      const activeOperation = tx.select({
-        createdAt: connectorOperationLeases.createdAt,
-      }).from(connectorOperationLeases).where(and(
-        eq(connectorOperationLeases.connectorId, options.connectorInstanceId),
-        sql`${connectorOperationLeases.leaseExpiresAt} > ${now}`,
-      )).limit(1).get();
-      if (activeOperation && activeOperation.createdAt <= running.startedAt) {
-        throw new GitHubWriteFenceError('active_write_cycle');
-      }
-      tx.update(taskSourceWriteLeases).set({
-        state: 'expired',
-        finalizedAt: now,
-        updatedAt: now,
-      }).where(and(
-        eq(taskSourceWriteLeases.writeCycleId, running.id),
-        eq(taskSourceWriteLeases.connectorInstanceId, running.connectorInstanceId),
-        eq(taskSourceWriteLeases.modeRevision, running.modeRevision),
-        inArray(taskSourceWriteLeases.state, ['claimed', 'authorized']),
-        isNull(taskSourceWriteLeases.dispatchedAt),
-        sql`${taskSourceWriteLeases.expiresAt} <= ${now}`,
-      )).run();
-      const leases = tx.select().from(taskSourceWriteLeases)
-        .where(eq(taskSourceWriteLeases.writeCycleId, running.id))
-        .all();
-      if (leases.some((lease) =>
-        lease.state === 'dispatched'
-        || lease.state === 'unknown'
-        || (
-          ['claimed', 'authorized'].includes(lease.state)
-          && lease.expiresAt > now
-        ))) {
-        throw new GitHubWriteFenceError('active_write_cycle');
-      }
-      const locallyFinalized = leases.length === running.pendingCandidateCount
-        && leases.every((lease) =>
-          ['succeeded', 'failed', 'blocked'].includes(lease.state)
-          && lease.cycleOutcome === lease.state
-          && lease.finalizedAt !== null);
-      const changed = locallyFinalized
-        ? tx.update(githubIdentityWriteCycles).set({
-            observedRouteCount: leases.filter((lease) => lease.cycleObservedAt !== null).length,
-            appliedCount: leases.filter((lease) => lease.cycleOutcome === 'succeeded').length,
-            blockedCount: leases.filter((lease) => lease.cycleOutcome === 'blocked').length,
-            failedCount: leases.filter((lease) => lease.cycleOutcome === 'failed').length,
-            unknownCount: 0,
-            state: 'completed',
-            completedAt: now,
-          }).where(and(
-            eq(githubIdentityWriteCycles.id, running.id),
-            eq(githubIdentityWriteCycles.state, 'running'),
-            eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-          )).run().changes
-        : tx.update(githubIdentityWriteCycles).set({
-            state: 'interrupted',
-            completedAt: now,
-          }).where(and(
-            eq(githubIdentityWriteCycles.id, running.id),
-            eq(githubIdentityWriteCycles.state, 'running'),
-            eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-          )).run().changes;
-      if (changed !== 1) throw new GitHubWriteFenceError('write_cycle_replacement_lost');
-    }
-    tx.insert(githubIdentityWriteCycles).values({
-      id,
-      connectorInstanceId: options.connectorInstanceId,
-      jobId: options.jobId,
-      modeRevision: options.modeSnapshot.modeRevision,
-      pendingCandidateCount: options.pendingCandidateCount,
-      startedAt: now,
-    }).run();
-    return id;
+  const writeFence = await getGitHubWriteFenceRepository();
+  const result = await writeFence.beginWriteCycle({
+    id,
+    connectorInstanceId: options.connectorInstanceId,
+    jobId: options.jobId,
+    expectedModeRevision: options.modeSnapshot.modeRevision,
+    pendingCandidateCount: options.pendingCandidateCount,
+    now,
   });
+  if (!result.ok) throw new GitHubWriteFenceError(result.code);
+  return id;
 }
 
-export function finishGitHubWriteCycle(
+export async function finishGitHubWriteCycle(
   id: string,
   outcome: { observed: number; applied: number; blocked: number; failed: number; unknown: number },
-): boolean {
+): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = runTransaction((tx) => {
-    const cycle = tx.select().from(githubIdentityWriteCycles)
-      .where(eq(githubIdentityWriteCycles.id, id))
-      .limit(1)
-      .get();
-    if (!cycle) return { changed: 0, complete: false };
-    const mode = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      cycle.connectorInstanceId,
-      now,
-    );
-    if (mode.modeRevision !== cycle.modeRevision) return { changed: 0, complete: false };
-    const complete = outcome.observed === cycle.pendingCandidateCount
-      && outcome.applied + outcome.blocked + outcome.failed + outcome.unknown === outcome.observed;
-    const changed = tx.update(githubIdentityWriteCycles).set({
-      observedRouteCount: outcome.observed,
-      appliedCount: outcome.applied,
-      blockedCount: outcome.blocked,
-      failedCount: outcome.failed,
-      unknownCount: outcome.unknown,
-      state: complete ? 'completed' : 'interrupted',
-      completedAt: now,
-    }).where(and(
-      eq(githubIdentityWriteCycles.id, id),
-      eq(githubIdentityWriteCycles.connectorInstanceId, cycle.connectorInstanceId),
-      eq(githubIdentityWriteCycles.modeRevision, cycle.modeRevision),
-      eq(githubIdentityWriteCycles.state, 'running'),
-      eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-    )).run().changes;
-    return { changed, complete };
-  });
-  return result.changed === 1 && result.complete;
+  const writeFence = await getGitHubWriteFenceRepository();
+  const result = await writeFence.finishWriteCycle({ id, outcome, now });
+  return result.committed;
 }
 
 /**
@@ -227,67 +118,24 @@ export function finishGitHubWriteCycle(
  * evidence is the lease target rows plus `cycle_observed_at`; nothing depends
  * on a comparison record any more.
  */
-function recordGitHubWriteCycleObservation(
+async function recordGitHubWriteCycleObservation(
   leaseId: string,
   decision: GitHubIdentityResolutionDecision,
-): void {
+): Promise<void> {
   if (decision.appliedSource !== 'stable') {
     throw new GitHubWriteFenceError('write_cycle_observation_missing');
   }
-  runTransaction((tx) => {
-    const lease = tx.select().from(taskSourceWriteLeases)
-      .where(and(
-        eq(taskSourceWriteLeases.id, leaseId),
-        eq(taskSourceWriteLeases.state, 'claimed'),
-        isNull(taskSourceWriteLeases.cycleOutcome),
-      ))
-      .limit(1)
-      .get();
-    if (!lease?.writeCycleId) {
-      throw new GitHubWriteFenceError('write_cycle_missing');
-    }
-    if (lease.cycleObservedAt) return;
-    const now = new Date().toISOString();
-    const mode = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      lease.connectorInstanceId,
-      now,
-    );
-    if (mode.modeRevision !== lease.modeRevision) {
-      throw new GitHubWriteFenceError('write_cycle_observation_stale_mode');
-    }
-    const cycleChanged = tx.update(githubIdentityWriteCycles).set({
-      observedRouteCount: sql`${githubIdentityWriteCycles.observedRouteCount} + 1`,
-    }).where(and(
-      eq(githubIdentityWriteCycles.id, lease.writeCycleId),
-      eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-      eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
-      eq(githubIdentityWriteCycles.state, 'running'),
-      eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-    )).run().changes;
-    if (cycleChanged !== 1) {
-      throw new GitHubWriteFenceError('write_cycle_observation_lost');
-    }
-    const leaseChanged = tx.update(taskSourceWriteLeases).set({
-      cycleObservedAt: now,
-      updatedAt: now,
-    }).where(and(
-      eq(taskSourceWriteLeases.id, lease.id),
-      eq(taskSourceWriteLeases.token, lease.token),
-      eq(taskSourceWriteLeases.state, 'claimed'),
-      isNull(taskSourceWriteLeases.cycleObservedAt),
-    )).run();
-    if (leaseChanged.changes !== 1) {
-      throw new GitHubWriteFenceError('write_cycle_observation_lost');
-    }
-  });
+  const now = new Date().toISOString();
+  const writeFence = await getGitHubWriteFenceRepository();
+  const result = await writeFence.recordCycleObservation({ leaseId, now });
+  if (!result.ok) throw new GitHubWriteFenceError(result.code);
 }
 
 /**
  * Freezes local route facts. The caller must perform its remote preflight after
  * this returns and call confirmGitHubWriteDispatch immediately before mutation.
  */
-export function authorizeGitHubWrite(options: {
+export async function authorizeGitHubWrite(options: {
   connectorInstanceId: string;
   taskId: string;
   operation: GitHubTaskWriteOperation;
@@ -300,131 +148,43 @@ export function authorizeGitHubWrite(options: {
     role: 'parent_issue' | 'blocker_issue' | 'blocked_issue';
     taskId: string;
   }>;
-}): GitHubWriteAuthorization {
+}): Promise<GitHubWriteAuthorization> {
   const now = new Date();
   const nowIso = now.toISOString();
   const token = randomUUID();
+  const leaseId = randomUUID();
   const expiresAt = new Date(now.getTime() + LEASE_MS).toISOString();
-  const result = runTransaction((tx) => {
-    const task = tx.select().from(tasks).where(and(
-      eq(tasks.id, options.taskId),
-      eq(tasks.connectorInstanceId, options.connectorInstanceId),
-    )).limit(1).get();
-    if (!task) throw new GitHubWriteFenceError('missing_task');
-    if (
-      (options.expectedTaskVersion && task.updatedAt !== options.expectedTaskVersion)
-      || (
-        options.taskPushLeaseToken
-        && (
-          task.syncStatus !== 'pushing'
-          || task.lastSyncedAt !== options.taskPushLeaseToken
-        )
-      )
-    ) {
-      throw new GitHubWriteFenceError('stale_task_push_claim');
-    }
-    const mode = getGitHubIdentityModeSnapshotInTransaction(tx, options.connectorInstanceId, nowIso);
-    const cycle = options.writeCycleId
-      ? tx.select().from(githubIdentityWriteCycles).where(and(
-          eq(githubIdentityWriteCycles.id, options.writeCycleId),
-          eq(githubIdentityWriteCycles.connectorInstanceId, options.connectorInstanceId),
-          eq(githubIdentityWriteCycles.state, 'running'),
-          eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-        )).limit(1).get()
-      : null;
-    if (!cycle || cycle.modeRevision !== mode.modeRevision) {
-      throw new GitHubWriteFenceError('stale_write_cycle');
-    }
-    if (hasOpenStableIdentityCollision(options.connectorInstanceId, 'task', task.id)) {
-      throw new GitHubWriteFenceError('stable_identity_evidence_blocked');
-    }
-    const targets = loadTargets(
-      options.connectorInstanceId,
-      task.id,
-      task.sourceListId,
-      task.sourceId,
-      options.operation,
-      options.targetSourceListId,
-      options.participantTaskIds,
-    );
-    if (!targets) throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
-    if (targets.some((target) => target.bindingState !== 'active')) {
-      throw new GitHubWriteFenceError('stable_binding_not_active');
-    }
-    const leaseId = randomUUID();
-    const { idempotencyKey, intent, initialCreate } = taskWriteIdentity(task, options.operation);
-    const priorSuccess = intent
-      ? tx.select({ id: taskSourceWriteLeases.id })
-        .from(taskSourceWriteLeases)
-        .where(and(
-          eq(taskSourceWriteLeases.connectorInstanceId, options.connectorInstanceId),
-          eq(taskSourceWriteLeases.taskId, task.id),
-          eq(taskSourceWriteLeases.operation, options.operation),
-          eq(taskSourceWriteLeases.modeRevision, mode.modeRevision),
-          ...(initialCreate
-            ? []
-            : [
-                eq(taskSourceWriteLeases.idempotencyKey, idempotencyKey),
-                eq(taskSourceWriteLeases.intentKind, intent.kind),
-                eq(taskSourceWriteLeases.intentDigest, intent.digest),
-              ]),
-          eq(taskSourceWriteLeases.state, 'succeeded'),
-          eq(taskSourceWriteLeases.cycleOutcome, 'succeeded'),
-        ))
-        .limit(10)
-        .all()
-        .find((lease) => currentLeaseTargetsMatch(lease.id, true))
-      : null;
-    if (priorSuccess) throw new GitHubWriteFenceError('write_already_succeeded');
-    try {
-      tx.insert(taskSourceWriteLeases).values({
-        id: leaseId,
-        token,
-        connectorInstanceId: options.connectorInstanceId,
-        taskId: task.id,
-        operation: options.operation,
-        taskVersion: task.updatedAt,
-        idempotencyKey,
-        modeRevision: mode.modeRevision,
-        writeCycleId: options.writeCycleId,
-        intentKind: intent?.kind,
-        intentDigest: intent?.digest,
-        expiresAt,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      }).run();
-    } catch {
-      throw new GitHubWriteFenceError('active_or_unknown_lease');
-    }
-    tx.insert(taskSourceWriteLeaseTargets).values(targets.map((target) => ({
-      leaseId,
-      role: target.role,
-      externalEntityId: target.entityId,
-      repositoryEntityId: target.repositoryEntityId,
-      hostKey: target.hostKey,
-      locatorRevision: target.locatorRevision,
-      bindingRevision: target.bindingRevision,
-      legacyLocatorDigest: digestLocator(target.owner, target.repository, target.issueNumber),
-      owner: target.owner,
-      repository: target.repository,
-      issueNumber: target.issueNumber,
-    }))).run();
-    return { task, mode, leaseId, targets };
+  const writeFence = await getGitHubWriteFenceRepository();
+  const result = await writeFence.authorizeTaskWrite({
+    connectorInstanceId: options.connectorInstanceId,
+    taskId: options.taskId,
+    operation: options.operation,
+    writeCycleId: options.writeCycleId ?? null,
+    targetSourceListId: options.targetSourceListId,
+    participantTaskIds: options.participantTaskIds,
+    expectedTaskVersion: options.expectedTaskVersion,
+    taskPushLeaseToken: options.taskPushLeaseToken,
+    leaseId,
+    token,
+    expiresAt,
+    now: nowIso,
+    deriveWriteIdentity: (task) => taskWriteIdentity(task, options.operation),
   });
+  if (!result.ok) throw new GitHubWriteFenceError(result.code);
 
   if (!options.identityRuntime) {
-    blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
+    await blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
     throw new GitHubWriteFenceError('missing_identity_runtime');
   }
   const primary = result.targets.find((target) => target.role === 'primary_issue')
     ?? result.targets.find((target) => target.role === 'target_repository')
     ?? result.targets.find((target) => target.role === 'source_repository');
   if (!primary) {
-    blockGitHubWrite(result.leaseId, token, 'missing_or_inaccessible_identity');
+    await blockGitHubWrite(result.leaseId, token, 'missing_or_inaccessible_identity');
     throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
   }
   try {
-    const [decision] = options.identityRuntime.applyResolvedBatch('write_route', [{
+    const [decision] = await options.identityRuntime.applyResolvedBatch('write_route', [{
       candidateKey: `write:${result.task.id}:${options.operation}:${result.leaseId}`,
       localTaskId: result.task.id,
       localSourceListId: result.task.sourceListId ?? undefined,
@@ -439,9 +199,9 @@ export function authorizeGitHubWrite(options: {
         bindingState: primary.bindingState as 'shadow' | 'active' | 'collision' | 'retired',
       },
     }]);
-    recordGitHubWriteCycleObservation(result.leaseId, decision);
+    await recordGitHubWriteCycleObservation(result.leaseId, decision);
   } catch (error) {
-    blockGitHubWrite(result.leaseId, token, 'identity_route_resolution_failed');
+    await blockGitHubWrite(result.leaseId, token, 'identity_route_resolution_failed');
     throw error;
   }
 
@@ -471,138 +231,56 @@ export function authorizeGitHubWrite(options: {
   });
 }
 
-export function hasSucceededGitHubWrite(options: {
+export async function hasSucceededGitHubWrite(options: {
   connectorInstanceId: string;
   taskId: string;
   operation: GitHubTaskWriteOperation;
   expectedTaskVersion: string;
   taskPushLeaseToken: string;
-}): boolean {
-  const task = db.select().from(tasks).where(and(
-    eq(tasks.id, options.taskId),
-    eq(tasks.connectorInstanceId, options.connectorInstanceId),
-    eq(tasks.updatedAt, options.expectedTaskVersion),
-    eq(tasks.syncStatus, 'pushing'),
-    eq(tasks.lastSyncedAt, options.taskPushLeaseToken),
-  )).limit(1).get();
-  if (!task) return false;
-  const { idempotencyKey, intent, initialCreate } = taskWriteIdentity(task, options.operation);
-  if (!intent) return false;
-  const mode = getGitHubIdentityModeSnapshotInTransaction(
-    db,
-    options.connectorInstanceId,
-    new Date().toISOString(),
-  );
-  return db.select({ id: taskSourceWriteLeases.id })
-    .from(taskSourceWriteLeases)
-    .where(and(
-      eq(taskSourceWriteLeases.connectorInstanceId, options.connectorInstanceId),
-      eq(taskSourceWriteLeases.taskId, task.id),
-      eq(taskSourceWriteLeases.operation, options.operation),
-      eq(taskSourceWriteLeases.modeRevision, mode.modeRevision),
-      ...(initialCreate
-        ? []
-        : [
-            eq(taskSourceWriteLeases.idempotencyKey, idempotencyKey),
-            eq(taskSourceWriteLeases.intentKind, intent.kind),
-            eq(taskSourceWriteLeases.intentDigest, intent.digest),
-          ]),
-      eq(taskSourceWriteLeases.state, 'succeeded'),
-      eq(taskSourceWriteLeases.cycleOutcome, 'succeeded'),
-    ))
-    .limit(10)
-    .all()
-    .some((lease) => currentLeaseTargetsMatch(lease.id, true));
+}): Promise<boolean> {
+  const writeFence = await getGitHubWriteFenceRepository();
+  return writeFence.hasSucceededWrite({
+    connectorInstanceId: options.connectorInstanceId,
+    taskId: options.taskId,
+    operation: options.operation,
+    expectedTaskVersion: options.expectedTaskVersion,
+    taskPushLeaseToken: options.taskPushLeaseToken,
+    now: new Date().toISOString(),
+    deriveWriteIdentity: (task) => taskWriteIdentity(task, options.operation),
+  });
 }
 
-export function authorizeGitHubSourceWrite(options: {
+export async function authorizeGitHubSourceWrite(options: {
   connectorInstanceId: string;
   sourceListId: string;
   operation: 'create' | 'label';
   identityRuntime?: GitHubStableIdentityRuntime;
   writeCycleId?: string | null;
-}): GitHubWriteAuthorization {
+}): Promise<GitHubWriteAuthorization> {
   const now = new Date();
   const nowIso = now.toISOString();
   const token = randomUUID();
+  const leaseId = randomUUID();
   const expiresAt = new Date(now.getTime() + LEASE_MS).toISOString();
-  const result = runTransaction((tx) => {
-    const sourceList = tx.select().from(sourceLists).where(and(
-      eq(sourceLists.connectorInstanceId, options.connectorInstanceId),
-      eq(sourceLists.id, options.sourceListId),
-    )).limit(1).get();
-    if (!sourceList) throw new GitHubWriteFenceError('missing_source_list');
-    const mode = getGitHubIdentityModeSnapshotInTransaction(tx, options.connectorInstanceId, nowIso);
-    const cycle = options.writeCycleId
-      ? tx.select().from(githubIdentityWriteCycles).where(and(
-          eq(githubIdentityWriteCycles.id, options.writeCycleId),
-          eq(githubIdentityWriteCycles.connectorInstanceId, options.connectorInstanceId),
-          eq(githubIdentityWriteCycles.state, 'running'),
-          eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-        )).limit(1).get()
-      : null;
-    if (!cycle || cycle.modeRevision !== mode.modeRevision) {
-      throw new GitHubWriteFenceError('stale_write_cycle');
-    }
-    if (hasOpenStableIdentityCollision(
-      options.connectorInstanceId,
-      'source_list',
-      sourceList.id,
-    )) {
-      throw new GitHubWriteFenceError('stable_identity_evidence_blocked');
-    }
-    const target = identityForBinding(
-      options.connectorInstanceId,
-      'source_list',
-      sourceList.id,
-      'source_repository',
-    );
-    if (!target) throw new GitHubWriteFenceError('missing_or_inaccessible_identity');
-    if (target.bindingState !== 'active') {
-      throw new GitHubWriteFenceError('stable_binding_not_active');
-    }
-    const leaseId = randomUUID();
-    const idempotencyKey = `source-list:${sourceList.id}:${options.operation}:${sourceList.sourceId}`;
-    try {
-      tx.insert(taskSourceWriteLeases).values({
-        id: leaseId,
-        token,
-        connectorInstanceId: options.connectorInstanceId,
-        taskId: `source-list:${sourceList.id}`,
-        operation: options.operation,
-        taskVersion: sourceList.sourceId,
-        idempotencyKey,
-        modeRevision: mode.modeRevision,
-        writeCycleId: options.writeCycleId,
-        expiresAt,
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      }).run();
-    } catch {
-      throw new GitHubWriteFenceError('active_or_unknown_lease');
-    }
-    tx.insert(taskSourceWriteLeaseTargets).values({
-      leaseId,
-      role: target.role,
-      externalEntityId: target.entityId,
-      repositoryEntityId: target.repositoryEntityId,
-      hostKey: target.hostKey,
-      locatorRevision: target.locatorRevision,
-      bindingRevision: target.bindingRevision,
-      legacyLocatorDigest: digestLocator(target.owner, target.repository, null),
-      owner: target.owner,
-      repository: target.repository,
-      issueNumber: null,
-    }).run();
-    return { sourceList, mode, target, leaseId };
+  const writeFence = await getGitHubWriteFenceRepository();
+  const result = await writeFence.authorizeSourceWrite({
+    connectorInstanceId: options.connectorInstanceId,
+    sourceListId: options.sourceListId,
+    operation: options.operation,
+    writeCycleId: options.writeCycleId ?? null,
+    leaseId,
+    token,
+    expiresAt,
+    now: nowIso,
   });
+  if (!result.ok) throw new GitHubWriteFenceError(result.code);
 
   if (!options.identityRuntime) {
-    blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
+    await blockGitHubWrite(result.leaseId, token, 'missing_identity_runtime');
     throw new GitHubWriteFenceError('missing_identity_runtime');
   }
   try {
-    const [decision] = options.identityRuntime.applyResolvedBatch('write_route', [{
+    const [decision] = await options.identityRuntime.applyResolvedBatch('write_route', [{
       candidateKey: `write:source-list:${result.sourceList.id}:${options.operation}:${result.leaseId}`,
       localSourceListId: result.sourceList.id,
       stable: {
@@ -616,9 +294,9 @@ export function authorizeGitHubSourceWrite(options: {
         bindingState: result.target.bindingState as 'shadow' | 'active' | 'collision' | 'retired',
       },
     }]);
-    recordGitHubWriteCycleObservation(result.leaseId, decision);
+    await recordGitHubWriteCycleObservation(result.leaseId, decision);
   } catch (error) {
-    blockGitHubWrite(result.leaseId, token, 'identity_route_resolution_failed');
+    await blockGitHubWrite(result.leaseId, token, 'identity_route_resolution_failed');
     throw error;
   }
 
@@ -647,231 +325,76 @@ export function authorizeGitHubSourceWrite(options: {
  * Re-querying locators makes a rename, replacement, mode change, or task edit
  * between preflight and dispatch fail closed.
  */
-export function assertGitHubWriteCycleCurrent(
+export async function assertGitHubWriteCycleCurrent(
   authorization: GitHubWriteAuthorization,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
-  const current = runTransaction((tx) => {
-    const lease = tx.select().from(taskSourceWriteLeases).where(and(
-      eq(taskSourceWriteLeases.id, authorization.leaseId),
-      eq(taskSourceWriteLeases.token, authorization.token),
-      inArray(taskSourceWriteLeases.state, ['claimed', 'authorized']),
-    )).limit(1).get();
-    if (!lease) return false;
-    if (authorization.expectedTaskVersion || authorization.taskPushLeaseToken) {
-      const task = tx.select().from(tasks).where(and(
-        eq(tasks.id, authorization.taskId),
-        eq(tasks.connectorInstanceId, authorization.connectorInstanceId),
-      )).limit(1).get();
-      if (
-        !task
-        || (
-          authorization.expectedTaskVersion
-          && task.updatedAt !== authorization.expectedTaskVersion
-        )
-        || (
-          authorization.taskPushLeaseToken
-          && (
-            task.syncStatus !== 'pushing'
-            || task.lastSyncedAt !== authorization.taskPushLeaseToken
-          )
-        )
-      ) return false;
-    }
-    if (!lease.writeCycleId) return false;
-    const mode = getGitHubIdentityModeSnapshotInTransaction(
-      tx,
-      authorization.connectorInstanceId,
-      now,
-    );
-    if (mode.modeRevision !== lease.modeRevision) return false;
-    return Boolean(tx.select({ id: githubIdentityWriteCycles.id })
-      .from(githubIdentityWriteCycles)
-      .where(and(
-        eq(githubIdentityWriteCycles.id, lease.writeCycleId),
-        eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-        eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
-        eq(githubIdentityWriteCycles.state, 'running'),
-        eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-      )).limit(1).get());
+  const writeFence = await getGitHubWriteFenceRepository();
+  const current = await writeFence.assertCycleCurrent({
+    authorization: toAuthorizationRef(authorization),
+    now,
   });
   if (!current) throw new GitHubWriteFenceError('stale_write_cycle');
 }
 
-export function confirmGitHubWriteDispatch(authorization: GitHubWriteAuthorization): void {
+export async function confirmGitHubWriteDispatch(
+  authorization: GitHubWriteAuthorization,
+): Promise<void> {
   const now = new Date().toISOString();
-  const changes = runTransaction((tx) => {
-    const lease = tx.select().from(taskSourceWriteLeases).where(and(
-      eq(taskSourceWriteLeases.id, authorization.leaseId),
-      eq(taskSourceWriteLeases.token, authorization.token),
-      eq(taskSourceWriteLeases.state, 'claimed'),
-    )).limit(1).get();
-    if (!lease || lease.expiresAt <= now) return 0;
-    const cycle = lease.writeCycleId
-      ? tx.select().from(githubIdentityWriteCycles).where(and(
-          eq(githubIdentityWriteCycles.id, lease.writeCycleId),
-          eq(githubIdentityWriteCycles.connectorInstanceId, authorization.connectorInstanceId),
-          eq(githubIdentityWriteCycles.state, 'running'),
-          eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-        )).limit(1).get()
-      : null;
-    const mode = getGitHubIdentityModeSnapshotInTransaction(tx, authorization.connectorInstanceId, now);
-    const sourceListSubject = authorization.taskId.startsWith('source-list:')
-      ? tx.select().from(sourceLists).where(and(
-        eq(sourceLists.id, authorization.taskId.slice('source-list:'.length)),
-        eq(sourceLists.connectorInstanceId, authorization.connectorInstanceId),
-      )).limit(1).get()
-      : null;
-    const task = sourceListSubject
-      ? null
-      : tx.select().from(tasks).where(eq(tasks.id, authorization.taskId)).limit(1).get();
-    if (
-      (!task && !sourceListSubject)
-      || (task && task.connectorInstanceId !== authorization.connectorInstanceId)
-      || (task && task.updatedAt !== lease.taskVersion)
-      || (
-        task
-        && authorization.taskPushLeaseToken
-        && (
-          task.syncStatus !== 'pushing'
-          || task.lastSyncedAt !== authorization.taskPushLeaseToken
-        )
-      )
-      || (sourceListSubject && sourceListSubject.sourceId !== lease.taskVersion)
-      || mode.modeRevision !== lease.modeRevision
-      || lease.cycleObservedAt === null
-      || !cycle
-      || cycle.modeRevision !== lease.modeRevision
-      || !currentLeaseTargetsMatch(authorization.leaseId)
-    ) return 0;
-    return tx.update(taskSourceWriteLeases).set({
-      state: 'dispatched',
-      dispatchedAt: now,
-      updatedAt: now,
-    }).where(and(
-      eq(taskSourceWriteLeases.id, authorization.leaseId),
-      eq(taskSourceWriteLeases.token, authorization.token),
-      eq(taskSourceWriteLeases.state, 'claimed'),
-    )).run().changes;
+  const writeFence = await getGitHubWriteFenceRepository();
+  const dispatched = await writeFence.confirmDispatch({
+    authorization: toAuthorizationRef(authorization),
+    now,
   });
-  if (changes !== 1) {
-    blockGitHubWrite(authorization.leaseId, authorization.token, 'stale_mode_lease_or_locator');
+  if (!dispatched) {
+    await blockGitHubWrite(authorization.leaseId, authorization.token, 'stale_mode_lease_or_locator');
     throw new GitHubWriteFenceError('stale_mode_lease_or_locator');
   }
 }
 
-export function verifyGitHubWritePreflight(
+export async function verifyGitHubWritePreflight(
   authorization: GitHubWriteAuthorization,
   observed: { targets: Record<string, { repositoryStableId: string; issueStableId?: string }> },
-): void {
-  const rows = sqlite.prepare(`
-    SELECT target.role AS role, entity.entity_type AS entityType, entity.stable_id AS stableId,
-      repository.stable_id AS repositoryStableId
-    FROM task_source_write_lease_targets AS target
-    JOIN external_entities AS entity ON entity.id = target.external_entity_id
-    LEFT JOIN external_entities AS repository ON repository.id = target.repository_entity_id
-    WHERE target.lease_id = ?
-  `).all(authorization.leaseId) as Array<{
-    role: string; entityType: 'issue' | 'repository'; stableId: string; repositoryStableId: string | null;
-  }>;
-  if (rows.length === 0 || rows.some((row) => {
-    const value = observed.targets[row.role];
-    return !value || (row.entityType === 'issue'
-      ? value.issueStableId !== row.stableId || value.repositoryStableId !== row.repositoryStableId
-      : value.repositoryStableId !== row.stableId);
-  })) {
-    blockGitHubWrite(authorization.leaseId, authorization.token, 'remote_identity_disagreement');
+): Promise<void> {
+  const writeFence = await getGitHubWriteFenceRepository();
+  const ok = await writeFence.verifyPreflight({ leaseId: authorization.leaseId, observed });
+  if (!ok) {
+    await blockGitHubWrite(authorization.leaseId, authorization.token, 'remote_identity_disagreement');
     throw new GitHubWriteFenceError('remote_identity_disagreement');
   }
 }
 
-export function finalizeGitHubWrite(
+export async function finalizeGitHubWrite(
   authorization: GitHubWriteAuthorization,
   outcome: 'succeeded' | 'failed' | 'unknown',
   reason?: string,
   result?: unknown,
-): void {
+): Promise<void> {
   const now = new Date().toISOString();
   const safeReason = reason?.replace(/[^a-z0-9_:-]/gi, '_').slice(0, 100) ?? null;
-  const allowedStates = outcome === 'failed'
-    ? ['claimed', 'authorized', 'dispatched'] as const
-    : ['dispatched', 'authorized'] as const;
-  const changed = runTransaction((tx) => {
-    const lease = tx.select().from(taskSourceWriteLeases).where(and(
-      eq(taskSourceWriteLeases.id, authorization.leaseId),
-      eq(taskSourceWriteLeases.token, authorization.token),
-      inArray(taskSourceWriteLeases.state, allowedStates),
-    )).limit(1).get();
-    if (!lease) return 0;
-    if (
-      lease.writeCycleId
-      && (outcome !== 'failed' || lease.dispatchedAt !== null)
-    ) {
-      const cycle = tx.select({ id: githubIdentityWriteCycles.id })
-        .from(githubIdentityWriteCycles)
-        .where(and(
-          eq(githubIdentityWriteCycles.id, lease.writeCycleId),
-          eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-          eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
-          eq(githubIdentityWriteCycles.state, 'running'),
-          eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-        )).limit(1).get();
-      if (!cycle) return 0;
-    }
-    const leaseUpdate = tx.update(taskSourceWriteLeases).set({
-      state: outcome,
-      cycleOutcome: outcome,
-      unknownReason: outcome === 'unknown' ? safeReason ?? 'unknown_post_dispatch_outcome' : null,
-      blockReason: outcome === 'failed' ? safeReason : null,
-      resultDigest: outcome === 'succeeded' ? digestWriteResult(result) : null,
-      finalizedAt: now,
-      updatedAt: now,
-    }).where(and(
-      eq(taskSourceWriteLeases.id, authorization.leaseId),
-      eq(taskSourceWriteLeases.token, authorization.token),
-      inArray(taskSourceWriteLeases.state, allowedStates),
-    )).run().changes;
-    if (leaseUpdate === 1 && lease.writeCycleId && !lease.cycleOutcome) {
-      if (incrementGitHubWriteCycleOutcome(lease.writeCycleId, outcome) !== 1) {
-        throw new GitHubWriteFenceError('write_cycle_outcome_lost');
-      }
-    }
-    if (leaseUpdate === 1 && outcome === 'succeeded') {
-      sqlite.prepare(`
-        UPDATE github_identity_write_cycles
-        SET reconciliation_state = 'superseded',
-            reconciliation_code = 'superseded_by_succeeded_retry',
-            reconciled_at = ?
-        WHERE id IN (
-          SELECT prior.write_cycle_id
-          FROM task_source_write_leases AS prior
-          JOIN github_write_outcome_events AS event ON event.lease_id = prior.id
-          WHERE prior.connector_instance_id = ?
-            AND prior.idempotency_key = ?
-            AND prior.id != ?
-            AND prior.write_cycle_id IS NOT NULL
-            AND event.outcome = 'proven_not_applied_retryable'
-        )
-          AND state IN ('interrupted', 'completed')
-          AND reconciliation_state = 'post_dispatch_retryable'
-      `).run(
-        now,
-        lease.connectorInstanceId,
-        lease.idempotencyKey,
-        lease.id,
-      );
-    }
-    return leaseUpdate;
+  const resultDigest = outcome === 'succeeded' ? digestWriteResult(result) : null;
+  const writeFence = await getGitHubWriteFenceRepository();
+  const finalized = await writeFence.finalizeWrite({
+    authorization: toAuthorizationRef(authorization),
+    outcome,
+    safeReason,
+    resultDigest,
+    now,
   });
-  if (changed !== 1) throw new GitHubWriteFenceError('lease_finalization_lost');
+  if (finalized.status === 'outcome_lost') {
+    throw new GitHubWriteFenceError('write_cycle_outcome_lost');
+  }
+  if (finalized.status !== 'committed') {
+    throw new GitHubWriteFenceError('lease_finalization_lost');
+  }
 }
 
-export function quarantineUnknownGitHubWrite(
+export async function quarantineUnknownGitHubWrite(
   authorization: GitHubWriteAuthorization,
   cause: unknown,
-): never {
+): Promise<never> {
   try {
-    finalizeGitHubWrite(authorization, 'unknown', 'unknown_post_dispatch_outcome');
+    await finalizeGitHubWrite(authorization, 'unknown', 'unknown_post_dispatch_outcome');
   } catch (finalizationError) {
     throw new GitHubUnknownWriteOutcomeError(authorization.leaseId, {
       cause: new AggregateError(
@@ -883,243 +406,18 @@ export function quarantineUnknownGitHubWrite(
   throw new GitHubUnknownWriteOutcomeError(authorization.leaseId, { cause });
 }
 
-export function blockGitHubWrite(leaseId: string, token: string, code: string): boolean {
+export async function blockGitHubWrite(
+  leaseId: string,
+  token: string,
+  code: string,
+): Promise<boolean> {
   const now = new Date().toISOString();
-  const result = runTransaction((tx) => {
-    const lease = tx.select().from(taskSourceWriteLeases).where(and(
-      eq(taskSourceWriteLeases.id, leaseId),
-      eq(taskSourceWriteLeases.token, token),
-      inArray(taskSourceWriteLeases.state, ['claimed', 'authorized']),
-    )).limit(1).get();
-    if (!lease) return 'unchanged';
-    if (lease.writeCycleId) {
-      const cycle = tx.select({ id: githubIdentityWriteCycles.id })
-        .from(githubIdentityWriteCycles)
-        .where(and(
-          eq(githubIdentityWriteCycles.id, lease.writeCycleId),
-          eq(githubIdentityWriteCycles.connectorInstanceId, lease.connectorInstanceId),
-          eq(githubIdentityWriteCycles.modeRevision, lease.modeRevision),
-          eq(githubIdentityWriteCycles.state, 'running'),
-          eq(githubIdentityWriteCycles.reconciliationState, 'unresolved'),
-        )).limit(1).get();
-      if (!cycle) return 'cycle_lost';
-    }
-    const changed = tx.update(taskSourceWriteLeases).set({
-      state: 'blocked',
-      cycleOutcome: 'blocked',
-      blockReason: code.slice(0, 100),
-      finalizedAt: now,
-      updatedAt: now,
-    }).where(and(
-      eq(taskSourceWriteLeases.id, leaseId),
-      eq(taskSourceWriteLeases.token, token),
-      inArray(taskSourceWriteLeases.state, ['claimed', 'authorized']),
-    )).run().changes;
-    if (changed === 1 && lease.writeCycleId && !lease.cycleOutcome) {
-      if (incrementGitHubWriteCycleOutcome(lease.writeCycleId, 'blocked') !== 1) {
-        throw new GitHubWriteFenceError('write_cycle_outcome_lost');
-      }
-    }
-    return changed === 1 ? 'blocked' : 'unchanged';
-  });
-  return result === 'blocked';
-}
-
-function incrementGitHubWriteCycleOutcome(
-  cycleId: string,
-  outcome: 'succeeded' | 'failed' | 'blocked' | 'unknown',
-): number {
-  const column = {
-    succeeded: 'applied_count',
-    failed: 'failed_count',
-    blocked: 'blocked_count',
-    unknown: 'unknown_count',
-  }[outcome];
-  return sqlite.prepare(`
-    UPDATE github_identity_write_cycles
-    SET ${column} = ${column} + 1
-    WHERE id = ?
-      AND state = 'running'
-      AND reconciliation_state = 'unresolved'
-  `).run(cycleId).changes;
-}
-
-function loadTargets(
-  connectorId: string,
-  taskId: string,
-  sourceListId: string | null,
-  sourceId: string,
-  operation: GitHubTaskWriteOperation,
-  targetSourceListId?: string | null,
-  participants?: ReadonlyArray<{ role: 'parent_issue' | 'blocker_issue' | 'blocked_issue'; taskId: string }>,
-): IdentityTarget[] | null {
-  const result: IdentityTarget[] = [];
-  const localCreation = sourceId.startsWith('local:') || sourceId === taskId;
-  const issue = localCreation ? null : identityForBinding(connectorId, 'task', taskId, 'primary_issue');
-  if (!localCreation && !issue) return null;
-  if (issue) result.push(issue);
-  const localSourceListId = sourceListId
-    ? resolveLocalSourceListId(connectorId, sourceListId)
-    : null;
-  const sourceList = localSourceListId
-    ? identityForBinding(connectorId, 'source_list', localSourceListId, 'source_repository')
-    : issue ? repositoryForIssue(issue, 'source_repository') : null;
-  if (!sourceList) return null;
-  if (issue && sourceList.entityId !== issue.repositoryEntityId) return null;
-  result.push(sourceList);
-  if (targetSourceListId) {
-    const localTargetSourceListId = resolveLocalSourceListId(connectorId, targetSourceListId);
-    const target = localTargetSourceListId
-      ? identityForBinding(connectorId, 'source_list', localTargetSourceListId, 'target_repository')
-      : null;
-    if (!target) return null;
-    result.push(target);
+  const writeFence = await getGitHubWriteFenceRepository();
+  const result = await writeFence.blockWrite({ leaseId, token, code, now });
+  if (result.status === 'outcome_lost') {
+    throw new GitHubWriteFenceError('write_cycle_outcome_lost');
   }
-
-  function resolveLocalSourceListId(connectorId: string, sourceListId: string): string | null {
-    const row = sqlite.prepare(`
-      SELECT id
-      FROM source_lists
-      WHERE connector_instance_id = ?
-        AND (id = ? OR lower(source_id) = lower(?))
-      ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END
-      LIMIT 1
-    `).get(connectorId, sourceListId, sourceListId, sourceListId) as { id: string } | undefined;
-    return row?.id ?? null;
-  }
-  for (const participant of participants ?? []) {
-    const identity = identityForBinding(connectorId, 'task', participant.taskId, participant.role);
-    if (!identity) return null;
-    result.push(identity);
-  }
-  if (operation === 'create' && !result.some((target) => target.role === 'source_repository')) return null;
-  return result;
-}
-
-function identityForBinding(
-  connectorId: string,
-  bindingType: 'task' | 'source_list',
-  localId: string,
-  role: IdentityTarget['role'],
-): IdentityTarget | null {
-  const row = sqlite.prepare(`
-    SELECT entity.id AS entityId, entity.host_key AS hostKey, locator.repository_entity_id AS repositoryEntityId,
-      locator.locator_revision AS locatorRevision, locator.owner, locator.repository, locator.issue_number AS issueNumber,
-      binding.state AS bindingState, binding.verified_at AS bindingRevision
-    FROM external_entity_bindings AS binding
-    JOIN external_entities AS entity ON entity.id = binding.external_entity_id
-    JOIN external_entity_locators AS locator ON locator.external_entity_id = entity.id AND locator.valid_to IS NULL
-    WHERE binding.connector_instance_id = ? AND binding.binding_type = ? AND binding.local_id = ?
-      AND binding.state IN ('shadow', 'active') AND binding.verified_at IS NOT NULL
-      AND entity.provider = 'github'
-    LIMIT 1
-  `).get(connectorId, bindingType, localId) as {
-    entityId: string; hostKey: string; repositoryEntityId: string | null; locatorRevision: number;
-    owner: string; repository: string; issueNumber: number | null; bindingState: string; bindingRevision: string;
-  } | undefined;
-  if (!row || !['shadow', 'active'].includes(row.bindingState) || !row.bindingRevision) return null;
-  return {
-    role,
-    entityId: row.entityId,
-    repositoryEntityId: row.repositoryEntityId,
-    hostKey: row.hostKey,
-    locatorRevision: row.locatorRevision,
-    owner: row.owner,
-    repository: row.repository,
-    issueNumber: row.issueNumber,
-    bindingRevision: row.bindingRevision,
-    bindingState: row.bindingState,
-  };
-}
-
-/**
- * Blocks a write while the connector still has an open, unresolved NodeID
- * collision for this local row. `github_identity_collisions` is the canonical
- * durable record; no comparison evidence is consulted.
- */
-function hasOpenStableIdentityCollision(
-  connectorInstanceId: string,
-  bindingType: 'task' | 'source_list',
-  localId: string,
-): boolean {
-  const row = sqlite.prepare(`
-    SELECT 1
-    FROM github_identity_collisions AS collision
-    WHERE collision.connector_instance_id = ?
-      AND collision.binding_type = ?
-      AND collision.state = 'open'
-      AND (
-        json_valid(collision.local_ids) = 0
-        OR EXISTS (
-          SELECT 1
-          FROM json_each(collision.local_ids) AS member
-          WHERE member.value = ?
-        )
-      )
-    LIMIT 1
-  `).get(connectorInstanceId, bindingType, localId);
-  return row !== undefined;
-}
-
-function repositoryForIssue(issue: IdentityTarget, role: IdentityTarget['role']): IdentityTarget | null {
-  if (!issue.repositoryEntityId) return null;
-  const row = sqlite.prepare(`
-    SELECT entity.id AS entityId, entity.host_key AS hostKey, locator.locator_revision AS locatorRevision,
-      locator.owner, locator.repository
-    FROM external_entities AS entity
-    JOIN external_entity_locators AS locator ON locator.external_entity_id = entity.id AND locator.valid_to IS NULL
-    WHERE entity.id = ? AND entity.provider = 'github' AND entity.entity_type = 'repository'
-  `).get(issue.repositoryEntityId) as {
-    entityId: string; hostKey: string; locatorRevision: number; owner: string; repository: string;
-  } | undefined;
-  return row ? {
-    ...row,
-    role,
-    repositoryEntityId: null,
-    issueNumber: null,
-    bindingRevision: '',
-    bindingState: issue.bindingState,
-  } : null;
-}
-
-function currentLeaseTargetsMatch(leaseId: string, requireTargets = false): boolean {
-  if (
-    requireTargets
-    && !sqlite.prepare(`
-      SELECT 1
-      FROM task_source_write_lease_targets
-      WHERE lease_id = ?
-      LIMIT 1
-    `).get(leaseId)
-  ) return false;
-  const mismatch = sqlite.prepare(`
-    SELECT COUNT(*) AS value
-    FROM task_source_write_lease_targets AS target
-    LEFT JOIN external_entity_locators AS locator
-      ON locator.external_entity_id = target.external_entity_id
-      AND locator.valid_to IS NULL
-    LEFT JOIN task_source_write_leases AS lease ON lease.id = target.lease_id
-    LEFT JOIN external_entity_bindings AS binding
-      ON binding.connector_instance_id = lease.connector_instance_id
-      AND binding.external_entity_id = target.external_entity_id
-      AND binding.state IN ('shadow', 'active')
-    WHERE target.lease_id = ?
-      AND (
-        target.external_entity_id IS NULL
-        OR locator.id IS NULL
-        -- A repository target derived from an issue has no binding of its own;
-        -- it is frozen with an empty binding revision and checked by locator.
-        OR (
-          COALESCE(target.binding_revision, '') != ''
-          AND (binding.id IS NULL OR binding.verified_at != target.binding_revision)
-        )
-        OR locator.locator_revision != target.locator_revision
-        OR lower(locator.owner) != lower(target.owner)
-        OR lower(locator.repository) != lower(target.repository)
-        OR COALESCE(locator.issue_number, -1) != COALESCE(target.issue_number, -1)
-      )
-  `).get(leaseId) as { value: number };
-  return mismatch.value === 0;
+  return result.status === 'blocked';
 }
 
 /**
@@ -1142,7 +440,7 @@ function digestLocator(...values: Array<string | number | null>): string {
 }
 
 function taskWriteIdentity(
-  task: typeof tasks.$inferSelect,
+  task: GitHubFenceTaskRow,
   operation: GitHubTaskWriteOperation,
 ): {
   idempotencyKey: string;
@@ -1159,7 +457,7 @@ function taskWriteIdentity(
 }
 
 function taskWriteIntent(
-  task: typeof tasks.$inferSelect,
+  task: GitHubFenceTaskRow,
   operation: GitHubTaskWriteOperation,
 ): { kind: string; digest: string } | null {
   if (operation === 'complete') {
@@ -1215,45 +513,28 @@ function digestWriteResult(value: unknown): string {
   return createHash('sha256').update(serialized).digest('hex');
 }
 
-export function expireUndispatchedGitHubWriteLeases(now = new Date().toISOString()): number {
-  return sqlite.prepare(`
-    UPDATE task_source_write_leases AS lease
-    SET state = 'expired',
-        finalized_at = ?,
-        updated_at = ?
-    WHERE lease.state IN ('claimed', 'authorized')
-      AND lease.dispatched_at IS NULL
-      AND lease.expires_at <= ?
-      AND (
-        lease.write_cycle_id IS NULL
-        OR EXISTS (
-          SELECT 1
-          FROM github_identity_write_cycles AS cycle
-          WHERE cycle.id = lease.write_cycle_id
-            AND cycle.connector_instance_id = lease.connector_instance_id
-            AND cycle.mode_revision = lease.mode_revision
-            AND cycle.state = 'running'
-            AND cycle.reconciliation_state = 'unresolved'
-        )
-      )
-  `).run(now, now, now).changes;
+export async function expireUndispatchedGitHubWriteLeases(
+  now = new Date().toISOString(),
+): Promise<number> {
+  const writeFence = await getGitHubWriteFenceRepository();
+  return writeFence.expireUndispatchedLeases(now);
 }
 
-function completeGitHubWriteCycleScope(options: {
+async function completeGitHubWriteCycleScope(options: {
   cycleId: string;
   runtime?: GitHubStableIdentityRuntime;
   runtimeState: Parameters<GitHubStableIdentityRuntime['complete']>[0];
   runtimeReason: string;
   outcome: { observed: number; applied: number; blocked: number; failed: number; unknown: number };
   primaryFailure: { error: unknown } | null;
-}): void {
+}): Promise<void> {
   const cleanupFailureCodes: string[] = [];
   try {
     options.runtime?.complete(options.runtimeState, options.runtimeReason);
   } catch (error) {
     cleanupFailureCodes.push(cleanupFailureCode(error));
   }
-  if (!finishGitHubWriteCycle(options.cycleId, options.outcome)) {
+  if (!await finishGitHubWriteCycle(options.cycleId, options.outcome)) {
     cleanupFailureCodes.push('write_cycle_finish_not_committed');
   }
   if (cleanupFailureCodes.length === 0) return;
@@ -1290,11 +571,8 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
   }>;
 }): Promise<T> {
   if (options.connector.type !== 'github-issues') return options.write();
-  const snapshot = getGitHubIdentityModeSnapshotInTransaction(
-    db,
-    options.connectorInstanceId,
-  );
-  const cycleId = beginGitHubWriteCycle({
+  const snapshot = await (await getGitHubIdentityRepository()).getModeSnapshot(options.connectorInstanceId);
+  const cycleId = await beginGitHubWriteCycle({
     connectorInstanceId: options.connectorInstanceId,
     modeSnapshot: snapshot,
     pendingCandidateCount: 1,
@@ -1310,7 +588,7 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
   let primaryFailure: { error: unknown } | null = null;
   let authorization: GitHubWriteAuthorization | undefined;
   try {
-    authorization = authorizeGitHubWrite({
+    authorization = await authorizeGitHubWrite({
       connectorInstanceId: options.connectorInstanceId,
       taskId: options.taskId,
       operation: options.operation,
@@ -1321,16 +599,16 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
     });
     observed = true;
     if (!options.connector.preflightWriteRoute || !options.connector.runAuthorizedWrite) {
-      blockGitHubWrite(authorization.leaseId, authorization.token, 'missing_write_fence_adapter');
+      await blockGitHubWrite(authorization.leaseId, authorization.token, 'missing_write_fence_adapter');
       throw new GitHubWriteFenceError('missing_write_fence_adapter');
     }
-    assertGitHubWriteCycleCurrent(authorization);
+    await assertGitHubWriteCycleCurrent(authorization);
     const preflight = await options.connector.preflightWriteRoute(authorization);
-    verifyGitHubWritePreflight(authorization, preflight);
-    confirmGitHubWriteDispatch(authorization);
+    await verifyGitHubWritePreflight(authorization, preflight);
+    await confirmGitHubWriteDispatch(authorization);
     dispatched = true;
     const value = await options.connector.runAuthorizedWrite(authorization, options.write);
-    finalizeGitHubWrite(authorization, 'succeeded', undefined, value);
+    await finalizeGitHubWrite(authorization, 'succeeded', undefined, value);
     outcome = 'succeeded';
     return value;
   } catch (error) {
@@ -1339,7 +617,7 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
       outcome = 'unknown';
       // A fence failure after dispatch is also ambiguous if an earlier step mutated GitHub.
       try {
-        quarantineUnknownGitHubWrite(authorization, error);
+        await quarantineUnknownGitHubWrite(authorization, error);
       } catch (quarantineError) {
         primaryFailure = { error: quarantineError };
         throw quarantineError;
@@ -1351,7 +629,7 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
     }
     if (authorization) {
       try {
-        finalizeGitHubWrite(authorization, 'failed', 'definitive_pre_dispatch_failure');
+        await finalizeGitHubWrite(authorization, 'failed', 'definitive_pre_dispatch_failure');
       } catch (finalizationError) {
         const combined = new AggregateError(
           [error, finalizationError],
@@ -1363,7 +641,7 @@ export async function executeFencedGitHubTaskMutation<T>(options: {
     }
     throw error;
   } finally {
-    completeGitHubWriteCycleScope({
+    await completeGitHubWriteCycleScope({
       cycleId,
       runtime,
       runtimeState: outcome === 'succeeded' ? 'succeeded' : 'failed',
@@ -1388,8 +666,8 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
   write: () => Promise<T>;
 }): Promise<T> {
   if (options.connector.type !== 'github-issues') return options.write();
-  const snapshot = getGitHubIdentityModeSnapshotInTransaction(db, options.connectorInstanceId);
-  const cycleId = beginGitHubWriteCycle({
+  const snapshot = await (await getGitHubIdentityRepository()).getModeSnapshot(options.connectorInstanceId);
+  const cycleId = await beginGitHubWriteCycle({
     connectorInstanceId: options.connectorInstanceId,
     modeSnapshot: snapshot,
     pendingCandidateCount: 1,
@@ -1405,7 +683,7 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
   let outcome: 'succeeded' | 'failed' | 'unknown' | 'blocked' = 'failed';
   let primaryFailure: { error: unknown } | null = null;
   try {
-    authorization = authorizeGitHubSourceWrite({
+    authorization = await authorizeGitHubSourceWrite({
       connectorInstanceId: options.connectorInstanceId,
       sourceListId: options.sourceListId,
       operation: options.operation,
@@ -1414,16 +692,16 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
     });
     observed = true;
     if (!options.connector.preflightWriteRoute || !options.connector.runAuthorizedWrite) {
-      blockGitHubWrite(authorization.leaseId, authorization.token, 'missing_write_fence_adapter');
+      await blockGitHubWrite(authorization.leaseId, authorization.token, 'missing_write_fence_adapter');
       throw new GitHubWriteFenceError('missing_write_fence_adapter');
     }
-    assertGitHubWriteCycleCurrent(authorization);
+    await assertGitHubWriteCycleCurrent(authorization);
     const preflight = await options.connector.preflightWriteRoute(authorization);
-    verifyGitHubWritePreflight(authorization, preflight);
-    confirmGitHubWriteDispatch(authorization);
+    await verifyGitHubWritePreflight(authorization, preflight);
+    await confirmGitHubWriteDispatch(authorization);
     dispatched = true;
     const value = await options.connector.runAuthorizedWrite(authorization, options.write);
-    finalizeGitHubWrite(authorization, 'succeeded', undefined, value);
+    await finalizeGitHubWrite(authorization, 'succeeded', undefined, value);
     outcome = 'succeeded';
     return value;
   } catch (error) {
@@ -1431,7 +709,7 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
     if (authorization && dispatched) {
       outcome = 'unknown';
       try {
-        quarantineUnknownGitHubWrite(authorization, error);
+        await quarantineUnknownGitHubWrite(authorization, error);
       } catch (quarantineError) {
         primaryFailure = { error: quarantineError };
         throw quarantineError;
@@ -1443,7 +721,7 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
     }
     if (authorization) {
       try {
-        finalizeGitHubWrite(authorization, 'failed', 'definitive_pre_dispatch_failure');
+        await finalizeGitHubWrite(authorization, 'failed', 'definitive_pre_dispatch_failure');
       } catch (finalizationError) {
         const combined = new AggregateError(
           [error, finalizationError],
@@ -1455,7 +733,7 @@ export async function executeFencedGitHubSourceMutation<T>(options: {
     }
     throw error;
   } finally {
-    completeGitHubWriteCycleScope({
+    await completeGitHubWriteCycleScope({
       cycleId,
       runtime,
       runtimeState: outcome === 'succeeded' ? 'succeeded' : 'failed',

@@ -137,11 +137,60 @@ describe('connector task page streams', () => {
     const iterator = connector.fetchTasks(new Date('2026-08-01T00:00:00Z'));
     const first = await iterator.next();
     expect(first.value?.map(task => task.title)).toEqual(['First page']);
+    expect(graphFetch.mock.calls.some(([url]) => (
+      String(url).includes('$expand=checklistItems,linkedResources')
+    ))).toBe(true);
     expect(graphFetch.mock.calls.filter(([url]) => String(url).includes('/tasks?'))).toHaveLength(2);
 
     const second = await iterator.next();
     expect(second.value?.map(task => task.title)).toEqual(['Second page']);
     expect(graphFetch.mock.calls.filter(([url]) => String(url).includes('/tasks?'))).toHaveLength(2);
+    await iterator.return();
+  });
+
+  it('fetches flagged email links from the dedicated endpoint when expansion is empty', async () => {
+    const graphFetch = vi.fn(async (url: string) => {
+      if (url === '/me/todo/lists?$top=100') {
+        return Response.json({
+          value: [{
+            id: 'flagged-emails',
+            displayName: 'Flagged Emails',
+            wellKnownListName: 'flaggedEmails',
+          }],
+        });
+      }
+      if (url.endsWith('/linkedResources')) {
+        return Response.json({
+          value: [{
+            id: 'email-link',
+            applicationName: 'Microsoft Outlook',
+            displayName: 'Flagged email',
+            webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
+          }],
+        });
+      }
+      return Response.json({
+        value: [{ ...graphTask('flagged-task', 'Follow up'), linkedResources: [] }],
+      });
+    });
+    clients.microsoft = { graphFetch, substrateFetch: vi.fn() };
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config('todo-flagged', 'microsoft-todo', {}));
+
+    const iterator = connector.fetchTasks(new Date('2026-08-01T00:00:00Z'));
+    const first = await iterator.next();
+
+    expect(first.value?.[0].metadata.linkedResources).toEqual([{
+      id: 'email-link',
+      applicationName: 'Microsoft Outlook',
+      displayName: 'Flagged email',
+      webUrl: 'https://outlook.office.com/mail/deeplink/read/id',
+    }]);
+    expect(graphFetch).toHaveBeenCalledWith(
+      '/me/todo/lists/flagged-emails/tasks/flagged-task/linkedResources',
+    );
     await iterator.return();
   });
 

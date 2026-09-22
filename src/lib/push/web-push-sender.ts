@@ -1,10 +1,9 @@
 import 'server-only';
 
 import webPush from 'web-push';
-import db from '@/db';
-import { pushSubscriptions } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import type { MissionControlPushPayload } from '@/lib/notifications/service';
+import type { NotificationDeliveryRepository } from '@/db/persistence/notification-delivery';
+import type { MissionControlPushPayload } from '@/lib/notifications/push-payload';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import logger from '@/lib/logger';
 
 export interface PushSendResult {
@@ -32,6 +31,9 @@ function isTransientStatus(statusCode: number | null): boolean {
 
 export async function sendWebPushPayload(
   payload: MissionControlPushPayload,
+  dependencies: {
+    repository?: NotificationDeliveryRepository;
+  } = {},
 ): Promise<PushSendResult> {
   const publicKey = process.env.VAPID_PUBLIC_KEY;
   const privateKey = process.env.VAPID_PRIVATE_KEY;
@@ -52,9 +54,9 @@ export async function sendWebPushPayload(
     privateKey,
   );
 
-  const subscriptions = db.select().from(pushSubscriptions).where(
-    eq(pushSubscriptions.platform, 'web'),
-  ).all();
+  const repository = dependencies.repository
+    ?? (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const subscriptions = await repository.listWebPushSubscriptions();
   if (subscriptions.length === 0) {
     return {
       classification: 'no_subscription',
@@ -87,7 +89,7 @@ export async function sendWebPushPayload(
       const statusCode = statusCodeOf(error);
       failed += 1;
       if (statusCode === 404 || statusCode === 410) {
-        db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, subscription.id)).run();
+        await repository.retireWebPushSubscription(subscription.id);
         expiredSubscriptions += 1;
         permanentFailures += 1;
         logger.info(

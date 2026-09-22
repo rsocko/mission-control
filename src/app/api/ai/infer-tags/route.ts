@@ -1,4 +1,4 @@
-import { inferTags } from '@/lib/ai';
+import { inferTags } from '@/lib/ai/features/tag-inference';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 import { resolveTaskEditPoliciesByIds } from '@/lib/tasks/edit-policy';

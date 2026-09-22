@@ -1,12 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { and, asc, eq, gt, sql, type SQL } from 'drizzle-orm';
 import { resolveAndStoreEmbed } from '@/lib/triage/capture';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { DomainRateLimiter } from '@/lib/triage/domain-rate-limiter';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 const rateLimiter = new DomainRateLimiter();
 let backfillActive = false;
@@ -53,29 +51,15 @@ export async function POST(request: Request) {
   if (!dryRun) backfillActive = true;
 
   try {
-    const conditions: SQL[] = [];
-    if (sourceFilter) conditions.push(eq(triageItems.sourcePlatform, sourceFilter));
-    if (cursor) conditions.push(gt(triageItems.id, cursor));
-    if (!force) {
-      conditions.push(sql`CASE
-        WHEN json_valid(${triageItems.rawMetadata}) = 0 THEN 1
-        WHEN json_type(${triageItems.rawMetadata}, '$.embed') IS NULL THEN 1
-        ELSE 0
-      END = 1`);
-    }
-
-    const selectedItems = await db.select({
-      id: triageItems.id,
-      sourceUrl: triageItems.sourceUrl,
-      canonicalUrl: triageItems.canonicalUrl,
-    })
-      .from(triageItems)
-      .where(conditions.length ? and(...conditions) : undefined)
-      .orderBy(asc(triageItems.id))
-      .limit(limit);
-    const nextCursor = selectedItems.length === limit
-      ? selectedItems[selectedItems.length - 1]?.id ?? null
-      : null;
+    const {
+      items: selectedItems,
+      nextCursor,
+    } = await getTriagePersistenceRepositories().items.listEmbedBackfillCandidates({
+      limit,
+      force,
+      ...(sourceFilter ? { source: sourceFilter } : {}),
+      ...(cursor ? { cursor } : {}),
+    });
 
     if (dryRun) {
       return NextResponse.json({

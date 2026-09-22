@@ -143,9 +143,10 @@ the same semantic commands with keyboard-accessible alternatives.
 
 ## Semantic Index Integration
 
-Mission Control already stores embeddings in `search_embeddings` and performs
-semantic search over task title/description and notification title/body. Reuse
-that infrastructure to augment graph exploration:
+Mission Control stores embeddings in the durable semantic index
+(`semantic_documents`/`semantic_vectors`, issue #1664) and performs semantic
+search over task and notification projections. Reuse that infrastructure to
+augment graph exploration:
 
 - Compute top-k semantically similar neighbors for a selected task through the
   narrow node-neighbor API
@@ -156,13 +157,16 @@ that infrastructure to augment graph exploration:
 Semantic similarity augments the graph layer; it does not replace explicit or
 derived edges. Do not persist every pairwise similarity as a canonical edge:
 that would grow quadratically and become stale whenever content or the embedding
-model changes. Compute bounded top-k results on demand from the existing
-embedding cache. Exclude the selected task, deleted tasks, dimension-mismatched
-vectors, and embeddings older than their task records. Return explicit
-unavailable, missing, or stale status instead of fabricating fallback edges.
-Include score and provider/model/embedding timestamps when available. Never
-write semantic edges to dependency or graph tables; persist only explicit or
-user-approved relationships.
+model changes. Compute bounded top-k results on demand from the vector the index
+already holds for the selected task — never by embedding its content at request
+time, which would compare a freshly produced vector against a corpus embedded
+under different rules. Exclude the selected task, deleted tasks, vectors outside
+the active index identity's vector space, and vectors older than the document
+revision they point at. Return explicit unavailable, missing, stale, or
+incompatible status instead of fabricating fallback edges. Include score and
+provider/model/embedding timestamps when available. Never write semantic edges
+to dependency or graph tables; persist only explicit or user-approved
+relationships.
 
 Projects, phases, tags, and attribute nodes are not currently embedded. Extend
 the index to another entity type only when a concrete graph feature needs it,

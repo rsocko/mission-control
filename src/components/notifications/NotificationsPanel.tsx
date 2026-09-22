@@ -32,13 +32,14 @@ const LEVEL_FILTERS: Array<{
   label: string;
   icon: LucideIcon;
   count: (stats: UseNotificationsReturn['stats']) => number;
+  countLabel: 'unread' | 'outstanding';
   badgeClassName: string;
 }> = [
-  { value: null, label: 'All', icon: Inbox, count: stats => stats.unread, badgeClassName: 'bg-slate-500' },
-  { value: 'urgent', label: 'Urgent', icon: AlertTriangle, count: stats => stats.urgent, badgeClassName: 'bg-red-500' },
-  { value: 'action_needed', label: 'Action', icon: ClipboardCheck, count: stats => stats.actionNeeded, badgeClassName: 'bg-amber-500' },
-  { value: 'heads_up', label: 'Heads Up', icon: BellRing, count: stats => stats.headsUp, badgeClassName: 'bg-blue-500' },
-  { value: 'fyi', label: 'FYI', icon: Info, count: stats => stats.fyi, badgeClassName: 'bg-slate-500' },
+  { value: null, label: 'All', icon: Inbox, count: stats => stats.unread, countLabel: 'unread', badgeClassName: 'bg-slate-500' },
+  { value: 'urgent', label: 'Urgent', icon: AlertTriangle, count: stats => stats.urgent, countLabel: 'outstanding', badgeClassName: 'bg-red-500' },
+  { value: 'action_needed', label: 'Action', icon: ClipboardCheck, count: stats => stats.actionNeeded, countLabel: 'outstanding', badgeClassName: 'bg-amber-500' },
+  { value: 'heads_up', label: 'Heads Up', icon: BellRing, count: stats => stats.headsUp, countLabel: 'unread', badgeClassName: 'bg-blue-500' },
+  { value: 'fyi', label: 'FYI', icon: Info, count: stats => stats.fyi, countLabel: 'unread', badgeClassName: 'bg-slate-500' },
 ];
 
 function getLevelBadgeOffset(count: number) {
@@ -83,8 +84,12 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
       focusTarget?.focus();
     });
   }, [setSelectedId]);
-  const handleExecuteAction = useCallback(async (notificationId: string, actionId: string) => {
-    const result = await executeAction(notificationId, actionId);
+  const handleExecuteAction = useCallback(async (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => {
+    const result = await executeAction(notificationId, actionId, params);
     if (result.success && selectedIdRef.current === notificationId) {
       setSelectedId(null);
       setSelectedSnapshot(null);
@@ -150,7 +155,7 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
             <NotificationDetail
               notification={selectedNotification}
               onClose={() => closePreview(true)}
-              onExecuteAction={(actionId) => handleExecuteAction(selectedNotification.id, actionId)}
+              onExecuteAction={(actionId, params) => handleExecuteAction(selectedNotification.id, actionId, params)}
               onMarkRead={async () => {
                 if (isNotificationUnread(selectedNotification)) {
                   await hook.markRead([selectedNotification.id]);
@@ -211,8 +216,8 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
         </div>
 
         <div className="mb-2 flex items-stretch border-b border-[var(--border)]">
-          {LEVEL_FILTERS.map(({ value, label, icon: Icon, count, badgeClassName }) => {
-            const unreadCount = count(stats);
+          {LEVEL_FILTERS.map(({ value, label, icon: Icon, count, countLabel, badgeClassName }) => {
+            const levelCount = count(stats);
             const active = hook.filters.level === value;
             return (
               <button
@@ -223,7 +228,7 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
                   setSelectedSnapshot(null);
                   hook.setLevelFilter(value);
                 }}
-                aria-label={`${label}: ${unreadCount} unread`}
+                aria-label={`${label}: ${levelCount} ${countLabel}`}
                 aria-pressed={active}
                 className={`relative -mb-px flex flex-1 flex-col items-center gap-1 border-b-2 py-2 text-[10px] transition-colors ${
                   active
@@ -233,9 +238,9 @@ export function NotificationsPanel({ hook }: NotificationsPanelProps) {
               >
                 <span className="relative">
                   <Icon size={17} />
-                  {unreadCount > 0 && (
-                    <span className={`absolute ${getLevelBadgeOffset(unreadCount)} -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white ${badgeClassName}`}>
-                      {unreadCount > 99 ? '99+' : unreadCount}
+                  {levelCount > 0 && (
+                    <span className={`absolute ${getLevelBadgeOffset(levelCount)} -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold leading-none text-white ${badgeClassName}`}>
+                      {levelCount > 99 ? '99+' : levelCount}
                     </span>
                   )}
                 </span>
@@ -349,7 +354,11 @@ function NotificationGroup({
     notification: (typeof hook.notifications)[number],
     trigger: HTMLElement | null,
   ) => void;
-  onExecuteAction: (notificationId: string, actionId: string) => Promise<{ success: boolean }>;
+  onExecuteAction: (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => Promise<{ success: boolean }>;
 }) {
   if (items.length === 0) return null;
 
@@ -387,7 +396,7 @@ function NotificationGroup({
               onMute={() => notification.mutedAt
                 ? hook.unmute([notification.id])
                 : hook.mute([notification.id])}
-              onExecuteAction={(actionId) => onExecuteAction(notification.id, actionId)}
+              onExecuteAction={(actionId, params) => onExecuteAction(notification.id, actionId, params)}
             />
           ))}
         </AnimatePresence>

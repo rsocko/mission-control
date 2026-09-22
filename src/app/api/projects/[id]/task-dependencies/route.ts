@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import {
   createTaskDependency,
-  GraphServiceError,
-} from '@/lib/graph/service';
+  ProjectGraphServiceError,
+} from '@/lib/graph/project-service';
 
 export async function POST(
   request: Request,
@@ -34,7 +34,7 @@ export async function POST(
     });
     return NextResponse.json({ dependency }, { status: 201 });
   } catch (error) {
-    if (error instanceof GraphServiceError) {
+    if (error instanceof ProjectGraphServiceError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return ApiErrors.internal('Failed to create task dependency', error);

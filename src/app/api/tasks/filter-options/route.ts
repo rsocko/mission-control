@@ -1,20 +1,15 @@
-import { asc, isNotNull } from 'drizzle-orm';
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks } from '@/db/schema';
 import { ApiErrors } from '@/lib/api-error';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 
 export async function GET() {
   try {
-    const rows = await db
-      .selectDistinct({ assignee: tasks.assignee })
-      .from(tasks)
-      .where(isNotNull(tasks.assignee))
-      .orderBy(asc(tasks.assignee));
+    const { taskReads } = await getTaskCorePersistence();
+    const assignees = await taskReads.listDistinctTaskAssignees();
 
     return NextResponse.json({
-      assignees: rows
-        .map((row) => row.assignee?.trim())
+      assignees: assignees
+        .map((assignee) => assignee.trim())
         .filter((assignee): assignee is string => Boolean(assignee)),
     });
   } catch (error) {

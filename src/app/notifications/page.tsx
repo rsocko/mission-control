@@ -12,6 +12,7 @@ import {
   RefreshCw, Loader2, Zap,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useRef } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { useSearchParams, useRouter } from 'next/navigation';
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
@@ -28,6 +29,7 @@ import {
 import type { NotificationView } from '@/lib/notifications/views';
 import { isNotificationUnread } from '@/lib/notifications/lifecycle';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {
   NotificationRestoreSnapshot,
 } from '@/lib/hooks/useNotifications';
@@ -90,9 +92,18 @@ function DesktopNotificationsPage() {
   } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const pendingFocusIdRef = useRef<string | null>(null);
   const expectedUrlRef = useRef<string | null>(null);
   const applyingUrlRef = useRef(false);
   const selectedIdRef = useRef(hook.selectedId);
+  const virtualizeNotifications = shouldVirtualizeList(hook.notifications.length);
+  const notificationVirtualizer = useVirtualizer({
+    count: virtualizeNotifications ? hook.notifications.length : 0,
+    getScrollElement: () => listRef.current,
+    getItemKey: (index) => hook.notifications[index]?.id ?? index,
+    estimateSize: () => 132,
+    overscan: 6,
+  });
   useEffect(() => {
     selectedIdRef.current = hook.selectedId;
   }, [hook.selectedId]);
@@ -163,12 +174,18 @@ function DesktopNotificationsPage() {
 
   const selectAndFocus = useCallback((id: string | null) => {
     setSelectedId(id);
+    selectedIdRef.current = id;
     if (!id) return;
+    pendingFocusIdRef.current = id;
+    const index = hook.notifications.findIndex(notification => notification.id === id);
+    if (virtualizeNotifications && index >= 0) {
+      notificationVirtualizer.scrollToIndex(index, { align: 'auto' });
+    }
     const focus = () => rowRefs.current.get(id)?.focus();
     requestAnimationFrame(focus);
     window.setTimeout(focus, 100);
     window.setTimeout(focus, 300);
-  }, [setSelectedId]);
+  }, [hook.notifications, notificationVirtualizer, setSelectedId, virtualizeNotifications]);
 
   const announceBulkResult = useCallback((result: {
     acceptedCount: number;
@@ -320,14 +337,99 @@ function DesktopNotificationsPage() {
     ? hook.notifications.find(n => n.id === hook.selectedId)
       || (selectedSnapshot?.id === hook.selectedId ? selectedSnapshot : undefined)
     : undefined;
-  const handleExecuteAction = useCallback(async (notificationId: string, actionId: string) => {
-    const result = await executeAction(notificationId, actionId);
+  const handleExecuteAction = useCallback(async (
+    notificationId: string,
+    actionId: string,
+    params?: Record<string, unknown>,
+  ) => {
+    const result = await executeAction(notificationId, actionId, params);
     if (result.success && selectedIdRef.current === notificationId) {
       setSelectedId(null);
       setSelectedSnapshot(null);
     }
     return result;
   }, [executeAction, setSelectedId]);
+  const renderNotificationRow = (
+    notification: (typeof filteredNotifications)[number],
+    index: number,
+  ) => (
+    <div
+      key={notification.id}
+      ref={element => {
+        if (element) {
+          rowRefs.current.set(notification.id, element);
+          if (
+            pendingFocusIdRef.current === notification.id
+            && document.activeElement !== element
+          ) {
+            pendingFocusIdRef.current = null;
+            requestAnimationFrame(() => element.focus());
+          }
+        } else {
+          rowRefs.current.delete(notification.id);
+        }
+      }}
+      role="option"
+      aria-selected={hook.selectedId === notification.id}
+      aria-posinset={index + 1}
+      aria-setsize={filteredNotifications.length}
+      tabIndex={hook.selectedId === notification.id || !hook.selectedId ? 0 : -1}
+      onFocus={() => hook.setSelectedId(notification.id)}
+      className="rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+    >
+      <NotificationCard
+        notification={notification}
+        compact
+        isSelected={hook.selectedId === notification.id}
+        onSelect={() => {
+          setSelectedSnapshot(isNotificationUnread(notification)
+            ? { ...notification, state: 'read', readState: 'read', readAt: new Date().toISOString() }
+            : notification);
+          selectAndFocus(notification.id);
+          if (isNotificationUnread(notification)) {
+            void hook.markRead([notification.id]).then(announceBulkResult);
+            setUndoState({
+              snapshots: [restoreSnapshot(notification)],
+              focusId: notification.id,
+              label: 'mark read',
+            });
+          }
+        }}
+        onMarkRead={() => {
+          const unread = isNotificationUnread(notification);
+          const action = unread
+            ? hook.markRead([notification.id])
+            : hook.markUnread([notification.id]);
+          void action.then(announceBulkResult);
+          setUndoState({
+            snapshots: [restoreSnapshot(notification)],
+            focusId: notification.id,
+            label: unread ? 'mark read' : 'mark unread',
+          });
+        }}
+        onHandle={async () => {
+          const index = filteredNotifications.findIndex(item => item.id === notification.id);
+          const next = filteredNotifications[index + 1] ?? filteredNotifications[index - 1];
+          const result = await hook.handle([notification.id]);
+          announceBulkResult(result);
+          setUndoState({
+            snapshots: [restoreSnapshot(notification)],
+            focusId: notification.id,
+            label: 'mark done',
+          });
+          selectAndFocus(next?.id ?? null);
+        }}
+        onSnooze={(duration) => hook.snooze(notification.id, duration)}
+        onMute={async () => {
+          const result = await (notification.mutedAt
+            ? hook.unmute([notification.id])
+            : hook.mute([notification.id]));
+          announceBulkResult(result);
+        }}
+        onExecuteAction={(actionId, params) => handleExecuteAction(notification.id, actionId, params)}
+      />
+    </div>
+  );
 
   // Bulk actions
   const handleBulkAction = useCallback(async (action: 'mark_read' | 'dismiss' | 'handle') => {
@@ -387,16 +489,16 @@ function DesktopNotificationsPage() {
     {
       key: 'urgent',
       label: 'Urgent',
-      detail: 'Unread',
+      detail: 'Until cleared',
       count: hook.stats.urgent,
       icon: AlertTriangle,
-      active: hook.filters.level === 'urgent' && hook.filters.state === 'unread',
+      active: hook.filters.level === 'urgent' && hook.filters.state === null,
       onClick: () => {
-        const active = hook.filters.level === 'urgent' && hook.filters.state === 'unread';
+        const active = hook.filters.level === 'urgent' && hook.filters.state === null;
         hook.replaceFilters({
           ...hook.filters,
           level: active ? null : 'urgent',
-          state: active ? null : 'unread',
+          state: null,
         });
       },
       accent: 'text-red-300',
@@ -404,17 +506,17 @@ function DesktopNotificationsPage() {
     {
       key: 'action-needed',
       label: 'Action needed',
-      detail: 'Unread',
+      detail: 'Until cleared',
       count: hook.stats.actionNeeded,
       icon: ClipboardCheck,
-      active: hook.filters.level === 'action_needed' && hook.filters.state === 'unread',
+      active: hook.filters.level === 'action_needed' && hook.filters.state === null,
       onClick: () => {
         const active = hook.filters.level === 'action_needed'
-          && hook.filters.state === 'unread';
+          && hook.filters.state === null;
         hook.replaceFilters({
           ...hook.filters,
           level: active ? null : 'action_needed',
-          state: active ? null : 'unread',
+          state: null,
         });
       },
       accent: 'text-amber-300',
@@ -422,7 +524,7 @@ function DesktopNotificationsPage() {
     {
       key: 'actionable',
       label: 'Actionable',
-      detail: 'Can be handled',
+      detail: 'Has available actions',
       count: hook.stats.actionable,
       icon: Zap,
       active: hook.filters.actionableOnly,
@@ -630,6 +732,7 @@ function DesktopNotificationsPage() {
               </button>
               <button
                 onClick={() => handleBulkAction('dismiss')}
+                title="Remove as irrelevant; future source activity will not bring it back"
                 className="text-xs px-2 py-1 rounded bg-red-900/30 text-red-300 hover:bg-red-900/50 transition-colors"
               >
                 <Trash2 size={11} className="inline mr-1" />
@@ -637,10 +740,11 @@ function DesktopNotificationsPage() {
               </button>
               <button
                 onClick={() => handleBulkAction('handle')}
+                title="Clear from the inbox; new source activity can bring it back"
                 className="text-xs px-2 py-1 rounded bg-slate-800/50 text-slate-300 hover:bg-slate-800/70 transition-colors"
               >
                 <Archive size={11} className="inline mr-1" />
-                Handle
+                Done
               </button>
               <button
                 onClick={() => { setSelectionScope(null); setBulkSelected(new Set()); }}
@@ -655,8 +759,8 @@ function DesktopNotificationsPage() {
         {/* Main content: split list + detail */}
         <div className="flex flex-1 overflow-hidden">
           {/* Notification list */}
-          <div ref={listRef} className="w-[420px] flex-shrink-0 border-r border-[var(--border)] overflow-y-auto">
-            <div className="sticky top-0 z-10 flex h-10 items-center border-b border-[var(--border)] bg-[var(--surface-1)] px-3">
+          <div className="flex w-[420px] flex-shrink-0 flex-col border-r border-[var(--border)]">
+            <div className="z-10 flex h-10 shrink-0 items-center border-b border-[var(--border)] bg-[var(--surface-1)] px-3">
               <label className="inline-flex items-center gap-1.5 text-xs text-[var(--text-muted)]">
                 <input
                   type="checkbox"
@@ -671,6 +775,7 @@ function DesktopNotificationsPage() {
                 {hook.matchingCount.toLocaleString()} matching
               </span>
             </div>
+            <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
             {hook.isLoading && filteredNotifications.length === 0 ? (
               <div className="flex h-full items-center justify-center" role="status">
                 <Loader2 size={20} className="animate-spin text-[var(--text-muted)]" />
@@ -701,74 +806,28 @@ function DesktopNotificationsPage() {
                 </p>
               </div>
             ) : (
-              <div className="p-3 space-y-1" role="listbox" aria-label="Notifications">
+              <div className="p-3 space-y-1" role="listbox" aria-label="Notifications" data-virtualized={virtualizeNotifications || undefined}>
                 <AnimatePresence mode="popLayout">
-                  {filteredNotifications.map((notification) => (
+                  {virtualizeNotifications ? (
                     <div
-                      key={notification.id}
-                      ref={element => {
-                        if (element) rowRefs.current.set(notification.id, element);
-                        else rowRefs.current.delete(notification.id);
-                      }}
-                      role="option"
-                      aria-selected={hook.selectedId === notification.id}
-                      tabIndex={hook.selectedId === notification.id || !hook.selectedId ? 0 : -1}
-                      onFocus={() => hook.setSelectedId(notification.id)}
-                      className="rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                      role="presentation"
+                      className="relative w-full"
+                      style={{ height: `${notificationVirtualizer.getTotalSize()}px` }}
                     >
-                      <NotificationCard
-                        notification={notification}
-                        compact
-                        isSelected={hook.selectedId === notification.id}
-                        onSelect={() => {
-                          setSelectedSnapshot(isNotificationUnread(notification)
-                            ? { ...notification, state: 'read', readState: 'read', readAt: new Date().toISOString() }
-                            : notification);
-                          selectAndFocus(notification.id);
-                          if (isNotificationUnread(notification)) {
-                            void hook.markRead([notification.id]).then(announceBulkResult);
-                            setUndoState({
-                              snapshots: [restoreSnapshot(notification)],
-                              focusId: notification.id,
-                              label: 'mark read',
-                            });
-                          }
-                        }}
-                        onMarkRead={() => {
-                          const unread = isNotificationUnread(notification);
-                          const action = unread
-                            ? hook.markRead([notification.id])
-                            : hook.markUnread([notification.id]);
-                          void action.then(announceBulkResult);
-                          setUndoState({
-                            snapshots: [restoreSnapshot(notification)],
-                            focusId: notification.id,
-                            label: unread ? 'mark read' : 'mark unread',
-                          });
-                        }}
-                        onHandle={async () => {
-                          const index = filteredNotifications.findIndex(item => item.id === notification.id);
-                          const next = filteredNotifications[index + 1] ?? filteredNotifications[index - 1];
-                          const result = await hook.handle([notification.id]);
-                          announceBulkResult(result);
-                          setUndoState({
-                            snapshots: [restoreSnapshot(notification)],
-                            focusId: notification.id,
-                            label: 'handle',
-                          });
-                          selectAndFocus(next?.id ?? null);
-                        }}
-                        onSnooze={(duration) => hook.snooze(notification.id, duration)}
-                        onMute={async () => {
-                          const result = await (notification.mutedAt
-                            ? hook.unmute([notification.id])
-                            : hook.mute([notification.id]));
-                          announceBulkResult(result);
-                        }}
-                        onExecuteAction={(actionId) => handleExecuteAction(notification.id, actionId)}
-                      />
+                      {notificationVirtualizer.getVirtualItems().map((virtualRow) => (
+                        <div
+                          key={virtualRow.key}
+                          ref={notificationVirtualizer.measureElement}
+                          data-index={virtualRow.index}
+                          role="presentation"
+                          className="absolute left-0 top-0 w-full pb-1"
+                          style={{ transform: `translateY(${virtualRow.start}px)` }}
+                        >
+                          {renderNotificationRow(filteredNotifications[virtualRow.index], virtualRow.index)}
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : filteredNotifications.map(renderNotificationRow)}
                 </AnimatePresence>
 
                 {/* Infinite scroll loading indicator */}
@@ -787,6 +846,7 @@ function DesktopNotificationsPage() {
                 )}
               </div>
             )}
+            </div>
           </div>
 
           {/* Detail panel */}
@@ -795,7 +855,7 @@ function DesktopNotificationsPage() {
               <NotificationDetail
                 key={selectedNotification.id}
                 notification={selectedNotification}
-                onExecuteAction={(actionId) => handleExecuteAction(selectedNotification.id, actionId)}
+                onExecuteAction={(actionId, params) => handleExecuteAction(selectedNotification.id, actionId, params)}
                 onMarkRead={() => {
                  const nextState = isNotificationUnread(selectedNotification) ? 'read' : 'unread';
                  setSelectedSnapshot({ ...selectedNotification, state: nextState, readState: nextState });
@@ -831,7 +891,7 @@ function DesktopNotificationsPage() {
                  setUndoState({
                    snapshots: [restoreSnapshot(selectedNotification)],
                    focusId: selectedNotification.id,
-                   label: 'handle',
+                   label: 'mark done',
                  });
                  selectAndFocus(next?.id ?? null);
                 }}

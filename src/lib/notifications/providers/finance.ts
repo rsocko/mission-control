@@ -1,5 +1,6 @@
 import type { NotificationSourceProvider } from './types';
 import { buildMonarchExternalTargetLink } from '@/lib/finance/external-targets';
+import { resolveTyrionReconnectUrl } from '@/lib/finance/tyrion-reconnect';
 import {
   financeInsightDetailTarget,
   financeInsightPeriodTarget,
@@ -194,6 +195,96 @@ export const financeNotificationProvider: NotificationSourceProvider = {
   displayName: 'Tyrion',
   signatures: [
     {
+      key: 'finance-connector-authentication-expired',
+      matches: notification => (
+        notification.metadata.notificationType === 'connectorAuthenticationExpired'
+      ),
+      present(notification) {
+        return {
+          title: notification.title,
+          body: notification.body ?? null,
+          level: 'urgent',
+          category: 'finance',
+          templateKey: 'connectorAuthenticationExpired',
+          isActionable: true,
+          metadata: notification.metadata,
+          presentation: {
+            sourceName: 'Tyrion',
+            providerSignature: 'finance-connector-authentication-expired',
+            richContent: {
+              primaryText: 'Monarch authentication expired',
+              secondaryText: 'Finance data is stale and synchronization is blocked.',
+              footerText: 'Reconnect in Tyrion, then verify recovery in Mission Control.',
+            },
+          },
+          actions: [
+            {
+              actionType: 'reconnect_monarch',
+              label: 'Reconnect Monarch',
+              icon: 'external-link',
+              variant: 'primary',
+              isPrimary: true,
+              payload: {},
+              opensExternal: true,
+              createdBy: 'connector',
+            },
+            {
+              actionType: 'navigate',
+              label: 'Open Finance settings',
+              icon: 'settings',
+              variant: 'secondary',
+              payload: { target: '/settings/connectors' },
+              createdBy: 'connector',
+            },
+          ],
+        };
+      },
+    },
+    {
+      key: 'finance-connector-degraded',
+      matches: notification => notification.metadata.notificationType === 'connectorDegraded',
+      present(notification) {
+        return {
+          title: notification.title,
+          body: notification.body ?? null,
+          level: 'action_needed',
+          category: 'finance',
+          templateKey: 'connectorDegraded',
+          isActionable: true,
+          metadata: notification.metadata,
+          presentation: {
+            sourceName: 'Tyrion',
+            providerSignature: 'finance-connector-degraded',
+            richContent: {
+              primaryText: 'Monarch connection degraded',
+              secondaryText: 'Finance data is stale while synchronization is unavailable.',
+              footerText: 'Reconnect in Tyrion, then verify recovery in Mission Control.',
+            },
+          },
+          actions: [
+            {
+              actionType: 'reconnect_monarch',
+              label: 'Reconnect Monarch',
+              icon: 'external-link',
+              variant: 'primary',
+              isPrimary: true,
+              payload: {},
+              opensExternal: true,
+              createdBy: 'connector',
+            },
+            {
+              actionType: 'navigate',
+              label: 'Open Finance settings',
+              icon: 'settings',
+              variant: 'secondary',
+              payload: { target: '/settings/connectors' },
+              createdBy: 'connector',
+            },
+          ],
+        };
+      },
+    },
+    {
       key: 'finance-recurring-amount-change',
       matches: notification => notification.metadata.notificationType === 'recurringAmountChange',
       present: recurringPresentation,
@@ -275,6 +366,35 @@ export const financeNotificationProvider: NotificationSourceProvider = {
     },
   ],
   async executeAction(context) {
+    if (context.action.actionType === 'reconnect_monarch') {
+      const notificationType = text(record(context.notification.metadata).notificationType);
+      if (
+        notificationType !== 'connectorDegraded'
+        && notificationType !== 'connectorAuthenticationExpired'
+      ) {
+        return {
+          result: { type: 'finance_reconnect_action_rejected' },
+          error: {
+            message: 'Reconnect is not authorized for this finance notification',
+            status: 400,
+          },
+        };
+      }
+      try {
+        return {
+          state: 'read',
+          result: { type: 'open_url', url: resolveTyrionReconnectUrl() },
+        };
+      } catch {
+        return {
+          result: { type: 'finance_reconnect_unavailable' },
+          error: {
+            message: 'Tyrion reconnect is not configured safely',
+            status: 503,
+          },
+        };
+      }
+    }
     if (context.action.actionType !== 'open_url') return null;
     const link = buildMonarchExternalTargetLink(context.payload.target);
     if (!link) {

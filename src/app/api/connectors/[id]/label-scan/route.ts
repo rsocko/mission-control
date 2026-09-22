@@ -1,9 +1,7 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { createGitHubClient } from '@/lib/connectors/github-issues/github-client';
 import { scanForNonCanonicalLabels } from '@/lib/connectors/github-issues/label-handler';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 /**
  * GET /api/connectors/[id]/label-scan
@@ -17,15 +15,9 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [connector] = await db
-      .select({
-        type: connectorConfigs.type,
-        credentials: connectorConfigs.credentials,
-        settings: connectorConfigs.settings,
-      })
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await (
+      await getConnectorManagementPersistence()
+    ).getConnector(id);
 
     if (!connector) {
       return NextResponse.json({ error: 'Connector not found' }, { status: 404 });

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IConnector } from '@/lib/connectors';
-import type { ConnectorConfig } from '@/types';
+import type { ConnectorConfig, FetchTaskOptions } from '@/types';
 
 const mocks = vi.hoisted(() => ({
   cronSchedule: vi.fn(),
@@ -47,6 +47,24 @@ const persistedConfig = {
   settings: JSON.stringify({ repos: ['octo/existing', 'octo/new'] }),
   syncedLists: JSON.stringify(['octo/existing', 'octo/new']),
   deletedAt: null,
+};
+
+const repositoryConfig: ConnectorConfig = {
+  ...persistedConfig,
+  syncMode: 'poll',
+  capabilities: {
+    read: true,
+    write: false,
+    delete: false,
+    sync: true,
+    subtasks: false,
+    lists: true,
+    tags: false,
+    tagWriteBack: false,
+  },
+  credentials: { token: 'test-token' },
+  settings: { repos: ['octo/existing', 'octo/new'] },
+  syncedLists: ['octo/existing', 'octo/new'],
 };
 
 vi.mock('@/db', () => ({
@@ -106,12 +124,78 @@ vi.mock('@/db/schema', () => ({
   },
 }));
 
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: async () => ({
+    connectors: {
+      get: vi.fn(async () => repositoryConfig),
+    },
+    syncRuns: {
+      listLatestSuccessfulPulls: vi.fn(async () => []),
+      append: vi.fn(async () => undefined),
+    },
+    execution: {
+      support: {
+        allowsLegacyWorkflow: vi.fn(() => true),
+        assertConfigSupported: vi.fn(),
+        assertConnectorSupported: vi.fn(),
+        listEnabledGitHubConfigs: vi.fn(async () => mocks.dependencyPollConfigs),
+        listConnectorTaskIdentities: vi.fn(async () => []),
+        listConnectorTaskIds: vi.fn(async () => []),
+      },
+      lists: {
+        list: vi.fn(async () => []),
+        removeLegacyProjectLists: vi.fn(async () => undefined),
+      },
+      pulls: {
+        listStaleInProgress: vi.fn(async () => []),
+        applyVerifiedTerminalStatus: vi.fn(async () => true),
+      },
+      notifications: {
+        ingest: vi.fn(async (commands: Array<{ input: { id: string } }>) =>
+          commands.map(({ input }) => ({
+            id: input.id,
+            created: true,
+            pendingDelivery: false,
+          }))),
+        listActive: vi.fn(async () => []),
+        applyReconciliation: vi.fn(async () => 0),
+        recordReconciliationFailure: vi.fn(async () => undefined),
+        archiveStale: vi.fn(async () => 0),
+        mergeMetadata: vi.fn(async () => true),
+      },
+    },
+    github: {
+      identity: {
+        getModeSnapshot: vi.fn(async (connectorInstanceId: string) => ({
+          connectorInstanceId,
+          effectiveMode: 'stable',
+          modeRevision: 1,
+          capturedAt: new Date().toISOString(),
+        })),
+        checkDecisionsCurrent: vi.fn(async () => true),
+      },
+      writeFence: {},
+      dependencies: {},
+      hierarchy: {},
+      projects: {},
+    },
+  }),
+}));
+
 vi.mock('@/lib/connectors', () => ({
   connectorRegistry: {
     getConnector: mocks.getConnector,
     replaceConnector: mocks.replaceConnector,
     getAllConnectors: vi.fn(() => []),
   },
+}));
+
+vi.mock('@/lib/connectors/registry-runtime', () => ({
+  getConnectorRegistry: () => ({
+    getConnector: mocks.getConnector,
+    replaceConnector: mocks.replaceConnector,
+    getAllConnectors: vi.fn(() => []),
+  }),
 }));
 
 vi.mock('@/lib/sync/push-manager', () => ({
@@ -160,18 +244,18 @@ vi.mock('@/lib/logger', () => ({
   },
 }));
 vi.mock('@/lib/public-demo', () => ({ isPublicDemoMode: vi.fn(() => false) }));
-vi.mock('@/lib/external-identities', () => ({
-  GITHUB_IDENTITY_MODE: 'stable',
+const identityRuntimeStub = vi.hoisted(() => ({
   GitHubStableIdentityRuntime: class {
+    blockedReasonCodes: readonly string[] = [];
     modeSnapshot = {
       connectorInstanceId: 'github-1',
       effectiveMode: 'stable',
       modeRevision: 1,
       capturedAt: '2026-08-09T00:00:00.000Z',
     };
-    markNetworkPage = mocks.identityRuntime.markNetworkPage;
-    markBlocked = mocks.identityRuntime.markBlocked;
-    complete = mocks.identityRuntime.complete;
+    markNetworkPage: unknown;
+    markBlocked: unknown;
+    complete: unknown;
     assertCurrentMode() {}
     assertDecisionsCurrent() {}
     hasResolvedStableLocalId() { return false; }
@@ -180,6 +264,23 @@ vi.mock('@/lib/external-identities', () => ({
     applyResolvedBatch() { return []; }
     resolveLinkedSourceBatch() { return []; }
   },
+}));
+identityRuntimeStub.GitHubStableIdentityRuntime.prototype.markNetworkPage =
+  mocks.identityRuntime.markNetworkPage;
+identityRuntimeStub.GitHubStableIdentityRuntime.prototype.markBlocked =
+  mocks.identityRuntime.markBlocked;
+identityRuntimeStub.GitHubStableIdentityRuntime.prototype.complete =
+  mocks.identityRuntime.complete;
+vi.mock('@/lib/external-identities/stable-identity-runtime', () => ({
+  GitHubStableIdentityRuntime: identityRuntimeStub.GitHubStableIdentityRuntime,
+}));
+vi.mock('@/lib/external-identities/stable-identity-types', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  GITHUB_IDENTITY_MODE: 'stable',
+}));
+vi.mock('@/lib/external-identities', () => ({
+  GITHUB_IDENTITY_MODE: 'stable',
+  GitHubStableIdentityRuntime: identityRuntimeStub.GitHubStableIdentityRuntime,
   getGitHubIdentityModeSnapshot: vi.fn((connectorInstanceId: string) => ({
     connectorInstanceId,
     effectiveMode: 'stable',
@@ -191,7 +292,7 @@ vi.mock('@/lib/notifications', () => ({
   createNotificationsInTransaction: vi.fn(async () => []),
   wakeNotificationDeliveryDispatcher: vi.fn(),
 }));
-vi.mock('@/lib/sync/job-queue', () => ({
+vi.mock('@/lib/sync/job-runtime', () => ({
   countRemainingSyncJobs: vi.fn(() => 0),
   enqueueSyncJob: vi.fn(),
   getActiveSyncJobConnectorIds: vi.fn(() => []),
@@ -206,13 +307,13 @@ vi.mock('@/lib/sync/job-queue', () => ({
   waitForSyncJob: vi.fn(),
 }));
 vi.mock('@/lib/sync/maintenance-lock', () => ({
-  assertConnectorMaintenanceUnlocked: vi.fn(),
+  assertConnectorMaintenanceUnlockedAsync: vi.fn(() => Promise.resolve()),
 }));
 vi.mock('@/lib/telemetry/operations', () => ({
   setQueuedExpensiveOperations: vi.fn(),
   withRuntimeOperation: vi.fn((_operation, callback: () => unknown) => callback()),
 }));
-vi.mock('@/lib/sync/connector-lock', () => {
+vi.mock('@/lib/sync/connector-lock-runtime', () => {
   class ConnectorOperationBusyError extends Error {
     constructor(message = 'Another operation is already queued or in progress for this connector') {
       super(message);
@@ -240,7 +341,7 @@ vi.mock('node-cron', () => ({
 }));
 
 import { SyncExecutionPipeline } from '@/lib/sync';
-import { ConnectorOperationBusyError } from '@/lib/sync/connector-lock';
+import { ConnectorOperationBusyError } from '@/lib/sync/connector-lock-runtime';
 
 function createScheduler(): SyncExecutionPipeline {
   const scheduler = Object.create(
@@ -361,6 +462,8 @@ describe('connector settings refresh before sync', () => {
         parentTasksAdded: 1,
         subtasksAdded: 0,
         remoteSourceIds: new Set<string>(),
+        identityBlocked: 0,
+        identityBlockedOutcomes: {},
       };
     });
   });
@@ -436,6 +539,8 @@ describe('dependency reconciliation resume scheduling', () => {
     mocks.getConnector.mockReturnValue(mocks.staleConnector);
     mocks.getResumeCandidates.mockResolvedValue([]);
     mocks.recordResumeOutcome.mockResolvedValue(undefined);
+    mocks.getDependencyHealth.mockResolvedValue(new Map());
+    mocks.dependencyPollConfigs.length = 0;
     mocks.runWithLease.mockImplementation(
       async (_connectorId: string, _operationType: string, operation: () => unknown) =>
         operation(),
@@ -480,7 +585,7 @@ describe('dependency reconciliation resume scheduling', () => {
     }
   });
 
-  it('collects a due relationship generation without upserting tasks and skips fresh or active state', async () => {
+  it('collects a due relationship generation, skips active state, and replaces interrupted partial state', async () => {
     const connectorId = 'github-due-poll';
     mocks.dependencyPollConfigs.push({
       ...persistedConfig,
@@ -542,7 +647,10 @@ describe('dependency reconciliation resume scheduling', () => {
       new Set(['acme/app']),
       true,
       new Map([['acme/app', 'acme/app']]),
-      { identityRuntime: expect.any(Object) },
+      {
+        identityRuntime: expect.any(Object),
+        requireCompletePopulation: true,
+      },
     );
     expect(mocks.reconcileDependencies).toHaveBeenCalledWith(
       connectorId,
@@ -553,6 +661,7 @@ describe('dependency reconciliation resume scheduling', () => {
     mocks.getDependencyHealth.mockResolvedValue(new Map([[
       connectorId,
       {
+        status: 'completed',
         lastCompletedAt: new Date().toISOString(),
         collectionPhase: 'complete',
         reconciliationPhase: 'complete',
@@ -562,6 +671,7 @@ describe('dependency reconciliation resume scheduling', () => {
     mocks.getDependencyHealth.mockResolvedValue(new Map([[
       connectorId,
       {
+        status: 'running',
         lastCompletedAt: null,
         collectionPhase: 'collecting',
         reconciliationPhase: 'pending',
@@ -570,6 +680,22 @@ describe('dependency reconciliation resume scheduling', () => {
     await scheduler.pollDueDependencyRelationships('manual');
 
     expect(mocks.beginDependencyGeneration).toHaveBeenCalledOnce();
+
+    mocks.getDependencyHealth.mockResolvedValue(new Map([[
+      connectorId,
+      {
+        status: 'partial',
+        lastCompletedAt: null,
+        collectionPhase: 'collecting',
+        reconciliationPhase: 'complete',
+      },
+    ]]));
+    const restartedScheduler = createScheduler();
+    Reflect.set(restartedScheduler, 'dependencyRelationshipPollEnabled', true);
+    await restartedScheduler.pollDueDependencyRelationships('startup');
+
+    expect(mocks.beginDependencyGeneration).toHaveBeenCalledTimes(2);
+    expect(fetchTasks).toHaveBeenCalledTimes(2);
   });
 
   it('cancels comparison evidence when a relationship generation is revision-fenced', async () => {
@@ -592,8 +718,8 @@ describe('dependency reconciliation resume scheduling', () => {
       icon: 'github',
       dependencySnapshotStrategy: 'task-stream',
       capabilities: { dependencyRead: true },
-      fetchTasks: async function* (_since, options) {
-        await options.dependencyGeneration.complete('graphql-bulk');
+      fetchTasks: async function* (_since?: Date, options?: FetchTaskOptions) {
+        await options!.dependencyGeneration!.complete('graphql-bulk');
         yield [];
       },
       getIdentityObservationState: () => [{

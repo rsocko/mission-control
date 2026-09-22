@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const runTransaction = vi.fn();
-vi.mock('@/db', () => ({ runTransaction }));
+const convertDraft = vi.fn(async () => ({ projectId: 'proj-mock' }));
+vi.mock('@/lib/ai/workflow-persistence', () => ({
+  getAIWorkflowPersistence: async () => ({ ideation: { convertDraft } }),
+}));
 vi.mock('@/lib/api-error', () => ({
   ApiErrors: {
     validation: (message: string) => Response.json({ error: message }, { status: 422 }),
@@ -21,7 +23,7 @@ const root = {
 };
 
 describe('POST /api/ideation/convert', () => {
-  beforeEach(() => runTransaction.mockReset());
+  beforeEach(() => convertDraft.mockClear());
 
   it('validates a complete draft before starting one transaction', async () => {
     const { POST } = await import('@/app/api/ideation/convert/route');
@@ -56,7 +58,7 @@ describe('POST /api/ideation/convert', () => {
 
     const body = await response.clone().json();
     expect(response.status, JSON.stringify(body)).toBe(201);
-    expect(runTransaction).toHaveBeenCalledOnce();
+    expect(convertDraft).toHaveBeenCalledOnce();
   });
 
   it('rejects missing parents and cycles without opening a transaction', async () => {
@@ -74,7 +76,7 @@ describe('POST /api/ideation/convert', () => {
     }));
 
     expect(response.status).toBe(422);
-    expect(runTransaction).not.toHaveBeenCalled();
+    expect(convertDraft).not.toHaveBeenCalled();
   });
 
   it('rejects wiki-link dependencies that match duplicate task titles', async () => {
@@ -111,7 +113,7 @@ describe('POST /api/ideation/convert', () => {
       error: expect.stringContaining('ambiguous'),
     });
 
-    expect(runTransaction).not.toHaveBeenCalled();
+    expect(convertDraft).not.toHaveBeenCalled();
   });
 
   it('rejects unresolved cross-references before opening a transaction', async () => {
@@ -143,7 +145,7 @@ describe('POST /api/ideation/convert', () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ error: expect.stringContaining('does not exist') });
-    expect(runTransaction).not.toHaveBeenCalled();
+    expect(convertDraft).not.toHaveBeenCalled();
   });
 
   it('rejects blocking cycles before opening a transaction', async () => {
@@ -189,7 +191,7 @@ describe('POST /api/ideation/convert', () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ error: expect.stringContaining('cycle') });
-    expect(runTransaction).not.toHaveBeenCalled();
+    expect(convertDraft).not.toHaveBeenCalled();
   });
 
   it('rejects reverse duplicates of symmetric related relationships', async () => {
@@ -227,7 +229,7 @@ describe('POST /api/ideation/convert', () => {
 
     expect(response.status).toBe(422);
     expect(await response.json()).toEqual({ error: expect.stringContaining('duplicated') });
-    expect(runTransaction).not.toHaveBeenCalled();
+    expect(convertDraft).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -256,6 +258,6 @@ describe('POST /api/ideation/convert', () => {
     }));
 
     expect(response.status).toBe(422);
-    expect(runTransaction).not.toHaveBeenCalled();
+    expect(convertDraft).not.toHaveBeenCalled();
   });
 });

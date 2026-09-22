@@ -16,6 +16,7 @@ vi.mock('@/lib/native/bridge', () => ({
 import { PushNotificationSettings } from '@/components/settings/PushNotificationSettings';
 
 const preferences = {
+  pushDeliveryEnabled: true,
   morningEnabled: true,
   morningHour: 8,
   triageNudgeEnabled: true,
@@ -83,5 +84,13 @@ describe('native push permission settings', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
 
     expect(await screen.findByText(/Notifications are disabled/)).toBeInTheDocument();
+  });
+
+  it('separates push delivery from scheduled reminder generation', async () => {
+    render(<PushNotificationSettings />);
+
+    expect(await screen.findByRole('switch', { name: 'Push Delivery' })).toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Scheduled Summaries' })).toBeChecked();
+    expect(screen.queryByRole('switch', { name: 'Notification Scheduler' })).not.toBeInTheDocument();
   });
 });

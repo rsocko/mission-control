@@ -1,9 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { projectPhaseItems } from '@/db/schema';
-import { and, eq } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import {
+  findProjectPhaseItemTaskId,
+  listProjectPhaseItems,
   placeTasksInProjectPhase,
   ProjectHierarchyServiceError,
   removeTasksFromProjectPhase,
@@ -38,9 +37,7 @@ function hierarchyItem(
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
-    const items = await db.select().from(projectPhaseItems)
-      .where(eq(projectPhaseItems.phaseId, id))
-      .orderBy(projectPhaseItems.sortOrder);
+    const items = await listProjectPhaseItems(id);
     return NextResponse.json({ items });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch phase items', error);
@@ -154,23 +151,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ error: 'proposalType must be a string or null' }, { status: 400 });
     }
 
-    const [existingItem] = await db.select({ taskId: projectPhaseItems.taskId })
-      .from(projectPhaseItems)
-      .where(and(
-        eq(projectPhaseItems.id, itemId),
-        eq(projectPhaseItems.phaseId, phaseId),
-      ));
-    if (!existingItem) return ApiErrors.notFound('Phase item');
+    const existingTaskId = await findProjectPhaseItemTaskId(phaseId, itemId);
+    if (!existingTaskId) return ApiErrors.notFound('Phase item');
 
     const result = await updateProjectPhaseItem({
       phaseId,
-      taskId: existingItem.taskId,
+      taskId: existingTaskId,
       toIndex: hasSortOrder ? body.sortOrder : undefined,
       updates,
       actor: { type: 'user' },
     });
     return NextResponse.json({
-      item: hierarchyItem(result.hierarchy, phaseId, existingItem.taskId),
+      item: hierarchyItem(result.hierarchy, phaseId, existingTaskId),
     });
   } catch (error) {
     if (error instanceof ProjectHierarchyServiceError) return hierarchyErrorResponse(error);

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 
 const tempDirectory = mkdtempSync(join(tmpdir(), 'mc-finance-insight-history-'));
@@ -82,7 +83,7 @@ function bridgePage(
 beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   vi.resetModules();
-  sqlite = (await import('@/db')).sqlite;
+  sqlite = (await importInitializedSqliteDatabase()).sqlite;
   ({
     FinanceInsightHistorySynchronizer,
     buildFinanceInsightHistoryWindows,
@@ -169,16 +170,22 @@ describe.sequential('finance insight transaction history projection', () => {
       `).get(connector.id, first.generationId) as { payload: string }
     ).payload);
     expect(payload).toEqual({
-      sourceRef: 'transaction-one',
+      sourceRef: expect.stringMatching(/^transaction-v1:[A-Za-z0-9_-]{43}$/),
       occurredOn: '2026-08-09',
       amountMinor: -8425,
       merchantName: 'Invented market',
-      categoryRef: 'category-one',
-      accountRef: 'account-one',
+      categoryRef: expect.stringMatching(/^category-v1:[A-Za-z0-9_-]{43}$/),
+      accountRef: expect.stringMatching(/^account-v1:[A-Za-z0-9_-]{43}$/),
       isPending: false,
       recurringRef: null,
-      tagRefs: ['tag-one', 'tag-two'],
+      tagRefs: [
+        expect.stringMatching(/^tag-v1:[A-Za-z0-9_-]{43}$/),
+        expect.stringMatching(/^tag-v1:[A-Za-z0-9_-]{43}$/),
+      ],
     });
+    expect(JSON.stringify(payload)).not.toMatch(
+      /transaction-one|category-one|account-one|tag-one|tag-two/,
+    );
     expect(JSON.stringify(payload)).not.toMatch(/notes|logo|mask|displayName|tags/i);
   });
 
@@ -226,6 +233,38 @@ describe.sequential('finance insight transaction history projection', () => {
       SELECT COUNT(*) AS count
       FROM finance_insight_transaction_projection_facts
       WHERE connector_id = ? AND generation_id = 'abandoned-attempt'
+    `).get(connector.id)).toEqual({ count: 0 });
+  });
+
+  it('cancels between bounded page writes and removes the abandoned attempt', async () => {
+    const controller = new AbortController();
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      controller.abort(new Error('invented cancellation'));
+      return bridgePage([]);
+    }));
+
+    const synchronizer = new FinanceInsightHistorySynchronizer(connector, () => baseNow);
+    await expect(synchronizer.sync({ full: false, signal: controller.signal }))
+      .rejects
+      .toThrow('invented cancellation');
+
+    expect(sqlite.prepare(`
+      SELECT status, current_attempt_id AS currentAttemptId
+      FROM finance_insight_transaction_projection_state
+      WHERE connector_id = ?
+    `).get(connector.id)).toEqual({
+      status: 'failed',
+      currentAttemptId: null,
+    });
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM finance_insight_transaction_projection_facts
+      WHERE connector_id = ?
+    `).get(connector.id)).toEqual({ count: 0 });
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM finance_insight_transaction_projection_windows
+      WHERE connector_id = ?
     `).get(connector.id)).toEqual({ count: 0 });
   });
 

@@ -17,6 +17,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PhaseColorPicker } from "@/components/projects/PhaseColorPicker";
+import { COLOR_PRESETS } from "@/lib/constants/colors";
 import { fadeSlideUp, modalContent, modalOverlay, scaleIn, staggerContainer } from "@/lib/motion";
 import type { TaskPriority } from "@/types";
 import {
@@ -150,6 +152,14 @@ export function PhaseProposalReview({
   function updatePhaseName(index: number, name: string) {
     setEditablePhases((current) =>
       current.map((phase, phaseIndex) => (phaseIndex === index ? { ...phase, name } : phase)),
+    );
+  }
+
+  function updatePhaseColor(index: number, color: string | null) {
+    setEditablePhases((current) =>
+      current.map((phase, phaseIndex) => (
+        phaseIndex === index ? { ...phase, color: color || COLOR_PRESETS[0] } : phase
+      )),
     );
   }
 
@@ -429,7 +439,14 @@ export function PhaseProposalReview({
                                   >
                                     {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                                   </button>
-                                  <span className="inline-flex h-3 w-3 rounded-full" style={{ backgroundColor: phase.color }} aria-hidden="true" />
+                                  <PhaseColorPicker
+                                    phaseName={phase.name}
+                                    value={phase.color}
+                                    fallbackColor={COLOR_PRESETS[0]}
+                                    inheritLabel={null}
+                                    disabled={saving}
+                                    onChange={(color) => updatePhaseColor(index, color)}
+                                  />
                                   <input
                                     value={phase.name}
                                     onChange={(event) => updatePhaseName(index, event.target.value)}

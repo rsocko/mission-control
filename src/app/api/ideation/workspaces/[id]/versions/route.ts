@@ -9,9 +9,9 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    if (!ideationWorkspaceService.get(id)) return ApiErrors.notFound('Ideation workspace');
+    if (!await ideationWorkspaceService.get(id)) return ApiErrors.notFound('Ideation workspace');
     const limit = new URL(request.url).searchParams.get('limit') ?? undefined;
-    const versions = ideationWorkspaceService.listVersions(id, limit).map((version) => ({
+    const versions = (await ideationWorkspaceService.listVersions(id, limit)).map((version) => ({
       id: version.id,
       workspaceId: version.workspaceId,
       revision: version.revision,

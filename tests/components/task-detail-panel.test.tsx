@@ -137,6 +137,37 @@ afterEach(() => {
 });
 
 describe('TaskDetailPanel redesigned presentations', () => {
+  it('portals the move dialog outside its transformed task-detail container', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/connectors') {
+        return json({
+          connectors: [{
+            id: 'todo-1',
+            type: 'microsoft-todo',
+            name: 'Microsoft To Do',
+            capabilities: { taskCreate: true },
+          }],
+        });
+      }
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+
+    renderPanel({
+      taskId: 'task-1',
+      mode: 'dialog',
+      autoOpenMoveDialog: true,
+      onClose: vi.fn(),
+    });
+
+    const moveDialog = await screen.findByRole('dialog', { name: task.title });
+    expect(moveDialog.parentElement?.parentElement).toBe(document.body);
+  });
+
   it('renders dialog select menus above the task popout', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       if (String(input) === '/api/tasks/task-1') return json({ task });
@@ -278,6 +309,44 @@ describe('TaskDetailPanel redesigned presentations', () => {
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     await screen.findByRole('heading', { name: task.title });
     expect(screen.queryByRole('button', { name: /Jump to subtasks/ })).not.toBeInTheDocument();
+  });
+
+  it('uses an info tooltip instead of persistent copy for local-only subtask ordering', async () => {
+    const remoteTask = {
+      ...task,
+      connectorType: 'microsoft-todo',
+      connectorInstanceId: 'todo-1',
+      sourceId: 'todo:task-1',
+      subtasks: [
+        { id: 'subtask-1', title: 'First', status: 'todo' },
+        { id: 'subtask-2', title: 'Second', status: 'todo' },
+      ],
+    };
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task: remoteTask });
+      if (url === '/api/features') {
+        return json({
+          taskDestinations: [{
+            id: 'todo-1',
+            capabilities: { subtasks: true, subtaskOrderWrite: false },
+          }],
+        });
+      }
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    const infoButton = await screen.findByRole('button', {
+      name: 'Subtask order is saved in Mission Control only',
+    });
+    expect(screen.queryByText('Subtask order is saved in Mission Control only.')).not.toBeInTheDocument();
+
+    fireEvent.pointerMove(infoButton, { pointerType: 'mouse' });
+    expect(await screen.findByRole('tooltip')).toHaveTextContent(
+      'Subtask order is saved in Mission Control only.',
+    );
   });
 
   it('scrolls only the panel to subtasks and focuses its heading', async () => {
@@ -784,6 +853,116 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(onUpdate).toHaveBeenCalledWith({ description: valueWithSoftBreak });
   });
 
+  it('switches inline Notes to read mode before persistence finishes', async () => {
+    let resolvePatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
+    const patchRequest = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const onUpdate = vi.fn();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') return patchRequest;
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn(), onUpdate });
+    await screen.findByRole('heading', { name: task.title });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+
+    const editor = screen.getByRole('textbox', { name: 'Edit notes' });
+    fireEvent.change(editor, { target: { value: 'Optimistic **notes**' } });
+    fireEvent.blur(editor, { relatedTarget: document.body });
+
+    expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
+    expect(await screen.findByText('notes')).toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolvePatch({ ok: true, json: async () => ({}) });
+      await patchRequest;
+    });
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ description: 'Optimistic **notes**' }));
+  });
+
+  it('restores the inline Notes draft when optimistic persistence fails', async () => {
+    let resolvePatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
+    const patchRequest = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {
+      resolvePatch = resolve;
+    });
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') return patchRequest;
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+    await screen.findByRole('heading', { name: task.title });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+
+    const editor = screen.getByRole('textbox', { name: 'Edit notes' });
+    fireEvent.change(editor, { target: { value: 'Draft that must survive' } });
+    fireEvent.blur(editor, { relatedTarget: document.body });
+
+    expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
+    expect(await screen.findByText('Draft that must survive')).toBeInTheDocument();
+
+    await act(async () => {
+      resolvePatch({ ok: false, json: async () => ({ error: 'Save failed' }) });
+      await patchRequest;
+    });
+
+    expect(await screen.findByRole('textbox', { name: 'Edit notes' })).toHaveValue('Draft that must survive');
+    expect(toast.error).toHaveBeenCalledWith('Failed to save notes');
+  });
+
+  it('does not let an older failed save roll back or report over newer Notes', async () => {
+    let resolveFirstPatch!: (response: { ok: boolean; json: () => Promise<object> }) => void;
+    const firstPatch = new Promise<{ ok: boolean; json: () => Promise<object> }>((resolve) => {
+      resolveFirstPatch = resolve;
+    });
+    let patchCount = 0;
+    const onUpdate = vi.fn();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      if (String(input) === '/api/tasks/task-1' && init?.method === 'PATCH') {
+        patchCount++;
+        return patchCount === 1 ? firstPatch : json({});
+      }
+      if (String(input) === '/api/tasks/task-1') return json({ task });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn(), onUpdate });
+    await screen.findByRole('heading', { name: task.title });
+    fireEvent.click(screen.getByRole('button', { name: 'Edit notes' }));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      target: { value: 'First draft' },
+    });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      relatedTarget: document.body,
+    });
+
+    fireEvent.click(await screen.findByText('First draft'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      target: { value: 'Newest draft' },
+    });
+    fireEvent.blur(screen.getByRole('textbox', { name: 'Edit notes' }), {
+      relatedTarget: document.body,
+    });
+
+    expect(await screen.findByText('Newest draft')).toBeInTheDocument();
+    expect(patchCount).toBe(1);
+
+    await act(async () => {
+      resolveFirstPatch({ ok: false, json: async () => ({ error: 'Save failed' }) });
+      await firstPatch;
+    });
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith({ description: 'Newest draft' }));
+    expect(screen.getByText('Newest draft')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: 'Edit notes' })).not.toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
   it('keeps expanded edit and preview rendering in parity', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       if (String(input) === '/api/tasks/task-1') return json({ task });
@@ -823,19 +1002,17 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
-    const checkbox = await waitFor(() => {
-      const input = notes.querySelector<HTMLInputElement>('input[type="checkbox"]');
-      expect(input).not.toBeNull();
-      return input!;
-    });
+    await waitFor(() => {
+      expect(notes.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeNull();
+    }, { timeout: 10_000 });
 
     await act(async () => {
-      fireEvent.click(checkbox);
+      const checkbox = notes.querySelector<HTMLInputElement>('input[type="checkbox"]');
+      expect(checkbox).not.toBeNull();
+      fireEvent.click(checkbox!);
     });
 
     await waitFor(() => {
-      expect(checkbox).not.toBeChecked();
-      expect(screen.getByText('Verify persistence')).toBeInTheDocument();
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/tasks/task-1',
         expect.objectContaining({
@@ -843,6 +1020,8 @@ describe('TaskDetailPanel redesigned presentations', () => {
           body: JSON.stringify({ description: '- [x] Verify persistence' }),
         }),
       );
+      expect(notes.querySelector<HTMLInputElement>('input[type="checkbox"]')).not.toBeChecked();
+      expect(screen.getByText('Verify persistence')).toBeInTheDocument();
     });
   });
 
@@ -1177,6 +1356,45 @@ describe('TaskDetailPanel redesigned presentations', () => {
     expect(screen.queryByRole('option', { name: /Other hidden project/ })).not.toBeInTheDocument();
   });
 
+  it('shows recent projects first and groups the remaining project choices by category', async () => {
+    localStorage.setItem('mission-control:recent-project-targets', JSON.stringify(['project-recent']));
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [
+        { id: 'project-work', name: 'Work project', icon: null, color: '#60a5fa', category: 'Work' },
+        { id: 'project-personal', name: 'Personal project', icon: null, color: '#60a5fa', category: 'Personal' },
+        { id: 'project-recent', name: 'Recent project', icon: null, color: '#60a5fa', category: 'Personal' },
+        { id: 'project-other', name: 'Other project', icon: null, color: '#60a5fa', category: null },
+      ] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
+
+    fireEvent.click(await screen.findByRole('combobox', { name: 'Add project' }));
+
+    expect(screen.getAllByRole('option').map((option) => option.textContent?.replace('📁', ''))).toEqual([
+      'Recent project',
+      'Personal project',
+      'Work project',
+      'Other project',
+    ]);
+    expect(screen.getByText('Recent')).toBeInTheDocument();
+    expect(screen.getByText('Personal')).toBeInTheDocument();
+    expect(screen.getByText('Work')).toBeInTheDocument();
+    expect(screen.getByText('Uncategorized')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('option', { name: /Work project/ }));
+    expect(JSON.parse(localStorage.getItem('mission-control:recent-project-targets') ?? '[]')).toEqual([
+      'project-work',
+      'project-recent',
+    ]);
+  });
+
   it.each(['dialog', 'workspace'] as const)(
     'places relationships in the approved %s primary-column grid slot',
     async (mode) => {
@@ -1258,6 +1476,56 @@ describe('TaskDetailPanel redesigned presentations', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument());
     expect(onClose).not.toHaveBeenCalled();
     await waitFor(() => expect(expandButton).toHaveFocus());
+  });
+
+  it('closes expanded Notes when the backdrop is clicked', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+    const onClose = vi.fn();
+
+    renderPanel({ taskId: 'task-1', mode: 'mobile', onClose });
+    expect(await screen.findByText(task.title)).toBeInTheDocument();
+    const expandButton = screen.getByRole('button', { name: 'Expand notes' });
+    fireEvent.click(expandButton);
+    const dialog = screen.getByRole('dialog', { name: 'Notes' });
+
+    fireEvent.click(dialog.parentElement!);
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Notes' })).not.toBeInTheDocument());
+    expect(onClose).not.toHaveBeenCalled();
+    await waitFor(() => expect(expandButton).toHaveFocus());
+  });
+
+  it('keeps expanded Notes open when the backdrop is clicked with an unsaved draft', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input);
+      if (url === '/api/tasks/task-1') return json({ task });
+      if (url === '/api/features') return json({ taskDestinations: [] });
+      if (url === '/api/hub-projects?includeHidden=true') return json({ projects: [] });
+      if (url === '/api/connectors') return json({ connectors: [] });
+      if (url.includes('detect-duplicates')) return json({ duplicates: [] });
+      return json({});
+    }));
+
+    renderPanel({ taskId: 'task-1', mode: 'mobile', onClose: vi.fn() });
+    expect(await screen.findByText(task.title)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Expand notes' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
+    const editor = screen.getByRole('textbox', { name: 'Edit notes' });
+    fireEvent.change(editor, { target: { value: 'Unsaved notes' } });
+    const dialog = screen.getByRole('dialog', { name: 'Notes' });
+
+    fireEvent.click(dialog.parentElement!);
+
+    expect(screen.getByRole('dialog', { name: 'Notes' })).toBeInTheDocument();
+    expect(editor).toHaveValue('Unsaved notes');
   });
 
   it('renders mobile actions without desktop mode controls', async () => {
@@ -1846,13 +2114,16 @@ describe('TaskDetailPanel redesigned presentations', () => {
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
 
     const image = await screen.findByRole('img', { name: 'Image' });
-    expect(image).toHaveAttribute('src', imageUrl);
+    expect(image).toHaveAttribute(
+      'src',
+      `/api/tasks/task-1/github-attachment?url=${encodeURIComponent(imageUrl)}`,
+    );
     expect(image).toHaveAttribute('width', '572');
     expect(image).toHaveAttribute('height', '738');
   });
 
   it('replaces a failed GitHub image with a link to the source task', async () => {
-    const imageUrl = 'https://github.com/user-attachments/assets/private-image';
+    const imageUrl = 'https://github.com/user-attachments/assets/61668656-37e6-4245-b2a3-92a4a0daac2a';
     const sourceUrl = 'https://github.com/octo-org/mission-control/issues/2149';
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);
@@ -1923,13 +2194,18 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
     renderPanel({ taskId: 'task-1', mode: 'panel', onClose: vi.fn() });
     const notes = (await screen.findByRole('heading', { name: 'Notes' })).closest('section')!;
-    const checkboxes = await waitFor(() => {
-      const inputs = notes.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
-      expect(inputs).toHaveLength(1);
-      return inputs;
-    });
+    const checkboxes = await within(notes).findAllByRole(
+      'checkbox',
+      undefined,
+      { timeout: 10_000 },
+    );
+    expect(checkboxes).toHaveLength(1);
 
-    fireEvent.click(checkboxes[0]);
+    await act(async () => {
+      const liveCheckboxes = within(notes).getAllByRole('checkbox');
+      expect(liveCheckboxes).toHaveLength(1);
+      fireEvent.click(liveCheckboxes[0]);
+    });
 
     await waitFor(() => expect(update).toHaveBeenCalledWith({
       description: '<input type="checkbox" checked />\n\n- [x] Verify persistence',

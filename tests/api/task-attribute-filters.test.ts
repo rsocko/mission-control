@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('task attribute filtering', () => {
   let db: typeof import('@/db').default;
@@ -15,7 +16,7 @@ describe('task attribute filtering', () => {
     vi.resetModules();
 
     const [dbModule, schemaModule, filterModule, drizzle] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/app/api/tasks/canonical-filter'),
       import('drizzle-orm'),
@@ -251,6 +252,29 @@ describe('task attribute filtering', () => {
       quickFilter: 'recentlyClosed',
       openOnly: 'true',
     }))).resolves.toEqual(['recently-closed']);
+  });
+
+  it('filters tasks due today and tasks without a date', async () => {
+    const today = new Date();
+    const localToday = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, '0'),
+      String(today.getDate()).padStart(2, '0'),
+    ].join('-');
+    const now = today.toISOString();
+    await db.insert(schema.tasks).values([
+      task('due-today', now, { dueDate: localToday }),
+      task('no-date', now),
+    ]);
+
+    await expect(matchingParamIds(new URLSearchParams({
+      quickFilter: 'today',
+      openOnly: 'true',
+    }))).resolves.toEqual(['due-today']);
+    await expect(matchingParamIds(new URLSearchParams({
+      quickFilter: 'noDate',
+      openOnly: 'true',
+    }))).resolves.toEqual(['no-date', 'project-only', 'unassigned']);
   });
 });
 

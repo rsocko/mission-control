@@ -3,8 +3,13 @@ import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '@/db/schema';
 import { getBurnReport } from '@/lib/reports/burn';
+import { createSqliteGraphReportingRepository } from '@/db/persistence/sqlite-graph-reporting-repository';
+import {
+  describeSqliteGraphReportingRepositoryContract,
+} from '../contracts/graph-reporting-repository.contract';
 
 vi.unmock('drizzle-orm');
+describeSqliteGraphReportingRepositoryContract();
 
 const openDatabases: Database.Database[] = [];
 
@@ -15,6 +20,7 @@ function createDatabase() {
     CREATE TABLE hub_projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      appearance TEXT,
       started_at TEXT,
       target_date TEXT
     );
@@ -29,7 +35,8 @@ function createDatabase() {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       created_at TEXT NOT NULL,
-      completed_at TEXT
+      completed_at TEXT,
+      deleted_at TEXT
     );
     CREATE TABLE task_history_events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,7 +54,11 @@ function createDatabase() {
       metadata TEXT
     );
   `);
-  return { sqlite, database: drizzle(sqlite, { schema }) };
+  const database = drizzle(sqlite, { schema });
+  return {
+    sqlite,
+    repository: createSqliteGraphReportingRepository(sqlite, database).burn,
+  };
 }
 
 function insertEvent(
@@ -85,15 +96,15 @@ afterEach(() => {
 
 describe('getBurnReport', () => {
   it('queries historical project and phase members rather than only current junction rows', async () => {
-    const { sqlite, database } = createDatabase();
+    const { sqlite, repository } = createDatabase();
     sqlite.exec(`
-      INSERT INTO hub_projects VALUES (
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
         'project-1', 'Reporting', '2026-07-01', '2026-07-31'
       );
       INSERT INTO project_phases VALUES (
         'phase-1', 'project-1', 'Build', '2026-07-01', '2026-07-15'
       );
-      INSERT INTO tasks VALUES
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES
         ('task-1', 'Migrated task', '2026-07-01T08:00:00.000Z', '2026-07-01T10:00:00.000Z'),
         ('task-2', 'Added task', '2026-07-01T08:00:00.000Z', NULL);
     `);
@@ -139,7 +150,7 @@ describe('getBurnReport', () => {
       startDate: '2026-07-01',
       endDate: '2026-07-03',
       today: '2026-07-03',
-    }, database);
+    }, repository);
     const phaseReport = await getBurnReport({
       projectId: 'project-1',
       phaseId: 'phase-1',
@@ -147,7 +158,7 @@ describe('getBurnReport', () => {
       startDate: '2026-07-01',
       endDate: '2026-07-03',
       today: '2026-07-03',
-    }, database);
+    }, repository);
 
     expect(projectReport?.points.at(-1)).toMatchObject({
       total: 2,
@@ -166,12 +177,12 @@ describe('getBurnReport', () => {
   });
 
   it('loads migration baselines after the requested range to reconstruct earlier lifecycle dates', async () => {
-    const { sqlite, database } = createDatabase();
+    const { sqlite, repository } = createDatabase();
     sqlite.exec(`
-      INSERT INTO hub_projects VALUES (
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
         'project-1', 'Reporting', '2026-06-01', '2026-08-31'
       );
-      INSERT INTO tasks VALUES (
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES (
         'task-1',
         'Historical task',
         '2026-06-10T08:00:00.000Z',
@@ -197,7 +208,7 @@ describe('getBurnReport', () => {
       startDate: '2026-06-01',
       endDate: '2026-06-30',
       today: '2026-08-07',
-    }, database);
+    }, repository);
 
     expect(report?.points.find((point) => point.date === '2026-06-09')).toMatchObject({
       total: 0,
@@ -214,12 +225,12 @@ describe('getBurnReport', () => {
   });
 
   it('loads later project additions to reconstruct scope in an earlier requested range', async () => {
-    const { sqlite, database } = createDatabase();
+    const { sqlite, repository } = createDatabase();
     sqlite.exec(`
-      INSERT INTO hub_projects VALUES (
+      INSERT INTO hub_projects (id, name, started_at, target_date) VALUES (
         'project-1', 'Reporting', '2025-03-01', '2026-08-31'
       );
-      INSERT INTO tasks VALUES (
+      INSERT INTO tasks (id, title, created_at, completed_at) VALUES (
         'task-1',
         'Older organized task',
         '2025-03-25T08:00:00.000Z',
@@ -250,7 +261,7 @@ describe('getBurnReport', () => {
       startDate: '2025-03-24',
       endDate: '2025-03-31',
       today: '2026-08-08',
-    }, database);
+    }, repository);
 
     expect(report?.points.find((point) => point.date === '2025-03-24')).toMatchObject({
       total: 0,

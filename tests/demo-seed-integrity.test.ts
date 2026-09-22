@@ -2,21 +2,29 @@ import type Database from 'better-sqlite3';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 vi.unmock('drizzle-orm');
 
 let sqlite: Database.Database;
 let resetDemoDatabase: () => Promise<void>;
+let shutdownSqlitePersistenceComposition: () => Promise<void>;
 
 beforeAll(async () => {
   const directory = mkdtempSync(join(tmpdir(), 'mc-demo-seed-'));
   process.env.MC_DB_PATH = join(directory, 'demo.db');
 
-  ({ sqlite } = await import('@/db'));
+  const database = await import('@/db');
+  ({ sqlite } = database);
+  shutdownSqlitePersistenceComposition = database.shutdownSqlitePersistenceComposition;
   sqlite.prepare('SELECT 1').get();
+  await database.initializeSqlitePersistenceComposition();
   ({ resetDemoDatabase } = await import('@/lib/seed-api'));
   await resetDemoDatabase();
+});
+
+afterAll(async () => {
+  await shutdownSqlitePersistenceComposition();
 });
 
 function count(table: string): number {
@@ -92,11 +100,13 @@ describe('canonical demo seed', () => {
       ) VALUES ('stale-demo-task', 'baseline', '2026-01-01T00:00:00.000Z',
         '2026-01-01T00:00:00.000Z', 'test')
     `).run();
-    const expectedHistoryCount = count('task_history_events') - 1;
-
     await resetDemoDatabase();
 
-    expect(count('task_history_events')).toBe(expectedHistoryCount);
+    expect(sqlite.prepare(`
+      SELECT COUNT(*) AS count
+      FROM task_history_events
+      WHERE task_id = 'stale-demo-task'
+    `).get()).toEqual({ count: 0 });
     expect(() => sqlite.prepare(`
       DELETE FROM task_history_events WHERE task_id = 't-hr1'
     `).run()).toThrow(/append-only/);

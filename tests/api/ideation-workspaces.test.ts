@@ -39,6 +39,10 @@ describe('Ideation workspace API', () => {
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
+    // L16: the routes now resolve their repository through the composed
+    // worker persistence registry instead of a hardcoded SQLite singleton,
+    // so the runtime composition has to be published before they are used.
+    await (await import('@/db/runtime')).initializeRuntimeDatabase();
     [collection, item, versions, version] = await Promise.all([
       import('@/app/api/ideation/workspaces/route'),
       import('@/app/api/ideation/workspaces/[id]/route'),

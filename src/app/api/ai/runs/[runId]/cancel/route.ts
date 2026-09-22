@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DurableAiRunStore } from '@/lib/ai/durable-runs';
+import { getDurableAiRunRepository } from '@/lib/ai/durable-runs';
 import { ApiErrors } from '@/lib/api-error';
 import { isTrustedMutationRequest } from '@/lib/api/trusted-request';
 
@@ -14,7 +14,8 @@ export async function POST(
   if (!parsed.success) return ApiErrors.badRequest('Invalid durable AI run ID.');
 
   try {
-    const run = new DurableAiRunStore().requestCancellation(parsed.data);
+    const run = await (await getDurableAiRunRepository())
+      .requestCancellation(parsed.data);
     if (!run) return ApiErrors.notFound('Durable AI run');
     return Response.json({ run });
   } catch (error) {

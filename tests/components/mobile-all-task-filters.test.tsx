@@ -35,13 +35,34 @@ function renderFilters(overrides: Partial<React.ComponentProps<typeof MobileTask
     activeFilter: 'all',
     sourceFilter: null,
     listFilter: null,
+    planningHorizonFilters: [],
     sources,
     sourceLists,
     syncStatus,
     sourceCounts: { github: 12 },
+    stats: {
+      totalOpen: 16,
+      overdue: 1,
+      dueToday: 2,
+      dueThisWeek: 3,
+      noDate: 0,
+      highPriority: 2,
+      assignedToMe: 0,
+      myDay: 0,
+      recentlyCreated: 0,
+      recentlyClosed: 0,
+      waiting: 0,
+      inbox: 4,
+    },
+    hiddenQuickFilters: [],
+    quickFilterVisibility: {},
+    loading: false,
     onQuickFilterChange: vi.fn(),
+    onQuickFilterVisibilityChange: vi.fn(),
     onSourceFilterChange: vi.fn(),
     onListFilterChange: vi.fn(),
+    onPlanningHorizonToggle: vi.fn(),
+    onPlanningHorizonClear: vi.fn(),
     onClear: vi.fn(),
     ...overrides,
   };
@@ -78,5 +99,43 @@ describe('MobileTaskFilters', () => {
     expect(screen.getByRole('button', { name: /Work Microsoft To Do · 4 tasks/ })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Mission Control/ })).not.toBeInTheDocument();
     expect(screen.queryByText('Quick filters')).not.toBeInTheDocument();
+  });
+
+  it('shows catalog filters and auto-hides empty conditional filters', () => {
+    renderFilters();
+
+    expect(screen.getByRole('button', { name: /Due Today/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next 7 Days/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Assigned to Me/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /No Date/ })).not.toBeInTheDocument();
+  });
+
+  it('shows and toggles canonical planning horizon filters', () => {
+    const props = renderFilters({ planningHorizonFilters: ['next'] });
+
+    expect(screen.getByRole('button', { name: /Next Planned for next/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Not set Needs planning/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Later Planned for later/ }));
+    expect(props.onPlanningHorizonToggle).toHaveBeenCalledWith('later');
+
+    fireEvent.click(screen.getByRole('button', { name: /Any horizon/ }));
+    expect(props.onPlanningHorizonClear).toHaveBeenCalledTimes(1);
+  });
+
+  it('virtualizes source-list pickers above 50 lists', () => {
+    const manyLists = Array.from({ length: 51 }, (_, index) => ({
+      id: `list-${index}`,
+      sourceId: `source-list-${index}`,
+      connectorInstanceId: 'github-connector',
+      name: `List ${index}`,
+      taskCount: index,
+      groupId: null,
+    }));
+
+    renderFilters({ sourceLists: manyLists });
+
+    expect(document.querySelector('[data-virtualized="true"]')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /List 50/ })).not.toBeInTheDocument();
   });
 });

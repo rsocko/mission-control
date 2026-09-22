@@ -1,22 +1,28 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs, tasks, sourceLists } from '@/db/schema';
-import { eq, and } from 'drizzle-orm';
-import { connectorRegistry } from '@/lib/connectors';
+import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import logger from '@/lib/logger';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { ApiErrors } from '@/lib/api-error';
 import { resolveTaskEditPolicy } from '@/lib/tasks/edit-policy';
 import { isDemoMode } from '@/lib/mode';
-import { syncScheduler } from '@/lib/sync';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+
+/** Reads one field off a decoded JSON body without widening it to `any`. */
+function readField(body: unknown, key: string): unknown {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return undefined;
+  return Object.getOwnPropertyDescriptor(body, key)?.value;
+}
 
 /**
  * POST /api/tasks/[id]/move-to-list — Move a task to a different list within the same connector.
- * 
+ *
  * Body: { targetListId: string }
- * 
- * Calls the connector's moveTaskToList to move it remotely, then updates the local DB.
+ *
+ * Every validating read runs first, then at most one remote move happens, and
+ * only then is the local row finalized — so a failed remote move never leaves
+ * a task pointing at a list it was never moved to.
  */
 export async function POST(
   request: Request,
@@ -25,10 +31,10 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const body = await request.json();
-    const { targetListId } = body;
+    const body: unknown = await request.json();
+    const targetListId = readField(body, 'targetListId');
 
-    if (!targetListId) {
+    if (typeof targetListId !== 'string' || !targetListId) {
       return NextResponse.json(
         { error: 'targetListId is required' },
         { status: 400 }
@@ -36,11 +42,11 @@ export async function POST(
     }
 
     // Fetch the task
-    const taskRows = await db.select().from(tasks).where(eq(tasks.id, id)).limit(1);
-    if (!taskRows.length) {
+    const persistence = await getTaskCorePersistence();
+    const task = await persistence.organization.getTaskMoveToListContext(id);
+    if (!task) {
       return NextResponse.json({ error: 'Task not found' }, { status: 404 });
     }
-    const task = taskRows[0];
 
     const localIdentity = task.sourceId.startsWith('local:') || task.connectorType === 'local';
     const [caps, connectorEnabled] = localIdentity
@@ -60,25 +66,22 @@ export async function POST(
     }
 
     // Fetch the target list to get its sourceId (the remote list ID)
-    const targetListRows = await db.select().from(sourceLists).where(eq(sourceLists.id, targetListId)).limit(1);
-    if (!targetListRows.length) {
+    const management = await getConnectorManagementPersistence();
+    const targetList = await management.getSourceList(targetListId);
+    if (!targetList) {
       return NextResponse.json({ error: 'Target list not found' }, { status: 404 });
     }
-    const targetList = targetListRows[0];
     if (targetList.connectorInstanceId !== task.connectorInstanceId) {
       return ApiErrors.badRequest('Target list must belong to the task source');
     }
-    const [targetConnector] = await db.select().from(connectorConfigs)
-      .where(eq(connectorConfigs.id, targetList.connectorInstanceId))
-      .limit(1);
+    const targetConnector = await management.getConnector(targetList.connectorInstanceId);
     if (!targetConnector || !isSourceListSelected(targetConnector, targetList)) {
       return ApiErrors.badRequest('Target list is not selected for sync');
     }
 
     let newSourceId: string | undefined;
     if (editPolicy.sourceModel !== 'mc-owned') {
-      const connector = connectorRegistry.getConnector(task.connectorInstanceId)
-        ?? await syncScheduler.initializeConnectorFromDb(task.connectorInstanceId);
+      const connector = await getOrInitializeConnector(task.connectorInstanceId);
       if (!connector?.moveTaskToList) {
         return ApiErrors.forbidden('The upstream source does not support moving this task');
       }
@@ -98,20 +101,18 @@ export async function POST(
     // Find the previous list's DB id so the client can undo
     let previousListId: string | null = null;
     if (previousSourceListId) {
-      const prevListRows = await db.select({ id: sourceLists.id }).from(sourceLists)
-        .where(and(eq(sourceLists.sourceId, previousSourceListId), eq(sourceLists.connectorInstanceId, task.connectorInstanceId)))
-        .limit(1);
-      if (prevListRows.length) {
-        previousListId = prevListRows[0].id;
-      }
+      const snapshot = await management.getConnectorListSnapshot(task.connectorInstanceId);
+      previousListId = snapshot.sourceLists
+        .find((list) => list.sourceId === previousSourceListId)?.id ?? null;
     }
 
     // Update local DB — sourceListId stores the remote list ID (sourceId), not DB id
-    await db.update(tasks).set({
+    await persistence.organization.finalizeTaskMoveToList({
+      taskId: id,
       sourceListId: targetList.sourceId,
-      ...(newSourceId ? { sourceId: newSourceId } : {}),
+      sourceId: newSourceId ?? null,
       updatedAt: new Date().toISOString(),
-    }).where(eq(tasks.id, id));
+    });
 
     return NextResponse.json({ success: true, newSourceId, previousListId });
   } catch (error) {

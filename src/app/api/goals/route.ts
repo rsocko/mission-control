@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, tags, taskTags, hubProjects, taskProjects, projectMilestones } from '@/db/schema';
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 import { ApiErrors } from '@/lib/api-error';
 
 /**
@@ -16,149 +14,26 @@ export async function GET(request: Request) {
   const projectId = searchParams.get('project');
 
   try {
-    // Find relevant tag slugs
     const goalSlugs = filter === 'all'
       ? ['goal', 'idea', 'brainstorm']
       : [filter];
 
-    const matchingTags = await db.select()
-      .from(tags)
-      .where(inArray(tags.slug, goalSlugs));
-
-    if (matchingTags.length === 0) {
-      return NextResponse.json({ items: [], counts: { goal: 0, idea: 0, brainstorm: 0 } });
-    }
-
-    const tagIds = matchingTags.map(t => t.id);
-
-    // Get task IDs that have these tags
-    const taggedTaskIds = await db.select({ taskId: taskTags.taskId })
-      .from(taskTags)
-      .where(inArray(taskTags.tagId, tagIds));
-
-    if (taggedTaskIds.length === 0) {
-      return NextResponse.json({ items: [], counts: { goal: 0, idea: 0, brainstorm: 0 } });
-    }
-
-    const taskIds = taggedTaskIds.map(r => r.taskId);
-
-    // If filtering by project, intersect with project tasks
-    let filteredTaskIds = taskIds;
-    if (projectId) {
-      const projectTaskIds = await db.select({ taskId: taskProjects.taskId })
-        .from(taskProjects)
-        .where(and(
-          eq(taskProjects.projectId, projectId),
-          inArray(taskProjects.taskId, taskIds)
-        ));
-      filteredTaskIds = projectTaskIds.map(r => r.taskId);
-    }
-
-    if (filteredTaskIds.length === 0) {
-      return NextResponse.json({ items: [], counts: { goal: 0, idea: 0, brainstorm: 0 } });
-    }
-
-    // Fetch full tasks
-    const goalTasks = await db.select()
-      .from(tasks)
-      .where(inArray(tasks.id, filteredTaskIds));
-
-    // Enrich with tags and project info
-    const allTaskTags = await db.select({
-      taskId: taskTags.taskId,
-      tagId: taskTags.tagId,
-      tagName: tags.name,
-      tagSlug: tags.slug,
-      tagColor: tags.color,
-      tagType: tags.type,
-    })
-      .from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(inArray(taskTags.taskId, filteredTaskIds));
-
-    const allTaskProjects = await db.select({
-      taskId: taskProjects.taskId,
-      projectId: taskProjects.projectId,
-      projectName: hubProjects.name,
-      projectColor: hubProjects.color,
-      projectIcon: hubProjects.icon,
-    })
-      .from(taskProjects)
-      .innerJoin(hubProjects, eq(taskProjects.projectId, hubProjects.id))
-      .where(inArray(taskProjects.taskId, filteredTaskIds));
-
-    // Fetch milestones and task counts for linked projects
-    const linkedProjectIds = [...new Set(allTaskProjects.map(tp => tp.projectId))];
-    let projectMilestonesData: Array<{ id: string; projectId: string; name: string; targetDate: string | null; completedAt: string | null; sortOrder: number }> = [];
-    const projectTaskStats: Map<string, { total: number; done: number }> = new Map();
-
-    if (linkedProjectIds.length > 0) {
-      projectMilestonesData = await db.select()
-        .from(projectMilestones)
-        .where(inArray(projectMilestones.projectId, linkedProjectIds));
-
-      // Get task completion stats per project
-      const projectTaskCounts = await db.select({
-        projectId: taskProjects.projectId,
-        total: sql<number>`count(*)`,
-        done: sql<number>`sum(case when ${tasks.status} = 'done' then 1 else 0 end)`,
-      })
-        .from(taskProjects)
-        .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-        .where(inArray(taskProjects.projectId, linkedProjectIds))
-        .groupBy(taskProjects.projectId);
-
-      for (const row of projectTaskCounts) {
-        projectTaskStats.set(row.projectId, { total: row.total, done: row.done ?? 0 });
-      }
-    }
+    const persistence = await getAIWorkflowPersistence();
+    const goalTasks = await persistence.goalsBoard.listGoalTasks({
+      tagSlugs: goalSlugs,
+      projectId,
+    });
 
     // Build enriched items
     const items = goalTasks.map(task => {
-      const taskTagList = allTaskTags
-        .filter(tt => tt.taskId === task.id)
-        .map(tt => ({
-          id: tt.tagId,
-          name: tt.tagName,
-          slug: tt.tagSlug,
-          color: tt.tagColor,
-          type: tt.tagType,
-        }));
-
-      const linkedProjects = allTaskProjects
-        .filter(tp => tp.taskId === task.id)
-        .map(tp => {
-          const stats = projectTaskStats.get(tp.projectId);
-          const milestones = projectMilestonesData
-            .filter(m => m.projectId === tp.projectId)
-            .sort((a, b) => a.sortOrder - b.sortOrder)
-            .map(m => ({
-              id: m.id,
-              name: m.name,
-              targetDate: m.targetDate,
-              completed: !!m.completedAt,
-            }));
-          return {
-            id: tp.projectId,
-            name: tp.projectName,
-            color: tp.projectColor,
-            icon: tp.projectIcon,
-            totalTasks: stats?.total ?? 0,
-            doneTasks: stats?.done ?? 0,
-            progress: stats && stats.total > 0 ? Math.round((stats.done / stats.total) * 100) : 0,
-            milestones,
-          };
-        });
-
-      // Determine the goal type based on tags
-      const goalType = taskTagList.find(t => t.slug === 'goal') ? 'goal'
-        : taskTagList.find(t => t.slug === 'idea') ? 'idea'
-        : taskTagList.find(t => t.slug === 'brainstorm') ? 'brainstorm'
+      const goalType = task.tags.find(t => t.slug === 'goal') ? 'goal'
+        : task.tags.find(t => t.slug === 'idea') ? 'idea'
+        : task.tags.find(t => t.slug === 'brainstorm') ? 'brainstorm'
         : 'idea';
 
       // Compute aggregate progress across all linked projects
-      const totalTasks = linkedProjects.reduce((sum, p) => sum + p.totalTasks, 0);
-      const doneTasks = linkedProjects.reduce((sum, p) => sum + p.doneTasks, 0);
+      const totalTasks = task.linkedProjects.reduce((sum, p) => sum + p.totalTasks, 0);
+      const doneTasks = task.linkedProjects.reduce((sum, p) => sum + p.doneTasks, 0);
       const overallProgress = totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 0;
 
       return {
@@ -168,8 +43,11 @@ export async function GET(request: Request) {
         status: task.status,
         priority: task.priority,
         goalType,
-        tags: taskTagList,
-        linkedProjects,
+        tags: task.tags,
+        linkedProjects: task.linkedProjects.map(p => ({
+          ...p,
+          progress: p.totalTasks > 0 ? Math.round((p.doneTasks / p.totalTasks) * 100) : 0,
+        })),
         progress: overallProgress,
         totalTasks,
         doneTasks,
@@ -190,26 +68,9 @@ export async function GET(request: Request) {
     });
 
     // Compute counts (always across all, regardless of filter)
-    const allTagsForCounts = await db.select({
-      taskId: taskTags.taskId,
-      tagSlug: tags.slug,
-    })
-      .from(taskTags)
-      .innerJoin(tags, eq(taskTags.tagId, tags.id))
-      .where(inArray(tags.slug, ['goal', 'idea', 'brainstorm']));
+    const counts = await persistence.goalsBoard.countGoalTags();
 
-    const uniqueGoals = new Set(allTagsForCounts.filter(r => r.tagSlug === 'goal').map(r => r.taskId));
-    const uniqueIdeas = new Set(allTagsForCounts.filter(r => r.tagSlug === 'idea').map(r => r.taskId));
-    const uniqueBrainstorms = new Set(allTagsForCounts.filter(r => r.tagSlug === 'brainstorm').map(r => r.taskId));
-
-    return NextResponse.json({
-      items,
-      counts: {
-        goal: uniqueGoals.size,
-        idea: uniqueIdeas.size,
-        brainstorm: uniqueBrainstorms.size,
-      },
-    });
+    return NextResponse.json({ items, counts });
   } catch (error) {
     return ApiErrors.internal('Failed to fetch goals', error);
   }

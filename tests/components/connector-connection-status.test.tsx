@@ -105,4 +105,80 @@ describe('ConnectionStatus', () => {
     expect(screen.getByText('Active')).toBeInTheDocument();
     expect(screen.queryByText('Push-only')).not.toBeInTheDocument();
   });
+
+  it('shows Active for a credentialed OAuth connector with no known failures', () => {
+    render(
+      <ConnectionStatus
+        connector={{ ...connector, type: 'outlook-email', hasCredentials: true }}
+      />
+    );
+
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('shows Token Expired when the last manual test failed with an auth error', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'outlook-email',
+          hasCredentials: true,
+          lastTestStatus: 'failed',
+          lastTestError: 'Token expired — re-authenticate',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Token Expired')).toBeInTheDocument();
+    expect(screen.queryByText('Active')).not.toBeInTheDocument();
+  });
+
+  it('shows Token Expired when the last sync failed with an auth error and no manual test has run', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'outlook-calendar',
+          hasCredentials: true,
+          lastSyncStatus: 'failed',
+          lastSyncError: 'Outlook Calendar token expired or invalid — re-authenticate in Settings',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Token Expired')).toBeInTheDocument();
+  });
+
+  it('shows Connection Failed for a non-auth failure', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'outlook-email',
+          hasCredentials: true,
+          lastTestStatus: 'failed',
+          lastTestError: 'HTTP 500: Internal Server Error',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Connection Failed')).toBeInTheDocument();
+  });
+
+  it('prefers the last manual test result over a stale sync failure', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'outlook-email',
+          hasCredentials: true,
+          lastTestStatus: 'success',
+          lastSyncStatus: 'failed',
+          lastSyncError: 'Token expired — re-authenticate',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
 });

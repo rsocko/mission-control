@@ -777,9 +777,10 @@ Recommended top-level categories:
 |---|---|
 | **System** | sync errors, auth expired, connector offline, app updates |
 | **Tasks** | overdue warnings, due today, assignment changes, blocked tasks |
+| **Development** | PR reviews, issue activity, CI activity, releases, security alerts |
 | **Finance** | budget alerts, anomalies, kid spending, upcoming bills |
 | **Home** | device state changes, automations triggered, deliveries, mail |
-| **Social / Comms** | mentions, messages, reply-needed, PR reviews |
+| **Social / Comms** | messages, reply-needed, social mentions |
 | **AI / Insights** | weekly summaries, suggestions, pattern detected, forecast |
 | **Packages / Shipping** | out for delivery, delayed, delivered |
 
@@ -794,7 +795,7 @@ Examples:
 |---|---|
 | Finance | `budget_exceeded` |
 | Finance | `subscription_duplicate` |
-| Social / Comms | `pr_review_requested` |
+| Development | `pr_review_requested` |
 | System | `connector_auth_expired` |
 | AI / Insights | `weekly_summary` |
 | Packages / Shipping | `delivery_delayed` |

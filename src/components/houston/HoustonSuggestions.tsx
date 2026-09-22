@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { AlertTriangle, Clock, Layers, TrendingUp, X, ArrowRight } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { NEXT_7_DAYS_LABEL } from '@/lib/tasks/due-window';
 
 interface Suggestion {
   id: string;
@@ -44,7 +45,7 @@ function buildSuggestions(data: SuggestionData): Suggestion[] {
       id: 'triage',
       type: 'triage',
       title: `${data.triagePending} items need triage`,
-      description: 'Your triage queue is building up. I can help categorize and route them quickly.',
+      description: 'Your Inbox is building up. I can help categorize and route items quickly.',
       icon: <Layers size={16} className="text-amber-400" />,
       action: 'Start triage',
       actionPrompt: 'Help me triage my pending items. Categorize them and suggest actions for each.',
@@ -57,10 +58,10 @@ function buildSuggestions(data: SuggestionData): Suggestion[] {
       id: 'deadlines',
       type: 'deadline',
       title: `${data.upcomingDeadlines} upcoming ${data.upcomingDeadlines === 1 ? 'deadline' : 'deadlines'}`,
-      description: 'Tasks due this week that may need your attention.',
+      description: `Tasks due in the ${NEXT_7_DAYS_LABEL.toLowerCase()} that may need your attention.`,
       icon: <Clock size={16} className="text-blue-400" />,
       action: 'Plan ahead',
-      actionPrompt: 'What tasks do I have due this week? Help me create a plan to get them done on time.',
+      actionPrompt: `What tasks do I have due in the ${NEXT_7_DAYS_LABEL.toLowerCase()}? Help me create a plan to get them done on time.`,
       urgency: 'medium',
     });
   }
@@ -96,7 +97,7 @@ export function HoustonSuggestions({ onAction, disabled = false }: HoustonSugges
       try {
         const [tasksRes, triageRes] = await Promise.allSettled([
           fetch('/api/tasks?openOnly=true&parentOnly=true&countsOnly=true'),
-          fetch('/api/triage?status=pending&limit=0'),
+          fetch('/api/navigation/counts'),
         ]);
 
         let overdue = 0;
@@ -110,7 +111,7 @@ export function HoustonSuggestions({ onAction, disabled = false }: HoustonSugges
         let triagePending = 0;
         if (triageRes.status === 'fulfilled' && triageRes.value.ok) {
           const data = await triageRes.value.json();
-          triagePending = data?.stats?.pending ?? data?.totalFiltered ?? 0;
+          triagePending = data?.triage ?? 0;
         }
 
         const built = buildSuggestions({

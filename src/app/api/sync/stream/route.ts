@@ -1,10 +1,10 @@
 import { syncEventBus } from '@/lib/sync/events';
 import type { SyncStreamEvent } from '@/lib/sync/events';
 import {
-  getLatestSyncJobEventId,
-  getSyncJobEventsAfter,
+  getSyncJobRepository,
   isDurableSyncMode,
 } from '@/lib/sync/job-queue';
+import logger from '@/lib/logger';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -16,11 +16,12 @@ export async function GET(request: Request) {
   const parsedCursor = suppliedCursor === null ? Number.NaN : Number(suppliedCursor);
 
   const stream = new ReadableStream({
-    start(controller) {
-      let persistedCursor = isDurableSyncMode()
+    async start(controller) {
+      const jobRepository = isDurableSyncMode() ? await getSyncJobRepository() : null;
+      let persistedCursor = jobRepository
         ? Number.isSafeInteger(parsedCursor) && parsedCursor >= 0
           ? parsedCursor
-          : getLatestSyncJobEventId()
+          : await jobRepository.getLatestEventId()
         : 0;
       const send = (event: SyncStreamEvent, eventId?: number) => {
         const id = eventId === undefined ? '' : `id: ${eventId}\n`;
@@ -42,12 +43,26 @@ export async function GET(request: Request) {
         }
       }, 30_000);
 
-      const persistedEvents = isDurableSyncMode()
+      let pollingPersistedEvents = false;
+      const pollPersistedEvents = async () => {
+        if (!jobRepository || pollingPersistedEvents) return;
+        pollingPersistedEvents = true;
+        try {
+          const events = await jobRepository.getEventsAfter(persistedCursor);
+              for (const item of events) {
+                persistedCursor = item.id;
+                send(item.event, item.id);
+              }
+        } catch (error) {
+          logger.warn({ err: error, persistedCursor }, 'Sync event stream polling failed');
+          cleanup();
+        } finally {
+          pollingPersistedEvents = false;
+        }
+      };
+      const persistedEvents = jobRepository
         ? setInterval(() => {
-            for (const item of getSyncJobEventsAfter(persistedCursor)) {
-              persistedCursor = item.id;
-              send(item.event, item.id);
-            }
+            void pollPersistedEvents();
           }, 500)
         : null;
 

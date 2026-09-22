@@ -74,6 +74,14 @@ vi.mock('@/components/insights/ActivityHeatmap', () => ({
     <div data-testid="activity-heatmap" data-compact={compact ? 'true' : 'false'} />
   ),
 }));
+vi.mock('@/components/insights/TaskBreakdownChart', () => ({
+  TaskBreakdownChart: ({ compact }: { compact?: boolean }) => (
+    <div data-testid="task-breakdown-chart" data-compact={compact ? 'true' : 'false'} />
+  ),
+}));
+vi.mock('@/components/insights/ProductivityPatterns', () => ({
+  ProductivityPatterns: () => <div data-testid="productivity-patterns" />,
+}));
 vi.mock('@/lib/stats/insights', () => ({}));
 
 const mockSnapshot = {
@@ -97,12 +105,26 @@ const mockSnapshot = {
     { date: '2026-07-29', completed: 2, created: 1 },
   ],
   sourceBreakdown: [],
+  taskBreakdown: {
+    byPriority: [{ value: 'high', count: 4, percentage: 100 }],
+    byStatus: [{ value: 'todo', count: 4, percentage: 100 }],
+  },
   taskAge: [],
   projectActivity: [],
+  workActivity: { lists: [], tags: [], projects: [], sources: [] },
   routineHeatmap: [],
   activityHeatmap: [
     { date: '2026-07-29', taskCompletions: 2, routineCompletions: 1 },
   ],
+  productivity: {
+    periodStart: '2026-07-23',
+    periodEnd: '2026-07-29',
+    timeZone: 'UTC',
+    hourly: [],
+    weekdays: [],
+    timeliness: { onTime: 0, late: 0, withoutDueDate: 0, onTimeRate: null },
+    comparisons: [],
+  },
 };
 
 const mockObservations = {
@@ -181,6 +203,9 @@ describe('MobileInsightsScreen', () => {
       expect(screen.getByText('Tasks created')).toBeInTheDocument();
       expect(screen.getByText('8')).toBeInTheDocument();
       expect(screen.getByTestId('activity-heatmap')).toHaveAttribute('data-compact', 'true');
+      expect(screen.getByTestId('task-breakdown-chart')).toHaveAttribute('data-compact', 'true');
+      expect(screen.getByText('Current task mix')).toBeInTheDocument();
+      expect(screen.getByTestId('productivity-patterns')).toBeInTheDocument();
     });
   });
 

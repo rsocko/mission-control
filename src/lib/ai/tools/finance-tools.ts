@@ -1,4 +1,5 @@
 import { tool, zodSchema } from 'ai';
+import { z } from 'zod';
 import {
   getFinanceConnectorHealth,
   getFinanceObligations,
@@ -30,6 +31,22 @@ import {
 } from '@/lib/finance/houston-contracts';
 
 const FINANCE_TOOL_TIMEOUT_MS = 3_000;
+// Uses `.default({})` rather than `.optional()` on the outer object: the AI
+// SDK's `InferToolContext`/`ToolsContextParameter` require a context type
+// that does not include `undefined` in its union for a finance mutation
+// tool's context to compose correctly into the combined `toolsContext` type
+// (see `IsEmptyObject`/`ToolsContextParameter` in the `ai` package) — wrapping
+// the whole schema in `.optional()` collapsed the inferred type and broke
+// the production build. `.default({})` keeps the *output* type free of
+// `undefined` (satisfying the SDK's typing) while still letting the schema
+// accept a missing/`undefined` context at runtime (substituting `{}`), which
+// is required for callers — including tests and any non-`chat.ts` call site
+// — that invoke these tools without supplying `toolsContext` explicitly.
+// `correlationId` itself remains optional, so providing it is never mandatory.
+const financeMutationToolContextSchema = z.object({
+  correlationId: z.string().optional(),
+  financeApprovalIds: z.record(z.string(), z.string()).optional(),
+}).default({});
 
 async function executeFinanceTool<T>(
   operation: (signal: AbortSignal) => Promise<T>,
@@ -118,6 +135,12 @@ export const financeTools = {
 
 type HoustonToolContext = {
   correlationId?: unknown;
+  financeApprovalIds?: unknown;
+};
+
+type HoustonToolExecutionOptions = {
+  context?: unknown;
+  experimental_context?: unknown;
 };
 
 function correlationId(context: unknown): string {
@@ -125,17 +148,34 @@ function correlationId(context: unknown): string {
   return typeof value === 'string' && value.length > 0 ? value : 'unavailable';
 }
 
-export function createFinanceMutationTools(approvalSecret: string) {
+function resolveToolContext(options: unknown): unknown {
+  const value = options as HoustonToolExecutionOptions | undefined;
+  return value?.context ?? value?.experimental_context;
+}
+
+function approvalId(context: unknown, toolCallId: string): string {
+  const approvals = (context as HoustonToolContext | undefined)?.financeApprovalIds;
+  if (!approvals || typeof approvals !== 'object') {
+    throw new Error('The finance approval context is unavailable.');
+  }
+  const value = (approvals as Record<string, unknown>)[toolCallId];
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error('The finance approval context is unavailable.');
+  }
+  return value;
+}
+
+export function createFinanceMutationTools() {
   return {
     assignFinanceTransactionKid: tool({
       description: 'Propose assigning one current finance transaction to a current household member. This always requires explicit user approval.',
       inputSchema: zodSchema(assignFinanceTransactionKidInputSchema),
       outputSchema: zodSchema(assignFinanceTransactionKidOutputSchema),
+      contextSchema: financeMutationToolContextSchema,
       needsApproval: true,
       execute: (input, options) => assignFinanceTransactionKid(input, {
-        approvalSecret,
-        toolCallId: options.toolCallId,
-        correlationId: correlationId(options.experimental_context),
+        approvalId: approvalId(resolveToolContext(options), options.toolCallId),
+        correlationId: correlationId(resolveToolContext(options)),
         signal: options.abortSignal,
       }),
     }),
@@ -143,11 +183,11 @@ export function createFinanceMutationTools(approvalSecret: string) {
       description: 'Propose changing one current finance transaction to a current finance category. This always requires explicit user approval.',
       inputSchema: zodSchema(updateFinanceTransactionCategoryInputSchema),
       outputSchema: zodSchema(updateFinanceTransactionCategoryOutputSchema),
+      contextSchema: financeMutationToolContextSchema,
       needsApproval: true,
       execute: (input, options) => updateFinanceTransactionCategory(input, {
-        approvalSecret,
-        toolCallId: options.toolCallId,
-        correlationId: correlationId(options.experimental_context),
+        approvalId: approvalId(resolveToolContext(options), options.toolCallId),
+        correlationId: correlationId(resolveToolContext(options)),
         signal: options.abortSignal,
       }),
     }),

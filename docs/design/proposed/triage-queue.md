@@ -965,7 +965,8 @@ RyMessage already has:
 
 Should triage live in RyMessage instead?
 
-### Recommendation: **Mission Control is the correct home.** RyMessage can be a *capture channel*.
+### Recommendation: **Mission Control is the correct home for general triage.**
+RyMessage is a conversational capture and task-extraction source.
 
 ### Reasoning
 
@@ -986,18 +987,23 @@ Should triage live in RyMessage instead?
 
 ### Where RyMessage Fits
 
-RyMessage remains a **capture channel** (like iOS Share Sheet):
+RyMessage remains a **conversational capture channel** and can also materialize
+high-confidence extracted actions as provider-owned tasks:
 
 ```mermaid
 graph LR
     RM[RyMessage] -->|"Send to Triage"| API[MC Triage API]
     RM -->|"Direct: Send to Catalog"| MC3D[Model Catalog]
-    RM -->|"Direct: Create Task"| TODO[MS Todo / GitHub]
+    RM -->|"Policy: Materialize Task"| TODO[MS Todo by default]
+    TODO -->|"Import same provider task"| MC[Mission Control]
 ```
 
 - If someone sends you a cool link in iMessage → RyMessage's existing "Send to Model Catalog" or "Create Task" flows handle it **in context**.
 - If you want to batch-process your Reddit saved items, Instagram saves, and GitHub stars → that's Mission Control Triage.
 - RyMessage could optionally "forward to triage" for items the user doesn't want to act on immediately but doesn't want to lose.
+- When RyMessage materializes a Microsoft To Do task, Mission Control imports
+  that same provider task with RyMessage provenance rather than creating a
+  duplicate local task.
 
 ### Summary
 
@@ -1010,7 +1016,13 @@ graph LR
 | You share a URL from Instagram via iOS | iOS Share Sheet → MC Triage API |
 | Batch "dismiss all items older than 7 days" | MC Triage Queue |
 
-The rule: **If the item originated from a conversation and has conversational context, RyMessage handles it. If the item is a saved/bookmarked thing awaiting decision, Mission Control handles it.**
+The rule: **If the item originated from a conversation, RyMessage owns the
+evidence and extraction. If it becomes a task, the selected task provider owns
+the task. If the item is saved or bookmarked work awaiting a general routing
+decision, Mission Control owns triage.**
+
+See [RyMessage Task Materialization](rymessage-task-materialization.md) for
+defaults, authority, provenance, and lifecycle reconciliation.
 
 ---
 

@@ -49,7 +49,7 @@ export function TriageSummaryCard({ data }: { data: TriageSummaryData }) {
 
       {data.items.length > 1 ? (
         <div className="flex items-center gap-1.5 border-b border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2">
-          <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">Sort</span>
+          <span className="mr-1 text-xs font-semibold uppercase tracking-wider text-[var(--text-muted)]">Sort</span>
           {([
             ['score', 'Relevance'],
             ['newest', 'Newest'],
@@ -60,7 +60,7 @@ export function TriageSummaryCard({ data }: { data: TriageSummaryData }) {
               type="button"
               aria-pressed={sortBy === value}
               onClick={() => setSortBy(value)}
-              className={`rounded-full border px-2 py-1 text-[10px] font-medium ${
+              className={`rounded-full border px-2 py-1 text-xs font-medium ${
                 sortBy === value
                   ? 'border-[var(--border)] bg-[var(--surface-2)] text-[var(--text-primary)]'
                   : 'border-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'
@@ -75,7 +75,7 @@ export function TriageSummaryCard({ data }: { data: TriageSummaryData }) {
       {items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 p-6 text-center text-xs text-[var(--text-muted)]">
           <Inbox size={22} aria-hidden="true" />
-          <p>No triage items match this search.</p>
+          <p>No inbox items match this search.</p>
         </div>
       ) : (
         <div className="max-h-[32rem] divide-y divide-[var(--border-subtle)] overflow-y-auto">
@@ -92,7 +92,7 @@ export function TriageSummaryCard({ data }: { data: TriageSummaryData }) {
                 />
               ) : null}
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--text-muted)]">
+                <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]">
                   <span>{formatLabel(item.source)}</span>
                   <span aria-hidden="true">/</span>
                   <span>{formatLabel(item.status)}</span>
@@ -119,13 +119,13 @@ export function TriageSummaryCard({ data }: { data: TriageSummaryData }) {
                   <p className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--text-secondary)]">{item.summary}</p>
                 ) : null}
                 <div className="mt-2 flex flex-wrap gap-1.5">
-                  <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[10px] text-[var(--text-muted)]">
+                  <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-xs text-[var(--text-muted)]">
                     {formatLabel(item.contentType)}
                   </span>
                   {item.categories.slice(0, 3).map(category => (
                     <span
                       key={category}
-                      className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-[10px] text-[var(--text-secondary)]"
+                      className="rounded-full bg-[var(--surface-2)] px-2 py-0.5 text-xs text-[var(--text-secondary)]"
                     >
                       {category}
                     </span>

@@ -1,5 +1,5 @@
-import { sqlite } from '@/db';
 import type { ExternalBindingType } from '@/db/schema';
+import type { GitHubDecisionCurrencyCheck } from '@/db/persistence/github-identity';
 import { syncLogger } from '@/lib/logger';
 import type {
   GitHubIdentityAction,
@@ -12,11 +12,12 @@ import type {
 import { resolveGitHubStableIdentityBatch } from './stable-lookup';
 import type { ExternalIdentityEvidence } from './types';
 import { resolveGitHubIdentityBatch } from './resolver';
-import { getGitHubIdentityModeSnapshot } from './identity-mode';
+
 import {
   resolveGitHubLinkedSourceIdentityBatch,
   type GitHubLinkedSourceIdentityCandidate,
 } from './linked-source-identity';
+import { getGitHubIdentityRepository } from './worker-persistence';
 
 const LOOKUP_CHUNK_SIZE = 500;
 
@@ -88,9 +89,9 @@ export class GitHubStableIdentityRuntime {
   }
 
   /** Fails closed when the connector identity epoch moved under a running scope. */
-  assertCurrentMode(): void {
+  async assertCurrentMode(): Promise<void> {
     this.assertRunning();
-    const current = getGitHubIdentityModeSnapshot(this.connectorInstanceId);
+    const current = await (await getGitHubIdentityRepository()).getModeSnapshot(this.connectorInstanceId);
     if (current.modeRevision !== this.modeSnapshot.modeRevision) {
       throw new Error('GitHub identity runtime revision is stale');
     }
@@ -101,10 +102,11 @@ export class GitHubStableIdentityRuntime {
    * a concurrent rename, transfer, or rebind cannot be written through a stale
    * resolution.
    */
-  assertDecisionsCurrent(
+  async assertDecisionsCurrent(
     decisions: Iterable<GitHubIdentityResolutionDecision>,
-  ): void {
-    this.assertCurrentMode();
+  ): Promise<void> {
+    await this.assertCurrentMode();
+    const checks: GitHubDecisionCurrencyCheck[] = [];
     for (const decision of decisions) {
       if (
         decision.appliedSource !== 'stable'
@@ -114,30 +116,21 @@ export class GitHubStableIdentityRuntime {
         || decision.locatorRevision === null
       ) continue;
       const bindingType = decision.surface === 'source_list' ? 'source_list' : 'task';
-      const current = sqlite.prepare(`
-        SELECT 1
-        FROM external_entity_bindings AS binding
-        INNER JOIN external_entity_locators AS locator
-          ON locator.external_entity_id = binding.external_entity_id
-          AND locator.valid_to IS NULL
-        WHERE binding.connector_instance_id = ?
-          AND binding.binding_type = ?
-          AND binding.local_id = ?
-          AND binding.external_entity_id = ?
-          AND binding.state = 'active'
-          AND binding.verified_at = ?
-          AND locator.locator_revision = ?
-        LIMIT 1
-      `).get(
-        this.connectorInstanceId,
+      checks.push({
         bindingType,
-        decision.selectedLocalId,
-        decision.externalEntityId,
-        decision.bindingRevision,
-        decision.locatorRevision,
-      );
-      if (!current) throw new Error('GitHub stable decision binding or locator is stale');
+        localId: decision.selectedLocalId,
+        externalEntityId: decision.externalEntityId,
+        bindingRevision: decision.bindingRevision,
+        locatorRevision: decision.locatorRevision,
+      });
     }
+    if (checks.length === 0) return;
+    const identity = await getGitHubIdentityRepository();
+    const current = await identity.checkDecisionsCurrent({
+      connectorInstanceId: this.connectorInstanceId,
+      checks,
+    });
+    if (!current) throw new Error('GitHub stable decision binding or locator is stale');
   }
 
   hasResolvedStableLocalId(localId: string): boolean {
@@ -160,14 +153,14 @@ export class GitHubStableIdentityRuntime {
     return [...this.blockedReasons].sort();
   }
 
-  resolveBatch(
+  async resolveBatch(
     surface: GitHubIdentitySurface,
     bindingType: ExternalBindingType,
     candidates: readonly GitHubStableIdentityCandidate[],
-  ): readonly GitHubIdentityResolutionDecision[] {
+  ): Promise<readonly GitHubIdentityResolutionDecision[]> {
     this.assertRunning();
     if (candidates.length === 0) return [];
-    const lookup = resolveGitHubStableIdentityBatch(
+    const lookup = await resolveGitHubStableIdentityBatch(
       this.connectorInstanceId,
       candidates.map((candidate) => ({
         candidateKey: candidate.candidateKey,
@@ -189,11 +182,11 @@ export class GitHubStableIdentityRuntime {
    * per distinct entity. Duplicate candidate keys and conflicting local scopes
    * are rejected rather than silently merged.
    */
-  resolveDeduplicatedBatch(
+  async resolveDeduplicatedBatch(
     surface: GitHubIdentitySurface,
     bindingType: ExternalBindingType,
     candidates: readonly GitHubStableIdentityCandidate[],
-  ): readonly GitHubIdentityResolutionDecision[] {
+  ): Promise<readonly GitHubIdentityResolutionDecision[]> {
     this.assertRunning();
     if (candidates.length === 0) return [];
     const seenCandidates = new Set<string>();
@@ -227,7 +220,7 @@ export class GitHubStableIdentityRuntime {
     const representatives = [...representativeByLookupKey.entries()];
     for (let index = 0; index < representatives.length; index += LOOKUP_CHUNK_SIZE) {
       const chunk = representatives.slice(index, index + LOOKUP_CHUNK_SIZE);
-      const lookup = resolveGitHubStableIdentityBatch(
+      const lookup = await resolveGitHubStableIdentityBatch(
         this.connectorInstanceId,
         chunk.map(([lookupKey, candidate]) => ({
           candidateKey: lookupKey,
@@ -247,7 +240,7 @@ export class GitHubStableIdentityRuntime {
     const decisions: GitHubIdentityResolutionDecision[] = [];
     for (let index = 0; index < candidates.length; index += LOOKUP_CHUNK_SIZE) {
       const chunk = candidates.slice(index, index + LOOKUP_CHUNK_SIZE);
-      decisions.push(...this.applyDecisions(surface, chunk.map((candidate) => {
+      decisions.push(...await this.applyDecisions(surface, chunk.map((candidate) => {
         const stable = candidate.evidence
           ? stableByLookupKey.get(stableLookupDedupKey(bindingType, candidate.evidence))
           : { selectedLocalIds: [], action: 'none' as const, evidence: 'missing' as const };
@@ -261,25 +254,25 @@ export class GitHubStableIdentityRuntime {
   }
 
   /** Applies candidates whose NodeID evidence the caller already resolved. */
-  applyResolvedBatch(
+  async applyResolvedBatch(
     surface: GitHubIdentitySurface,
     candidates: readonly GitHubStableResolvedCandidate[],
-  ): readonly GitHubIdentityResolutionDecision[] {
+  ): Promise<readonly GitHubIdentityResolutionDecision[]> {
     this.assertRunning();
     return this.applyDecisions(surface, candidates);
   }
 
-  resolveLinkedSourceBatch(
+  async resolveLinkedSourceBatch(
     candidates: readonly GitHubLinkedSourceIdentityCandidate[],
-  ): readonly GitHubIdentityResolutionDecision[] {
+  ): Promise<readonly GitHubIdentityResolutionDecision[]> {
     this.assertRunning();
     if (candidates.length === 0) return [];
-    const lookup = resolveGitHubLinkedSourceIdentityBatch(
+    const lookup = await resolveGitHubLinkedSourceIdentityBatch(
       this.connectorInstanceId,
       candidates,
     );
     this.queryCount += lookup.queryCount;
-    const decisions = this.applyDecisions('linked_source', candidates.map((candidate) => {
+    const decisions = await this.applyDecisions('linked_source', candidates.map((candidate) => {
       const stable = lookup.resolutions.get(candidate.candidateKey);
       if (!stable) {
         throw new Error(`Stable linked-source resolution is missing for ${candidate.candidateKey}`);
@@ -321,11 +314,11 @@ export class GitHubStableIdentityRuntime {
     }, 'GitHub stable identity scope closed with blocked surfaces');
   }
 
-  private applyDecisions(
+  private async applyDecisions(
     surface: GitHubIdentitySurface,
     candidates: readonly GitHubStableResolvedCandidate[],
-  ): readonly GitHubIdentityResolutionDecision[] {
-    this.assertCurrentMode();
+  ): Promise<readonly GitHubIdentityResolutionDecision[]> {
+    await this.assertCurrentMode();
     const result = resolveGitHubIdentityBatch({
       modeSnapshot: this.modeSnapshot,
       candidates: candidates.map((candidate) => ({

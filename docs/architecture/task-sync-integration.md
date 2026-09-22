@@ -2,11 +2,12 @@
 title: "Task Sync & Integration Architecture"
 status: active
 created: 2026-06-20
-last_reviewed: 2026-07-30
+last_reviewed: 2026-08-29
 category: reference
 related:
-  - "[Sync Engine](../architecture/SYNC-ENGINE.md)"
-  - "[Connectors](../architecture/CONNECTORS.md)"
+  - "[Sync Engine](sync-engine.md)"
+  - "[Connectors](connectors.md)"
+  - "[Database Scaling and Migration Strategy](../design/active/database-scaling-strategy.md)"
   - "[Connector Settings](../design/CONNECTOR-SETTINGS-DESIGN.md)"
 ---
 
@@ -73,7 +74,7 @@ graph TB
         CONN[Connector Registry<br/>IConnector interface]
         SYNC[SyncScheduler<br/>node-cron, per-connector polling]
         WB[Write-Back<br/>Immediate push to source]
-        DB[(SQLite / Drizzle<br/>Local task store)]
+        DB[(Configured relational backend<br/>PostgreSQL or SQLite)]
     end
 
     subgraph "Native Connectors (Implemented)"
@@ -115,7 +116,11 @@ graph TB
 
 ### How It Works
 
-Each connector implements the `IConnector` interface and is registered in the connector registry. The `SyncScheduler` polls each connector on its configured interval and upserts tasks/notifications into the local SQLite DB.
+Each connector implements the `IConnector` interface and is registered in the
+connector registry. The `SyncScheduler` polls each connector on its configured
+interval and upserts tasks and notifications through the selected persistence
+backend. PostgreSQL is the approved production target; SQLite remains the
+default compatibility backend and the documented homelab backend until cutover.
 
 ### IConnector Interface
 
@@ -154,7 +159,7 @@ sequenceDiagram
     participant Cron as SyncScheduler
     participant Conn as Connector
     participant API as External API
-    participant DB as SQLite
+    participant DB as Configured relational backend
 
     Cron->>Conn: fetchTasks(since)
     Conn->>API: GET /tasks (Microsoft Graph, GitHub API, etc.)
@@ -176,7 +181,7 @@ sequenceDiagram
 | `outlook-email` | Microsoft Graph API | Read (flagged → tasks), Notifications | OAuth2 (MSAL) |
 | `outlook-calendar` | Microsoft Graph API | Read (events → timeline) | OAuth2 (MSAL) |
 | `home-assistant` | HA REST API | Notifications (device states) | Long-lived token |
-| `rymessage` | Webhook/REST | Read (messages → tasks) | API key |
+| `rymessage` | Experimental webhook today; transport-independent durable ingress proposed | Notifications today; provider-owned task materialization bridge proposed | LAN trust today; dedicated scoped integration principal required before production |
 | `document-intelligence` | Azure AI | Read (extracted action items) | API key |
 | `monarch-money` | Monarch API | Notifications (finance) | Session token |
 | `custom-rest` | Any REST API | Configurable | Configurable |
@@ -299,7 +304,8 @@ Mission Control already stores n8n connection state in `integrationConfigs` tabl
 | Outlook Email connector | ✅ Done | `src/lib/connectors/outlook-email/` |
 | Outlook Calendar connector | ✅ Done | `src/lib/connectors/outlook-calendar/` |
 | Home Assistant connector | ✅ Done | `src/lib/connectors/home-assistant/` |
-| RyMessage connector | ✅ Done | `src/lib/connectors/rymessage/` |
+| RyMessage notification connector | ✅ Done | `src/lib/connectors/rymessage/` |
+| RyMessage task materialization bridge | 🔲 Proposed | `docs/design/proposed/rymessage-task-materialization.md` |
 | Document Intelligence connector | ✅ Done | `src/lib/connectors/document-intelligence/` |
 | Monarch Money connector | ✅ Done | `src/lib/connectors/monarch-money/` |
 | Custom REST connector | ✅ Done | `src/lib/connectors/custom-rest/` |

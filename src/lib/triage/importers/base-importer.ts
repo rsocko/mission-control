@@ -56,12 +56,60 @@ export interface TriageImportSummary {
 }
 
 export interface FullSyncResult {
+  outcome: 'success' | 'partial' | 'failure' | 'stale';
   imported: number;
   skipped: number;
   errors: string[];
   pagesProcessed: number;
   durationMs: number;
   lastCursor: string | null;
+}
+
+export function createFullSyncResult(): FullSyncResult {
+  return {
+    outcome: 'success',
+    imported: 0,
+    skipped: 0,
+    errors: [],
+    pagesProcessed: 0,
+    durationMs: 0,
+    lastCursor: null,
+  };
+}
+
+export function completeFullSyncResult(result: FullSyncResult, startedAt: number): FullSyncResult {
+  result.durationMs = Date.now() - startedAt;
+  if (result.outcome !== 'stale') {
+    result.outcome = result.errors.length === 0
+      ? 'success'
+      : result.imported > 0 || result.skipped > 0 || result.pagesProcessed > 0
+        ? 'partial'
+        : 'failure';
+  }
+  return result;
+}
+
+export function safeRemoteError(label: string, error: unknown): string {
+  if (error instanceof TriageImporterError) return error.message;
+  return `${label} failed`;
+}
+
+export class TriageImporterError extends Error {
+  constructor(message: string) {
+    super(message.slice(0, 500));
+    this.name = 'TriageImporterError';
+  }
+}
+
+export function remoteResponseError(
+  label: string,
+  response: Response,
+  qualifier?: string,
+): TriageImporterError {
+  const statusText = response.statusText.replace(/[^\w .()-]/g, '').slice(0, 100);
+  return new TriageImporterError(
+    `${label} failed${qualifier ? ` (${qualifier})` : ''}: ${response.status}${statusText ? ` ${statusText}` : ''}`,
+  );
 }
 
 /** Safety limit to prevent runaway pagination */

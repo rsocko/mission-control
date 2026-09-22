@@ -5,8 +5,10 @@ import type { SyncJob } from '@/lib/sync/job-queue';
 const queueMocks = vi.hoisted(() => ({
   claimNextSyncJob: vi.fn(),
   completeSyncJob: vi.fn(),
+  finalizeSuccessfulSyncJob: vi.fn(),
   enqueueDueSyncSchedules: vi.fn(() => []),
   failSyncJob: vi.fn(() => 'failed'),
+  countQueuedSyncJobs: vi.fn(() => 0),
   getSyncLeaseMs: vi.fn(() => 30_000),
   getSyncQueueMetrics: vi.fn(() => ({
     queued: 0,
@@ -21,8 +23,8 @@ const queueMocks = vi.hoisted(() => ({
   })),
   isSyncJobCancellationRequested: vi.fn(() => false),
   linkSyncLogToJob: vi.fn(),
-  persistSyncJobEvent: vi.fn(),
-  pruneSyncJobs: vi.fn(),
+  persistSyncJobEvent: vi.fn(() => Promise.resolve()),
+  pruneSyncJobs: vi.fn(() => Promise.resolve()),
   releaseSyncJob: vi.fn(() => true),
   renewSyncJobLease: vi.fn(() => true),
 }));
@@ -30,7 +32,29 @@ const eventMocks = vi.hoisted(() => ({
   setSyncEventPersistence: vi.fn(),
 }));
 
-vi.mock('@/lib/sync/job-queue', () => queueMocks);
+vi.mock('@/lib/sync/job-runtime', () => ({
+  getSyncLeaseMs: queueMocks.getSyncLeaseMs,
+  // Backend-selected repository (see @/db/runtime): all of SyncWorker's
+  // queue/lease operations go through this in the current implementation.
+  // The same underlying mock functions back both the raw exports above and
+  // the repository methods below, so existing assertions against
+  // `queueMocks.*` keep working unchanged.
+  getSyncJobRepository: () => Promise.resolve({
+    claimNext: queueMocks.claimNextSyncJob,
+    complete: queueMocks.completeSyncJob,
+    finalizeSuccess: queueMocks.finalizeSuccessfulSyncJob,
+    countQueued: queueMocks.countQueuedSyncJobs,
+    enqueueDueSchedules: queueMocks.enqueueDueSyncSchedules,
+    fail: queueMocks.failSyncJob,
+    getMetrics: queueMocks.getSyncQueueMetrics,
+    isCancellationRequested: queueMocks.isSyncJobCancellationRequested,
+    linkSyncLog: queueMocks.linkSyncLogToJob,
+    persistEvent: queueMocks.persistSyncJobEvent,
+    prune: queueMocks.pruneSyncJobs,
+    release: queueMocks.releaseSyncJob,
+    renewLease: queueMocks.renewSyncJobLease,
+  }),
+}));
 vi.mock('@/lib/sync/events', () => eventMocks);
 vi.mock('@/lib/logger', () => ({
   syncLogger: {
@@ -95,6 +119,7 @@ async function waitFor(assertion: () => void): Promise<void> {
 describe('sync worker runtime', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    queueMocks.countQueuedSyncJobs.mockReturnValue(0);
     queueMocks.claimNextSyncJob.mockReturnValueOnce(job()).mockReturnValue(null);
   });
 
@@ -110,22 +135,72 @@ describe('sync worker runtime', () => {
 
   it('reports pending work from either the active execution or durable queue', async () => {
     queueMocks.claimNextSyncJob.mockReset();
-    queueMocks.getSyncQueueMetrics.mockReturnValueOnce({
-      queued: 1,
-      running: 0,
-      retrying: 0,
-      cancelled: 0,
-      oldestQueuedAgeMs: 0,
-      missedSchedules: 0,
-      oldestScheduleOverdueMs: 0,
-      overBudget: 0,
-      expiredLeases: 0,
-    });
+    queueMocks.claimNextSyncJob.mockReturnValue(null);
+    queueMocks.countQueuedSyncJobs.mockReturnValue(1);
     const { SyncWorker } = await import('@/lib/sync/worker');
     const worker = new SyncWorker(vi.fn(), { ownerId: 'worker-a', pollIntervalMs: 1 });
 
+    worker.start();
+    await waitFor(() => expect(queueMocks.countQueuedSyncJobs).toHaveBeenCalled());
     expect(worker.hasPendingWork()).toBe(true);
+    queueMocks.countQueuedSyncJobs.mockReturnValue(0);
+    await waitFor(() => expect(worker.hasPendingWork()).toBe(false));
     expect(worker.hasPendingWork()).toBe(false);
+    await worker.stop();
+    expect(queueMocks.getSyncQueueMetrics).not.toHaveBeenCalled();
+  });
+
+  it('stays dormant until activation and wakes exactly once without a polling delay', async () => {
+    let enabled = false;
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob.mockReturnValue(null);
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(vi.fn(), {
+      ownerId: 'worker-a',
+      pollIntervalMs: 60_000,
+      isEnabled: () => enabled,
+    });
+
+    worker.start();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(queueMocks.claimNextSyncJob).not.toHaveBeenCalled();
+    expect(queueMocks.pruneSyncJobs).not.toHaveBeenCalled();
+
+    enabled = true;
+    worker.wake();
+    worker.wake();
+    await waitFor(() => expect(queueMocks.claimNextSyncJob).toHaveBeenCalledOnce());
+    await worker.stop();
+  });
+
+  it('releases a claim won concurrently with processing deactivation', async () => {
+    let enabled = true;
+    let resolveClaim!: (value: SyncJob) => void;
+    queueMocks.claimNextSyncJob.mockReset();
+    queueMocks.claimNextSyncJob.mockReturnValueOnce(new Promise<SyncJob>((resolve) => {
+      resolveClaim = resolve;
+    }));
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const execute = vi.fn();
+    const worker = new SyncWorker(execute, {
+      ownerId: 'worker-a',
+      pollIntervalMs: 60_000,
+      isEnabled: () => enabled,
+    });
+
+    worker.start();
+    await waitFor(() => expect(queueMocks.claimNextSyncJob).toHaveBeenCalledOnce());
+    enabled = false;
+    resolveClaim(job());
+    await waitFor(() => expect(queueMocks.releaseSyncJob).toHaveBeenCalledWith(
+      'job-1',
+      'worker-a',
+      1,
+      'worker_deactivated',
+    ));
+    await worker.stop();
+
+    expect(execute).not.toHaveBeenCalled();
   });
 
   it('records successful work only after the connector returns success', async () => {
@@ -134,7 +209,7 @@ describe('sync worker runtime', () => {
     const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
 
     worker.start();
-    await waitFor(() => expect(queueMocks.completeSyncJob).toHaveBeenCalledOnce());
+    await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledOnce());
     await worker.stop();
 
     expect(execute).toHaveBeenCalledWith(
@@ -149,10 +224,46 @@ describe('sync worker runtime', () => {
       }),
     );
     expect(queueMocks.failSyncJob).not.toHaveBeenCalled();
-    expect(queueMocks.linkSyncLogToJob).toHaveBeenCalledWith(
+    expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'job-1' }),
+      'worker-a',
       expect.objectContaining({ success: true }),
+      {
+        events: [expect.objectContaining({
+          eventType: 'sync.completed',
+          stableKey: 'sync.completed:job:job-1:run:job-1',
+        })],
+      },
     );
+    expect(queueMocks.linkSyncLogToJob).not.toHaveBeenCalled();
+  });
+
+  it('records a failed attempt when atomic success ownership is lost', async () => {
+    queueMocks.finalizeSuccessfulSyncJob.mockRejectedValueOnce(
+      new Error('Sync job job-1 ownership was lost before completion'),
+    );
+    const { SyncWorker } = await import('@/lib/sync/worker');
+    const worker = new SyncWorker(
+      vi.fn().mockResolvedValue(result(true)),
+      { ownerId: 'worker-a', pollIntervalMs: 1 },
+    );
+
+    worker.start();
+    await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalledOnce());
+    await worker.stop();
+
+    expect(queueMocks.failSyncJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
+      'worker-a',
+      'Sync job job-1 ownership was lost before completion',
+      {
+        retry: true,
+        cancelled: false,
+        terminal: false,
+        events: expect.any(Array),
+      },
+    );
+    expect(queueMocks.completeSyncJob).not.toHaveBeenCalled();
   });
 
   it('forwards a frozen legacy identity context', async () => {
@@ -165,7 +276,7 @@ describe('sync worker runtime', () => {
       const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
 
       worker.start();
-      await waitFor(() => expect(queueMocks.completeSyncJob).toHaveBeenCalledOnce());
+      await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledOnce());
       await worker.stop();
 
       expect(execute).toHaveBeenCalledWith(
@@ -189,7 +300,7 @@ describe('sync worker runtime', () => {
     const worker = new SyncWorker(execute, { ownerId: 'worker-a', pollIntervalMs: 1 });
 
     worker.start();
-    await waitFor(() => expect(queueMocks.completeSyncJob).toHaveBeenCalledOnce());
+    await waitFor(() => expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledOnce());
     await worker.stop();
 
     expect(execute).toHaveBeenCalledWith(
@@ -219,6 +330,9 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'connector failed',
+      expect.objectContaining({
+        events: [expect.objectContaining({ eventType: 'sync.failed' })],
+      }),
     );
   });
 
@@ -246,7 +360,12 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'Sync execution exceeded its 5ms duration budget',
-      { retry: true, cancelled: false, terminal: false },
+      {
+        retry: true,
+        cancelled: false,
+        terminal: false,
+        events: expect.any(Array),
+      },
     );
   });
 
@@ -270,7 +389,11 @@ describe('sync worker runtime', () => {
       expect.objectContaining({ id: 'job-1' }),
       'worker-a',
       'Worker shutdown grace period expired',
-      { retry: true, cancelled: false },
+      expect.objectContaining({
+        retry: true,
+        cancelled: false,
+        events: expect.any(Array),
+      }),
     );
   });
 
@@ -317,10 +440,11 @@ describe('sync worker runtime', () => {
       30_000,
       new Set(['todo-1']),
     );
-    expect(queueMocks.completeSyncJob).toHaveBeenCalledWith(
-      'job-2',
+    expect(queueMocks.finalizeSuccessfulSyncJob).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-2' }),
       'worker-a',
       expect.objectContaining({ success: true }),
+      expect.objectContaining({ events: expect.any(Array) }),
     );
     const persistEvent = eventMocks.setSyncEventPersistence.mock.calls[0]?.[0];
     persistEvent?.({
@@ -329,15 +453,16 @@ describe('sync worker runtime', () => {
       connectorName: 'To Do',
       phase: 'tasks',
     });
-    expect(queueMocks.persistSyncJobEvent).toHaveBeenCalledWith(
+    await waitFor(() => expect(queueMocks.persistSyncJobEvent).toHaveBeenCalledWith(
       'job-1',
       expect.objectContaining({ connectorId: 'todo-1' }),
-    );
+    ));
 
     finishAbandoned?.(result(true));
     await waitFor(() => expect(queueMocks.failSyncJob).toHaveBeenCalled());
-    expect(queueMocks.completeSyncJob).not.toHaveBeenCalledWith(
-      'job-1',
+    expect(queueMocks.finalizeSuccessfulSyncJob).not.toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'job-1' }),
+      expect.anything(),
       expect.anything(),
       expect.anything(),
     );

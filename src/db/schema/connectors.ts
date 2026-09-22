@@ -8,6 +8,7 @@ import {
   primaryKey,
 } from 'drizzle-orm/sqlite-core';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
+import type { ContextAppearance } from '@/types';
 import type { tasks } from './tasks';
 
 // ─── CONNECTOR CONFIGS ──────────────────────────────────────────────────────
@@ -26,6 +27,10 @@ export const connectorConfigs = sqliteTable('connector_configs', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   deletedAt: text('deleted_at'),
+  /** Outcome of the most recent manual "Test Connection" click, independent of scheduled syncs. */
+  lastTestStatus: text('last_test_status').$type<'success' | 'failed'>(),
+  lastTestError: text('last_test_error'),
+  lastTestAt: text('last_test_at'),
 });
 
 export const listGroups = sqliteTable('list_groups', {
@@ -48,6 +53,9 @@ export const sourceLists = sqliteTable('source_lists', {
   type: text('type').notNull(), // list | project | repo | folder | board
   taskCount: integer('task_count').notNull().default(0),
   lastSyncedAt: text('last_synced_at'),
+  healthStatus: text('health_status').$type<'ok' | 'disabled' | 'failed'>(),
+  healthError: text('health_error'),
+  lastSuccessfulAt: text('last_successful_at'),
   wellKnownListName: text('well_known_list_name'), // flaggedEmails, defaultList, etc.
   groupId: text('group_id').references(() => listGroups.id, { onDelete: 'set null' }),
   sortOrder: integer('sort_order').notNull().default(0),
@@ -56,6 +64,7 @@ export const sourceLists = sqliteTable('source_lists', {
   userDisplayName: text('user_display_name'),
   icon: text('icon'),
   iconColor: text('icon_color'),
+  appearance: text('appearance', { mode: 'json' }).$type<ContextAppearance>(),
 });
 
 // ─── WORK MICROSOFT TO DO BRIDGE ────────────────────────────────────────────
@@ -135,7 +144,8 @@ export const syncLog = sqliteTable('sync_log', {
   syncedAt: text('synced_at').notNull(),
   durationMs: integer('duration_ms'),
   jobId: text('job_id'),
-  trigger: text('trigger').$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery'>(),
+  trigger: text('trigger')
+    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>(),
   scheduledFor: text('scheduled_for'),
   startedAt: text('started_at'),
   attempt: integer('attempt'),
@@ -154,7 +164,9 @@ export const syncJobs = sqliteTable('sync_jobs', {
   id: text('id').primaryKey(),
   connectorId: text('connector_id').notNull(),
   full: integer('full', { mode: 'boolean' }).notNull().default(false),
-  source: text('source').$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery'>().notNull(),
+  source: text('source')
+    .$type<'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary'>()
+    .notNull(),
   status: text('status')
     .$type<'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'>()
     .notNull(),
@@ -269,6 +281,48 @@ export const syncSchedules = sqliteTable('sync_schedules', {
   updatedAt: text('updated_at').notNull(),
 }, (table) => [
   index('idx_sync_schedules_next_due').on(table.nextDueAt),
+]);
+
+export const connectorSyncControls = sqliteTable('connector_sync_controls', {
+  connectorId: text('connector_id')
+    .primaryKey()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  schedulerState: text('scheduler_state')
+    .$type<'scheduled' | 'quarantined'>()
+    .notNull()
+    .default('scheduled'),
+  quarantineId: text('quarantine_id'),
+  quarantinedAt: text('quarantined_at'),
+  releasedAt: text('released_at'),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  index('idx_connector_sync_controls_state').on(table.schedulerState, table.updatedAt),
+]);
+
+export const connectorSyncOperatorRuns = sqliteTable('connector_sync_operator_runs', {
+  id: text('id').primaryKey(),
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  quarantineId: text('quarantine_id'),
+  operation: text('operation')
+    .$type<'quarantine' | 'canary' | 'release' | 'rollback'>()
+    .notNull(),
+  actorType: text('actor_type').$type<'parent-admin' | 'service'>().notNull(),
+  idempotencyKey: text('idempotency_key').notNull(),
+  jobId: text('job_id').references(() => syncJobs.id, { onDelete: 'set null' }),
+  resultCode: text('result_code').notNull(),
+  cancelledQueuedCount: integer('cancelled_queued_count').notNull().default(0),
+  createdAt: text('created_at').notNull(),
+  completedAt: text('completed_at'),
+}, (table) => [
+  uniqueIndex('idx_connector_sync_operator_idempotency')
+    .on(table.connectorId, table.idempotencyKey),
+  uniqueIndex('idx_connector_sync_operator_canary')
+    .on(table.connectorId, table.quarantineId, table.operation)
+    .where(sql`${table.operation} = 'canary'`),
+  index('idx_connector_sync_operator_connector')
+    .on(table.connectorId, table.createdAt),
 ]);
 
 export const syncDeletionCandidates = sqliteTable('sync_deletion_candidates', {
@@ -458,6 +512,61 @@ export const outboundWebhooks = sqliteTable('outbound_webhooks', {
   lastStatus: integer('last_status'),
   createdAt: text('created_at').notNull(),
 });
+
+// ─── DURABLE EVENT OUTBOX (LAYER 2) ───────────────────────────────────────────
+
+/**
+ * Durable outbound-event log. `sequence` is the monotonic ordering key used to
+ * guarantee deterministic per-webhook delivery order, and `stableKey` is the
+ * caller-supplied idempotency key that makes repeated enqueue attempts (sync
+ * job retries, worker restarts) collapse onto a single row.
+ */
+export const eventOutbox = sqliteTable('event_outbox', {
+  sequence: integer('sequence').primaryKey({ autoIncrement: true }),
+  stableKey: text('stable_key').notNull(),
+  eventType: text('event_type').notNull(),
+  payload: text('payload', { mode: 'json' }).notNull(),
+  occurredAt: text('occurred_at').notNull(),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_event_outbox_stable_key').on(table.stableKey),
+  index('idx_event_outbox_type').on(table.eventType, table.sequence),
+]);
+
+/**
+ * One row per (event, webhook) pair. The unique pair index provides the stable
+ * delivery identity required for at-least-once delivery without duplicates,
+ * and the lease columns implement owner/token fencing for the dispatcher.
+ */
+export const eventOutboxDeliveries = sqliteTable('event_outbox_deliveries', {
+  id: text('id').primaryKey(),
+  eventSequence: integer('event_sequence')
+    .notNull()
+    .references(() => eventOutbox.sequence, { onDelete: 'cascade' }),
+  webhookId: text('webhook_id')
+    .notNull()
+    .references(() => outboundWebhooks.id, { onDelete: 'cascade' }),
+  status: text('status').notNull().default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  nextAttemptAt: text('next_attempt_at'),
+  leaseOwner: text('lease_owner'),
+  leaseToken: text('lease_token'),
+  leaseExpiresAt: text('lease_expires_at'),
+  lastError: text('last_error'),
+  lastStatus: integer('last_status'),
+  completedAt: text('completed_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_event_outbox_deliveries_pair').on(table.eventSequence, table.webhookId),
+  index('idx_event_outbox_deliveries_dispatch').on(
+    table.status,
+    table.nextAttemptAt,
+    table.eventSequence,
+  ),
+  index('idx_event_outbox_deliveries_webhook_order').on(table.webhookId, table.eventSequence),
+  index('idx_event_outbox_deliveries_lease').on(table.status, table.leaseExpiresAt),
+]);
 
 export const integrationConfigs = sqliteTable('integration_configs', {
   id: text('id').primaryKey(),

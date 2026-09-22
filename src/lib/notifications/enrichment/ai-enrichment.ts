@@ -11,81 +11,27 @@
  * the sync pipeline.
  */
 
-import { connectorLogger } from '@/lib/logger';
+import {
+  buildEnrichmentPrompt,
+  parseAIEnrichmentResult,
+  shouldEnrichWithAI,
+  type AIEnrichmentInput,
+  type AIEnrichmentResult,
+} from './ai-enrichment-policy';
+import {
+  assertCanRegisterAIEnrichmentService,
+  clearAIEnrichmentService,
+  registerAIEnrichmentService,
+} from './ai-enrichment-service';
 
-// ─── TYPES ──────────────────────────────────────────────────────────────────
-
-export interface AIEnrichmentInput {
-  notificationId: string;
-  title: string;
-  body?: string | null;
-  connectorType: string;
-  category: string;
-  metadata: Record<string, unknown>;
-  presentation: Record<string, unknown>;
-}
-
-export interface AIEnrichmentResult {
-  /** AI-generated one-line summary */
-  summary?: string;
-  /** Suggested action type */
-  suggestedAction?: string;
-  /** Reason for suggested action */
-  suggestedActionReason?: string;
-  /** Whether AI thinks this is more urgent than rule-based level suggests */
-  urgencyBoost?: boolean;
-  /** Additional context tags AI extracted */
-  contextTags?: string[];
-}
-
-// ─── ENRICHMENT RULES ───────────────────────────────────────────────────────
-
-/**
- * Determines whether a notification is worth sending to AI for enrichment.
- * We don't want to burn AI calls on simple FYI/digest notifications.
- */
-export function shouldEnrichWithAI(input: AIEnrichmentInput): boolean {
-  // Always enrich actionable categories
-  const enrichableCategories = ['social', 'security', 'tasks'];
-  if (enrichableCategories.includes(input.category)) return true;
-
-  // Enrich if it's a PR review (complex enough to benefit from summary)
-  const presentation = input.presentation as { subjectType?: string; reason?: string };
-  if (presentation.reason === 'review_requested') return true;
-  if (presentation.reason === 'security_alert') return true;
-
-  // Don't enrich simple system/digest notifications
-  return false;
-}
-
-// ─── PROMPT GENERATION ──────────────────────────────────────────────────────
-
-/**
- * Builds the prompt for AI enrichment. This is designed to work with
- * the existing AI assistant infrastructure.
- */
-export function buildEnrichmentPrompt(input: AIEnrichmentInput): string {
-  const presentation = input.presentation as Record<string, string | number | undefined>;
-
-  return `Analyze this notification and provide a brief, actionable summary:
-
-Source: ${input.connectorType}
-Category: ${input.category}
-Title: ${input.title}
-Body: ${input.body || 'N/A'}
-Repository: ${presentation.repository || 'N/A'}
-Entity: ${presentation.subjectType || 'unknown'} ${presentation.entityNumber ? `#${presentation.entityNumber}` : ''}
-Reason: ${presentation.reasonLabel || presentation.reason || 'N/A'}
-
-Respond with JSON:
-{
-  "summary": "One-sentence summary of what requires attention",
-  "suggestedAction": "create_task | open_url | snooze | dismiss",
-  "suggestedActionReason": "Why this action makes sense",
-  "urgencyBoost": false,
-  "contextTags": ["tag1", "tag2"]
-}`;
-}
+export {
+  buildEnrichmentPrompt,
+  NotificationEnrichmentPermanentError,
+  parseAIEnrichmentResult,
+  shouldEnrichWithAI,
+  type AIEnrichmentInput,
+  type AIEnrichmentResult,
+} from './ai-enrichment-policy';
 
 // ─── ENRICHMENT EXECUTION ───────────────────────────────────────────────────
 
@@ -95,46 +41,30 @@ Respond with JSON:
  *
  * Returns null if enrichment is skipped or fails gracefully.
  */
-export async function enrichWithAI(input: AIEnrichmentInput): Promise<AIEnrichmentResult | null> {
+export async function enrichWithAI(
+  input: AIEnrichmentInput,
+  options: { signal?: AbortSignal } = {},
+): Promise<AIEnrichmentResult | null> {
   if (!shouldEnrichWithAI(input)) {
     return null;
   }
 
-  try {
-    // Dynamic import to avoid circular dependencies with AI module
-    const { generateText } = await import('ai');
-    const { getAIModel } = await import('@/lib/ai/provider-factory');
+  // Dynamic import to avoid circular dependencies with AI module
+  const { generateText } = await import('ai');
+  const { getAsyncAIModel } = await import('@/lib/ai/provider-runtime');
 
-    const prompt = buildEnrichmentPrompt(input);
-    const route = getAIModel('notification-enrichment', {
-      sources: [input.connectorType],
-    });
+  const prompt = buildEnrichmentPrompt(input);
+  const route = await getAsyncAIModel('notification-enrichment', {
+    sources: [input.connectorType],
+  });
 
-    const { text } = await generateText({
-      model: route.model,
-      prompt,
-    });
+  const { text } = await generateText({
+    model: route.model,
+    prompt,
+    abortSignal: options.signal,
+  });
 
-    // Parse the AI response
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      connectorLogger.warn({ err: 'no-json' }, '[AI Enrichment] Could not parse AI response as JSON');
-      return null;
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]) as AIEnrichmentResult;
-    return {
-      summary: parsed.summary,
-      suggestedAction: parsed.suggestedAction,
-      suggestedActionReason: parsed.suggestedActionReason,
-      urgencyBoost: parsed.urgencyBoost === true,
-      contextTags: Array.isArray(parsed.contextTags) ? parsed.contextTags : undefined,
-    };
-  } catch (error) {
-    // AI enrichment is optional — never fail the sync
-    connectorLogger.warn({ err: error instanceof Error ? error.message : String(error) }, '[AI Enrichment] Failed');
-    return null;
-  }
+  return parseAIEnrichmentResult(text);
 }
 
 // ─── BATCH ENRICHMENT ───────────────────────────────────────────────────────
@@ -156,4 +86,18 @@ export async function enrichBatchWithAI(
   }
 
   return results;
+}
+
+const sqliteAIEnrichmentService = { enrich: enrichWithAI };
+
+export function registerSqliteAIEnrichmentService(): void {
+  registerAIEnrichmentService(sqliteAIEnrichmentService);
+}
+
+export function assertCanRegisterSqliteAIEnrichmentService(): void {
+  assertCanRegisterAIEnrichmentService(sqliteAIEnrichmentService);
+}
+
+export function clearSqliteAIEnrichmentService(): void {
+  clearAIEnrichmentService(sqliteAIEnrichmentService);
 }

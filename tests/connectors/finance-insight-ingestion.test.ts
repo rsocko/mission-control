@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ConnectorConfig } from '@/types';
 import type {
   EvaluationRequestV1,
@@ -56,7 +57,9 @@ let isMaterialRecurringIncrease:
 let selectFinanceInsightNotificationInputs:
   typeof import('@/lib/finance-insights/notification-ingestion')['selectFinanceInsightNotificationInputs'];
 let syncFinanceProviderPresentation:
-  typeof import('@/lib/finance-insights/notification-ingestion')['syncFinanceProviderPresentation'];
+  typeof import(
+    '@/db/persistence/sqlite-finance-insight-notification-lifecycle'
+  )['syncFinanceProviderPresentation'];
 
 function connector(id = connectorId): ConnectorConfig {
   return {
@@ -385,7 +388,7 @@ beforeAll(async () => {
   process.env.MC_DB_PATH = databasePath;
   process.env.TYRION_FINANCE_INSIGHTS_IMMEDIATE_NOTIFICATIONS_ENABLED = 'true';
   vi.resetModules();
-  ({ sqlite, runTransaction } = await import('@/db'));
+  ({ sqlite, runTransaction } = await importInitializedSqliteDatabase());
   ({ createNotificationsInTransaction } = await import('@/lib/notifications/service'));
   ({ financeInsightDigestV1 } = await import('@/lib/finance-insights/canonical'));
   ({ sourceGenerationCreateRequestSchema } = await import('@/lib/finance-insights/contract'));
@@ -403,8 +406,10 @@ beforeAll(async () => {
     getFinanceMonthlyDigestSchedule,
     isMaterialRecurringIncrease,
     selectFinanceInsightNotificationInputs,
-    syncFinanceProviderPresentation,
   } = await import('@/lib/finance-insights/notification-ingestion'));
+  ({ syncFinanceProviderPresentation } = await import(
+    '@/db/persistence/sqlite-finance-insight-notification-lifecycle'
+  ));
 });
 
 beforeEach(clearDatabase);
@@ -824,11 +829,11 @@ describe.sequential('finance insight deterministic ingestion', () => {
   it('publishes all five batches, cuts over atomically, and dedupes replay and revision resurfacing', async () => {
     seedConnector();
     seedPublication();
-    expect(() => enableFinanceInsightCutover({
+    await expect(enableFinanceInsightCutover({
       connectorId,
       sourceGeneration: publicationId,
       now,
-    })).toThrow('finance_insight_cutover_generation_unavailable');
+    })).rejects.toThrow('finance_insight_cutover_generation_unavailable');
     const firstClient = clientFor([occurrence()]);
     const first = await runFinanceInsightIngestion({
       config: connector(),
@@ -878,25 +883,37 @@ describe.sequential('finance insight deterministic ingestion', () => {
         'unread', 'inbox', 'active', 'synced', 1, ?, ?, '{}', '{}'
       )
     `).run(now.toISOString(), now.toISOString());
-    expect(isLegacyFinanceAnomalyProductionEnabled()).toBe(true);
+    await expect(isLegacyFinanceAnomalyProductionEnabled()).resolves.toBe(true);
 
-    expect(enableFinanceInsightCutover({
+    await expect(enableFinanceInsightCutover({
       connectorId,
       sourceGeneration: publicationId,
       now,
-    })).toEqual({ status: 'enabled', legacyExpiredCount: 1, importedCount: 1 });
-    expect(enableFinanceInsightCutover({
+    })).resolves.toEqual({
+      status: 'enabled',
+      legacyExpiredCount: 1,
+      importedCount: 1,
+      suppressedDeliveryCount: 0,
+      replayed: false,
+    });
+    await expect(enableFinanceInsightCutover({
       connectorId,
       sourceGeneration: publicationId,
       now,
-    })).toEqual({ status: 'enabled', legacyExpiredCount: 1, importedCount: 1 });
+    })).resolves.toEqual({
+      status: 'enabled',
+      legacyExpiredCount: 1,
+      importedCount: 1,
+      suppressedDeliveryCount: 0,
+      replayed: false,
+    });
     expect(sqlite.prepare(`
       SELECT source_state AS sourceState FROM notifications WHERE id = 'legacy-anomaly'
     `).get()).toEqual({ sourceState: 'resolved' });
     expect(sqlite.prepare(`
       SELECT source_state AS sourceState FROM notifications WHERE id = 'legacy-budget'
     `).get()).toEqual({ sourceState: 'active' });
-    expect(isLegacyFinanceAnomalyProductionEnabled()).toBe(false);
+    await expect(isLegacyFinanceAnomalyProductionEnabled()).resolves.toBe(false);
 
     const sourceId = `finance-insight:${connectorId}:${occurrenceId}`;
     expect(sqlite.prepare(`
@@ -1057,11 +1074,17 @@ describe.sequential('finance insight deterministic ingestion', () => {
       SET source_generation = 'publication-newer', source_sequence = 2
       WHERE connector_id = ?
     `).run(connectorId);
-    expect(enableFinanceInsightCutover({
+    await expect(enableFinanceInsightCutover({
       connectorId,
       sourceGeneration: publicationId,
       now,
-    })).toEqual({ status: 'enabled', legacyExpiredCount: 1, importedCount: 1 });
+    })).resolves.toEqual({
+      status: 'enabled',
+      legacyExpiredCount: 1,
+      importedCount: 1,
+      suppressedDeliveryCount: 0,
+      replayed: false,
+    });
 
     sqlite.prepare(`
       INSERT INTO notifications (
@@ -1097,7 +1120,17 @@ describe.sequential('finance insight deterministic ingestion', () => {
         'rollback-digest-in-flight', 'pending', '{}', '{}', 0, NULL, ?
       )
     `).run(now.toISOString());
-    rollbackFinanceInsightCutover(connectorId, now);
+    await expect(rollbackFinanceInsightCutover({
+      connectorId,
+      sourceGeneration: publicationId,
+      now,
+    })).resolves.toEqual({
+      status: 'rolled-back',
+      legacyExpiredCount: 0,
+      importedCount: 0,
+      suppressedDeliveryCount: 2,
+      replayed: false,
+    });
     expect(sqlite.prepare(`
       SELECT legacy_disabled AS legacyDisabled, delivery_enabled AS deliveryEnabled
       FROM finance_insight_cutovers WHERE connector_id = ?
@@ -1136,11 +1169,11 @@ describe.sequential('finance insight deterministic ingestion', () => {
       WHERE source_id = ?
     `).run(sourceId);
 
-    expect(enableFinanceInsightCutover({
+    await expect(enableFinanceInsightCutover({
       connectorId,
       sourceGeneration: publicationId,
       now,
-    })).toMatchObject({ status: 'enabled' });
+    })).resolves.toMatchObject({ status: 'enabled' });
     expect(sqlite.prepare(`
       SELECT source_state AS sourceState, state, is_actionable AS isActionable
       FROM notifications WHERE source_id = ?
@@ -1150,9 +1183,9 @@ describe.sequential('finance insight deterministic ingestion', () => {
       isActionable: 0,
     });
 
-    expect(isLegacyFinanceAnomalyProductionEnabled()).toBe(false);
+    await expect(isLegacyFinanceAnomalyProductionEnabled()).resolves.toBe(false);
     seedConnector('finance-invented-second');
-    expect(isLegacyFinanceAnomalyProductionEnabled()).toBe(false);
+    await expect(isLegacyFinanceAnomalyProductionEnabled()).resolves.toBe(false);
   });
 
   it('resumes at the exact crash batch and classifies conflicts and stale fences', async () => {

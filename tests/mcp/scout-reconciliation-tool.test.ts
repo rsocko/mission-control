@@ -3,10 +3,13 @@ import { resolve } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { z, type ZodType } from 'zod';
 
-const { mcPost } = vi.hoisted(() => ({ mcPost: vi.fn() }));
+const { mcGet, mcPost } = vi.hoisted(() => ({
+  mcGet: vi.fn(),
+  mcPost: vi.fn(),
+}));
 
 vi.mock('@/mcp/client', () => ({
-  mcGet: vi.fn(),
+  mcGet,
   mcPost,
 }));
 
@@ -44,6 +47,7 @@ function registrations() {
 
 describe('mc_scout_reconcile', () => {
   beforeEach(() => {
+    mcGet.mockReset();
     mcPost.mockReset();
   });
 
@@ -132,6 +136,7 @@ describe('mc_scout_reconcile', () => {
       sourceIdentity: 'automation-run-1',
       signals: [],
     });
+
     expect(failed.isError).toBe(true);
     expect(failed.content[0].text).toContain('Run already in progress');
 
@@ -161,6 +166,63 @@ describe('mc_scout_reconcile', () => {
       source: 'automation',
       sourceIdentity: 'automation-run-1',
     }));
+  });
+
+  it('auto-acknowledges only complete global-cursor status reads', async () => {
+    mcGet.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        changes: [{ mcTaskId: 'task-1' }],
+        count: 1,
+        hasMore: false,
+        since: '2026-09-08T10:00:00.000Z',
+        cursorSource: 'write_back_cursor',
+        queriedAt: '2026-09-08T12:00:00.000Z',
+      },
+    });
+    mcPost.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: { success: true, cursor: '2026-09-08T12:00:00.000Z' },
+    });
+    const tool = registrations().find(
+      (registration) => registration.name === 'mc_scout_status_sync',
+    )!;
+
+    const result = await tool.callback({ acknowledge: true });
+
+    expect(mcPost).toHaveBeenCalledWith('/api/scout/status-changes/ack', {
+      acknowledgedAt: '2026-09-08T12:00:00.000Z',
+    });
+    expect(result.content[0].text).toContain('cursor advanced');
+  });
+
+  it.each([
+    [{ acknowledge: true, since: '2026-09-08T11:00:00.000Z' }, false],
+    [{ acknowledge: true, sourceTypes: ['email'] }, false],
+    [{ acknowledge: true }, true],
+  ])('keeps unsafe status reads replayable', async (args, hasMore) => {
+    mcGet.mockResolvedValue({
+      ok: true,
+      status: 200,
+      data: {
+        changes: [{ mcTaskId: 'task-1' }],
+        count: 1,
+        hasMore,
+        since: null,
+        cursorSource: 'none',
+        queriedAt: '2026-09-08T12:00:00.000Z',
+      },
+    });
+    const tool = registrations().find(
+      (registration) => registration.name === 'mc_scout_status_sync',
+    )!;
+
+    const result = await tool.callback(args);
+
+    expect(mcPost).not.toHaveBeenCalled();
+    expect(result.content[0].text).toContain('cursor not advanced');
   });
 
   it('keeps the schedule on the safe API contract instead of direct mutation', () => {

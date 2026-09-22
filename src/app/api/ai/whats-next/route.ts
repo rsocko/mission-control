@@ -1,4 +1,4 @@
-import { whatsNext } from '@/lib/ai';
+import { whatsNext } from '@/lib/ai/features/whats-next';
 import { aiLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
 

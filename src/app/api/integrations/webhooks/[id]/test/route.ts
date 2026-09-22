@@ -1,9 +1,7 @@
-import db from '@/db';
-import { outboundWebhooks } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import { sendWebhookEvent } from '@/lib/events';
 import type { MCEvent } from '@/lib/events';
 import { ApiErrors } from '@/lib/api-error';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 export async function POST(
   _request: Request,
@@ -12,11 +10,8 @@ export async function POST(
   const { id } = await params;
 
   try {
-    const [webhook] = await db
-      .select()
-      .from(outboundWebhooks)
-      .where(eq(outboundWebhooks.id, id))
-      .limit(1);
+    const repositories = await getWorkerPersistenceRepositories();
+    const webhook = await repositories.webhookIntegrations.outbound.find(id);
 
     if (!webhook) {
       return Response.json({ error: 'Webhook not found' }, { status: 404 });
@@ -32,6 +27,8 @@ export async function POST(
       },
     };
 
+    // Network I/O happens only after the lookup resolves and outside any
+    // database transaction.
     const result = await sendWebhookEvent(webhook, testEvent);
 
     return Response.json({

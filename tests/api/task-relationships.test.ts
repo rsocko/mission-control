@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { registerFakeTaskCorePersistence } from '../fixtures/task-core-fake';
 
 const {
   createGlobalTaskDependency,
@@ -24,7 +25,6 @@ vi.mock('@/lib/graph/service', () => ({
   createGlobalTaskDependency,
   deleteGlobalTaskDependency,
   getTaskRelationships,
-  searchTaskRelationshipCandidates,
   GraphServiceError: MockGraphServiceError,
 }));
 
@@ -39,6 +39,13 @@ vi.mock('@/lib/tasks/mutation-policy', () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+  searchTaskRelationshipCandidates.mockReset();
+  searchTaskRelationshipCandidates.mockResolvedValue(null);
+  registerFakeTaskCorePersistence({
+    taskReads: {
+      searchRelationshipCandidates: searchTaskRelationshipCandidates,
+    },
+  });
   getStoredRelationshipMutationPolicies.mockResolvedValue([{
     task: {},
     capabilities: null,
@@ -209,6 +216,10 @@ describe('/api/tasks/[id]/relationships', () => {
     );
 
     expect(response.status).toBe(200);
-    expect(searchTaskRelationshipCandidates).toHaveBeenCalledWith('task-1', 'across', 20);
+    expect(searchTaskRelationshipCandidates).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      query: 'across',
+      limit: 20,
+    });
   });
 });

@@ -1,6 +1,10 @@
 import 'server-only';
 
-import { redactFinanceConnector } from './monarch-money/config';
+import {
+  getFinanceConnectorConfigurationState,
+  isFinanceConnectorType,
+  redactFinanceConnector,
+} from './monarch-money/config';
 
 type ConnectorRowLike = {
   type: string;
@@ -15,7 +19,11 @@ function parseRecord(value: unknown): Record<string, unknown> {
 
 export function serializeConnectorForBrowser<T extends ConnectorRowLike>(
   connector: T,
-): T & { hasCredentials: boolean; credentials: Record<string, never> } {
+): T & {
+  hasCredentials: boolean;
+  credentials: Record<string, never>;
+  configurationState?: ReturnType<typeof getFinanceConnectorConfigurationState>;
+} {
   const credentials = parseRecord(connector.credentials);
   const redacted = redactFinanceConnector({
     ...connector,
@@ -25,5 +33,8 @@ export function serializeConnectorForBrowser<T extends ConnectorRowLike>(
     ...redacted,
     hasCredentials: Object.keys(credentials).length > 0,
     credentials: {},
+    ...(isFinanceConnectorType(connector.type)
+      ? { configurationState: getFinanceConnectorConfigurationState(redacted.settings) }
+      : {}),
   };
 }

@@ -1,7 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { routines } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import {
+  archiveRoutine,
+  getRoutine,
+  updateRoutine,
+  type RoutineUpdate,
+} from '@/lib/routines/service';
 
 /**
  * PATCH /api/routines/[id] — Update a routine
@@ -15,12 +18,12 @@ export async function PATCH(
     const { id } = await params;
     const body = await request.json();
 
-    const [existing] = await db.select().from(routines).where(eq(routines.id, id));
+    const existing = await getRoutine(id);
     if (!existing) {
       return NextResponse.json({ error: 'Routine not found' }, { status: 404 });
     }
 
-    const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
+    const updates: Record<string, unknown> = {};
     const allowedFields = ['name', 'cadenceType', 'cadenceConfig', 'description', 'icon', 'isActive', 'isArchived', 'sortOrder'];
     for (const field of allowedFields) {
       if (body[field] !== undefined) {
@@ -28,7 +31,10 @@ export async function PATCH(
       }
     }
 
-    await db.update(routines).set(updates).where(eq(routines.id, id));
+    await updateRoutine(id, {
+      updates: updates as RoutineUpdate,
+      updatedAt: new Date().toISOString(),
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {
@@ -49,16 +55,10 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    const [existing] = await db.select().from(routines).where(eq(routines.id, id));
-    if (!existing) {
+    const archived = await archiveRoutine(id, new Date().toISOString());
+    if (!archived) {
       return NextResponse.json({ error: 'Routine not found' }, { status: 404 });
     }
-
-    await db.update(routines).set({
-      isArchived: true,
-      isActive: false,
-      updatedAt: new Date().toISOString(),
-    }).where(eq(routines.id, id));
 
     return NextResponse.json({ success: true });
   } catch (error) {

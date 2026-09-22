@@ -1,11 +1,9 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { triageItems } from '@/db/schema';
-import { like } from 'drizzle-orm';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { getThumbnailCacheStats, removeOrphanedThumbnails } from '@/lib/triage/thumbnail-cache';
 import { purgeDismissedItems } from '@/lib/triage/lifecycle';
 import logger from '@/lib/logger';
+import { getTriagePersistenceRepositories } from '@/lib/triage/persistence';
 
 /**
  * POST /api/triage/maintenance
@@ -38,33 +36,16 @@ export async function POST(request: Request) {
     if (!dryRun) {
       results.purgedDismissed = await purgeDismissedItems(retentionDays);
     } else {
-      // Count what would be purged
-      const { sql } = await import('drizzle-orm');
-      const { eq, and } = await import('drizzle-orm');
       const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
-      const [count] = await db.select({
-        count: sql<number>`count(*)`,
-      }).from(triageItems).where(
-        and(
-          eq(triageItems.status, 'dismissed'),
-          sql`${triageItems.ingestedAt} < ${cutoff}`,
-        ),
-      );
-      results.wouldPurge = count?.count ?? 0;
+      results.wouldPurge = await getTriagePersistenceRepositories()
+        .maintenance
+        .countDismissedBefore(cutoff);
     }
 
     // 2. Remove orphaned thumbnails
-    const rows = await db.select({
-      thumbnailUrl: triageItems.thumbnailUrl,
-    }).from(triageItems).where(like(triageItems.thumbnailUrl, '/api/assets/thumbnails/%'));
-
-    const validFilenames = new Set<string>();
-    for (const row of rows) {
-      if (row.thumbnailUrl) {
-        const filename = row.thumbnailUrl.split('/').pop();
-        if (filename) validFilenames.add(filename);
-      }
-    }
+    const validFilenames = new Set(
+      await getTriagePersistenceRepositories().maintenance.listCachedThumbnailFilenames(),
+    );
 
     if (!dryRun) {
       results.orphanedFilesRemoved = await removeOrphanedThumbnails(validFilenames);

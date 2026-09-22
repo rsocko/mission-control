@@ -1,32 +1,16 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { appSettings } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-
-export interface InboxListEntry {
-  connectorType: string;
-  sourceListId?: string;
-  sourceListName?: string;
-  label?: string;
-}
-
-const SETTING_KEY = 'inbox.lists';
+import {
+  getPreferenceSettingsRepositoryForBackend,
+  type InboxListEntry,
+} from '@/lib/settings/preference-settings';
 
 /**
  * GET /api/settings/inbox-lists — Get user-configured inbox lists
  * These lists are included in the "Inbox" quick filter alongside local tasks.
  */
 export async function GET() {
-  const rows = await db
-    .select({ value: appSettings.value })
-    .from(appSettings)
-    .where(eq(appSettings.key, SETTING_KEY))
-    .limit(1);
-
-  const lists: InboxListEntry[] = rows.length > 0
-    ? rows[0].value as InboxListEntry[]
-    : [];
-
+  const repository = await getPreferenceSettingsRepositoryForBackend();
+  const lists = await repository.getInboxLists();
   return NextResponse.json({ lists });
 }
 
@@ -49,15 +33,8 @@ export async function PUT(request: Request) {
     return item;
   });
 
-  const now = new Date().toISOString();
-
-  await db
-    .insert(appSettings)
-    .values({ key: SETTING_KEY, value: lists as unknown as Record<string, unknown>, updatedAt: now })
-    .onConflictDoUpdate({
-      target: appSettings.key,
-      set: { value: lists as unknown as Record<string, unknown>, updatedAt: now },
-    });
+  const repository = await getPreferenceSettingsRepositoryForBackend();
+  await repository.setInboxLists(lists);
 
   return NextResponse.json({ lists });
 }

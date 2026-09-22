@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('global task relationship service', () => {
   beforeAll(() => {
@@ -11,7 +12,7 @@ describe('global task relationship service', () => {
 
   it('validates, lists, searches, and deletes global relationships', async () => {
     const [{ default: db }, schema, service, { eq }] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/lib/graph/service'),
       import('drizzle-orm'),

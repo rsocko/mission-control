@@ -1,8 +1,10 @@
 import type { ScoreBreakdown } from '@/lib/smart-score';
+import type { ReminderRelativeRule } from '@/lib/tasks/relative-reminder';
 import type {
   HubProject,
   KanbanColumn,
   LocalDisposition,
+  PlanningHorizon,
   Tag,
   TaskEditPolicy,
   TaskItem,
@@ -40,6 +42,7 @@ export type TaskListItemDto = TaskListDomainFields & {
   taskSourceModel: TaskSourceModel;
   microStatus: string | null;
   priority: string;
+  planningHorizon: PlanningHorizon | null;
   dueDate: string | null;
   sourceListId?: string | null;
   sourceListName: string | null;
@@ -55,6 +58,12 @@ export type TaskListItemDto = TaskListDomainFields & {
   scoreBreakdown?: ScoreBreakdown | null;
   snoozedUntil?: string | null;
   reminderAt?: string | null;
+  reminderRelative?: ReminderRelativeRule | null;
+  reminderDueTime?: string | null;
+  reminderNagInterval?: 1 | 5 | 15 | null;
+  reminderNagStopAt?: string | null;
+  reminderNagSeriesId?: string | null;
+  reminderNagSequence?: number;
   hubProjectIds?: string[];
   projectPhaseMemberships?: Array<{
     projectId: string;
@@ -65,12 +74,16 @@ export type TaskListItemDto = TaskListDomainFields & {
   linkedSourceCount?: number;
   hasDescription: boolean;
   editPolicy: TaskEditPolicy;
+  syncStatus?: string;
+  pushRetryCount?: number;
 };
 
 export interface TaskListStatsDto {
   totalOpen: number;
   overdue: number;
+  dueToday: number;
   dueThisWeek: number;
+  noDate: number;
   highPriority: number;
   assignedToMe: number;
   myDay: number;
@@ -91,7 +104,7 @@ export interface TaskListResponseDto {
 
 type HubProjectSummaryFields = Pick<
   HubProject,
-  'id' | 'name' | 'color'
+  'id' | 'name' | 'color' | 'appearance'
 >;
 
 export type KanbanColumnDto = Pick<KanbanColumn, 'id' | 'name' | 'color'> &

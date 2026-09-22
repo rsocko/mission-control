@@ -55,7 +55,7 @@ const sections: MoreSection[] = [
       { href: '/notifications', label: 'Notifications', icon: Bell, iconColor: 'text-yellow-400 bg-yellow-400/15' },
       { href: '/routines', label: 'Routines', icon: Repeat, iconColor: 'text-emerald-400 bg-emerald-400/15' },
       { href: '/insights', label: 'Insights', icon: Activity, iconColor: 'text-pink-400 bg-pink-400/15' },
-      { href: '/triage', label: 'Triage', icon: Inbox, iconColor: 'text-orange-400 bg-orange-400/15' },
+      { href: '/triage', label: 'Inbox', icon: Inbox, iconColor: 'text-orange-400 bg-orange-400/15' },
     ],
   },
   {

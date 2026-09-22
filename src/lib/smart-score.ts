@@ -3,15 +3,17 @@
  *
  * Computes a composite 0–100 score for each task by combining:
  *   - Priority baseline (up to 20 pts)
- *   - Entity tier relevance (up to 30 pts)
- *   - Urgency / due-date pressure (up to 25 pts)
- *   - Source trust rank (up to 12 pts)
- *   - Freshness / recency (up to 13 pts)
+ *   - Entity tier relevance (up to 25 pts)
+ *   - Urgency / due-date pressure (up to 20 pts)
+ *   - Planning horizon (up to 10 pts)
+ *   - Source trust rank (up to 10 pts)
+ *   - Freshness / recency (up to 10 pts)
+ *   - Execution fit from duration or effort (up to 5 pts)
  *
  * The score powers the "Sort by Smart Score" view and AI triage recommendations.
  */
 
-import type { TaskPriority } from '@/types';
+import type { PlanningHorizon, TaskPriority } from '@/types';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +63,10 @@ export interface ScoreInput {
   snoozedUntil?: string | null;
   /** Effort level 1–5 (optional). Low effort boosts score as a quick-win signal. */
   effort?: number | null;
+  /** Broad planning intent, independent of a concrete due date. */
+  planningHorizon?: PlanningHorizon | null;
+  /** Estimated task duration in minutes. Preferred over effort when available. */
+  estimatedDuration?: number | null;
 }
 
 export interface ScoreInputTask {
@@ -78,15 +84,18 @@ export interface ScoreInputTask {
   assignee?: string | null;
   snoozedUntil?: string | null;
   effort?: number | null;
+  planningHorizon?: PlanningHorizon | null;
+  estimatedDuration?: number | null;
 }
 
 export interface ScoreBreakdown {
   priorityBase: number; // 0–20
-  entityTier: number;   // 0–30
-  urgency: number;      // 0–25
-  sourceRank: number;   // 0–12
-  freshness: number;    // 0–13
-  effortBonus: number;  // 0–5 (quick-win bonus for low effort)
+  entityTier: number;   // 0–25
+  urgency: number;      // 0–20
+  planningHorizon: number; // 0–10
+  sourceRank: number;   // 0–10
+  freshness: number;    // 0–10
+  executionFit: number; // 0–5 (duration preferred, effort used as fallback)
   snoozePenalty: number; // 0 to -15 (penalty applied when task is snoozed)
   total: number;        // 0–100
 }
@@ -100,9 +109,9 @@ export interface ScoredTask {
 // ─── Scoring Weights ────────────────────────────────────────────────────────
 
 const TIER_POINTS: Record<EntityTier, number> = {
-  critical: 30,
-  high: 21,
-  medium: 12,
+  critical: 25,
+  high: 18,
+  medium: 10,
   standard: 3,
 };
 
@@ -115,22 +124,32 @@ const PRIORITY_BASE_POINTS: Record<TaskPriority, number> = {
   none: 0,
 };
 
-const PRIORITY_URGENCY_BONUS: Record<TaskPriority, number> = {
-  critical: 8,
-  high: 5,
-  medium: 3,
-  low: 1,
-  none: 0,
+const PLANNING_HORIZON_POINTS: Record<PlanningHorizon, number> = {
+  next: 10,
+  soon: 7,
+  later: 3,
+  someday: 0,
 };
 
-/** Quick-win bonus for low-effort tasks (0–5 pts). Lower effort = higher bonus. */
-const EFFORT_BONUS: Record<number, number> = {
-  1: 5,   // XS — easiest quick win
-  2: 3,   // S
-  3: 1,   // M
-  4: 0,   // L
-  5: -2,  // XL — slight penalty (heavy lift)
+/** Execution-fit points for effort when no duration estimate is available. */
+const EFFORT_FIT_POINTS: Record<number, number> = {
+  1: 5,
+  2: 4,
+  3: 2,
+  4: 1,
+  5: 0,
 };
+
+export const SMART_SCORE_FACTOR_MAX = {
+  priorityBase: 20,
+  entityTier: 25,
+  urgency: 20,
+  planningHorizon: 10,
+  sourceRank: 10,
+  freshness: 10,
+  executionFit: 5,
+  snoozePenalty: 15,
+} as const;
 
 function containsDelimitedName(text: string, name: string): boolean {
   const isWordCharacter = (character: string) => /[a-z0-9]/.test(character);
@@ -150,7 +169,7 @@ function containsDelimitedName(text: string, name: string): boolean {
 // ─── Core Scoring ───────────────────────────────────────────────────────────
 
 /**
- * Compute the entity-tier component (0–30).
+ * Compute the entity-tier component (0–25).
  * Uses the best-matched entity tier for this task.
  */
 function computeEntityScore(
@@ -190,8 +209,8 @@ function computeEntityScore(
     if (matched_) {
       const tierScore = TIER_POINTS[entity.tier];
       // Apply a small rank bonus within tier (higher rank = slightly more points)
-      const rankBonus = Math.max(0, (20 - entity.rank) * 0.3);
-      const entityScore = Math.min(30, tierScore + rankBonus);
+      const rankBonus = Math.max(0, (20 - entity.rank) * 0.25);
+      const entityScore = Math.min(SMART_SCORE_FACTOR_MAX.entityTier, tierScore + rankBonus);
 
       matched.push({ name: entity.name, tier: entity.tier, rank: entity.rank });
       bestScore = Math.max(bestScore, entityScore);
@@ -210,68 +229,76 @@ function computePriorityBase(priority: TaskPriority): number {
 }
 
 /**
- * Compute the urgency component (0–25).
- * Combines due-date pressure with a small priority bonus.
+ * Compute the urgency component (0–20) from due-date pressure.
+ * Priority is scored separately so it is not counted twice.
  */
-function computeUrgencyScore(dueDate: string | null | undefined, priority: TaskPriority): number {
-  let duePressure = 0;
+function computeUrgencyScore(dueDate: string | null | undefined): number {
+  if (!dueDate) return 0;
 
-  if (dueDate) {
-    const now = new Date();
-    const due = new Date(dueDate);
-    const daysUntilDue = (due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
-
-    if (daysUntilDue < 0) {
-      // Overdue — max urgency
-      duePressure = 17;
-    } else if (daysUntilDue <= 1) {
-      duePressure = 15;
-    } else if (daysUntilDue <= 3) {
-      duePressure = 12;
-    } else if (daysUntilDue <= 7) {
-      duePressure = 8;
-    } else if (daysUntilDue <= 14) {
-      duePressure = 5;
-    } else {
-      duePressure = 2;
-    }
-  }
-
-  const priorityBonus = PRIORITY_URGENCY_BONUS[priority] ?? 0;
-  return Math.min(25, duePressure + priorityBonus);
+  // Date-only deadlines remain due through the end of their calendar day.
+  const dueTime = /^\d{4}-\d{2}-\d{2}$/.test(dueDate)
+    ? new Date(`${dueDate}T23:59:59.999`).getTime()
+    : new Date(dueDate).getTime();
+  const daysUntilDue = (dueTime - Date.now()) / (1000 * 60 * 60 * 24);
+  if (!Number.isFinite(daysUntilDue)) return 0;
+  if (daysUntilDue < 0) return 20;
+  if (daysUntilDue <= 1) return 18;
+  if (daysUntilDue <= 3) return 15;
+  if (daysUntilDue <= 7) return 11;
+  if (daysUntilDue <= 14) return 7;
+  return 2;
 }
 
 /**
- * Compute the source rank component (0–12).
+ * Compute the source rank component (0–10).
  * Higher-ranked sources produce higher scores.
  */
 function computeSourceScore(connectorInstanceId: string, sourceRankings: SourceRanking[]): number {
-  if (sourceRankings.length === 0) return 6; // Default mid-score when no rankings configured
+  if (sourceRankings.length === 0) return 5; // Neutral midpoint when rankings are not configured.
 
   const ranking = sourceRankings.find((r) => r.id === connectorInstanceId);
-  if (!ranking) return 4;
+  if (!ranking) return 3;
 
   const totalSources = sourceRankings.length;
-  // Rank 1 = 12 pts, last rank = 2 pts
+  // Rank 1 = 10 pts, last rank = 2 pts.
   const normalized = Math.max(0, 1 - (ranking.rank - 1) / Math.max(1, totalSources - 1));
-  return Math.round(2 + normalized * 10);
+  return Math.round(2 + normalized * 8);
 }
 
 /**
- * Compute the freshness component (0–13).
+ * Compute the freshness component (0–10).
  * Recently updated tasks get a freshness boost.
  */
 function computeFreshnessScore(updatedAt: string): number {
-  const now = new Date();
-  const updated = new Date(updatedAt);
-  const hoursAgo = (now.getTime() - updated.getTime()) / (1000 * 60 * 60);
+  const hoursAgo = Math.max(0, (Date.now() - new Date(updatedAt).getTime()) / (1000 * 60 * 60));
 
-  if (hoursAgo <= 2) return 13;
-  if (hoursAgo <= 6) return 10;
-  if (hoursAgo <= 24) return 8;
-  if (hoursAgo <= 72) return 6;
-  if (hoursAgo <= 168) return 3; // 1 week
-  return 1;
+  if (!Number.isFinite(hoursAgo)) return 0;
+  if (hoursAgo <= 2) return 10;
+  if (hoursAgo <= 6) return 8;
+  if (hoursAgo <= 24) return 6;
+  if (hoursAgo <= 72) return 4;
+  if (hoursAgo <= 168) return 2;
+  return 0;
+}
+
+function computePlanningHorizonScore(planningHorizon: PlanningHorizon | null | undefined): number {
+  return planningHorizon ? PLANNING_HORIZON_POINTS[planningHorizon] : 0;
+}
+
+function computeExecutionFitScore(
+  estimatedDuration: number | null | undefined,
+  effort: number | null | undefined,
+): number {
+  if (typeof estimatedDuration === 'number' && Number.isFinite(estimatedDuration) && estimatedDuration > 0) {
+    if (estimatedDuration <= 15) return 5;
+    if (estimatedDuration <= 30) return 4;
+    if (estimatedDuration <= 60) return 3;
+    if (estimatedDuration <= 120) return 2;
+    if (estimatedDuration <= 240) return 1;
+    return 0;
+  }
+
+  return typeof effort === 'number' ? (EFFORT_FIT_POINTS[effort] ?? 0) : 0;
 }
 
 /**
@@ -280,9 +307,8 @@ function computeFreshnessScore(updatedAt: string): number {
  */
 function computeSnoozePenalty(snoozedUntil: string | null | undefined): number {
   if (!snoozedUntil) return 0;
-  const now = new Date();
-  const until = new Date(snoozedUntil);
-  if (until.getTime() <= now.getTime()) return 0; // snooze expired
+  const until = new Date(snoozedUntil).getTime();
+  if (!Number.isFinite(until) || until <= Date.now()) return 0;
   return -15;
 }
 
@@ -327,6 +353,8 @@ export function createScoreInput(
     ],
     snoozedUntil: task.snoozedUntil,
     effort: task.effort,
+    planningHorizon: task.planningHorizon,
+    estimatedDuration: task.estimatedDuration,
   };
 }
 
@@ -345,18 +373,36 @@ export function computeSmartScore(
     input.linkedEntityRefs,
     entities,
   );
-  const urgency = computeUrgencyScore(input.dueDate, input.priority);
+  const urgency = computeUrgencyScore(input.dueDate);
+  const planningHorizon = computePlanningHorizonScore(input.planningHorizon);
   const sourceRank = computeSourceScore(input.connectorInstanceId, rankings);
   const freshness = computeFreshnessScore(input.updatedAt);
-  const effortBonus = input.effort ? (EFFORT_BONUS[input.effort] ?? 0) : 0;
+  const executionFit = computeExecutionFitScore(input.estimatedDuration, input.effort);
   const snoozePenalty = computeSnoozePenalty(input.snoozedUntil);
 
-  const raw = priorityBase + entityTier + urgency + sourceRank + freshness + effortBonus + snoozePenalty;
+  const raw = priorityBase
+    + entityTier
+    + urgency
+    + planningHorizon
+    + sourceRank
+    + freshness
+    + executionFit
+    + snoozePenalty;
   const total = Math.max(0, Math.min(100, Number.isFinite(raw) ? raw : 0));
 
   return {
     taskId: input.taskId,
-    score: { priorityBase, entityTier, urgency, sourceRank, freshness, effortBonus, snoozePenalty, total },
+    score: {
+      priorityBase,
+      entityTier,
+      urgency,
+      planningHorizon,
+      sourceRank,
+      freshness,
+      executionFit,
+      snoozePenalty,
+      total,
+    },
     matchedEntities: matched,
   };
 }
@@ -387,9 +433,11 @@ export function getScoreTier(score: number): 'high' | 'mid' | 'low' {
  * Default weights configuration (stored in smartScoreSettings table).
  */
 export const DEFAULT_SCORE_WEIGHTS = {
-  priorityBase: 20,
-  entityTier: 30,
-  urgency: 25,
-  sourceRank: 12,
-  freshness: 13,
+  priorityBase: SMART_SCORE_FACTOR_MAX.priorityBase,
+  entityTier: SMART_SCORE_FACTOR_MAX.entityTier,
+  urgency: SMART_SCORE_FACTOR_MAX.urgency,
+  planningHorizon: SMART_SCORE_FACTOR_MAX.planningHorizon,
+  sourceRank: SMART_SCORE_FACTOR_MAX.sourceRank,
+  freshness: SMART_SCORE_FACTOR_MAX.freshness,
+  executionFit: SMART_SCORE_FACTOR_MAX.executionFit,
 };

@@ -115,6 +115,31 @@ describe('MonarchBridgeClient', () => {
     );
   });
 
+  it('runs only the bounded server-authenticated recovery sync with no request body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({
+      contractVersion: '1.0',
+      status: 'ok',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await new MonarchBridgeClient(config).runBoundedSync(30);
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'http://localhost:8100/sync?days=30',
+      expect.objectContaining({
+        method: 'POST',
+        redirect: 'error',
+      }),
+    );
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get('authorization')).toMatch(/^Bearer .+/);
+    expect(init.body).toBeUndefined();
+    expect(new Headers(init.headers).has('content-type')).toBe(false);
+    await expect(new MonarchBridgeClient(config).runBoundedSync(0)).rejects.toMatchObject({
+      code: 'invalid_request',
+    });
+  });
+
   it('rejects an invalid contract without exposing the response body', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({
       contractVersion: '2.0',

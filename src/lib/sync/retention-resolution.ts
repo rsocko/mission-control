@@ -1,9 +1,4 @@
-import db from '@/db';
-import { syncLog, tasks } from '@/db/schema';
 import { connectorRegistry } from '@/lib/connectors';
-import { getConnectorCapabilities } from '@/lib/connectors/capabilities';
-import { deleteTaskTreeLocally, convertTaskTreeToLocal, getTaskByRetentionIdentity } from '@/lib/tasks/local-task-lifecycle';
-import { and, eq } from 'drizzle-orm';
 import { syncScheduler, type SyncAuditEntry } from './index';
 import { pushPendingChanges } from './push-manager';
 import {
@@ -12,6 +7,8 @@ import {
   type RetentionResolutionRecord,
 } from './retention';
 import { randomUUID } from 'node:crypto';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { resolvePersistedConnectorCapabilities } from '@/lib/connectors/resolved-capabilities';
 
 const RESOLUTION_LEASE_MS = 5 * 60 * 1000;
 const RESOLUTION_LEASE_RENEWAL_MS = Math.floor(RESOLUTION_LEASE_MS / 3);
@@ -37,59 +34,10 @@ export interface RetentionResolutionResult {
   resolutionStatus?: import('./retention').RetentionResolutionStatus;
 }
 
-function parseDetails(details: unknown): SyncAuditEntry[] {
-  if (Array.isArray(details)) return details as SyncAuditEntry[];
-  if (typeof details !== 'string') return [];
-  try {
-    const parsed = JSON.parse(details);
-    return Array.isArray(parsed) ? parsed as SyncAuditEntry[] : [];
-  } catch {
-    return [];
-  }
-}
-
 function getSuccessfulResolutionSyncStatus(resolution: RetentionResolution): string {
   return resolution === 'delete_local' || resolution === 'discard_local_changes'
     ? 'deleted'
     : 'synced';
-}
-
-type DetailUpdateResult =
-  | { status: 'updated'; detail: SyncAuditEntry }
-  | { status: 'unchanged'; detail?: SyncAuditEntry }
-  | { status: 'not_found' };
-
-async function updateResolutionAtomically(
-  syncLogId: string,
-  detailIndex: number,
-  mutate: (detail: SyncAuditEntry) => RetentionResolutionRecord | undefined,
-): Promise<DetailUpdateResult> {
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const [row] = await db.select({ details: syncLog.details })
-      .from(syncLog)
-      .where(eq(syncLog.id, syncLogId));
-    if (!row) return { status: 'not_found' };
-
-    const details = parseDetails(row.details);
-    const detail = details[detailIndex];
-    if (!detail || detail.action !== 'protected') return { status: 'not_found' };
-
-    const resolution = mutate(detail);
-    if (!resolution) return { status: 'unchanged', detail };
-
-    const updatedDetail = { ...detail, resolution };
-    details[detailIndex] = updatedDetail;
-    const updated = await db.update(syncLog)
-      .set({ details: details as unknown as string })
-      .where(and(
-        eq(syncLog.id, syncLogId),
-        eq(syncLog.details, row.details),
-      ))
-      .returning({ id: syncLog.id });
-    if (updated.length > 0) return { status: 'updated', detail: updatedDetail };
-  }
-
-  throw new Error('Sync history changed while applying the resolution; retry the request');
 }
 
 async function performResolution(
@@ -100,6 +48,7 @@ async function performResolution(
   confirmed: boolean,
   recoveringStaleClaim = false,
 ): Promise<Omit<RetentionResolutionResult, 'syncLogId' | 'detailIndex' | 'resolution'>> {
+  const execution = (await getWorkerPersistenceRepositories()).execution;
   const classification = classifyRetainedReason(detail.reason);
   if (!classification.actions.includes(resolution)) {
     throw new Error(`${classification.label} does not support this resolution`);
@@ -108,13 +57,13 @@ async function performResolution(
     throw new Error('Explicit confirmation is required for this resolution');
   }
 
-  let task = await getTaskByRetentionIdentity({
+  let task = await execution.retention.findTask({
     connectorId,
     taskId: detail.taskId,
     taskSourceId: detail.taskSourceId,
   });
   if (!task && recoveringStaleClaim && detail.taskId) {
-    const [taskById] = await db.select().from(tasks).where(eq(tasks.id, detail.taskId));
+    const taskById = await execution.retention.getTask(detail.taskId);
     if (
       taskById
       && (resolution === 'keep_local' || resolution === 'archive_local')
@@ -178,14 +127,13 @@ async function performResolution(
     const connector = connectorRegistry.getConnector(connectorId)
       ?? await syncScheduler.initializeConnectorFromDb(connectorId);
     if (!connector) throw new Error('Connector is unavailable');
+    execution.support.assertConnectorSupported(connector);
 
     if (isLocallyCreated && task.isChecklistItem) {
       if (!task.parentId) {
         throw new Error('The locally-created subtask no longer has an upstream parent');
       }
-      const [parentTask] = await db.select({ sourceId: tasks.sourceId })
-        .from(tasks)
-        .where(eq(tasks.id, task.parentId));
+      const [parentTask] = await execution.pushes.listSourceIds([task.parentId]);
       if (
         !parentTask
         || parentTask.sourceId.startsWith('local:')
@@ -195,7 +143,16 @@ async function performResolution(
       }
     }
 
-    const capabilities = await getConnectorCapabilities(connectorId);
+    const persistedConnector = await (
+      await getWorkerPersistenceRepositories()
+    ).connectors.get(connectorId);
+    const capabilities = persistedConnector
+      ? resolvePersistedConnectorCapabilities({
+          type: persistedConnector.type,
+          capabilities: persistedConnector.capabilities,
+          settings: persistedConnector.settings,
+        })
+      : connector.capabilities ?? null;
     const createCapabilitySupported = !capabilities || (
       capabilities.notificationOnly !== true
       && (capabilities.taskCreate ?? capabilities.write) !== false
@@ -221,10 +178,7 @@ async function performResolution(
       throw new Error('Write is disabled for this connector');
     }
 
-    await db.update(tasks).set({
-      syncStatus: 'pending_push',
-      pushRetryCount: 0,
-    }).where(eq(tasks.id, task.id));
+    await execution.deletions.markPendingPush(task.id);
 
     const retryAudit: SyncAuditEntry[] = [];
     const result = await pushPendingChanges(
@@ -234,7 +188,7 @@ async function performResolution(
       [task.id],
       { deleteGhostsOnNotFound: false },
     );
-    const [updatedTask] = await db.select().from(tasks).where(eq(tasks.id, task.id));
+    const updatedTask = await execution.retention.getTask(task.id);
     if (!updatedTask) throw new Error('The retained task was removed unexpectedly');
     if (updatedTask.syncStatus !== 'synced') {
       if (isLocallyCreated && createOperationSupported) {
@@ -253,7 +207,10 @@ async function performResolution(
   }
 
   if (resolution === 'keep_local' || resolution === 'archive_local') {
-    convertTaskTreeToLocal(task.id, resolution);
+    await execution.retention.convertTaskTreeToLocal(
+      task.id,
+      resolution === 'archive_local',
+    );
     return {
       success: true,
       message: resolution === 'archive_local'
@@ -264,7 +221,7 @@ async function performResolution(
     };
   }
 
-  deleteTaskTreeLocally(task.id);
+  await execution.retention.deleteTaskTree(task.id);
   return {
     success: true,
     message: resolution === 'discard_local_changes'
@@ -279,15 +236,11 @@ export async function resolveRetainedItems(
   items: RetentionResolutionRequestItem[],
 ): Promise<RetentionResolutionResult[]> {
   const results: RetentionResolutionResult[] = [];
+  const persistence = (await getWorkerPersistenceRepositories()).execution.retention;
 
   for (const item of items) {
-    const [row] = await db.select({
-      connectorId: syncLog.connectorId,
-      details: syncLog.details,
-      syncedAt: syncLog.syncedAt,
-    }).from(syncLog).where(eq(syncLog.id, item.syncLogId));
-    const details = parseDetails(row?.details);
-    const detail = details[item.detailIndex];
+    const row = await persistence.getDetail(item.syncLogId, item.detailIndex);
+    const detail = row?.detail as SyncAuditEntry | undefined;
 
     if (!row || !detail || detail.action !== 'protected') {
       results.push({
@@ -325,40 +278,18 @@ export async function resolveRetainedItems(
     }
 
     const claimId = randomUUID();
-    let recoveringStaleClaim = false;
-    const claim = await updateResolutionAtomically(
-      item.syncLogId,
-      item.detailIndex,
-      (currentDetail) => {
-        if (currentDetail.resolution?.status === 'succeeded') return undefined;
-        if (
-          currentDetail.resolution?.status === 'indeterminate'
-          && item.resolution === 'retry_push'
-        ) {
-          return undefined;
-        }
-        if (currentDetail.resolution?.status === 'in_progress') {
-          const leaseExpiresAt = currentDetail.resolution.leaseExpiresAt
-            ?? new Date(
-              new Date(currentDetail.resolution.resolvedAt).getTime() + RESOLUTION_LEASE_MS,
-            ).toISOString();
-          if (Date.parse(leaseExpiresAt) > Date.now()) return undefined;
-          recoveringStaleClaim = true;
-        }
-        const now = new Date();
-        return {
-          action: item.resolution,
-          status: 'in_progress',
-          resolvedAt: now.toISOString(),
-          message: 'Resolution is in progress.',
-          claimId,
-          leaseExpiresAt: new Date(now.getTime() + RESOLUTION_LEASE_MS).toISOString(),
-        };
-      },
-    );
-    if (claim.status !== 'updated') {
+    const claimAt = new Date();
+    const claim = await persistence.claim({
+      syncLogId: item.syncLogId,
+      detailIndex: item.detailIndex,
+      action: item.resolution,
+      claimId,
+      now: claimAt.toISOString(),
+      leaseExpiresAt: new Date(claimAt.getTime() + RESOLUTION_LEASE_MS).toISOString(),
+    });
+    if (claim.status !== 'claimed') {
       const currentResolution = claim.status === 'unchanged'
-        ? claim.detail?.resolution
+        ? claim.record.detail.resolution as RetentionResolutionRecord | undefined
         : undefined;
       results.push({
         ...item,
@@ -382,24 +313,20 @@ export async function resolveRetainedItems(
       });
       continue;
     }
+    const recoveringStaleClaim = claim.recoveringStaleClaim;
 
     let renewalError: Error | undefined;
     let renewalInProgress = false;
     const leaseRenewal = setInterval(() => {
       if (renewalInProgress) return;
       renewalInProgress = true;
-      void updateResolutionAtomically(
-        item.syncLogId,
-        item.detailIndex,
-        (currentDetail) => currentDetail.resolution?.status === 'in_progress'
-          && currentDetail.resolution.claimId === claimId
-          ? {
-              ...currentDetail.resolution,
-              leaseExpiresAt: new Date(Date.now() + RESOLUTION_LEASE_MS).toISOString(),
-            }
-          : undefined,
-      ).then((renewed) => {
-        if (renewed.status !== 'updated') {
+      void persistence.renew({
+        syncLogId: item.syncLogId,
+        detailIndex: item.detailIndex,
+        claimId,
+        leaseExpiresAt: new Date(Date.now() + RESOLUTION_LEASE_MS).toISOString(),
+      }).then((renewed) => {
+        if (!renewed) {
           renewalError = new Error('Resolution ownership changed while the operation was running');
         }
       }).catch((error) => {
@@ -412,11 +339,11 @@ export async function resolveRetainedItems(
 
     try {
       const outcome = await syncScheduler.runExclusiveConnectorOperation(
-        row.connectorId,
+        row!.connectorId,
         () => performResolution(
           detail,
-          row.connectorId,
-          row.syncedAt,
+          row!.connectorId,
+          row!.syncedAt,
           item.resolution,
           item.confirmed,
           recoveringStaleClaim,
@@ -429,34 +356,30 @@ export async function resolveRetainedItems(
         resolvedAt: new Date().toISOString(),
         message: outcome.message,
       };
-      const finalized = await updateResolutionAtomically(
-        item.syncLogId,
-        item.detailIndex,
-        (currentDetail) => currentDetail.resolution?.status === 'in_progress'
-          && currentDetail.resolution.claimId === claimId
-          ? resolutionRecord
-          : undefined,
-      );
-      if (finalized.status !== 'updated') {
+      const finalized = await persistence.finalize({
+        syncLogId: item.syncLogId,
+        detailIndex: item.detailIndex,
+        claimId,
+        resolution: resolutionRecord,
+      });
+      if (!finalized) {
         throw new Error('Resolution ownership changed before the result could be recorded');
       }
       results.push({ ...item, ...outcome, resolutionStatus: 'succeeded' });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const resolutionStatus = error instanceof IndeterminateRetryError ? 'indeterminate' : 'failed';
-      await updateResolutionAtomically(
-        item.syncLogId,
-        item.detailIndex,
-        (currentDetail) => currentDetail.resolution?.status === 'in_progress'
-          && currentDetail.resolution.claimId === claimId
-          ? {
-              action: item.resolution,
-              status: resolutionStatus,
-              resolvedAt: new Date().toISOString(),
-              message,
-            }
-          : undefined,
-      );
+      await persistence.finalize({
+        syncLogId: item.syncLogId,
+        detailIndex: item.detailIndex,
+        claimId,
+        resolution: {
+          action: item.resolution,
+          status: resolutionStatus,
+          resolvedAt: new Date().toISOString(),
+          message,
+        },
+      });
       results.push({
         ...item,
         success: false,

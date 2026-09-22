@@ -1,0 +1,488 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { getTableName, isTable, type Table } from 'drizzle-orm/table';
+import { getTableColumns } from 'drizzle-orm/utils';
+import { getTableConfig as getPostgresTableConfig } from 'drizzle-orm/pg-core';
+import { getTableConfig as getSqliteTableConfig } from 'drizzle-orm/sqlite-core';
+import { describe, expect, it } from 'vitest';
+import * as postgresSchema from '@/db/postgres/schema';
+import * as sqliteSchema from '@/db/schema';
+import { taskTimeActivities as postgresTaskTimeActivities } from '@/db/postgres/schema/tasks';
+import { taskTimeActivities as sqliteTaskTimeActivities } from '@/db/schema/tasks';
+
+function exportedTables(schema: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(schema)
+      .filter((entry): entry is [string, Table] => isTable(entry[1]))
+      .map(([exportName, table]) => [exportName, table]),
+  );
+}
+
+/**
+ * PostgreSQL-only additive tables with no SQLite counterpart. SQLite's
+ * equivalent keyword-search mirror (`tasks_fts`/`alerts_fts`) is a raw FTS5
+ * virtual table created via `sqlite.exec(...)` in
+ * `src/lib/search/sqlite-fts-repository.ts` — it is never represented in
+ * `src/db/schema/**`, so there is nothing on the SQLite side for these two
+ * tables to have parity with. They are excluded from the strict 1:1
+ * SQLite<->PostgreSQL schema-parity checks below and instead validated by
+ * their own dedicated structural assertions (see
+ * "adds PostgreSQL-only search-index tables..." below).
+ */
+const POSTGRES_ONLY_TABLE_EXPORTS = new Set(['taskSearchDocuments', 'notificationSearchDocuments']);
+const POSTGRES_ONLY_SHARED_COLUMNS = new Map([
+  ['semanticIntents', new Set(['idempotency_key_version'])],
+  ['semanticRuns', new Set(['idempotency_key_version'])],
+]);
+
+function sharedTables(schema: Record<string, unknown>) {
+  return Object.fromEntries(
+    Object.entries(exportedTables(schema)).filter(([exportName]) => !POSTGRES_ONLY_TABLE_EXPORTS.has(exportName)),
+  );
+}
+
+describe('PostgreSQL schema', () => {
+  it('keeps task time activity columns, indexes, foreign keys, and checks in parity', () => {
+    const sqliteColumns = Object.values(getTableColumns(sqliteTaskTimeActivities))
+      .map((column) => [column.name, column.notNull, column.hasDefault]);
+    const postgresColumns = Object.values(getTableColumns(postgresTaskTimeActivities))
+      .map((column) => [column.name, column.notNull, column.hasDefault]);
+    expect(postgresColumns).toEqual(sqliteColumns);
+
+    const sqlite = getSqliteTableConfig(sqliteTaskTimeActivities);
+    const postgres = getPostgresTableConfig(postgresTaskTimeActivities);
+    expect(postgres.indexes.map((index) => [index.config.name, index.config.unique]))
+      .toEqual(sqlite.indexes.map((index) => [index.config.name, index.config.unique]));
+    expect(postgres.checks.map((check) => check.name))
+      .toEqual(sqlite.checks.map((check) => check.name));
+    expect(postgres.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(sqlite.foreignKeys[0]?.onDelete).toBe('cascade');
+  });
+
+  it('has a table and column equivalent for every SQLite schema export', () => {
+    const sqliteTables = exportedTables(sqliteSchema);
+    const postgresTables = sharedTables(postgresSchema);
+
+    expect(Object.keys(postgresTables)).toHaveLength(166);
+    expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
+
+    for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
+      const postgresTable = postgresTables[exportName];
+      expect(getTableName(postgresTable), exportName).toBe(getTableName(sqliteTable));
+
+      const sqliteColumns = Object.values(getTableColumns(sqliteTable)).map((column) => column.name);
+      const postgresColumns = Object.values(getTableColumns(postgresTable))
+        .map((column) => column.name)
+        .filter((name) => (
+          name !== 'search_vector'
+          && !POSTGRES_ONLY_SHARED_COLUMNS.get(exportName)?.has(name)
+        ));
+      expect(postgresColumns, exportName).toEqual(sqliteColumns);
+
+      const sqliteColumnConfig = Object.values(getTableColumns(sqliteTable)).map((column) => ({
+        name: column.name,
+        dataType: column.dataType,
+        primary: column.primary,
+        notNull: column.notNull,
+        hasDefault: column.hasDefault,
+      }));
+      const postgresColumnConfig = Object.values(getTableColumns(postgresTable))
+        .filter((column) => (
+          column.name !== 'search_vector'
+          && !POSTGRES_ONLY_SHARED_COLUMNS.get(exportName)?.has(column.name)
+        ))
+        .map((column) => ({
+          name: column.name,
+          dataType: column.dataType,
+          primary: column.primary,
+          notNull: column.notNull,
+          hasDefault: column.hasDefault,
+        }));
+      expect(postgresColumnConfig, exportName).toEqual(sqliteColumnConfig);
+    }
+  });
+
+  it('preserves declared indexes and constraint topology for every table', () => {
+    const sqliteTables = exportedTables(sqliteSchema);
+    const postgresTables = exportedTables(postgresSchema);
+
+    for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
+      const postgresTable = postgresTables[exportName];
+      const sqlite = getSqliteTableConfig(
+        sqliteTable as Parameters<typeof getSqliteTableConfig>[0],
+      );
+      const postgres = getPostgresTableConfig(
+        postgresTable as Parameters<typeof getPostgresTableConfig>[0],
+      );
+
+      const sqliteIndexes = sqlite.indexes.map((index) => ({
+        name: index.config.name,
+        unique: index.config.unique,
+        partial: index.config.where !== undefined,
+      }));
+      const postgresIndexes = postgres.indexes
+        .filter((index) => !index.config.name?.endsWith('_search_vector'))
+        .map((index) => ({
+          name: index.config.name,
+          unique: index.config.unique,
+          partial: index.config.where !== undefined,
+        }));
+      expect(postgresIndexes, `${exportName} indexes`).toEqual(sqliteIndexes);
+
+      const foreignKeys = (config: typeof sqlite | typeof postgres) =>
+        config.foreignKeys.map((foreignKey) => {
+          const reference = foreignKey.reference();
+          return {
+            columns: reference.columns.map((column) => column.name),
+            foreignTable: getTableName(reference.foreignTable),
+            foreignColumns: reference.foreignColumns.map((column) => column.name),
+            onDelete: foreignKey.onDelete ?? 'no action',
+            onUpdate: foreignKey.onUpdate ?? 'no action',
+          };
+        });
+      expect(foreignKeys(postgres), `${exportName} foreign keys`).toEqual(
+        foreignKeys(sqlite),
+      );
+
+      expect(
+        postgres.primaryKeys.map((key) => key.columns.map((column) => column.name)),
+        `${exportName} primary keys`,
+      ).toEqual(sqlite.primaryKeys.map((key) => key.columns.map((column) => column.name)));
+      expect(
+        postgres.checks.map((check) => check.name),
+        `${exportName} checks`,
+      ).toEqual(sqlite.checks.map((check) => check.name));
+    }
+  });
+
+  it('uses PostgreSQL-native booleans, jsonb, serial keys, and text timestamps', () => {
+    expect(postgresSchema.tasks.isChecklistItem.columnType).toBe('PgBoolean');
+    expect(postgresSchema.tasks.metadata.columnType).toBe('PgJsonb');
+    expect(postgresSchema.taskHistoryEvents.id.columnType).toBe('PgSerial');
+    expect(postgresSchema.tasks.createdAt.columnType).toBe('PgText');
+    expect(postgresSchema.financeTransactions.tags.columnType).toBe('PgJsonb');
+  });
+
+  it('preserves representative keys, cascades, checks, and critical indexes', () => {
+    const tasks = getPostgresTableConfig(postgresSchema.tasks);
+    expect(tasks.indexes.map((index) => index.config.name)).toEqual(
+      expect.arrayContaining([
+        'idx_tasks_source_connector',
+        'idx_tasks_list_counts',
+        'idx_tasks_due_reminder',
+        'idx_tasks_search_vector',
+      ]),
+    );
+    expect(
+      tasks.indexes.find((index) => index.config.name === 'idx_tasks_search_vector')?.config.method,
+    ).toBe('gin');
+
+    const dependencies = getPostgresTableConfig(postgresSchema.taskDependencies);
+    expect(dependencies.foreignKeys).toHaveLength(2);
+    expect(dependencies.foreignKeys.map((foreignKey) => foreignKey.onDelete)).toEqual([
+      'cascade',
+      'cascade',
+    ]);
+
+    const facts = getPostgresTableConfig(postgresSchema.financeInsightPublicationFacts);
+    expect(facts.primaryKeys[0]?.columns.map((column) => column.name)).toEqual([
+      'publication_id',
+      'kind',
+      'source_ref',
+    ]);
+    expect(facts.foreignKeys[0]?.onDelete).toBe('cascade');
+
+    const externalEntities = getPostgresTableConfig(postgresSchema.externalEntities);
+    expect(externalEntities.checks.map((check) => check.name)).toEqual(
+      expect.arrayContaining([
+        'external_entities_type_check',
+        'external_entities_identity_version_check',
+      ]),
+    );
+
+    const notifications = getPostgresTableConfig(postgresSchema.notifications);
+    expect(
+      notifications.indexes.find(
+        (index) => index.config.name === 'idx_notifications_search_vector',
+      )?.config.method,
+    ).toBe('gin');
+  });
+
+  it('adds PostgreSQL-only search-index tables that are excluded from SQLite parity', () => {
+    for (const exportName of POSTGRES_ONLY_TABLE_EXPORTS) {
+      expect(postgresSchema[exportName as keyof typeof postgresSchema], exportName).toBeDefined();
+      expect(
+        (sqliteSchema as Record<string, unknown>)[exportName],
+        `${exportName} must have no SQLite counterpart`,
+      ).toBeUndefined();
+    }
+
+    const taskDocs = getPostgresTableConfig(postgresSchema.taskSearchDocuments);
+    expect(getTableName(postgresSchema.taskSearchDocuments)).toBe('task_search_documents');
+    expect(
+      taskDocs.indexes.find((index) => index.config.name === 'idx_task_search_documents_vector')
+        ?.config.method,
+    ).toBe('gin');
+    expect(taskDocs.foreignKeys).toHaveLength(1);
+    expect(taskDocs.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(taskDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.tasks);
+
+    const notificationDocs = getPostgresTableConfig(postgresSchema.notificationSearchDocuments);
+    expect(getTableName(postgresSchema.notificationSearchDocuments)).toBe('notification_search_documents');
+    expect(
+      notificationDocs.indexes.find(
+        (index) => index.config.name === 'idx_notification_search_documents_vector',
+      )?.config.method,
+    ).toBe('gin');
+    expect(notificationDocs.foreignKeys).toHaveLength(1);
+    expect(notificationDocs.foreignKeys[0]?.onDelete).toBe('cascade');
+    expect(notificationDocs.foreignKeys[0]?.reference().foreignTable).toBe(postgresSchema.notifications);
+  });
+
+  it('keeps semantic idempotency-key versions PostgreSQL-only and importer-safe', () => {
+    for (const [exportName, columnName] of [
+      ['semanticIntents', 'idempotencyKeyVersion'],
+      ['semanticRuns', 'idempotencyKeyVersion'],
+    ] as const) {
+      const postgresColumns = getTableColumns(postgresSchema[exportName]);
+      const sqliteColumns = getTableColumns(sqliteSchema[exportName]);
+      expect(postgresColumns[columnName]).toMatchObject({
+        name: 'idempotency_key_version',
+        notNull: true,
+        hasDefault: true,
+      });
+      expect(Object.keys(sqliteColumns)).not.toContain(columnName);
+    }
+
+    const intentIndexes = getPostgresTableConfig(postgresSchema.semanticIntents).indexes;
+    expect(
+      intentIndexes
+        .find((index) => index.config.name === 'idx_semantic_intents_pending')
+        ?.config.columns.map((column) => 'name' in column ? column.name : undefined),
+    ).toEqual(['idempotency_key_version', 'idempotency_key']);
+
+    const runIndexes = getPostgresTableConfig(postgresSchema.semanticRuns).indexes;
+    expect(
+      runIndexes
+        .find((index) => index.config.name === 'idx_semantic_runs_idempotency')
+        ?.config.columns.map((column) => 'name' in column ? column.name : undefined),
+    ).toEqual(['idempotency_key_version', 'idempotency_key']);
+  });
+
+  it('ships the PostgreSQL baseline and additive parity migrations', () => {
+    const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
+    const migrations = readdirSync(migrationDirectory)
+      .filter((file) => file.endsWith('.sql'))
+      .sort();
+    expect(migrations).toHaveLength(14);
+
+    const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
+    // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
+    expect(sql.match(/^CREATE TABLE /gm)).toHaveLength(164);
+    expect(sql).toContain('CREATE TABLE "task_search_documents"');
+    expect(sql).toContain('CREATE TABLE "notification_search_documents"');
+    expect(sql).toContain('"id" serial PRIMARY KEY NOT NULL');
+    expect(sql).toContain('"metadata" jsonb');
+    expect(sql).toContain('"is_checklist_item" boolean');
+    expect(sql).toMatch(
+      /CREATE TABLE "triage_sync_state" \([\s\S]*"revision" integer DEFAULT 0 NOT NULL/,
+    );
+    expect(sql).toContain('"search_vector" "tsvector" GENERATED ALWAYS AS');
+    expect(sql).toContain('USING gin ("search_vector")');
+    expect(sql).not.toContain('AUTOINCREMENT');
+
+    const persistentRemindersSql = readFileSync(
+      resolve(migrationDirectory, '0010_certain_warhawk.sql'),
+      'utf8',
+    );
+    expect(persistentRemindersSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "reminder_nag_interval" integer',
+    );
+    expect(persistentRemindersSql).toContain(
+      'CREATE INDEX "idx_task_reminder_occurrences_series_sequence"',
+    );
+
+    const recurringOccurrenceSql = readFileSync(
+      resolve(migrationDirectory, '0011_recurring_occurrence_identity.sql'),
+      'utf8',
+    );
+    expect(recurringOccurrenceSql).toContain(
+      'CREATE TABLE IF NOT EXISTS "task_recurrence_occurrences"',
+    );
+    expect(recurringOccurrenceSql).toContain(
+      'CREATE UNIQUE INDEX IF NOT EXISTS "idx_task_recurrence_occurrences_identity"',
+    );
+
+    const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');
+    expect(enrichmentSql).toContain('CREATE TABLE "notification_enrichment_jobs"');
+    expect(enrichmentSql).toContain(
+      'ALTER TABLE "notifications" ADD COLUMN "enrichment_revision" text',
+    );
+    expect(enrichmentSql).toContain(
+      'ALTER TABLE "notifications" ADD COLUMN "enrichment_generation" integer',
+    );
+    expect(enrichmentSql).toContain('idx_notification_enrichment_generation');
+    expect(sql).not.toContain('PRAGMA');
+
+    const connectorTestResultSql = readFileSync(resolve(migrationDirectory, migrations[2]), 'utf8');
+    expect(connectorTestResultSql).toContain(
+      'ALTER TABLE "connector_configs" ADD COLUMN "last_test_status" text',
+    );
+    expect(connectorTestResultSql).toContain(
+      'ALTER TABLE "connector_configs" ADD COLUMN "last_test_error" text',
+    );
+    expect(connectorTestResultSql).toContain(
+      'ALTER TABLE "connector_configs" ADD COLUMN "last_test_at" text',
+    );
+
+    const semanticKeyVersionSql = readFileSync(resolve(migrationDirectory, migrations[3]), 'utf8');
+    expect(semanticKeyVersionSql).toContain(
+      'ALTER TABLE "semantic_intents" ADD COLUMN "idempotency_key_version" integer DEFAULT 0 NOT NULL',
+    );
+    expect(semanticKeyVersionSql).toContain(
+      'ALTER TABLE "semantic_runs" ADD COLUMN "idempotency_key_version" integer DEFAULT 0 NOT NULL',
+    );
+    expect(semanticKeyVersionSql).toContain(
+      '("idempotency_key_version","idempotency_key")',
+    );
+    const intentColumn = semanticKeyVersionSql.indexOf(
+      'ALTER TABLE "semantic_intents" ADD COLUMN',
+    );
+    const runColumn = semanticKeyVersionSql.indexOf(
+      'ALTER TABLE "semantic_runs" ADD COLUMN',
+    );
+    const dropIntentIndex = semanticKeyVersionSql.indexOf(
+      'DROP INDEX "idx_semantic_intents_pending"',
+    );
+    const createIntentIndex = semanticKeyVersionSql.indexOf(
+      'CREATE UNIQUE INDEX "idx_semantic_intents_pending"',
+    );
+    const dropRunIndex = semanticKeyVersionSql.indexOf(
+      'DROP INDEX "idx_semantic_runs_idempotency"',
+    );
+    const createRunIndex = semanticKeyVersionSql.indexOf(
+      'CREATE UNIQUE INDEX "idx_semantic_runs_idempotency"',
+    );
+    expect([
+      intentColumn,
+      runColumn,
+      dropIntentIndex,
+      createIntentIndex,
+      dropRunIndex,
+      createRunIndex,
+    ]).toEqual([...[
+      intentColumn,
+      runColumn,
+      dropIntentIndex,
+      createIntentIndex,
+      dropRunIndex,
+      createRunIndex,
+    ]].sort((left, right) => left - right));
+    expect(semanticKeyVersionSql.match(/--> statement-breakpoint/g)).toHaveLength(5);
+
+    const sourceHealthSql = readFileSync(resolve(migrationDirectory, migrations[5]), 'utf8');
+    expect(sourceHealthSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "health_status" text',
+    );
+
+    const taskSoftDeleteSql = readFileSync(resolve(migrationDirectory, migrations[7]), 'utf8');
+    expect(taskSoftDeleteSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "deleted_at" text',
+    );
+    expect(taskSoftDeleteSql).toContain(
+      'CREATE INDEX "idx_tasks_deleted_at" ON "tasks"',
+    );
+    const subtaskOrderingSql = readFileSync(
+      resolve(migrationDirectory, migrations[8]),
+      'utf8',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "sibling_order" integer',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'ALTER TABLE "tasks" ADD COLUMN "subtask_order_revision" integer DEFAULT 0 NOT NULL',
+    );
+    expect(subtaskOrderingSql).toContain(
+      'CREATE INDEX "idx_tasks_parent_sibling_order" ON "tasks" USING btree ("parent_id","sibling_order")',
+    );
+    const contextAppearanceSql = readFileSync(
+      resolve(migrationDirectory, migrations[9]),
+      'utf8',
+    );
+    expect(contextAppearanceSql).toContain(
+      'ALTER TABLE "hub_projects" ADD COLUMN "appearance" jsonb',
+    );
+    expect(contextAppearanceSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "appearance" jsonb',
+    );
+    expect(sourceHealthSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "health_error" text',
+    );
+    expect(sourceHealthSql).toContain(
+      'ALTER TABLE "source_lists" ADD COLUMN "last_successful_at" text',
+    );
+  });
+
+  it('ships the additive project-hierarchy integrity parity migration', () => {
+    const migrationDirectory = resolve(process.cwd(), 'drizzle/postgres');
+    const journal = JSON.parse(readFileSync(
+      resolve(migrationDirectory, 'meta/_journal.json'),
+      'utf8',
+    )) as { entries: Array<{ idx: number; tag: string }> };
+    expect(journal.entries.find(entry => entry.tag === '0004_project_hierarchy_integrity')).toMatchObject({
+      idx: 4,
+      tag: '0004_project_hierarchy_integrity',
+    });
+
+    const sql = readFileSync(
+      resolve(migrationDirectory, '0004_project_hierarchy_integrity.sql'),
+      'utf8',
+    );
+
+    for (const fn of [
+      'project_hierarchy_bump_revision',
+      'project_phase_items_one_phase_guard_insert',
+      'project_phase_items_one_phase_guard_update',
+      'project_phase_items_membership_guard',
+      'project_phases_reparent_assignment_guard',
+      'project_phases_reparent_membership_guard',
+      'project_membership_phase_cleanup',
+      'project_hierarchy_revision_phase',
+      'project_hierarchy_revision_phase_item',
+      'project_hierarchy_revision_task_project',
+    ]) {
+      expect(sql, fn).toContain(`CREATE OR REPLACE FUNCTION ${fn}(`);
+    }
+
+    // Trigger-name parity with the SQLite hierarchy integrity triggers
+    // (drizzle/0032_project_hierarchy_commands.sql).
+    const sqliteHierarchySql = readFileSync(
+      resolve(process.cwd(), 'drizzle/0032_project_hierarchy_commands.sql'),
+      'utf8',
+    );
+    const sqliteTriggers = [...sqliteHierarchySql.matchAll(
+      /CREATE TRIGGER IF NOT EXISTS `([^`]+)`/g,
+    )].map((match) => match[1]).sort();
+    const postgresTriggers = [...sql.matchAll(/CREATE TRIGGER ([a-z0-9_]+)/g)]
+      .map((match) => match[1]).sort();
+    expect(postgresTriggers).toEqual(sqliteTriggers);
+    expect(postgresTriggers).toHaveLength(17);
+
+    // Every trigger is dropped first so the migration stays replay-safe.
+    for (const trigger of postgresTriggers) {
+      expect(sql, trigger).toContain(`DROP TRIGGER IF EXISTS ${trigger} ON `);
+    }
+
+    // Out-of-band revision bumps are suppressed while an adapter-owned
+    // command holds a mutation-context row.
+    expect(sql).toMatch(
+      /SELECT 1 FROM project_hierarchy_mutation_context\s+WHERE project_id = target_project_id/,
+    );
+    expect(sql).toContain('SET hierarchy_revision = hierarchy_revision + 1');
+
+    // Additive parity only: functions and triggers over existing tables.
+    expect(sql).not.toMatch(
+      /CREATE TABLE|ALTER TABLE|DROP TABLE|CREATE INDEX|CREATE UNIQUE INDEX|DROP INDEX/,
+    );
+  });
+});

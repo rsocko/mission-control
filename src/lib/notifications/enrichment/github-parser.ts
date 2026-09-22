@@ -90,21 +90,6 @@ function resolveTemplateKey(reason: string, subjectType: string): string {
   }
 }
 
-// ─── REASON → CATEGORY MAP ─────────────────────────────────────────────────
-
-function resolveCategory(reason: string, subjectType: string): string {
-  switch (reason) {
-    case 'review_requested': return 'social';
-    case 'mention':
-    case 'team_mention': return 'social';
-    case 'security_alert': return 'security';
-    case 'ci_activity': return 'system';
-    case 'assign': return 'tasks';
-    default:
-      return subjectType === 'Release' ? 'system' : 'social';
-  }
-}
-
 // ─── ENTITY NUMBER EXTRACTION ───────────────────────────────────────────────
 
 /**
@@ -165,13 +150,12 @@ export function parseGitHubNotification(notification: InboundNotification): Pars
   const body = buildHumanBody(reasonLabel, subtitle);
 
   const templateKey = resolveTemplateKey(reason, subjectType);
-  const category = resolveCategory(reason, subjectType);
 
   return {
     title,
     body,
     templateKey,
-    category,
+    category: 'development',
     presentation: {
       subjectType,
       reason,

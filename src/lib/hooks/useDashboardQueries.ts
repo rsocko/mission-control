@@ -4,6 +4,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@
 import { useCallback } from 'react';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { uiLogger } from '@/lib/client-logger';
+import { MAX_TASK_PAGE_SIZE } from '@/app/api/tasks/pagination';
 import type {
   DashboardTaskResponseViewModel as TaskResponse,
   DashboardTaskTagViewModel as TaskTag,
@@ -80,6 +81,33 @@ export function flattenTaskPages(data: InfiniteData<TaskResponse, number> | unde
   };
 }
 
+export function getRetainedTaskRequestCount(
+  data: InfiniteData<TaskResponse, number> | undefined,
+  requestedCount: number,
+): number {
+  if (data?.pages.length !== 1) return requestedCount;
+  return Math.max(
+    requestedCount,
+    Math.min(data.pages[0]?.tasks?.length ?? 0, DASHBOARD_TASK_ENTITY_LIMIT),
+  );
+}
+
+export function buildTaskRequestRanges(
+  offset: number,
+  count: number,
+): Array<{ offset: number; limit: number }> {
+  return Array.from(
+    { length: Math.ceil(count / MAX_TASK_PAGE_SIZE) },
+    (_, index) => ({
+      offset: offset + index * MAX_TASK_PAGE_SIZE,
+      limit: Math.min(
+        MAX_TASK_PAGE_SIZE,
+        count - index * MAX_TASK_PAGE_SIZE,
+      ),
+    }),
+  );
+}
+
 export const myDayKeys = {
   items: (date: string) => ['myDay', 'items', date] as const,
   schedule: (date: string) => ['myDay', 'schedule', date] as const,
@@ -115,10 +143,29 @@ export function useDashboardQueries(taskParams: string) {
     number
   >({
     queryKey: dashboardKeys.tasks(normalizedTaskParams),
-    queryFn: ({ pageParam }) => {
+    queryFn: async ({ pageParam }) => {
       const params = new URLSearchParams(normalizedTaskParams);
-      params.set('offset', String(pageParam));
-      return fetchJson<TaskListResponseDto>(`/api/tasks?${params.toString()}`);
+      const requestedCount = Number(params.get('limit')) || PAGE_SIZE;
+      const retainedCount = pageParam === 0
+        ? getRetainedTaskRequestCount(
+          queryClient.getQueryData<InfiniteData<TaskResponse, number>>(
+            dashboardKeys.tasks(normalizedTaskParams),
+          ),
+          requestedCount,
+        )
+        : requestedCount;
+      const ranges = buildTaskRequestRanges(pageParam, retainedCount);
+      const pages = await Promise.all(ranges.map(({ offset, limit }) => {
+        const pageParams = new URLSearchParams(params);
+        pageParams.set('offset', String(offset));
+        pageParams.set('limit', String(limit));
+        return fetchJson<TaskListResponseDto>(`/api/tasks?${pageParams.toString()}`);
+      }));
+
+      return flattenTaskPages({
+        pages,
+        pageParams: ranges.map(({ offset }) => offset),
+      });
     },
     initialPageParam: 0,
     getNextPageParam: (lastPage, pages, lastPageParam) => {

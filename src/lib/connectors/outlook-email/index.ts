@@ -9,6 +9,7 @@ import type {
 } from '@/types';
 import { randomUUID } from 'crypto';
 import { connectorRegistry } from '../index';
+import { createGraphClient, type GraphClient } from '../microsoft-todo/graph-client';
 
 /**
  * Outlook Email Connector
@@ -17,11 +18,9 @@ import { connectorRegistry } from '../index';
  * high-severity actionable alerts with a direct link to the message.
  * 
  * Auth: OAuth2 via Azure AD (shared with MS Todo connector if same tenant)
- * API: https://graph.microsoft.com/v1.0/me/messages
+ * API: https://graph.microsoft.com/v1.0/me/mailFolders/{folderId}/messages
  * Permissions: Mail.Read (delegated)
  */
-
-const GRAPH_BASE_URL = 'https://graph.microsoft.com/v1.0';
 
 interface OutlookEmailConfig {
   accessToken?: string;
@@ -49,19 +48,19 @@ export class OutlookEmailConnector implements IConnector {
   };
 
   private config: ConnectorConfig | null = null;
-  private accessToken: string = '';
+  private hasCredentials: boolean = false;
+  private client: GraphClient | null = null;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
     (this as { id: string }).id = config.id;
     const creds = config.credentials as unknown as OutlookEmailConfig;
-    if (creds.accessToken) {
-      this.accessToken = creds.accessToken;
-    }
+    this.hasCredentials = !!creds.accessToken;
+    this.client = createGraphClient(this.id);
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
-    if (!this.accessToken) {
+    if (!this.hasCredentials) {
       return { success: false, message: 'No access token configured' };
     }
     try {
@@ -78,12 +77,19 @@ export class OutlookEmailConnector implements IConnector {
 
   async dispose(): Promise<void> {
     this.config = null;
-    this.accessToken = '';
+    this.hasCredentials = false;
+    this.client = null;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
     const res = await this.graphFetch('/me/mailFolders?$top=20');
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(
+        res.status === 401
+          ? 'Outlook Email token expired or invalid — re-authenticate in Settings'
+          : `Outlook Email folder lookup failed: HTTP ${res.status}`
+      );
+    }
     const data = await res.json();
 
     return (data.value || []).map((folder: { id: string; displayName: string; totalItemCount: number }) => ({
@@ -106,6 +112,11 @@ export class OutlookEmailConnector implements IConnector {
     const settings = (this.config?.settings || {}) as unknown as OutlookEmailConfig;
     let filterMode = settings.filterMode || 'both';
     const maxAgeHours = settings.maxAgeHours || 72;
+    // An empty selection is intentionally Inbox-only; additional folders are opt-in.
+    const configuredFolderIds = this.config?.syncedLists
+      .map(folderId => folderId.startsWith(`${this.id}:`) ? folderId.slice(this.id.length + 1) : folderId)
+      .filter(Boolean) || [];
+    const folderIds = [...new Set(configuredFolderIds.length > 0 ? configuredFolderIds : ['inbox'])];
 
     // When Microsoft Todo connector is active, it owns flagged emails as full tasks.
     // Avoid duplicating them as alerts here — only surface importance-based alerts.
@@ -135,42 +146,51 @@ export class OutlookEmailConnector implements IConnector {
     }
 
     const filter = filters.join(' and ');
-    const url = `/me/messages?$filter=${encodeURIComponent(filter)}&$top=50&$orderby=receivedDateTime desc&$select=id,subject,bodyPreview,from,receivedDateTime,importance,flag,webLink,isRead`;
+    const query = `$filter=${encodeURIComponent(filter)}&$top=50&$orderby=receivedDateTime desc&$select=id,subject,bodyPreview,from,receivedDateTime,importance,flag,webLink,isRead`;
 
-    const res = await this.graphFetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
+    for (const folderId of folderIds) {
+      const url = `/me/mailFolders/${encodeURIComponent(folderId)}/messages?${query}`;
+      const res = await this.graphFetch(url);
+      if (!res.ok) {
+        throw new Error(
+          res.status === 401
+            ? 'Outlook Email token expired or invalid — re-authenticate in Settings'
+            : `Outlook Email message fetch failed for folder ${folderId}: HTTP ${res.status}`
+        );
+      }
+      const data = await res.json();
 
-    for (const msg of data.value || []) {
-      const isFlagged = msg.flag?.flagStatus === 'flagged';
-      const isImportant = msg.importance === 'high';
+      for (const msg of data.value || []) {
+        const isFlagged = msg.flag?.flagStatus === 'flagged';
+        const isImportant = msg.importance === 'high';
 
-      notifications.push({
-        id: randomUUID(),
-        sourceId: `email:${msg.id}`,
-        connectorType: this.type,
-        connectorInstanceId: this.id,
-        title: msg.subject || '(No subject)',
-        body: msg.from?.emailAddress
-          ? `From: ${msg.from.emailAddress.name || msg.from.emailAddress.address} — ${msg.bodyPreview?.slice(0, 120) || ''}`
-          : msg.bodyPreview?.slice(0, 150) || undefined,
-        level: isImportant ? 'action_needed' : isFlagged ? 'heads_up' : 'fyi',
-        category: 'email',
-        isRead: msg.isRead || false,
-        isActionable: true,
-        actionUrl: msg.webLink || undefined,
-        receivedAt: msg.receivedDateTime,
-        expiresAt: undefined,
-        relatedTaskId: undefined,
-        hubProjectIds: [],
-        tags: [],
-        metadata: {
-          messageId: msg.id,
-          from: msg.from?.emailAddress?.address,
-          isFlagged,
-          isImportant,
-        },
-      });
+        notifications.push({
+          id: randomUUID(),
+          sourceId: `email:${msg.id}`,
+          connectorType: this.type,
+          connectorInstanceId: this.id,
+          title: msg.subject || '(No subject)',
+          body: msg.from?.emailAddress
+            ? `From: ${msg.from.emailAddress.name || msg.from.emailAddress.address} — ${msg.bodyPreview?.slice(0, 120) || ''}`
+            : msg.bodyPreview?.slice(0, 150) || undefined,
+          level: isImportant ? 'action_needed' : isFlagged ? 'heads_up' : 'fyi',
+          category: 'email',
+          isRead: msg.isRead || false,
+          isActionable: true,
+          actionUrl: msg.webLink || undefined,
+          receivedAt: msg.receivedDateTime,
+          expiresAt: undefined,
+          relatedTaskId: undefined,
+          hubProjectIds: [],
+          tags: [],
+          metadata: {
+            messageId: msg.id,
+            from: msg.from?.emailAddress?.address,
+            isFlagged,
+            isImportant,
+          },
+        });
+      }
     }
 
     return notifications;
@@ -183,14 +203,10 @@ export class OutlookEmailConnector implements IConnector {
   // ─── Private ──────────────────────────────────────────────────────────────
 
   private async graphFetch(path: string, options?: RequestInit): Promise<Response> {
-    return fetch(`${GRAPH_BASE_URL}${path}`, {
-      ...options,
-      headers: {
-        Authorization: `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-        ...(options?.headers || {}),
-      },
-    });
+    if (!this.client) {
+      throw new Error('Outlook Email connector not initialized');
+    }
+    return this.client.graphFetch(path, options);
   }
 }
 

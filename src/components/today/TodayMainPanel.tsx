@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   CircleDot,
   GripVertical,
   Loader2,
@@ -36,6 +37,7 @@ import {
   BulkDispositionButtons,
   BulkDueDateDropdown,
   BulkMoveDropdown,
+  BulkMoveToProjectDropdown,
   BulkMoveToSourceButton,
   BulkPriorityDropdown,
   BulkStatusDropdown,
@@ -62,6 +64,7 @@ import { InteractiveTimeline } from '@/components/today/InteractiveTimeline';
 import { MobileSuggestions } from '@/components/today/MobileSuggestions';
 import { ConnectorIcon, SortableTaskRow } from '@/components/today/SortableTaskRow';
 import { TimerPanel } from '@/components/today/TimerPanel';
+import { Tooltip } from '@/components/ui/Tooltip';
 import { uiLogger } from '@/lib/client-logger';
 import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { useViewMode } from '@/lib/hooks/useViewMode';
@@ -90,6 +93,7 @@ import {
   reorderMyDayItems,
   resolveMyDayGroupSelection,
   resolveMyDaySortSelection,
+  sortCompletedMyDayItems,
   sortMyDayItems,
 } from '@/lib/utils/my-day-view';
 import type {
@@ -150,7 +154,6 @@ interface TodayMainPanelProps {
     selectedTaskId: string | null;
     selectTask: (taskId: string | null) => void;
     doubleClickTask?: (taskId: string) => void;
-    cancelPendingTaskSelection?: () => void;
   };
   focus: {
     showTimer: boolean;
@@ -225,7 +228,6 @@ export function TodayMainPanel({
   } = taskActions;
   const {
     selectedTaskId, selectTask: onSelectTask, doubleClickTask: onDoubleClickTask,
-    cancelPendingTaskSelection: onCancelPendingTaskSelection,
   } = selection;
   const {
     showTimer, setShowTimer: onSetShowTimer, focusTask, setFocusTask: onSetFocusTask,
@@ -341,8 +343,8 @@ export function TodayMainPanel({
     [filteredItemsByStatus.open, sortBy, sortDirection],
   );
   const completedItems = useMemo(
-    () => sortMyDayItems(filteredItemsByStatus.completed, sortBy, sortDirection),
-    [filteredItemsByStatus.completed, sortBy, sortDirection],
+    () => sortCompletedMyDayItems(filteredItemsByStatus.completed),
+    [filteredItemsByStatus.completed],
   );
   const cancelledItems = useMemo(
     () => sortMyDayItems(filteredItemsByStatus.cancelled, sortBy, sortDirection),
@@ -497,6 +499,25 @@ export function TodayMainPanel({
       return { ...current, query: tokens.map((token) => token.raw).join(' ') };
     });
   }, []);
+  const setSingleQueryFilter = useCallback((type: 'priority' | 'status', value: string) => {
+    setFilterContext((current) => {
+      const remainingTokens = parseFilterQuery(current.query).tokens
+        .filter((token) => token.type !== type)
+        .map((token) => token.raw);
+      return {
+        ...current,
+        priorities: type === 'priority' ? [] : current.priorities,
+        statuses: type === 'status' ? [] : current.statuses,
+        query: [...remainingTokens, `${type}:${value}`].join(' '),
+      };
+    });
+  }, []);
+  const filterByPriority = useCallback((priority: string) => {
+    setSingleQueryFilter('priority', priority);
+  }, [setSingleQueryFilter]);
+  const filterByStatus = useCallback((status: string) => {
+    setSingleQueryFilter('status', status);
+  }, [setSingleQueryFilter]);
 
   const handleModifierClick = useCallback((taskId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const items = activeItems;
@@ -657,7 +678,7 @@ export function TodayMainPanel({
           </div>
         )}
 
-        {(showTimer || focusTask) && <div className="mb-6"><TimerPanel taskTitle={focusTask?.title} taskDeadline={focusTask?.dueDate || undefined} /></div>}
+        <div className={showTimer || focusTask ? 'mb-6' : ''}><TimerPanel taskId={focusTask?.taskId} taskTitle={focusTask?.title} taskDeadline={focusTask?.dueDate || undefined} hiddenWhenIdle={!showTimer && !focusTask} onRestore={onSetShowTimer} /></div>
 
         {loading ? (
           <div className="space-y-4 py-4 animate-pulse">
@@ -678,7 +699,13 @@ export function TodayMainPanel({
         ) : view === 'list' ? (
           <>
             <div className="mb-6 grid grid-cols-1 items-start gap-4 xl:grid-cols-2">
-              <Focus3Panel onRefresh={fetchData} compact />
+              <Focus3Panel
+                onRefresh={fetchData}
+                selectedTaskId={selectedTaskId}
+                onSelectTask={onSelectTask}
+                onDoubleClickTask={onDoubleClickTask}
+                compact
+              />
               <InProgressPanel
                 items={inProgressItems}
                 onSelectTask={onSelectTask}
@@ -845,6 +872,27 @@ export function TodayMainPanel({
                       else bulk.clearSelection();
                     }}
                   />
+                  <BulkMoveToProjectDropdown
+                    projects={projects}
+                    onMove={async (projectId, phaseId) => {
+                      const ids = Array.from(bulk.bulkSelected);
+                      const project = projects.find((candidate) => candidate.id === projectId);
+                      const phase = project?.phases?.find((candidate) => candidate.id === phaseId);
+                      const destination = phase ? `${project?.name} / ${phase.name}` : project?.name || 'project';
+                      const { failed } = await executeBulkOperation(
+                        ids,
+                        (id) => fetch(`/api/hub-projects/${projectId}/tasks`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ taskId: id, phaseId }),
+                        }),
+                        `Moved ${ids.length} task${ids.length > 1 ? 's' : ''} to ${destination}`,
+                      );
+                      if (failed.length > 0) bulk.setBulkSelected(new Set(failed));
+                      else bulk.clearSelection();
+                      void fetchData();
+                    }}
+                  />
                   <BulkMoveToSourceButton
                     selectedTaskIds={Array.from(bulk.bulkSelected)}
                     onComplete={() => {
@@ -937,18 +985,12 @@ export function TodayMainPanel({
                                       onRemove={(taskId) => { void onRemoveFromDay(taskId); }}
                                       onSelect={onSelectTask}
                                       onDoubleClick={onDoubleClickTask}
-                                      onModifierClick={(taskId, event) => {
-                                        onCancelPendingTaskSelection?.();
-                                        handleModifierClick(taskId, event);
-                                      }}
+                                      onModifierClick={handleModifierClick}
                                       isSelected={selectedTaskId === item.taskId}
                                       isCompleting={completingIds.has(item.taskId)}
                                       bulkMode={bulk.bulkMode}
                                       bulkSelected={bulk.bulkSelected.has(item.taskId)}
-                                      onBulkToggle={() => {
-                                        onCancelPendingTaskSelection?.();
-                                        bulk.toggleItem(item.taskId);
-                                      }}
+                                      onBulkToggle={() => bulk.toggleItem(item.taskId)}
                                       contextMenuActions={getContextMenuActions({
                                         id: item.taskId,
                                         title: item.title,
@@ -959,6 +1001,8 @@ export function TodayMainPanel({
                                       onSetDueDate={(date) => onSetTaskDueDate(item.taskId, date)}
                                       onSetPriority={(priority) => onSetTaskPriority(item.taskId, priority)}
                                       onSetStatus={(status) => onSetTaskStatus(item.taskId, status)}
+                                      onFilterPriority={filterByPriority}
+                                      onFilterStatus={filterByStatus}
                                       onOpenNotes={(mode) => onOpenTaskNotes(item.taskId, mode)}
                                       sourceLists={sourceLists}
                                       listGroups={listGroups}
@@ -1057,6 +1101,8 @@ export function InProgressPanel({
   onSelectTask: (taskId: string) => void;
   onStartFocus: (item: MyDayItem) => void;
 }) {
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
     <section className="overflow-hidden rounded-[var(--radius-lg)] border border-blue-500/35 bg-[var(--surface-1)]">
       <div className="flex items-center justify-between border-b border-blue-500/15 px-4 py-3">
@@ -1065,50 +1111,74 @@ export function InProgressPanel({
           In Progress
           <span className="text-blue-400">({items.length})</span>
         </h3>
+        <Tooltip content={collapsed ? 'Expand In Progress' : 'Collapse In Progress'}>
+          <button
+            type="button"
+            onClick={() => setCollapsed((current) => !current)}
+            aria-expanded={!collapsed}
+            aria-controls="my-day-in-progress-tasks"
+            aria-label={collapsed ? 'Expand In Progress' : 'Collapse In Progress'}
+            className="p-1.5 text-[var(--text-muted)] hover:text-[var(--text-secondary)] hover:bg-[var(--surface-2)] rounded transition-colors"
+          >
+            {collapsed ? <ChevronDown size={13} /> : <ChevronUp size={13} />}
+          </button>
+        </Tooltip>
       </div>
-      {items.length === 0 ? (
-        <div className="flex min-h-36 items-center justify-center px-5 text-center">
-          <div>
-            <p className="text-sm text-[var(--text-secondary)]">Nothing is in progress yet.</p>
-            <p className="mt-1 text-xs text-[var(--text-muted)]">Change a task&apos;s status to make active work visible here.</p>
-          </div>
-        </div>
-      ) : (
-        <div className="px-3 py-2">
-          {items.slice(0, 3).map((item) => (
-            <div
-              key={item.taskId}
-              className="group flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-blue-500/10"
-            >
-              <button
-                type="button"
-                onClick={() => onSelectTask(item.taskId)}
-                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
-              >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600/25 text-blue-300">
-                  <CircleDot size={12} />
-                </span>
-                <ConnectorIcon type={item.connectorType} size={13} />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{item.title}</span>
-                  <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{item.sourceListName || item.connectorType}</span>
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onStartFocus(item)}
-                aria-label={`Focus on ${item.title}`}
-                className="rounded-full border border-blue-500/35 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-300 opacity-70 transition-opacity group-hover:opacity-100"
-              >
-                Focus
-              </button>
-            </div>
-          ))}
-          {items.length > 3 && (
-            <p className="px-2 pb-1 pt-2 text-xs text-[var(--text-muted)]">+{items.length - 3} more in progress</p>
-          )}
-        </div>
-      )}
+      <AnimatePresence initial={false}>
+        {!collapsed && (
+          <motion.div
+            id="my-day-in-progress-tasks"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            {items.length === 0 ? (
+              <div className="flex min-h-36 items-center justify-center px-5 text-center">
+                <div>
+                  <p className="text-sm text-[var(--text-secondary)]">Nothing is in progress yet.</p>
+                  <p className="mt-1 text-xs text-[var(--text-muted)]">Change a task&apos;s status to make active work visible here.</p>
+                </div>
+              </div>
+            ) : (
+              <div className="px-3 py-2">
+                {items.slice(0, 3).map((item) => (
+                  <div
+                    key={item.taskId}
+                    className="group flex w-full items-center gap-2 rounded-md px-2 py-1 hover:bg-blue-500/10"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectTask(item.taskId)}
+                      className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-1 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+                    >
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600/25 text-blue-300">
+                        <CircleDot size={12} />
+                      </span>
+                      <ConnectorIcon type={item.connectorType} size={13} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-[var(--text-primary)]">{item.title}</span>
+                        <span className="mt-0.5 block truncate text-xs text-[var(--text-muted)]">{item.sourceListName || item.connectorType}</span>
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onStartFocus(item)}
+                      aria-label={`Focus on ${item.title}`}
+                      className="rounded-full border border-blue-500/35 bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-300 opacity-70 transition-opacity group-hover:opacity-100"
+                    >
+                      Focus
+                    </button>
+                  </div>
+                ))}
+                {items.length > 3 && (
+                  <p className="px-2 pb-1 pt-2 text-xs text-[var(--text-muted)]">+{items.length - 3} more in progress</p>
+                )}
+              </div>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </section>
   );
 }

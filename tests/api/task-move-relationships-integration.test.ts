@@ -1,4 +1,5 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 const { createTask } = vi.hoisted(() => ({
   createTask: vi.fn(),
@@ -18,12 +19,13 @@ vi.mock('@/lib/logger', () => ({
 }));
 
 describe('task move relationship persistence', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('@/db');
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
+    await importInitializedSqliteDatabase();
   });
 
   it('repoints both dependency endpoints on move and leaves them unchanged on copy', async () => {

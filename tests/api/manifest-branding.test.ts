@@ -31,10 +31,10 @@ describe('PWA manifest branding', () => {
     expect(manifest.background_color).toBe('#020617');
     expect(manifest.theme_color).toBe('#0b1120');
     expect(manifest.icons).toEqual([
-      { src: '/icon-v3-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
-      { src: '/icon-v3-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
-      { src: '/icon-maskable-v3-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
-      { src: '/icon-maskable-v3-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+      { src: '/icon-v4-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: '/icon-v4-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+      { src: '/icon-maskable-v4-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+      { src: '/icon-maskable-v4-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
     ]);
   });
 

@@ -5,16 +5,18 @@ import {
   constants,
   type ClientHttp2Session,
 } from 'node:http2';
-import { and, eq, isNull } from 'drizzle-orm';
 import { importPKCS8, SignJWT } from 'jose';
-import db from '@/db';
-import { apnsRegistrations } from '@/db/schema';
+import type {
+  ApnsRegistrationRecord,
+  NotificationDeliveryRepository,
+} from '@/db/persistence/notification-delivery';
 import {
   classifyNativeNavigation,
   normalizeNativeTrustedOrigin,
 } from '@/lib/native/contract';
-import { decryptApnsDeviceToken } from '@/lib/native/apns-registration-service';
-import type { MissionControlPushPayload } from '@/lib/notifications/service';
+import { decryptApnsDeviceToken } from '@/lib/native/apns-token-crypto';
+import type { MissionControlPushPayload } from '@/lib/notifications/push-payload';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import logger from '@/lib/logger';
 import {
   apnsEndpoint,
@@ -36,12 +38,13 @@ export interface ApnsResponseClassification {
 export interface ApnsSenderDependencies {
   send?: (
     configuration: ApnsConfiguration,
-    registration: typeof apnsRegistrations.$inferSelect,
+    registration: ApnsRegistrationRecord,
     deviceToken: string,
     payload: Record<string, unknown>,
     providerToken: string,
   ) => Promise<ApnsProviderResponse>;
   now?: () => Date;
+  repository?: NotificationDeliveryRepository;
 }
 
 const INVALID_TOKEN_REASONS = new Set([
@@ -136,6 +139,8 @@ export function buildApnsPayload(
     version: 1,
     notificationId: payload.notificationId,
   };
+  if (payload.deliveryId) nativeMetadata.deliveryId = payload.deliveryId;
+  if (payload.collapseId) nativeMetadata.collapseId = payload.collapseId;
   if (deepLink) nativeMetadata.deepLink = deepLink;
   return {
     aps: {
@@ -151,13 +156,19 @@ export function buildApnsPayload(
 }
 
 export function buildApnsRequestHeaders(
-  registration: typeof apnsRegistrations.$inferSelect,
+  registration: ApnsRegistrationRecord,
   deviceToken: string,
   payload: Record<string, unknown>,
   providerToken: string,
 ): Record<string, string> {
   const notificationId = payload.mc && typeof payload.mc === 'object'
     ? String((payload.mc as Record<string, unknown>).notificationId)
+    : '';
+  const deliveryId = payload.mc && typeof payload.mc === 'object'
+    ? String((payload.mc as Record<string, unknown>).deliveryId ?? '')
+    : '';
+  const collapseId = payload.mc && typeof payload.mc === 'object'
+    ? String((payload.mc as Record<string, unknown>).collapseId ?? '')
     : '';
   const headers: Record<string, string> = {
     [constants.HTTP2_HEADER_METHOD]: 'POST',
@@ -167,7 +178,11 @@ export function buildApnsRequestHeaders(
     'apns-push-type': 'alert',
     'apns-priority': '10',
   };
-  if (UUID_PATTERN.test(notificationId)) headers['apns-id'] = notificationId;
+  if (UUID_PATTERN.test(deliveryId)) headers['apns-id'] = deliveryId;
+  else if (UUID_PATTERN.test(notificationId)) headers['apns-id'] = notificationId;
+  if (collapseId && Buffer.byteLength(collapseId, 'utf8') <= 64) {
+    headers['apns-collapse-id'] = collapseId;
+  }
   return headers;
 }
 
@@ -212,7 +227,7 @@ async function providerToken(
 
 async function sendApnsRequest(
   configuration: ApnsConfiguration,
-  registration: typeof apnsRegistrations.$inferSelect,
+  registration: ApnsRegistrationRecord,
   deviceToken: string,
   payload: Record<string, unknown>,
   token: string,
@@ -287,11 +302,12 @@ export async function sendApnsPayload(
       expiredSubscriptions: 0,
     };
   }
-  const registrations = db.select().from(apnsRegistrations).where(and(
-    eq(apnsRegistrations.environment, configuration.environment),
-    eq(apnsRegistrations.topic, configuration.topic),
-    isNull(apnsRegistrations.invalidatedAt),
-  )).all();
+  const repository = dependencies.repository
+    ?? (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const registrations = await repository.listApnsRegistrations({
+    environment: configuration.environment,
+    topic: configuration.topic,
+  });
   if (registrations.length === 0) {
     return {
       classification: 'no_subscription',
@@ -319,11 +335,11 @@ export async function sendApnsPayload(
       deviceToken = decryptApnsDeviceToken(registration.tokenCiphertext);
     } catch {
       permanentFailures += 1;
-      db.update(apnsRegistrations).set({
+      await repository.invalidateApnsRegistration({
+        id: registration.id,
         invalidatedAt: now.toISOString(),
-        invalidationReason: 'token_decryption_failed',
-        updatedAt: now.toISOString(),
-      }).where(eq(apnsRegistrations.id, registration.id)).run();
+        reason: 'token_decryption_failed',
+      });
       logger.error(
         { registrationId: registration.id },
         'Retired APNs registration with unreadable token material',
@@ -362,11 +378,11 @@ export async function sendApnsPayload(
       permanentFailures += 1;
       if (classification.outcome === 'invalid_token') {
         expiredSubscriptions += 1;
-        db.update(apnsRegistrations).set({
+        await repository.invalidateApnsRegistration({
+          id: registration.id,
           invalidatedAt: now.toISOString(),
-          invalidationReason: response.reason ?? 'invalid_token',
-          updatedAt: now.toISOString(),
-        }).where(eq(apnsRegistrations.id, registration.id)).run();
+          reason: response.reason ?? 'invalid_token',
+        });
         logger.info(
           {
             registrationId: registration.id,

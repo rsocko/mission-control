@@ -13,6 +13,7 @@ const task: ProjectTask = {
   connectorType: 'local',
   connectorInstanceId: 'local',
   localDisposition: 'active',
+  microStatus: null,
   taskSourceModel: 'mc-owned',
   editPolicy: editableTaskPolicy,
   hubProjectIds: ['project-1'],

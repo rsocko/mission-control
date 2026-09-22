@@ -17,6 +17,15 @@ const connector: {
   createSubTask?: ReturnType<typeof vi.fn>;
 } = { updateTask: vi.fn() };
 
+function takeNextDataRow(): Record<string, unknown> | undefined {
+  while (selectResults.length > 0) {
+    const rows = selectResults.shift() as Array<Record<string, unknown>>;
+    const row = rows.find((candidate) => !('details' in candidate));
+    if (row) return row;
+  }
+  return undefined;
+}
+
 vi.mock('@/db', () => ({
   default: {
     select: vi.fn(() => ({
@@ -73,6 +82,117 @@ vi.mock('@/lib/sync/index', () => ({
 
 vi.mock('@/lib/sync/push-manager', () => ({
   pushPendingChanges: (...args: unknown[]) => mockPushPending(...args),
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: {
+      get: vi.fn(async () => {
+        const capabilities = await mockGetCapabilities();
+        return capabilities ? { capabilities } : null;
+      }),
+    },
+    execution: {
+      support: {
+        assertConnectorSupported: vi.fn(),
+      },
+      retention: {
+        getDetail: vi.fn(async () => {
+          const rows = selectResults.shift() as Array<{
+            connectorId: string;
+            syncedAt?: string;
+            details: unknown[];
+          }> | undefined;
+          const row = rows?.[0];
+          if (!row) return null;
+          currentDetails = row.details;
+          const detail = currentDetails[0];
+          return detail
+            ? {
+                connectorId: row.connectorId,
+                syncedAt: row.syncedAt,
+                detail,
+              }
+            : null;
+        }),
+        claim: vi.fn(async (input: {
+          action: string;
+          claimId: string;
+          now: string;
+          leaseExpiresAt: string;
+        }) => {
+          const detail = currentDetails[0] as Record<string, unknown> & {
+            resolution?: {
+              action: string;
+              status: string;
+              resolvedAt: string;
+              leaseExpiresAt?: string;
+            };
+          };
+          const resolution = detail?.resolution;
+          if (
+            resolution?.status === 'succeeded'
+            || (resolution?.status === 'indeterminate' && input.action === 'retry_push')
+            || (
+              resolution?.status === 'in_progress'
+              && Date.parse(resolution.leaseExpiresAt ?? resolution.resolvedAt) > Date.now()
+            )
+          ) {
+            return {
+              status: 'unchanged',
+              record: { connectorId: 'connector-1', syncedAt: undefined, detail },
+            };
+          }
+          const recoveringStaleClaim = resolution?.status === 'in_progress';
+          const claimed = {
+            ...detail,
+            resolution: {
+              action: input.action,
+              status: 'in_progress',
+              resolvedAt: input.now,
+              message: 'Resolution is in progress.',
+              claimId: input.claimId,
+              leaseExpiresAt: input.leaseExpiresAt,
+            },
+          };
+          currentDetails[0] = claimed;
+          updates.push({ details: [...currentDetails] });
+          return {
+            status: 'claimed',
+            record: { connectorId: 'connector-1', syncedAt: undefined, detail: claimed },
+            recoveringStaleClaim,
+          };
+        }),
+        renew: vi.fn(async () => true),
+        finalize: vi.fn(async (input: { resolution: unknown }) => {
+          const detail = currentDetails[0] as Record<string, unknown>;
+          currentDetails[0] = { ...detail, resolution: input.resolution };
+          updates.push({ details: [...currentDetails] });
+          return true;
+        }),
+        findTask: (...args: unknown[]) => mockGetTask(...args),
+        getTask: vi.fn(async () => takeNextDataRow() ?? mockGetTask()),
+        convertTaskTreeToLocal: vi.fn(async (taskId: string, archive: boolean) => {
+          mockConvertToLocal(taskId, archive ? 'archive_local' : 'keep_local');
+        }),
+        deleteTaskTree: vi.fn(async (taskId: string) => {
+          mockDeleteLocal(taskId);
+        }),
+      },
+      pushes: {
+        listSourceIds: vi.fn(async () => {
+          const row = takeNextDataRow();
+          return row ? [row] : [];
+        }),
+      },
+      deletions: {
+        markPendingPush: vi.fn(async () => {
+          updates.push({ syncStatus: 'pending_push', pushRetryCount: 0 });
+          return true;
+        }),
+      },
+    },
+  })),
 }));
 
 import { resolveRetainedItems } from '@/lib/sync/retention-resolution';

@@ -39,7 +39,9 @@ const response = (tasks: Task[]): TaskResponse => ({
   stats: {
     totalOpen: tasks.length,
     overdue: 0,
+    dueToday: 0,
     dueThisWeek: 0,
+    noDate: tasks.length,
     highPriority: tasks.length,
     assignedToMe: tasks.length,
     myDay: 0,

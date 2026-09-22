@@ -4,6 +4,7 @@ import {
   isSourceListSelected,
   normalizeSyncedLists,
 } from '@/lib/connectors/source-list-selection';
+import type { ContextAppearance } from '@/types';
 
 export { getConnectorDisplayName } from '@/lib/connectors/display-name';
 export { isSourceListSelected, normalizeSyncedLists };
@@ -23,6 +24,17 @@ export interface ConnectorConfig {
   createdAt: string;
   updatedAt: string;
   deletedAt: string | null;
+  configurationState?: {
+    status: 'configured' | 'needs-configuration';
+    code: 'household_currency_unavailable' | null;
+  };
+  /** Outcome of the most recent manual "Test Connection" click. */
+  lastTestStatus?: 'success' | 'failed' | null;
+  lastTestError?: string | null;
+  lastTestAt?: string | null;
+  /** Outcome of the most recent scheduled/triggered sync attempt (from sync_log). */
+  lastSyncStatus?: 'success' | 'failed' | null;
+  lastSyncError?: string | null;
 }
 
 export interface SourceList {
@@ -33,6 +45,9 @@ export interface SourceList {
   type: string;
   taskCount: number;
   lastSyncedAt: string | null;
+  healthStatus?: 'ok' | 'disabled' | 'failed' | null;
+  healthError?: string | null;
+  lastSuccessfulAt?: string | null;
   wellKnownListName?: string | null;
   groupId: string | null;
   sortOrder?: number;
@@ -40,6 +55,7 @@ export interface SourceList {
   icon?: string | null;
   iconColor?: string | null;
   selectedForSync?: boolean;
+  appearance?: ContextAppearance | null;
 }
 
 export interface ListGroup {
@@ -67,7 +83,7 @@ export interface SyncLogEntry {
   syncedAt: string;
   durationMs: number | null;
   jobId?: string | null;
-  trigger?: 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | null;
+  trigger?: 'api' | 'schedule' | 'nightly' | 'watchdog' | 'recovery' | 'operator-canary' | null;
   scheduledFor?: string | null;
   startedAt?: string | null;
   attempt?: number | null;
@@ -143,6 +159,51 @@ export interface InboundWebhookConfig {
   updatedAt: string;
 }
 
+export interface AlertmanagerOperationalEvent {
+  id: string;
+  kind: 'webhook_request' | 'operator_action' | 'synthetic_test';
+  outcome: string;
+  authenticated: boolean;
+  httpStatus: number;
+  accepted: number;
+  applied: number;
+  created: number;
+  updated: number;
+  stale: number;
+  duplicateReceipts: number;
+  detail: string | null;
+  occurredAt: string;
+}
+
+export interface AlertmanagerIntegrationStatus {
+  id: string;
+  name: string;
+  endpoint: string;
+  systemManaged: true;
+  configured: boolean;
+  connected: boolean;
+  enabled: boolean;
+  paused: boolean;
+  state: 'not_configured' | 'awaiting_delivery' | 'connected' | 'degraded' | 'paused';
+  controlUpdatedAt: string | null;
+  lastRequest: AlertmanagerOperationalEvent | null;
+  lastAuthenticatedReceipt: AlertmanagerOperationalEvent | null;
+  lastSuccessfulProjection: AlertmanagerOperationalEvent | null;
+  lastSyntheticTest: AlertmanagerOperationalEvent | null;
+  recentFailures: AlertmanagerOperationalEvent[];
+  counts: {
+    requests: number;
+    failures: number;
+    intentionalDrops: number;
+    accepted: number;
+    applied: number;
+    created: number;
+    updated: number;
+    stale: number;
+    duplicateReceipts: number;
+  };
+}
+
 export const INTEGRATION_EVENT_OPTIONS = [
   'task.created',
   'task.completed',
@@ -182,6 +243,7 @@ export const CONNECTOR_ICONS: Record<string, string> = {
   'monarch-money': '/icons/connectors/tyrion.svg',
   'custom-rest': '/icons/connectors/custom-rest.svg',
   'document-intelligence': '/icons/agents/owl.svg',
+  'home-assistant': '/icons/connectors/home-assistant.svg',
 };
 
 

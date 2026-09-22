@@ -90,7 +90,7 @@ The command bar owns:
 
 It should not repeat domain filters already supplied by the shared filter
 system. Existing Universe toolbar work in issue
-[#1943](https://github.com/rsocko/mission-control/issues/1943) remains the
+[#1080](https://github.com/rsocko/mission-control/issues/1080) remains the
 surface-specific information architecture.
 
 ### Layers and saved views
@@ -136,7 +136,7 @@ Available only for a view with durable placements.
 
 For Project Graph, Arrange initially remains a temporary layout tool. Persistent
 hierarchy editing belongs to the explicit structure-edit flow in issue
-[#1826](https://github.com/rsocko/mission-control/issues/1826).
+[#1021](https://github.com/rsocko/mission-control/issues/1021).
 
 ### Connect
 
@@ -151,7 +151,7 @@ Available only when the active graph supports semantic relationship mutation.
   dragging.
 
 Universe relationship editing remains governed by issue
-[#1946](https://github.com/rsocko/mission-control/issues/1946).
+[#1083](https://github.com/rsocko/mission-control/issues/1083).
 
 ### Direct edit
 
@@ -344,7 +344,7 @@ passes the validation gate in the Structured Graph Workspace roadmap.
 
 ### Phase 1: interaction contract
 
-[Issue #2212](https://github.com/rsocko/mission-control/issues/2212)
+[Issue #1200](https://github.com/rsocko/mission-control/issues/1200)
 
 - shared mode vocabulary and command-bar primitives;
 - search/focus controller;
@@ -354,7 +354,7 @@ passes the validation gate in the Structured Graph Workspace roadmap.
 
 ### Phase 2: complete Ideation authoring
 
-[Issue #2216](https://github.com/rsocko/mission-control/issues/2216)
+[Issue #1204](https://github.com/rsocko/mission-control/issues/1204)
 
 - direct label editing;
 - keyboard sibling/child loop;
@@ -365,7 +365,7 @@ passes the validation gate in the Structured Graph Workspace roadmap.
 
 ### Phase 3: graph navigation and saved lenses
 
-[Issue #2214](https://github.com/rsocko/mission-control/issues/2214)
+[Issue #1202](https://github.com/rsocko/mission-control/issues/1202)
 
 - Project and Universe focus behavior;
 - collapse aggregate edges;
@@ -375,7 +375,7 @@ passes the validation gate in the Structured Graph Workspace roadmap.
 
 ### Phase 4: durable views and presentation
 
-[Issue #2215](https://github.com/rsocko/mission-control/issues/2215)
+[Issue #1203](https://github.com/rsocko/mission-control/issues/1203)
 
 - canonical/view state separation;
 - saved placements and routes;
@@ -385,7 +385,7 @@ passes the validation gate in the Structured Graph Workspace roadmap.
 
 ### Phase 5: Relationship Workspace pilot
 
-[Issue #2213](https://github.com/rsocko/mission-control/issues/2213)
+[Issue #1201](https://github.com/rsocko/mission-control/issues/1201)
 
 - fixed entity and relationship registries;
 - search-before-create connection flow;
@@ -394,7 +394,7 @@ passes the validation gate in the Structured Graph Workspace roadmap.
 - bounded agent handoff.
 
 Advanced waypoints and endpoint reconnection remain a later capability tracked
-in [issue #2211](https://github.com/rsocko/mission-control/issues/2211). They
+in [issue #1199](https://github.com/rsocko/mission-control/issues/1199). They
 should not block the first durable saved-view implementation.
 
 ## Decision Gates

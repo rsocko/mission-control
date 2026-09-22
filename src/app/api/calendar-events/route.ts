@@ -1,10 +1,8 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
 import { getTimezone, ianaToWindowsTimezone } from '@/lib/mode';
 import { getLocalToday } from '@/lib/utils/date';
 import { ApiErrors } from '@/lib/api-error';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 interface CalendarEvent {
   id: string;
@@ -27,12 +25,9 @@ export async function GET(request: Request) {
 
   try {
     // Find active outlook-calendar connectors
-    const calConnectors = await db
-      .select()
-      .from(connectorConfigs)
-      .where(and(eq(connectorConfigs.type, 'outlook-calendar'), isNull(connectorConfigs.deletedAt)));
-
-    const activeConnectors = calConnectors.filter(c => c.enabled);
+    const activeConnectors = await (
+      await getConnectorManagementPersistence()
+    ).listActiveConnectorsByType('outlook-calendar');
 
     if (activeConnectors.length === 0) {
       return NextResponse.json({ events: [], source: 'none' });

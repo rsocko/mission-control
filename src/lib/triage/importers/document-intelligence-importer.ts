@@ -4,11 +4,23 @@
  * Fetches pending actions from the DI action-queue API and ingests them
  * into the triage system with deduplication via ingestTriageImport().
  */
-import { ingestTriageImport } from '../capture';
-import { upsertSyncState } from '../sync-state';
+import { ingestTriageImports, type TriageImportInput } from '../import-capture';
+import { getSyncState, recordSyncRun } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
-import { fetchWithRateLimit, IMPORT_USER_AGENT } from './base-importer';
-import type { DocAction } from '@/lib/connectors/document-intelligence/document-parser';
+import {
+  completeFullSyncResult,
+  createFullSyncResult,
+  fetchWithRateLimit,
+  IMPORT_USER_AGENT,
+  remoteResponseError,
+  safeRemoteError,
+} from './base-importer';
+import {
+  isActionReady,
+  resolveActionCta,
+  resolveReviewUrl,
+  type DocAction,
+} from '@/lib/connectors/document-intelligence/document-parser';
 
 export interface DocIntelligenceImportOptions {
   baseUrl?: string;
@@ -17,6 +29,7 @@ export interface DocIntelligenceImportOptions {
 }
 
 const DEFAULT_DI_URL = 'http://localhost:8200';
+export const MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE = 100;
 
 /**
  * Resolve DI connection settings from env vars.
@@ -51,22 +64,29 @@ export async function importDocumentIntelligenceActions(
   const response = await fetchWithRateLimit(url, { headers });
 
   if (!response.ok) {
-    throw new Error(
-      `OWL import failed: ${response.status} ${response.statusText}`,
-    );
+    throw remoteResponseError('Document intelligence import', response);
   }
 
-  const actions = (await response.json()) as DocAction[];
+  const payload = await response.json();
+  if (!Array.isArray(payload)) {
+    throw new Error('Document intelligence import returned malformed data');
+  }
+  const actions = payload as DocAction[];
   const summary: TriageImportSummary = {
     imported: 0,
     skipped: 0,
     errors: [],
   };
 
+  const imports: TriageImportInput[] = [];
   for (const action of actions) {
     if (!action.id || !action.document_title) {
       summary.skipped += 1;
       summary.errors.push(`Skipped DI action missing id or document_title`);
+      continue;
+    }
+    if (!isActionReady(action)) {
+      summary.skipped += 1;
       continue;
     }
 
@@ -75,8 +95,9 @@ export async function importDocumentIntelligenceActions(
       (settings.paperlessBaseUrl
         ? `${settings.paperlessBaseUrl}/documents/${action.document_id}/details`
         : '');
+    const primaryAction = resolveActionCta(action);
 
-    const result = await ingestTriageImport({
+    imports.push({
       sourcePlatform: 'document-intelligence',
       sourceId: `docintel-action-${action.id}`,
       sourceUrl: documentUrl,
@@ -92,14 +113,28 @@ export async function importDocumentIntelligenceActions(
         documentTitle: action.document_title,
         urgency: action.urgency,
         dueDate: action.due_date,
+        category: action.category,
+        actionReady: isActionReady(action),
+        reviewState: action.review_state,
+        reviewUrl: resolveReviewUrl(action, null),
+        primaryActionId: primaryAction?.id,
+        primaryActionLabel: primaryAction?.label,
+        primaryActionUrl: primaryAction?.url,
         connectorType: 'document-intelligence',
       },
     });
+  }
 
-    if (result.status === 'imported') {
-      summary.imported += 1;
-    } else {
-      summary.skipped += 1;
+  for (
+    let offset = 0;
+    offset < imports.length;
+    offset += MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE
+  ) {
+    const outcomes = await ingestTriageImports(
+      imports.slice(offset, offset + MAX_DOCUMENT_INTELLIGENCE_BATCH_SIZE),
+    );
+    for (const outcome of outcomes) {
+      summary[outcome.status === 'imported' ? 'imported' : 'skipped'] += 1;
     }
   }
 
@@ -114,14 +149,8 @@ export async function importAllDocumentIntelligenceActions(
   options?: DocIntelligenceImportOptions & { incremental?: boolean },
 ): Promise<FullSyncResult> {
   const startTime = Date.now();
-  const result: FullSyncResult = {
-    imported: 0,
-    skipped: 0,
-    errors: [],
-    pagesProcessed: 0,
-    durationMs: 0,
-    lastCursor: null,
-  };
+  const state = await getSyncState('document-intelligence');
+  const result = createFullSyncResult();
 
   try {
     const summary = await importDocumentIntelligenceActions(options);
@@ -130,18 +159,18 @@ export async function importAllDocumentIntelligenceActions(
     result.skipped = summary.skipped;
     result.errors = summary.errors;
   } catch (error) {
-    result.errors.push(error instanceof Error ? error.message : String(error));
+    result.errors.push(safeRemoteError('Document intelligence import', error));
   }
 
-  result.durationMs = Date.now() - startTime;
-
-  await upsertSyncState('document-intelligence', {
+  completeFullSyncResult(result, startTime);
+  const persisted = await recordSyncRun('document-intelligence', state?.revision ?? 0, {
     lastCursor: null,
     imported: result.imported,
     skipped: result.skipped,
     errors: result.errors.slice(0, 20),
     durationMs: result.durationMs,
   });
+  if (persisted.status === 'stale') result.outcome = 'stale';
 
   return result;
 }
@@ -161,6 +190,8 @@ function buildTitle(action: DocAction): string {
       return `Schedule: ${action.document_title}`;
     case 'file':
       return `File: ${action.document_title}`;
+    case 'archive':
+      return `Archive: ${action.document_title}`;
     case 'review':
       return `Review: ${action.document_title}`;
     default:

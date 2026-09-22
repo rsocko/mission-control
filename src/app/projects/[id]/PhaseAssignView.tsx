@@ -19,7 +19,6 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
-  FilePlus2,
   GripVertical,
 Layers,
 LoaderCircle,
@@ -28,13 +27,12 @@ Search,
 X,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { CompletionBurst } from '@/components/ui/CompletionBurst';
-import { TaskContextMenu, type TaskContextMenuActions, type HubProject } from '@/components/task-list/TaskContextMenu';
+import { type TaskContextMenuActions, type HubProject } from '@/components/task-list/TaskContextMenu';
 import { cn } from '@/lib/utils';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
-import { DraggableTaskItem, PhaseAddTaskMenu, PriorityDot, TaskDisplayId, TaskInfoBadges, TaskStatusBadge } from './components';
+import { DraggableTaskItem, PhaseAddTaskMenu, PriorityDot, TaskStatusBadge } from './components';
 import { BUTTON_TRANSITION } from './constants';
 import { getConnectorIcon, getPhaseColor } from './utils';
+import { PlanTaskRow } from './PlanTaskRow';
 import type {
   PhaseTaskEntry,
   ProjectPhaseViewModel as ProjectPhase,
@@ -45,6 +43,7 @@ import type {
 
 function AssignPhaseTarget({
   phase,
+  projectColor,
   entries,
   isExpanded,
   isDragging,
@@ -53,6 +52,8 @@ function AssignPhaseTarget({
   isSaving,
   isRenameDisabled,
   onSelectTask,
+  onDoubleClickTask,
+  onOpenTaskNotes,
   selectedTaskId,
   completingIds,
   myDayTaskIds,
@@ -62,6 +63,7 @@ function AssignPhaseTarget({
   projects = [],
 }: {
   phase: ProjectPhase;
+  projectColor?: string;
   entries: PhaseTaskEntry[];
   isExpanded: boolean;
   isDragging: boolean;
@@ -70,6 +72,8 @@ function AssignPhaseTarget({
   isSaving: boolean;
   isRenameDisabled: boolean;
   onSelectTask: (taskId: string | null) => void;
+  onDoubleClickTask: (taskId: string) => void;
+  onOpenTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
   selectedTaskId: string | null;
   completingIds: Set<string>;
   myDayTaskIds: Set<string>;
@@ -83,7 +87,7 @@ function AssignPhaseTarget({
     data: { type: 'phase-drop' },
   });
 
-  const phaseColor = getPhaseColor(phase);
+  const phaseColor = getPhaseColor(phase, projectColor ? { color: projectColor } : null);
   const [isEditing, setIsEditing] = useState(false);
   const [draftName, setDraftName] = useState(phase.name);
 
@@ -185,60 +189,25 @@ function AssignPhaseTarget({
               <div className="border-t border-[var(--border)] px-3 py-2 space-y-1">
                 <SortableContext items={entries.map(({ task }) => `task:${task.id}`)} strategy={verticalListSortingStrategy}>
                   {entries.map(({ task }) => {
-                    const ConnectorIcon = getConnectorIcon(task.connectorType);
-                    const isDone = task.status === 'done' || completingIds.has(task.id);
-                    const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);
                     return (
                       <DraggableTaskItem key={task.id} taskId={task.id}>
                         {(dragHandleProps) => (
-                          <TaskContextMenu
-                            task={{ id: task.id, title: task.title, status: task.status, priority: task.priority, connectorType: task.connectorType, dueDate: task.dueDate ?? null, localDisposition: task.localDisposition, taskSourceModel: task.taskSourceModel, editPolicy: task.editPolicy }}
+                          <PlanTaskRow
+                            task={task}
+                            variant="compact"
+                            dragHandleProps={dragHandleProps}
+                            dragLabel="Drag task to another phase"
+                            isSelected={selectedTaskId === task.id}
+                            isCompleting={completingIds.has(task.id)}
+                            onSelect={onSelectTask}
+                            onDoubleClick={onDoubleClickTask}
+                            onOpenNotes={onOpenTaskNotes}
+                            onComplete={onCompleteTask}
                             isInMyDay={myDayTaskIds.has(task.id)}
-                            projectPhases={phaseMenuItems}
+                            contextMenuActions={getTaskContextActions(task)}
+                            phaseMenuItems={phaseMenuItems}
                             projects={projects}
-                            taskProjectIds={task.hubProjectIds}
-                            taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                            actions={getTaskContextActions(task)}
-                          >
-                            <div
-                              className={cn(
-                                'flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
-                                selectedTaskId === task.id && 'ring-1 ring-[var(--accent-400)] bg-[var(--surface-1)]',
-                                isInactive && 'opacity-50',
-                              )}
-                              onClick={() => onSelectTask(task.id)}
-                            >
-                              <button
-                                type="button"
-                                {...dragHandleProps}
-                                className="inline-flex min-h-6 min-w-6 cursor-grab items-center justify-center rounded text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-                                aria-label="Drag task to another phase"
-                                onClick={(e) => e.stopPropagation()}
-                              >
-                                <GripVertical size={12} />
-                              </button>
-                              <CompletionBurst celebrating={completingIds.has(task.id)}>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); void onCompleteTask(task.id); }}
-                                  disabled={completingIds.has(task.id)}
-                                  className={cn(
-                                    'flex-shrink-0 h-[14px] w-[14px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                    isDone
-                                      ? 'bg-green-400 border-green-400 text-white'
-                                      : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                  )}
-                                  aria-label={isDone ? 'Completed' : 'Mark complete'}
-                                >
-                                  {isDone && <CheckCircle2 size={10} />}
-                                </button>
-                              </CompletionBurst>
-                              <PriorityDot priority={task.priority} />
-                              <ConnectorIcon size={11} className="text-[var(--text-tertiary)]" />
-                              <span className={cn('truncate text-xs text-[var(--text-secondary)]', isDone && 'line-through')}>{task.title}</span>
-                              <TaskDisplayId task={task} />
-                            </div>
-                          </TaskContextMenu>
+                          />
                         )}
                       </DraggableTaskItem>
                     );
@@ -282,6 +251,7 @@ function UnassignedDropTarget({ isDragging, children }: { isDragging: boolean; c
 
 interface PhaseAssignViewProps {
   phases: ProjectPhase[];
+  projectColor?: string;
   unassignedTasks: ProjectTask[];
   phaseEntries: Record<string, PhaseTaskEntry[]>;
   sensors: ReturnType<typeof import('@dnd-kit/core').useSensors>;
@@ -293,6 +263,8 @@ interface PhaseAssignViewProps {
   onDragStart: (event: DragStartEvent) => void;
   onDragEnd: (event: DragEndEvent) => void;
   onSelectTask: (taskId: string | null) => void;
+  onDoubleClickTask: (taskId: string) => void;
+  onOpenTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
   onCompleteTask: (taskId: string) => void;
   onRenamePhase: (phase: ProjectPhase, name: string) => void | Promise<void>;
   savingPhaseIds: Set<string>;
@@ -309,6 +281,7 @@ interface PhaseAssignViewProps {
 
 export function PhaseAssignView({
   phases,
+  projectColor,
   unassignedTasks,
   phaseEntries,
   sensors,
@@ -320,6 +293,8 @@ export function PhaseAssignView({
   onDragStart,
   onDragEnd,
   onSelectTask,
+  onDoubleClickTask,
+  onOpenTaskNotes,
   onCompleteTask,
   onRenamePhase,
   savingPhaseIds,
@@ -393,38 +368,26 @@ export function PhaseAssignView({
                 {filteredUnassigned.length}
               </span>
             </div>
-            <div className="flex items-center gap-2">
-              <div className="relative" data-phase-add-menu>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setAddTaskMenuOpen((v) => !v)}
-                  aria-expanded={addTaskMenuOpen}
-                  aria-haspopup="menu"
-                  className={cn(
-                    'gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--accent)]',
-                    BUTTON_TRANSITION,
-                  )}
-                >
-                  <Plus size={14} />
-                  Add task
-                </Button>
-                <AnimatePresence>
-                  {addTaskMenuOpen && (
-                    <PhaseAddTaskMenu
-                      onCreateNew={() => {
-                        setAddTaskMenuOpen(false);
-                        onCreateNewTask();
-                      }}
-                      onLinkExisting={() => {
-                        setAddTaskMenuOpen(false);
-                        onLinkExistingTask();
-                      }}
-                      onClose={() => setAddTaskMenuOpen(false)}
-                    />
-                  )}
-                </AnimatePresence>
-              </div>
+             <div className="flex items-center gap-2">
+              <PhaseAddTaskMenu
+                open={addTaskMenuOpen}
+                onOpenChange={setAddTaskMenuOpen}
+                trigger={(
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      'gap-1.5 text-xs text-[var(--text-secondary)] hover:text-[var(--accent)]',
+                      BUTTON_TRANSITION,
+                    )}
+                  >
+                    <Plus size={14} />
+                    Add task
+                  </Button>
+                )}
+                onCreateNew={onCreateNewTask}
+                onLinkExisting={onLinkExistingTask}
+              />
               <div className={cn(
                 'input-glow flex items-center gap-1 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-1)] px-2 py-1',
                 isDragging && 'opacity-50 pointer-events-none',
@@ -468,70 +431,25 @@ export function PhaseAssignView({
               <SortableContext items={filteredUnassigned.map((t) => `task:${t.id}`)} strategy={verticalListSortingStrategy}>
                 <div className="space-y-2">
                   {filteredUnassigned.map((task) => {
-                    const ConnectorIcon = getConnectorIcon(task.connectorType);
-                    const isDone = task.status === 'done' || completingIds.has(task.id);
-                    const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);
                     return (
                       <DraggableTaskItem key={task.id} taskId={task.id}>
                         {(dragHandleProps) => (
-                          <TaskContextMenu
-                            task={{ id: task.id, title: task.title, status: task.status, priority: task.priority, connectorType: task.connectorType, dueDate: task.dueDate ?? null, localDisposition: task.localDisposition, taskSourceModel: task.taskSourceModel, editPolicy: task.editPolicy }}
+                          <PlanTaskRow
+                            task={task}
+                            dragHandleProps={dragHandleProps}
+                            dragLabel="Drag task to a phase"
+                            dragEnabled={hasPhases}
+                            isSelected={selectedTaskId === task.id}
+                            isCompleting={completingIds.has(task.id)}
+                            onSelect={onSelectTask}
+                            onDoubleClick={onDoubleClickTask}
+                            onOpenNotes={onOpenTaskNotes}
+                            onComplete={onCompleteTask}
                             isInMyDay={myDayTaskIds.has(task.id)}
-                            projectPhases={phaseMenuItems}
+                            contextMenuActions={getTaskContextActions(task)}
+                            phaseMenuItems={phaseMenuItems}
                             projects={projects}
-                            taskProjectIds={task.hubProjectIds}
-                            taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                            actions={getTaskContextActions(task)}
-                          >
-                            <div
-                              className={cn(
-                                'flex items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
-                                selectedTaskId === task.id && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
-                                isInactive && 'opacity-50',
-                              )}
-                              onClick={() => onSelectTask(task.id)}
-                            >
-                              <button
-                                type="button"
-                                {...dragHandleProps}
-                                className={cn(
-                                  'inline-flex min-h-7 min-w-7 items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]',
-                                  hasPhases ? 'cursor-grab active:cursor-grabbing' : 'cursor-default opacity-0',
-                                )}
-                                aria-label="Drag task to a phase"
-                                onClick={(e) => e.stopPropagation()}
-                                tabIndex={hasPhases ? 0 : -1}
-                              >
-                                <GripVertical size={14} />
-                              </button>
-                              <CompletionBurst celebrating={completingIds.has(task.id)}>
-                                <button
-                                  type="button"
-                                  onClick={(e) => { e.stopPropagation(); void onCompleteTask(task.id); }}
-                                  disabled={completingIds.has(task.id)}
-                                  className={cn(
-                                    'flex-shrink-0 h-[16px] w-[16px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                    isDone
-                                      ? 'bg-green-400 border-green-400 text-white'
-                                      : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                  )}
-                                  aria-label={isDone ? 'Completed' : 'Mark complete'}
-                                >
-                                  {isDone && <CheckCircle2 size={12} />}
-                                </button>
-                              </CompletionBurst>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1.5">
-                                  <PriorityDot priority={task.priority} />
-                                  <ConnectorIcon size={12} className="text-[var(--text-tertiary)]" />
-                                  <p className={cn('truncate text-sm text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
-                                  <TaskDisplayId task={task} />
-                                  <TaskInfoBadges task={task} />
-                                </div>
-                              </div>
-                              <TaskStatusBadge status={task.status} statusReason={task.statusReason} />
-                            </div>
-                          </TaskContextMenu>
+                          />
                         )}
                       </DraggableTaskItem>
                     );
@@ -596,6 +514,7 @@ export function PhaseAssignView({
                 <AssignPhaseTarget
                   key={phase.id}
                   phase={phase}
+                  projectColor={projectColor}
                   entries={phaseEntries[phase.id] ?? []}
                   isExpanded={expandedPhases.has(phase.id)}
                   isDragging={isDragging}
@@ -604,6 +523,8 @@ export function PhaseAssignView({
                   isSaving={savingPhaseIds.has(phase.id)}
                   isRenameDisabled={phaseMutationPending}
                   onSelectTask={onSelectTask}
+                  onDoubleClickTask={onDoubleClickTask}
+                  onOpenTaskNotes={onOpenTaskNotes}
                   selectedTaskId={selectedTaskId}
                   completingIds={completingIds}
                   myDayTaskIds={myDayTaskIds}

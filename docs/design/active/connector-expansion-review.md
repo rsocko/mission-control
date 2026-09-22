@@ -9,6 +9,7 @@ related:
   - "[Task Sync Integration](../reference/TASK-SYNC-INTEGRATION.md)"
   - "[Future Integrations](FUTURE-INTEGRATIONS.md)"
   - "[Kanban Column Mapping](KANBAN-COLUMN-MAPPING-DESIGN.md)"
+  - "[Home Assistant: Multi-Instance, Updates/Repairs, and Custom Actions](../proposed/home-assistant-multi-instance-expansion.md)"
 mockups: []
 ---
 
@@ -34,7 +35,7 @@ This document reviews all existing connectors, maps them against the planned Con
 | 2 | GitHub Issues | `github-issues` | ✅ | ✅ | — | ✅ | ✅ | ✅ | Kanban, micro-status as `mc:*` labels, GitHub notifications → alerts |
 | 3 | Outlook Calendar | `outlook-calendar` | ✅ | — | — | — | — | ✅ | **Today timeline: calendar meeting overlay** (amber `CalendarEventBlock`), `/api/calendar-events` |
 | 4 | Outlook Email | `outlook-email` | ✅ | — | — | — | — | ✅ | Flagged/important emails → triage queue alerts |
-| 5 | RyMessage | `rymessage` | ✅ | — | — | — | — | — | AI-extracted iMessage actions → alerts; webhook + REST + SQLite modes |
+| 5 | RyMessage | `rymessage` | ✅ | — | — | — | — | — | AI-extracted actions → notifications today; provider-owned task materialization bridge proposed |
 | 6 | Tyrion | `finance-manager` | ✅ | ✅ | — | — | ✅ | — | Finance projection, attribution, insights, notifications, and bounded exception escalation |
 | 7 | Home Assistant | `home-assistant` | ✅ | — | — | — | — | — | Device state → triage alerts; rule engine with cooldowns |
 | 8 | Document Intelligence | `document-intelligence` | ✅ | ✅ | — | — | — | — | Bill extraction → tasks; statement tracking → alerts; EOB matching |
@@ -58,15 +59,29 @@ The Outlook Calendar connector renders uniquely on the **Today view**:
 
 ## Expansion Roadmap — Status (§4.4)
 
-### 1. ✅ Home Assistant Alerts — DONE
+### 1. Home Assistant — BASE SHIPPED; EXPANSION SPEC READY
 
-Fully implemented as `home-assistant` connector in `src/lib/connectors/home-assistant/index.ts`.
+Base entity-alert ingestion is implemented as the `home-assistant` connector in
+`src/lib/connectors/home-assistant/index.ts`.
 
 - Configurable entity patterns (`sensor.mail_*`, `binary_sensor.*_door*`, `sensor.*_battery`)
 - Rule engine with conditions: `equals`, `above`, `below`, `changed`
 - Built-in rules: door-open (high), low-battery (medium), motion (low), device-offline (medium)
 - Per-rule cooldown support (prevents alert fatigue)
 - **Surfaces:** Alerts panel, triage queue, notification badges
+
+**Implementation-ready expansion:** see
+[Home Assistant: Multi-Instance, Updates/Repairs, and Custom Actions](../proposed/home-assistant-multi-instance-expansion.md)
+for multi-instance naming and filtering, Updates from REST `update.*` states,
+persistent notifications from WebSocket `persistent_notification/get`, Repairs
+from WebSocket `repairs/list_issues`, and confirmed HA-specific actions through
+the existing notification provider framework. Persistent notifications are not
+REST state entities. [#1756](https://github.com/rsocko/mission-control/issues/1756)
+is the canonical epic; [#1706](https://github.com/rsocko/mission-control/issues/1706)
+is the first Updates implementation slice. #133 and #1297 are correctly closed;
+#627 is closed as fulfilled after its acceptance check; and
+[rsocko/ideation#1421](https://github.com/rsocko/ideation/issues/1421) is closed
+as a duplicate of #1756.
 
 ### 2. ✅ Document Intelligence — DONE
 
@@ -172,7 +187,7 @@ No connector exists in Mission Control. See [§ Model Catalog Gap Analysis](#mod
 | Connector | Status | Notes |
 |-----------|--------|-------|
 | **Custom REST** | ✅ Built | Generic adapter — field mapping, status/priority maps, custom headers. "Escape hatch" for any REST API. |
-| **RyMessage** | ✅ Built | AI-extracted iMessage actions → alerts. Webhook + REST + SQLite modes. Full lifecycle tracking. |
+| **RyMessage** | ⚠️ Transitional | Notification ingestion is built. First-class task candidates, provider materialization defaults, provenance, and lifecycle reconciliation are proposed in `../proposed/rymessage-task-materialization.md`. |
 | **n8n Webhook** | ✅ Built | Route-level integration (not a factory connector). Inbound + outbound webhook support. |
 
 ---

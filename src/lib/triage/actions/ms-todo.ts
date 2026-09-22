@@ -1,9 +1,7 @@
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
 import { createGraphClient } from '@/lib/connectors/microsoft-todo/graph-client';
 import type { GraphClient } from '@/lib/connectors/microsoft-todo/graph-client';
-import type { ConnectorConfig } from '@/types';
+import { graphTodoTasksPath } from '@/lib/connectors/microsoft-todo/resource-paths';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import type { TriageItem } from '@/types';
 import logger from '@/lib/logger';
 
@@ -66,19 +64,18 @@ function inferListName(item: TriageItem): string | undefined {
 
 /**
  * Resolve a Graph client from an active microsoft-todo connector config.
+ *
+ * Connector selection now goes through the backend-neutral core connector
+ * repository. `listEnabled()` already excludes disabled and soft-deleted
+ * connectors; the deterministic `id` ordering below replaces the previous
+ * backend-defined "first matching row" with a stable choice across backends.
  */
 async function resolveGraphClient(): Promise<{ client: GraphClient; connectorId: string } | null> {
   try {
-    const [config] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(
-        and(
-          eq(connectorConfigs.type, 'microsoft-todo'),
-          eq(connectorConfigs.enabled, true),
-          isNull(connectorConfigs.deletedAt),
-        ),
-      );
+    const connectors = await getCorePersistenceRepositories().connectors.listEnabled();
+    const config = connectors
+      .filter((connector) => connector.type === 'microsoft-todo')
+      .sort((left, right) => (left.id < right.id ? -1 : left.id > right.id ? 1 : 0))[0];
 
     if (!config) return null;
 
@@ -184,7 +181,7 @@ export async function findTodoTaskFromTriageItem(
     ? { listId: options.listId, resolvedName: options.listName || 'Custom List' }
     : await resolveListId(client, targetListName);
   const marker = getTriageMarker(item.id);
-  let url = `/me/todo/lists/${listId}/tasks?$top=100`;
+  let url = `${graphTodoTasksPath(listId)}?$top=100`;
 
   while (url) {
     const res = await client.graphFetch(url);
@@ -264,7 +261,7 @@ export async function createTodoTaskFromTriageItem(
 
   let res: Response;
   try {
-    res = await client.graphFetch(`/me/todo/lists/${listId}/tasks`, {
+    res = await client.graphFetch(graphTodoTasksPath(listId), {
       method: 'POST',
       body: JSON.stringify(graphBody),
     });

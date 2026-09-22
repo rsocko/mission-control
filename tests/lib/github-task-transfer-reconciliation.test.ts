@@ -1,8 +1,14 @@
 import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities';
+import {
+  digestHistoricalProof,
+  historicalProofDigestMatches,
+} from '@/db/persistence/github-transfer-succession';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -18,7 +24,7 @@ let identities: typeof import('@/lib/external-identities');
 let service: typeof import('@/lib/connectors/github-issues/repoint-service');
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   schema = await import('@/db/schema');
   identities = await import('@/lib/external-identities');
   service = await import('@/lib/connectors/github-issues/repoint-service');
@@ -30,9 +36,20 @@ afterAll(() => {
 });
 
 describe('historical GitHub task transfer reconciliation', () => {
+  it('uses a JSONB-stable digest while accepting legacy SQLite proof digests', () => {
+    const original = { requestedSourceId: 'a:1', successorSourceId: 'b:2' };
+    const reordered = { successorSourceId: 'b:2', requestedSourceId: 'a:1' };
+    const legacyDigest = createHash('sha256')
+      .update(JSON.stringify(original))
+      .digest('hex');
+
+    expect(digestHistoricalProof(reordered)).toBe(digestHistoricalProof(original));
+    expect(historicalProofDigestMatches(original, legacyDigest)).toBe(true);
+  });
+
   it('records the exact historical endpoint to observable successor proof', async () => {
     const connectorId = 'historical-transfer-exact';
-    const pair = seedTransferPair(connectorId);
+    const pair = await seedTransferPair(connectorId);
     const observation = restObservation(
       connectorId,
       'I_kwDOTWhjas8AAAABMFO0qg',
@@ -102,7 +119,7 @@ describe('historical GitHub task transfer reconciliation', () => {
 
   it('rejects stable-identity and canonical-locator near matches without persisting proof', async () => {
     const stableMismatchConnector = 'historical-transfer-stable-mismatch';
-    const stableMismatchPair = seedTransferPair(stableMismatchConnector);
+    const stableMismatchPair = await seedTransferPair(stableMismatchConnector);
     await expect(service.reconcileHistoricalGitHubIssueTransfer({
       connectorInstanceId: stableMismatchConnector,
       sourceTaskId: stableMismatchPair.sourceTaskId,
@@ -120,7 +137,7 @@ describe('historical GitHub task transfer reconciliation', () => {
     })).rejects.toThrow('did not resolve to the successor stable identity');
 
     const locatorMismatchConnector = 'historical-transfer-locator-mismatch';
-    const locatorMismatchPair = seedTransferPair(locatorMismatchConnector);
+    const locatorMismatchPair = await seedTransferPair(locatorMismatchConnector);
     await expect(service.reconcileHistoricalGitHubIssueTransfer({
       connectorInstanceId: locatorMismatchConnector,
       sourceTaskId: locatorMismatchPair.sourceTaskId,
@@ -147,10 +164,10 @@ describe('historical GitHub task transfer reconciliation', () => {
   });
 });
 
-function seedTransferPair(connectorInstanceId: string): {
+async function seedTransferPair(connectorInstanceId: string): Promise<{
   sourceTaskId: string;
   successorTaskId: string;
-} {
+}> {
   const sourceTaskId = `${connectorInstanceId}-historical-task`;
   const successorTaskId = `${connectorInstanceId}-successor-task`;
   database.default.insert(schema.connectorConfigs).values({
@@ -202,7 +219,7 @@ function seedTransferPair(connectorInstanceId: string): {
       lastSyncedAt: now,
     },
   ]).run();
-  identities.persistExternalIdentityBatch([
+  await identities.persistExternalIdentityBatch([
     {
       target: {
         connectorInstanceId,

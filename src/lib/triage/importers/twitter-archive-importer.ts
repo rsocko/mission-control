@@ -12,7 +12,7 @@
  * the API route) are responsible for extracting the raw text of the relevant
  * `data/*.js` files and passing them in here.
  */
-import { ingestTriageImport } from '../capture';
+import { ingestTriageImport } from '../import-capture';
 import { upsertSyncState } from '../sync-state';
 import type { TriageImportSummary, FullSyncResult } from './base-importer';
 
@@ -249,6 +249,11 @@ export async function importAllTwitterArchive(input: {
   const summary = await importTwitterArchive(input);
 
   const result: FullSyncResult = {
+    outcome: summary.errors.length === 0
+      ? 'success'
+      : summary.imported > 0 || summary.skipped > 0
+        ? 'partial'
+        : 'failure',
     imported: summary.imported,
     skipped: summary.skipped,
     errors: summary.errors,

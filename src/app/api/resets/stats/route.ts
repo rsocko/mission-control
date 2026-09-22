@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { tasks, routines, routineCompletions, focusItems, energyCheckins } from '@/db/schema';
-import { and, gte, lte, eq, not, inArray } from 'drizzle-orm';
+import { getAIWorkflowPersistence } from '@/lib/ai/workflow-persistence';
 import {
   formatDateInLocalTimezone,
   getLocalDateBoundsISO,
@@ -10,7 +8,6 @@ import {
 } from '@/lib/utils/date';
 import logger from '@/lib/logger';
 import { resolveTaskEditPolicies } from '@/lib/tasks/edit-policy';
-import { timestampGte, timestampLt } from '@/lib/utils/sqlite-date';
 
 function formatDateLocal(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -75,49 +72,25 @@ export async function GET(request: Request) {
     const { dayStart: periodStartIso } = getLocalDateBoundsISO(periodStart);
     const { nextDayStart: periodEndExclusiveIso } = getLocalDateBoundsISO(periodEnd);
 
-    // 1. Tasks completed in period
-    const completedTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      completedAt: tasks.completedAt,
-    })
-      .from(tasks)
-      .where(and(
-        eq(tasks.status, 'done'),
-        timestampGte(tasks.completedAt, periodStartIso),
-        timestampLt(tasks.completedAt, periodEndExclusiveIso),
-      ));
+    // Stale threshold (>14 days since last update, still open)
+    const staleThreshold = new Date(today + 'T12:00:00');
+    staleThreshold.setDate(staleThreshold.getDate() - STALE_THRESHOLD_DAYS);
+    const staleThresholdStr = formatDateLocal(staleThreshold);
+    const { nextDayStart: staleThresholdExclusiveIso } = getLocalDateBoundsISO(staleThresholdStr);
 
-    // 2. Tasks created in period
-    const createdTasks = await db.select({ id: tasks.id })
-      .from(tasks)
-      .where(and(
-        timestampGte(tasks.createdAt, periodStartIso),
-        timestampLt(tasks.createdAt, periodEndExclusiveIso),
-      ));
-
-    // 3. Carried forward (open tasks that existed before period end)
-    const carriedForward = await db.select({ id: tasks.id })
-      .from(tasks)
-      .where(and(
-        not(inArray(tasks.status, ['done', 'cancelled'])),
-        timestampLt(tasks.createdAt, periodEndExclusiveIso),
-      ));
-
-    // 4. Routine completion rate
-    const activeRoutines = await db.select({ id: routines.id, cadenceType: routines.cadenceType })
-      .from(routines)
-      .where(and(eq(routines.isActive, true), eq(routines.isArchived, false)));
-
-    const periodCompletions = await db.select({
-      routineId: routineCompletions.routineId,
-      date: routineCompletions.date,
-    })
-      .from(routineCompletions)
-      .where(and(
-        gte(routineCompletions.date, periodStart),
-        lte(routineCompletions.date, periodEnd),
-      ));
+    const persistence = await getAIWorkflowPersistence();
+    const aggregate = await persistence.resets.aggregateStats({
+      periodStart,
+      periodEnd,
+      periodStartIso,
+      periodEndExclusiveIso,
+      staleThresholdExclusiveIso,
+      staleLimit: 50,
+    });
+    const {
+      completedTasks, createdTaskCount, carriedForwardCount, activeRoutines,
+      periodCompletions, focusItems: focusItemsInPeriod, staleTasks, energyData, focusTaskStatuses,
+    } = aggregate;
 
     // Simple routine % = unique routine-days completed / (active daily routines × days in period)
     const daysInPeriod = Math.ceil((new Date(periodEnd + 'T12:00:00').getTime() - new Date(periodStart + 'T12:00:00').getTime()) / 86400000) + 1;
@@ -130,20 +103,9 @@ export async function GET(request: Request) {
       ? Math.round((dailyCompletions.length / expectedCompletions) * 100)
       : 0;
 
-    // 5. Focus 3 hit rate (days where all 3 slots were filled)
-    const focusDays = await db.select({
-      date: focusItems.date,
-      slot: focusItems.slot,
-    })
-      .from(focusItems)
-      .where(and(
-        eq(focusItems.scope, 'today'),
-        gte(focusItems.date, periodStart),
-        lte(focusItems.date, periodEnd),
-      ));
-
+    // Focus 3 hit rate (days where all 3 slots were filled)
     const focusByDay = new Map<string, Set<number>>();
-    for (const f of focusDays) {
+    for (const f of focusItemsInPeriod) {
       if (!focusByDay.has(f.date)) focusByDay.set(f.date, new Set());
       focusByDay.get(f.date)!.add(f.slot);
     }
@@ -159,68 +121,18 @@ export async function GET(request: Request) {
     const focusHitDays = workDays.filter(d => (focusByDay.get(d)?.size ?? 0) >= 3).length;
     const focusHitRate = `${focusHitDays}/${workDays.length} days`;
 
-    // 6. Stale tasks (>14 days since last update, still open)
-    const staleThreshold = new Date(today + 'T12:00:00');
-    staleThreshold.setDate(staleThreshold.getDate() - STALE_THRESHOLD_DAYS);
-    const staleThresholdStr = formatDateLocal(staleThreshold);
-    const { nextDayStart: staleThresholdExclusiveIso } = getLocalDateBoundsISO(staleThresholdStr);
-
-    const staleTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      updatedAt: tasks.updatedAt,
-      status: tasks.status,
-      priority: tasks.priority,
-      sourceId: tasks.sourceId,
-      connectorType: tasks.connectorType,
-      connectorInstanceId: tasks.connectorInstanceId,
-    })
-      .from(tasks)
-      .where(and(
-        not(inArray(tasks.status, ['done', 'cancelled'])),
-        timestampLt(tasks.updatedAt, staleThresholdExclusiveIso),
-      ))
-      .limit(50);
     const staleTaskPolicies = await resolveTaskEditPolicies(staleTasks);
 
-    // 7. Energy data for period
-    const energyData = await db.select()
-      .from(energyCheckins)
-      .where(and(
-        gte(energyCheckins.date, periodStart),
-        lte(energyCheckins.date, periodEnd),
-      ));
-
-    // 8. Incomplete Focus 3 items (tasks that were in Focus 3 but not completed)
-    const allFocusItemsInPeriod = await db.select({
-      taskId: focusItems.taskId,
-      date: focusItems.date,
-      slot: focusItems.slot,
-    })
-      .from(focusItems)
-      .where(and(
-        eq(focusItems.scope, 'today'),
-        gte(focusItems.date, periodStart),
-        lte(focusItems.date, periodEnd),
-      ));
-
-    // Get unique task IDs from focus items
-    const focusTaskIds = [...new Set(allFocusItemsInPeriod.map(f => f.taskId))];
+    // Incomplete Focus 3 items (tasks that were in Focus 3 but not completed)
     const incompleteFocusTasks: Array<{ id: string; title: string; timesInFocus: number }> = [];
-    if (focusTaskIds.length > 0) {
-      const focusTasks = await db.select({ id: tasks.id, title: tasks.title, status: tasks.status })
-        .from(tasks)
-        .where(inArray(tasks.id, focusTaskIds));
-
-      for (const t of focusTasks) {
-        if (t.status !== 'done' && t.status !== 'cancelled') {
-          const count = allFocusItemsInPeriod.filter(f => f.taskId === t.id).length;
-          incompleteFocusTasks.push({ id: t.id, title: t.title, timesInFocus: count });
-        }
+    for (const t of focusTaskStatuses) {
+      if (t.status !== 'done' && t.status !== 'cancelled') {
+        const count = focusItemsInPeriod.filter(f => f.taskId === t.id).length;
+        incompleteFocusTasks.push({ id: t.id, title: t.title, timesInFocus: count });
       }
     }
 
-    // 9. For monthly: week-by-week breakdown
+    // For monthly: week-by-week breakdown
     let weeklyBreakdown: Array<{ weekStart: string; weekEnd: string; completed: number; routinePercent: number }> | undefined;
     if (type === 'monthly') {
       weeklyBreakdown = [];
@@ -272,8 +184,8 @@ export async function GET(request: Request) {
       periodStart,
       periodEnd,
       tasksCompleted: completedTasks.length,
-      tasksCreated: createdTasks.length,
-      tasksCarriedForward: carriedForward.length,
+      tasksCreated: createdTaskCount,
+      tasksCarriedForward: carriedForwardCount,
       routinePercentage,
       focusHitRate,
       focusHitDays,

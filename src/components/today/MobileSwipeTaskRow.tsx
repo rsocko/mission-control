@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { motion, useMotionValue, useTransform, useReducedMotion, type PanInfo } from 'motion/react';
 import {
-  Archive, Calendar, CalendarClock, Check, CircleCheck, Clock, Moon, Sun, X,
+  Archive, Calendar, CalendarClock, CircleCheck, Clock, Moon, Sun, X,
 } from 'lucide-react';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import Image from 'next/image';
@@ -12,6 +12,7 @@ import { triggerHaptic, triggerHapticFeedback } from '@/lib/utils/haptics';
 import { formatDueDate } from '@/lib/utils/date-format';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { isInactiveTaskStatus, PRIORITY_DOT_COLORS } from '@/lib/constants/task-formatting';
+import { getConnectorLabel } from '@/lib/constants/colors';
 import { CONNECTOR_ICONS } from '@/types/dashboard';
 import type { MyDayItem } from './types';
 import {
@@ -21,6 +22,9 @@ import {
   taskFieldBlockedReason,
 } from '@/lib/tasks/client-edit-policy';
 import type { LocalDisposition } from '@/types';
+import { TaskBlockedBadge, TaskStatusIndicator } from '@/components/task-list/TaskStatusIndicator';
+import { TaskConnectorSyncState } from '@/components/task-list/TaskConnectorSyncState';
+import { PlanningHorizonBadge } from '@/components/task-list/PlanningHorizonBadge';
 
 const SWIPE_THRESHOLD = 80;
 const FULL_SWIPE_THRESHOLD = 160;
@@ -108,6 +112,7 @@ export function MobileSwipeTaskRow({
     && option.value !== item.localDisposition
     && canSetTaskLocalDisposition(item.editPolicy, item.localDisposition, option.value)
   ));
+  const connectorLabel = getConnectorLabel(item.connectorType);
 
   // Background colors for swipe indicators
   const leftBgOpacity = useTransform(x, [-FULL_SWIPE_THRESHOLD, -SWIPE_THRESHOLD, 0], [1, 0.6, 0]);
@@ -300,17 +305,14 @@ export function MobileSwipeTaskRow({
             )}
             aria-label={`Complete ${item.title}`}
           >
-            <span
-              data-testid="completion-indicator"
-              className={cn(
-                'w-6 h-6 rounded-full border-2 flex items-center justify-center transition-[border-color,background-color,color,transform] duration-200',
-                isCompleting
-                  ? 'border-green-400 bg-green-400 text-white'
-                  : 'border-[var(--border-strong)] active:border-green-500 active:bg-green-900/30'
-              )}
-              aria-hidden="true"
-            >
-              {isCompleting && <Check size={14} />}
+            <span className="group/status flex h-6 w-6 items-center justify-center" aria-hidden="true">
+              <TaskStatusIndicator
+                status={item.status}
+                microStatus={item.microStatus}
+                isCompleting={isCompleting}
+                size="lg"
+                testId="completion-indicator"
+              />
             </span>
           </button>
         </CompletionBurst>
@@ -334,6 +336,8 @@ export function MobileSwipeTaskRow({
             </p>
           </div>
           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+            <TaskBlockedBadge status={item.status} microStatus={item.microStatus} />
+            <PlanningHorizonBadge planningHorizon={item.planningHorizon} />
             {/* Project tag (hub project name) */}
             {item.hubProjectIds && item.hubProjectIds.length > 0 && projects.length > 0 && (() => {
               const matched = projects.filter((p) => item.hubProjectIds!.includes(p.id));
@@ -349,7 +353,7 @@ export function MobileSwipeTaskRow({
                 {CONNECTOR_ICONS[item.connectorType] && (
                   <Image
                     src={CONNECTOR_ICONS[item.connectorType]}
-                    alt={item.connectorType}
+                    alt={connectorLabel}
                     width={11}
                     height={11}
                     className="flex-shrink-0"
@@ -359,15 +363,28 @@ export function MobileSwipeTaskRow({
               </span>
             )}
             {/* Source icon only (when no list name but connector icon exists) */}
-            {!item.sourceListName && CONNECTOR_ICONS[item.connectorType] && (
-              <Image
-                src={CONNECTOR_ICONS[item.connectorType]}
-                alt={item.connectorType}
-                width={11}
-                height={11}
-                className="flex-shrink-0 opacity-60"
-              />
+            {!item.sourceListName && (
+              <span className="flex min-w-0 shrink items-center gap-1 text-xs text-[var(--text-muted)]">
+                {CONNECTOR_ICONS[item.connectorType] && (
+                  <Image
+                    src={CONNECTOR_ICONS[item.connectorType]}
+                    alt=""
+                    width={11}
+                    height={11}
+                    className="shrink-0 opacity-60"
+                  />
+                )}
+                <span className="truncate">{connectorLabel}</span>
+              </span>
             )}
+            <TaskConnectorSyncState
+              compact
+              taskStatus={item.status}
+              syncStatus={item.syncStatus}
+              connectorType={item.connectorType}
+              connectorInstanceId={item.connectorInstanceId}
+              pushRetryCount={item.pushRetryCount}
+            />
             {/* Due indicator */}
             {dueDateStr && (
               <span className={cn(

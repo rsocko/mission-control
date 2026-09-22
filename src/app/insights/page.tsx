@@ -9,13 +9,17 @@ import { fadeSlideUp } from '@/lib/motion';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { CompletionTrendChart } from '@/components/insights/CompletionTrendChart';
+import { PlanAlignmentChart } from '@/components/insights/PlanAlignmentChart';
 import { SourceBreakdownChart } from '@/components/insights/SourceBreakdownChart';
 import { TaskAgeChart } from '@/components/insights/TaskAgeChart';
 import { RoutineHeatmap } from '@/components/insights/RoutineHeatmap';
 import { ProjectActivity } from '@/components/insights/ProjectActivity';
+import { WorkActivityChart } from '@/components/insights/WorkActivityChart';
 import { DeliveryTrendChart } from '@/components/insights/DeliveryTrendChart';
 import { LeadTimeChart } from '@/components/insights/LeadTimeChart';
 import { ActivityHeatmap } from '@/components/insights/ActivityHeatmap';
+import { TaskBreakdownChart } from '@/components/insights/TaskBreakdownChart';
+import { ProductivityPatterns } from '@/components/insights/ProductivityPatterns';
 import type {
   DeliveryInterval,
   InsightsActivitySection,
@@ -454,6 +458,24 @@ function InsightsPageContent() {
             ) : null}
 
             {sectionLoading.summary ? (
+              <GroupSkeleton label="Loading task breakdown" className="mb-6 h-56" />
+            ) : summary ? (
+              <motion.section
+                variants={fadeSlideUp}
+                className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
+                aria-labelledby="task-breakdown-heading"
+              >
+                <div className="mb-5">
+                  <h3 id="task-breakdown-heading" className="text-base font-semibold">Current task mix</h3>
+                  <p className="mt-1 text-xs text-slate-400">
+                    A present-tense inventory snapshot. Priority excludes completed and cancelled work.
+                  </p>
+                </div>
+                <TaskBreakdownChart data={summary.taskBreakdown} />
+              </motion.section>
+            ) : null}
+
+            {sectionLoading.summary ? (
               <GroupSkeleton label="Loading planning friction insights" className="mb-6 h-64" />
             ) : summary ? (
               <PlanningFrictionSection
@@ -530,7 +552,7 @@ function InsightsPageContent() {
                 </div>
               </div>
 
-              <p className="mb-3 text-[0.7rem] text-slate-500">
+              <p className="mb-3 text-xs text-slate-500">
                 {delivery.deliverySemantics.intervals} {delivery.deliverySemantics.exclusions}
               </p>
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
@@ -542,7 +564,7 @@ function InsightsPageContent() {
                     </div>
                     <div className="text-right">
                       <div className="text-lg font-semibold tabular-nums text-emerald-400">{delivery.delivery.throughput.total}</div>
-                      <div className="text-[0.65rem] text-slate-500">
+                      <div className="text-xs text-slate-500">
                         {delivery.delivery.throughput.averagePerInterval} average / {interval}
                       </div>
                     </div>
@@ -572,15 +594,30 @@ function InsightsPageContent() {
               </motion.div>
             ) : null}
 
+            {sectionLoading.activity ? (
+              <GroupSkeleton label="Loading productivity patterns" className="mb-6 h-96" />
+            ) : activity ? (
+              <motion.div variants={fadeSlideUp}>
+                <ProductivityPatterns data={activity.productivity} />
+              </motion.div>
+            ) : null}
+
             {/* Completion Trend + Source Breakdown */}
             {sectionLoading.summary ? (
               <GroupSkeleton label="Loading trend insights" className="mb-6 h-72" />
             ) : summary ? (
             <motion.div variants={fadeSlideUp} className="grid grid-cols-1 gap-5 mb-6 lg:grid-cols-3">
               <div className="lg:col-span-2 rounded-2xl bg-slate-900 border border-slate-800 p-5">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="text-sm font-semibold">Completion Trend</h3>
-                  <div className="flex items-center gap-4 text-xs">
+                <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold">Completion Trend</h3>
+                    <p className="mt-1 text-xs text-slate-500">Daily task flow for the selected period.</p>
+                  </div>
+                  <div
+                    className="flex items-center gap-4 text-xs text-slate-300"
+                    role="group"
+                    aria-label="Chart legend"
+                  >
                     <span className="flex items-center gap-1.5">
                       <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 inline-block" /> Completed
                     </span>
@@ -589,7 +626,7 @@ function InsightsPageContent() {
                     </span>
                   </div>
                 </div>
-                <CompletionTrendChart data={summary.trends} period={period === 'custom' ? 30 : period} />
+                <CompletionTrendChart data={summary.trends} />
               </div>
               <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
                 <h3 className="text-sm font-semibold mb-4">Completions by Source</h3>
@@ -599,6 +636,17 @@ function InsightsPageContent() {
                 />
               </div>
             </motion.div>
+            ) : null}
+
+            {sectionLoading.summary ? (
+              <GroupSkeleton label="Loading plan alignment insights" className="mb-6 h-80" />
+            ) : summary ? (
+              <motion.div
+                variants={fadeSlideUp}
+                className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
+              >
+                <PlanAlignmentChart data={summary.planAlignment} />
+              </motion.div>
             ) : null}
 
             {sectionLoading.flow ? (
@@ -675,18 +723,21 @@ function InsightsPageContent() {
               </div>
             </motion.div>
 
-            {/* Routine Heatmap + Project Activity */}
+            {/* Work mix + Routine Heatmap + Project Activity */}
             {sectionLoading.activity ? (
               <GroupSkeleton label="Loading routine and project activity" className="h-64" />
             ) : activity ? (
-            <motion.div variants={fadeSlideUp} className="grid grid-cols-1 gap-5 md:grid-cols-2">
-              <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
-                <h3 className="text-sm font-semibold mb-4">Routine Completion (This Week)</h3>
-                <RoutineHeatmap data={activity.routineHeatmap} />
-              </div>
-              <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
-                <h3 className="text-sm font-semibold mb-4">Project Activity</h3>
-                <ProjectActivity data={activity.projectActivity} />
+            <motion.div variants={fadeSlideUp} className="space-y-5">
+              <WorkActivityChart data={activity.workActivity} />
+              <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+                <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
+                  <h3 className="text-sm font-semibold mb-4">Routine Completion (This Week)</h3>
+                  <RoutineHeatmap data={activity.routineHeatmap} />
+                </div>
+                <div className="rounded-2xl bg-slate-900 border border-slate-800 p-5">
+                  <h3 className="text-sm font-semibold mb-4">Project Activity</h3>
+                  <ProjectActivity data={activity.projectActivity} />
+                </div>
               </div>
             </motion.div>
             ) : null}
@@ -730,6 +781,7 @@ function PlanningFrictionSection({
 }) {
   return (
     <motion.section
+      id="planning-friction"
       variants={fadeSlideUp}
       className="mb-6 rounded-2xl border border-slate-800 bg-slate-900 p-5"
       aria-labelledby="planning-friction-heading"
@@ -741,25 +793,25 @@ function PlanningFrictionSection({
         <div>
           <h3 id="planning-friction-heading" className="text-sm font-semibold">Planning friction</h3>
           <p className="mt-1 text-xs text-slate-400">
-            Later due-date moves reveal where plans repeatedly need more room. Initial scheduling and earlier moves are excluded.
+            Missed day commitments, elapsed focus blocks, overdue transitions, snooze extensions, and later due-date moves reveal where plans need more room.
           </p>
         </div>
       </div>
-      {data.pushesInPeriod === 0 ? (
+      {data.signalsInPeriod === 0 ? (
         <p className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-6 text-center text-sm text-slate-500">
-          No later due-date moves in this period.
+          No planning friction signals in this period.
         </p>
       ) : (
         <>
           <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <FrictionMetric label="Signals" value={data.signalsInPeriod} />
+            <FrictionMetric label="Missed commitments" value={data.missedCommitments} />
             <FrictionMetric label="Later moves" value={data.pushesInPeriod} />
-            <FrictionMetric label="Tasks affected" value={data.pushedTaskCount} />
             <FrictionMetric label="Days deferred" value={data.totalDaysDeferred} />
-            <FrictionMetric label="Average move" value={data.averageDaysPerPush} suffix=" days" />
           </div>
           <div className="grid gap-5 lg:grid-cols-2">
             <div>
-              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Most shifted tasks</h4>
+              <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">Most affected tasks</h4>
               <div className="space-y-2">
                 {data.topTasks.map(task => (
                   <button
@@ -771,7 +823,7 @@ function PlanningFrictionSection({
                   >
                     <span className="min-w-0 truncate text-sm text-slate-200">{task.title}</span>
                     <span className="shrink-0 text-xs tabular-nums text-amber-400">
-                      {task.pushesInPeriod} moves / {task.daysDeferredInPeriod} days
+                      {task.signalsInPeriod} signals / {task.missedCommitmentsInPeriod} missed
                     </span>
                   </button>
                 ))}
@@ -944,7 +996,7 @@ function ObservationCard({ observation }: { observation: AIObservation }) {
 
   return (
     <div className="rounded-xl bg-slate-800 border border-slate-700/70 p-4 hover:border-blue-500/20 transition-colors">
-      <div className={cn('text-[0.6rem] font-bold uppercase tracking-widest mb-2', config.color)}>
+      <div className={cn('mb-2 text-xs font-bold uppercase tracking-widest', config.color)}>
         {config.label}
       </div>
       <h4 className="text-sm font-semibold">{observation.title}</h4>

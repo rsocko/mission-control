@@ -3,12 +3,26 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import * as Popover from '@radix-ui/react-popover';
 import { DayPicker } from 'react-day-picker';
-import { Bell, Clock, Sun, Calendar, X } from 'lucide-react';
+import { Bell, Clock, Sun, Calendar, X, Loader2, Repeat2 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  computeRelativeReminderAt,
+  REMINDER_RELATIVE_RULES,
+  type ReminderRelativeRule,
+} from '@/lib/tasks/relative-reminder';
 import { calendarClassNames } from './calendar-classes';
 
 // ─── Preset helpers ─────────────────────────────────────────────────────────
+
+const DEFAULT_RELATIVE_DUE_TIME = '09:00';
 
 function getLaterToday(): Date | null {
   const now = new Date();
@@ -68,7 +82,20 @@ function formatReminderDisplay(iso: string): string {
 
 export interface ReminderPickerProps {
   value: string | null;
-  onChange: (isoDatetime: string | null) => void;
+  relativeRule?: ReminderRelativeRule | null;
+  nagInterval?: 1 | 5 | 15 | null;
+  nagStopAt?: string | null;
+  dueDate?: string | null;
+  dueTime?: string | null;
+  timezone?: string;
+  saving?: boolean;
+  onChange: (updates: {
+    reminderAt?: string | null;
+    reminderRelative?: ReminderRelativeRule | null;
+    reminderDueTime?: string | null;
+    reminderNagInterval?: 1 | 5 | 15 | null;
+    reminderNagStopAt?: string | null;
+  }) => boolean | Promise<boolean>;
   disabled?: boolean;
   /** Compact inline trigger (used in detail panel) */
   variant?: 'inline' | 'badge';
@@ -76,6 +103,13 @@ export interface ReminderPickerProps {
 
 export function ReminderPicker({
   value,
+  relativeRule = null,
+  nagInterval = null,
+  nagStopAt = null,
+  dueDate = null,
+  dueTime = null,
+  timezone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+  saving = false,
   onChange,
   disabled = false,
   variant = 'inline',
@@ -83,7 +117,12 @@ export function ReminderPicker({
   const [open, setOpen] = useState(false);
   const [showCustom, setShowCustom] = useState(false);
   const [customTime, setCustomTime] = useState('09:00');
+  const [relativeDueTime, setRelativeDueTime] = useState(
+    dueTime ?? DEFAULT_RELATIVE_DUE_TIME,
+  );
+  const [saveError, setSaveError] = useState<string | null>(null);
   const timeInputRef = useRef<HTMLInputElement>(null);
+  const relativeTimeInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (disabled) setOpen(false);
@@ -94,17 +133,39 @@ export function ReminderPicker({
     if (!open) setShowCustom(false);
   }, [open]);
 
+  useEffect(() => {
+    setRelativeDueTime(dueTime ?? DEFAULT_RELATIVE_DUE_TIME);
+  }, [dueTime]);
+
   const laterToday = getLaterToday();
   const tomorrow = getTomorrow9am();
   const nextWeek = getNextWeekMonday9am();
 
   const isPast = value ? new Date(value) < new Date() : false;
   const hasReminder = !!value && !isPast;
+  const hasConfiguredReminder = hasReminder || !!relativeRule;
+  const nagStopMinutes = nagStopAt && value
+    ? Math.round((Date.parse(nagStopAt) - Date.parse(value)) / 60_000)
+    : null;
+  const customStopMinutes = nagStopMinutes !== null
+    && ![30, 60, 120].includes(nagStopMinutes)
+    ? nagStopMinutes
+    : 180;
+
+  const save = useCallback(async (updates: Parameters<ReminderPickerProps['onChange']>[0]) => {
+    setSaveError(null);
+    const saved = await onChange(updates);
+    if (!saved) {
+      setSaveError('The reminder could not be saved. Review the time and try again.');
+      return false;
+    }
+    setOpen(false);
+    return true;
+  }, [onChange]);
 
   const handlePreset = useCallback((d: Date) => {
-    onChange(d.toISOString());
-    setOpen(false);
-  }, [onChange]);
+    void save({ reminderAt: d.toISOString() });
+  }, [save]);
 
   const handleCustomSelect = useCallback((day: Date | undefined) => {
     if (!day) return;
@@ -114,18 +175,51 @@ export function ReminderPicker({
     if (day <= new Date()) {
       day.setHours(new Date().getHours() + 1, 0, 0, 0);
     }
-    onChange(day.toISOString());
-    setOpen(false);
-  }, [customTime, onChange]);
+    void save({ reminderAt: day.toISOString() });
+  }, [customTime, save]);
 
   const handleClear = useCallback(() => {
-    onChange(null);
-    setOpen(false);
-  }, [onChange]);
+    void save({
+      reminderAt: null,
+      reminderNagInterval: null,
+      reminderNagStopAt: null,
+    });
+  }, [save]);
 
   const triggerContent = value && !isPast
-    ? formatReminderDisplay(value)
+    ? relativeRule
+      ? `${REMINDER_RELATIVE_RULES[relativeRule].label} (${formatReminderDisplay(value)})${nagInterval ? ` · every ${nagInterval}m` : ''}`
+      : `${formatReminderDisplay(value)}${nagInterval ? ` · every ${nagInterval}m` : ''}`
+    : relativeRule
+      ? `${REMINDER_RELATIVE_RULES[relativeRule].label} needs attention`
     : 'Set reminder';
+
+  const handleRelative = useCallback((rule: ReminderRelativeRule) => {
+    if (!dueDate) {
+      setSaveError('Set a due date before choosing a relative reminder.');
+      return;
+    }
+    if (!relativeDueTime) {
+      setSaveError('Set the task due time before choosing a relative reminder.');
+      relativeTimeInputRef.current?.focus();
+      return;
+    }
+    const computed = computeRelativeReminderAt({
+      dueDate,
+      dueTime: relativeDueTime,
+      timezone,
+      rule,
+    });
+    if (!computed.success) {
+      setSaveError(computed.error);
+      return;
+    }
+    if (new Date(computed.reminderAt) <= new Date()) {
+      setSaveError('That relative reminder would be in the past. Choose a later due time or date.');
+      return;
+    }
+    void save({ reminderRelative: rule, reminderDueTime: relativeDueTime });
+  }, [dueDate, relativeDueTime, save, timezone]);
 
   return (
     <Popover.Root open={open} onOpenChange={(next) => { if (!disabled) setOpen(next); }}>
@@ -133,19 +227,19 @@ export function ReminderPicker({
         {variant === 'inline' ? (
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabled || saving}
             className={cn(
               'inline-flex items-center gap-1.5 px-2 py-1 text-xs rounded-md transition-[background-color,border-color] duration-150 outline-none',
               'hover:bg-[var(--surface-2)] active:scale-[0.96]',
               'border border-transparent',
-              disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+              disabled || saving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
               hasReminder ? 'text-purple-400' : 'text-[var(--text-muted)]',
             )}
             aria-label="Set reminder"
           >
             <Bell size={12} className="shrink-0" />
             <span>{triggerContent}</span>
-            {hasReminder && !disabled && (
+            {hasConfiguredReminder && !disabled && (
               <span
                 role="button"
                 tabIndex={0}
@@ -162,7 +256,7 @@ export function ReminderPicker({
         ) : (
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabled || saving}
             className={cn(
               'inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded border transition-colors',
               hasReminder
@@ -173,7 +267,13 @@ export function ReminderPicker({
             aria-label="Set reminder"
           >
             <Bell size={10} />
-            {hasReminder && <span>{formatReminderDisplay(value!)}</span>}
+            {hasReminder && (
+              <span>
+                {relativeRule
+                  ? `${REMINDER_RELATIVE_RULES[relativeRule].label} (${formatReminderDisplay(value!)})`
+                  : formatReminderDisplay(value!)}
+              </span>
+            )}
           </button>
         )}
       </Popover.Trigger>
@@ -198,6 +298,7 @@ export function ReminderPicker({
               {laterToday && (
                 <button
                   onClick={() => handlePreset(laterToday)}
+                  disabled={saving}
                   className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
                 >
                   <Clock size={14} className="text-purple-400/70 shrink-0" />
@@ -210,6 +311,7 @@ export function ReminderPicker({
 
               <button
                 onClick={() => handlePreset(tomorrow)}
+                disabled={saving}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
               >
                 <Sun size={14} className="text-purple-400/70 shrink-0" />
@@ -219,6 +321,7 @@ export function ReminderPicker({
 
               <button
                 onClick={() => handlePreset(nextWeek)}
+                disabled={saving}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
               >
                 <Calendar size={14} className="text-purple-400/70 shrink-0" />
@@ -226,27 +329,217 @@ export function ReminderPicker({
                 <span className="text-xs text-[var(--text-muted)]">{formatPresetTime(nextWeek)}</span>
               </button>
 
+              {dueDate && (
+                <>
+                  <div className="border-t border-[var(--border-subtle)] my-1" />
+                  <div className="px-3 pb-1 pt-1.5 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                    Relative to due date
+                  </div>
+                  <label className="flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-secondary)]">
+                    <Clock size={13} className="text-purple-400/70" aria-hidden="true" />
+                    <span>Due time</span>
+                    <input
+                      ref={relativeTimeInputRef}
+                      type="time"
+                      value={relativeDueTime}
+                      onChange={(event) => {
+                        setRelativeDueTime(event.target.value);
+                        setSaveError(null);
+                      }}
+                      disabled={saving}
+                      aria-label="Task due time for relative reminder"
+                      className="ml-auto w-24 rounded border border-[var(--border-strong)] bg-transparent px-1.5 py-1 text-xs text-[var(--text-secondary)] outline-none focus-visible:ring-2 focus-visible:ring-purple-400/60"
+                    />
+                  </label>
+                  {(Object.entries(REMINDER_RELATIVE_RULES) as Array<
+                    [ReminderRelativeRule, (typeof REMINDER_RELATIVE_RULES)[ReminderRelativeRule]]
+                  >).map(([rule, config]) => {
+                    const computed = relativeDueTime
+                      ? computeRelativeReminderAt({ dueDate, dueTime: relativeDueTime, timezone, rule })
+                      : null;
+                    const computedAt = computed?.success ? computed.reminderAt : null;
+                    const unavailable = relativeDueTime !== ''
+                      && (!computedAt || new Date(computedAt) <= new Date());
+                    return (
+                      <button
+                        key={rule}
+                        type="button"
+                        onClick={() => handleRelative(rule)}
+                        disabled={saving || unavailable}
+                        aria-pressed={relativeRule === rule}
+                        className={cn(
+                          'flex w-full items-center gap-2.5 px-3 py-2 text-sm transition-colors',
+                          relativeRule === rule
+                            ? 'bg-purple-500/10 text-purple-300'
+                            : 'text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]',
+                          unavailable && 'cursor-not-allowed opacity-45',
+                        )}
+                      >
+                        <Bell size={14} className="shrink-0 text-purple-400/70" />
+                        <span className="flex-1 text-left">{config.label}</span>
+                        <span className="text-xs text-[var(--text-muted)]">
+                          {computedAt ? formatReminderDisplay(computedAt) : 'Set time'}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+
               <div className="border-t border-[var(--border-subtle)] my-1" />
 
               <button
                 onClick={() => setShowCustom(true)}
+                disabled={saving}
                 className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
               >
                 <Calendar size={14} className="text-[var(--text-muted)] shrink-0" />
                 <span className="flex-1 text-left">Pick a date &amp; time</span>
               </button>
 
-              {hasReminder && (
+              {hasConfiguredReminder && (
                 <>
+                  <div className="border-t border-[var(--border-subtle)] my-1" />
+                  <div className="px-3 py-2">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={nagInterval !== null}
+                      disabled={saving || !hasReminder}
+                      onClick={() => void save({
+                        reminderNagInterval: nagInterval ? null : 5,
+                        reminderNagStopAt: nagInterval ? null : nagStopAt,
+                      })}
+                      className="flex min-h-9 w-full items-center gap-2 text-left text-sm text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      <Repeat2 size={14} className={nagInterval ? 'text-amber-400' : 'text-[var(--text-muted)]'} />
+                      <span className="flex-1">Repeat until done</span>
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          'relative h-5 w-9 rounded-full border transition-colors',
+                          nagInterval
+                            ? 'border-amber-400/50 bg-amber-500/30'
+                            : 'border-[var(--border-strong)] bg-[var(--surface-0)]',
+                        )}
+                      >
+                        <span className={cn(
+                          'absolute top-0.5 h-3.5 w-3.5 rounded-full bg-current transition-transform',
+                          nagInterval ? 'translate-x-[17px] text-amber-300' : 'translate-x-0.5 text-[var(--text-muted)]',
+                        )} />
+                      </span>
+                    </button>
+                    {nagInterval && (
+                      <div className="ml-6 mt-2 space-y-2">
+                        <fieldset>
+                          <legend className="mb-1 text-xs text-[var(--text-muted)]">Alert every</legend>
+                          <div className="grid grid-cols-3 gap-1">
+                            {([1, 5, 15] as const).map((interval) => (
+                              <button
+                                key={interval}
+                                type="button"
+                                aria-pressed={nagInterval === interval}
+                                onClick={() => void save({ reminderNagInterval: interval })}
+                                className={cn(
+                                  'min-h-8 rounded-md border px-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-400/60',
+                                  nagInterval === interval
+                                    ? 'border-amber-400/40 bg-amber-500/15 text-amber-300'
+                                    : 'border-[var(--border)] text-[var(--text-secondary)] hover:bg-[var(--surface-2)]',
+                                )}
+                              >
+                                {interval} min
+                              </button>
+                            ))}
+                          </div>
+                        </fieldset>
+                        <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                          <span>Stop after</span>
+                          <Select
+                            value={nagStopMinutes === null
+                              ? 'none'
+                              : [30, 60, 120].includes(nagStopMinutes)
+                                ? String(nagStopMinutes)
+                                : 'custom'}
+                            onValueChange={(nextValue) => {
+                              const minutes = nextValue === 'custom'
+                                ? customStopMinutes
+                                : Number(nextValue);
+                              void save({
+                                reminderNagStopAt: nextValue === 'none' || !value
+                                  ? null
+                                  : new Date(Date.parse(value) + minutes * 60_000).toISOString(),
+                              });
+                            }}
+                          >
+                            <SelectTrigger
+                              variant="inline"
+                              aria-label="Stop repeat alerts after"
+                              className="ml-auto min-h-8 border-[var(--border)] bg-[var(--surface-0)] px-2"
+                            >
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">Until done</SelectItem>
+                              <SelectItem value="30">30 minutes</SelectItem>
+                              <SelectItem value="60">1 hour</SelectItem>
+                              <SelectItem value="120">2 hours</SelectItem>
+                              <SelectItem value="custom">
+                                Custom ({customStopMinutes} min)
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {nagStopMinutes !== null && ![30, 60, 120].includes(nagStopMinutes) && (
+                          <label className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
+                            <span>Minutes</span>
+                            <span className="input-glow ml-auto rounded-md">
+                              <input
+                                key={customStopMinutes}
+                                type="number"
+                                min={1}
+                                max={10_080}
+                                defaultValue={customStopMinutes}
+                                onBlur={(event) => value && void save({
+                                  reminderNagStopAt: new Date(
+                                    Date.parse(value)
+                                    + Math.min(
+                                      10_080,
+                                      Math.max(1, Number(event.currentTarget.value) || 1),
+                                    ) * 60_000,
+                                  ).toISOString(),
+                                })}
+                                className="min-h-8 w-20 rounded-md border border-[var(--border)] bg-[var(--surface-0)] px-2 text-xs text-[var(--text-secondary)] outline-none"
+                              />
+                            </span>
+                          </label>
+                        )}
+                        <p className="text-xs leading-4 text-[var(--text-muted)]">
+                          Alerts pause during quiet hours and Do Not Disturb.
+                        </p>
+                      </div>
+                    )}
+                  </div>
                   <div className="border-t border-[var(--border-subtle)] my-1" />
                   <button
                     onClick={handleClear}
+                    disabled={saving}
                     className="w-full flex items-center gap-2.5 px-3 py-2 text-sm text-red-400 hover:text-red-300 hover:bg-red-900/10 transition-colors"
                   >
                     <X size={14} className="shrink-0" />
                     <span className="flex-1 text-left">Remove reminder</span>
                   </button>
                 </>
+              )}
+              {saveError && (
+                <p role="alert" className="border-t border-[var(--border-subtle)] px-3 py-2 text-xs leading-relaxed text-red-400">
+                  {saveError}
+                </p>
+              )}
+              {saving && (
+                <div className="flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-muted)]">
+                  <Loader2 size={12} className="animate-spin" aria-hidden="true" />
+                  Saving reminder…
+                </div>
               )}
             </div>
           ) : (

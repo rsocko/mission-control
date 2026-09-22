@@ -1,36 +1,41 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
-import { financeConnectorConfigFromRow } from '@/lib/connectors/monarch-money/config';
 import { MonarchBridgeClient, MonarchBridgeError } from '@/lib/connectors/monarch-money/client';
 import { describeTyrionConnectionError } from '@/lib/connectors/monarch-money/connection-error';
 import { getDocumentIntelligenceBaseUrl, getDocumentIntelligenceApiKey } from '@/lib/connectors/document-intelligence';
+import { trustedFinanceMutationActor } from '@/lib/connectors/monarch-money/finance-request';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import logger from '@/lib/logger';
 import { isDemoMode } from '@/lib/mode';
+import { createHAClient } from '@/lib/connectors/home-assistant/ha-client';
+import {
+  normalizeHomeAssistantSettings,
+  readHomeAssistantCredentials,
+} from '@/lib/connectors/home-assistant/settings';
 
 /**
  * POST /api/connectors/[id]/test
  * Tests connectivity for a given connector by pinging its external API.
  */
 export async function POST(
-  _request: Request,
+  request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
 
   try {
-    const [connector] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await getCorePersistenceRepositories().connectors.get(id);
 
     if (!connector) {
       return NextResponse.json(
         { success: false, error: 'Connector not found' },
         { status: 404 }
       );
+    }
+
+    const isFinanceConnector = normalizeFinanceProviderAlias(connector.type) !== null;
+    if (isFinanceConnector && !trustedFinanceMutationActor(request)) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // In demo mode, simulate a successful connection test
@@ -47,20 +52,22 @@ export async function POST(
         'home-assistant': '42 service domains accessible',
         'document-intelligence': 'OWL healthy — 3 Paperless-ngx modules active',
       };
-      return NextResponse.json({
+      const demoResult = {
         success: true,
         latencyMs: 87 + Math.floor(Math.random() * 200),
         details: demoDetails[connector.type] || 'Connection OK',
-      });
+      };
+      await persistTestResult(id, demoResult);
+      return NextResponse.json(demoResult);
     }
 
-    if (normalizeFinanceProviderAlias(connector.type)) {
+    if (isFinanceConnector) {
       const start = Date.now();
       try {
-        const health = await new MonarchBridgeClient(
-          financeConnectorConfigFromRow(connector),
-        ).getHealth();
-        return NextResponse.json(health.authenticated
+        // Provider I/O happens outside every transaction; only the redacted
+        // badge below is persisted afterwards.
+        const health = await new MonarchBridgeClient(connector).getHealth();
+        const financeResult = health.authenticated
           ? {
               success: true,
               latencyMs: Date.now() - start,
@@ -70,28 +77,57 @@ export async function POST(
               success: false,
               latencyMs: Date.now() - start,
               error: 'Tyrion is reachable, but its Monarch session is not authenticated yet',
-            });
+            };
+        await persistTestResult(id, financeResult);
+        return NextResponse.json(financeResult);
       } catch (error) {
         const code = error instanceof MonarchBridgeError ? error.code : 'bridge_unavailable';
-        return NextResponse.json({
+        const financeErrorResult = {
           success: false,
           latencyMs: Date.now() - start,
           error: describeTyrionConnectionError({ code }),
-        });
+        };
+        await persistTestResult(id, financeErrorResult);
+        return NextResponse.json(financeErrorResult);
       }
     }
 
     const credentials = connector.credentials as Record<string, string> | null;
-    const settings = typeof connector.settings === 'string'
-      ? JSON.parse(connector.settings)
-      : (connector.settings as Record<string, unknown> | null);
+    const settings = connector.settings ?? null;
     const result = await testConnector(connector.type, credentials || {}, settings || {});
+    await persistTestResult(id, result);
 
     return NextResponse.json(result);
   } catch {
-    return NextResponse.json(
-      { success: false, error: 'Connector test failed. Check credentials and try again.' },
-      { status: 500 }
+    const failureResult = { success: false, error: 'Connector test failed. Check credentials and try again.' };
+    await persistTestResult(id, failureResult);
+    return NextResponse.json(failureResult, { status: 500 });
+  }
+}
+
+/**
+ * Persist the outcome of a manual "Test Connection" click on the connector row so the
+ * settings UI's connection badge can reflect real, current status instead of only
+ * "credentials are stored" (which stays green even after a token expires).
+ */
+async function persistTestResult(
+  connectorId: string,
+  result: { success: boolean; error?: string },
+): Promise<void> {
+  try {
+    await getCorePersistenceRepositories().connectors.recordTestResult({
+      connectorId,
+      status: result.success ? 'success' : 'failed',
+      error: result.success ? null : (result.error || 'Connection test failed'),
+      testedAt: new Date().toISOString(),
+    });
+  } catch {
+    // Non-fatal — the test result is still returned to the caller even if we
+    // can't persist it for the badge. Nothing about the failure is logged
+    // beyond the route identity, so no credential or provider body can leak.
+    logger.error(
+      { route: 'connector_test', failure: 'badge_persistence' },
+      'Failed to persist connector test result',
     );
   }
 }
@@ -100,7 +136,13 @@ async function testConnector(
   type: string,
   credentials: Record<string, string>,
   settings: Record<string, unknown>
-): Promise<{ success: boolean; latencyMs: number; error?: string; details?: string }> {
+): Promise<{
+  success: boolean;
+  latencyMs: number;
+  error?: string;
+  details?: string;
+  sources?: Record<string, { available: boolean; error?: string }>;
+}> {
   const start = Date.now();
 
   try {
@@ -212,36 +254,26 @@ async function testConnector(
       }
 
       case 'home-assistant': {
-        const baseUrl = typeof settings.baseUrl === 'string'
-          ? settings.baseUrl.replace(/\/+$/, '')
-          : (process.env.HOME_ASSISTANT_URL || 'http://localhost:8123');
-        const token =
-          credentials.accessToken ||
-          credentials.token ||
-          (typeof settings.accessToken === 'string' ? settings.accessToken : '') ||
-          process.env.HOME_ASSISTANT_TOKEN ||
-          '';
-
-        if (!token) {
+        const normalized = normalizeHomeAssistantSettings(settings);
+        const { accessToken } = readHomeAssistantCredentials(credentials, settings);
+        if (!accessToken) {
           return { success: false, latencyMs: 0, error: 'No Home Assistant access token configured' };
         }
-
-        const res = await fetch(`${baseUrl}/api/services`, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          signal: AbortSignal.timeout(10000),
-        });
+        const result = await createHAClient({
+          baseUrl: normalized.baseUrl,
+          accessToken,
+        }).testConnection();
         const latencyMs = Date.now() - start;
-        if (res.ok) {
-          const data = await res.json();
-          return { success: true, latencyMs, details: `${Array.isArray(data) ? data.length : 0} service domains accessible` };
+        if (!result.ok) {
+          return { success: false, latencyMs, error: result.error || 'Connection failed' };
         }
-        if (res.status === 401) {
-          return { success: false, latencyMs, error: 'Token expired or invalid' };
-        }
-        return { success: false, latencyMs, error: `HTTP ${res.status}: ${res.statusText}` };
+        const available = Object.values(result.sources || {}).filter(source => source.available).length;
+        return {
+          success: true,
+          latencyMs,
+          details: `Connected — ${available} of 3 notification sources available`,
+          sources: result.sources,
+        };
       }
 
       case 'document-intelligence': {

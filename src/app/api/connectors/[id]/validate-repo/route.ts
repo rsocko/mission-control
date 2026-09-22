@@ -1,7 +1,5 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 /**
  * POST /api/connectors/[id]/validate-repo
@@ -21,11 +19,9 @@ export async function POST(
   }
 
   try {
-    const [connector] = await db
-      .select({ credentials: connectorConfigs.credentials, type: connectorConfigs.type })
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await (
+      await getConnectorManagementPersistence()
+    ).getConnector(id);
 
     if (!connector) {
       return NextResponse.json({ valid: false, error: 'Connector not found' }, { status: 404 });

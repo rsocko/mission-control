@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { generateIdeationExpansion, getResolvedAIConfig } = vi.hoisted(() => ({
+const { generateIdeationExpansion, getAsyncAIProviderConfiguration } = vi.hoisted(() => ({
   generateIdeationExpansion: vi.fn(),
-  getResolvedAIConfig: vi.fn(() => ({ configured: true })),
+  getAsyncAIProviderConfiguration: vi.fn(async () => ({ configured: true })),
 }));
 
 vi.mock('@/lib/ai/ideation-expand', async (importOriginal) => {
@@ -10,7 +10,7 @@ vi.mock('@/lib/ai/ideation-expand', async (importOriginal) => {
   return { ...original, generateIdeationExpansion };
 });
 
-vi.mock('@/lib/ai', () => ({ getResolvedAIConfig }));
+vi.mock('@/lib/ai/provider-runtime', () => ({ getAsyncAIProviderConfiguration }));
 vi.mock('@/lib/logger', () => ({ default: { error: vi.fn() } }));
 
 import { POST } from '@/app/api/ideation/expand/route';
@@ -26,11 +26,15 @@ const body = {
 function request(requestBody: unknown = body, headers: Record<string, string> = {}) {
   const request = new Request('http://localhost:3099/api/ideation/expand', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...headers },
+    headers: { 'Content-Type': 'application/json', Host: 'localhost:3099', ...headers },
     body: JSON.stringify(requestBody),
   });
   Object.defineProperty(request, 'headers', {
-    value: new Headers({ 'Content-Type': 'application/json', ...headers }),
+    value: new Headers({
+      'Content-Type': 'application/json',
+      Host: 'localhost:3099',
+      ...headers,
+    }),
   });
   return request;
 }
@@ -45,10 +49,10 @@ describe('POST /api/ideation/expand', () => {
       { id: 'p2', label: 'Prototype', rationale: 'Test.' },
       { id: 'p3', label: 'Launch', rationale: 'Ship.' },
     ]);
-    getResolvedAIConfig.mockReturnValue({ configured: true });
+    getAsyncAIProviderConfiguration.mockResolvedValue({ configured: true });
   });
 
-  it('requires a same-origin browser request or configured API key', async () => {
+  it('allows same-origin browsers and configured API keys without exposing the key', async () => {
     expect((await POST(request())).status).toBe(401);
     expect((await POST(request(body, {
       Origin: 'http://localhost:3099',
@@ -59,6 +63,10 @@ describe('POST /api/ideation/expand', () => {
     expect((await POST(request(body, {
       Origin: 'http://localhost:3099',
       'Sec-Fetch-Site': 'same-origin',
+    }))).status).toBe(200);
+    expect((await POST(request(body, {
+      Origin: 'https://attacker.example',
+      'Sec-Fetch-Site': 'cross-site',
     }))).status).toBe(401);
     const response = await POST(request(body, { 'X-MC-API-Key': 'secret' }));
     expect(response.status).toBe(200);

@@ -3,6 +3,7 @@
 import { useCallback, useMemo, type Dispatch, type SetStateAction } from 'react';
 import { useDashboardViewStore } from '@/lib/stores/dashboardViewStore';
 import { withoutTaskFilterQueryTypes } from '@/lib/task-filter-context';
+import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 
 export interface DashboardFilterState {
   sourceFilter: string | null;
@@ -20,6 +21,7 @@ export interface DashboardFilterState {
   viewDensity: 'compact' | 'comfortable';
   showCompleted: boolean;
   hiddenQuickFilters: string[];
+  quickFilterVisibility: Record<string, QuickFilterVisibility>;
 }
 
 export interface DashboardFilterActions {
@@ -38,6 +40,7 @@ export interface DashboardFilterActions {
   setViewDensity: (value: 'compact' | 'comfortable') => void;
   setShowCompleted: (value: boolean) => void;
   toggleQuickFilterVisibility: (filterId: string) => void;
+  setQuickFilterVisibility: (filterId: string, visibility: QuickFilterVisibility) => void;
 }
 
 export function useDashboardFilterState(): {
@@ -126,9 +129,11 @@ export function useDashboardFilterState(): {
     viewDensity: viewStore.viewDensity,
     showCompleted: viewStore.showCompleted,
     hiddenQuickFilters: viewStore.hiddenQuickFilters,
+    quickFilterVisibility: viewStore.quickFilterVisibility,
   }), [
     viewStore.groupBy,
     viewStore.hiddenQuickFilters,
+    viewStore.quickFilterVisibility,
     viewStore.listFilter,
     viewStore.listGroupFilter,
     viewStore.priorityFilter,
@@ -160,6 +165,7 @@ export function useDashboardFilterState(): {
     setViewDensity: viewStore.setViewDensity,
     setShowCompleted: viewStore.setShowCompleted,
     toggleQuickFilterVisibility: viewStore.toggleQuickFilterVisibility,
+    setQuickFilterVisibility: viewStore.setQuickFilterVisibility,
   }), [
     setListFilter,
     setPriorityFilter,
@@ -176,6 +182,7 @@ export function useDashboardFilterState(): {
     viewStore.setTextFilter,
     viewStore.setViewDensity,
     viewStore.toggleQuickFilterVisibility,
+    viewStore.setQuickFilterVisibility,
   ]);
 
   return { state, actions };

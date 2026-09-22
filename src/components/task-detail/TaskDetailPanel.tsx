@@ -1,16 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from 'sonner';
-import { Circle, ListChecks, Loader2, X } from 'lucide-react';
+import { Circle, Info, ListChecks, Loader2, X } from 'lucide-react';
 import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';
 import { useImagePasteHandler } from './TaskAttachmentSection';
 import { LinkedSourcesSection } from './LinkedSourcesSection';
 import { TaskMoveDialog } from './TaskMoveDialog';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import { Tooltip } from '@/components/ui/Tooltip';
 import type { TaskField } from '@/types';
 import {
   canEditTaskField,
@@ -22,13 +23,13 @@ import {
   taskRemovalLabel,
 } from '@/lib/tasks/client-edit-policy';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
-import { getDeepLinkInfo } from '@/lib/utils/deep-links';
+import { getDeepLinkInfo, getLinkedResourceDeepLinkInfo } from '@/lib/utils/deep-links';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getNextRecurringDate } from '@/lib/utils/recurrence';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import { cn } from '@/lib/utils';
 import { formatTaskDetailUpdatedAt } from '@/lib/utils/task-detail-date';
-import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { useResizablePanel } from '@/lib/hooks/useResizablePanel';
 import { modalContent, modalOverlay, panelSlideFromRight } from '@/lib/motion';
 import { TaskDetailHeader } from './TaskDetailHeader';
@@ -40,13 +41,16 @@ import { TaskProjectAssignmentSection } from './TaskProjectAssignmentSection';
 import { TaskPlanningSection } from './TaskPlanningSection';
 import { TaskDuplicatesSection } from './TaskDuplicatesSection';
 import { TaskSourceActionsSection } from './TaskSourceActionsSection';
+import { TaskConnectorSyncState } from '@/components/task-list/TaskConnectorSyncState';
 import { TaskDocumentPreviewSection } from './TaskDocumentPreviewSection';
 import { TaskAttachmentCard } from './TaskAttachmentCard';
+import { OwlTaskActions } from './OwlTaskActions';
 import { TaskDetailFooter, TaskMobileActionBar } from './TaskDetailFooter';
 import { toggleMarkdownCheckbox } from './TaskDetailMarkdown';
 import { useTaskDetailData } from './useTaskDetailData';
 import { useTaskDetailMutations, type TaskConfirmRequest } from './useTaskDetailMutations';
 import { parseTaskMetadata } from './task-detail-types';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
   TaskDetailPanelProps,
@@ -66,19 +70,8 @@ export type {
   TaskTag,
 } from './task-detail-types';
 
-const CONNECTOR_ICON_PATHS: Record<string, string> = {
-  'local': LOCAL_CONNECTOR_ICON_PATH,
-  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
-  'github-issues': '/icons/connectors/github.svg',
-  'outlook-email': '/icons/connectors/outlook.svg',
-  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
-  'rymessage': '/icons/connectors/rymessage.svg',
-  'document-intelligence': '/icons/agents/owl.svg',
-  'custom-rest': '/icons/connectors/custom-rest.svg',
-};
-
 // Connectors that support recurrence
-const RECURRENCE_CONNECTORS = ['microsoft-todo', 'outlook-calendar'];
+const RECURRENCE_CONNECTORS = ['local', 'microsoft-todo', 'outlook-calendar'];
 
 const PANEL_WIDTH_STORAGE_KEY = 'mission-control:detail-panel-width';
 
@@ -101,6 +94,8 @@ export function TaskDetailPanel({
   animatePanel = true,
   portalDialog = false,
   minPanelWidth = 280,
+  fillContainer = false,
+  documentPreviewClassName,
   focusPanelOnMount = false,
   notesOpenRequest = null,
   subtasksOpenRequest = null,
@@ -139,6 +134,10 @@ export function TaskDetailPanel({
   const handledSubtasksRequestRef = useRef<number | null>(null);
   const recurrenceFocusTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resetTransientStateRef = useRef<() => void>(() => {});
+  const activeTaskIdRef = useRef<string | null>(taskId);
+  const descriptionMutationRef = useRef(0);
+  const descriptionEditSessionRef = useRef(0);
+  const descriptionSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   const {
     task,
@@ -147,6 +146,7 @@ export function TaskDetailPanel({
     connectorCaps,
     supportsAttachments,
     supportsSubtasks,
+    supportsSubtaskOrderWrite,
     extraTags,
     setExtraTags,
     potentialDuplicates,
@@ -158,6 +158,8 @@ export function TaskDetailPanel({
   } = useTaskDetailData({
     taskId,
     onTaskReset: () => {
+      descriptionMutationRef.current++;
+      descriptionEditSessionRef.current++;
       setEditingTitle(false);
       setEditingDesc(false);
       setNotesExpanded(false);
@@ -169,6 +171,12 @@ export function TaskDetailPanel({
       setDescValue(loaded.description || '');
     },
   });
+  useEffect(() => {
+    activeTaskIdRef.current = taskId;
+    return () => {
+      activeTaskIdRef.current = null;
+    };
+  }, [taskId]);
 
   const effectiveIsInMyDay = isInMyDay ?? task?.isInMyDay ?? false;
 
@@ -183,6 +191,13 @@ export function TaskDetailPanel({
         setConfirmDialog((dialog) => ({ ...dialog, open: false }));
         request.onConfirm();
       },
+      alternateLabel: request.alternateLabel,
+      onAlternate: request.onAlternate
+        ? () => {
+            setConfirmDialog((dialog) => ({ ...dialog, open: false }));
+            request.onAlternate?.();
+          }
+        : undefined,
     });
   }, []);
 
@@ -206,6 +221,13 @@ export function TaskDetailPanel({
     requestConfirm,
   });
   const { resetTransientState, saveField } = mutations;
+  const saveDescription = useCallback((description: string | null) => {
+    const save = descriptionSaveQueueRef.current.then(
+      () => saveField('description', description, false),
+    );
+    descriptionSaveQueueRef.current = save.then(() => undefined);
+    return save;
+  }, [saveField]);
   useEffect(() => {
     resetTransientStateRef.current = resetTransientState;
   }, [resetTransientState]);
@@ -225,6 +247,7 @@ export function TaskDetailPanel({
   const canEditDescription = canEdit('description');
   const canEditStatus = canEdit('status');
   const canEditPriority = canEdit('priority');
+  const canEditPlanningHorizon = canEdit('planningHorizon');
   const canEditDueDate = canEdit('dueDate');
   const canEditEffort = canEdit('effort');
   const canEditDuration = canEdit('estimatedDuration');
@@ -240,6 +263,11 @@ export function TaskDetailPanel({
   const canEditPhases = canEdit('phases');
   const canEditReminder = canEdit('reminderAt');
   const canEditRecurrence = canEdit('recurrence');
+  const completionModeAvailable = Boolean(
+    task
+    && (task.connectorType === 'local' || task.sourceId?.startsWith('local:'))
+    && task.editPolicy.fields.recurrence.mutation === 'local',
+  );
   const canEditDependencies = canEdit('dependencies');
   const canDeleteTask = canRemoveTask(task?.editPolicy);
   const dispositionOptions = task
@@ -448,14 +476,68 @@ export function TaskDetailPanel({
     return true;
   };
 
-  const handleDescBlur = async () => {
-    if (descValue !== (task?.description || '')) {
-      const saved = await saveField('description', descValue || null);
-      if (!saved) return false;
-      setTask((prev) => prev ? { ...prev, description: descValue || null } : prev);
+  const handleExpandedDescSave = async () => {
+    if (!task || descValue === (task.description || '')) return true;
+    const taskIdAtSave = task.id;
+    const nextDescription = descValue || null;
+    const mutationId = ++descriptionMutationRef.current;
+    const saved = await saveDescription(nextDescription);
+    if (!saved) {
+      if (
+        descriptionMutationRef.current === mutationId
+        && activeTaskIdRef.current === taskIdAtSave
+      ) {
+        toast.error('Failed to save notes');
+      }
+      return false;
     }
-    setEditingDesc(false);
+    if (
+      descriptionMutationRef.current === mutationId
+      && activeTaskIdRef.current === taskIdAtSave
+    ) {
+      setTask((prev) => (
+        prev?.id === taskIdAtSave ? { ...prev, description: nextDescription } : prev
+      ));
+    }
     return true;
+  };
+
+  const handleDescBlur = async () => {
+    if (!task || descValue === (task.description || '')) {
+      setEditingDesc(false);
+      return true;
+    }
+
+    const taskIdAtSave = task.id;
+    const previousDescription = task.description;
+    const nextDescription = descValue || null;
+    const mutationId = ++descriptionMutationRef.current;
+    const editSessionId = descriptionEditSessionRef.current;
+
+    setTask((prev) => (
+      prev?.id === taskIdAtSave ? { ...prev, description: nextDescription } : prev
+    ));
+    setEditingDesc(false);
+
+    const saved = await saveDescription(nextDescription);
+    if (saved) return true;
+    if (
+      descriptionMutationRef.current !== mutationId
+      || activeTaskIdRef.current !== taskIdAtSave
+    ) {
+      return false;
+    }
+
+    toast.error('Failed to save notes');
+    setTask((prev) => (
+      prev?.id === taskIdAtSave ? { ...prev, description: previousDescription } : prev
+    ));
+    if (descriptionEditSessionRef.current === editSessionId) {
+      setDescValue(nextDescription || '');
+      setEditingDesc(true);
+      setTimeout(() => descRef.current?.focus(), 0);
+    }
+    return false;
   };
 
   const handleCheckboxToggle = useCallback(async (index: number, checked: boolean) => {
@@ -463,29 +545,50 @@ export function TaskDetailPanel({
     const taskIdAtSave = task.id;
     const previousDesc = task.description;
     const newDesc = toggleMarkdownCheckbox(previousDesc, index, checked);
-    const saved = await saveField('description', newDesc);
-    if (!saved) {
-      setTask((prev) => (
-        prev?.id === taskIdAtSave ? { ...prev, description: previousDesc } : prev
-      ));
-      return;
-    }
+    const mutationId = ++descriptionMutationRef.current;
     setDescValue(newDesc);
     setTask((prev) => (
       prev?.id === taskIdAtSave ? { ...prev, description: newDesc } : prev
     ));
-  }, [saveField, setTask, task?.description, task?.id]);
+    const saved = await saveDescription(newDesc);
+    if (!saved) {
+      if (
+        descriptionMutationRef.current === mutationId
+        && activeTaskIdRef.current === taskIdAtSave
+      ) {
+        toast.error('Failed to save notes');
+        setDescValue(previousDesc);
+        setTask((prev) => (
+          prev?.id === taskIdAtSave ? { ...prev, description: previousDesc } : prev
+        ));
+      }
+      return;
+    }
+  }, [saveDescription, setTask, task]);
 
   const startDescriptionEdit = useCallback(() => {
+    descriptionEditSessionRef.current++;
+    setDescValue(task?.description || '');
     setEditingDesc(true);
     setTimeout(() => descRef.current?.focus(), 0);
-  }, []);
+  }, [task?.description]);
+
+  const cancelDescriptionEdit = useCallback(() => {
+    descriptionEditSessionRef.current++;
+    setDescValue(task?.description || '');
+    setEditingDesc(false);
+  }, [task?.description]);
 
   const parsedMetadata = parseTaskMetadata(task?.metadata);
+  const linkedResourceDeepLink = getLinkedResourceDeepLinkInfo(parsedMetadata.linkedResources);
   const currentRecurrence: string = task?.recurrence !== undefined
     ? task.recurrence ?? 'none'
     : parsedMetadata?.recurrence ?? 'none';
   const supportsRecurrence = task ? RECURRENCE_CONNECTORS.includes(task.connectorType) : false;
+  const recurrenceOptions = useMemo<RecurrenceEditorOptions>(() => ({
+    skipDates: [...(task?.recurrenceControl?.rule?.semantics.exceptions.skipDates ?? [])],
+    catchUp: task?.recurrenceControl?.rule?.semantics.materialization.catchUp ?? 'latest',
+  }), [task?.recurrenceControl?.rule]);
 
   // Pre-compute the next recurring date for the "Skip to current" action.
   // Only defined when the task is overdue and has a recurrence set.
@@ -585,13 +688,14 @@ export function TaskDetailPanel({
           onClose={() => { setShowMoveDialog(false); onMoveDialogDismissed?.(); }}
           onSuccess={(_newTaskId, action) => {
             toast.success(action === 'move' ? 'Task moved successfully' : 'Task copied successfully');
-            onClose();
+            onClose(action === 'move' ? 'task-removed' : 'dismiss');
             onUpdate?.();
           }}
         />
       ) : null}
     </AnimatePresence>
   );
+  const moveDialogElement = portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog;
 
   const confirmDialogElement = (
     <ConfirmDialog
@@ -601,6 +705,8 @@ export function TaskDetailPanel({
       confirmLabel={confirmDialog.confirmLabel}
       confirmVariant={confirmDialog.variant}
       onConfirm={confirmDialog.onConfirm}
+      alternateLabel={confirmDialog.alternateLabel}
+      onAlternate={confirmDialog.onAlternate}
       onCancel={() => setConfirmDialog((dialog) => ({ ...dialog, open: false }))}
     />
   );
@@ -621,7 +727,7 @@ export function TaskDetailPanel({
         {mode === 'mobile' && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             className="absolute right-3 top-3 flex min-h-11 min-w-11 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--surface-2)]"
             aria-label="Close task detail"
           >
@@ -635,7 +741,7 @@ export function TaskDetailPanel({
         {mode === 'mobile' && (
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             className="flex min-h-11 min-w-11 items-center justify-center rounded-lg hover:bg-[var(--surface-2)]"
             aria-label="Close task detail"
           >
@@ -677,6 +783,16 @@ export function TaskDetailPanel({
           onModeChange={onModeChange}
         />
 
+        <TaskConnectorSyncState
+          taskId={task.id}
+          taskStatus={task.status}
+          syncStatus={task.syncStatus}
+          connectorType={task.connectorType}
+          connectorInstanceId={task.connectorInstanceId}
+          pushRetryCount={task.pushRetryCount}
+          onRetryComplete={() => onUpdate?.()}
+        />
+
         {mode === 'panel' && task.subtasks && task.subtasks.length > 0 && (() => {
           const completedSubtasks = task.subtasks.filter((subtask) => subtask.status === 'done').length;
           return (
@@ -684,7 +800,7 @@ export function TaskDetailPanel({
               type="button"
               onClick={jumpToSubtasks}
               aria-label={`Jump to subtasks, ${completedSubtasks} of ${task.subtasks.length} complete`}
-              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
+              className="order-0 -mt-1 flex w-fit items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-0)]/55 px-2.5 py-1 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]"
             >
               <ListChecks size={12} aria-hidden="true" />
               Subtasks {completedSubtasks}/{task.subtasks.length}
@@ -717,6 +833,7 @@ export function TaskDetailPanel({
             statusReason: task.statusReason,
             microStatus: task.microStatus,
             connectorType: task.connectorType,
+            supportedStatusValues: task.supportedStatusValues,
             canEditStatus,
             canEditMicroStatus,
             statusBlockedReason: blockedReason('status'),
@@ -737,10 +854,17 @@ export function TaskDetailPanel({
           }}
           priority={{
             priority: task.priority,
+            planningHorizon: task.planningHorizon,
             canEditPriority,
+            canEditPlanningHorizon,
             priorityBlockedReason: blockedReason('priority'),
+            planningHorizonBlockedReason: blockedReason('planningHorizon'),
             prioritySaveLabel: saveLabel('priority'),
+            planningHorizonSaveLabel: saveLabel('planningHorizon'),
             onPriorityChange: (priority) => { void mutations.handlePriorityChange(priority); },
+            onPlanningHorizonChange: (planningHorizon) => {
+              void mutations.handlePlanningHorizonChange(planningHorizon);
+            },
           }}
           dueDate={{
             dueDate: taskDueDateOnly,
@@ -770,6 +894,7 @@ export function TaskDetailPanel({
 
         <TaskNotesSection
           mode={mode}
+          taskId={task.id}
           description={task.description}
           descValue={descValue}
           editingDesc={editingDesc}
@@ -781,10 +906,7 @@ export function TaskDetailPanel({
           expandButtonRef={notesExpandButtonRef}
           onDescValueChange={setDescValue}
           onEditStart={startDescriptionEdit}
-          onEditCancel={() => {
-            setDescValue(task.description || '');
-            setEditingDesc(false);
-          }}
+          onEditCancel={cancelDescriptionEdit}
           onEditorBlur={handleDescBlur}
           onExpand={() => {
             setExpandedNotesEditing(editingDesc);
@@ -835,16 +957,30 @@ export function TaskDetailPanel({
           headingRef={recurrenceHeadingRef}
           highlighted={recurrenceFocused}
           reminderAt={task.reminderAt ?? null}
+          reminderRelative={task.reminderRelative ?? null}
+          reminderDueTime={task.reminderDueTime ?? null}
+          reminderNagInterval={task.reminderNagInterval ?? null}
+          reminderNagStopAt={task.reminderNagStopAt ?? null}
+          reminderTimezone={task.reminderTimezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone}
+          dueDate={taskDueDateOnly}
+          reminderSaving={mutations.reminderSaving}
           canEditReminder={canEditReminder}
           reminderBlockedReason={blockedReason('reminderAt')}
           reminderSaveLabel={saveLabel('reminderAt')}
           onReminderChange={mutations.handleReminderChange}
           supportsRecurrence={supportsRecurrence}
           currentRecurrence={currentRecurrence}
+          recurrenceMode={task.recurrenceMode ?? 'schedule'}
+          completionModeAvailable={completionModeAvailable}
           canEditRecurrence={canEditRecurrence}
           recurrenceBlockedReason={blockedReason('recurrence')}
           recurrenceSaveLabel={saveLabel('recurrence')}
+          recurrenceControl={task.recurrenceControl}
+          recurrenceOptions={recurrenceOptions}
+          recurrenceOptionsSaving={mutations.recurrenceOptionsSaving}
           onRecurrenceChange={(recurrence) => { void mutations.handleRecurrenceChange(recurrence); }}
+          onRecurrenceModeChange={(recurrenceMode) => { void mutations.handleRecurrenceModeChange(recurrenceMode); }}
+          onRecurrenceOptionsChange={(options) => { void mutations.handleRecurrenceOptionsChange(options); }}
           skipToCurrentDate={skipToCurrentDate}
           skippingToCurrent={mutations.skippingToCurrent}
           canEditDueDate={canEditDueDate}
@@ -871,6 +1007,17 @@ export function TaskDetailPanel({
               Subtasks
               {task.subtasks && task.subtasks.length > 0 && ` (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`}
             </h3>
+            {canManageSubtasks && !supportsSubtaskOrderWrite && (task.subtasks?.length ?? 0) > 1 && (
+              <Tooltip content="Subtask order is saved in Mission Control only.">
+                <button
+                  type="button"
+                  aria-label="Subtask order is saved in Mission Control only"
+                  className="rounded-sm text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+                >
+                  <Info size={12} aria-hidden="true" />
+                </button>
+              </Tooltip>
+            )}
           </div>
           <SubtaskSection
             key={task.id}
@@ -880,6 +1027,7 @@ export function TaskDetailPanel({
             onUpdate={onUpdate}
             canEdit={canManageSubtasks}
             canCreateSubtasks={canManageSubtasks}
+            orderRevision={task.subtaskOrderRevision ?? 0}
           />
         </section>
 
@@ -920,16 +1068,42 @@ export function TaskDetailPanel({
           supportsMoveToList={supportsMoveToList}
           hasWritableConnectors={writableConnectors.length > 0}
           onOpenMoveDialog={() => setShowMoveDialog(true)}
-          deepLink={task.sourceId ? getDeepLinkInfo(task.connectorType, task.sourceId) : null}
+          deepLink={
+            linkedResourceDeepLink
+            ?? (task.sourceId ? getDeepLinkInfo(task.connectorType, task.sourceId) : null)
+          }
           canDeleteTask={canDeleteTask}
           deleteLabel={taskRemovalLabel(task.editPolicy)}
           onDelete={mutations.handleDelete}
+          sourceSpecificActions={task.connectorType === 'document-intelligence' ? (
+            <OwlTaskActions
+              key={`${task.id}:${parsedMetadata.owlUpdatedAt || task.updatedAt}`}
+              taskId={task.id}
+              metadata={parsedMetadata}
+              snoozedUntil={task.snoozedUntil}
+              onTaskUpdate={(update) => {
+                setTask((current) => current ? {
+                  ...current,
+                  ...update,
+                  metadata: JSON.stringify(update.metadata),
+                } : current);
+                onUpdate?.({
+                  status: update.status,
+                  priority: update.priority,
+                  snoozedUntil: update.snoozedUntil,
+                });
+              }}
+            />
+          ) : undefined}
         />
 
         <TaskDocumentPreviewSection
+          taskId={taskId}
           mode={mode}
           connectorType={task.connectorType}
           metadata={parsedMetadata}
+          dueDate={task.dueDate}
+          className={documentPreviewClassName}
         />
 
         <TaskAttachmentCard
@@ -964,6 +1138,7 @@ export function TaskDetailPanel({
           <AnimatePresence>
             {notesExpanded && (
               <TaskNotesDialog
+                taskId={task.id}
                 taskTitle={task.title}
                 description={task.description}
                 descValue={descValue}
@@ -975,7 +1150,7 @@ export function TaskDetailPanel({
                 onDescValueChange={setDescValue}
                 onEditingChange={setExpandedNotesEditing}
                 onCancelEdit={() => { setDescValue(task.description || ''); setExpandedNotesEditing(false); }}
-                onSave={handleDescBlur}
+                onSave={handleExpandedDescSave}
                 onClose={closeExpandedNotes}
                 onPaste={handleImagePaste}
                 onCheckboxToggle={canEditDescription ? handleCheckboxToggle : undefined}
@@ -994,7 +1169,7 @@ export function TaskDetailPanel({
       <>
         <div className="bg-[var(--surface-1)]">{panelContent}</div>
         {confirmDialogElement}
-        {moveDialog}
+        {moveDialogElement}
       </>
     );
   }
@@ -1012,7 +1187,7 @@ export function TaskDetailPanel({
             initial="hidden"
             animate="show"
             exit="exit"
-            onClick={onClose}
+            onClick={() => onClose('dismiss')}
             aria-hidden="true"
           />
           <motion.div
@@ -1037,7 +1212,7 @@ export function TaskDetailPanel({
         </div>
       </AnimatePresence>
       {confirmDialogElement}
-      {portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog}
+      {moveDialogElement}
       </>
     );
 
@@ -1051,22 +1226,29 @@ export function TaskDetailPanel({
     <motion.aside
       ref={panelRef}
       tabIndex={focusPanelOnMount ? -1 : undefined}
-      className="bg-[var(--surface-1)] border-l border-[var(--border)] shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.45)] flex-shrink-0 overflow-y-auto relative"
-      style={{ width: panelWidth, maxWidth: 'min(calc(100vw - 4rem), 100%)' }}
+      className={cn(
+        'relative flex-shrink-0 overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] shadow-[-12px_0_30px_-24px_rgba(0,0,0,0.45)]',
+        fillContainer && 'h-full w-full',
+      )}
+      style={fillContainer
+        ? { width: '100%', maxWidth: '100%' }
+        : { width: panelWidth, maxWidth: 'min(calc(100vw - 4rem), 100%)' }}
       variants={animatePanel ? panelSlideFromRight : undefined}
       initial={animatePanel ? 'hidden' : false}
       animate={animatePanel ? 'show' : undefined}
       exit={animatePanel ? 'exit' : undefined}
     >
       {/* Resize handle */}
-      <div
-        className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[var(--accent)]/30 active:bg-[var(--accent)]/50 transition-colors z-10"
-        onMouseDown={handleResizeStart}
-      />
+      {!fillContainer && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-[var(--accent)]/30 active:bg-[var(--accent)]/50 transition-colors z-10"
+          onMouseDown={handleResizeStart}
+        />
+      )}
       {panelContent}
     </motion.aside>
     {confirmDialogElement}
-    {portalDialog && portalRoot ? createPortal(moveDialog, portalRoot) : moveDialog}
+    {moveDialogElement}
     </>
   );
 }

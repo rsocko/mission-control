@@ -1,10 +1,8 @@
 import 'server-only';
 
-import db from '@/db';
-import { tasks } from '@/db/schema';
-import { inArray } from 'drizzle-orm';
 import { getConnectorCapabilities, isConnectorEnabled } from '@/lib/connectors/capabilities';
 import { isDemoMode } from '@/lib/mode';
+import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
 import type {
   ConnectorCapabilities,
   TaskEditPolicy,
@@ -169,12 +167,8 @@ export async function resolveTaskEditPoliciesByIds(
   const uniqueIds = [...new Set(taskIds.filter(Boolean))];
   if (uniqueIds.length === 0) return new Map();
 
-  const taskRows = await db.select({
-    id: tasks.id,
-    sourceId: tasks.sourceId,
-    connectorType: tasks.connectorType,
-    connectorInstanceId: tasks.connectorInstanceId,
-  }).from(tasks).where(inArray(tasks.id, uniqueIds));
+  const persistence = await getTaskCorePersistence();
+  const taskRows = await persistence.policyIdentities.listTaskSourceIdentities(uniqueIds);
 
   return resolveTaskEditPolicies(taskRows);
 }

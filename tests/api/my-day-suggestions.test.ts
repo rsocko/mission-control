@@ -1,10 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('GET /api/my-day suggestions', () => {
   let db: typeof import('@/db').default;
   let sqlite: typeof import('@/db').sqlite;
   let schema: typeof import('@/db/schema');
   let getMyDay: typeof import('@/app/api/my-day/route').GET;
+  let postMyDay: typeof import('@/app/api/my-day/route').POST;
   let deleteMyDay: typeof import('@/app/api/my-day/route').DELETE;
 
   beforeAll(async () => {
@@ -20,10 +22,19 @@ describe('GET /api/my-day suggestions', () => {
     vi.doUnmock('@/db/schema');
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
+    vi.doMock('@/lib/planning-signals', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@/lib/planning-signals')>();
+      return {
+        ...actual,
+        getPlanningSignalRepository: async () => {
+          throw new Error('Mutation routes must not open a second persistence connection');
+        },
+      };
+    });
     vi.resetModules();
 
     const [dbModule, schemaModule, routeModule] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
       import('@/app/api/my-day/route'),
     ]);
@@ -31,6 +42,7 @@ describe('GET /api/my-day suggestions', () => {
     sqlite = dbModule.sqlite;
     schema = schemaModule;
     getMyDay = routeModule.GET;
+    postMyDay = routeModule.POST;
     deleteMyDay = routeModule.DELETE;
 
     const recent = '2026-08-04T12:00:00.000Z';
@@ -92,6 +104,8 @@ describe('GET /api/my-day suggestions', () => {
         timestamp: old,
       }),
       task('top-week', { dueDate: '2026-08-07', timestamp: old }),
+      task('top-week-boundary', { dueDate: '2026-08-12', timestamp: old }),
+      task('top-outside-week', { dueDate: '2026-08-13', timestamp: old }),
       task('child-week', {
         dueDate: '2026-08-07',
         parentId: 'top-week',
@@ -143,6 +157,7 @@ describe('GET /api/my-day suggestions', () => {
         status: 'done',
         completedAt: '2026-08-05T17:00:00.000Z',
       }),
+      task('manual-suggestion'),
     ]);
 
     const myDayItem = (id: string, taskId: string, date: string, order: number) => ({
@@ -176,7 +191,45 @@ describe('GET /api/my-day suggestions', () => {
   afterAll(() => {
     sqlite.close();
     vi.doUnmock('@/lib/mode');
+    vi.doUnmock('@/lib/planning-signals');
     delete process.env.MC_DB_PATH;
+  });
+
+  it('records add and remove planning signals in the My Day transaction', async () => {
+    const addResponse = await postMyDay(new Request('http://localhost/api/my-day', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId: 'manual-suggestion', date: '2026-08-05' }),
+    }));
+    expect(addResponse.status).toBe(201);
+
+    const addedItem = sqlite.prepare(
+      'SELECT id FROM my_day_items WHERE task_id = ? AND date = ?',
+    ).get('manual-suggestion', '2026-08-05') as { id: string };
+    expect(addedItem.id).toBeTruthy();
+    expect(sqlite.prepare(`
+      SELECT event_type AS eventType, new_value AS date
+      FROM task_history_events
+      WHERE task_id = ? AND event_type IN ('my_day_committed', 'my_day_withdrawn')
+      ORDER BY id
+    `).all('manual-suggestion')).toEqual([
+      { eventType: 'my_day_committed', date: '2026-08-05' },
+    ]);
+
+    const removeResponse = await deleteMyDay(new Request(
+      `http://localhost/api/my-day?id=${addedItem.id}`,
+      { method: 'DELETE' },
+    ));
+    expect(removeResponse.status).toBe(200);
+    expect(sqlite.prepare(`
+      SELECT event_type AS eventType, new_value AS date
+      FROM task_history_events
+      WHERE task_id = ? AND event_type IN ('my_day_committed', 'my_day_withdrawn')
+      ORDER BY id
+    `).all('manual-suggestion')).toEqual([
+      { eventType: 'my_day_committed', date: '2026-08-05' },
+      { eventType: 'my_day_withdrawn', date: '2026-08-05' },
+    ]);
   });
 
   it('returns only top-level tasks in every suggestion group', async () => {
@@ -189,6 +242,7 @@ describe('GET /api/my-day suggestions', () => {
         taskId: string;
         isAutoIncluded: boolean;
         addedAt: string;
+        completedAt: string | null;
       }>;
       suggestions: Record<string, Array<{ id: string }>>;
     };
@@ -198,6 +252,9 @@ describe('GET /api/my-day suggestions', () => {
     expect(body.suggestions.overdue.map(({ id }) => id)).toContain('top-overdue');
     expect(body.suggestions.dueToday.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.dueThisWeek.map(({ id }) => id)).toContain('top-week');
+    expect(body.suggestions.dueThisWeek.map(({ id }) => id)).toContain('top-week-boundary');
+    expect(body.suggestions.dueThisWeek.map(({ id }) => id)).not.toContain('top-outside-week');
+    expect(body.suggestions.dueThisWeek.map(({ id }) => id)).not.toContain('top-today');
     expect(body.suggestions.highPriority.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.aiRecommended.map(({ id }) => id)).toContain('top-today');
     expect(body.suggestions.recentlyAdded.map(({ id }) => id)).toContain('top-today');
@@ -217,11 +274,13 @@ describe('GET /api/my-day suggestions', () => {
         taskId: 'completed-today',
         isAutoIncluded: true,
         addedAt: '2026-08-05T16:00:00.000Z',
+        completedAt: '2026-08-05T16:00:00.000Z',
       }),
       expect.objectContaining({
         taskId: 'completed-microsoft-today',
         isAutoIncluded: true,
         addedAt: '2026-08-05T16:30:00.0000000',
+        completedAt: '2026-08-05T16:30:00.0000000',
       }),
     ]));
     expect(suggestedIds).not.toContain('handled-today');

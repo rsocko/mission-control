@@ -3,7 +3,12 @@
  * Tests for PR #302 — Use targetConnectorInstanceId instead of type string in copy/move
  */
 import { NextResponse } from 'next/server';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import type { TaskCorePersistence } from '@/lib/tasks/core/contracts';
+import {
+  clearTaskCorePersistence,
+  registerTaskCorePersistence,
+} from '@/lib/tasks/core/runtime';
 
 // ─── Shared DB mock (chainable with transaction tracking) ────────────────────
 
@@ -82,11 +87,37 @@ const mockRunTransaction = vi.fn((fn: (tx: ReturnType<typeof createTxMock>) => u
   const tx = createTxMock();
   return fn(tx);
 });
+const mockExecutePendingSyncMove = vi.fn(async () => {
+  mockRunTransaction((tx) => {
+    tx.insert('tasks').values({});
+    for (let index = 0; index < 15; index += 1) tx.run();
+    tx.delete('taskTags').where({});
+    tx.delete('tasks').where({});
+  });
+  return { kind: 'moved' as const };
+});
+const mockCopyTask = vi.fn();
 
 vi.mock('@/db', () => ({
   default: mockDb,
   runTransaction: mockRunTransaction,
 }));
+
+vi.mock('@/lib/persistence/runtime', () => {
+  const repositories = {
+    connectors: {
+      get: async () => {
+        const rows = await mockDb.select() as unknown as Array<Record<string, unknown>>;
+        return rows[0] ?? null;
+      },
+    },
+  };
+  return {
+    getCorePersistenceRepositories: () => repositories,
+    getCorePersistenceRepositoriesForBackend: async () => repositories,
+    registerCorePersistenceRepositories: vi.fn(),
+  };
+});
 
 vi.mock('@/db/schema', () => ({
   tasks: { id: 'id', connectorType: 'connector_type', connectorInstanceId: 'connector_instance_id', parentId: 'parent_id', sourceListId: 'source_list_id' },
@@ -122,7 +153,39 @@ const BASE = 'http://localhost:3099';
 
 beforeEach(() => {
   txOps.length = 0;
+  vi.clearAllMocks();
   mockDb.select.mockImplementation(() => chainable([]));
+  mockCopyTask.mockResolvedValue({ kind: 'task-not-found' });
+  registerTaskCorePersistence({
+    moves: {
+      getMoveSource: async () => {
+        const rows = await mockDb.select() as unknown as Array<Record<string, unknown>>;
+        const row = rows[0];
+        return row
+          ? {
+              sourceId: `source:${String(row.id)}`,
+              updatedAt: '2026-08-01T00:00:00.000Z',
+              description: null,
+              dueDate: null,
+              createdAt: '2026-07-01T00:00:00.000Z',
+              completedAt: null,
+              ...row,
+            }
+          : null;
+      },
+      listTaskAttachments: async () => [],
+      findTargetList: async () => null,
+      executePendingSyncMove: mockExecutePendingSyncMove,
+      taskExists: async () => false,
+    },
+    ancillary: {
+      copyTask: mockCopyTask,
+    },
+  } as unknown as TaskCorePersistence);
+});
+
+afterAll(() => {
+  clearTaskCorePersistence();
 });
 
 // ─── MOVE ENDPOINT ──────────────────────────────────────────────────────────
@@ -242,18 +305,15 @@ describe('POST /api/tasks/[id]/move — reference migration (PR #303)', () => {
     });
     await POST(request, { params: Promise.resolve({ id: 'task-1' }) });
 
-    // Transaction should have been used
     expect(mockRunTransaction).toHaveBeenCalled();
 
-    // Verify multiple reference tables were touched in the transaction
     const insertOps = txOps.filter(op => op.op === 'insert');
     const repointOps = txOps.filter(op => op.op === 'run');
     const deleteOps = txOps.filter(op => op.op === 'delete');
 
-    // At minimum: insert the successor and invoke the complete shared repoint inventory.
-    expect(insertOps.length).toBeGreaterThanOrEqual(1); // new task
+    expect(insertOps.length).toBeGreaterThanOrEqual(1);
     expect(repointOps.length).toBeGreaterThanOrEqual(15);
-    expect(deleteOps.length).toBeGreaterThanOrEqual(2); // old taskTags, taskProjects, task
+    expect(deleteOps.length).toBeGreaterThanOrEqual(2);
   });
 });
 
@@ -274,7 +334,7 @@ describe('POST /api/tasks/[id]/copy — uses targetConnectorInstanceId (PR #302)
   });
 
   it('should return 404 when target connector instance does not exist', async () => {
-    mockDb.select.mockImplementation(() => chainable([]));
+    mockCopyTask.mockResolvedValue({ kind: 'connector-not-found' });
 
     const { POST } = await import('@/app/api/tasks/[id]/copy/route');
     const request = new Request(`${BASE}/api/tasks/task-1/copy`, {
@@ -287,12 +347,7 @@ describe('POST /api/tasks/[id]/copy — uses targetConnectorInstanceId (PR #302)
   });
 
   it('should return 404 when source task does not exist', async () => {
-    let callCount = 0;
-    mockDb.select.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) return chainable([{ id: 'inst-2', type: 'github-issues' }]);
-      return chainable([]);
-    });
+    mockCopyTask.mockResolvedValue({ kind: 'task-not-found' });
 
     const { POST } = await import('@/app/api/tasks/[id]/copy/route');
     const request = new Request(`${BASE}/api/tasks/task-999/copy`, {
@@ -305,15 +360,9 @@ describe('POST /api/tasks/[id]/copy — uses targetConnectorInstanceId (PR #302)
   });
 
   it('should return 201 on successful copy', async () => {
-    let callCount = 0;
-    mockDb.select.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) return chainable([{ id: 'inst-2', type: 'microsoft-todo' }]);
-      return chainable([{
-        id: 'task-1', connectorInstanceId: 'inst-1', connectorType: 'local',
-        title: 'Copy Me', description: 'a task', status: 'todo', priority: 'low',
-        dueDate: null, createdAt: '2026-07-01',
-      }]);
+    mockCopyTask.mockResolvedValue({
+      kind: 'committed',
+      connectorType: 'microsoft-todo',
     });
 
     const { POST } = await import('@/app/api/tasks/[id]/copy/route');

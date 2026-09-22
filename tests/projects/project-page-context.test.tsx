@@ -125,8 +125,12 @@ function SharedStateProbe({
       <p>{data.phaseEntries[phase.id]?.[0]?.task.title}</p>
       <p>{data.taskToPhase.get(task.id)?.name}</p>
       <p>{interactions.selectedTaskId ?? 'No selection'}</p>
-      <button type="button" onClick={() => interactions.toggleTask(task.id)}>
-        Toggle task
+      <p>{interactions.detailMode}</p>
+      <button type="button" onClick={() => interactions.selectTask(task.id)}>
+        Select task
+      </button>
+      <button type="button" onDoubleClick={() => interactions.handleTaskDoubleClick(task.id)}>
+        Open task fullscreen
       </button>
     </div>
   );
@@ -222,8 +226,22 @@ describe('ProjectPageContext', () => {
     expect(screen.getByText('Plan')).toBeInTheDocument();
     expect(screen.getByText('No selection')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select task' }));
     expect(screen.getByText(task.id)).toBeInTheDocument();
+  });
+
+  it('opens a double-clicked task in the detail dialog', async () => {
+    render(
+      <ProjectPageProvider projectId="project-1">
+        <SharedStateProbe />
+      </ProjectPageProvider>,
+    );
+
+    await screen.findByText('Context project');
+    fireEvent.doubleClick(screen.getByRole('button', { name: 'Open task fullscreen' }));
+
+    expect(screen.getByText(task.id)).toBeInTheDocument();
+    expect(screen.getByText('dialog')).toBeInTheDocument();
   });
 
   it('does not churn read or mutation contracts for selection-only updates', async () => {
@@ -239,10 +257,23 @@ describe('ProjectPageContext', () => {
     );
 
     await screen.findByText('Context project');
+    // The provider's load effects can settle after the DOM text appears, so wait until the
+    // recorded context values reflect the loaded snapshot and stop changing before capturing.
+    // The assertion only passes when two consecutive retries observe identical counts.
+    let recordedCounts = [-1, -1];
+    await waitFor(() => {
+      const loaded = (dataValues.at(-1) as { loading?: boolean } | undefined)?.loading === false;
+      const counts = [dataValues.length, mutationValues.length];
+      const settled = loaded
+        && counts[0] === recordedCounts[0]
+        && counts[1] === recordedCounts[1];
+      recordedCounts = counts;
+      expect(settled).toBe(true);
+    });
     const dataValue = dataValues.at(-1);
     const mutationValue = mutationValues.at(-1);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle task' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Select task' }));
     await waitFor(() => expect(screen.getByText(task.id)).toBeInTheDocument());
 
     expect(dataValues.at(-1)).toBe(dataValue);

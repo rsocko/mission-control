@@ -93,11 +93,43 @@ describe('GitHubNotificationsAdapter', () => {
       connectorType: 'github-issues',
       connectorInstanceId: 'github-1',
       level: 'urgent',
-      category: 'security',
+      category: 'development',
       isRead: false,
       isActionable: true,
       actionUrl: 'https://github.com/acme/app',
     });
+  });
+
+  it.each([
+    ['review_requested', 'PullRequest'],
+    ['mention', 'Issue'],
+    ['assign', 'Issue'],
+    ['ci_activity', 'CheckSuite'],
+    ['security_alert', 'RepositoryVulnerabilityAlert'],
+    ['subscribed', 'Release'],
+  ])('keeps %s notifications in the Development category', async (reason, subjectType) => {
+    const restFetch = vi.fn(async () => new Response(JSON.stringify([
+      githubNotification({
+        reason,
+        subject: {
+          title: 'GitHub activity',
+          type: subjectType,
+          url: 'https://api.github.com/repos/acme/app/issues/9',
+        },
+      }),
+    ]), { status: 200 }));
+    const { adapter } = createAdapter({ restFetch });
+    adapter.configure({
+      fetchNotificationsEnabled: true,
+      notificationReasons: [],
+      participatingOnly: false,
+      authenticatedUser: 'octocat',
+      notificationPollState: {},
+    });
+
+    const [result] = await adapter.fetchNotifications();
+
+    expect(result.category).toBe('development');
   });
 
   it('follows Link-header pagination across multiple pages and persists poll-state checkpoints incrementally', async () => {

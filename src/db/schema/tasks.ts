@@ -1,4 +1,13 @@
-import { sqliteTable, text, integer, real, index, primaryKey, uniqueIndex } from 'drizzle-orm/sqlite-core';
+import {
+  check,
+  index,
+  integer,
+  primaryKey,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 import type { LocalDisposition } from '@/types';
 import type { QuickSortBeforeSnapshot, QuickSortTaskSnapshot } from '@/types/quick-sort';
@@ -19,15 +28,21 @@ export const tasks = sqliteTable('tasks', {
     .notNull()
     .default('active'),
   priority: text('priority').notNull().default('none'),
+  planningHorizon: text('planning_horizon').$type<'next' | 'soon' | 'later' | 'someday'>(),
 
   dueDate: text('due_date'),
   pushCount: integer('push_count').notNull().default(0),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
   completedAt: text('completed_at'),
+  deletedAt: text('deleted_at'),
+  // Set only on locally generated recurring occurrences. One successor per occurrence.
+  recurrenceGeneratedFromTaskId: text('recurrence_generated_from_task_id'),
 
   // Hierarchy
   parentId: text('parent_id'),
+  siblingOrder: integer('sibling_order'),
+  subtaskOrderRevision: integer('subtask_order_revision').notNull().default(0),
   depth: integer('depth').notNull().default(0),
   isChecklistItem: integer('is_checklist_item', { mode: 'boolean' }).notNull().default(false),
 
@@ -55,8 +70,14 @@ export const tasks = sqliteTable('tasks', {
   // Snooze
   snoozedUntil: text('snoozed_until'),
 
-  // Reminder (ISO datetime — fires a notification at this time)
+  // Reminder (computed ISO datetime plus optional due-date-relative intent)
   reminderAt: text('reminder_at'),
+  reminderRelative: text('reminder_relative'),
+  reminderDueTime: text('reminder_due_time'),
+  reminderNagInterval: integer('reminder_nag_interval'),
+  reminderNagStopAt: text('reminder_nag_stop_at'),
+  reminderNagSeriesId: text('reminder_nag_series_id'),
+  reminderNagSequence: integer('reminder_nag_sequence').notNull().default(0),
 
   // Effort level (1–5, nullable — purely optional)
   effort: integer('effort'),
@@ -65,14 +86,223 @@ export const tasks = sqliteTable('tasks', {
   isBulkImport: integer('is_bulk_import', { mode: 'boolean' }).notNull().default(false),
 }, (table) => [
   uniqueIndex('idx_tasks_source_connector').on(table.sourceId, table.connectorInstanceId),
+  index('idx_tasks_parent_sibling_order').on(table.parentId, table.siblingOrder),
   index('idx_tasks_local_disposition').on(table.localDisposition),
+  index('idx_tasks_deleted_at').on(table.deletedAt),
+  index('idx_tasks_planning_horizon').on(table.planningHorizon),
   index('idx_tasks_list_counts')
     .on(table.isChecklistItem, table.connectorInstanceId, table.sourceListId, table.status),
+  index('idx_tasks_due_reminder')
+    .on(table.reminderAt, table.status)
+    .where(sql`${table.reminderAt} IS NOT NULL`),
   index('idx_tasks_push_count')
     .on(table.pushCount)
     .where(sql`${table.pushCount} >= 2`),
+  uniqueIndex('idx_tasks_recurrence_generated_from')
+    .on(table.recurrenceGeneratedFromTaskId)
+    .where(sql`${table.recurrenceGeneratedFromTaskId} IS NOT NULL`),
 ]);
 
+export const taskRecurrenceOccurrences = sqliteTable('task_recurrence_occurrences', {
+  occurrenceId: text('occurrence_id').primaryKey(),
+  taskId: text('task_id').notNull(),
+  generatedFromTaskId: text('generated_from_task_id'),
+  seriesId: text('series_id').notNull(),
+  ruleRevisionId: text('rule_revision_id').notNull(),
+  effectiveKind: text('effective_kind', { enum: ['local-date', 'instant'] }).notNull(),
+  effectiveValue: text('effective_value').notNull(),
+  localDate: text('local_date').notNull(),
+  instant: text('instant'),
+  occurrenceNumber: integer('occurrence_number'),
+  anchorKind: text('anchor_kind', { enum: ['schedule', 'completion'] }).notNull(),
+  anchorValue: text('anchor_value').notNull(),
+  timezoneId: text('timezone_id').notNull(),
+  timezoneKind: text('timezone_kind', { enum: ['iana', 'provider'] }).notNull(),
+  materializationStrategy: text('materialization_strategy', {
+    enum: ['on-schedule', 'on-completion'],
+  }).notNull(),
+  sourceOwner: text('source_owner', { enum: ['mission-control', 'connector'] }).notNull(),
+  seriesIdentityKind: text('series_identity_kind', {
+    enum: ['mission-control', 'connector'],
+  }).notNull(),
+  stableSeriesId: text('stable_series_id'),
+  connectorType: text('connector_type'),
+  connectorInstanceId: text('connector_instance_id'),
+  externalSeriesId: text('external_series_id'),
+  seriesStability: text('series_stability', { enum: ['provider', 'derived'] }),
+  createdAt: text('created_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_task_recurrence_occurrences_identity').on(
+    table.seriesId,
+    table.ruleRevisionId,
+    table.effectiveKind,
+    table.effectiveValue,
+  ),
+  uniqueIndex('idx_task_recurrence_occurrences_task').on(table.taskId),
+  uniqueIndex('idx_task_recurrence_occurrences_generation').on(table.generatedFromTaskId),
+  check(
+    'task_recurrence_occurrences_effective_check',
+    sql`(
+      (${table.effectiveKind} = 'local-date'
+        AND ${table.effectiveValue} = ${table.localDate}
+        AND ${table.instant} IS NULL)
+      OR
+      (${table.effectiveKind} = 'instant'
+        AND ${table.effectiveValue} = ${table.instant}
+        AND ${table.instant} IS NOT NULL)
+    )`,
+  ),
+  check(
+    'task_recurrence_occurrences_anchor_check',
+    sql`(
+      (${table.materializationStrategy} = 'on-schedule'
+        AND ${table.anchorKind} = 'schedule'
+        AND ${table.generatedFromTaskId} IS NULL)
+      OR
+      (${table.materializationStrategy} = 'on-completion'
+        AND ${table.anchorKind} = 'completion'
+        AND ${table.generatedFromTaskId} IS NOT NULL)
+    )`,
+  ),
+  check(
+    'task_recurrence_occurrences_provenance_check',
+    sql`(
+      (${table.sourceOwner} = 'mission-control'
+        AND ${table.seriesIdentityKind} = 'mission-control'
+        AND ${table.stableSeriesId} IS NOT NULL
+        AND ${table.connectorType} IS NULL
+        AND ${table.connectorInstanceId} IS NULL
+        AND ${table.externalSeriesId} IS NULL
+        AND ${table.seriesStability} IS NULL)
+      OR
+      (${table.sourceOwner} = 'connector'
+        AND ${table.connectorType} IS NOT NULL
+        AND ${table.connectorInstanceId} IS NOT NULL
+        AND (
+          (${table.seriesIdentityKind} = 'mission-control'
+            AND ${table.stableSeriesId} IS NOT NULL
+            AND ${table.externalSeriesId} IS NULL
+            AND ${table.seriesStability} IS NULL)
+          OR
+          (${table.seriesIdentityKind} = 'connector'
+            AND ${table.stableSeriesId} IS NULL
+            AND ${table.externalSeriesId} IS NOT NULL
+            AND ${table.seriesStability} IS NOT NULL)
+        ))
+    )`,
+  ),
+  check(
+    'task_recurrence_occurrences_number_check',
+    sql`${table.occurrenceNumber} IS NULL OR ${table.occurrenceNumber} > 0`,
+  ),
+]);
+
+export const taskRecurrenceBackfillDecisions = sqliteTable(
+  'task_recurrence_backfill_decisions',
+  {
+    occurrenceId: text('occurrence_id').primaryKey(),
+    seriesId: text('series_id').notNull(),
+    ruleRevisionId: text('rule_revision_id').notNull(),
+    effectiveKind: text('effective_kind', { enum: ['local-date', 'instant'] }).notNull(),
+    effectiveValue: text('effective_value').notNull(),
+    decision: text('decision', {
+      enum: [
+        'materialized',
+        'preserved',
+        'collapsed',
+        'superseded',
+        'connector-owned-missing',
+      ],
+    }).notNull(),
+    reason: text('reason').notNull(),
+    taskId: text('task_id'),
+    supersededByOccurrenceId: text('superseded_by_occurrence_id'),
+    decidedAt: text('decided_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_task_recurrence_backfill_identity').on(
+      table.seriesId,
+      table.ruleRevisionId,
+      table.effectiveKind,
+      table.effectiveValue,
+    ),
+    index('idx_task_recurrence_backfill_task').on(table.taskId),
+    check(
+      'task_recurrence_backfill_decision_check',
+      sql`${table.decision} IN (
+        'materialized',
+        'preserved',
+        'collapsed',
+        'superseded',
+        'connector-owned-missing'
+      )`,
+    ),
+  ],
+);
+
+// ─── TASK REMINDER OCCURRENCES ───────────────────────────────────────────────
+
+export const taskReminderOccurrences = sqliteTable('task_reminder_occurrences', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  scheduledAt: text('scheduled_at').notNull(),
+  seriesId: text('series_id'),
+  sequence: integer('sequence'),
+  state: text('state')
+    .$type<'pending' | 'processing' | 'fired' | 'cancelled' | 'failed'>()
+    .notNull()
+    .default('pending'),
+  attemptCount: integer('attempt_count').notNull().default(0),
+  claimToken: text('claim_token'),
+  claimedAt: text('claimed_at'),
+  leaseExpiresAt: text('lease_expires_at'),
+  firedAt: text('fired_at'),
+  cancelledAt: text('cancelled_at'),
+  notificationId: text('notification_id'),
+  lastError: text('last_error'),
+  nextAttemptAt: text('next_attempt_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  uniqueIndex('idx_task_reminder_occurrences_task_schedule')
+    .on(table.taskId, table.scheduledAt),
+  index('idx_task_reminder_occurrences_series_sequence')
+    .on(table.seriesId, table.sequence)
+    .where(sql`${table.seriesId} IS NOT NULL`),
+  index('idx_task_reminder_occurrences_claim')
+    .on(table.state, table.nextAttemptAt, table.leaseExpiresAt),
+]);
+
+export const taskTimeActivities = sqliteTable('task_time_activities', {
+  id: text('id').primaryKey(),
+  taskId: text('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+  mode: text('mode', { enum: ['focus', 'deadline'] }).notNull(),
+  state: text('state', { enum: ['running', 'paused', 'completed', 'cancelled'] }).notNull(),
+  activeKey: integer('active_key'),
+  targetSeconds: integer('target_seconds').notNull(),
+  elapsedSeconds: integer('elapsed_seconds').notNull().default(0),
+  activeStartedAt: text('active_started_at'),
+  startedAt: text('started_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+  version: integer('version').notNull().default(0),
+  lastCommandId: text('last_command_id').notNull(),
+  lastCommandAction: text('last_command_action').notNull(),
+}, (table) => [
+  uniqueIndex('idx_task_time_activities_active').on(table.activeKey),
+  index('idx_task_time_activities_task_started').on(table.taskId, table.startedAt),
+  check(
+    'task_time_activities_contract_check',
+    sql`(
+      ${table.mode} IN ('focus', 'deadline')
+      AND ${table.state} IN ('running', 'paused', 'completed', 'cancelled')
+      AND ((${table.state} IN ('running', 'paused') AND ${table.activeKey} = 1)
+        OR (${table.state} IN ('completed', 'cancelled') AND ${table.activeKey} IS NULL))
+      AND ${table.targetSeconds} > 0
+      AND ${table.elapsedSeconds} >= 0
+      AND ${table.elapsedSeconds} <= ${table.targetSeconds}
+    )`,
+  ),
+]);
 // ─── TASK SCHEDULES (Focus & Planning) ──────────────────────────────────────
 
 export const taskSchedules = sqliteTable('task_schedules', {
@@ -82,6 +312,10 @@ export const taskSchedules = sqliteTable('task_schedules', {
   estimatedDuration: integer('estimated_duration'), // minutes
   isTimeBlocked: integer('is_time_blocked', { mode: 'boolean' }).notNull().default(false),
   recurrence: text('recurrence'),
+  recurrenceMode: text('recurrence_mode')
+    .$type<'schedule' | 'completion'>()
+    .notNull()
+    .default('schedule'),
 });
 
 // ─── TAGS ───────────────────────────────────────────────────────────────────
@@ -137,6 +371,15 @@ export const taskHistoryEvents = sqliteTable('task_history_events', {
   index('idx_task_history_type_time').on(table.eventType, table.occurredAt),
   index('idx_task_history_project_time').on(table.projectId, table.occurredAt),
   index('idx_task_history_phase_time').on(table.phaseId, table.occurredAt),
+  uniqueIndex('idx_task_history_planning_signal_once')
+    .on(table.taskId, table.eventType, table.newValue)
+    .where(sql`${table.eventType} IN ('my_day_missed', 'focus_missed', 'scheduled_block_elapsed', 'became_overdue')`),
+  uniqueIndex('idx_task_history_planning_observation_once')
+    .on(table.taskId, table.eventType, table.newValue, table.occurredAt)
+    .where(sql`${table.eventType} IN ('my_day_committed', 'my_day_withdrawn', 'focus_committed', 'focus_withdrawn')`),
+  index('idx_task_history_planning_date')
+    .on(table.eventType, table.newValue)
+    .where(sql`${table.eventType} IN ('my_day_committed', 'my_day_withdrawn', 'focus_committed', 'focus_withdrawn')`),
 ]);
 
 export const taskFieldStates = sqliteTable('task_field_states', {
@@ -395,7 +638,7 @@ export const quickSortLog = sqliteTable('task_triage_log', {
   id: text('id').primaryKey(),
   taskId: text('task_id').notNull(),
   operationId: text('operation_id'),
-  /** 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date' */
+  /** 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon' */
   mode: text('mode').notNull(),
   /** 'applied' | 'suggestion_accepted' | 'skipped' */
   action: text('action').notNull(),

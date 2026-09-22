@@ -10,7 +10,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
-import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
+import { motion, useReducedMotion } from 'motion/react';
 import {
   DndContext,
   DragOverlay,
@@ -51,11 +51,7 @@ import {
   NotepadText,
   PencilLine,
   Plus,
-  RefreshCw,
-  Search,
-  Sparkles,
   Trash2,
-  X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -69,12 +65,16 @@ import {
   resolveSelectionAnchorIndex,
   useBulkSelection,
 } from '@/components/bulk-actions';
+import { TaskKeywordFilter } from '@/components/filters/TaskKeywordFilter';
 import { BurnReportCard } from '@/components/projects/BurnReportCard';
-import { TaskContextMenu } from '@/components/task-list/TaskContextMenu';
+import { PhaseColorPicker } from '@/components/projects/PhaseColorPicker';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
+import {
+  ViewDensityToggle,
+  type ViewDensity,
+} from '@/components/toolbar/ViewDensityToggle';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { CompletionBurst } from '@/components/ui/CompletionBurst';
 import {
   Select,
   SelectContent,
@@ -83,14 +83,20 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
-import { isInactiveTaskStatus } from '@/lib/constants/task-formatting';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
+import {
+  countTaskFilters,
+  EMPTY_TASK_FILTER_CONTEXT,
+  updateTaskFilterContext,
+  type TaskFilterContext,
+} from '@/lib/task-filter-context';
 import { ProjectHierarchyClientError } from '@/lib/projects/hierarchy-client';
 import {
   filterCompletedTasks,
   getPhaseTaskStatusSummary,
   shouldCompactCompletedPhase,
 } from '@/lib/projects/phase-task-status';
+import { LARGE_PHASE_TASK_THRESHOLD } from '@/lib/projects/phase-reorganization';
 import {
   canEditTaskField,
   selectedTaskFieldBlockedReason,
@@ -108,7 +114,6 @@ import {
   PriorityDot,
   SortablePhaseItem,
   TaskDisplayId,
-  TaskInfoBadges,
   TaskStatusBadge,
 } from '../components';
 import {
@@ -116,7 +121,6 @@ import {
   LEFT_GANTT_COLUMN_WIDTH,
   PHASE_STATUS_LABELS,
   PHASE_STATUS_ORDER,
-  PRIORITY_LABELS,
   TASK_STATUS_LABELS,
   ZOOM_CELL_WIDTH,
 } from '../constants';
@@ -135,10 +139,9 @@ import type {
 import {
   buildGanttRows,
   buildTimelineSegments,
-  formatDateLabel,
+  filterProjectTasks,
   getConnectorIcon,
   getPhaseColor,
-  getPhaseStatusColor,
   getTaskStatusColor,
   getTimelineRange,
   toRgba,
@@ -148,6 +151,10 @@ import type {
   ProjectTaskOverlayActions,
   RequestConfirmation,
 } from './contracts';
+import { AIPlanControl } from './AIPlanControl';
+import { PhaseReorganizationTrigger } from './PhaseReorganizationTrigger';
+import { PlanTaskRow } from '../PlanTaskRow';
+import { useProjectTaskFilterOptions } from './useProjectTaskFilterOptions';
 
 const ProjectStructureGraph = dynamic(
   () => import('@/components/graph/ProjectStructureGraph'),
@@ -158,6 +165,10 @@ const ProjectStructureGraph = dynamic(
 );
 
 const ALLOWED_PHASE_FIELDS = new Set(['name', 'description', 'status', 'color', 'estimatedDays', 'targetStart', 'targetEnd', 'startAfterPhaseId', 'sortOrder']);
+const DEFAULT_PLAN_FILTER_CONTEXT: TaskFilterContext = {
+  ...EMPTY_TASK_FILTER_CONTEXT,
+  completion: 'all',
+};
 
 interface ProjectPhasesTabProps {
   /** True while this tab is the visible Activity boundary. */
@@ -176,10 +187,13 @@ interface ProjectPhasesTabProps {
   requestConfirmation: RequestConfirmation;
   /** Route-level AI proposal controller owned by the shell. */
   proposalActions: ProjectProposalActions;
+  /** Display labels for connector types, keyed by connector type. */
+  connectorLabels: Record<string, string>;
 }
 
 export function ProjectPhasesTab({
   active,
+  connectorLabels,
   onGraphLayoutChange,
   onRevealComplete,
   proposalActions,
@@ -197,7 +211,7 @@ export function ProjectPhasesTab({
     projectId,
     reportRefreshKey,
     tasks,
-    taskToPhase,
+    unassignedTasks,
   } = useProjectPageData();
   const {
     hierarchyAnnouncement,
@@ -213,10 +227,13 @@ export function ProjectPhasesTab({
     getTaskContextActions,
     handleCompleteTask,
     handleGraphTaskSelect,
+    handleTaskClick,
+    handleTaskDoubleClick,
     myDayTaskIds,
+    openTaskNotes,
     selectedTaskId,
     setSelectedTaskId,
-    toggleTask,
+    selectTask,
   } = useProjectPageTaskInteractions();
   const prefersReducedMotion = useReducedMotion() ?? false;
 
@@ -243,14 +260,23 @@ export function ProjectPhasesTab({
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [addTaskMenuPhaseId, setAddTaskMenuPhaseId] = useState<string | null>(null);
   const [unassignedCollapsed, setUnassignedCollapsed] = useState(false);
-  const [phaseTaskSearch, setPhaseTaskSearch] = useState('');
-  const [showCompletedTasks, setShowCompletedTasks] = useState(true);
+  const [planFilterContext, setPlanFilterContext] = useState<TaskFilterContext>(
+    DEFAULT_PLAN_FILTER_CONTEXT,
+  );
+  const [viewDensity, setViewDensity] = useState<ViewDensity>('comfortable');
   const [portalContainer, setPortalContainer] = useState<HTMLElement | null>(null);
+  const planFilterProjectIdRef = useRef(projectId);
   const bulk = useBulkSelection();
   const visiblePhaseViewMode = revealPhaseId ? 'list' : phaseViewMode;
-  const normalizedPhaseTaskSearch = phaseTaskSearch.trim().toLowerCase();
+  const showCompletedTasks = planFilterContext.completion === 'all';
 
   useEffect(() => { setPortalContainer(document.body); }, []);
+
+  useEffect(() => {
+    if (planFilterProjectIdRef.current === projectId) return;
+    planFilterProjectIdRef.current = projectId;
+    setPlanFilterContext(DEFAULT_PLAN_FILTER_CONTEXT);
+  }, [projectId]);
 
   // Keep the shell's scroll container in step with the full-height graph view.
   useLayoutEffect(() => {
@@ -266,7 +292,7 @@ export function ProjectPhasesTab({
   useEffect(() => {
     if (!revealPhaseId) return;
     setPhaseViewMode('list');
-    setShowCompletedTasks(true);
+    setPlanFilterContext((current) => updateTaskFilterContext(current, { completion: 'all' }));
     setCollapsedPhaseIds((current) => {
       const next = current.filter((entry) => entry !== revealPhaseId);
       persistCollapsedPhaseIds(next);
@@ -322,6 +348,57 @@ export function ProjectPhasesTab({
   }, []);
 
   const taskMap = useMemo(() => new Map(tasks.map((task) => [task.id, task] as const)), [tasks]);
+  const {
+    assignees: planTaskAssignees,
+    projects: planTaskFilterProjects,
+    sourceLists: planTaskSourceLists,
+    sources: planTaskSources,
+    tags: planTaskTags,
+  } = useProjectTaskFilterOptions({
+    connectorLabels,
+    phases,
+    project,
+    tasks,
+  });
+  const filteredPlanTasks = useMemo(
+    () => filterProjectTasks(tasks, planFilterContext, projectId),
+    [planFilterContext, projectId, tasks],
+  );
+  const filteredPlanTaskIds = useMemo(
+    () => new Set(filteredPlanTasks.map((task) => task.id)),
+    [filteredPlanTasks],
+  );
+  const hasPlanTaskFilters = (
+    countTaskFilters(planFilterContext)
+    - (planFilterContext.completion === 'all' ? 1 : 0)
+  ) > 0;
+  const clearPlanTaskFilters = useCallback(() => {
+    setPlanFilterContext((current) => ({
+      ...EMPTY_TASK_FILTER_CONTEXT,
+      completion: current.completion,
+    }));
+  }, []);
+  const planRowFilterController = useMemo(() => ({
+    tagSlugs: planFilterContext.tagSlugs,
+    projectId: null,
+    onToggleTag: (slug: string) => {
+      setPlanFilterContext((current) => updateTaskFilterContext(current, {
+        tagSlugs: current.tagSlugs.includes(slug)
+          ? current.tagSlugs.filter((tagSlug) => tagSlug !== slug)
+          : [...current.tagSlugs, slug],
+      }));
+    },
+    onFilterPriority: (priority: string) => {
+      setPlanFilterContext((current) => updateTaskFilterContext(current, {
+        priorities: [priority],
+      }));
+    },
+    onFilterStatus: (status: string) => {
+      setPlanFilterContext((current) => updateTaskFilterContext(current, {
+        statuses: [status],
+      }));
+    },
+  }), [planFilterContext.tagSlugs]);
 
   const graphRefreshKey = useMemo(() => JSON.stringify({
     phases: phases.map((phase) => [
@@ -337,39 +414,21 @@ export function ProjectPhasesTab({
     tasks: tasks.map((task) => [task.id, task.status, task.updatedAt]),
   }), [phaseItemsByPhase, phases, tasks]);
 
-  // Tasks in the project that are not assigned to any phase
-  const unassignedTasks = useMemo(() => {
-    if (phases.length === 0) return [];
-    return tasks.filter((t) => !taskToPhase.has(t.id));
-  }, [tasks, taskToPhase, phases]);
-
   const visibleUnassignedTasks = useMemo(() => {
-    const completionFiltered = filterCompletedTasks(
-      unassignedTasks,
-      showCompletedTasks,
-      (task) => task.status,
-    );
-    return normalizedPhaseTaskSearch
-      ? completionFiltered.filter((task) => task.title.toLowerCase().includes(normalizedPhaseTaskSearch))
-      : completionFiltered;
-  }, [normalizedPhaseTaskSearch, showCompletedTasks, unassignedTasks]);
+    return unassignedTasks.filter((task) => filteredPlanTaskIds.has(task.id));
+  }, [filteredPlanTaskIds, unassignedTasks]);
 
   // Flat ordered list of all task IDs shown in the Plan list view (for shift-click range selection)
   const planListTaskIds = useMemo(() => {
     const ids: string[] = [];
     for (const phase of phases) {
-      const entries = filterCompletedTasks(
-        phaseEntries[phase.id] ?? [],
-        showCompletedTasks,
-        ({ task }) => task.status,
-      ).filter(({ task }) => (
-        !normalizedPhaseTaskSearch || task.title.toLowerCase().includes(normalizedPhaseTaskSearch)
-      ));
+      const entries = (phaseEntries[phase.id] ?? [])
+        .filter(({ task }) => filteredPlanTaskIds.has(task.id));
       for (const { task } of entries) ids.push(task.id);
     }
     for (const task of visibleUnassignedTasks) ids.push(task.id);
     return ids;
-  }, [normalizedPhaseTaskSearch, phaseEntries, phases, showCompletedTasks, visibleUnassignedTasks]);
+  }, [filteredPlanTaskIds, phaseEntries, phases, visibleUnassignedTasks]);
 
   const handleBulkModifierClick = useCallback((taskId: string, e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => {
     const clickedIndex = planListTaskIds.indexOf(taskId);
@@ -797,135 +856,143 @@ export function ProjectPhasesTab({
         <CardHeader
           ref={planToolbarRef}
           className={cn(
-            'z-10 gap-4 rounded-t-[var(--radius-lg)] border-b border-[var(--border-subtle)] bg-[var(--surface-1)] sm:flex-row sm:items-center sm:justify-between sm:space-y-0',
+            'z-10 gap-3 rounded-t-[var(--radius-lg)] border-b border-[var(--border-subtle)] bg-[var(--surface-1)]',
             isGraphView ? 'relative shrink-0' : 'sticky',
           )}
           style={isGraphView ? undefined : { top: stickyHeaderHeight }}
         >
-          <div>
-            <CardTitle>Plan</CardTitle>
-            <CardDescription>Organize tasks into phases. Right-click tasks for actions.</CardDescription>
-            <p className="sr-only" aria-live="polite" aria-atomic="true">
-              {hierarchyAnnouncement}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {visiblePhaseViewMode !== 'assign' && visiblePhaseViewMode !== 'graph' && (
-            <div className="input-glow flex items-center gap-1.5 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-3 h-9">
-              <Search size={14} className="text-[var(--text-tertiary)]" />
-              <input
-                type="text"
-                placeholder="Filter tasks…"
-                value={phaseTaskSearch}
-                onChange={(e) => setPhaseTaskSearch(e.target.value)}
-                className="bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-tertiary)] outline-none w-28"
-              />
-              {phaseTaskSearch && (
-                <button type="button" onClick={() => setPhaseTaskSearch('')} className="text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]">
-                  <X size={12} />
-                </button>
-              )}
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle>Plan</CardTitle>
+              <CardDescription>Organize tasks into phases. Right-click tasks for actions.</CardDescription>
+              <p className="sr-only" aria-live="polite" aria-atomic="true">
+                {hierarchyAnnouncement}
+              </p>
             </div>
-            )}
-            <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-              {(['list', 'gantt', 'graph', 'assign'] as const).map((viewMode) => (
-                <button
-                  key={viewMode}
-                  type="button"
-                  onClick={() => { setPhaseViewMode(viewMode); if (viewMode !== 'list') bulk.clearSelection(); }}
-                  className={cn(
-                    'h-8 rounded-[var(--radius-md)] px-3 text-sm font-medium capitalize',
-                    BUTTON_TRANSITION,
-                    visiblePhaseViewMode === viewMode
-                      ? 'bg-[var(--accent-600)] text-white shadow-[var(--shadow-sm)]'
-                      : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96]',
-                  )}
-                >
-                  {viewMode === 'graph' ? <Network size={14} className="mr-1.5 inline" /> : null}
-                  {viewMode}
-                </button>
-              ))}
-            </div>
-            {visiblePhaseViewMode === 'gantt' ? (
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-                {(['day', 'week', 'month'] as const).map((zoom) => (
+                {(['list', 'gantt', 'graph', 'assign'] as const).map((viewMode) => (
                   <button
-                    key={zoom}
+                    key={viewMode}
                     type="button"
-                    onClick={() => setGanttZoom(zoom)}
+                    onClick={() => { setPhaseViewMode(viewMode); if (viewMode !== 'list') bulk.clearSelection(); }}
                     className={cn(
                       'h-8 rounded-[var(--radius-md)] px-3 text-sm font-medium capitalize',
                       BUTTON_TRANSITION,
-                      ganttZoom === zoom
+                      visiblePhaseViewMode === viewMode
                         ? 'bg-[var(--accent-600)] text-white shadow-[var(--shadow-sm)]'
                         : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96]',
                     )}
                   >
-                    {zoom}
+                    {viewMode === 'graph' ? <Network size={14} className="mr-1.5 inline" /> : null}
+                    {viewMode}
                   </button>
                 ))}
               </div>
-            ) : null}
-            {visiblePhaseViewMode !== 'assign' && (
-            <>
-            {visiblePhaseViewMode === 'list' && phases.length > 0 && (
-              <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
-                <Tooltip content="Expand all phases">
-                  <button
-                    type="button"
-                    onClick={expandAllPhases}
-                    disabled={collapsedPhaseIds.length === 0}
-                    className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:opacity-40 disabled:pointer-events-none', BUTTON_TRANSITION)}
-                    aria-label="Expand all phases"
-                  >
-                    <ChevronsUpDown size={16} />
-                  </button>
-                </Tooltip>
-                <Tooltip content="Collapse all phases">
-                  <button
-                    type="button"
-                    onClick={collapseAllPhases}
-                    disabled={collapsedPhaseIds.length === phases.length}
-                    className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:opacity-40 disabled:pointer-events-none', BUTTON_TRANSITION)}
-                    aria-label="Collapse all phases"
-                  >
-                    <ChevronsDownUp size={16} />
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-            {visiblePhaseViewMode === 'list' && !bulk.bulkMode && tasks.some((task) => task.status === 'done') && (
-              <ShowCompletedToggle
-                showCompleted={showCompletedTasks}
-                onShowCompletedChange={setShowCompletedTasks}
-              />
-            )}
-            {visiblePhaseViewMode === 'list' && tasks.length > 0 && !bulk.bulkMode && (
-              <button
-                type="button"
-                onClick={bulk.enterBulkMode}
-                className="text-xs text-[var(--text-muted)] hover:text-[var(--text-secondary)] transition-colors"
-              >
-                Select
-              </button>
-            )}
-            <Button variant="outline" className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300" onClick={() => proposalActions.generate()} disabled={proposalActions.isGenerating || proposalActions.isRefining}>
-              {proposalActions.isGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-              AI Suggest Phases
-            </Button>
-            {phases.length > 0 ? (
-              <Button variant="outline" className="border-purple-500/30 text-purple-400 hover:bg-purple-500/10 hover:text-purple-300" onClick={() => proposalActions.refine()} disabled={proposalActions.isRefining || proposalActions.isGenerating}>
-                {proposalActions.isRefining ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}
-                Refine Plan
-              </Button>
-            ) : null}
-            <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
-              {creatingPhase ? <LoaderCircle className="animate-spin" /> : <Plus />}
-              Add phase
-            </Button>
-            </>
-            )}
+              {visiblePhaseViewMode === 'gantt' ? (
+                <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
+                  {(['day', 'week', 'month'] as const).map((zoom) => (
+                    <button
+                      key={zoom}
+                      type="button"
+                      onClick={() => setGanttZoom(zoom)}
+                      className={cn(
+                        'h-8 rounded-[var(--radius-md)] px-3 text-sm font-medium capitalize',
+                        BUTTON_TRANSITION,
+                        ganttZoom === zoom
+                          ? 'bg-[var(--accent-600)] text-white shadow-[var(--shadow-sm)]'
+                          : 'text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96]',
+                      )}
+                    >
+                      {zoom}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              {visiblePhaseViewMode !== 'assign' ? (
+                <>
+                  {phases.length > 0 ? (
+                    <AIPlanControl hasPhases proposalActions={proposalActions} />
+                  ) : null}
+                  <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
+                    {creatingPhase ? <LoaderCircle className="animate-spin" /> : <Plus />}
+                    Add phase
+                  </Button>
+                </>
+              ) : null}
+            </div>
           </div>
+          {visiblePhaseViewMode === 'list' ? (
+            <TaskKeywordFilter
+              filteredCount={filteredPlanTasks.length}
+              sources={planTaskSources}
+              sourceLists={planTaskSourceLists}
+              tags={planTaskTags}
+              assignees={planTaskAssignees}
+              projects={planTaskFilterProjects}
+              listGroups={[]}
+              controller={{
+                context: planFilterContext,
+                setContext: setPlanFilterContext,
+                clear: clearPlanTaskFilters,
+              }}
+              hiddenBuilderFilters={['project']}
+              placeholder="Filter Plan tasks... (press / to focus, ? for help)"
+              className="mb-0"
+              secondaryContent={(
+                <div className="flex items-center gap-1">
+                  {phases.length > 0 ? (
+                    <div className="flex rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] p-0.5">
+                      <Tooltip content="Expand all phases">
+                        <button
+                          type="button"
+                          onClick={expandAllPhases}
+                          disabled={collapsedPhaseIds.length === 0}
+                          className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40', BUTTON_TRANSITION)}
+                          aria-label="Expand all phases"
+                        >
+                          <ChevronsUpDown size={16} />
+                        </button>
+                      </Tooltip>
+                      <Tooltip content="Collapse all phases">
+                        <button
+                          type="button"
+                          onClick={collapseAllPhases}
+                          disabled={collapsedPhaseIds.length === phases.length}
+                          className={cn('h-8 rounded-[var(--radius-md)] px-2 text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] active:scale-[0.96] disabled:pointer-events-none disabled:opacity-40', BUTTON_TRANSITION)}
+                          aria-label="Collapse all phases"
+                        >
+                          <ChevronsDownUp size={16} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  ) : null}
+                  {!bulk.bulkMode && tasks.some((task) => task.status === 'done') ? (
+                    <ShowCompletedToggle
+                      showCompleted={showCompletedTasks}
+                      onShowCompletedChange={(showCompleted) => {
+                        setPlanFilterContext((current) => updateTaskFilterContext(current, {
+                          completion: showCompleted ? 'all' : 'open',
+                        }));
+                      }}
+                    />
+                  ) : null}
+                  {!bulk.bulkMode ? (
+                    <ViewDensityToggle value={viewDensity} onChange={setViewDensity} />
+                  ) : null}
+                  {tasks.length > 0 && !bulk.bulkMode ? (
+                    <button
+                      type="button"
+                      onClick={bulk.enterBulkMode}
+                      className="px-2 text-xs text-[var(--text-muted)] transition-colors hover:text-[var(--text-secondary)]"
+                    >
+                      Select
+                    </button>
+                  ) : null}
+                </div>
+              )}
+            />
+          ) : null}
           {/* Bulk action bar inside sticky header so it stays visible when scrolled */}
           {bulk.bulkMode && visiblePhaseViewMode === 'list' && (
             <div className="border-t border-[var(--border-subtle)]">
@@ -1141,8 +1208,25 @@ export function ProjectPhasesTab({
         </CardHeader>
 
         {/* AI Insights - inline hints based on phase data */}
-        {phases.length >= 2 && (() => {
-          const insights: Array<{ type: 'gap' | 'stale' | 'overlap'; message: string }> = [];
+        {phases.length > 0 && (() => {
+          const insights: Array<{
+            type: 'gap' | 'stale' | 'overlap' | 'large';
+            message: string;
+            phaseId?: string;
+            phaseName?: string;
+          }> = [];
+          const largePhases = phases.filter(
+            (phase) => (phaseEntries[phase.id] ?? []).length > LARGE_PHASE_TASK_THRESHOLD,
+          );
+          for (const largePhase of largePhases) {
+            const taskCount = (phaseEntries[largePhase.id] ?? []).length;
+            insights.push({
+              type: 'large',
+              message: `“${largePhase.name}” has ${taskCount} tasks and may be easier to manage if subdivided.`,
+              phaseId: largePhase.id,
+              phaseName: largePhase.name,
+            });
+          }
           const stalePhasesCount = phases.filter((p) => p.status === 'in_progress').length;
           if (stalePhasesCount > 2) {
             insights.push({ type: 'stale', message: `${stalePhasesCount} phases are marked in-progress simultaneously — consider focusing on fewer.` });
@@ -1170,7 +1254,15 @@ export function ProjectPhasesTab({
                 {insights.slice(0, 3).map((insight, i) => (
                   <div key={i} className="flex items-start gap-2 text-xs text-[var(--text-secondary)]">
                     <span className="mt-0.5 h-1.5 w-1.5 rounded-full bg-purple-400 flex-shrink-0" />
-                    <span>{insight.message}</span>
+                    <span className="flex-1">{insight.message}</span>
+                    {insight.phaseId && insight.phaseName ? (
+                      <PhaseReorganizationTrigger
+                        phaseId={insight.phaseId}
+                        phaseName={insight.phaseName}
+                        proposalActions={proposalActions}
+                        compact
+                      />
+                    ) : null}
                   </div>
                 ))}
               </div>
@@ -1184,10 +1276,11 @@ export function ProjectPhasesTab({
               <p className="text-sm font-medium text-[var(--text-primary)]">No phases yet</p>
               <p className="mt-2 text-sm text-[var(--text-tertiary)]">Create the first phase to start shaping delivery.</p>
               <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                <Button variant="secondary" onClick={() => proposalActions.generate()} disabled={proposalActions.isGenerating}>
-                  {proposalActions.isGenerating ? <LoaderCircle className="animate-spin" /> : <Sparkles />}
-                  AI Suggest Phases
-                </Button>
+                <AIPlanControl
+                  hasPhases={false}
+                  proposalActions={proposalActions}
+                  variant="secondary"
+                />
                 <Button onClick={handleAddPhase} disabled={creatingPhase || savingPhaseIds.size > 0}>
                   <Plus />
                   Add first phase
@@ -1213,9 +1306,8 @@ export function ProjectPhasesTab({
                       showCompletedTasks,
                       ({ task }) => task.status,
                     );
-                    const entries = normalizedPhaseTaskSearch
-                      ? completionFilteredEntries.filter(({ task }) => task.title.toLowerCase().includes(normalizedPhaseTaskSearch))
-                      : completionFilteredEntries;
+                    const entries = completionFilteredEntries
+                      .filter(({ task }) => filteredPlanTaskIds.has(task.id));
                     const isCollapsed = collapsedPhaseIds.includes(phase.id);
                     const isEditing = editingPhaseId === phase.id;
                     const isSaving = savingPhaseIds.has(phase.id);
@@ -1258,6 +1350,13 @@ export function ProjectPhasesTab({
                               >
                                 <GripVertical size={14} />
                               </button>
+                              <PhaseColorPicker
+                                phaseName={phase.name}
+                                value={phase.color}
+                                fallbackColor={project.color}
+                                disabled={isPhaseMutationDisabled}
+                                onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                              />
                               <CheckCircle2 size={16} className="shrink-0 text-[var(--success)]" />
                               <span className="min-w-0 truncate text-sm font-medium text-[var(--text-secondary)]">
                                 {phase.name}
@@ -1277,7 +1376,11 @@ export function ProjectPhasesTab({
                               </span>
                               <button
                                 type="button"
-                                onClick={() => setShowCompletedTasks(true)}
+                                onClick={() => {
+                                  setPlanFilterContext((current) => updateTaskFilterContext(current, {
+                                    completion: 'all',
+                                  }));
+                                }}
                                 className="ml-auto text-xs font-medium text-[var(--accent-400)] hover:text-[var(--accent-300)]"
                               >
                                 Show tasks
@@ -1306,7 +1409,15 @@ export function ProjectPhasesTab({
                             <div className="relative rounded-t-[var(--radius-lg)] bg-[var(--surface-1)]">
                               <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-start sm:justify-between">
                                 <div className="flex min-w-0 gap-3">
-                                  <span className="mt-4 h-2.5 w-2.5 shrink-0 rounded-full" style={{ backgroundColor: phaseColor }} aria-hidden="true" />
+                                  <div className="mt-1">
+                                    <PhaseColorPicker
+                                      phaseName={phase.name}
+                                      value={phase.color}
+                                      fallbackColor={project.color}
+                                      disabled={isPhaseMutationDisabled}
+                                      onChange={(color) => handleUpdatePhaseField(phase.id, 'color', color)}
+                                    />
+                                  </div>
                                   <button
                                     type="button"
                                     {...dragHandleProps}
@@ -1360,11 +1471,42 @@ export function ProjectPhasesTab({
                                       <button type="button" onClick={() => void handleCyclePhaseStatus(phase)} disabled={isPhaseMutationDisabled} title="Click to cycle status">
                                         <PhaseStatusBadge status={phase.status} />
                                       </button>
+                                      {statusSummary.mismatchMessage ? (
+                                        <Tooltip content={statusSummary.mismatchMessage} placement="bottom">
+                                          <span
+                                            role="img"
+                                            tabIndex={0}
+                                            title={statusSummary.mismatchMessage}
+                                            aria-label={`Phase status warning: ${statusSummary.mismatchMessage}`}
+                                            className="inline-flex min-h-6 min-w-6 items-center justify-center rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 text-[var(--warning)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--warning)]/60"
+                                          >
+                                            <CircleAlert size={13} />
+                                          </span>
+                                        </Tooltip>
+                                      ) : null}
                                       {/* Task count — read-only pill, visually distinct */}
-                                      <span className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-2)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]">
+                                      <span
+                                        className={cn(
+                                          'inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium',
+                                          allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                            ? 'bg-amber-500/10 text-amber-300'
+                                            : 'bg-[var(--surface-2)] text-[var(--text-secondary)]',
+                                        )}
+                                        title={allEntries.length > LARGE_PHASE_TASK_THRESHOLD
+                                          ? 'Large phases can be harder to scan and maintain.'
+                                          : undefined}
+                                      >
                                         <Layers3 size={11} />
-                                        {normalizedPhaseTaskSearch || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {hasPlanTaskFilters || !showCompletedTasks ? `${entries.length}/${allEntries.length}` : entries.length} {allEntries.length === 1 ? 'task' : 'tasks'}
+                                        {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? ' · Large phase' : ''}
                                       </span>
+                                      {allEntries.length > LARGE_PHASE_TASK_THRESHOLD ? (
+                                        <PhaseReorganizationTrigger
+                                          phaseId={phase.id}
+                                          phaseName={phase.name}
+                                          proposalActions={proposalActions}
+                                        />
+                                      ) : null}
                                       {/* Progress indicator */}
                                       {totalCount > 0 && (
                                         <span className="inline-flex items-center gap-1.5 text-xs text-[var(--text-tertiary)]">
@@ -1378,15 +1520,6 @@ export function ProjectPhasesTab({
                                           <span className="tabular-nums">{pctComplete}%</span>
                                         </span>
                                       )}
-                                      {statusSummary.mismatchMessage ? (
-                                        <span
-                                          role="status"
-                                          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--warning)]/30 bg-[var(--warning)]/10 px-2 py-1 text-xs font-medium text-[var(--warning)]"
-                                        >
-                                          <CircleAlert size={12} />
-                                          {statusSummary.mismatchMessage}
-                                        </span>
-                                      ) : null}
                                       {/* Description icon when no description exists */}
                                       {!phase.description && editingPhaseDescId !== phase.id && (
                                         <Tooltip content="Add description">
@@ -1553,45 +1686,43 @@ export function ProjectPhasesTab({
                                         <p className="text-sm text-[var(--text-tertiary)]">
                                           {!showCompletedTasks && allEntries.length > 0 && completionFilteredEntries.length === 0
                                             ? 'Completed tasks are hidden.'
-                                            : normalizedPhaseTaskSearch && completionFilteredEntries.length > 0
+                                            : hasPlanTaskFilters && completionFilteredEntries.length > 0
                                               ? 'No tasks match this filter.'
                                               : 'No tasks in this phase yet.'}
                                         </p>
                                         {!showCompletedTasks && completionFilteredEntries.length === 0 && allEntries.length > 0 ? (
                                           <button
                                             type="button"
-                                            onClick={() => setShowCompletedTasks(true)}
+                                            onClick={() => {
+                                              setPlanFilterContext((current) => updateTaskFilterContext(current, {
+                                                completion: 'all',
+                                              }));
+                                            }}
                                             className="mt-2 text-xs font-medium text-[var(--accent-400)] hover:text-[var(--accent-300)]"
                                           >
                                             Show completed tasks
                                           </button>
                                         ) : null}
-                                        <div className="relative mt-3 inline-flex" data-phase-add-menu>
-                                          <button
-                                            type="button"
-                                            onClick={() => setAddTaskMenuPhaseId(addTaskMenuPhaseId === phase.id ? null : phase.id)}
-                                            aria-expanded={addTaskMenuPhaseId === phase.id}
-                                            aria-haspopup="menu"
-                                            className={cn('inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] active:scale-[0.96]', BUTTON_TRANSITION)}
-                                          >
-                                            <Plus size={14} />
-                                            Add task
-                                          </button>
-                                          <AnimatePresence>
-                                            {addTaskMenuPhaseId === phase.id && (
-                                              <PhaseAddTaskMenu
-                                                onCreateNew={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestCreateTask({ phaseId: phase.id });
-                                                }}
-                                                onLinkExisting={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
-                                                }}
-                                                onClose={() => setAddTaskMenuPhaseId(null)}
-                                              />
+                                        <div className="mt-3 inline-flex">
+                                          <PhaseAddTaskMenu
+                                            open={addTaskMenuPhaseId === phase.id}
+                                            onOpenChange={(open) => setAddTaskMenuPhaseId(open ? phase.id : null)}
+                                            trigger={(
+                                              <button
+                                                type="button"
+                                                className={cn('inline-flex items-center gap-2 rounded-lg bg-[var(--accent)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--accent-hover)] active:scale-[0.96]', BUTTON_TRANSITION)}
+                                              >
+                                                <Plus size={14} />
+                                                Add task
+                                              </button>
                                             )}
-                                          </AnimatePresence>
+                                            onCreateNew={() => {
+                                              taskOverlayActions.requestCreateTask({ phaseId: phase.id });
+                                            }}
+                                            onLinkExisting={() => {
+                                              taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
+                                            }}
+                                          />
                                         </div>
                                       </div>
                                     </DroppablePhaseZone>
@@ -1600,134 +1731,56 @@ export function ProjectPhasesTab({
                                       <SortableContext items={entries.map(({ task }) => `task:${task.id}`)} strategy={verticalListSortingStrategy}>
                                       <div className="space-y-2">
                                         {entries.map(({ item, task }) => {
-                                          const ConnectorIcon = getConnectorIcon(task.connectorType);
-                                          const isDone = task.status === 'done' || completingIds.has(task.id);
-                                          const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);
                                           const isBulkSelected = bulk.bulkSelected.has(task.id);
                                           return (
                                             <DraggableTaskItem key={item.id} taskId={task.id}>
                                               {(taskDragHandleProps) => (
-                                                <TaskContextMenu
-                                                 task={{ id: task.id, title: task.title, status: task.status, priority: task.priority, connectorType: task.connectorType, sourceId: task.sourceId, dueDate: task.dueDate ?? null, localDisposition: task.localDisposition, taskSourceModel: task.taskSourceModel, editPolicy: task.editPolicy }}
-                                                 isInMyDay={myDayTaskIds.has(task.id)}
-                                                projectPhases={phaseMenuItems}
-                                                projects={allProjects}
-                                                taskProjectIds={task.hubProjectIds}
-                                                taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                                                actions={getTaskContextActions(task)}
-                                               >
-                                                <div
-                                                  className={cn(
-                                                    'flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
-                                                    selectedTaskId === task.id && !bulk.bulkMode && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
-                                                    isBulkSelected && 'bg-blue-900/20 border-blue-500/30',
-                                                    isInactive && 'opacity-50',
-                                                  )}
-                                                  onMouseDown={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault(); }}
-                                                  onClick={(e) => {
-                                                    if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                                      handleBulkModifierClick(task.id, e);
-                                                    } else if (bulk.bulkMode) {
-                                                      bulk.toggleItem(task.id);
-                                                    } else {
-                                                      toggleTask(task.id);
-                                                    }
-                                                  }}
-                                                >
-                                                  <div className="flex min-w-0 items-center gap-2">
-                                                    {bulk.bulkMode ? (
-                                                      <label className="flex items-center justify-center flex-shrink-0 cursor-pointer min-w-8 min-h-8">
-                                                        <input
-                                                          type="checkbox"
-                                                          checked={isBulkSelected}
-                                                          onChange={() => bulk.toggleItem(task.id)}
-                                                          onClick={(e) => e.stopPropagation()}
-                                                          aria-label={`Select ${task.title}`}
-                                                          className="w-4 h-4 rounded border-[var(--border-strong)] accent-[var(--accent-500)] cursor-pointer"
-                                                        />
-                                                      </label>
-                                                    ) : (
-                                                    <button
-                                                      type="button"
-                                                      {...taskDragHandleProps}
-                                                      className="inline-flex min-h-8 min-w-8 cursor-grab items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-                                                      aria-label="Drag task to another phase"
-                                                      onClick={(e) => e.stopPropagation()}
-                                                    >
-                                                      <GripVertical size={14} />
-                                                    </button>
-                                                    )}
-                                                    <CompletionBurst celebrating={completingIds.has(task.id)}>
-                                                      <button
-                                                        type="button"
-                                                        onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
-                                                        disabled={completingIds.has(task.id)}
-                                                        className={cn(
-                                                          'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                                          isDone
-                                                            ? 'bg-green-400 border-green-400 text-white'
-                                                            : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                                        )}
-                                                        aria-label={isDone ? 'Completed' : 'Mark complete'}
-                                                      >
-                                                        {isDone && <CheckCircle2 size={14} />}
-                                                      </button>
-                                                    </CompletionBurst>
-                                                    <div className="min-w-0">
-                                                      <div className="flex flex-wrap items-center gap-2">
-                                                        <PriorityDot priority={task.priority} />
-                                                        <ConnectorIcon size={14} className="text-[var(--text-tertiary)]" />
-                                                        <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
-                                                        <TaskDisplayId task={task} />
-                                                        <TaskInfoBadges task={task} />
-                                                      </div>
-                                                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
-                                                        <span>{PRIORITY_LABELS[task.priority]}</span>
-                                                        <span>•</span>
-                                                        <span>{task.sourceListName || task.connectorType}</span>
-                                                        {task.dueDate ? (
-                                                          <>
-                                                            <span>•</span>
-                                                            <span>Due {formatDateLabel(task.dueDate)}</span>
-                                                          </>
-                                                        ) : null}
-                                                      </div>
-                                                    </div>
-                                                  </div>
-                                                  <TaskStatusBadge status={task.status} statusReason={task.statusReason} />
-                                                </div>
-                                                </TaskContextMenu>
+                                                <PlanTaskRow
+                                                  task={task}
+                                                  variant={viewDensity === 'compact' ? 'compact' : 'card'}
+                                                  dragHandleProps={taskDragHandleProps}
+                                                  dragLabel="Drag task to another phase"
+                                                  isSelected={selectedTaskId === task.id}
+                                                  isCompleting={completingIds.has(task.id)}
+                                                  bulkMode={bulk.bulkMode}
+                                                  bulkSelected={isBulkSelected}
+                                                  onBulkToggle={() => bulk.toggleItem(task.id)}
+                                                  onSelect={handleTaskClick}
+                                                  onDoubleClick={handleTaskDoubleClick}
+                                                  onOpenNotes={openTaskNotes}
+                                                  onModifierClick={handleBulkModifierClick}
+                                                  onComplete={handleCompleteTask}
+                                                  isInMyDay={myDayTaskIds.has(task.id)}
+                                                  contextMenuActions={getTaskContextActions(task)}
+                                                  phaseMenuItems={phaseMenuItems}
+                                                  projects={allProjects}
+                                                  filterController={planRowFilterController}
+                                                />
                                               )}
                                             </DraggableTaskItem>
                                           );
                                         })}
                                         {/* Add task button at bottom of populated phase */}
-                                        <div className="relative pt-1" data-phase-add-menu>
-                                          <button
-                                            type="button"
-                                            onClick={() => setAddTaskMenuPhaseId(addTaskMenuPhaseId === phase.id ? null : phase.id)}
-                                            aria-expanded={addTaskMenuPhaseId === phase.id}
-                                            aria-haspopup="menu"
-                                            className={cn('inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-lg)] border border-dashed border-[var(--border)] bg-transparent px-3 py-2 text-xs text-[var(--text-tertiary)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] active:scale-[0.98]', BUTTON_TRANSITION)}
-                                          >
-                                            <Plus size={12} />
-                                            Add task
-                                          </button>
-                                          <AnimatePresence>
-                                            {addTaskMenuPhaseId === phase.id && (
-                                              <PhaseAddTaskMenu
-                                                onCreateNew={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestCreateTask({ phaseId: phase.id });
-                                                }}
-                                                onLinkExisting={() => {
-                                                  setAddTaskMenuPhaseId(null);
-                                                  taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
-                                                }}
-                                                onClose={() => setAddTaskMenuPhaseId(null)}
-                                              />
+                                        <div className="pt-1">
+                                          <PhaseAddTaskMenu
+                                            open={addTaskMenuPhaseId === phase.id}
+                                            onOpenChange={(open) => setAddTaskMenuPhaseId(open ? phase.id : null)}
+                                            trigger={(
+                                              <button
+                                                type="button"
+                                                className={cn('inline-flex w-full items-center justify-center gap-2 rounded-[var(--radius-lg)] border border-dashed border-[var(--border)] bg-transparent px-3 py-2 text-xs text-[var(--text-tertiary)] hover:border-[var(--accent)]/40 hover:text-[var(--accent)] active:scale-[0.98]', BUTTON_TRANSITION)}
+                                              >
+                                                <Plus size={12} />
+                                                Add task
+                                              </button>
                                             )}
-                                          </AnimatePresence>
+                                            onCreateNew={() => {
+                                              taskOverlayActions.requestCreateTask({ phaseId: phase.id });
+                                            }}
+                                            onLinkExisting={() => {
+                                              taskOverlayActions.requestLinkTasks({ phaseId: phase.id });
+                                            }}
+                                          />
                                         </div>
                                       </div>
                                       </SortableContext>
@@ -1765,103 +1818,31 @@ export function ProjectPhasesTab({
                       <SortableContext items={visibleUnassignedTasks.map((t) => `task:${t.id}`)} strategy={verticalListSortingStrategy}>
                         <div className="space-y-2">
                           {visibleUnassignedTasks.map((task) => {
-                            const ConnectorIcon = getConnectorIcon(task.connectorType);
-                            const isDone = task.status === 'done' || completingIds.has(task.id);
-                            const isInactive = isInactiveTaskStatus(task.status) || completingIds.has(task.id);
                             const isBulkSelected = bulk.bulkSelected.has(task.id);
                             return (
                               <DraggableTaskItem key={task.id} taskId={task.id}>
                                 {(taskDragHandleProps) => (
-                                  <TaskContextMenu
-                                   task={{ id: task.id, title: task.title, status: task.status, priority: task.priority, connectorType: task.connectorType, sourceId: task.sourceId, dueDate: task.dueDate ?? null, localDisposition: task.localDisposition, taskSourceModel: task.taskSourceModel, editPolicy: task.editPolicy }}
+                                  <PlanTaskRow
+                                    task={task}
+                                    variant={viewDensity === 'compact' ? 'compact' : 'card'}
+                                    dragHandleProps={taskDragHandleProps}
+                                    dragLabel="Drag task to a phase"
+                                    isSelected={selectedTaskId === task.id}
+                                    isCompleting={completingIds.has(task.id)}
+                                    bulkMode={bulk.bulkMode}
+                                    bulkSelected={isBulkSelected}
+                                    onBulkToggle={() => bulk.toggleItem(task.id)}
+                                    onSelect={handleTaskClick}
+                                    onDoubleClick={handleTaskDoubleClick}
+                                    onOpenNotes={openTaskNotes}
+                                    onModifierClick={handleBulkModifierClick}
+                                    onComplete={handleCompleteTask}
                                     isInMyDay={myDayTaskIds.has(task.id)}
-                                    projectPhases={phaseMenuItems}
+                                    contextMenuActions={getTaskContextActions(task)}
+                                    phaseMenuItems={phaseMenuItems}
                                     projects={allProjects}
-                                    taskProjectIds={task.hubProjectIds}
-                                    taskProjectPhaseMemberships={task.projectPhaseMemberships}
-                                    actions={getTaskContextActions(task)}
-                                  >
-                                  <div
-                                    className={cn(
-                                      'flex flex-col gap-3 rounded-[var(--radius-lg)] border border-[var(--border)] bg-[var(--surface-0)] px-4 py-3 sm:flex-row sm:items-center sm:justify-between cursor-pointer hover:bg-[var(--surface-1)] transition-colors',
-                                      selectedTaskId === task.id && !bulk.bulkMode && 'ring-1 ring-[var(--accent-400)] border-[var(--accent-400)]',
-                                      isBulkSelected && 'bg-blue-900/20 border-blue-500/30',
-                                      isInactive && 'opacity-50',
-                                    )}
-                                    onMouseDown={(e) => { if (e.shiftKey || e.ctrlKey || e.metaKey) e.preventDefault(); }}
-                                    onClick={(e) => {
-                                      if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                        handleBulkModifierClick(task.id, e);
-                                      } else if (bulk.bulkMode) {
-                                        bulk.toggleItem(task.id);
-                                      } else {
-                                        toggleTask(task.id);
-                                      }
-                                    }}
-                                  >
-                                    <div className="flex min-w-0 items-center gap-2">
-                                      {bulk.bulkMode ? (
-                                        <label className="flex items-center justify-center flex-shrink-0 cursor-pointer min-w-8 min-h-8">
-                                          <input
-                                            type="checkbox"
-                                            checked={isBulkSelected}
-                                            onChange={() => bulk.toggleItem(task.id)}
-                                            onClick={(e) => e.stopPropagation()}
-                                            aria-label={`Select ${task.title}`}
-                                            className="w-4 h-4 rounded border-[var(--border-strong)] accent-[var(--accent-500)] cursor-pointer"
-                                          />
-                                        </label>
-                                      ) : (
-                                      <button
-                                        type="button"
-                                        {...taskDragHandleProps}
-                                        className="inline-flex min-h-8 min-w-8 cursor-grab items-center justify-center rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] active:cursor-grabbing"
-                                        aria-label="Drag task to a phase"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <GripVertical size={14} />
-                                      </button>
-                                      )}
-                                      <CompletionBurst celebrating={completingIds.has(task.id)}>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => { e.stopPropagation(); void handleCompleteTask(task.id); }}
-                                          disabled={completingIds.has(task.id)}
-                                          className={cn(
-                                            'flex-shrink-0 h-[18px] w-[18px] rounded-full border-2 transition-[border-color,background-color,color,transform] duration-200',
-                                            isDone
-                                              ? 'bg-green-400 border-green-400 text-white'
-                                              : 'border-[var(--border-strong)] hover:border-green-500 hover:bg-green-900/30',
-                                          )}
-                                          aria-label={isDone ? 'Completed' : 'Mark complete'}
-                                        >
-                                          {isDone && <CheckCircle2 size={14} />}
-                                        </button>
-                                      </CompletionBurst>
-                                      <div className="min-w-0">
-                                        <div className="flex flex-wrap items-center gap-2">
-                                          <PriorityDot priority={task.priority} />
-                                          <ConnectorIcon size={14} className="text-[var(--text-tertiary)]" />
-                                          <p className={cn('truncate text-sm font-medium text-[var(--text-primary)]', isDone && 'line-through')}>{task.title}</p>
-                                          <TaskDisplayId task={task} />
-                                          <TaskInfoBadges task={task} />
-                                        </div>
-                                        <div className="mt-2 flex flex-wrap gap-2 text-xs text-[var(--text-tertiary)]">
-                                          <span>{PRIORITY_LABELS[task.priority]}</span>
-                                          <span>•</span>
-                                          <span>{task.sourceListName || task.connectorType}</span>
-                                          {task.dueDate ? (
-                                            <>
-                                              <span>•</span>
-                                              <span>Due {formatDateLabel(task.dueDate)}</span>
-                                            </>
-                                          ) : null}
-                                        </div>
-                                      </div>
-                                    </div>
-                                    <TaskStatusBadge status={task.status} statusReason={task.statusReason} />
-                                  </div>
-                                  </TaskContextMenu>
+                                    filterController={planRowFilterController}
+                                  />
                                 )}
                               </DraggableTaskItem>
                             );
@@ -1904,6 +1885,7 @@ export function ProjectPhasesTab({
           ) : visiblePhaseViewMode === 'assign' ? (
             <PhaseAssignView
               phases={phases}
+              projectColor={project.color}
               unassignedTasks={unassignedTasks}
               phaseEntries={phaseEntries}
               sensors={sensors}
@@ -1914,7 +1896,9 @@ export function ProjectPhasesTab({
               selectedTaskId={selectedTaskId}
               onDragStart={handleDragStart}
               onDragEnd={handleDragEnd}
-              onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : toggleTask(taskId)}
+              onSelectTask={(taskId) => taskId === null ? setSelectedTaskId(null) : handleTaskClick(taskId)}
+              onDoubleClickTask={handleTaskDoubleClick}
+              onOpenTaskNotes={openTaskNotes}
               onCompleteTask={handleCompleteTask}
               onRenamePhase={renamePhase}
               savingPhaseIds={savingPhaseIds}
@@ -1965,7 +1949,7 @@ export function ProjectPhasesTab({
                   </div>
 
                   {ganttRows.map((row) => {
-                    const phaseStatusColor = getPhaseStatusColor(row.phase.status);
+                    const phaseColor = getPhaseColor(row.phase, project);
                     const phaseOffset = differenceInCalendarDays(row.start, timelineRange.start) * timelineCellWidth;
                     const phaseWidth = row.durationDays * timelineCellWidth;
 
@@ -1973,7 +1957,7 @@ export function ProjectPhasesTab({
                       <div key={row.phase.id} className="flex border-b border-[var(--border-subtle)] last:border-b-0">
                         <div className="sticky left-0 z-10 w-[220px] shrink-0 border-r border-[var(--border)] bg-[var(--surface-0)] px-4 py-4">
                           <div className="flex items-center gap-2">
-                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseStatusColor }} />
+                            <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: phaseColor }} />
                             <p className="truncate text-sm font-medium text-[var(--text-primary)]">{row.phase.name}</p>
                           </div>
                           <div className="mt-2 flex flex-wrap gap-2 text-[12px] text-[var(--text-tertiary)]">
@@ -1994,8 +1978,8 @@ export function ProjectPhasesTab({
                             style={{
                               left: phaseOffset,
                               width: Math.max(phaseWidth, 24),
-                              backgroundColor: toRgba(phaseStatusColor, 0.22),
-                              borderColor: toRgba(phaseStatusColor, 0.46),
+                              backgroundColor: toRgba(phaseColor, 0.22),
+                              borderColor: toRgba(phaseColor, 0.46),
                             }}
                             role="button"
                             tabIndex={0}
@@ -2036,7 +2020,7 @@ export function ProjectPhasesTab({
                                 tabIndex={0}
                                 title={`${taskBar.task.title} — ${TASK_STATUS_LABELS[taskBar.task.status]}`}
                                 aria-label={`Task: ${taskBar.task.title}, ${TASK_STATUS_LABELS[taskBar.task.status]}`}
-                                onClick={() => toggleTask(taskBar.task.id)}
+                                onClick={() => selectTask(taskBar.task.id)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter' || e.key === ' ') {
                                     e.preventDefault();

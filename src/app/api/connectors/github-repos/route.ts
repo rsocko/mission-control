@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { connectorConfigs, sourceLists } from '@/db/schema';
-import { eq, and, isNull } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
+import { getConnectorManagementPersistence } from '@/lib/connectors/management-service';
 
 /**
  * GET /api/connectors/github-repos
@@ -12,34 +10,9 @@ import { ApiErrors } from '@/lib/api-error';
  */
 export async function GET() {
   try {
-    // Fetch enabled, non-deleted github-issues connectors
-    const configs = await db
-      .select({
-        id: connectorConfigs.id,
-        name: connectorConfigs.name,
-        settings: connectorConfigs.settings,
-      })
-      .from(connectorConfigs)
-      .where(
-        and(
-          eq(connectorConfigs.type, 'github-issues'),
-          eq(connectorConfigs.enabled, true),
-          isNull(connectorConfigs.deletedAt),
-        ),
-      );
-
-    // Also fetch source lists (repos) for these connectors
-    const connectorIds = configs.map(c => c.id);
-    const lists = connectorIds.length > 0
-      ? await db
-          .select({
-            connectorInstanceId: sourceLists.connectorInstanceId,
-            sourceId: sourceLists.sourceId,
-            name: sourceLists.name,
-          })
-          .from(sourceLists)
-          .where(eq(sourceLists.type, 'repo'))
-      : [];
+    const { connectors: configs, sourceLists: lists } = await (
+      await getConnectorManagementPersistence()
+    ).getGitHubRepositorySnapshot();
 
     // Build a flat list of repos with their connector info
     const repos: Array<{

@@ -3,14 +3,17 @@ import { persist } from 'zustand/middleware';
 import {
   DEFAULT_UNIVERSE_DIMENSIONS,
   type UniverseDimension,
+  type UniverseNeighborLayer,
 } from '@/lib/graph/universe-types';
 import type { LegacyUniverseFilters } from '@/lib/task-filter-context';
 
 interface UniverseGraphState {
   dimensions: UniverseDimension[];
+  neighborLayers: UniverseNeighborLayer[];
   legacyFilters: LegacyUniverseFilters | null;
   selectedNodeIds: string[];
   toggleDimension: (dimension: UniverseDimension) => void;
+  toggleNeighborLayer: (layer: UniverseNeighborLayer) => void;
   clearLegacyFilters: () => void;
   setSelectedNodeIds: (nodeIds: Iterable<string>) => void;
   resetScene: () => void;
@@ -20,7 +23,7 @@ interface UniverseGraphState {
 export function migrateUniverseGraphState(
   persisted: unknown,
   version: number,
-): Pick<UniverseGraphState, 'dimensions' | 'legacyFilters'> {
+): Pick<UniverseGraphState, 'dimensions' | 'neighborLayers' | 'legacyFilters'> {
   const state = isRecord(persisted) ? persisted : {};
   const dimensions = Array.isArray(state.dimensions)
     ? state.dimensions as UniverseDimension[]
@@ -28,11 +31,15 @@ export function migrateUniverseGraphState(
   if (version >= 2) {
     return {
       dimensions,
+      neighborLayers: Array.isArray(state.neighborLayers)
+        ? state.neighborLayers as UniverseNeighborLayer[]
+        : ['explicit', 'derived'],
       legacyFilters: isRecord(state.legacyFilters) ? state.legacyFilters : null,
     };
   }
   return {
     dimensions,
+    neighborLayers: ['explicit', 'derived'],
     legacyFilters: {
       search: state.search,
       priorities: state.priorities,
@@ -47,6 +54,7 @@ export const useUniverseGraphStore = create<UniverseGraphState>()(
   persist(
     (set) => ({
       dimensions: [...DEFAULT_UNIVERSE_DIMENSIONS],
+      neighborLayers: ['explicit', 'derived'],
       legacyFilters: null,
       selectedNodeIds: [],
       toggleDimension: (dimension) => set((state) => {
@@ -58,6 +66,11 @@ export const useUniverseGraphStore = create<UniverseGraphState>()(
             : [...state.dimensions, dimension],
         };
       }),
+      toggleNeighborLayer: (layer) => set((state) => ({
+        neighborLayers: state.neighborLayers.includes(layer)
+          ? state.neighborLayers.filter((candidate) => candidate !== layer)
+          : [...state.neighborLayers, layer],
+      })),
       clearLegacyFilters: () => set({ legacyFilters: null }),
       setSelectedNodeIds: (nodeIds) => set({
         selectedNodeIds: [...new Set(nodeIds)],
@@ -74,10 +87,11 @@ export const useUniverseGraphStore = create<UniverseGraphState>()(
     }),
     {
       name: 'mission-control:universe-graph',
-      version: 2,
+      version: 3,
       migrate: migrateUniverseGraphState,
       partialize: (state) => ({
         dimensions: state.dimensions,
+        neighborLayers: state.neighborLayers,
       }),
     },
   ),

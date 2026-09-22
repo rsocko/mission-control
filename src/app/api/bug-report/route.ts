@@ -1,8 +1,7 @@
 import { NextResponse } from 'next/server';
 import { randomUUID } from 'crypto';
-import db from '@/db';
-import { tasks, tags, taskTags } from '@/db/schema';
-import { eq } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import type { BugReportTagInput } from '@/db/persistence/operational-utility';
 import logger from '@/lib/logger';
 
 const CORS_HEADERS = {
@@ -48,6 +47,14 @@ export async function POST(request: Request) {
       );
     }
 
+    const { operationalUtility } = await getWorkerPersistenceRepositories();
+    if (!operationalUtility) {
+      return NextResponse.json(
+        { error: 'Operational utility persistence is not available in the selected backend' },
+        { status: 503, headers: CORS_HEADERS },
+      );
+    }
+
     const now = new Date().toISOString();
     const taskId = randomUUID();
     const appName = typeof body.app === 'string' ? body.app : 'unknown';
@@ -61,73 +68,45 @@ export async function POST(request: Request) {
     if (body.url) descParts.push(`**URL/Route:** ${body.url}`);
     if (body.context) descParts.push(`**Context:** ${body.context}`);
 
-    // Create the task (using 'local' connector for MC-native tasks)
-    await db.insert(tasks).values({
-      id: taskId,
-      sourceId: `bug-snap-${taskId}`,
-      connectorType: 'local',
-      connectorInstanceId: 'bug-snap',
-      title: `🐛 ${body.title.trim()}`,
-      description: descParts.join('\n'),
-      status: 'todo',
-      priority: severity === 'critical' ? 'high' : severity === 'medium' ? 'medium' : 'none',
-      createdAt: now,
-      updatedAt: now,
-      lastSyncedAt: now,
-      metadata: JSON.stringify({
-        bugSnap: true,
-        app: appName,
-        severity,
-        url: body.url || null,
-        reportedAt: now,
-      }),
-    });
-
-    // Ensure #bug tag exists and associate it
-    const bugTagSlug = 'bug';
-    const existingTag = await db.select().from(tags).where(eq(tags.slug, bugTagSlug)).limit(1);
-    let tagId: string;
-
-    if (existingTag.length > 0) {
-      tagId = existingTag[0].id;
-    } else {
-      tagId = randomUUID();
-      await db.insert(tags).values({
-        id: tagId,
-        name: 'bug',
-        slug: bugTagSlug,
-        type: 'hub',
-        color: '#ef4444',
-        confirmed: true,
-        createdAt: now,
+    // The canonical #bug tag always applies; the app tag is added only when the
+    // reporter identified itself.
+    const reportTags: BugReportTagInput[] = [
+      { slug: 'bug', name: 'bug', color: '#ef4444', newTagId: randomUUID() },
+    ];
+    if (appName !== 'unknown') {
+      reportTags.push({
+        slug: `app-${appName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+        name: appName,
+        color: '#6366f1',
+        newTagId: randomUUID(),
       });
     }
 
-    await db.insert(taskTags).values({ taskId, tagId });
-
-    // Also tag with app name if provided
-    if (appName !== 'unknown') {
-      const appTagSlug = `app-${appName.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`;
-      const existingAppTag = await db.select().from(tags).where(eq(tags.slug, appTagSlug)).limit(1);
-      let appTagId: string;
-
-      if (existingAppTag.length > 0) {
-        appTagId = existingAppTag[0].id;
-      } else {
-        appTagId = randomUUID();
-        await db.insert(tags).values({
-          id: appTagId,
-          name: appName,
-          slug: appTagSlug,
-          type: 'hub',
-          color: '#6366f1',
-          confirmed: true,
-          createdAt: now,
-        });
-      }
-
-      await db.insert(taskTags).values({ taskId, tagId: appTagId });
-    }
+    // Task and tag associations are created in one backend transaction, so a
+    // partially tagged report is never observable.
+    await operationalUtility.bugReports.create({
+      task: {
+        id: taskId,
+        sourceId: `bug-snap-${taskId}`,
+        connectorType: 'local',
+        connectorInstanceId: 'bug-snap',
+        title: `🐛 ${body.title.trim()}`,
+        description: descParts.join('\n'),
+        status: 'todo',
+        priority: severity === 'critical' ? 'high' : severity === 'medium' ? 'medium' : 'none',
+        createdAt: now,
+        updatedAt: now,
+        lastSyncedAt: now,
+        metadata: {
+          bugSnap: true,
+          app: appName,
+          severity,
+          url: body.url || null,
+          reportedAt: now,
+        },
+      },
+      tags: reportTags,
+    });
 
     return NextResponse.json(
       { id: taskId, message: 'Bug reported successfully' },

@@ -56,6 +56,9 @@ export interface CreateTaskPayload {
   subtasks?: { title: string }[];
   estimatedDuration?: number;
   recurrence?: string;
+  recurrenceMode?: 'schedule' | 'completion';
+  recurrenceSkipDates?: string[];
+  recurrenceCatchUp?: 'latest' | 'none';
 }
 
 /** POST /api/tasks — create a new task. */
@@ -84,6 +87,11 @@ export function updateTask(taskId: string, updates: Record<string, unknown>) {
 /** DELETE /api/tasks/:id — delete a task. */
 export function deleteTask(taskId: string) {
   return request<void>(`/api/tasks/${taskId}`, { method: 'DELETE' });
+}
+
+/** POST /api/tasks/:id/restore — restore a soft-deleted task. */
+export function restoreTask(taskId: string) {
+  return request<void>(`/api/tasks/${taskId}/restore`, { method: 'POST' });
 }
 
 // ---------------------------------------------------------------------------

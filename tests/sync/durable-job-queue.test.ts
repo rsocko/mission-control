@@ -4,7 +4,9 @@ import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { SyncResult } from '@/types';
+import { SqliteSyncRunRepository } from '@/db/persistence/sqlite-sync-run-repository';
 
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
@@ -32,7 +34,7 @@ function success(connectorId: string): SyncResult {
 }
 
 beforeAll(async () => {
-  database = await import('@/db');
+  database = await importInitializedSqliteDatabase();
   queue = await import('@/lib/sync/job-queue');
   connectorLock = await import('@/lib/sync/connector-lock');
   database.sqlite.prepare('SELECT 1').get();
@@ -68,17 +70,7 @@ function startRetentionProcess(
   leaseMs: number,
   mode = 'hold',
 ): Promise<{ child: ChildProcess; acquired: boolean }> {
-  const child = fork(
-    join(process.cwd(), 'tests', 'sync', 'fixtures', 'connector-lock-process.ts'),
-    [connectorId, String(leaseMs), mode],
-    {
-      execArgv: ['--conditions', 'react-server', '--import', 'tsx'],
-      env: { ...process.env, MC_DB_PATH: process.env.MC_DB_PATH },
-      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
-    },
-  );
-  retentionProcesses.add(child);
-  child.once('exit', () => retentionProcesses.delete(child));
+  const child = createRetentionProcess(connectorId, leaseMs, mode);
   return new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('message', (message) => {
@@ -91,6 +83,61 @@ function startRetentionProcess(
       if (code && code !== 0) reject(new Error(`Retention process exited with code ${code}`));
     });
   });
+}
+
+function createRetentionProcess(
+  connectorId: string,
+  leaseMs: number,
+  mode: string,
+): ChildProcess {
+  const child = fork(
+    join(process.cwd(), 'tests', 'sync', 'fixtures', 'connector-lock-process.ts'),
+    [connectorId, String(leaseMs), mode],
+    {
+      execArgv: ['--conditions', 'react-server', '--import', 'tsx'],
+      env: { ...process.env, MC_DB_PATH: process.env.MC_DB_PATH },
+      stdio: ['ignore', 'ignore', 'inherit', 'ipc'],
+    },
+  );
+  retentionProcesses.add(child);
+  child.once('exit', () => retentionProcesses.delete(child));
+  return child;
+}
+
+function startRetentionProbeProcess(
+  connectorId: string,
+  leaseMs: number,
+): Promise<ChildProcess> {
+  const child = createRetentionProcess(connectorId, leaseMs, 'probe');
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('message', (message) => {
+      if (!(message as { ready?: boolean }).ready) {
+        reject(new Error('Retention probe did not become ready'));
+        return;
+      }
+      resolve(child);
+    });
+    child.once('exit', (code) => {
+      if (code && code !== 0) reject(new Error(`Retention process exited with code ${code}`));
+    });
+  });
+}
+
+function probeRetentionProcess(child: ChildProcess): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    child.once('error', reject);
+    child.once('message', (message) => {
+      resolve((message as { acquired: boolean }).acquired);
+    });
+    child.send('probe');
+  });
+}
+
+async function stopRetentionProbeProcess(child: ChildProcess): Promise<void> {
+  const exited = once(child, 'exit');
+  child.send('exit');
+  await exited;
 }
 
 function releaseRetentionProcess(child: ChildProcess): Promise<void> {
@@ -121,6 +168,68 @@ afterAll(() => {
 });
 
 describe('durable sync job queue', () => {
+  it('implements the async repository contract behind the compatibility facade', async () => {
+    const queued = await queue.sqliteSyncJobRepository.enqueue('github-1', {
+      availableAt: '2026-08-25T20:00:00.000Z',
+      scheduledFor: '2026-08-25T20:00:00.000Z',
+    });
+
+    await expect(queue.sqliteSyncJobRepository.get(queued.id)).resolves.toMatchObject({
+      id: queued.id,
+      connectorId: 'github-1',
+      availableAt: '2026-08-25T20:00:00.000Z',
+    });
+  });
+
+  it('exposes explicit connector operation lease outcomes', async () => {
+    const repository = connectorLock.sqliteConnectorOperationLeaseRepository;
+    const at = '2026-08-25T20:00:00.000Z';
+    const request = {
+      connectorId: 'github-1',
+      operationType: 'transfer' as const,
+      owner: 'owner-a',
+      leaseDurationMs: 60_000,
+      at,
+    };
+
+    await expect(repository.acquire(request)).resolves.toEqual({
+      status: 'acquired',
+      expiresAt: '2026-08-25T20:01:00.000Z',
+    });
+    await expect(repository.acquire({ ...request, owner: 'owner-b' }))
+      .resolves.toEqual({ status: 'conflict' });
+    await expect(repository.renew({
+      ...request,
+      owner: 'owner-b',
+      at: '2026-08-25T20:00:10.000Z',
+    })).resolves.toEqual({ status: 'lost' });
+    await expect(repository.renew({
+      ...request,
+      at: '2026-08-25T20:00:10.000Z',
+    })).resolves.toEqual({
+      status: 'renewed',
+      expiresAt: '2026-08-25T20:01:10.000Z',
+    });
+    await expect(repository.release({
+      connectorId: 'github-1',
+      owner: 'owner-b',
+    })).resolves.toEqual({ status: 'lost' });
+    await expect(repository.release({
+      connectorId: 'github-1',
+      owner: 'owner-a',
+    })).resolves.toEqual({ status: 'released' });
+    await expect(repository.hasActiveSyncJobLease({
+      connectorId: 'github-1',
+      jobId: 'missing-job',
+      at,
+    })).resolves.toBe(false);
+    await expect(repository.recoverExpiredJobs(at)).resolves.toEqual({
+      exhausted: 0,
+      superseded: 0,
+      requeued: 0,
+    });
+  });
+
   it('rejects enqueue and operation leases while maintenance is locked', () => {
     seedMaintenanceLock();
     expect(() => queue.enqueueSyncJob('github-1')).toThrow('locked for maintenance');
@@ -157,6 +266,24 @@ describe('durable sync job queue', () => {
     expect(duplicate.id).toBe(first.id);
     expect(duplicate.full).toBe(true);
     expect(queue.getSyncQueueMetrics().queued).toBe(1);
+  });
+
+  it('counts queued jobs through the status index without scanning retained history', () => {
+    const queued = queue.enqueueSyncJob('github-1');
+    const claimed = queue.claimNextSyncJob('worker-a');
+    expect(claimed?.id).toBe(queued.id);
+    queue.completeSyncJob(claimed!.id, 'worker-a', claimed!.attempt, success('github-1'));
+    queue.enqueueSyncJob('github-2');
+
+    expect(queue.countQueuedSyncJobs()).toBe(1);
+    const plan = database.sqlite.prepare(`
+      EXPLAIN QUERY PLAN
+      SELECT COUNT(*) FROM sync_jobs INDEXED BY idx_sync_jobs_claim
+      WHERE status = 'queued'
+    `).all() as Array<{ detail: string }>;
+    expect(plan.some((step) =>
+      step.detail.includes('USING COVERING INDEX idx_sync_jobs_claim')
+    )).toBe(true);
   });
 
   it('keeps the earliest availability when delayed work is deduplicated', () => {
@@ -245,10 +372,10 @@ describe('durable sync job queue', () => {
     const { validateAndFreezeGitHubIdentityContext } = await import(
       '@/lib/sync/github-identity-context'
     );
-    expect(() => validateAndFreezeGitHubIdentityContext('github-1', {
+    await expect(validateAndFreezeGitHubIdentityContext('github-1', {
       connectorInstanceId: 'github-1',
       modeRevision: claimed.identityModeRevision!,
-    })).toThrow('revision 4 is stale');
+    })).rejects.toThrow('revision 4 is stale');
   });
 
   it('cancels a legacy unstamped GitHub queue row instead of stamping it at claim', () => {
@@ -323,7 +450,8 @@ describe('durable sync job queue', () => {
 
   it('queues one bounded follow-up behind a running connector job', () => {
     const running = queue.enqueueSyncJob('github-follow-up');
-    expect(queue.claimNextSyncJob('worker-a')?.id).toBe(running.id);
+    const claimed = queue.claimNextSyncJob('worker-a')!;
+    expect(claimed.id).toBe(running.id);
 
     const followUp = queue.enqueueSyncJob('github-follow-up', { full: true });
     const duplicate = queue.enqueueSyncJob('github-follow-up', { full: true });
@@ -333,16 +461,17 @@ describe('durable sync job queue', () => {
     expect(followUp).toMatchObject({ status: 'queued', full: true, attempt: 0 });
     expect(queue.getSyncQueueMetrics()).toMatchObject({ queued: 1, running: 1 });
 
-    queue.completeSyncJob(running.id, 'worker-a', success('github-follow-up'));
+    queue.completeSyncJob(claimed.id, 'worker-a', claimed.attempt, success('github-follow-up'));
     expect(queue.claimNextSyncJob('worker-b')?.id).toBe(followUp.id);
   });
 
   it('runs a queued follow-up instead of re-queuing a failed active job', () => {
     const running = queue.enqueueSyncJob('github-failed-follow-up');
-    expect(queue.claimNextSyncJob('worker-a')?.id).toBe(running.id);
+    const claimed = queue.claimNextSyncJob('worker-a')!;
+    expect(claimed.id).toBe(running.id);
     const followUp = queue.enqueueSyncJob('github-failed-follow-up', { full: true });
 
-    expect(queue.failSyncJob(running, 'worker-a', 'temporary failure')).toBe('failed');
+    expect(queue.failSyncJob(claimed, 'worker-a', 'temporary failure')).toBe('failed');
     expect(queue.getSyncJob(running.id)?.status).toBe('failed');
     expect(queue.claimNextSyncJob('worker-b')?.id).toBe(followUp.id);
   });
@@ -353,15 +482,145 @@ describe('durable sync job queue', () => {
 
     expect(claimed?.id).toBe(queued.id);
     expect(queue.claimNextSyncJob('worker-b')).toBeNull();
-    expect(queue.renewSyncJobLease(queued.id, 'worker-b')).toBe(false);
-    expect(() => queue.completeSyncJob(queued.id, 'worker-b', success('github-1')))
+    expect(queue.renewSyncJobLease(queued.id, 'worker-b', claimed!.attempt)).toBe(false);
+    expect(() => queue.completeSyncJob(
+      queued.id,
+      'worker-b',
+      claimed!.attempt,
+      success('github-1'),
+    ))
       .toThrow(/ownership was lost/);
 
-    queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
+    queue.completeSyncJob(queued.id, 'worker-a', claimed!.attempt, success('github-1'));
     expect(queue.getSyncJob(queued.id)).toMatchObject({
       status: 'succeeded',
       result: { success: true },
     });
+  });
+
+  it('fences stale attempts even when a retry uses the same owner', () => {
+    const queued = queue.enqueueSyncJob('github-1', { maxAttempts: 2 });
+    const first = queue.claimNextSyncJob('worker-a')!;
+    expect(queue.failSyncJob(first, 'worker-a', 'retry')).toBe('queued');
+    database.sqlite.prepare(`
+      UPDATE sync_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE id = ?
+    `).run(queued.id);
+    const second = queue.claimNextSyncJob('worker-a')!;
+    expect(second.attempt).toBe(first.attempt + 1);
+
+    expect(queue.renewSyncJobLease(first.id, 'worker-a', first.attempt)).toBe(false);
+    expect(() => queue.completeSyncJob(
+      first.id,
+      'worker-a',
+      first.attempt,
+      success('github-1'),
+    )).toThrow(/ownership was lost/);
+    expect(() => queue.failSyncJob(first, 'worker-a', 'stale failure'))
+      .toThrow(/ownership was lost/);
+    expect(queue.releaseSyncJob(first.id, 'worker-a', first.attempt, 'stale release'))
+      .toBe(false);
+
+    queue.completeSyncJob(second.id, 'worker-a', second.attempt, success('github-1'));
+    expect(queue.getSyncJob(second.id)?.status).toBe('succeeded');
+  });
+
+  it('atomically finalizes only the exact owned success log and releases its lease', async () => {
+      const queued = queue.enqueueSyncJob('github-1');
+      const claimed = queue.claimNextSyncJob('worker-a')!;
+      const result = {
+        ...success('github-1'),
+        syncRunId: 'exact-success-log',
+      };
+      const insert = database.sqlite.prepare(`
+        INSERT INTO sync_log (
+          id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+          tasks_pushed, local_only_protected, alerts_added, errors, details,
+          synced_at, job_id
+        ) VALUES (?, 'github-1', ?, 1, 0, 0, 0, 0, 0, '[]', '[]', ?, ?)
+      `);
+      insert.run(result.syncRunId, 0, result.syncedAt, null);
+      insert.run('same-time-unlinked-log', 1, result.syncedAt, null);
+
+      await queue.sqliteSyncJobRepository.finalizeSuccess(claimed, 'worker-a', result);
+
+      expect(queue.getSyncJob(queued.id)).toMatchObject({ status: 'succeeded' });
+      expect(database.sqlite.prepare(`
+        SELECT job_id AS jobId, success, trigger, attempt FROM sync_log WHERE id = ?
+      `).get(result.syncRunId)).toEqual({
+        jobId: claimed.id,
+        success: 1,
+        trigger: claimed.source,
+        attempt: 1,
+      });
+      expect(database.sqlite.prepare(`
+        SELECT job_id AS jobId, trigger FROM sync_log WHERE id = 'same-time-unlinked-log'
+      `).get()).toEqual({ jobId: null, trigger: null });
+      expect(database.sqlite.prepare(`
+        SELECT 1 FROM connector_operation_leases WHERE connector_id = 'github-1'
+      `).get()).toBeUndefined();
+  });
+
+  it('rolls back exact-log finalization after job ownership is lost', async () => {
+      const queued = queue.enqueueSyncJob('github-1');
+      const claimed = queue.claimNextSyncJob('worker-a')!;
+      const result = {
+        ...success('github-1'),
+        syncRunId: 'lost-owner-log',
+      };
+      database.sqlite.prepare(`
+        INSERT INTO sync_log (
+          id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+          tasks_pushed, local_only_protected, alerts_added, errors, details,
+          synced_at, job_id
+        ) VALUES (?, 'github-1', 0, 1, 0, 0, 0, 0, 0, '[]', '[]', ?, NULL)
+      `).run(result.syncRunId, result.syncedAt);
+
+      await expect(queue.sqliteSyncJobRepository.finalizeSuccess(
+        claimed,
+        'worker-b',
+        result,
+      )).rejects.toThrow(/ownership was lost/);
+      expect(queue.getSyncJob(queued.id)).toMatchObject({
+        status: 'running',
+        leaseOwner: 'worker-a',
+      });
+      expect(database.sqlite.prepare(`
+        SELECT success, job_id AS jobId, trigger, attempt FROM sync_log WHERE id = ?
+      `).get(result.syncRunId)).toEqual({
+        success: 0,
+        jobId: null,
+        trigger: null,
+        attempt: null,
+      });
+  });
+
+  it('does not publish a provisional success after the job lease expires', async () => {
+    queue.enqueueSyncJob('github-1');
+    const claimed = queue.claimNextSyncJob('worker-a')!;
+    const result = {
+      ...success('github-1'),
+      syncRunId: 'expired-owner-log',
+    };
+    database.sqlite.prepare(`
+      INSERT INTO sync_log (
+        id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
+        tasks_pushed, local_only_protected, alerts_added, errors, details,
+        synced_at, job_id
+      ) VALUES (?, 'github-1', 0, 1, 0, 0, 0, 0, 0, '[]', '[]', ?, NULL)
+    `).run(result.syncRunId, result.syncedAt);
+    database.sqlite.prepare(`
+      UPDATE sync_jobs SET lease_expires_at = '2000-01-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(claimed.id);
+
+    await expect(queue.sqliteSyncJobRepository.finalizeSuccess(
+      claimed,
+      'worker-a',
+      result,
+    )).rejects.toThrow(/ownership was lost/);
+    expect(database.sqlite.prepare(`
+      SELECT success, job_id AS jobId FROM sync_log WHERE id = ?
+    `).get(result.syncRunId)).toEqual({ success: 0, jobId: null });
   });
 
   it('recovers an expired lease for another worker without duplicate execution', async () => {
@@ -401,19 +660,17 @@ describe('durable sync job queue', () => {
   });
 
   it('blocks retention in another process while durable sync is queued or running', async () => {
+    const retentionProbe = await startRetentionProbeProcess('github-1', 10_000);
     const queued = queue.enqueueSyncJob('github-1');
-    const queuedAttempt = await startRetentionProcess('github-1', 10_000);
-    expect(queuedAttempt.acquired).toBe(false);
+    expect(await probeRetentionProcess(retentionProbe)).toBe(false);
 
     const running = queue.claimNextSyncJob('worker-a');
     expect(running?.id).toBe(queued.id);
-    const runningAttempt = await startRetentionProcess('github-1', 10_000);
-    expect(runningAttempt.acquired).toBe(false);
+    expect(await probeRetentionProcess(retentionProbe)).toBe(false);
 
-    queue.completeSyncJob(queued.id, 'worker-a', success('github-1'));
-    const afterSync = await startRetentionProcess('github-1', 10_000);
-    expect(afterSync.acquired).toBe(true);
-    await releaseRetentionProcess(afterSync.child);
+    queue.completeSyncJob(running!.id, 'worker-a', running!.attempt, success('github-1'));
+    expect(await probeRetentionProcess(retentionProbe)).toBe(true);
+    await stopRetentionProbeProcess(retentionProbe);
   });
 
   it('keeps a worker from claiming a connector leased by another process', async () => {
@@ -476,14 +733,14 @@ describe('durable sync job queue', () => {
 
   it('exposes cooperative cancellation for the current lease owner', () => {
     const queued = queue.enqueueSyncJob('github-1');
-    queue.claimNextSyncJob('worker-a');
+    const claimed = queue.claimNextSyncJob('worker-a')!;
 
     expect(queue.requestSyncJobCancellation({ jobId: queued.id })).toEqual({
       cancelled: 0,
       cancellationRequested: 1,
     });
-    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-a')).toBe(true);
-    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-b')).toBe(false);
+    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-a', claimed.attempt)).toBe(true);
+    expect(queue.isSyncJobCancellationRequested(queued.id, 'worker-b', claimed.attempt)).toBe(false);
   });
 
   it('retries failures and records terminal failure without a success result', () => {
@@ -629,17 +886,25 @@ describe('durable sync job queue', () => {
     });
   });
 
-  it('links durable job timing and trigger metadata to sync history', () => {
-    database.sqlite.prepare(`
-      INSERT INTO sync_log (
-        id, connector_id, success, tasks_added, tasks_updated, tasks_removed,
-        tasks_pushed, local_only_protected, alerts_added, errors, details,
-        synced_at, duration_ms
-      ) VALUES (
-        'log-1', 'github-1', 1, 0, 0, 0, 0, 0, 0, '[]', '[]',
-        '2026-08-03T12:00:05.000Z', 5000
-      )
-    `).run();
+  it('links durable job timing and trigger metadata to a portable journal entry', async () => {
+    await new SqliteSyncRunRepository(database.sqlite).append({
+      id: 'log-1',
+      connectorId: 'github-1',
+      success: true,
+      tasksAdded: 0,
+      tasksUpdated: 0,
+      tasksRemoved: 0,
+      tasksPushed: 0,
+      localOnlyProtected: 0,
+      notificationsAdded: 0,
+      errors: [],
+      details: [],
+      syncedAt: '2026-08-03T12:00:05.000Z',
+      durationMs: 5000,
+      jobId: null,
+      identityMode: null,
+      identityModeRevision: null,
+    });
     const queued = queue.enqueueSyncJob('github-1', {
       source: 'schedule',
       scheduledFor: new Date('2026-08-03T12:00:00.000Z'),
@@ -699,7 +964,7 @@ describe('durable sync job queue', () => {
       UPDATE sync_jobs SET available_at = '2000-01-01T00:00:00.000Z' WHERE id = ?
     `).run(queued.id);
     const second = queue.claimNextSyncJob('worker-b')!;
-    queue.completeSyncJob(second.id, 'worker-b', success('github-1'));
+    queue.completeSyncJob(second.id, 'worker-b', second.attempt, success('github-1'));
 
     await expect(waiting).resolves.toMatchObject({ success: true, tasksAdded: 1 });
   });

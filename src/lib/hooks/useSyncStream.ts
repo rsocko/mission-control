@@ -41,8 +41,8 @@ export interface SyncProgress {
 
 export interface SyncStreamContextValue {
   progress: SyncProgress;
-  /** Trigger a full sync — sets isSyncing immediately so all consumers react */
-  triggerSync: () => void;
+  /** Trigger an incremental sync, optionally scoped to one connector. */
+  triggerSync: (connectorId?: string) => void;
 }
 
 const initialProgress: SyncProgress = {
@@ -150,6 +150,27 @@ export function useSyncStreamConnection() {
   // Grace period: suppress toasts for first 2s after connection to avoid
   // flooding the user with stale events on hard reload (Ctrl+Shift+R).
   const toastSuppressedUntilRef = useRef<number>(0);
+  const hiddenSyncResultsRef = useRef({ completed: 0, failed: 0 });
+
+  useEffect(() => {
+    const showHiddenSyncSummary = () => {
+      if (document.visibilityState !== 'visible') return;
+      const { completed, failed } = hiddenSyncResultsRef.current;
+      if (completed === 0 && failed === 0) return;
+
+      hiddenSyncResultsRef.current = { completed: 0, failed: 0 };
+      const parts = [
+        completed > 0 ? `${completed} sync${completed === 1 ? '' : 's'} completed` : null,
+        failed > 0 ? `${failed} failed` : null,
+      ].filter((part): part is string => part !== null);
+      toast(`While you were away: ${parts.join(', ')}. See Sync History for details.`, {
+        duration: 5000,
+      });
+    };
+
+    document.addEventListener('visibilitychange', showHiddenSyncSummary);
+    return () => document.removeEventListener('visibilitychange', showHiddenSyncSummary);
+  }, []);
 
   const refreshActiveQueries = useCallback(async () => {
     // An initial query fetch cannot be invalidated into a second request while
@@ -341,6 +362,11 @@ export function useSyncStreamConnection() {
         window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
       }
 
+      if (document.visibilityState !== 'visible') {
+        hiddenSyncResultsRef.current.completed += 1;
+        return;
+      }
+
       // Suppress toasts during the post-reload grace period
       if (Date.now() < toastSuppressedUntilRef.current) return;
 
@@ -413,6 +439,11 @@ export function useSyncStreamConnection() {
         window.dispatchEvent(new CustomEvent('mission-control:sync-complete'));
       }
 
+      if (document.visibilityState !== 'visible') {
+        hiddenSyncResultsRef.current.failed += 1;
+        return;
+      }
+
       // Suppress toasts during the post-reload grace period
       if (Date.now() < toastSuppressedUntilRef.current) return;
       const c = currentConnectorRef.current;
@@ -470,14 +501,14 @@ export function useSyncStreamConnection() {
     };
   }, [connect, stopFallbackPolling]);
 
-  const triggerSync = useCallback(async () => {
+  const triggerSync = useCallback(async (connectorId?: string) => {
     if (progress.isSyncing) return;
     // Immediately show syncing state so banner + bottom-left react instantly
     setProgress((prev) => ({
       ...prev,
       isSyncing: true,
       phase: null,
-      connectorId: null,
+      connectorId: connectorId ?? null,
       connectorName: null,
       currentList: null,
       listIndex: 0,
@@ -493,7 +524,7 @@ export function useSyncStreamConnection() {
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify(connectorId ? { connectorId } : {}),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));

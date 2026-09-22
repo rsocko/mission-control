@@ -145,7 +145,12 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
     ) return;
     const proposal = expansion.proposals.find((candidate) => candidate.id === proposalId);
     if (!proposal) return;
+    if (!proposal.label.trim()) {
+      toast.error('Add a title before accepting this suggestion.');
+      return;
+    }
     const accepted = acceptProposals(expansion.parentId, [{ label: proposal.label }]);
+    if (accepted === null) return;
     if (!accepted.length) {
       setExpansion((state) => {
         const proposals = state.proposals.filter((candidate) => candidate.id !== proposalId);
@@ -172,6 +177,20 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
     } : EMPTY_IDEATION_EXPANSION);
   }, [acceptProposals, currentContextVersion, expansion]);
 
+  const updateProposal = useCallback((proposalId: string, label: string) => {
+    setExpansion((state) => {
+      if (state.status !== 'ready') return state;
+      return {
+        ...state,
+        proposals: state.proposals.map((proposal) => (
+          proposal.id === proposalId
+            ? { ...proposal, label: label.slice(0, 120) }
+            : proposal
+        )),
+      };
+    });
+  }, []);
+
   const acceptAll = useCallback(() => {
     if (
       expansion.status !== 'ready'
@@ -187,6 +206,7 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
       expansion.parentId,
       expansion.proposals.map((proposal) => ({ label: proposal.label })),
     );
+    if (accepted === null) return;
     if (accepted.length !== expansion.proposals.length) {
       const rejected = expansion.proposals.filter(
         (proposal) => existingLabels.has(normalizeIdeationLabel(proposal.label)),
@@ -226,5 +246,14 @@ export function useIdeationExpansion(nodes: IdeationNode[], selected: IdeationNo
     acceptOne,
     acceptAll,
     dismissOne,
-  }), [acceptAll, acceptOne, clearExpansion, dismissOne, expandSelected, expansion]);
+    updateProposal,
+  }), [
+    acceptAll,
+    acceptOne,
+    clearExpansion,
+    dismissOne,
+    expandSelected,
+    expansion,
+    updateProposal,
+  ]);
 }

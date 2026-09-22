@@ -28,6 +28,60 @@ export interface TaskMutationResult {
   data: Record<string, unknown>;
 }
 
+export interface OwlTaskActionUpdate {
+  status: string;
+  statusReason: string | null;
+  snoozedUntil: string | null;
+  priority: string;
+  metadata: Record<string, unknown>;
+  updatedAt: string;
+  syncStatus: string;
+  title?: string;
+  description?: string | null;
+  dueDate?: string | null;
+}
+
+export interface OwlTaskActionResult {
+  ok: boolean;
+  task?: OwlTaskActionUpdate;
+  error?: string;
+}
+
+function isOwlTaskActionUpdate(value: unknown): value is OwlTaskActionUpdate {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const task = value as Partial<OwlTaskActionUpdate>;
+  return typeof task.status === 'string'
+    && (typeof task.statusReason === 'string' || task.statusReason === null)
+    && (typeof task.snoozedUntil === 'string' || task.snoozedUntil === null)
+    && typeof task.priority === 'string'
+    && !!task.metadata
+    && typeof task.metadata === 'object'
+    && !Array.isArray(task.metadata)
+    && typeof task.updatedAt === 'string'
+    && typeof task.syncStatus === 'string'
+    && (task.title === undefined || typeof task.title === 'string')
+    && (task.description === undefined || typeof task.description === 'string' || task.description === null)
+    && (task.dueDate === undefined || typeof task.dueDate === 'string' || task.dueDate === null);
+}
+
+/** Apply one source-backed OWL lifecycle or extraction-feedback action. */
+export async function postOwlTaskAction(
+  taskId: string,
+  action: Record<string, unknown>,
+): Promise<OwlTaskActionResult> {
+  const response = await fetch(`/api/tasks/${taskId}/owl`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(action),
+  });
+  const data = await readJson(response);
+  return {
+    ok: response.ok,
+    task: response.ok && isOwlTaskActionUpdate(data.task) ? data.task : undefined,
+    error: typeof data.error === 'string' ? data.error : undefined,
+  };
+}
+
 /** Fetch the full task record. Returns null when the API omits it. */
 export async function fetchTaskDetail(taskId: string): Promise<TaskDetail | null> {
   const response = await fetch(`/api/tasks/${taskId}`);
@@ -191,6 +245,7 @@ export interface ConnectorSupport {
   connectorCaps: TagConnectorCaps | null;
   supportsAttachments: boolean;
   supportsSubtasks: boolean;
+  supportsSubtaskOrderWrite: boolean;
 }
 
 /** Local tasks always support attachments and subtasks regardless of connector reports. */
@@ -207,7 +262,12 @@ export function deriveConnectorSupport(
   isLocal: boolean,
 ): ConnectorSupport {
   if (!capabilities) {
-    return { connectorCaps: null, supportsAttachments: isLocal, supportsSubtasks: isLocal };
+    return {
+      connectorCaps: null,
+      supportsAttachments: isLocal,
+      supportsSubtasks: isLocal,
+      supportsSubtaskOrderWrite: isLocal,
+    };
   }
   return {
     connectorCaps: {
@@ -217,6 +277,7 @@ export function deriveConnectorSupport(
     },
     supportsAttachments: isLocal || !!capabilities.attachments,
     supportsSubtasks: isLocal || !!capabilities.subtasks,
+    supportsSubtaskOrderWrite: isLocal || !!capabilities.subtaskOrderWrite,
   };
 }
 

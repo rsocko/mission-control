@@ -213,3 +213,35 @@ export function ianaToWindowsTimezone(iana: string): string {
   };
   return map[iana] || 'UTC';
 }
+
+/** Convert Microsoft Graph Windows timezone names to IANA for local datetime parsing. */
+export function windowsToIanaTimezone(timezone: string): string | null {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
+    return timezone;
+  } catch {
+    const map: Record<string, string> = {
+      'Eastern Standard Time': 'America/New_York',
+      'Central Standard Time': 'America/Chicago',
+      'Mountain Standard Time': 'America/Denver',
+      'Pacific Standard Time': 'America/Los_Angeles',
+      'Alaskan Standard Time': 'America/Anchorage',
+      'Hawaiian Standard Time': 'Pacific/Honolulu',
+      'US Mountain Standard Time': 'America/Phoenix',
+      'US Eastern Standard Time': 'America/Indiana/Indianapolis',
+      'Atlantic Standard Time': 'America/Halifax',
+      'GMT Standard Time': 'Europe/London',
+      'Central Europe Standard Time': 'Europe/Budapest',
+      'Romance Standard Time': 'Europe/Paris',
+      'W. Europe Standard Time': 'Europe/Berlin',
+      'Russian Standard Time': 'Europe/Moscow',
+      'Tokyo Standard Time': 'Asia/Tokyo',
+      'China Standard Time': 'Asia/Shanghai',
+      'India Standard Time': 'Asia/Kolkata',
+      'AUS Eastern Standard Time': 'Australia/Sydney',
+      'New Zealand Standard Time': 'Pacific/Auckland',
+      UTC: 'UTC',
+    };
+    return map[timezone] ?? null;
+  }
+}

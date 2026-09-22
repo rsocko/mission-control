@@ -34,7 +34,7 @@ export default function OrderSelector({ value, onChange }: OrderSelectorProps) {
             title={opt.label}
             aria-pressed={active}
             className={cn(
-              'flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium transition-all duration-100',
+              'flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-all duration-100',
               active
                 ? 'bg-[var(--surface-3)] text-[var(--text-primary)] shadow-sm'
                 : 'text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]'

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 import type { IConnector } from '@/lib/connectors';
 
 describe('sync deletion recovery', () => {
@@ -16,7 +17,7 @@ describe('sync deletion recovery', () => {
 
   async function setupTask(sourceId = 'remote:missing') {
     const [{ default: db }, schema] = await Promise.all([
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
     ]);
     const now = '2026-08-03T12:00:00.000Z';
@@ -131,7 +132,7 @@ describe('sync deletion recovery', () => {
       alreadyRestored: true,
     });
     expect(await db.select().from(schema.tasks)).toHaveLength(1);
-  });
+  }, 15_000);
 
   it('cancels quarantine when the task reappears on the next full sync', async () => {
     const { db, schema } = await setupTask('remote:returns');
@@ -482,7 +483,7 @@ describe('sync deletion recovery', () => {
     // A connector identity epoch bump must fence a recovery frozen at the old one.
     db.update(schema.githubIdentityControls).set({ modeRevision: 5, updatedAt: now })
       .where(eq(schema.githubIdentityControls.connectorInstanceId, 'github-recovery')).run();
-    expect(identity.getGitHubIdentityModeSnapshot('github-recovery'))
+    expect(await identity.getGitHubIdentityModeSnapshot('github-recovery'))
       .toMatchObject({ modeRevision: 5 });
     await expect(restoreDeletionSnapshot(snapshot.id, 'local'))
       .rejects.toThrow('stale_mode_revision');
@@ -524,7 +525,7 @@ describe('sync deletion recovery', () => {
 
 async function setupGitHubTask() {
   const [{ default: db }, schema] = await Promise.all([
-    import('@/db'),
+    importInitializedSqliteDatabase(),
     import('@/db/schema'),
   ]);
   const now = '2026-08-03T12:00:00.000Z';

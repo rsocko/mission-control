@@ -1,0 +1,100 @@
+import { getCorePersistenceRepositoriesForBackend } from '@/lib/persistence/runtime';
+import {
+  HOUSTON_MEMORY_MAX_LIST_LIMIT,
+  HOUSTON_MEMORY_SCOPE,
+  type HoustonConversationMemory,
+  type HoustonConversationMemoryWrite,
+} from './contracts';
+import {
+  publishSemanticEntityDelete,
+  publishSemanticEntityUpsert,
+} from '@/lib/semantic-index/publication-service';
+
+async function publish(kind: 'upsert' | 'delete', id: string): Promise<void> {
+  if (kind === 'upsert') {
+    await publishSemanticEntityUpsert('houston-summary', id);
+  } else {
+    await publishSemanticEntityDelete('houston-summary', id);
+  }
+}
+
+export async function getHoustonMemory(
+  id: string,
+  now = new Date().toISOString(),
+): Promise<HoustonConversationMemory | null> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const memory = await repositories.houstonMemories.get(
+    id,
+    HOUSTON_MEMORY_SCOPE,
+  );
+  if (!memory || memory.excludedAt || memory.retainUntil <= now) return null;
+  return memory;
+}
+
+export async function inspectHoustonMemory(
+  id: string,
+): Promise<HoustonConversationMemory | null> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  return repositories.houstonMemories.get(id, HOUSTON_MEMORY_SCOPE);
+}
+
+export async function listHoustonMemories(input: {
+  limit?: number;
+  beforeUpdatedAt?: string | null;
+  now?: string;
+} = {}): Promise<HoustonConversationMemory[]> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  return repositories.houstonMemories.list({
+    authorizationScope: HOUSTON_MEMORY_SCOPE,
+    limit: Math.min(Math.max(Math.trunc(input.limit ?? 20), 1), HOUSTON_MEMORY_MAX_LIST_LIMIT),
+    beforeUpdatedAt: input.beforeUpdatedAt,
+    now: input.now ?? new Date().toISOString(),
+  });
+}
+
+export async function upsertHoustonMemory(
+  input: Omit<HoustonConversationMemoryWrite, 'authorizationScope'>,
+): Promise<HoustonConversationMemory> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const memory = await repositories.houstonMemories.upsert({
+    ...input,
+    authorizationScope: HOUSTON_MEMORY_SCOPE,
+  });
+  await publish(memory.excludedAt ? 'delete' : 'upsert', memory.id);
+  return memory;
+}
+
+export async function excludeHoustonMemory(id: string): Promise<boolean> {
+  const now = new Date().toISOString();
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const excluded = await repositories.houstonMemories.exclude(
+    id,
+    HOUSTON_MEMORY_SCOPE,
+    now,
+  );
+  await publish('delete', id);
+  return excluded;
+}
+
+export async function deleteHoustonMemory(id: string): Promise<boolean> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const deleted = await repositories.houstonMemories.delete(
+    id,
+    HOUSTON_MEMORY_SCOPE,
+  );
+  await publish('delete', id);
+  return deleted;
+}
+
+export async function deleteExpiredHoustonMemories(
+  now = new Date().toISOString(),
+  limit = HOUSTON_MEMORY_MAX_LIST_LIMIT,
+): Promise<number> {
+  const repositories = await getCorePersistenceRepositoriesForBackend();
+  const ids = await repositories.houstonMemories.deleteExpired(
+    now,
+    Math.min(Math.max(Math.trunc(limit), 1), HOUSTON_MEMORY_MAX_LIST_LIMIT),
+  );
+  await Promise.all(ids.map((id) => publish('delete', id)));
+  return ids.length;
+}

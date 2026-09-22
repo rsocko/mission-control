@@ -1,201 +1,239 @@
-/**
- * Tests for PR #304 — Validate sourceInstanceId and action in cross-account endpoint
- */
-import { NextResponse } from 'next/server';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// ─── Shared DB mock ─────────────────────────────────────────────────────────
+const mocks = vi.hoisted(() => ({
+  sqliteTouched: vi.fn(),
+  getTask: vi.fn(),
+  findDefaultTargetList: vi.fn(),
+  getConnector: vi.fn(),
+  executeWriteThroughTaskMove: vi.fn(),
+}));
 
-type ChainableProxy = Record<PropertyKey, unknown>;
-
-function chainable<T>(terminal: T) {
-  const chain: ChainableProxy = new Proxy({}, {
-    get(_, prop: string | symbol) {
-      if (prop === 'then') return (resolve: (value: T) => unknown) => resolve(terminal);
-      if (prop === Symbol.iterator) {
-        return () => (Array.isArray(terminal) ? terminal : [])[Symbol.iterator]();
-      }
-      return vi.fn(() => chain);
+vi.mock('@/db', () => {
+  mocks.sqliteTouched();
+  throw new Error('POISONED: cross-account route must not import SQLite');
+});
+vi.mock('@/lib/tasks/core/runtime', () => ({
+  getTaskCorePersistence: async () => ({
+    writeThroughMoves: {
+      getTask: mocks.getTask,
+      findDefaultTargetList: mocks.findDefaultTargetList,
     },
+  }),
+}));
+vi.mock('@/lib/tasks/task-move-write-through', () => ({
+  executeWriteThroughTaskMove: mocks.executeWriteThroughTaskMove,
+}));
+vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositoriesForBackend: async () => ({
+    connectors: { get: mocks.getConnector },
+  }),
+}));
+
+import { executeCrossAccountTaskMove } from '@/lib/tasks/task-move-service';
+import {
+  _resetCrossAccountTaskMoveServiceForTests,
+  registerCrossAccountTaskMoveService,
+} from '@/lib/tasks/cross-account-route-service';
+import { POST } from '@/app/api/connectors/[id]/cross-account/route';
+
+const BASE = 'http://localhost:3099/api/connectors/source-1/cross-account';
+
+function request(body: unknown, traceId?: string) {
+  return new Request(BASE, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(traceId ? { 'x-trace-id': traceId } : {}),
+    },
+    body: JSON.stringify(body),
   });
-  return chain;
 }
 
-const mockDb = {
-  select: vi.fn(() => chainable([])),
-  insert: vi.fn(() => chainable([])),
-  update: vi.fn(() => chainable(undefined)),
-  delete: vi.fn(() => chainable(undefined)),
-  transaction: vi.fn(async (fn: (tx: unknown) => Promise<void>) => {
-    const txProxy = new Proxy({}, {
-      get() { return vi.fn(() => chainable([])); },
+const context = { params: Promise.resolve({ id: 'source-1' }) };
+
+describe('POST /api/connectors/[id]/cross-account', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    _resetCrossAccountTaskMoveServiceForTests();
+    registerCrossAccountTaskMoveService({
+      execute: executeCrossAccountTaskMove,
     });
-    await fn(txProxy);
-  }),
-};
-
-vi.mock('@/db', () => ({
-  default: mockDb,
-  runTransaction: vi.fn((fn: (tx: unknown) => unknown) => {
-    const txProxy = new Proxy({}, {
-      get() { return vi.fn(() => chainable([])); },
+    mocks.getTask.mockResolvedValue({
+      id: 'task-1',
+      connectorInstanceId: 'source-1',
     });
-    return fn(txProxy);
-  }),
-}));
-
-vi.mock('@/db/schema', () => ({
-  tasks: { id: 'id', connectorInstanceId: 'connector_instance_id' },
-  connectorConfigs: { id: 'id', type: 'type' },
-}));
-
-vi.mock('@/lib/auth', () => ({
-  getValidToken: vi.fn(() => Promise.resolve('mock-token')),
-}));
-
-vi.mock('@/lib/mode', () => ({
-  getTimezone: vi.fn(() => 'America/New_York'),
-}));
-
-vi.mock('@/lib/logger', () => ({
-  connectorLogger: { error: vi.fn(), info: vi.fn() },
-  dbLogger: { error: vi.fn() },
-}));
-
-vi.mock('@/lib/api-error', () => ({
-  ApiErrors: {
-    internal: vi.fn((msg: string) => {
-      return NextResponse.json({ error: msg, code: 'INTERNAL_ERROR' }, { status: 500 });
-    }),
-  },
-}));
-
-const BASE = 'http://localhost:3099';
-
-beforeEach(() => {
-  mockDb.select.mockImplementation(() => chainable([]));
-});
-
-describe('POST /api/connectors/[id]/cross-account — validation (PR #304)', () => {
-  it('should return 400 when taskId is missing', async () => {
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ targetInstanceId: 'inst-2', action: 'copy' }),
-      headers: { 'Content-Type': 'application/json' },
+    mocks.findDefaultTargetList.mockResolvedValue({
+      id: 'target-list-row',
+      name: 'Tasks',
+      sourceId: 'target-list',
     });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
-    expect(response.status).toBe(400);
-    const data = await response.json();
-    expect(data.error).toContain('taskId');
+    mocks.getConnector.mockResolvedValue({
+      id: 'target-1',
+      type: 'microsoft-todo',
+    });
+    mocks.executeWriteThroughTaskMove.mockResolvedValue({
+      status: 201,
+      body: {
+        newTaskId: 'task-2',
+        newSourceId: 'target-list:remote-2',
+        sourceAction: 'copy',
+        warnings: [],
+      },
+    });
   });
 
-  it('should return 400 when targetInstanceId is missing', async () => {
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ taskId: 'task-1', action: 'copy' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
+  it.each([
+    { targetInstanceId: 'target-1', action: 'copy' },
+    { taskId: 'task-1', action: 'copy' },
+    { taskId: 'task-1', targetInstanceId: 'target-1' },
+  ])('rejects invalid input without touching persistence', async (body) => {
+    const response = await POST(request(body), context);
+
     expect(response.status).toBe(400);
+    expect(mocks.getTask).not.toHaveBeenCalled();
   });
 
-  it('should return 400 when action is missing', async () => {
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ taskId: 'task-1', targetInstanceId: 'inst-2' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
+  it('preserves the invalid-action error contract', async () => {
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'target-1',
+      action: 'delete',
+    }), context);
+
     expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      error: 'action must be "copy" or "move"',
+    });
+    expect(mocks.getTask).not.toHaveBeenCalled();
   });
 
-  it('should return 400 when action is not "copy" or "move"', async () => {
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ taskId: 'task-1', targetInstanceId: 'inst-2', action: 'delete' }),
-      headers: { 'Content-Type': 'application/json' },
+  it('rejects a task owned by another source connector', async () => {
+    mocks.getTask.mockResolvedValue({
+      id: 'task-1',
+      connectorInstanceId: 'source-other',
     });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
-    expect(response.status).toBe(400);
-    const data = await response.json();
-    expect(data.error).toContain('action');
-    expect(data.error).toContain('copy');
-    expect(data.error).toContain('move');
-  });
 
-  it('should return 404 when task does not belong to source connector', async () => {
-    // Task lookup returns empty (task not found for this connector)
-    mockDb.select.mockImplementation(() => chainable([]));
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'target-1',
+      targetListId: 'target-list',
+      action: 'move',
+    }), context);
 
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ taskId: 'task-1', targetInstanceId: 'inst-2', action: 'copy' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
     expect(response.status).toBe(404);
-    const data = await response.json();
-    expect(data.error).toContain('not found');
+    expect(await response.json()).toEqual({
+      error: 'Task not found for this connector',
+    });
+    expect(mocks.executeWriteThroughTaskMove).not.toHaveBeenCalled();
   });
 
-  it('should return 404 when target connector does not exist', async () => {
-    // First select returns the task, second returns empty (no target connector)
-    let callCount = 0;
-    mockDb.select.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return chainable([{ id: 'task-1', connectorInstanceId: 'inst-1', title: 'Test' }]);
-      }
-      return chainable([]);
-    });
+  it('uses the persisted default list and delegates to the canonical move workflow', async () => {
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'target-1',
+      action: 'copy',
+    }, 'trace-cross-account'), context);
 
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ taskId: 'task-1', targetInstanceId: 'inst-99', action: 'move' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
-    expect(response.status).toBe(404);
-    const data = await response.json();
-    expect(data.error).toContain('Target connector not found');
-  });
-
-  it('should accept valid "copy" action', async () => {
-    // Mock the full path: task found → connector found → Graph API success
-    let callCount = 0;
-    mockDb.select.mockImplementation(() => {
-      callCount++;
-      if (callCount === 1) {
-        return chainable([{
-          id: 'task-1', connectorInstanceId: 'inst-1', title: 'My Task',
-          description: null, priority: 'medium', dueDate: null, metadata: '{}',
-        }]);
-      }
-      // target connector config
-      return chainable([{ id: 'inst-2', type: 'microsoft-todo' }]);
-    });
-
-    // Mock fetch for Graph API calls
-    global.fetch = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ value: [{ id: 'list-1', wellknownListName: 'defaultList' }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'graph-task-1' }), { status: 201 }));
-
-    const { POST } = await import('@/app/api/connectors/[id]/cross-account/route');
-    const request = new Request(`${BASE}/api/connectors/inst-1/cross-account`, {
-      method: 'POST',
-      body: JSON.stringify({ taskId: 'task-1', targetInstanceId: 'inst-2', action: 'copy' }),
-      headers: { 'Content-Type': 'application/json' },
-    });
-    const response = await POST(request, { params: Promise.resolve({ id: 'inst-1' }) });
     expect(response.status).toBe(200);
-    const data = await response.json();
-    expect(data.success).toBe(true);
-    expect(data.action).toBe('copy');
+    expect(await response.json()).toEqual({
+      success: true,
+      action: 'copy',
+      sourceTaskId: 'task-1',
+      targetTaskId: 'task-2',
+      targetRemoteId: 'remote-2',
+      targetInstance: 'target-1',
+      warnings: [],
+    });
+    expect(mocks.findDefaultTargetList).toHaveBeenCalledWith('target-1');
+    expect(mocks.executeWriteThroughTaskMove).toHaveBeenCalledWith({
+      taskId: 'task-1',
+      targetConnectorInstanceId: 'target-1',
+      targetSourceListId: 'target-list',
+      sourceAction: 'copy',
+      expectedSourceConnectorInstanceId: 'source-1',
+      addCrossReference: false,
+    }, 'trace-cross-account');
+    expect(mocks.sqliteTouched).not.toHaveBeenCalled();
+  });
+
+  it('preserves an explicit target list and canonical conflict response', async () => {
+    mocks.executeWriteThroughTaskMove.mockResolvedValue({
+      status: 409,
+      body: {
+        error: 'This task is already being moved',
+        code: 'TASK_MOVE_IN_PROGRESS',
+      },
+    });
+
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'target-1',
+      targetListId: 'explicit-list',
+      action: 'move',
+    }), context);
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: 'This task is already being moved',
+      code: 'TASK_MOVE_IN_PROGRESS',
+    });
+    expect(mocks.findDefaultTargetList).not.toHaveBeenCalled();
+    expect(mocks.executeWriteThroughTaskMove).toHaveBeenCalledWith(
+      expect.objectContaining({
+        targetSourceListId: 'explicit-list',
+        sourceAction: 'move',
+      }),
+      undefined,
+    );
+  });
+
+  it('preserves target-connector validation before default-list resolution', async () => {
+    mocks.getConnector.mockResolvedValue(null);
+
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'missing-target',
+      action: 'copy',
+    }), context);
+
+    expect(response.status).toBe(404);
+    expect(await response.json()).toEqual({ error: 'Target connector not found' });
+    expect(mocks.findDefaultTargetList).not.toHaveBeenCalled();
+    expect(mocks.executeWriteThroughTaskMove).not.toHaveBeenCalled();
+  });
+
+  it('preserves the redacted upstream failure response', async () => {
+    mocks.executeWriteThroughTaskMove.mockResolvedValue({
+      status: 502,
+      body: {
+        error: 'Failed to create in target. The external service returned an error.',
+      },
+    });
+
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'target-1',
+      targetListId: 'target-list',
+      action: 'copy',
+    }), context);
+
+    expect(response.status).toBe(502);
+    expect(await response.json()).toEqual({
+      error: 'Failed to create in target. The external service returned an error.',
+    });
+  });
+
+  it('fails before any remote effect when no destination list is persisted', async () => {
+    mocks.findDefaultTargetList.mockResolvedValue(null);
+
+    const response = await POST(request({
+      taskId: 'task-1',
+      targetInstanceId: 'target-1',
+      action: 'copy',
+    }), context);
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: 'No target list available' });
+    expect(mocks.executeWriteThroughTaskMove).not.toHaveBeenCalled();
   });
 });

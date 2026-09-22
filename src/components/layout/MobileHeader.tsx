@@ -148,7 +148,10 @@ export function MobileHeader({
   );
 
   return (
-    <header className="flex flex-col sm:hidden">
+    <header
+      className="safe-area-pt flex shrink-0 flex-col bg-[var(--surface-0)] sm:hidden"
+      data-mobile-shell-header
+    >
       <div className="flex items-center h-12 px-3 bg-[var(--surface-0)] border-b border-[var(--border-subtle)]">
         {/* Hamburger button with notification dot */}
         <button
@@ -159,15 +162,18 @@ export function MobileHeader({
           aria-expanded={isDrawerOpen}
           aria-controls="mobile-navigation-drawer"
         >
-          <Menu size={20} />
+          <span className="relative" data-mobile-menu-icon>
+            <Menu size={20} />
+            {showNavigationNotificationBadge && navigationCounts && (
+              <NavigationBadge
+                count={navigationCounts.notifications}
+                tone={navigationCounts.notificationTone}
+                overlay
+              />
+            )}
+          </span>
           {/* Notification dot indicator (F-9) — colored by most severe level */}
-          {showNavigationNotificationBadge && navigationCounts ? (
-            <NavigationBadge
-              count={navigationCounts.notifications}
-              tone={navigationCounts.notificationTone}
-              overlay
-            />
-          ) : dotColor && !navigationCounts ? (
+          {!showNavigationNotificationBadge && dotColor && !navigationCounts ? (
             <span
               className={cn('absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full ring-2 ring-[var(--surface-0)]', dotColorClass)}
               aria-hidden="true"

@@ -1,10 +1,19 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { weeklyOneThing, tasks, myDayItems } from '@/db/schema';
-import { eq, and, ne, sql } from 'drizzle-orm';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { getLocalToday } from '@/lib/utils/date';
 import logger from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
+
+const CANDIDATE_LIMIT = 200;
+
+async function oneThingRepository() {
+  const { dailyPlanning } = await getWorkerPersistenceRepositories();
+  if (!dailyPlanning) throw new Error('Daily planning persistence is unavailable');
+  return dailyPlanning.oneThing;
+}
+
+type OneThingRepository = Awaited<ReturnType<typeof oneThingRepository>>;
+type ExistingOneThing = NonNullable<Awaited<ReturnType<OneThingRepository['getForWeek']>>>;
 
 /**
  * Get the Monday of the week for a given YYYY-MM-DD date.
@@ -79,16 +88,31 @@ function scoreTask(task: {
   return score;
 }
 
-/** Fetch subtask progress for a parent task */
-async function getSubtaskProgress(taskId: string): Promise<{ total: number; done: number }> {
-  const [row] = await db
-    .select({
-      total: sql<number>`count(*)`,
-      done: sql<number>`sum(case when ${tasks.status} = 'done' then 1 else 0 end)`,
-    })
-    .from(tasks)
-    .where(eq(tasks.parentId, taskId));
-  return { total: Number(row?.total ?? 0), done: Number(row?.done ?? 0) };
+/** Shapes the response for an already-selected weekly one thing. */
+async function respondWithExisting(existing: ExistingOneThing, weekMonday: string) {
+  const repository = await oneThingRepository();
+
+  // If the task is now done and we haven't recorded completion, update it
+  const justCompleted = existing.status === 'done' && !existing.completedAt;
+  const completedAt = justCompleted ? new Date().toISOString() : existing.completedAt;
+  if (justCompleted) {
+    await repository.markCompleted({ id: existing.id, completedAt: completedAt! });
+  }
+
+  // Fetch subtask progress
+  const subtaskProgress = await repository.subtaskProgress(existing.taskId);
+
+  return NextResponse.json({
+    oneThing: {
+      ...existing,
+      completedAt,
+      justCompleted,
+      subtaskTotal: subtaskProgress.total,
+      subtaskDone: subtaskProgress.done,
+    },
+    weekMonday,
+    source: existing.isManualOverride ? 'manual' : 'auto',
+  });
 }
 
 /**
@@ -102,83 +126,21 @@ export async function GET(request: Request) {
   const weekMonday = getWeekMonday(date);
 
   try {
+    const repository = await oneThingRepository();
+
     // Check for existing manual override or previously selected one-thing
-    const [existing] = await db.select({
-      id: weeklyOneThing.id,
-      taskId: weeklyOneThing.taskId,
-      weekMonday: weeklyOneThing.weekMonday,
-      isManualOverride: weeklyOneThing.isManualOverride,
-      completedAt: weeklyOneThing.completedAt,
-      createdAt: weeklyOneThing.createdAt,
-      // Task fields
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      connectorType: tasks.connectorType,
-      sourceListName: tasks.sourceListName,
-    })
-      .from(weeklyOneThing)
-      .innerJoin(tasks, eq(weeklyOneThing.taskId, tasks.id))
-      .where(eq(weeklyOneThing.weekMonday, weekMonday))
-      .limit(1);
-
-    if (existing) {
-      // If the task is now done and we haven't recorded completion, update it
-      const justCompleted = existing.status === 'done' && !existing.completedAt;
-      if (justCompleted) {
-        await db.update(weeklyOneThing)
-          .set({ completedAt: new Date().toISOString() })
-          .where(eq(weeklyOneThing.id, existing.id));
-      }
-
-      // Fetch subtask progress
-      const subtaskProgress = await getSubtaskProgress(existing.taskId);
-
-      return NextResponse.json({
-        oneThing: {
-          ...existing,
-          completedAt: justCompleted ? new Date().toISOString() : existing.completedAt,
-          justCompleted,
-          subtaskTotal: subtaskProgress.total,
-          subtaskDone: subtaskProgress.done,
-        },
-        weekMonday,
-        source: existing.isManualOverride ? 'manual' : 'auto',
-      });
-    }
+    const existing = await repository.getForWeek(weekMonday);
+    if (existing) return respondWithExisting(existing, weekMonday);
 
     // No existing selection — auto-select the best candidate
-    const openTasks = await db.select({
-      id: tasks.id,
-      title: tasks.title,
-      status: tasks.status,
-      priority: tasks.priority,
-      dueDate: tasks.dueDate,
-      connectorType: tasks.connectorType,
-      sourceListName: tasks.sourceListName,
-      updatedAt: tasks.updatedAt,
-      depth: tasks.depth,
-    })
-      .from(tasks)
-      .where(
-        and(
-          ne(tasks.status, 'done'),
-          ne(tasks.status, 'cancelled'),
-          eq(tasks.depth, 0),
-        )
-      )
-      .limit(200);
+    const openTasks = await repository.listCandidates(CANDIDATE_LIMIT);
 
     if (openTasks.length === 0) {
       return NextResponse.json({ oneThing: null, weekMonday, source: 'none' });
     }
 
     // Get My Day task IDs for scoring boost
-    const myDayRows = await db.select({ taskId: myDayItems.taskId })
-      .from(myDayItems)
-      .where(eq(myDayItems.date, date));
-    const myDayTaskIds = new Set(myDayRows.map(r => r.taskId));
+    const myDayTaskIds = new Set(await repository.listMyDayTaskIds(date));
 
     const now = new Date();
     const scored = openTasks
@@ -187,18 +149,27 @@ export async function GET(request: Request) {
 
     const topTask = scored[0];
 
-    // Persist the auto-selection so it's stable for the week
+    // Persist the auto-selection so it's stable for the week. The write is
+    // serialized on the week namespace, so a concurrent manual or auto choice
+    // is never duplicated or overwritten.
     const id = `ot-${crypto.randomUUID().slice(0, 8)}`;
-    await db.insert(weeklyOneThing).values({
+    const createdAt = new Date().toISOString();
+    const selection = await repository.selectAuto({
       id,
       taskId: topTask.id,
       weekMonday,
-      isManualOverride: false,
-      createdAt: new Date().toISOString(),
+      createdAt,
     });
 
+    if (selection.outcome === 'existing') {
+      const raced = await repository.getForWeek(weekMonday);
+      return raced
+        ? respondWithExisting(raced, weekMonday)
+        : NextResponse.json({ oneThing: null, weekMonday, source: 'none' });
+    }
+
     // Fetch subtask progress
-    const subtaskProgress = await getSubtaskProgress(topTask.id);
+    const subtaskProgress = await repository.subtaskProgress(topTask.id);
 
     return NextResponse.json({
       oneThing: {
@@ -207,7 +178,7 @@ export async function GET(request: Request) {
         weekMonday,
         isManualOverride: false,
         completedAt: null,
-        createdAt: new Date().toISOString(),
+        createdAt,
         title: topTask.title,
         status: topTask.status,
         priority: topTask.priority,
@@ -242,28 +213,19 @@ export async function POST(request: Request) {
       return ApiErrors.badRequest('taskId is required');
     }
 
-    // Verify task exists
-    const [task] = await db.select({ id: tasks.id, title: tasks.title })
-      .from(tasks)
-      .where(eq(tasks.id, taskId))
-      .limit(1);
-
-    if (!task) {
-      return ApiErrors.notFound('Task');
-    }
-
-    // Delete any existing one-thing for this week
-    await db.delete(weeklyOneThing).where(eq(weeklyOneThing.weekMonday, weekMonday));
-
-    // Insert the new manual override
+    // Task existence, the replacement of any prior selection and the new
+    // manual insert are one serialized unit inside persistence.
     const id = `ot-${crypto.randomUUID().slice(0, 8)}`;
-    await db.insert(weeklyOneThing).values({
+    const result = await (await oneThingRepository()).selectManual({
       id,
       taskId,
       weekMonday,
-      isManualOverride: true,
       createdAt: new Date().toISOString(),
     });
+
+    if (result.outcome === 'task-not-found') {
+      return ApiErrors.notFound('Task');
+    }
 
     return NextResponse.json({ id, taskId, weekMonday }, { status: 201 });
   } catch (error) {
@@ -281,7 +243,7 @@ export async function DELETE(request: Request) {
   const weekMonday = getWeekMonday(date);
 
   try {
-    await db.delete(weeklyOneThing).where(eq(weeklyOneThing.weekMonday, weekMonday));
+    await (await oneThingRepository()).clearForWeek(weekMonday);
     return NextResponse.json({ success: true, weekMonday });
   } catch (error) {
     return ApiErrors.internal('Failed to clear one thing', error);

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DurableAiRunStore } from '@/lib/ai/durable-runs';
+import { getDurableAiRunRepository } from '@/lib/ai/durable-runs';
 import { ApiErrors } from '@/lib/api-error';
 
 export const dynamic = 'force-dynamic';
@@ -32,7 +32,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const runs = new DurableAiRunStore().listRuns(parsed.data);
+    const runs = await (await getDurableAiRunRepository()).listRuns(parsed.data);
     return Response.json(
       {
         runs,

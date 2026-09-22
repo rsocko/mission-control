@@ -13,7 +13,6 @@ import type {
 } from '@/types';
 import type { ConnectorNotificationTypeDefinition } from '@/lib/notifications/push-policy/catalog';
 import type { ExternalIdentityEvidence } from '@/lib/external-identities/types';
-import { validateNotificationTypeCatalog } from '@/lib/notifications/push-policy/catalog';
 import { customRestFactory } from './custom-rest';
 import { documentIntelligenceFactory } from './document-intelligence';
 import { githubIssuesFactory } from './github-issues';
@@ -26,6 +25,15 @@ import { ryMessageFactory } from './rymessage';
 import { scoutFactory } from './scout';
 import { workTodoBridgeFactory } from './work-todo';
 import type { NotificationWritebackAction } from './notification-writeback-contract';
+import {
+  connectorRegistry,
+  type ConnectorFactory,
+} from './registry-runtime';
+export {
+  ConnectorRegistry,
+  connectorRegistry,
+  type ConnectorFactory,
+} from './registry-runtime';
 export {
   ConnectorWritebackError,
   type NotificationWritebackAction,
@@ -37,8 +45,16 @@ export {
 export interface AlertReconciliation {
   sourceId: string;
   resolved: boolean;
+  /** False when the source could not authoritatively verify this notification. */
+  verified?: boolean;
   reason?: string;       // e.g. "PR merged", "condition cleared", "email replied"
   resolvedAt?: string;   // ISO timestamp of upstream resolution
+}
+
+export interface NotificationSourceHealth {
+  sourceId: string;
+  status: 'ok' | 'disabled' | 'failed';
+  error?: string;
 }
 
 export interface TransferIdentityRefresh {
@@ -113,10 +129,12 @@ export interface IConnector {
   /** Mark a task as complete */
   completeTask?(sourceId: string): Promise<void>;
 
+  /** Represent a local cancellation using the closest non-destructive source state. */
+  cancelTask?(sourceId: string): Promise<void>;
+
   /** Close a task with a specific reason (e.g. not_planned, duplicate) */
   closeTaskWithReason?(sourceId: string, reason: 'completed' | 'not_planned' | 'duplicate'): Promise<void>;
 
-  /** Delete a task */
   /** Delete a task */
   deleteTask?(sourceId: string): Promise<void>;
 
@@ -140,6 +158,9 @@ export interface IConnector {
 
   /** Update a sub-task/checklist item */
   updateSubTask?(parentSourceId: string, subTaskSourceId: string, updates: Partial<TaskItem>): Promise<void>;
+
+  /** Reorder all direct sub-tasks under a parent. */
+  reorderSubTasks?(parentSourceId: string, orderedSubTaskSourceIds: readonly string[]): Promise<void>;
 
   /** Add a tag/label to a task in the source system */
   addTagToTask?(sourceId: string, tagName: string): Promise<void>;
@@ -225,6 +246,9 @@ export interface IConnector {
    */
   getActiveAlertSourceIds?(since?: Date): Promise<string[] | null>;
 
+  /** Health from the most recent notification fetch, keyed by source-list source ID. */
+  getNotificationSourceHealth?(): NotificationSourceHealth[];
+
   /**
    * Per-ID reconciliation: given specific sourceIds that MC holds as active,
    * return which ones are resolved upstream.
@@ -233,79 +257,10 @@ export interface IConnector {
    * Only called for sourceIds NOT already resolved by getActiveAlertSourceIds().
    */
   reconcileAlerts?(activeSourceIds: string[]): Promise<AlertReconciliation[]>;
+
+  /** Override the default per-sync reconciliation cap; null means all active alerts. */
+  readonly reconcileAlertsBatchSize?: number | null;
 }
-
-/**
- * Registry for managing connector instances.
- */
-export class ConnectorRegistry {
-  private connectors = new Map<string, IConnector>();
-  private factories = new Map<string, ConnectorFactory>();
-
-  registerFactory(type: string, factory: ConnectorFactory): void {
-    if (!type.trim()) throw new Error('Connector factory type is required');
-    if (factory.notificationTypes) {
-      validateNotificationTypeCatalog(type, factory.notificationTypes);
-    }
-    this.factories.set(type, factory);
-  }
-
-  getNotificationTypeCatalog(
-    type: string,
-    config?: ConnectorConfig,
-  ): readonly ConnectorNotificationTypeDefinition[] {
-    const factory = this.factories.get(type);
-    if (!factory) return Object.freeze([]);
-    const catalog = config && factory.getNotificationTypes
-      ? factory.getNotificationTypes(config)
-      : factory.notificationTypes ?? [];
-    return validateNotificationTypeCatalog(type, catalog);
-  }
-
-  async createConnector(config: ConnectorConfig): Promise<IConnector> {
-    const factory = this.factories.get(config.type);
-    if (!factory) {
-      throw new Error(`No factory registered for connector type: ${config.type}`);
-    }
-    this.getNotificationTypeCatalog(config.type, config);
-    const connector = factory.create();
-    await connector.initialize(config);
-    this.connectors.set(config.id, connector);
-    return connector;
-  }
-
-  async replaceConnector(config: ConnectorConfig): Promise<IConnector> {
-    // Do not dispose the previous instance here: an API operation may still
-    // hold it after reading from the registry. Dropping the map reference lets
-    // that operation finish while the refreshed instance serves new work.
-    return this.createConnector(config);
-  }
-
-  getConnector(id: string): IConnector | undefined {
-    return this.connectors.get(id);
-  }
-
-  getAllConnectors(): IConnector[] {
-    return Array.from(this.connectors.values());
-  }
-
-  async removeConnector(id: string): Promise<void> {
-    const connector = this.connectors.get(id);
-    if (connector) {
-      await connector.dispose();
-      this.connectors.delete(id);
-    }
-  }
-}
-
-export interface ConnectorFactory {
-  create(): IConnector;
-  readonly notificationTypes?: readonly ConnectorNotificationTypeDefinition[];
-  getNotificationTypes?(config: ConnectorConfig): readonly ConnectorNotificationTypeDefinition[];
-}
-
-// Singleton registry
-export const connectorRegistry = new ConnectorRegistry();
 
 let defaultFactoriesRegistered = false;
 

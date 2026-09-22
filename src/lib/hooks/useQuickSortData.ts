@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
-import type { LocalDisposition, TaskEditPolicy, TaskSourceModel } from '@/types';
+import type { LocalDisposition, PlanningHorizon, TaskEditPolicy, TaskSourceModel } from '@/types';
 
-export type QuickSortQueueMode = 'no_priority' | 'no_effort' | 'no_tags' | 'no_due_date';
+export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
 
 export interface QuickSortQueueTask {
@@ -20,6 +20,7 @@ export interface QuickSortQueueTask {
   sourceListId: string | null;
   sourceListName: string | null;
   dueDate: string | null;
+  planningHorizon: PlanningHorizon | null;
   createdAt: string;
   localDisposition: LocalDisposition;
   taskSourceModel: TaskSourceModel;
@@ -31,9 +32,10 @@ export interface QuickSortQueueTask {
 
 export interface QuickSortModeCounts {
   no_priority: number;
+  quadrant: number;
   no_effort: number;
   no_tags: number;
-  no_due_date: number;
+  no_planning_horizon: number;
 }
 
 export interface QuickSortSuggestion {
@@ -48,13 +50,14 @@ export function getMissingFields(task: QuickSortQueueTask): QuickSortQueueMode[]
   if (task.priority === 'none') missing.push('no_priority');
   if (task.effort === null) missing.push('no_effort');
   if (task.tags.filter(t => !isSyntheticTag(t.name)).length === 0) missing.push('no_tags');
-  if (task.dueDate === null && ['critical', 'high'].includes(task.priority)) missing.push('no_due_date');
+  if (task.planningHorizon === null) missing.push('no_planning_horizon');
   return missing;
 }
 
 export interface QuickSortScopeFilter {
   source?: string;
   sourceList?: string;
+  sourceListId?: string;
   connectorId?: string;
 }
 
@@ -74,6 +77,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
     const params = new URLSearchParams();
     if (filter?.source) params.set('source', filter.source);
     if (filter?.sourceList) params.set('sourceList', filter.sourceList);
+    if (filter?.sourceListId) params.set('sourceListId', filter.sourceListId);
     if (filter?.connectorId) params.set('connectorId', filter.connectorId);
     const str = params.toString();
     return str ? `&${str}` : '';
@@ -103,7 +107,7 @@ export function useQuickSortData(mode: QuickSortQueueMode | null, scopeFilter?: 
       setHasMore(fetched.length >= 50);
 
       // Fetch suggestions for the first batch in the background
-      if (fetched.length > 0 && m !== 'no_due_date') {
+      if (fetched.length > 0 && m !== 'no_planning_horizon' && m !== 'quadrant') {
         const ids = fetched.slice(0, 20).map((t) => t.id).join(',');
         fetch(`/api/tasks/quick-sort/suggestions?taskIds=${ids}`)
           .then((r) => r.json())

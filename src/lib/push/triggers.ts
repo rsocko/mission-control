@@ -8,28 +8,21 @@
  *
  * Refs: #1539, #1540, #1541, #1542
  */
-import db from '@/db';
-import { tasks, myDayItems, triageItems } from '@/db/schema';
-import { eq, and, lt, ne, inArray, sql } from 'drizzle-orm';
-import { getPreferences } from '@/lib/notifications/quiet-hours';
 import {
   createNotification,
   type CreateNotificationResult,
   type MissionControlPushPayload,
 } from '@/lib/notifications';
-import { getLocalToday } from '@/lib/utils/date';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { formatDateInLocalTimezone, getLocalToday } from '@/lib/utils/date';
+import { DEFAULT_NOTIFICATION_QUERY } from '@/lib/notifications/query';
+import { getTimezone } from '@/lib/mode';
+import { normalizeHomeAssistantSettings } from '@/lib/connectors/home-assistant/settings';
 import logger from '@/lib/logger';
 
 type ScheduledPushPayload = Omit<MissionControlPushPayload, 'notificationId' | 'body'> & {
   body: string;
 };
-
-/**
- * In-memory tracker for triage nudge deduplication.
- * Prevents re-notifying for the same threshold breach within a window.
- * Keyed by date string (YYYY-MM-DD), value is the count at last notification.
- */
-const triageNudgeTracker = new Map<string, number>();
 
 /**
  * Write a notification record to the notifications table so it shows
@@ -47,6 +40,7 @@ async function writeNotificationRecord(opts: {
   level: 'fyi' | 'heads_up';
   navigationTarget?: string;
   occurrenceKey?: string;
+  metadata?: Record<string, unknown>;
 }): Promise<CreateNotificationResult> {
   const today = getLocalToday();
   const dedupeKey = `push:${opts.templateKey}:${today}`;
@@ -62,7 +56,13 @@ async function writeNotificationRecord(opts: {
     dedupeKey,
     navigationTarget: opts.navigationTarget,
     occurrenceKey: opts.occurrenceKey,
+    metadata: opts.metadata,
   });
+}
+
+export async function getTriageNudgeHighWater(today = getLocalToday()): Promise<number | null> {
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  return (await repository.scheduledTriggers.getTriageSnapshot(today)).highWater;
 }
 
 /**
@@ -108,42 +108,13 @@ async function getCalendarSummary(): Promise<{ count: number; summary: string }>
  * Generates a summary notification to kick off the day.
  */
 export async function triggerMorningNotification(): Promise<boolean> {
-  const prefs = await getPreferences();
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const prefs = await repository.push.getPreferences();
   if (!prefs.morningEnabled) return false;
 
   const today = getLocalToday();
-
-  // 1. Tasks due today
-  const todayMyDay = await db.select({ taskId: myDayItems.taskId })
-    .from(myDayItems)
-    .where(eq(myDayItems.date, today))
-    .limit(50);
-
-  const todayTaskIds = todayMyDay.map(i => i.taskId);
-  let plannedCount = 0;
-  if (todayTaskIds.length > 0) {
-    const plannedTasks = await db.select({ id: tasks.id })
-      .from(tasks)
-      .where(and(
-        inArray(tasks.id, todayTaskIds),
-        ne(tasks.status, 'done'),
-        ne(tasks.status, 'cancelled'),
-      ));
-    plannedCount = plannedTasks.length;
-  }
-
-  // 2. Overdue tasks (due before today, not completed/cancelled)
-  const overdueTasks = await db.select({ id: tasks.id })
-    .from(tasks)
-    .where(and(
-      lt(tasks.dueDate, today),
-      ne(tasks.status, 'done'),
-      ne(tasks.status, 'cancelled'),
-    ))
-    .limit(100);
-  const overdueCount = overdueTasks.length;
-
-  // 3. Calendar events
+  const { plannedCount, overdueCount } = await repository.scheduledTriggers
+    .getMorningSnapshot(today);
   const calendar = await getCalendarSummary();
 
   // Build notification body
@@ -209,32 +180,20 @@ export async function triggerMorningNotification(): Promise<boolean> {
  * Includes deduplication to prevent re-notifying for the same breach.
  */
 export async function triggerTriageNudge(): Promise<boolean> {
-  const prefs = await getPreferences();
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const prefs = await repository.push.getPreferences();
   if (!prefs.triageNudgeEnabled) return false;
 
-  // Count unprocessed triage items using SQL COUNT for accuracy
-  const [{ count: rawCount }] = await db
-    .select({ count: sql<number>`count(*)` })
-    .from(triageItems)
-    .where(eq(triageItems.status, 'pending'));
-
-  const count = Number(rawCount);
+  const today = getLocalToday();
+  const snapshot = await repository.scheduledTriggers.getTriageSnapshot(today);
+  const count = snapshot.pendingCount;
   const threshold = prefs.triageNudgeThreshold ?? 5;
   if (count < threshold) return false;
 
-  // Deduplication: don't re-notify if we already notified for this count level today
-  const today = getLocalToday();
-  const lastNotifiedCount = triageNudgeTracker.get(today);
-  if (lastNotifiedCount !== undefined && count <= lastNotifiedCount) {
-    logger.info({ count, lastNotifiedCount }, 'Triage nudge skipped (already notified at this threshold)');
+  const highWater = snapshot.highWater;
+  if (highWater !== null && count <= highWater) {
+    logger.info({ count, highWater }, 'Triage nudge skipped (queue has not grown)');
     return false;
-  }
-
-  // Track this notification
-  triageNudgeTracker.set(today, count);
-  // Clean up old date entries
-  for (const key of triageNudgeTracker.keys()) {
-    if (key !== today) triageNudgeTracker.delete(key);
   }
 
   const payload: ScheduledPushPayload = {
@@ -252,6 +211,7 @@ export async function triggerTriageNudge(): Promise<boolean> {
     level: 'heads_up',
     navigationTarget: '/triage',
     occurrenceKey: String(count),
+    metadata: { queueSize: count },
   });
   logger.info(
     {
@@ -275,41 +235,25 @@ export async function triggerTriageNudge(): Promise<boolean> {
  * Generates notification listing the incomplete count.
  */
 export async function triggerCarryForwardReminder(): Promise<boolean> {
-  const prefs = await getPreferences();
+  const repository = (await getWorkerPersistenceRepositories()).notificationDelivery;
+  const prefs = await repository.push.getPreferences();
   if (!prefs.carryForwardEnabled) return false;
 
   const today = getLocalToday();
-
-  // Get today's My Day items
-  const todayMyDay = await db.select({ taskId: myDayItems.taskId })
-    .from(myDayItems)
-    .where(eq(myDayItems.date, today))
-    .limit(50);
-
-  const todayTaskIds = todayMyDay.map(i => i.taskId);
-  if (todayTaskIds.length === 0) return false;
-
-  // Find incomplete tasks among today's items (exclude done and cancelled)
-  const incompleteTasks = await db
-    .select({ id: tasks.id, title: tasks.title })
-    .from(tasks)
-    .where(and(
-      inArray(tasks.id, todayTaskIds),
-      ne(tasks.status, 'done'),
-      ne(tasks.status, 'cancelled'),
-    ));
-
-  const incompleteCount = incompleteTasks.length;
+  const { incompleteTaskTitles } = await repository.scheduledTriggers
+    .getCarryForwardSnapshot(today);
+  const incompleteCount = incompleteTaskTitles.length;
   if (incompleteCount === 0) return false;
 
   // Build body with up to 3 task names for context
-  const preview = incompleteTasks.slice(0, 3).map(t => t.title);
+  const preview = incompleteTaskTitles.slice(0, 3);
   let body = `${incompleteCount} ${incompleteCount === 1 ? 'task remains' : 'tasks remain'} incomplete.`;
   if (preview.length > 0) {
     body += '\n• ' + preview.join('\n• ');
     if (incompleteCount > 3) {
       body += `\n…and ${incompleteCount - 3} more`;
     }
+
   }
   body += '\nCarry forward to tomorrow?';
 
@@ -343,4 +287,83 @@ export async function triggerCarryForwardReminder(): Promise<boolean> {
     'Carry-forward notification created',
   );
   return result.created && result.deliveryEvents.some(event => event.status === 'pending');
+}
+
+/**
+ * Sends one outbound-only summary for each Home Assistant instance configured
+ * for daily update summaries. The summary reuses an active update notification
+ * as its delivery anchor and does not create a grouped inbox record.
+ */
+export async function triggerHomeAssistantUpdateSummaries(now = new Date()): Promise<boolean> {
+  const repositories = await getWorkerPersistenceRepositories();
+  const enqueue = repositories.notificationDelivery.enqueueCustomDeliveries;
+  if (!enqueue) {
+    throw new Error('Notification delivery persistence does not support custom summary delivery');
+  }
+
+  const localTime = new Intl.DateTimeFormat('en-GB', {
+    timeZone: getTimezone(),
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(now);
+  const localDate = formatDateInLocalTimezone(now);
+  const connectors = (await repositories.connectors.listEnabled())
+    .filter(connector => connector.type === 'home-assistant');
+  if (connectors.length === 0) return false;
+
+  const result = await repositories.notificationDelivery.web.queryNotifications({
+    query: { ...DEFAULT_NOTIFICATION_QUERY, source: 'home-assistant', sort: 'oldest' },
+    limit: 500,
+    cursor: null,
+  });
+  let created = 0;
+
+  for (const connector of connectors) {
+    const settings = normalizeHomeAssistantSettings(connector.settings);
+    if (
+      settings.outboundDelivery.updatePush !== 'daily_summary'
+      || settings.outboundDelivery.dailySummaryTime !== localTime
+    ) {
+      continue;
+    }
+    const candidates = result.items.filter(item => {
+      if (
+        item.connectorInstanceId !== connector.id
+        || !['ha_update_available', 'ha_update_critical'].includes(item.templateKey || '')
+        || item.disposition !== 'inbox'
+        || item.sourceState !== 'active'
+        || item.readState !== 'unread'
+      ) {
+        return false;
+      }
+      const metadata = item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)
+        ? item.metadata as Record<string, unknown>
+        : {};
+      return metadata.pushDelivery === 'daily_summary';
+    });
+    if (candidates.length === 0) continue;
+
+    const names = candidates.slice(0, 3).map(item => item.title.replace(/\s+is available$/i, ''));
+    const remaining = candidates.length - names.length;
+    const body = `${names.join(', ')}${remaining > 0 ? ` and ${remaining} more` : ''}`;
+    const notificationId = candidates[0].id;
+    created += await enqueue({
+      notificationId,
+      dedupeKey: `home-assistant-update-summary:${connector.id}:${localDate}`,
+      nextAttemptAt: now.toISOString(),
+      payload: {
+        notificationId,
+        title: `${candidates.length} Home Assistant update${candidates.length === 1 ? '' : 's'} available`,
+        body,
+        tag: `ha-update-summary:${connector.id}:${localDate}`,
+        url: `/notifications?source=home-assistant&sourceAccount=${encodeURIComponent(connector.id)}`,
+      },
+    });
+  }
+
+  if (created > 0) {
+    logger.info({ deliveryEventsCreated: created }, 'Home Assistant update summaries queued');
+  }
+  return created > 0;
 }

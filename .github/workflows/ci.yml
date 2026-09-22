@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -17,26 +18,150 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: ${{ matrix.name }}
+  changes:
+    name: Classify changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+      impeccable_changed: ${{ steps.classify.outputs.impeccable_changed }}
+      vendor_changed: ${{ steps.classify.outputs.vendor_changed }}
+      workflow_policy_changed: ${{ steps.classify.outputs.workflow_policy_changed }}
+    steps:
+      - name: Check out source history
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed files
+        id: classify
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docs_only=true
+          impeccable_changed=false
+          vendor_changed=false
+          workflow_policy_changed=false
+          found_change=false
+          if [[ -z "${BASE_SHA}" ||
+                "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]] ||
+             ! git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            docs_only=false
+            impeccable_changed=true
+            vendor_changed=true
+            workflow_policy_changed=true
+          else
+            while IFS= read -r -d '' path; do
+              found_change=true
+              case "${path}" in
+                docs/*|README.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|DESIGN.md|PRODUCT.md|SECURITY.md|SUPPORT.md)
+                  ;;
+                *)
+                  docs_only=false
+                  ;;
+              esac
+              case "${path}" in
+                .github/agents/*|.github/hooks/impeccable.json|.github/skills/impeccable/*|.github/workflows/ci.yml|.impeccable/live/config.json|scripts/validate-impeccable.mjs|src/app/layout.tsx)
+                  impeccable_changed=true
+                  ;;
+              esac
+              case "${path}" in
+                .gitattributes|vendor/generic-graph-workbench/*|scripts/generic-graph-workbench-vendor.mjs|scripts/generic-graph-workbench-vendor.test.mjs|scripts/turbopack-node-next-source-loader.cjs|next.config.ts|package.json|package-lock.json)
+                  vendor_changed=true
+                  ;;
+              esac
+              case "${path}" in
+                .github/workflows/*|.impeccable/live/config.json|package.json|package-lock.json|scripts/validate-workflows.mjs)
+                  workflow_policy_changed=true
+                  ;;
+              esac
+            done < <(git diff --no-renames --name-only --diff-filter=ACDMRTUXB -z "${BASE_SHA}" "${HEAD_SHA}")
+          fi
+
+          if [[ "${found_change}" != "true" ]]; then
+            docs_only=false
+            impeccable_changed=true
+            vendor_changed=true
+            workflow_policy_changed=true
+          fi
+          echo "docs_only=${docs_only}" >> "$GITHUB_OUTPUT"
+          echo "impeccable_changed=${impeccable_changed}" >> "$GITHUB_OUTPUT"
+          echo "vendor_changed=${vendor_changed}" >> "$GITHUB_OUTPUT"
+          echo "workflow_policy_changed=${workflow_policy_changed}" >> "$GITHUB_OUTPUT"
+
+  impeccable-worker:
+    name: Impeccable integration worker
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.impeccable_changed != 'false')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Validate Impeccable integration
+        run: node scripts/validate-impeccable.mjs
+
+  impeccable:
+    name: Impeccable integration
+    if: always()
+    needs:
+      - changes
+      - impeccable-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm Impeccable integration result
+        env:
+          CHANGE_REQUIRED: ${{ needs.changes.outputs.impeccable_changed }}
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          WORKER_RESULT: ${{ needs.impeccable-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${CHANGE_REQUIRED}" in
+            true) test "${WORKER_RESULT}" = "success" ;;
+            false) test "${WORKER_RESULT}" = "skipped" ;;
+            *) echo "Invalid Impeccable classification." >&2; exit 1 ;;
+          esac
+
+  lint-worker:
+    name: Lint worker
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Workflow policy
-            command: npm run ci:workflows
-          - name: Impeccable integration
-            command: npm run impeccable:validate
-          - name: Lint
-            command: npm run lint
-          - name: Worker runtime
-            command: npm run test:worker-runtime
-          - name: Production build
-            command: npm run build
     steps:
       - name: Check out source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -46,24 +171,213 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-           node-version: 22
-           cache: npm
+          node-version: 22
+
+      - name: Restore npm download cache
+        id: npm-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Run ${{ matrix.name }}
-        if: matrix.name != 'Production build'
-        run: ${{ matrix.command }}
+      - name: Verify Generic Graph vendor snapshot
+        if: >-
+          (needs.changes.result != 'success' ||
+          needs.changes.outputs.vendor_changed != 'false')
+        run: npm run vendor:verify
 
-      - name: Run Production build
-        if: matrix.name == 'Production build'
+      - name: Test Generic Graph vendor tooling
+        if: >-
+          (needs.changes.result != 'success' ||
+          needs.changes.outputs.vendor_changed != 'false')
+        run: npm run test:vendor
+
+      - name: Validate workflow policy
+        if: >-
+          (needs.changes.result != 'success' ||
+          needs.changes.outputs.workflow_policy_changed != 'false')
+        run: npm run ci:workflows
+
+      - name: Run lint
+        run: npm run lint
+
+      - name: Save npm download cache
+        if: >-
+          needs.changes.outputs.docs_only != 'true' &&
+          github.ref == 'refs/heads/main' &&
+          steps.npm-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: ${{ steps.npm-cache.outputs.cache-primary-key }}
+
+  production-build-worker:
+    name: Production build worker
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Restore npm download cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Run production build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
-        run: ${{ matrix.command }}
+        run: npm run build
+
+      - name: Smoke-test production worker runtime
+        run: MC_WORKER_RUNTIME_SOURCE=.next/standalone node scripts/smoke-sync-worker-runtime.mjs
+
+  lint:
+    name: Lint
+    if: always()
+    needs:
+      - changes
+      - lint-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm lint result
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.lint-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  production-build:
+    name: Production build
+    if: always()
+    needs:
+      - changes
+      - production-build-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm production build result
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.production-build-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  workflow-policy:
+    name: Workflow policy
+    if: always()
+    needs:
+      - changes
+      - lint-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm workflow policy passed
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.lint-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  worker-runtime:
+    name: Worker runtime
+    if: always()
+    needs:
+      - changes
+      - production-build-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm worker runtime passed
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.production-build-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
 
   unit-test-shards:
     name: Unit tests (${{ matrix.shard }}/4)
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -82,7 +396,15 @@ jobs:
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
          node-version: 22
-         cache: npm
+
+      - name: Restore npm download cache
+        id: npm-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+         path: ~/.npm
+         key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+         restore-keys: |
+           npm-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
@@ -94,6 +416,7 @@ jobs:
     name: Unit tests
     if: always()
     needs:
+      - changes
       - unit-test-shards
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -102,5 +425,237 @@ jobs:
     steps:
       - name: Confirm all unit-test shards passed
         env:
-          SHARD_RESULT: ${{ needs.unit-test-shards.result }}
-        run: test "${SHARD_RESULT}" = "success"
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.unit-test-shards.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  postgres-route-sentinel-worker:
+    name: PostgreSQL route sentinel worker
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Enforce PostgreSQL route sentinel
+        env:
+          MC_DATABASE_BACKEND: postgres
+        run: npm run test:postgres-route-sentinel
+
+  postgres-route-sentinel:
+    name: PostgreSQL route sentinel
+    if: always()
+    needs:
+      - changes
+      - postgres-route-sentinel-worker
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm PostgreSQL route sentinel passed
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.postgres-route-sentinel-worker.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+             echo "Change classification did not succeed." >&2
+             exit 1
+          fi
+          case "${DOCS_ONLY}" in
+             true) test "${WORKER_RESULT}" = "skipped" ;;
+             false) test "${WORKER_RESULT}" = "success" ;;
+             *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac
+
+  persisted-state-compatibility:
+    name: Persisted-state compatibility
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+           persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+           node-version: 22
+
+      - name: Restore npm download cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+           path: ~/.npm
+           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+           restore-keys: |
+             npm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test persisted-state compatibility
+        run: npm run test:persisted-state
+
+  postgres-integration-shards:
+    name: PostgreSQL integration worker (${{ matrix.shard }}/3)
+    if: >-
+      always() &&
+      (needs.changes.result != 'success' ||
+      needs.changes.outputs.docs_only != 'true')
+    needs:
+      - changes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg17-bookworm@sha256:cf134a767f474095eeba57e0117be8e568e011a63f33fbf252f14c9b760f8e6f
+        env:
+          POSTGRES_DB: mission_control_test
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_USER: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --shm-size 2g
+          --health-cmd "pg_isready -U postgres -d mission_control_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
+      - name: Restore npm download cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Bootstrap and verify pgvector
+        env:
+          PGHOST: 127.0.0.1
+          PGPORT: 5432
+          PGDATABASE: mission_control_test
+          PGUSER: postgres
+          PGPASSWORD: postgres
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql --set ON_ERROR_STOP=1 --command 'CREATE EXTENSION IF NOT EXISTS vector;'
+          test "$(psql --tuples-only --no-align --command \
+            "SELECT extversion FROM pg_extension WHERE extname = 'vector'")" = "0.8.6"
+
+      - name: Build packaged sync worker
+        run: npm run build:worker
+
+      - name: Locate pgvector service container
+        if: github.event_name == 'workflow_dispatch' && matrix.shard == 2
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker ps --filter publish=5432 --format '{{.ID}}' | head -n 1)"
+          test -n "${container_id}"
+          echo "MC_BENCHMARK_POSTGRES_CONTAINER=${container_id}" >> "$GITHUB_ENV"
+
+      - name: Run PostgreSQL integration tests
+        env:
+          MC_TEST_POSTGRES_URL: postgres://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t test_files < <(
+            node scripts/select-postgres-integration-shard.mjs "${{ matrix.shard }}" 3
+          )
+          test "${#test_files[@]}" -gt 0
+          npm test -- --run --no-file-parallelism "${test_files[@]}"
+
+      - name: Run pgvector 100k benchmark gate
+        if: github.event_name == 'workflow_dispatch' && matrix.shard == 2
+        env:
+          MC_BENCHMARK_DIMENSIONS: 1536
+          MC_BENCHMARK_POSTGRES_URL: postgresql://postgres:postgres@127.0.0.1:5432/mission_control_test?sslmode=disable
+          MC_BENCHMARK_QUERY_RUNS: 20
+        run: npm run --silent benchmark:postgres-vector
+
+  postgres-integration:
+    name: PostgreSQL integration
+    if: always()
+    needs:
+      - changes
+      - postgres-integration-shards
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm all PostgreSQL integration shards passed
+        env:
+          CLASSIFICATION_RESULT: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          WORKER_RESULT: ${{ needs.postgres-integration-shards.result }}
+        shell: bash
+        run: |
+          if [[ "${CLASSIFICATION_RESULT}" != "success" ]]; then
+            echo "Change classification did not succeed." >&2
+            exit 1
+          fi
+          case "${DOCS_ONLY}" in
+            true) test "${WORKER_RESULT}" = "skipped" ;;
+            false) test "${WORKER_RESULT}" = "success" ;;
+            *) echo "Invalid documentation classification." >&2; exit 1 ;;
+          esac

@@ -2,6 +2,8 @@
 
 import {
   AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
   ChevronDown,
   Cloud,
   CloudOff,
@@ -72,6 +74,10 @@ interface ProjectGraphDisplayControlsProps {
   lineStyle: ProjectGraphLineStyle;
   showDependencies: boolean;
   visibleKinds: ProjectGraphNodeVisibility;
+  canNavigateBack: boolean;
+  canNavigateForward: boolean;
+  onNavigateBack: () => void;
+  onNavigateForward: () => void;
   onDirectionChange: (direction: GraphLayoutDirection) => void;
   onLineStyleChange: (lineStyle: ProjectGraphLineStyle) => void;
   onToggleDependencies: () => void;
@@ -83,6 +89,10 @@ export function ProjectGraphDisplayControls({
   lineStyle,
   showDependencies,
   visibleKinds,
+  canNavigateBack,
+  canNavigateForward,
+  onNavigateBack,
+  onNavigateForward,
   onDirectionChange,
   onLineStyleChange,
   onToggleDependencies,
@@ -90,6 +100,27 @@ export function ProjectGraphDisplayControls({
 }: ProjectGraphDisplayControlsProps) {
   return (
     <div className="pointer-events-auto flex max-w-full flex-wrap items-center justify-end gap-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-1)]/95 p-1.5 shadow-[var(--shadow-md)]">
+      <button
+        type="button"
+        onClick={onNavigateBack}
+        disabled={!canNavigateBack}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+        aria-label="Previous graph focus"
+        title="Previous graph focus"
+      >
+        <ArrowLeft size={13} />
+      </button>
+      <button
+        type="button"
+        onClick={onNavigateForward}
+        disabled={!canNavigateForward}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-md text-[var(--text-secondary)] hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+        aria-label="Next graph focus"
+        title="Next graph focus"
+      >
+        <ArrowRight size={13} />
+      </button>
+      <span className="h-5 w-px bg-[var(--border)]" aria-hidden="true" />
       <span
         className="rounded-md border border-[var(--border)] bg-[var(--surface-2)] px-2 py-1 text-xs text-[var(--text-secondary)]"
         title="Dragging a node only adjusts this temporary graph layout. Reorder phases and tasks in Plan list or assign view."

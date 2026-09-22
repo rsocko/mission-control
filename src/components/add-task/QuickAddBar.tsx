@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
-import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Plus, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
+import { Calendar, Check, CheckSquare, ClipboardList, Flame, AlertCircle, Clock, Repeat, Ellipsis, Maximize2, Sparkles, Sun, GitBranch, Mic, Square } from 'lucide-react';
 import { CONNECTOR_ICON_PATHS, CONNECTOR_LABELS } from '@/lib/constants/colors';
 import { cn } from '@/lib/utils';
 import { PRIORITY_OPTIONS, getEffortOptions, DEFAULT_EFFORT_MEASURE, getTaskPriorityVisual } from '@/lib/constants/task-formatting';
@@ -41,7 +41,7 @@ import {
 } from '@/lib/quick-add-preferences';
 import type { QuickAddProject } from '@/lib/parse-task-input';
 import { DestinationPicker } from './DestinationPicker';
-import type { QuickAddPendingTask } from './quick-add-types';
+import type { QuickAddDestination, QuickAddPendingTask } from './quick-add-types';
 import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
 import { useQuickAddTemplates } from '@/lib/hooks/useQuickAddTemplates';
 import { getLocalToday } from '@/lib/utils/client-date';
@@ -142,6 +142,42 @@ export function scrollListTypeaheadSelectionIntoView(
     ?.scrollIntoView({ block: 'nearest' });
 }
 
+export function getQuickAddSlashDestinations(
+  destinations: QuickAddDestination[],
+  query: string,
+): QuickAddDestination[] {
+  const normalizedQuery = query.toLowerCase().trim();
+  if (normalizedQuery.includes(':')) return [];
+
+  return destinations
+    .filter((destination) =>
+      Boolean(destination.listId) || destination.listSelectionMode !== 'required'
+    )
+    .filter((destination) => {
+      if (!normalizedQuery) return true;
+      return [
+        destination.listName,
+        destination.shortLabel,
+        destination.label,
+        destination.groupName,
+        destination.connectorType,
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedQuery);
+    })
+    .sort((a, b) => {
+      if (normalizedQuery) {
+        const aMatchesListName = Boolean(a.listName?.toLowerCase().includes(normalizedQuery));
+        const bMatchesListName = Boolean(b.listName?.toLowerCase().includes(normalizedQuery));
+        if (aMatchesListName !== bMatchesListName) return aMatchesListName ? -1 : 1;
+      }
+      if (Boolean(a.listId) !== Boolean(b.listId)) return a.listId ? -1 : 1;
+      return (a.shortLabel ?? a.label).localeCompare(b.shortLabel ?? b.label);
+    });
+}
+
 function isPendingSubtask(task: PendingTask): boolean {
   return task.parentIndex !== null || Boolean(task.parentTaskId);
 }
@@ -218,6 +254,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     selectDestination,
     isPickerOpen: showDestPicker,
     setPickerOpen: setShowDestPicker,
+    sourceLists,
   } = useQuickAddDestinations({
     sourceFilter: quickAddCtx.sourceFilter,
     listFilter: quickAddCtx.listFilter,
@@ -241,6 +278,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   const [parsed, setParsed] = useState<ParsedTask | null>(null);
   const [isFocused, setIsFocused] = useState(false);
   const [showModal, setShowModal] = useState(false);
+  const [mobileCaptureSemantics, setMobileCaptureSemantics] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [inlineToast, setInlineToast] = useState<InlineToast | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -282,6 +320,27 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   // When true, submit the task after the next typeahead acceptance clears the dropdown
   const submitAfterTypeaheadRef = useRef(false);
 
+  const moveViewedTaskToList = useCallback(async (targetListId: string) => {
+    if (!viewTaskId) return;
+
+    try {
+      const response = await fetch(`/api/tasks/${viewTaskId}/move-to-list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetListId }),
+      });
+      if (!response.ok) throw new Error('Failed to move task');
+
+      const targetList = sourceLists.find((list) => list.id === targetListId);
+      toast.success(`Moved to ${targetList?.name || 'list'}`);
+      onTaskAdded?.();
+      window.dispatchEvent(new CustomEvent('mission-control:task-added'));
+    } catch (error) {
+      taskLogger.error('Failed to move Quick Add task to list', { error, taskId: viewTaskId });
+      toast.error('Failed to move task');
+    }
+  }, [onTaskAdded, sourceLists, viewTaskId]);
+
   // Voice capture for dictation into the quick-add input
   const handleVoiceTranscript = useCallback((text: string) => {
     setInput(prev => prev ? `${prev} ${text}` : text);
@@ -293,6 +352,8 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     stopListening: voiceStop,
   } = useVoiceCapture({ onTranscript: handleVoiceTranscript, onError: (msg) => toast.error(msg) });
   const isVoiceListening = voiceState === 'listening';
+  const isVoiceStarting = voiceState === 'starting';
+  const isVoiceActive = isVoiceStarting || isVoiceListening;
 
   const parseInput = useCallback((text: string) => parseTaskInput(text, {
     ...quickAddPreferences,
@@ -302,7 +363,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     ...quickAddPreferences,
     projects: cachedProjects,
   }), [quickAddPreferences, cachedProjects]);
-  const modalInput = input.replace(/^\/\S+\s/, '');
+  const modalInput = input;
   const parsedInputForModal = useMemo(
     () => modalInput.trim() ? parseInputForSubmit(modalInput) : null,
     [modalInput, parseInputForSubmit],
@@ -333,23 +394,12 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     contextProjectIdRef.current = nextProjectId;
   }, [visibleContextProject?.id]);
 
-  // Derive typeahead state from input — active when typing `/query` (at start or after a space, no space after it yet)
+  // Derive destination typeahead state from `/query`.
   const listTypeahead = (() => {
-    const match = input.match(/(?:^|\s)\/(\S*)$/); // typing /... at start or after space, no trailing space
+    const match = input.match(/(?:^|\s)\/(\S*)$/);
     if (!match) return null;
     const query = match[1].toLowerCase();
-    const listDests = destinations.filter(d => d.listName);
-    if (listDests.length === 0) return null;
-
-    // Substring match: /ideation → acme/ideation, /shop → Shopping
-    const matches = query
-      ? listDests.filter(d => {
-          const name = d.listName!.toLowerCase();
-          // Match anywhere in the name, or match each segment individually
-          return name.includes(query)
-            || name.replace(/[\s/]/g, '-').includes(query);
-        })
-      : listDests; // Show all lists when just `/` is typed
+    const matches = getQuickAddSlashDestinations(destinations, query);
     return matches.length > 0 ? { query, matches } : null;
   })();
 
@@ -548,7 +598,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
     scrollListTypeaheadSelectionIntoView(listTypeaheadScrollRef.current, listTypeaheadIndex);
   }, [listTypeaheadIndex, listTypeahead?.query]);
 
-  // Accept a typeahead list selection: set destination pill and strip the /query from input
+  // Accept a destination selection: set the pill and strip /query from the input.
   const acceptListTypeahead = useCallback((dest: (typeof destinations)[number]) => {
     // Animate the token "flying" from the input to the destination pill
     const editorEl = barRef.current?.querySelector('[data-lexical-editor]');
@@ -578,20 +628,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
       const result = parseInput(input);
       setParsed(result);
 
-      // Check for /listname to quick-select a list (only after space = selection finalized)
-      // Supports /listname at start or mid-text (e.g., "buy milk /garage stuff")
+      // Check for a finalized /destination token.
       const slashMatch = input.match(/(?:^|\s)\/(\S+)\s/);
       if (slashMatch) {
         const listQuery = slashMatch[1].toLowerCase();
-        // Substring match: /ideation → acme/ideation
-        const listDest = destinations.find(d =>
-          d.listName && (
-            d.listName.toLowerCase().includes(listQuery)
-            || d.listName.toLowerCase().replace(/[\s/]/g, '-').includes(listQuery)
-          )
-        );
-        if (listDest) {
-          selectDestination(listDest, { manual: true });
+        const slashDestination = getQuickAddSlashDestinations(destinations, listQuery)[0];
+        if (slashDestination) {
+          selectDestination(slashDestination, { manual: true });
           // Remove the /slug portion, keep text before and after it
           const cleaned = input.replace(/(?:^|\s)\/\S+\s/, ' ').trim();
           setInput(cleaned);
@@ -604,17 +647,6 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         }
       }
 
-      // Auto-detect destination from parsed result
-      if (result.destination === 'work') {
-        const workDest = destinations.find(d => d.account === 'work');
-        if (workDest) selectDestination(workDest, { manual: true });
-      } else if (result.destination === 'github') {
-        const ghDest = destinations.find(d => d.connectorType === 'github-issues');
-        if (ghDest) selectDestination(ghDest, { manual: true });
-      } else if (result.destination === 'personal') {
-        const personalDest = destinations.find(d => d.account === 'personal');
-        if (personalDest) selectDestination(personalDest, { manual: true });
-      }
     } else {
       setParsed(null);
     }
@@ -644,12 +676,22 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   // Listen for custom event to open quick-add (from mobile "Add task" button).
   // On mobile the bar is visually hidden, so we open the full AddTaskModal directly.
   useEffect(() => {
-    const handler = () => {
+    const handler = (event: Event) => {
       // Check if we're on a narrow viewport (bar is hidden via `hidden sm:block`)
       const isMobile = window.innerWidth < 640;
       if (isMobile) {
+        const detail = (event as CustomEvent<{ defaultTags?: string[] }>).detail;
+        const defaultTagTokens = detail?.defaultTags
+          ?.map(tag => `#${tag.trim().replace(/\s+/g, '-')}`)
+          .filter(token => token.length > 1)
+          .join(' ');
+        if (defaultTagTokens) {
+          setInput(current => [current.trim(), defaultTagTokens].filter(Boolean).join(' '));
+        }
+        setMobileCaptureSemantics(true);
         setShowModal(true);
       } else {
+        setMobileCaptureSemantics(false);
         setIsFocused(true);
         setTimeout(() => {
           inputHandleRef.current?.focus();
@@ -751,6 +793,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         },
         onMyDayAddFailed: (taskId, status) => {
           taskLogger.error('Failed to add task to My Day', { taskId, status });
+          toast.error('Task created, but it could not be added to My Day.');
         },
       }, {
         plan,
@@ -772,7 +815,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         setPendingTasks([]);
         setParsed(null);
         setCompoundSplitHint(null);
-        const myDaySuffix = myDayActive ? ' · ☀️ My Day' : '';
+        const myDaySuffix = myDayActive || result.singleTaskMeta?.addToMyDay ? ' · My Day' : '';
         const toastDestSuffix = `${destination.account ? ` · ${destination.account}` : ''}${myDaySuffix}`;
         if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
         setInlineToast({
@@ -879,7 +922,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
   }, [listTypeahead, handleSubmit]);
 
   const commitCurrentInputToPending = useCallback(() => {
-    const normalized = normalizePendingTaskText(input.replace(/^\/\S+\s/, ''));
+    const normalized = normalizePendingTaskText(input);
     if (!normalized) return false;
     setPendingTasks(prev => [...prev, {
       id: `pending-task-${nextPendingTaskIdRef.current++}`,
@@ -1198,20 +1241,21 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
 
   return (
     <>
-      <div ref={barRef} className="relative z-10" style={{ minHeight: '2.5rem' }}>
+      <div ref={barRef} className="quick-add-bar relative z-10">
         <div
-          className={`absolute left-0 right-0 top-0 flex flex-wrap items-center gap-2 bg-[var(--surface-1)] rounded-xl px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 border ${
+          className={`relative flex flex-wrap items-center gap-2 rounded-xl border bg-[var(--surface-1)] px-1 py-1 transition-[background-color,border-color,box-shadow] duration-150 ${
             isFocused
               ? 'border-[var(--border-focus)] shadow-[var(--shadow-focus-glow)]'
               : 'border-[var(--border)] shadow-[var(--shadow-sm)]'
           }`}
         >
-          {/* Plus dropdown menu */}
-          <div ref={plusMenuRef} className="relative">
+          <div className="flex w-full min-w-0 items-center gap-2">
+          {/* Overflow actions menu */}
+          <div ref={plusMenuRef} className="relative shrink-0">
             <Tooltip content="More actions">
               <button
-                onMouseDown={(e) => {
-                  e.preventDefault();
+                type="button"
+                onClick={() => {
                   setShowPlusMenu(!showPlusMenu);
                 }}
                 className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors ${
@@ -1220,8 +1264,10 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     : 'text-blue-400 hover:text-blue-300 hover:bg-[var(--surface-2)]'
                 }`}
                 aria-label="More actions"
+                aria-haspopup="menu"
+                aria-expanded={showPlusMenu}
               >
-                <Plus size={16} />
+                <Ellipsis size={17} />
               </button>
             </Tooltip>
             <AnimatePresence>
@@ -1231,11 +1277,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                   initial="hidden"
                   animate="show"
                   exit="exit"
+                  role="menu"
                   className="absolute left-0 top-full mt-1 z-50 min-w-[180px] rounded-lg border border-[var(--border)] bg-[var(--surface-1)] shadow-lg py-1"
                 >
                   <button
-                    onMouseDown={(e) => {
-                      e.preventDefault();
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
                       setShowPlusMenu(false);
                       setShowTemplatePicker(true);
                     }}
@@ -1246,8 +1294,9 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     <span className="ml-auto text-xs text-[var(--text-muted)]">Ctrl+Shift+T</span>
                   </button>
                   <button
-                    onMouseDown={(e) => {
-                      e.preventDefault();
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
                       setShowPlusMenu(false);
                       setShowModal(true);
                     }}
@@ -1257,6 +1306,59 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                     <span>Expanded form</span>
                     <span className="ml-auto text-xs text-[var(--text-muted)]">Ctrl+Shift+N</span>
                   </button>
+                  <div className="my-1 h-px bg-[var(--border-subtle)]" />
+                  <button
+                    type="button"
+                    role="menuitemcheckbox"
+                    onClick={() => {
+                      setMyDayActive(active => !active);
+                      setShowPlusMenu(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)]"
+                    aria-checked={myDayActive}
+                  >
+                    <Sun size={13} className={myDayActive ? 'text-amber-300' : 'text-[var(--text-muted)]'} />
+                    <span>{myDayActive ? 'Remove from My Day' : 'Add to My Day'}</span>
+                    {myDayActive && <Check size={13} className="ml-auto text-amber-300" />}
+                  </button>
+                  {visibleContextProject && (
+                    <button
+                      type="button"
+                      role="menuitemcheckbox"
+                      onClick={() => {
+                        setContextProjectActive(active => !active);
+                        setShowPlusMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)]"
+                      aria-checked={contextProjectActive}
+                    >
+                      <GitBranch size={13} className={contextProjectActive ? 'text-pink-300' : 'text-[var(--text-muted)]'} />
+                      <span className="min-w-0 flex-1 truncate text-left">
+                        {contextProjectActive ? 'Remove from' : 'Add to'} {visibleContextProject.name}
+                      </span>
+                      {contextProjectActive && <Check size={13} className="shrink-0 text-pink-300" />}
+                    </button>
+                  )}
+                  {voiceSupported && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        if (isVoiceActive) {
+                          voiceStop();
+                        } else {
+                          voiceStart();
+                        }
+                        setShowPlusMenu(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)]"
+                    >
+                      {isVoiceActive
+                        ? <Square size={13} className="fill-current text-red-400" />
+                        : <Mic size={13} className="text-[var(--text-muted)]" />}
+                      <span>{isVoiceActive ? 'Stop dictation' : 'Dictate task'}</span>
+                    </button>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
@@ -1348,104 +1450,118 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                         ? `Add task to ${destination.shortLabel ?? destination.label}...`
                         : 'Add a task... (t/ for templates)'
               }
-              className="min-w-[12rem]"
+              className="quick-add-input min-w-0"
             />
           </div>
 
           {/* Actions */}
-          <div className="flex shrink-0 items-center gap-1 pr-1">
+          <div className="quick-add-actions flex shrink-0 items-center gap-1 pr-1">
             {/* Voice input toggle */}
             {voiceSupported && (
-              <Tooltip content={isVoiceListening ? 'Stop dictation' : 'Dictate task'}>
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    if (isVoiceListening) {
-                      voiceStop();
-                    } else {
-                      voiceStart();
+              <div className="quick-add-secondary-voice">
+                <Tooltip content={isVoiceActive ? 'Stop dictation' : 'Dictate task'}>
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      if (isVoiceActive) {
+                        voiceStop();
+                      } else {
+                        voiceStart();
+                      }
+                    }}
+                    aria-label={
+                      isVoiceListening
+                        ? 'Stop voice input'
+                        : isVoiceStarting
+                          ? 'Cancel voice input'
+                          : 'Start voice input'
                     }
-                  }}
-                  aria-label={isVoiceListening ? 'Stop voice input' : 'Start voice input'}
-                  className={cn(
-                    'inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors',
-                    isVoiceListening
-                      ? 'text-red-400 bg-red-500/10 border border-red-500/30 animate-pulse'
-                      : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
-                  )}
-                >
-                  {isVoiceListening ? <Square size={13} className="fill-current" /> : <Mic size={13} />}
-                </button>
-              </Tooltip>
+                    className={cn(
+                      'inline-flex items-center justify-center w-7 h-7 rounded-md transition-colors',
+                      isVoiceActive
+                        ? 'text-red-400 bg-red-500/10 border border-red-500/30 animate-pulse'
+                        : 'text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)]'
+                    )}
+                  >
+                    {isVoiceActive ? <Square size={13} className="fill-current" /> : <Mic size={13} />}
+                  </button>
+                </Tooltip>
+              </div>
             )}
 
             {/* My Day pill — shown when addToMyDay is active, toggleable */}
-            {myDayActive && (
-              <Tooltip content="Remove from My Day">
-                <button
-                  type="button"
-                  onClick={() => setMyDayActive(false)}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-amber-900/30 text-amber-300 border border-amber-700/40 hover:bg-amber-900/50 transition-colors"
-                >
-                  <Sun size={12} />
-                  <span>My Day</span>
-                  <span className="text-amber-400/60 ml-0.5">×</span>
-                </button>
-              </Tooltip>
-            )}
-            {!myDayActive && isFocused && (
-              <Tooltip content="Add to My Day">
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setMyDayActive(true);
-                  }}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-[var(--text-muted)] hover:text-amber-300 hover:bg-amber-900/20 border border-transparent hover:border-amber-700/30 transition-colors"
-                >
-                  <Sun size={12} />
-                  <span className="hidden sm:inline">My Day</span>
-                </button>
-              </Tooltip>
-            )}
+            <div className="quick-add-secondary-my-day">
+              {myDayActive && (
+                <Tooltip content="Remove from My Day">
+                  <button
+                    type="button"
+                    onClick={() => setMyDayActive(false)}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-amber-900/30 text-amber-300 border border-amber-700/40 hover:bg-amber-900/50 transition-colors"
+                  >
+                    <Sun size={12} />
+                    <span>My Day</span>
+                    <span className="text-amber-400/60 ml-0.5">×</span>
+                  </button>
+                </Tooltip>
+              )}
+              {!myDayActive && isFocused && (
+                <Tooltip content="Add to My Day">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setMyDayActive(true);
+                    }}
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium text-[var(--text-muted)] hover:text-amber-300 hover:bg-amber-900/20 border border-transparent hover:border-amber-700/30 transition-colors"
+                  >
+                    <Sun size={12} />
+                    <span>My Day</span>
+                  </button>
+                </Tooltip>
+              )}
+            </div>
 
             {visibleContextProject && (
-              <QuickAddProjectControl
-                project={visibleContextProject}
-                active={contextProjectActive}
-                onActiveChange={setContextProjectActive}
-              />
+              <div className="quick-add-secondary-project">
+                <QuickAddProjectControl
+                  project={visibleContextProject}
+                  active={contextProjectActive}
+                  onActiveChange={setContextProjectActive}
+                />
+              </div>
             )}
 
             {/* Expand to full form — shown when focused with text */}
             {isFocused && input.trim() && !listTypeahead && !templateTypeahead && !tagTypeahead && !priorityTypeahead && !effortTypeahead && (
-              <Tooltip content="Expanded form (Ctrl+Shift+N)">
-                <button
-                  type="button"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setShowModal(true);
-                  }}
-                  className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
-                  aria-label="Open expanded form"
-                >
-                  <Maximize2 size={13} />
-                </button>
-              </Tooltip>
+              <div className="quick-add-secondary-expand">
+                <Tooltip content="Expanded form (Ctrl+Shift+N)">
+                  <button
+                    type="button"
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setShowModal(true);
+                    }}
+                    className="inline-flex items-center justify-center w-7 h-7 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors"
+                    aria-label="Open expanded form"
+                  >
+                    <Maximize2 size={13} />
+                  </button>
+                </Tooltip>
+              </div>
             )}
 
             {/* Destination pill */}
             <motion.button
               ref={destPillRef}
               onClick={() => setShowDestPicker(!showDestPicker)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--surface-2)] text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--surface-3)] transition-colors"
+              className="quick-add-destination inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium bg-[var(--surface-2)] text-[var(--text-secondary)] border border-[var(--border)] hover:bg-[var(--surface-3)] transition-colors"
               animate={pillFlash ? { scale: [1, 1.08, 1], borderColor: ['var(--border)', 'var(--accent)', 'var(--border)'] } : {}}
               transition={{ duration: 0.4, ease: 'easeOut' }}
               title={destination.label}
             >
               <ConnectorIconImg type={destination.connectorType} size={14} />
-              <span className="max-w-[120px] truncate">{destination.shortLabel ?? destination.label}</span>
+              <span className="quick-add-destination-label max-w-[120px] truncate">{destination.shortLabel ?? destination.label}</span>
               <span className="text-[var(--text-muted)]">▾</span>
             </motion.button>
 
@@ -1460,6 +1576,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 {isSubmitting ? '...' : '↵ Add'}
               </button>
             )}
+          </div>
           </div>
 
           {/* Compound task split hint — inside bar as a full-width second row */}
@@ -1502,7 +1619,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
         </AnimatePresence>
 
         {/* Parse preview chips (hidden during list/template typeahead) */}
-        {isFocused && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && parsed && (parsed.dueDate || parsed.dateSuggestion || parsed.priority || parsed.tags.length > 0 || parsed.project || parsed.estimatedDuration || parsed.recurrence) && (
+        {isFocused && !listTypeahead && !templateTypeahead && !tagTypeahead && !projectTypeahead && !priorityTypeahead && !effortTypeahead && parsed && (parsed.dueDate || parsed.dateSuggestion || parsed.priority || parsed.tags.length > 0 || parsed.project || parsed.addToMyDay || parsed.estimatedDuration || parsed.recurrence) && (
           <div className="flex items-center gap-2 mt-1.5 px-3 text-xs">
             <Sparkles size={12} className="text-blue-400" />
             {parsed.dueDateLabel && (
@@ -1548,6 +1665,11 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                 /{parsed.project}
               </span>
             )}
+            {parsed.addToMyDay && (
+              <span className="inline-flex items-center gap-1 rounded border border-amber-800/30 bg-amber-900/30 px-2 py-0.5 text-amber-300">
+                <Sun size={11} /> My Day
+              </span>
+            )}
           </div>
         )}
 
@@ -1575,7 +1697,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               exit="exit"
             >
               <div className="px-3 pt-2 pb-1 text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider flex items-center justify-between">
-                <span>Select a list</span>
+                <span>Select a destination</span>
                 <span className="normal-case tracking-normal font-normal">↑↓ navigate · ↵ select</span>
               </div>
               <div ref={listTypeaheadScrollRef} className="max-h-48 overflow-y-auto">
@@ -1608,13 +1730,13 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
                             </>
                           ) : name}
                         </span>
-                        {(dest.groupName || dest.label !== dest.shortLabel) && (
-                          <span className="block text-xs text-[var(--text-muted)] truncate">
-                            {dest.groupName
+                        <span className="block text-xs text-[var(--text-muted)] truncate">
+                          {dest.listId
+                            ? dest.groupName
                               ? `${dest.label} › ${dest.groupName}`
-                              : dest.label}
-                          </span>
-                        )}
+                              : dest.label
+                            : 'Use source default'}
+                        </span>
                       </span>
                     </button>
                   );
@@ -2055,12 +2177,18 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
             initialListId={quickAddCtx.listFilter || undefined}
             initialTemplateId={selectedTemplateId || undefined}
             initialAddToMyDay={myDayActive}
-            onClose={() => { setShowModal(false); setSelectedTemplateId(null); }}
+            enableQuickAddSemantics={mobileCaptureSemantics}
+            onClose={() => {
+              setShowModal(false);
+              setMobileCaptureSemantics(false);
+              setSelectedTemplateId(null);
+            }}
             onSubmit={() => {
               setInput('');
               setCurrentInputParentTaskId(undefined);
               setParsed(null);
               setShowModal(false);
+              setMobileCaptureSemantics(false);
               setSelectedTemplateId(null);
               onTaskAdded?.();
               window.dispatchEvent(new CustomEvent('mission-control:task-added'));
@@ -2092,6 +2220,8 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
           <LazyTaskDetailPanel
             taskId={viewTaskId}
             mode="dialog"
+            sourceLists={sourceLists}
+            onMoveToList={moveViewedTaskToList}
             onClose={() => setViewTaskId(null)}
             onUpdate={() => {
               onTaskAdded?.();

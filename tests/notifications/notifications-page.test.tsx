@@ -58,7 +58,7 @@ vi.mock('@/components/notifications/NotificationCard', () => ({
   }) => (
     <div>
       <button onClick={onSelect}>{notification.title}</button>
-      <button onClick={onHandle} aria-label={`Handle ${notification.title}`}>Handle</button>
+      <button onClick={onHandle} aria-label={`Mark ${notification.title} done`}>Done</button>
     </div>
   ),
   NotificationDetail: ({
@@ -124,7 +124,10 @@ function makeHook(overrides: Partial<UseNotificationsReturn>): UseNotificationsR
       digest: 0,
       actionable: 0,
     },
-    facets: { level: {}, category: {}, source: {}, state: {}, merchant: [] },
+    facets: {
+      level: {}, category: {}, source: {}, sourceAccount: [],
+      notificationType: [], state: {}, merchant: [],
+    },
     matchingCount: 0,
     operationalStatus: {
       isSyncing: false,
@@ -153,6 +156,7 @@ function makeHook(overrides: Partial<UseNotificationsReturn>): UseNotificationsR
     setReasonFilter: vi.fn(),
     setSubjectTypeFilter: vi.fn(),
     setSourceAccountFilter: vi.fn(),
+    setNotificationTypeFilter: vi.fn(),
     setParticipatingFilter: vi.fn(),
     replaceFilters: vi.fn(),
     setAttentionView: vi.fn(),
@@ -194,7 +198,7 @@ function makeNotification(id: string, title: string): NotificationItem {
     body: 'Please review the change.',
     level: 'action_needed',
     levelRank: 1,
-    category: 'social',
+    category: 'development',
     state: 'unread',
     readState: 'unread',
     disposition: 'inbox',
@@ -245,6 +249,8 @@ describe('NotificationsPage data states', () => {
         level: {},
         category: { finance: 2, tasks: 1 },
         source: { 'finance-manager': 2 },
+        sourceAccount: [],
+        notificationType: [],
         state: {},
         merchant: [{ key: merchant, label: 'Invented Market', count: 1 }],
       },
@@ -288,7 +294,7 @@ describe('NotificationsPage data states', () => {
     expect(replaceFilters).toHaveBeenCalledWith({
       ...DEFAULT_NOTIFICATION_QUERY,
       level: 'urgent',
-      state: 'unread',
+      state: null,
     });
     expect(screen.queryByRole('button', { name: /Action needed/ })).not.toBeInTheDocument();
   });
@@ -494,9 +500,9 @@ describe('NotificationsPage data states', () => {
     });
     render(<NotificationsPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Handle First review' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Mark First review done' }));
     await waitFor(() => expect(setSelectedId).toHaveBeenCalledWith(second.id));
-    fireEvent.click(screen.getByRole('button', { name: 'Undo handle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Undo mark done' }));
 
     await waitFor(() => expect(restore).toHaveBeenCalledWith([
       expect.objectContaining({

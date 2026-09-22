@@ -1,11 +1,13 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { importInitializedSqliteDatabase } from '../helpers/initialized-sqlite-database';
 
 describe('getUniverseSubgraph', () => {
-  beforeAll(() => {
+  beforeAll(async () => {
     process.env.MC_DB_PATH = ':memory:';
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
+    await importInitializedSqliteDatabase();
   });
 
   it('queries a bounded, filtered property projection from relational task data', async () => {

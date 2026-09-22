@@ -55,7 +55,8 @@ export function applyTriageTableSafetyNets(_sqlite: Database.Database): void {
       last_run_imported INTEGER NOT NULL DEFAULT 0,
       last_run_skipped INTEGER NOT NULL DEFAULT 0,
       last_run_errors TEXT NOT NULL DEFAULT '[]',
-      last_run_duration_ms INTEGER
+      last_run_duration_ms INTEGER,
+      revision INTEGER NOT NULL DEFAULT 0
     )
   `);
 
@@ -100,4 +101,5 @@ export function applyTriageColumnSafetyNets(_sqlite: Database.Database): void {
       _sqlite.exec('ALTER TABLE triage_collections ADD COLUMN max_age_days INTEGER NOT NULL DEFAULT 14');
     }
   }
+
 }

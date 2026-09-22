@@ -1,4 +1,5 @@
 import type { TaskFilterContext } from '@/lib/task-filter-context';
+import type { ContextAppearance } from '@/types';
 import type {
   HubProjectSummaryDto,
   TaskListItemDto,
@@ -6,7 +7,7 @@ import type {
   TaskListStatsDto,
   TaskTagDto,
 } from '@/types/api';
-import { LOCAL_CONNECTOR_ICON_PATH } from '@/lib/constants/colors';
+import { CONNECTOR_ICON_PATHS } from '@/lib/constants/colors';
 import { PRIORITY_BADGE_COLORS, PRIORITY_LABELS as TASK_PRIORITY_LABELS, TASK_STATUS_VISUALS } from '@/lib/constants/task-formatting';
 
 export type DashboardTaskTagViewModel = TaskTagDto;
@@ -30,12 +31,14 @@ export interface SourceList {
   connectorInstanceId: string;
   name: string;
   taskCount: number;
+  type?: string | null;
   groupId: string | null;
   hidden?: boolean;
   sortOrder?: number;
   icon?: string | null;
   iconColor?: string | null;
   selectedForSync?: boolean;
+  appearance?: ContextAppearance | null;
 }
 
 export interface EnabledSource {
@@ -59,6 +62,22 @@ export interface SavedView {
   id: string;
   name: string;
   icon: string;
+  iconColor?: string;
+  filters: Record<string, string>;
+  filterContext?: TaskFilterContext;
+  presentation?: {
+    sortBy: string;
+    sortDirection: 'asc' | 'desc';
+    groupBy: string;
+    viewDensity: 'compact' | 'comfortable';
+  };
+}
+
+export interface SavedQuickFilter {
+  id: string;
+  name: string;
+  icon: string;
+  iconColor?: string;
   filters: Record<string, string>;
   filterContext?: TaskFilterContext;
 }
@@ -77,7 +96,9 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
   stats: {
     totalOpen: 0,
     overdue: 0,
+    dueToday: 0,
     dueThisWeek: 0,
+    noDate: 0,
     highPriority: 0,
     assignedToMe: 0,
     myDay: 0,
@@ -91,21 +112,7 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
   availableTags: [],
 };
 
-export const CONNECTOR_ICONS: Record<string, string> = {
-  'local': LOCAL_CONNECTOR_ICON_PATH,
-  'microsoft-todo': '/icons/connectors/microsoft-todo.svg',
-  'microsoft-todo-work': '/icons/connectors/microsoft-todo.svg',
-  'github-issues': '/icons/connectors/github.svg',
-  'outlook-email': '/icons/connectors/outlook.svg',
-  'outlook-calendar': '/icons/connectors/outlook-calendar.svg',
-  'rymessage': '/icons/connectors/rymessage.svg',
-  'document-intelligence': '/icons/agents/owl.svg',
-  finance: '/icons/connectors/tyrion.svg',
-  'finance-manager': '/icons/connectors/tyrion.svg',
-  'monarch-money': '/icons/connectors/tyrion.svg',
-  'custom-rest': '/icons/connectors/custom-rest.svg',
-  'scout': 'https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/microsoft-copilot.svg',
-};
+export const CONNECTOR_ICONS: Record<string, string> = CONNECTOR_ICON_PATHS;
 
 export const PRIORITY_COLORS = PRIORITY_BADGE_COLORS;
 
@@ -182,11 +189,16 @@ export const NOTIFICATION_LEVELS: Record<string, NotificationLevelConfig> = {
 export const NOTIFICATION_CATEGORY_ICONS: Record<string, string> = {
   system: 'server',
   tasks: 'check-square',
+  development: 'git-pull-request',
   finance: 'dollar-sign',
   home: 'home',
   social: 'at-sign',
   ai_insights: 'sparkles',
   packages: 'package',
+  infrastructure: 'server',
+  backup: 'archive',
+  automation: 'workflow',
+  security: 'shield-alert',
 };
 
 export const NOTIFICATION_SOURCE_ICONS: Record<string, string> = {
@@ -200,8 +212,9 @@ export const NOTIFICATION_SOURCE_ICONS: Record<string, string> = {
   finance: '/icons/agents/tyrion.svg',
   'finance-manager': '/icons/agents/tyrion.svg',
   'custom-rest': '/icons/connectors/custom-rest.svg',
-  'home-assistant': '/icons/connectors/custom-rest.svg',
+  'home-assistant': '/icons/connectors/home-assistant.svg',
   'monarch-money': '/icons/agents/tyrion.svg',
+  homelab: '/icons/connectors/custom-rest.svg',
 };
 
 export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
@@ -218,4 +231,5 @@ export const NOTIFICATION_SOURCE_LABELS: Record<string, string> = {
   scout: 'Scout',
   'home-assistant': 'Home Assistant',
   'monarch-money': 'Tyrion',
+  homelab: 'Homelab',
 };

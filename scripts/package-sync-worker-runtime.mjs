@@ -12,6 +12,8 @@ import {
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 const workerEntry = path.join(root, 'dist', 'sync-worker.cjs');
+const workerHealthcheckEntry = path.join(root, 'dist', 'sync-worker-healthcheck.cjs');
+const semanticWorkerHarnessEntry = path.join(root, 'dist', 'semantic-worker-harness.cjs');
 const identityOperatorEntry = path.join(root, 'dist', 'github-identity-operator.cjs');
 const defaultStandaloneDir = path.join(root, '.next', 'standalone');
 const supplementalEntries = syncWorkerSupplementalPackages.map((packageName) =>
@@ -34,8 +36,12 @@ function validateTrace(fileList, warnings) {
 
   const unexpectedWarnings = [...warnings].filter((warning) => {
     const message = warning instanceof Error ? warning.message : String(warning);
-    return !message.includes('Failed to resolve dependency "canvas"')
-      || !/node_modules[\\/]+jsdom[\\/]+/.test(message);
+    const optionalCanvas = message.includes('Failed to resolve dependency "canvas"')
+      && /node_modules[\\/]+jsdom[\\/]+/.test(message);
+    const optionalPgNative = message.includes('Failed to resolve dependency "pg-native"')
+      && /dist[\\/]+(?:sync-worker(?:-healthcheck)?|semantic-worker-harness|github-identity-operator)\.cjs/
+        .test(message);
+    return !optionalCanvas && !optionalPgNative;
   });
   if (unexpectedWarnings.length > 0) {
     throw new AggregateError(unexpectedWarnings, 'Worker runtime dependency tracing failed');
@@ -66,6 +72,8 @@ async function copyFiles(files, destination) {
 export async function packageSyncWorkerRuntime(standaloneDir = defaultStandaloneDir) {
   const { fileList, warnings } = await nodeFileTrace([
     workerEntry,
+    workerHealthcheckEntry,
+    semanticWorkerHarnessEntry,
     identityOperatorEntry,
     ...supplementalEntries,
   ], {

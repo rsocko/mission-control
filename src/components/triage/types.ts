@@ -13,7 +13,6 @@ import {
   Globe,
   Image,
   Layers,
-  Link2,
   ListTodo,
   MessageCircle,
   MoreHorizontal,
@@ -53,6 +52,7 @@ export const SORT_OPTIONS: Array<{ value: TriageSortOption; label: string }> = [
 ];
 
 export const CONTENT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'task', label: 'Tasks' },
   { value: 'link', label: 'Links' },
   { value: 'repo', label: 'Repos' },
   { value: 'model_3d', label: '3D Models' },
@@ -62,6 +62,7 @@ export const CONTENT_TYPE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'text_post', label: 'Discussions' },
   { value: 'product', label: 'Products' },
   { value: 'document', label: 'Documents' },
+  { value: 'other', label: 'Other' },
 ];
 
 export type Stats = {
@@ -121,6 +122,7 @@ export const SOURCE_META: Record<
   string,
   { label: string; icon: LucideIcon; badge: string; iconPath?: string }
 > = {
+  task: { label: 'Task', icon: ListTodo, badge: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20' },
   reddit: { label: 'Reddit', icon: MessageCircle, iconPath: TRIAGE_SOURCE_ICONS.reddit, badge: 'bg-orange-500/10 text-orange-300 border-orange-500/20' },
   github: { label: 'GitHub', icon: FolderGit2, iconPath: TRIAGE_SOURCE_ICONS.github, badge: 'bg-violet-500/10 text-violet-300 border-violet-500/20' },
   youtube: { label: 'YouTube', icon: PlayCircle, iconPath: TRIAGE_SOURCE_ICONS.youtube, badge: 'bg-red-500/10 text-red-300 border-red-500/20' },

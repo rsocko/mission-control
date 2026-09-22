@@ -13,6 +13,12 @@ export const NOTIFICATION_NEEDS_ATTENTION_SQL = [
   "level <> 'digest'",
 ].join(' AND ');
 
+export const NOTIFICATION_COUNTS_TOWARD_ATTENTION_SQL = [
+  NOTIFICATION_IS_INBOX_SQL,
+  "level <> 'digest'",
+  "(level IN ('urgent', 'action_needed') OR read_state = 'unread')",
+].join(' AND ');
+
 export function notificationIsInInbox(now = new Date()): SQL {
   return and(
     eq(notifications.disposition, 'inbox'),
@@ -31,6 +37,22 @@ export function notificationNeedsAttention(now = new Date()): SQL {
     or(
       isNull(notifications.level),
       inArray(notifications.level, ['urgent', 'action_needed', 'heads_up', 'fyi']),
+    ),
+  )!;
+}
+
+export function notificationCountsTowardAttention(now = new Date()): SQL {
+  return and(
+    notificationIsInInbox(now),
+    or(
+      inArray(notifications.level, ['urgent', 'action_needed']),
+      and(
+        eq(notifications.readState, 'unread'),
+        or(
+          isNull(notifications.level),
+          inArray(notifications.level, ['heads_up', 'fyi']),
+        ),
+      ),
     ),
   )!;
 }

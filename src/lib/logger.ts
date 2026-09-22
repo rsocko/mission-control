@@ -61,3 +61,4 @@ export const authLogger = logger.child({ module: 'auth' });
 export const aiLogger = logger.child({ module: 'ai' });
 export const connectorLogger = logger.child({ module: 'connector' });
 export const exportLogger = logger.child({ module: 'export' });
+export const semanticIndexLogger = logger.child({ module: 'semantic-index' });

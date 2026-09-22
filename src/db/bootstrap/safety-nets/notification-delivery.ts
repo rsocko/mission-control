@@ -44,6 +44,7 @@ export function applyNotificationDeliverySafetyNets(_sqlite: Database.Database):
       attempt_count INTEGER NOT NULL DEFAULT 0,
       next_attempt_at TEXT,
       lease_expires_at TEXT,
+      claim_token TEXT,
       subscriptions_attempted INTEGER NOT NULL DEFAULT 0,
       subscriptions_sent INTEGER NOT NULL DEFAULT 0,
       subscriptions_failed INTEGER NOT NULL DEFAULT 0,
@@ -53,6 +54,15 @@ export function applyNotificationDeliverySafetyNets(_sqlite: Database.Database):
       FOREIGN KEY (notification_id) REFERENCES notifications(id) ON DELETE CASCADE
     )
   `);
+  const deliveryColumns = _sqlite.prepare(
+    "PRAGMA table_info('notification_delivery_events')",
+  ).all() as Array<{ name: string }>;
+  if (
+    deliveryColumns.length > 0
+    && !deliveryColumns.some(column => column.name === 'claim_token')
+  ) {
+    _execSafe('ALTER TABLE notification_delivery_events ADD COLUMN claim_token TEXT');
+  }
   _sqlite.exec(
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_notification_delivery_events_dedupe ON notification_delivery_events(dedupe_key)',
   );

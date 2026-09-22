@@ -1,13 +1,10 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import { notifications } from '@/db/schema';
-import { eq, and, desc } from 'drizzle-orm';
 import { ApiErrors } from '@/lib/api-error';
 import type { NotificationLevel } from '@/types';
 import {
   isNotificationUnread,
 } from '@/lib/notifications/lifecycle';
-import { notificationIsInInbox } from '@/lib/notifications/lifecycle-sql';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 function mapSeverityToLevel(severity: string): NotificationLevel | null {
   switch (severity) {
@@ -56,27 +53,15 @@ export async function GET(request: Request) {
   const limit = parseInt(searchParams.get('limit') || '50', 10);
 
   try {
-    const conditions = [eq(notifications.category, 'finance')];
-
-    if (type) {
-      conditions.push(eq(notifications.templateKey, type));
-    }
-    if (severity) {
-      const mappedLevel = mapSeverityToLevel(severity);
-      if (mappedLevel) {
-        conditions.push(eq(notifications.level, mappedLevel));
-      }
-    }
-    if (dismissed === 'false') {
-      conditions.push(notificationIsInInbox());
-    }
-
-    const result = await db
-      .select()
-      .from(notifications)
-      .where(and(...conditions))
-      .orderBy(desc(notifications.receivedAt))
-      .limit(limit);
+    const result = await (
+      await getWorkerPersistenceRepositories()
+    ).finance.web.listNotifications({
+      type,
+      level: severity ? mapSeverityToLevel(severity) : null,
+      inboxOnly: dismissed === 'false',
+      limit,
+      now: new Date().toISOString(),
+    });
 
     return NextResponse.json({
       notifications: result.map((notification) => ({

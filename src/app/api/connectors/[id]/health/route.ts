@@ -1,17 +1,7 @@
 import { NextResponse } from 'next/server';
-import db from '@/db';
-import {
-  connectorConfigs,
-  financeInsightPublicationDelivery,
-  financeInsightPublicationState,
-  financeSyncState,
-  syncJobs,
-} from '@/db/schema';
-import { and, desc, eq, inArray } from 'drizzle-orm';
 import { createDocumentClient } from '@/lib/connectors/document-intelligence/document-client';
 import { getDocumentIntelligenceBaseUrl, getDocumentIntelligenceApiKey } from '@/lib/connectors/document-intelligence';
 import { isDemoMode } from '@/lib/mode';
-import { financeConnectorConfigFromRow } from '@/lib/connectors/monarch-money/config';
 import {
   MonarchBridgeClient,
   MonarchBridgeError,
@@ -19,7 +9,13 @@ import {
 import { isTrustedFinanceReadRequest } from '@/lib/connectors/monarch-money/finance-request';
 import { getFinanceDatasetHealth } from '@/lib/connectors/monarch-money/dataset-sync';
 import { normalizeFinanceProviderAlias } from '@/lib/finance-insights/provider';
+import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import logger from '@/lib/logger';
+import {
+  getFinanceConnectionRecoveryView,
+  reconcileFinanceConnectionObservation,
+} from '@/lib/connectors/monarch-money/connection-recovery';
 
 /**
  * GET /api/connectors/[id]/health
@@ -33,11 +29,7 @@ export async function GET(
   const { id } = await params;
 
   try {
-    const [connector] = await db
-      .select()
-      .from(connectorConfigs)
-      .where(eq(connectorConfigs.id, id))
-      .limit(1);
+    const connector = await getCorePersistenceRepositories().connectors.get(id);
 
     if (!connector) {
       return NextResponse.json({ error: 'Connector not found' }, { status: 404 });
@@ -49,7 +41,7 @@ export async function GET(
       }
       if (isDemoMode()) {
         const demoAsOf = new Date();
-        const projection = getFinanceDatasetHealth(id, demoAsOf);
+        const projection = await getFinanceDatasetHealth(id, demoAsOf);
         return NextResponse.json({
           overall: connector.enabled ? 'healthy' : 'disabled',
           modules: [
@@ -106,53 +98,36 @@ export async function GET(
             },
           },
           projection,
+          recovery: null,
         });
       }
-      const config = financeConnectorConfigFromRow(connector);
-      const [[state], [activeJob], [publication], [delivery]] = await Promise.all([
-        db.select().from(financeSyncState)
-          .where(eq(financeSyncState.connectorId, id)).limit(1),
-        db.select({
-          id: syncJobs.id,
-          status: syncJobs.status,
-          attempt: syncJobs.attempt,
-          maxAttempts: syncJobs.maxAttempts,
-          availableAt: syncJobs.availableAt,
-          startedAt: syncJobs.startedAt,
-        }).from(syncJobs).where(and(
-          eq(syncJobs.connectorId, id),
-          inArray(syncJobs.status, ['queued', 'running']),
-        )).orderBy(desc(syncJobs.createdAt)).limit(1),
-        db.select({
-          status: financeInsightPublicationState.lastCaptureOutcome,
-          lastAttemptAt: financeInsightPublicationState.lastCaptureAttemptAt,
-          lastErrorCode: financeInsightPublicationState.lastErrorCode,
-        }).from(financeInsightPublicationState)
-          .where(eq(financeInsightPublicationState.connectorId, id))
-          .limit(1),
-        db.select({
-          status: financeInsightPublicationDelivery.evaluationState,
-          stage: financeInsightPublicationDelivery.stage,
-          lastAttemptAt: financeInsightPublicationDelivery.lastAttemptAt,
-          lastSuccessfulAt: financeInsightPublicationDelivery.lastSuccessfulAt,
-          lastErrorCode: financeInsightPublicationDelivery.lastErrorCode,
-          retryable: financeInsightPublicationDelivery.lastErrorRetryable,
-        }).from(financeInsightPublicationDelivery)
-          .where(eq(financeInsightPublicationDelivery.connectorId, id))
-          .orderBy(desc(financeInsightPublicationDelivery.updatedAt))
-          .limit(1),
-      ]);
+      const snapshot = await (await getWorkerPersistenceRepositories())
+        .finance.operator.readHealthSnapshot(id);
+      const state = snapshot.sync;
+      const activeJob = snapshot.activeJob;
+      const publication = snapshot.capture;
+      const delivery = snapshot.evaluation;
       let bridge:
         | Awaited<ReturnType<MonarchBridgeClient['getHealth']>>
         | null = null;
       let bridgeErrorCode: string | null = null;
       if (connector.enabled) {
         try {
-          bridge = await new MonarchBridgeClient(config).getHealth();
+          // Provider I/O deliberately happens outside any transaction; only the
+          // narrow recovery observation below is persisted afterwards.
+          bridge = await new MonarchBridgeClient(connector).getHealth();
+          await reconcileFinanceConnectionObservation({
+            connectorId: id,
+            observation: { kind: 'health', health: bridge },
+          });
         } catch (error) {
           bridgeErrorCode = error instanceof MonarchBridgeError
             ? error.code
             : 'bridge_unavailable';
+          await reconcileFinanceConnectionObservation({
+            connectorId: id,
+            observation: { kind: 'unavailable', errorCode: bridgeErrorCode },
+          });
         }
       }
       const lastSuccessMs = state?.lastSuccessfulSyncAt
@@ -164,8 +139,8 @@ export async function GET(
       const staleAfterMinutes = Math.max((connector.pollIntervalMinutes ?? 240) * 2, 60);
       const stale = freshnessMinutes !== null && freshnessMinutes > staleAfterMinutes;
       const authenticated = bridge?.authenticated === true;
-      const attributionStatus = state?.attributionStatus ?? 'idle';
-      const projection = getFinanceDatasetHealth(id);
+      const attributionStatus = snapshot.attribution?.status ?? 'idle';
+      const projection = await getFinanceDatasetHealth(id);
       const insightUnhealthy = Boolean(publication?.lastErrorCode)
         || Boolean(delivery?.lastErrorCode)
         || delivery?.status === 'failed'
@@ -203,10 +178,10 @@ export async function GET(
             name: 'Tyrion Attribution',
             enabled: connector.enabled,
             status: !connector.enabled ? 'disabled' : attributionStatus,
-            detail: state?.attributionLastErrorCode
-              ? `Attribution requires attention (${state.attributionLastErrorCode})`
+            detail: snapshot.attribution?.lastErrorCode
+              ? `Attribution requires attention (${snapshot.attribution.lastErrorCode})`
               : attributionStatus === 'healthy'
-                ? `Policy ${state?.attributionPolicyVersion ?? 'current'}`
+                ? `Policy ${snapshot.attribution?.policyVersion ?? 'current'}`
                 : 'Attribution has not completed yet',
           },
         ],
@@ -225,7 +200,8 @@ export async function GET(
           status: state?.status ?? 'idle',
           lastAttemptAt: state?.lastAttemptAt ?? null,
           lastSuccessfulSyncAt: state?.lastSuccessfulSyncAt ?? null,
-          lastSuccessfulWindow: state?.lastSuccessfulWindowStart && state.lastSuccessfulWindowEnd
+          lastSuccessfulWindow: state?.lastSuccessfulWindowStart
+            && state.lastSuccessfulWindowEnd
             ? {
                 start: state.lastSuccessfulWindowStart,
                 end: state.lastSuccessfulWindowEnd,
@@ -246,11 +222,11 @@ export async function GET(
         },
         attribution: {
           status: attributionStatus,
-          lastAttemptAt: state?.attributionLastAttemptAt ?? null,
-          lastSuccessfulAt: state?.attributionLastSuccessfulAt ?? null,
-          lastErrorCode: state?.attributionLastErrorCode ?? null,
-          policyVersion: state?.attributionPolicyVersion ?? null,
-          engineVersion: state?.attributionEngineVersion ?? null,
+          lastAttemptAt: snapshot.attribution?.lastAttemptAt ?? null,
+          lastSuccessfulAt: snapshot.attribution?.lastSuccessfulAt ?? null,
+          lastErrorCode: snapshot.attribution?.lastErrorCode ?? null,
+          policyVersion: snapshot.attribution?.policyVersion ?? null,
+          engineVersion: snapshot.attribution?.engineVersion ?? null,
         },
         insights: {
           capture: {
@@ -268,6 +244,7 @@ export async function GET(
           },
         },
         projection,
+        recovery: await getFinanceConnectionRecoveryView(id),
       });
     }
 
@@ -297,9 +274,7 @@ export async function GET(
     }
 
     const credentials = connector.credentials as Record<string, string> | null;
-    const settings = typeof connector.settings === 'string'
-      ? JSON.parse(connector.settings)
-      : (connector.settings as Record<string, unknown> | null) || {};
+    const settings = connector.settings ?? {};
 
     const baseUrl = getDocumentIntelligenceBaseUrl(settings);
     const apiKey = getDocumentIntelligenceApiKey(credentials, settings);

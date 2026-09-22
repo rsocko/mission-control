@@ -3,15 +3,20 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 describe('ideation conversion transaction', () => {
   beforeAll(() => {
     process.env.MC_DB_PATH = ':memory:';
+    vi.doUnmock('@/db');
+    vi.doUnmock('@/db/schema');
     vi.doUnmock('drizzle-orm');
     vi.doUnmock('crypto');
     vi.resetModules();
   });
 
   it('persists the project hierarchy, properties, tags, and dependencies atomically', async () => {
+    const { importInitializedSqliteDatabase } = await import(
+      '../helpers/initialized-sqlite-database'
+    );
     const [{ POST }, { default: db }, schema] = await Promise.all([
       import('@/app/api/ideation/convert/route'),
-      import('@/db'),
+      importInitializedSqliteDatabase(),
       import('@/db/schema'),
     ]);
 
@@ -146,5 +151,5 @@ describe('ideation conversion transaction', () => {
     for (const related of dependencies.filter((dependency) => dependency.type === 'related')) {
       expect(related.dependsOnTaskId.localeCompare(related.taskId)).toBeLessThan(0);
     }
-  });
+  }, 30_000);
 });

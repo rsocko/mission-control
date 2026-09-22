@@ -112,8 +112,8 @@ export const SHORTCUT_PAGES: readonly ShortcutPage[] = [
   {
     id: 'triage',
     url: '/triage',
-    name: 'Triage',
-    description: 'Triage incoming items',
+    name: 'Inbox',
+    description: 'Review and route incoming items',
     icon: 'shortcut-triage.svg',
     iconKey: 'triage',
     iconColor: 'text-purple-400',

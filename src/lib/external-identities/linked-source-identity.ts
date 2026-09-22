@@ -1,18 +1,15 @@
-import { and, eq, inArray, isNull } from 'drizzle-orm';
-import { runTransaction, sqlite } from '@/db';
-import {
-  externalEntities,
-  externalEntityLocators,
-  taskLinkedSourceEntities,
-  taskLinkedSources,
-} from '@/db/schema';
-import { digestExternalIdentifier } from './service';
-import { assertGitHubIdentityModeSnapshotInTransaction } from './identity-mode';
+import type {
+  GitHubLinkedSourceLookupInputRow,
+
+  GitHubLinkedSourcePersistWrite,
+} from '@/db/persistence/github-identity';
+import { digestExternalIdentifier } from './identifier-digest';
 import type {
   GitHubIdentityModeSnapshot,
   GitHubStableResolution,
 } from './stable-identity-types';
 import type { ExternalIdentityEvidence } from './types';
+import { getGitHubIdentityRepository } from './worker-persistence';
 
 const MAX_BATCH_SIZE = 500;
 
@@ -42,25 +39,12 @@ export interface GitHubLinkedSourceIdentityWriteResult {
   state: 'associated' | 'collision' | 'unbound';
 }
 
-interface LinkedSourceLookupRow {
-  candidateKey: string;
-  linkedTaskId: string;
-  linkedEntityId: string | null;
-  stableEntityId: string | null;
-  stableLinkedSourceId: string | null;
-  stableTaskId: string | null;
-  locatorRevision: number | null;
-  currentOwnerKey: string | null;
-  currentRepositoryKey: string | null;
-  currentIssueNumber: number | null;
-  pathEntityId: string | null;
-}
 
-export function persistGitHubLinkedSourceIdentityBatch(
+export async function persistGitHubLinkedSourceIdentityBatch(
   connectorInstanceId: string,
   writes: readonly GitHubLinkedSourceIdentityWrite[],
   modeSnapshot?: GitHubIdentityModeSnapshot,
-): readonly GitHubLinkedSourceIdentityWriteResult[] {
+): Promise<readonly GitHubLinkedSourceIdentityWriteResult[]> {
   assertBatchSize(writes.length);
   if (writes.length === 0) return [];
   if (
@@ -70,121 +54,55 @@ export function persistGitHubLinkedSourceIdentityBatch(
     throw new Error('Linked-source identity writes do not match the frozen connector');
   }
 
-  return runTransaction((tx) => {
-    if (modeSnapshot) {
-      assertGitHubIdentityModeSnapshotInTransaction(tx, modeSnapshot);
-    }
-    const linkedRows = tx.select().from(taskLinkedSources).where(and(
-      eq(taskLinkedSources.connectorInstanceId, connectorInstanceId),
-      eq(taskLinkedSources.connectorType, 'github-issues'),
-      inArray(taskLinkedSources.id, writes.map((write) => write.linkedSourceId)),
-    )).all();
-    const linkedById = new Map(linkedRows.map((row) => [row.id, row]));
-    const results: GitHubLinkedSourceIdentityWriteResult[] = [];
-
-    for (const write of writes) {
-      const linked = linkedById.get(write.linkedSourceId);
-      if (!linked || !write.evidence) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'unbound' });
-        continue;
-      }
-
-      const identity = write.evidence.entity.identity;
-      if (
-        identity.provider !== 'github'
-        || identity.entityType !== 'issue'
-      ) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'collision' });
-        continue;
-      }
-
-      const entity = tx.select({ id: externalEntities.id }).from(externalEntities).where(and(
-        eq(externalEntities.provider, identity.provider),
-        eq(externalEntities.hostKey, identity.hostKey),
-        eq(externalEntities.entityType, identity.entityType),
-        eq(externalEntities.stableId, identity.stableId),
-      )).limit(1).get();
-      if (!entity) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'unbound' });
-        continue;
-      }
-
-      const locator = tx.select({
-        ownerKey: externalEntityLocators.ownerKey,
-        repositoryKey: externalEntityLocators.repositoryKey,
-        issueNumber: externalEntityLocators.issueNumber,
-      }).from(externalEntityLocators).where(and(
-        eq(externalEntityLocators.externalEntityId, entity.id),
-        isNull(externalEntityLocators.validTo),
-      )).limit(1).get();
-      const evidenceLocator = write.evidence.entity.locator;
-      if (
-        !locator
-        || locator.ownerKey !== evidenceLocator.owner.toLowerCase()
-        || locator.repositoryKey !== evidenceLocator.repository.toLowerCase()
-        || locator.issueNumber !== (evidenceLocator.issueNumber ?? null)
-      ) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'collision' });
-        continue;
-      }
-
-      const existingForLinked = tx.select().from(taskLinkedSourceEntities)
-        .where(eq(taskLinkedSourceEntities.linkedSourceId, linked.id)).limit(1).get();
-      const existingForEntity = tx.select().from(taskLinkedSourceEntities).where(and(
-        eq(taskLinkedSourceEntities.connectorInstanceId, connectorInstanceId),
-        eq(taskLinkedSourceEntities.externalEntityId, entity.id),
-      )).limit(1).get();
-      const locatorMatchesLegacy = canonicalLegacySourceId(write.evidence).toLowerCase()
-        === linked.sourceId.toLowerCase();
-      if (
-        (existingForLinked && (
-          existingForLinked.externalEntityId !== entity.id
-          || existingForLinked.connectorInstanceId !== connectorInstanceId
-        ))
-        || (existingForEntity && existingForEntity.linkedSourceId !== linked.id)
-        || (!existingForLinked && !locatorMatchesLegacy)
-      ) {
-        results.push({ linkedSourceId: write.linkedSourceId, state: 'collision' });
-        continue;
-      }
-
-      const observedAt = write.evidence.entity.observedAt;
-      // The linked-source `source_id` is a mutable locator: NodeID identity is
-      // authoritative, so repoint the locator whenever GitHub reports a new one.
-      const currentSourceId = canonicalLegacySourceId(write.evidence);
-      if (linked.sourceId !== currentSourceId) {
-        tx.update(taskLinkedSources).set({
-          sourceId: currentSourceId,
-        }).where(eq(taskLinkedSources.id, linked.id)).run();
-      }
-      tx.insert(taskLinkedSourceEntities).values({
-        linkedSourceId: linked.id,
-        connectorInstanceId,
-        externalEntityId: entity.id,
-        verifiedAt: observedAt,
-        createdAt: observedAt,
-        updatedAt: observedAt,
-      }).onConflictDoUpdate({
-        target: taskLinkedSourceEntities.linkedSourceId,
-        set: {
-          verifiedAt: observedAt,
-          updatedAt: observedAt,
-        },
-      }).run();
-      results.push({ linkedSourceId: write.linkedSourceId, state: 'associated' });
-    }
-    return results;
+  const normalized: GitHubLinkedSourcePersistWrite[] = writes.map((write) => {
+    const evidence = write.evidence;
+    const hasEvidence = evidence !== undefined;
+    const identity = evidence?.entity.identity;
+    const identityValid = Boolean(
+      identity && identity.provider === 'github' && identity.entityType === 'issue',
+    );
+    // `canonicalLegacySourceId` validates the issue number and throws on invalid
+    // GitHub issue evidence, mirroring the original in-transaction throw.
+    const canonicalSourceId = hasEvidence && identityValid
+      ? canonicalLegacySourceId(evidence!)
+      : '';
+    const locator = evidence?.entity.locator;
+    return {
+      linkedSourceId: write.linkedSourceId,
+      hasEvidence,
+      identityValid,
+      provider: identity?.provider ?? '',
+      hostKey: identity?.hostKey ?? '',
+      entityType: identity?.entityType ?? '',
+      stableId: identity?.stableId ?? '',
+      ownerKey: locator?.owner.toLowerCase() ?? '',
+      repositoryKey: locator?.repository.toLowerCase() ?? '',
+      issueNumber: locator?.issueNumber ?? null,
+      canonicalSourceId,
+      observedAt: evidence?.entity.observedAt ?? '',
+    };
   });
+
+  const identity = await getGitHubIdentityRepository();
+  const results = await identity.persistLinkedSourceIdentityBatch({
+    connectorInstanceId,
+    modeSnapshot,
+    writes: normalized,
+  });
+  return results.map((result) => ({
+    linkedSourceId: result.linkedSourceId,
+    state: result.state,
+  }));
 }
 
-export function resolveGitHubLinkedSourceIdentityBatch(
+export async function resolveGitHubLinkedSourceIdentityBatch(
   connectorInstanceId: string,
   candidates: readonly GitHubLinkedSourceIdentityCandidate[],
-): {
+): Promise<{
   resolutions: ReadonlyMap<string, GitHubStableResolution>;
   lookupMs: number;
   queryCount: number;
-} {
+}> {
   assertBatchSize(candidates.length);
   if (candidates.length === 0) {
     return { resolutions: new Map(), lookupMs: 0, queryCount: 0 };
@@ -208,81 +126,26 @@ export function resolveGitHubLinkedSourceIdentityBatch(
     throw new Error('GitHub linked-source lookup batches must share one host-scoped issue namespace');
   }
 
-  const valuesSql = candidates.map(() => '(?, ?, ?, ?, ?, ?)').join(', ');
-  const params: Array<string | number | null> = [];
-  for (const candidate of candidates) {
-    const observation = candidate.evidence?.entity;
-    params.push(
-      candidate.candidateKey,
-      candidate.linkedSourceId,
-      observation?.identity.stableId ?? null,
-      observation?.locator.owner.toLowerCase() ?? null,
-      observation?.locator.repository.toLowerCase() ?? null,
-      observation?.locator.issueNumber ?? null,
-    );
-  }
   const hostKey = namespaces[0]?.hostKey ?? '';
-  params.push(
-    connectorInstanceId,
-    connectorInstanceId,
-    'github',
-    hostKey,
-    'issue',
-    connectorInstanceId,
-    connectorInstanceId,
-  );
-  params.push('github', hostKey);
+  const inputRows: GitHubLinkedSourceLookupInputRow[] = candidates.map((candidate) => {
+    const observation = candidate.evidence?.entity;
+    return {
+      candidateKey: candidate.candidateKey,
+      linkedSourceId: candidate.linkedSourceId,
+      stableId: observation?.identity.stableId ?? null,
+      ownerKey: observation?.locator.owner.toLowerCase() ?? null,
+      repositoryKey: observation?.locator.repository.toLowerCase() ?? null,
+      issueNumber: observation?.locator.issueNumber ?? null,
+    };
+  });
 
+  const identity = await getGitHubIdentityRepository();
   const startedAt = performance.now();
-  const rows = sqlite.prepare(`
-    WITH incoming(
-      candidate_key, linked_source_id, stable_id, owner_key, repository_key, issue_number
-    ) AS (
-      VALUES ${valuesSql}
-    )
-    SELECT
-      incoming.candidate_key AS candidateKey,
-      legacy_link.task_id AS linkedTaskId,
-      linked_association.external_entity_id AS linkedEntityId,
-      stable_entity.id AS stableEntityId,
-      stable_association.linked_source_id AS stableLinkedSourceId,
-      stable_link.task_id AS stableTaskId,
-      current_locator.locator_revision AS locatorRevision,
-      current_locator.owner_key AS currentOwnerKey,
-      current_locator.repository_key AS currentRepositoryKey,
-      current_locator.issue_number AS currentIssueNumber,
-      path_locator.external_entity_id AS pathEntityId
-    FROM incoming
-    INNER JOIN task_linked_sources AS legacy_link
-      ON legacy_link.id = incoming.linked_source_id
-      AND legacy_link.connector_instance_id = ?
-      AND legacy_link.connector_type = 'github-issues'
-    LEFT JOIN task_linked_source_entities AS linked_association
-      ON linked_association.linked_source_id = legacy_link.id
-      AND linked_association.connector_instance_id = ?
-    LEFT JOIN external_entities AS stable_entity
-      ON stable_entity.provider = ?
-      AND stable_entity.host_key = ?
-      AND stable_entity.entity_type = ?
-      AND stable_entity.stable_id = incoming.stable_id
-    LEFT JOIN task_linked_source_entities AS stable_association
-      ON stable_association.connector_instance_id = ?
-      AND stable_association.external_entity_id = stable_entity.id
-    LEFT JOIN task_linked_sources AS stable_link
-      ON stable_link.id = stable_association.linked_source_id
-      AND stable_link.connector_instance_id = ?
-    LEFT JOIN external_entity_locators AS current_locator
-      ON current_locator.external_entity_id = stable_entity.id
-      AND current_locator.valid_to IS NULL
-    LEFT JOIN external_entity_locators AS path_locator
-      ON path_locator.provider = ?
-      AND path_locator.host_key = ?
-      AND path_locator.owner_key = incoming.owner_key
-      AND path_locator.repository_key = incoming.repository_key
-      AND path_locator.issue_number = incoming.issue_number
-      AND path_locator.valid_to IS NULL
-    ORDER BY incoming.candidate_key COLLATE BINARY
-  `).all(...params) as LinkedSourceLookupRow[];
+  const rows = await identity.lookupLinkedSourceIdentityBatch({
+    connectorInstanceId,
+    hostKey,
+    rows: inputRows,
+  });
   const lookupMs = Math.max(0, Math.round(performance.now() - startedAt));
   const rowByKey = new Map(rows.map((row) => [row.candidateKey, row]));
   const resolutions = new Map<string, GitHubStableResolution>();

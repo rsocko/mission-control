@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createTriageCapture, detectSourcePlatform } from '@/lib/triage/capture';
-import { isValidTriageSource } from '@/lib/triage/query';
+import { isValidTriageSource } from '@/lib/triage/queue-query';
 import { hasValidTriageCaptureKey } from '@/lib/triage/capture-auth';
 import { processIOSShareCapture } from '@/lib/native/share-capture-service';
 import logger from '@/lib/logger';

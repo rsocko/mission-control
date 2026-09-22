@@ -5,10 +5,13 @@ import {
   MAINTENANCE_AGENT_BUDGETS,
   MaintenanceAgentConflictError,
 } from '@/lib/ai/agents/maintenance';
+import { createSqliteAIWorkflowPersistence } from '@/db/persistence/sqlite-ai-workflow-repository';
+import type { AIMaintenancePersistence } from '@/db/persistence/ai-workflows';
 
 const NOW = new Date('2026-08-06T16:00:00.000Z');
 
 let database: Database.Database;
+let persistence: AIMaintenancePersistence;
 
 beforeEach(() => {
   database = new Database(':memory:');
@@ -54,6 +57,7 @@ beforeEach(() => {
       updated_at TEXT NOT NULL
     );
   `);
+  persistence = createSqliteAIWorkflowPersistence(database).maintenance;
 });
 
 afterEach(() => {
@@ -62,7 +66,7 @@ afterEach(() => {
 
 function options(overrides: Record<string, unknown> = {}) {
   return {
-    database,
+    persistence,
     now: () => NOW,
     ...overrides,
   };
@@ -83,8 +87,8 @@ function insertNotifications(count: number): void {
 }
 
 describe('bounded maintenance agents', () => {
-  it('returns a successful empty batch without a checkpoint', () => {
-    const result = executeMaintenanceAgent('cleanup-done', options());
+  it('returns a successful empty batch without a checkpoint', async () => {
+    const result = await executeMaintenanceAgent('cleanup-done', options());
 
     expect(result).toMatchObject({
       status: 'success',
@@ -96,10 +100,10 @@ describe('bounded maintenance agents', () => {
     });
   });
 
-  it('keeps exact boundary batches and result details bounded', () => {
+  it('keeps exact boundary batches and result details bounded', async () => {
     insertNotifications(MAINTENANCE_AGENT_BUDGETS.mutationLimit);
 
-    const result = executeMaintenanceAgent('dismiss-old-notifications', options());
+    const result = await executeMaintenanceAgent('dismiss-old-notifications', options());
 
     expect(result.status).toBe('success');
     expect(result.actionsPerformed).toBe(MAINTENANCE_AGENT_BUDGETS.mutationLimit);
@@ -111,11 +115,11 @@ describe('bounded maintenance agents', () => {
     expect(dismissed.count).toBe(MAINTENANCE_AGENT_BUDGETS.mutationLimit);
   });
 
-  it('resumes a large workload from its durable checkpoint', () => {
+  it('resumes a large workload from its durable checkpoint', async () => {
     insertNotifications(MAINTENANCE_AGENT_BUDGETS.mutationLimit + 1);
 
-    const first = executeMaintenanceAgent('dismiss-old-notifications', options());
-    const second = executeMaintenanceAgent('dismiss-old-notifications', options());
+    const first = await executeMaintenanceAgent('dismiss-old-notifications', options());
+    const second = await executeMaintenanceAgent('dismiss-old-notifications', options());
 
     expect(first).toMatchObject({
       status: 'partial',
@@ -140,7 +144,7 @@ describe('bounded maintenance agents', () => {
     ]);
   });
 
-  it('bounds source scanning even when most rows are ineligible', () => {
+  it('bounds source scanning even when most rows are ineligible', async () => {
     const insert = database.prepare(`
       INSERT INTO notifications (id, title, state, read_state, level, received_at)
       VALUES (?, ?, ?, ?, 'fyi', '2026-07-01T00:00:00.000Z')
@@ -158,8 +162,8 @@ describe('bounded maintenance agents', () => {
     });
     transaction();
 
-    const first = executeMaintenanceAgent('dismiss-old-notifications', options());
-    const second = executeMaintenanceAgent('dismiss-old-notifications', options());
+    const first = await executeMaintenanceAgent('dismiss-old-notifications', options());
+    const second = await executeMaintenanceAgent('dismiss-old-notifications', options());
 
     expect(first).toMatchObject({
       status: 'partial',
@@ -174,23 +178,23 @@ describe('bounded maintenance agents', () => {
     });
   });
 
-  it('rejects an overlapping run of the same agent', () => {
+  it('rejects an overlapping run of the same agent', async () => {
     database.prepare(`
       INSERT INTO maintenance_agent_runs (
         id, agent_type, status, lease_expires_at, started_at
       ) VALUES ('active', 'cleanup-done', 'running', ?, ?)
     `).run('2026-08-06T16:00:10.000Z', NOW.toISOString());
 
-    expect(() => executeMaintenanceAgent('cleanup-done', options()))
-      .toThrow(MaintenanceAgentConflictError);
+    await expect(executeMaintenanceAgent('cleanup-done', options()))
+      .rejects.toThrow(MaintenanceAgentConflictError);
   });
 
-  it('propagates cancellation without mutating eligible rows', () => {
+  it('propagates cancellation without mutating eligible rows', async () => {
     insertNotifications(1);
     const controller = new AbortController();
     controller.abort();
 
-    const result = executeMaintenanceAgent(
+    const result = await executeMaintenanceAgent(
       'dismiss-old-notifications',
       options({ signal: controller.signal }),
     );
@@ -208,7 +212,7 @@ describe('bounded maintenance agents', () => {
     expect(notification).toEqual({ state: 'unread' });
   });
 
-  it('reports a timeout before mutation', () => {
+  it('reports a timeout before mutation', async () => {
     insertNotifications(1);
     let tick = 0;
     const clock = () => {
@@ -216,7 +220,7 @@ describe('bounded maintenance agents', () => {
       return tick;
     };
 
-    const result = executeMaintenanceAgent(
+    const result = await executeMaintenanceAgent(
       'dismiss-old-notifications',
       options({ clock }),
     );
@@ -229,7 +233,7 @@ describe('bounded maintenance agents', () => {
     });
   });
 
-  it('rolls back mutations that exceed the duration budget', () => {
+  it('rolls back mutations that exceed the duration budget', async () => {
     insertNotifications(1);
     let checks = 0;
     const clock = () => {
@@ -237,7 +241,7 @@ describe('bounded maintenance agents', () => {
       return checks >= 5 ? MAINTENANCE_AGENT_BUDGETS.durationMs : 0;
     };
 
-    const result = executeMaintenanceAgent(
+    const result = await executeMaintenanceAgent(
       'dismiss-old-notifications',
       options({ clock }),
     );
@@ -252,7 +256,7 @@ describe('bounded maintenance agents', () => {
     ).get()).toEqual({ state: 'unread' });
   });
 
-  it('records partial failure and retries idempotently from the same checkpoint', () => {
+  it('records partial failure and retries idempotently from the same checkpoint', async () => {
     insertNotifications(2);
     database.exec(`
       CREATE TRIGGER fail_notification_update
@@ -262,7 +266,7 @@ describe('bounded maintenance agents', () => {
       END;
     `);
 
-    const failed = executeMaintenanceAgent('dismiss-old-notifications', options());
+    const failed = await executeMaintenanceAgent('dismiss-old-notifications', options());
     expect(failed).toMatchObject({
       status: 'failed',
       actionsPerformed: 0,
@@ -273,7 +277,7 @@ describe('bounded maintenance agents', () => {
     });
     database.exec('DROP TRIGGER fail_notification_update');
 
-    const retried = executeMaintenanceAgent('dismiss-old-notifications', options());
+    const retried = await executeMaintenanceAgent('dismiss-old-notifications', options());
     expect(retried).toMatchObject({
       status: 'success',
       actionsPerformed: 2,
@@ -281,7 +285,7 @@ describe('bounded maintenance agents', () => {
     });
   });
 
-  it('pushes eligibility into SQL for every task maintenance agent', () => {
+  it('pushes eligibility into SQL for every task maintenance agent', async () => {
     const insert = database.prepare(`
       INSERT INTO tasks (id, title, status, priority, due_date, completed_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -292,9 +296,9 @@ describe('bounded maintenance agents', () => {
     insert.run('urgent', 'Escalate me', 'todo', 'none', '2026-08-06', null, NOW.toISOString());
     insert.run('future', 'Leave me', 'todo', 'none', '2026-09-01', null, NOW.toISOString());
 
-    const cleanup = executeMaintenanceAgent('cleanup-done', options());
-    const snooze = executeMaintenanceAgent('snooze-low-priority', options());
-    const prioritize = executeMaintenanceAgent('bulk-prioritize', options());
+    const cleanup = await executeMaintenanceAgent('cleanup-done', options());
+    const snooze = await executeMaintenanceAgent('snooze-low-priority', options());
+    const prioritize = await executeMaintenanceAgent('bulk-prioritize', options());
 
     expect(cleanup.actionsPerformed).toBe(1);
     expect(snooze.actionsPerformed).toBe(1);
@@ -303,5 +307,119 @@ describe('bounded maintenance agents', () => {
       .toEqual({ status: 'done' });
     expect(database.prepare('SELECT priority FROM tasks WHERE id = ?').get('future'))
       .toEqual({ priority: 'none' });
+  });
+
+  it('never mutates, counts, or names rows that stopped being eligible after the scan', async () => {
+    insertNotifications(2);
+    const racing: AIMaintenancePersistence = {
+      claimRun: (input) => persistence.claimRun(input),
+      scanBatch: (input) => persistence.scanBatch(input),
+      async commitBatch(input) {
+        // A concurrent writer reads the FIRST scanned notification before the
+        // batch commits, so it must no longer be dismissed by this run — and
+        // must not appear in the result details, even though it still leads
+        // the scan order.
+        database.prepare(
+          "UPDATE notifications SET read_state = 'read' WHERE id = 'notification-000'",
+        ).run();
+        return persistence.commitBatch(input);
+      },
+    };
+
+    const result = await executeMaintenanceAgent(
+      'dismiss-old-notifications',
+      options({ persistence: racing }),
+    );
+
+    expect(result.actionsPerformed).toBe(1);
+    expect(result.details).toEqual([
+      { action: 'dismiss', target: 'Notification 1', result: 'completed' },
+    ]);
+    expect(database.prepare(
+      "SELECT state FROM notifications WHERE id = 'notification-000'",
+    ).get()).toEqual({ state: 'unread' });
+    expect(database.prepare(
+      "SELECT state FROM notifications WHERE id = 'notification-001'",
+    ).get()).toEqual({ state: 'dismissed' });
+    expect(database.prepare(
+      'SELECT mutation_count AS mutationCount FROM maintenance_agent_runs',
+    ).get()).toEqual({ mutationCount: 1 });
+  });
+
+  it('keeps non-dry-run details in scan order and bounded by the detail budget', async () => {
+    insertNotifications(MAINTENANCE_AGENT_BUDGETS.mutationLimit);
+    // Make every other scanned row ineligible between the scan and the commit.
+    const racing: AIMaintenancePersistence = {
+      claimRun: (input) => persistence.claimRun(input),
+      scanBatch: (input) => persistence.scanBatch(input),
+      async commitBatch(input) {
+        database.prepare(`
+          UPDATE notifications SET read_state = 'read'
+          WHERE CAST(substr(id, 14) AS INTEGER) % 2 = 0
+        `).run();
+        return persistence.commitBatch(input);
+      },
+    };
+
+    const result = await executeMaintenanceAgent(
+      'dismiss-old-notifications',
+      options({ persistence: racing }),
+    );
+
+    expect(result.actionsPerformed).toBe(MAINTENANCE_AGENT_BUDGETS.mutationLimit / 2);
+    expect(result.details).toHaveLength(MAINTENANCE_AGENT_BUDGETS.detailLimit);
+    expect(result.details.map((detail) => detail.target)).toEqual(
+      Array.from(
+        { length: MAINTENANCE_AGENT_BUDGETS.detailLimit },
+        (_, index) => `Notification ${index * 2 + 1}`,
+      ),
+    );
+  });
+
+  it('reports every candidate on a dry run without mutating anything', async () => {
+    insertNotifications(3);
+
+    const result = await executeMaintenanceAgent(
+      'dismiss-old-notifications',
+      options({ dryRun: true }),
+    );
+
+    expect(result.actionsPerformed).toBe(3);
+    expect(result.details.map((detail) => detail.target)).toEqual([
+      'Notification 0',
+      'Notification 1',
+      'Notification 2',
+    ]);
+    expect(result.details.every((detail) => detail.action === 'would_dismiss')).toBe(true);
+    expect(database.prepare(
+      "SELECT COUNT(*) AS count FROM notifications WHERE state = 'dismissed'",
+    ).get()).toEqual({ count: 0 });
+  });
+
+  it('stamps completion after the scan rather than at run start', async () => {
+    insertNotifications(1);
+    let scans = 0;
+    const observing: AIMaintenancePersistence = {
+      claimRun: (input) => persistence.claimRun(input),
+      async scanBatch(input) {
+        scans += 1;
+        return persistence.scanBatch(input);
+      },
+      commitBatch: (input) => persistence.commitBatch(input),
+    };
+
+    const result = await executeMaintenanceAgent(
+      'dismiss-old-notifications',
+      options({
+        persistence: observing,
+        now: () => new Date(NOW.getTime() + scans * 1_000),
+      }),
+    );
+
+    expect(result.startedAt).toBe(NOW.toISOString());
+    expect(result.completedAt).toBe(new Date(NOW.getTime() + 1_000).toISOString());
+    expect(database.prepare(
+      "SELECT dismissed_at AS dismissedAt FROM notifications WHERE id = 'notification-000'",
+    ).get()).toEqual({ dismissedAt: result.completedAt });
   });
 });

@@ -14,10 +14,17 @@ import {
 } from 'react';
 import { toast } from 'sonner';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
+import type {
+  TaskDetailMode,
+  TaskNotesOpenRequest,
+} from '@/components/task-detail/task-detail-types';
 import { useQuickAddContext } from '@/lib/hooks/useQuickAddContext';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
-import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
+import {
+  useHistoryParamSelection,
+  type HistoryParamSelectionSetter,
+} from '@/lib/hooks/useHistoryParamSelection';
 import {
   executeProjectHierarchyCommand,
   loadProjectHierarchy,
@@ -48,6 +55,26 @@ import {
   useProjectTaskActions,
   type RunProjectHierarchyCommand,
 } from '../useProjectTaskActions';
+import { notifyTaskChanged } from '@/lib/task-change-events';
+
+function hierarchyCommandTaskIds(command: ProjectHierarchyCommand): string[] {
+  switch (command.type) {
+    case 'move_tasks':
+    case 'assign_tasks':
+    case 'remove_tasks':
+      return command.taskIds;
+    case 'restore_task_positions':
+      return command.placements.map((placement) => placement.taskId);
+    case 'restore_project_tasks':
+      return command.states.map((state) => state.taskId);
+    case 'update_phase_item':
+      return [command.taskId];
+    case 'replace_phase_structure':
+      return command.placements.map((placement) => placement.taskId);
+    case 'reorder_phases':
+      return [];
+  }
+}
 
 interface ProjectPageDataContextValue {
   projectId: string;
@@ -60,6 +87,7 @@ interface ProjectPageDataContextValue {
   progress: ProgressSummary;
   phaseEntries: Record<string, PhaseTaskEntry[]>;
   taskToPhase: Map<string, ProjectPhase>;
+  unassignedTasks: ProjectTask[];
   phaseMenuItems: Array<{ id: string; name: string }>;
   reportRefreshKey: string;
 }
@@ -77,9 +105,15 @@ interface ProjectPageMutationsContextValue {
 
 interface ProjectPageTaskInteractionsContextValue {
   selectedTaskId: string | null;
-  setSelectedTaskId: Dispatch<SetStateAction<string | null>>;
-  toggleTask: (taskId: string) => void;
-  cancelPendingDeselect: () => void;
+  setSelectedTaskId: HistoryParamSelectionSetter;
+  detailMode: Exclude<TaskDetailMode, 'mobile'>;
+  setDetailMode: Dispatch<SetStateAction<Exclude<TaskDetailMode, 'mobile'>>>;
+  notesOpenRequest: TaskNotesOpenRequest | null;
+  openTaskNotes: (taskId: string, mode: 'read' | 'edit') => void;
+  clearTaskNotesRequest: () => void;
+  selectTask: (taskId: string) => void;
+  handleTaskClick: (taskId: string) => void;
+  handleTaskDoubleClick: (taskId: string) => void;
   handleGraphTaskSelect: (taskId: string | null) => void;
   allProjects: HubProject[];
   completingIds: Set<string>;
@@ -138,26 +172,52 @@ export function ProjectPageProvider({
   const [error, setError] = useState<string | null>(null);
   const [hierarchyAnnouncement, setHierarchyAnnouncement] = useState('');
   const [selectedTaskId, setSelectedTaskId] = useHistoryParamSelection('taskId');
+  const [detailMode, setDetailMode] =
+    useState<Exclude<TaskDetailMode, 'mobile'>>('panel');
+  const [notesOpenRequest, setNotesOpenRequest] = useState<TaskNotesOpenRequest | null>(null);
   const [allProjects, setAllProjects] = useState<HubProject[]>([]);
   const hierarchyRevisionRef = useRef(0);
   const hierarchyProjectIdRef = useRef<string | null>(null);
   const hierarchyUndoTrackerRef = useRef(new ProjectHierarchyUndoTracker());
   const loadRequestIdRef = useRef(0);
+  const notesRequestIdRef = useRef(0);
   const loadedProjectIdRef = useRef<string | null>(null);
   const { setQuickAddFilter, clearQuickAddFilter } = useQuickAddContext();
 
   const {
-    cancelPendingDeselect,
-    toggleTask,
+    handleTaskClick,
+    handleTaskDoubleClick,
+    selectTask,
   } = useTaskSelection({
     selectedTaskId,
-    onSelectionChange: setSelectedTaskId,
+    onSelectionChange: (taskId) => {
+      setNotesOpenRequest(null);
+      setDetailMode('panel');
+      setSelectedTaskId(taskId);
+    },
+    onDoubleClick: () => setDetailMode('dialog'),
   });
 
   const handleGraphTaskSelect = useCallback((taskId: string | null) => {
-    cancelPendingDeselect();
+    setNotesOpenRequest(null);
+    setDetailMode('panel');
     setSelectedTaskId(taskId);
-  }, [cancelPendingDeselect]);
+  }, [setSelectedTaskId]);
+
+  const openTaskNotes = useCallback((taskId: string, mode: 'read' | 'edit') => {
+    setDetailMode('panel');
+    setSelectedTaskId(taskId);
+    notesRequestIdRef.current += 1;
+    setNotesOpenRequest({
+      requestId: notesRequestIdRef.current,
+      taskId,
+      mode,
+    });
+  }, [setSelectedTaskId]);
+
+  const clearTaskNotesRequest = useCallback(() => {
+    setNotesOpenRequest(null);
+  }, []);
 
   const applyHierarchySnapshot = useCallback((snapshot: ProjectHierarchySnapshot) => {
     if (snapshot.projectId !== currentProjectIdRef.current) return;
@@ -220,6 +280,7 @@ export function ProjectPageProvider({
       });
       if (projectId !== currentProjectIdRef.current) return result;
       applyHierarchySnapshot(result.hierarchy);
+      for (const taskId of hierarchyCommandTaskIds(command)) notifyTaskChanged(taskId);
       hierarchyUndoTrackerRef.current.push(commandId, result.revision);
       setHierarchyAnnouncement(options.announcement);
       const undoEntryId = pushUndoWithToast(options.undoLabel, async () => {
@@ -230,6 +291,9 @@ export function ProjectPageProvider({
             command: result.inverseCommand,
           });
           applyHierarchySnapshot(undoResult.hierarchy);
+          for (const taskId of hierarchyCommandTaskIds(result.inverseCommand)) {
+            notifyTaskChanged(taskId);
+          }
           hierarchyUndoTrackerRef.current.complete(commandId, undoResult.revision);
           setHierarchyAnnouncement(`Undid: ${options.announcement}`);
         } catch (caughtError) {
@@ -332,8 +396,11 @@ export function ProjectPageProvider({
       }
       return next;
     });
-    setSelectedTaskId((current) => current === taskId ? null : current);
-  }, []);
+    setSelectedTaskId(
+      (current) => current === taskId ? null : current,
+      { history: 'replace' },
+    );
+  }, [setSelectedTaskId]);
 
   const stageProjectTaskRemoval = useCallback((taskId: string) => {
     const previousTasks = tasks;
@@ -350,6 +417,7 @@ export function ProjectPageProvider({
     phaseItemsByPhase,
     removeTaskFromView,
     selectedTaskId,
+    setSelectedTaskId,
     tasks,
   ]);
 
@@ -438,6 +506,12 @@ export function ProjectPageProvider({
     }
     return mapping;
   }, [phaseItemsByPhase, phases]);
+  const unassignedTasks = useMemo(
+    () => phases.length > 0
+      ? tasks.filter((task) => !taskToPhase.has(task.id))
+      : [],
+    [phases.length, taskToPhase, tasks],
+  );
   const phaseMenuItems = useMemo(
     () => phases.map((phase) => ({ id: phase.id, name: phase.name })),
     [phases],
@@ -464,6 +538,7 @@ export function ProjectPageProvider({
     progress,
     phaseEntries,
     taskToPhase,
+    unassignedTasks,
     phaseMenuItems,
     reportRefreshKey,
   }), [
@@ -479,6 +554,7 @@ export function ProjectPageProvider({
     reportRefreshKey,
     taskToPhase,
     tasks,
+    unassignedTasks,
   ]);
 
   const mutationsValue = useMemo<ProjectPageMutationsContextValue>(() => ({
@@ -500,8 +576,14 @@ export function ProjectPageProvider({
   const taskInteractionsValue = useMemo<ProjectPageTaskInteractionsContextValue>(() => ({
     selectedTaskId,
     setSelectedTaskId,
-    toggleTask,
-    cancelPendingDeselect,
+    detailMode,
+    setDetailMode,
+    notesOpenRequest,
+    openTaskNotes,
+    clearTaskNotesRequest,
+    selectTask,
+    handleTaskClick,
+    handleTaskDoubleClick,
     handleGraphTaskSelect,
     allProjects,
     completingIds: taskActions.completingIds,
@@ -512,16 +594,22 @@ export function ProjectPageProvider({
     handleRemoveFromMyDay: taskActions.handleRemoveFromMyDay,
   }), [
     allProjects,
+    clearTaskNotesRequest,
+    detailMode,
     handleGraphTaskSelect,
+    handleTaskClick,
+    handleTaskDoubleClick,
+    notesOpenRequest,
+    openTaskNotes,
     selectedTaskId,
+    setSelectedTaskId,
     taskActions.completingIds,
     taskActions.getTaskContextActions,
     taskActions.handleAddToMyDay,
     taskActions.handleCompleteTask,
     taskActions.handleRemoveFromMyDay,
     taskActions.myDayTaskIds,
-    cancelPendingDeselect,
-    toggleTask,
+    selectTask,
   ]);
 
   return (

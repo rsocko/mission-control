@@ -1,138 +1,12 @@
-import { randomUUID } from 'crypto';
-import db from '@/db';
-import { triageContentTypes } from '@/db/schema';
-import { eq } from 'drizzle-orm';
 import logger from '@/lib/logger';
-import type { TriageContentType, TriageSourcePlatform } from '@/types';
+import { getTriagePersistenceRepositories } from './persistence';
+import {
+  BUILTIN_CONTENT_TYPES,
+  type ContentTypeDefinition,
+} from './content-type-definitions';
+export type { ContentTypeDefinition } from './content-type-definitions';
 
 // ─── TYPES ──────────────────────────────────────────────────────────────────
-
-export interface ContentTypeDefinition {
-  id: string;
-  name: string;
-  icon?: string;
-  color: string;
-  builtin: boolean;
-  suppressed: boolean;
-  priority: number;
-  urlPatterns: string[]; // regex strings
-  keywordHints: string[]; // terms to match in title/desc/url
-  description?: string;
-}
-
-// ─── BUILT-IN CONTENT TYPES ─────────────────────────────────────────────────
-// These define the default detection logic. Users can suppress or override them.
-
-const BUILTIN_CONTENT_TYPES: ContentTypeDefinition[] = [
-  {
-    id: 'repo',
-    name: 'GitHub Repos',
-    icon: 'github',
-    color: '#24292f',
-    builtin: true,
-    suppressed: false,
-    priority: 10,
-    urlPatterns: ['github\\.com/[^/]+/[^/]+'],
-    keywordHints: [],
-    description: 'GitHub repositories',
-  },
-  {
-    id: 'model_3d',
-    name: '3D Models',
-    icon: 'box',
-    color: '#f59e0b',
-    builtin: true,
-    suppressed: false,
-    priority: 15,
-    urlPatterns: ['makerworld', 'printables', 'thingiverse'],
-    keywordHints: ['3d print', '3d-print', 'functionalprint'],
-    description: 'STL files, 3D printing models',
-  },
-  {
-    id: 'video',
-    name: 'Videos',
-    icon: 'play-circle',
-    color: '#ef4444',
-    builtin: true,
-    suppressed: false,
-    priority: 20,
-    urlPatterns: ['youtube\\.com', 'youtu\\.be', '/reel/', 'instagram\\.com/reel'],
-    keywordHints: [],
-    description: 'YouTube videos, Instagram Reels, etc.',
-  },
-  {
-    id: 'image',
-    name: 'Images',
-    icon: 'image',
-    color: '#ec4899',
-    builtin: true,
-    suppressed: false,
-    priority: 25,
-    urlPatterns: ['i\\.redd\\.it/', 'instagram\\.com/p/'],
-    keywordHints: [],
-    description: 'Instagram posts, Reddit images',
-  },
-  {
-    id: 'text_post',
-    name: 'Discussions',
-    icon: 'message-circle',
-    color: '#10b981',
-    builtin: true,
-    suppressed: false,
-    priority: 30,
-    urlPatterns: ['(twitter\\.com|x\\.com)/[^/]+/status/'],
-    keywordHints: [],
-    description: 'Twitter/X posts, forum threads',
-  },
-  {
-    id: 'article',
-    name: 'Articles',
-    icon: 'file-text',
-    color: '#6366f1',
-    builtin: true,
-    suppressed: false,
-    priority: 40,
-    urlPatterns: [],
-    keywordHints: ['article', 'blog'],
-    description: 'Blog posts and articles',
-  },
-  {
-    id: 'product',
-    name: 'Products',
-    icon: 'shopping-bag',
-    color: '#f97316',
-    builtin: true,
-    suppressed: false,
-    priority: 45,
-    urlPatterns: [],
-    keywordHints: [],
-    description: 'Product pages, things to buy',
-  },
-  {
-    id: 'document',
-    name: 'Documents',
-    icon: 'file-check',
-    color: '#3b82f6',
-    builtin: true,
-    suppressed: false,
-    priority: 50,
-    urlPatterns: [],
-    keywordHints: [],
-    description: 'Documents requiring action (bills, letters, forms)',
-  },
-  {
-    id: 'link',
-    name: 'Links',
-    icon: 'link',
-    color: '#3b82f6',
-    builtin: true,
-    suppressed: false,
-    priority: 100, // Lowest priority — fallback
-    urlPatterns: [],
-    keywordHints: [],
-    description: 'Generic links (fallback type)',
-  },
-];
 
 // ─── REGISTRY CACHE ─────────────────────────────────────────────────────────
 
@@ -148,7 +22,7 @@ export async function getContentTypes(): Promise<ContentTypeDefinition[]> {
   }
 
   try {
-    const rows = await db.select().from(triageContentTypes);
+    const rows = await getTriagePersistenceRepositories().contentTypes.list();
     const dbMap = new Map(rows.map((r) => [r.id, r]));
 
     // Start with built-in types, apply DB overrides (e.g., suppression)
@@ -217,7 +91,6 @@ export async function detectContentType(
   url: string,
   title: string,
   description?: string,
-  sourcePlatform?: TriageSourcePlatform,
 ): Promise<string> {
   const types = await getContentTypes();
   const combined = `${title} ${description || ''} ${url}`.toLowerCase();
@@ -322,8 +195,6 @@ export async function upsertContentType(input: {
   const now = new Date().toISOString();
   const id = input.id || input.name.toLowerCase().replace(/[^a-z0-9]+/g, '_');
 
-  const existing = await db.select().from(triageContentTypes).where(eq(triageContentTypes.id, id));
-
   const record = {
     id,
     name: input.name,
@@ -338,11 +209,10 @@ export async function upsertContentType(input: {
     updatedAt: now,
   };
 
-  if (existing.length > 0) {
-    await db.update(triageContentTypes).set(record).where(eq(triageContentTypes.id, id));
-  } else {
-    await db.insert(triageContentTypes).values({ ...record, createdAt: now });
-  }
+  await getTriagePersistenceRepositories().contentTypes.upsert({
+    ...record,
+    createdAt: now,
+  });
 
   invalidateContentTypeCache();
 
@@ -359,36 +229,31 @@ export async function deleteContentType(id: string): Promise<boolean> {
     return false;
   }
 
-  await db.delete(triageContentTypes).where(eq(triageContentTypes.id, id));
+  const deleted = await getTriagePersistenceRepositories().contentTypes.deleteCustom(id);
   invalidateContentTypeCache();
-  return true;
+  return deleted;
 }
 
 export async function suppressContentType(id: string, suppressed: boolean): Promise<void> {
   const now = new Date().toISOString();
-  const existing = await db.select().from(triageContentTypes).where(eq(triageContentTypes.id, id));
-
-  if (existing.length > 0) {
-    await db.update(triageContentTypes).set({ suppressed, updatedAt: now }).where(eq(triageContentTypes.id, id));
-  } else {
-    // Insert a DB record for this built-in type so we can track suppression
-    const builtin = BUILTIN_CONTENT_TYPES.find((bt) => bt.id === id);
-    if (!builtin) return;
-    await db.insert(triageContentTypes).values({
-      id: builtin.id,
-      name: builtin.name,
-      icon: builtin.icon || null,
-      color: builtin.color,
-      builtin: true,
-      suppressed,
-      priority: builtin.priority,
-      urlPatterns: builtin.urlPatterns,
-      keywordHints: builtin.keywordHints,
-      description: builtin.description || null,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
+  const builtin = BUILTIN_CONTENT_TYPES.find((candidate) => candidate.id === id);
+  await getTriagePersistenceRepositories().contentTypes.setSuppressed({
+    id,
+    suppressed,
+    updatedAt: now,
+    builtin: builtin
+      ? {
+          name: builtin.name,
+          icon: builtin.icon || null,
+          color: builtin.color,
+          priority: builtin.priority,
+          urlPatterns: builtin.urlPatterns,
+          keywordHints: builtin.keywordHints,
+          description: builtin.description || null,
+          createdAt: now,
+        }
+      : null,
+  });
 
   invalidateContentTypeCache();
 }

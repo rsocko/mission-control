@@ -65,6 +65,14 @@ describe('connector task source profiles', () => {
       authority: 'local',
       writeBack: 'none',
     });
+    expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.statusReason).toEqual({
+      authority: 'local',
+      writeBack: 'none',
+    });
+    expect(DOCUMENT_INTELLIGENCE_FIELD_PROFILE.snoozedUntil).toEqual({
+      authority: 'source',
+      writeBack: 'none',
+    });
   });
 
   it.each([

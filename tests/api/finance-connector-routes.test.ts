@@ -8,28 +8,42 @@ const mocks = vi.hoisted(() => ({
   runBackfill: vi.fn(),
   getHealth: vi.fn(),
   getDatasetHealth: vi.fn(),
-  select: vi.fn(),
+  verifyRecovery: vi.fn(),
+  reconcileRecovery: vi.fn(),
+  getRecoveryView: vi.fn(),
+  listEnabledConnectorIds: vi.fn(),
+  getConnector: vi.fn(),
+  recordTestResult: vi.fn(),
+  readHealthSnapshot: vi.fn(),
 }));
 
-function chainable<T>(terminal: T) {
-  const chain = new Proxy({}, {
-    get(_target, property) {
-      if (property === 'then') {
-        return (resolve: (value: T) => unknown) => Promise.resolve(resolve(terminal));
-      }
-      return vi.fn(() => chain);
-    },
-  });
-  return chain;
+/** Empty finance operator health snapshot (no persisted finance state yet). */
+function emptyHealthSnapshot() {
+  return {
+    sync: null,
+    attribution: null,
+    activeJob: null,
+    capture: null,
+    evaluation: null,
+  };
 }
 
-vi.mock('@/db', () => ({
-  default: { select: mocks.select },
-}));
+// The owned routes must never reach SQLite: an empty module is enough, and any
+// residual `db.*`/`sqlite.*` use would fail loudly as a TypeError.
+vi.mock('@/db', () => ({ default: {} }));
 
 vi.mock('@/lib/connectors/monarch-money/config', () => ({
   getPersistedFinanceConnectorConfig: mocks.getPersistedConfig,
   financeConnectorConfigFromRow: mocks.configFromRow,
+  isFinanceConnectorType: (type: string) => (
+    type === 'finance' || type === 'finance-manager' || type === 'monarch-money'
+  ),
+}));
+
+vi.mock('@/lib/connectors/monarch-money/connection-recovery', () => ({
+  verifyFinanceConnectionRecovery: mocks.verifyRecovery,
+  reconcileFinanceConnectionObservation: mocks.reconcileRecovery,
+  getFinanceConnectionRecoveryView: mocks.getRecoveryView,
 }));
 
 vi.mock('@/lib/sync', () => ({
@@ -37,6 +51,27 @@ vi.mock('@/lib/sync', () => ({
     runSync: mocks.runSync,
     runExclusiveConnectorOperation: mocks.runExclusive,
   },
+}));
+
+vi.mock('@/lib/persistence/worker-runtime', () => ({
+  getWorkerPersistenceRepositories: vi.fn(async () => ({
+    connectors: { get: mocks.getPersistedConfig },
+    finance: {
+      insights: {
+        connectors: { listEnabledConnectorIds: mocks.listEnabledConnectorIds },
+      },
+      operator: { readHealthSnapshot: mocks.readHealthSnapshot },
+    },
+  })),
+}));
+
+vi.mock('@/lib/persistence/runtime', () => ({
+  getCorePersistenceRepositories: () => ({
+    connectors: {
+      get: mocks.getConnector,
+      recordTestResult: mocks.recordTestResult,
+    },
+  }),
 }));
 
 vi.mock('@/lib/connectors/monarch-money/transaction-backfill', () => ({
@@ -70,11 +105,76 @@ describe('finance connector routes', () => {
     mocks.getPersistedConfig.mockResolvedValue({
       id: 'persisted-finance',
       type: 'finance-manager',
+      enabled: true,
     });
-    mocks.getDatasetHealth.mockReturnValue({
+    mocks.listEnabledConnectorIds.mockResolvedValue(['persisted-finance']);
+    mocks.getDatasetHealth.mockResolvedValue({
       aggregate: 'fresh',
       datasets: [],
     });
+    mocks.readHealthSnapshot.mockResolvedValue(emptyHealthSnapshot());
+    mocks.recordTestResult.mockResolvedValue({ recorded: true });
+    mocks.getRecoveryView.mockReturnValue(null);
+  });
+
+  it('authorizes recovery verification and accepts only an empty request contract', async () => {
+    const connector = {
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: true,
+      deletedAt: null,
+    };
+    mocks.getConnector.mockResolvedValue(connector);
+    mocks.configFromRow.mockReturnValue({ id: connector.id, settings: {}, credentials: {} });
+    mocks.verifyRecovery.mockResolvedValue({ recovered: true, reason: 'recovered' });
+    const { POST } = await import('@/app/api/connectors/[id]/finance/recovery/route');
+
+    const response = await POST(new Request(
+      'https://mc.example/api/connectors/persisted-finance/finance/recovery',
+      {
+        method: 'POST',
+        headers: {
+          host: 'mc.example',
+          origin: 'https://mc.example',
+          'sec-fetch-site': 'same-origin',
+          'content-type': 'application/json',
+        },
+        body: '{}',
+      },
+    ), { params: Promise.resolve({ id: connector.id }) });
+
+    expect(response.status).toBe(200);
+    expect(mocks.verifyRecovery).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ id: connector.id }),
+      signal: expect.any(AbortSignal),
+    }));
+  });
+
+  it.each([
+    ['cross-site request', { origin: 'https://attacker.example', 'sec-fetch-site': 'cross-site' }, '{}', 403],
+    ['malformed JSON', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{', 400],
+    ['return URL', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"returnUrl":"https://attacker.example"}', 400],
+    ['session cookie', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"session_id":"secret"}', 400],
+    ['CSRF token', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"csrftoken":"secret"}', 400],
+    ['connector token', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"connectorToken":"secret"}', 400],
+    ['recovery assertion', { origin: 'https://mc.example', 'sec-fetch-site': 'same-origin' }, '{"assertion":"secret"}', 400],
+  ])('rejects a recovery %s', async (_label, requestHeaders, body, status) => {
+    const { POST } = await import('@/app/api/connectors/[id]/finance/recovery/route');
+    const response = await POST(new Request(
+      'https://mc.example/api/connectors/persisted-finance/finance/recovery',
+      {
+        method: 'POST',
+        headers: {
+          host: 'mc.example',
+          'content-type': 'application/json',
+          ...requestHeaders,
+        },
+        body,
+      },
+    ), { params: Promise.resolve({ id: 'persisted-finance' }) });
+
+    expect(response.status).toBe(status);
+    expect(mocks.verifyRecovery).not.toHaveBeenCalled();
   });
 
   it('runs finance sync through persisted config and the canonical scheduler', async () => {
@@ -225,44 +325,50 @@ describe('finance connector routes', () => {
       configVersion: 1,
       warning: dataset === 'tags' ? 'invalid_contract' : null,
     }));
-    mocks.getDatasetHealth.mockReturnValue({
+    mocks.getDatasetHealth.mockResolvedValue({
       aggregate: 'partial',
       datasets: projectionDatasets,
     });
-    mocks.select
-      .mockReturnValueOnce(chainable([connector]))
-      .mockReturnValueOnce(chainable([{
+    mocks.getConnector.mockResolvedValue(connector);
+    mocks.readHealthSnapshot.mockResolvedValue({
+      sync: {
         status: 'succeeded',
         lastAttemptAt: '2026-08-10T01:00:00.000Z',
         lastSuccessfulSyncAt: new Date().toISOString(),
         lastSuccessfulWindowStart: '2026-08-01',
         lastSuccessfulWindowEnd: '2026-08-10',
         lastErrorCode: null,
-        attributionStatus: 'healthy',
-        attributionPolicyVersion: 7,
-        attributionEngineVersion: '1.0.0',
-      }]))
-      .mockReturnValueOnce(chainable([{
+      },
+      attribution: {
+        status: 'healthy',
+        lastAttemptAt: null,
+        lastSuccessfulAt: null,
+        lastErrorCode: null,
+        policyVersion: 7,
+        engineVersion: '1.0.0',
+      },
+      activeJob: {
         id: 'job-1',
         status: 'queued',
         attempt: 1,
         maxAttempts: 3,
         availableAt: '2026-08-10T01:05:00.000Z',
         startedAt: null,
-      }]))
-      .mockReturnValueOnce(chainable([{
+      },
+      capture: {
         status: 'captured',
         lastAttemptAt: '2026-08-10T12:02:00.000Z',
         lastErrorCode: null,
-      }]))
-      .mockReturnValueOnce(chainable([{
+      },
+      evaluation: {
         status: 'evaluating',
         stage: 'evaluation-requested',
         lastAttemptAt: '2026-08-10T12:03:00.000Z',
         lastSuccessfulAt: '2026-08-10T12:03:00.000Z',
         lastErrorCode: null,
         retryable: false,
-      }]));
+      },
+    });
     const { GET } = await import('@/app/api/connectors/[id]/health/route');
 
     const response = await GET({
@@ -351,30 +457,40 @@ describe('finance connector routes', () => {
       authenticated: true,
       authState: 'connected',
     });
-    mocks.getDatasetHealth.mockReturnValue({ aggregate: 'fresh', datasets: [] });
-    mocks.select
-      .mockReturnValueOnce(chainable([connector]))
-      .mockReturnValueOnce(chainable([{
+    mocks.getDatasetHealth.mockResolvedValue({ aggregate: 'fresh', datasets: [] });
+    mocks.getConnector.mockResolvedValue(connector);
+    mocks.readHealthSnapshot.mockResolvedValue({
+      sync: {
         status: 'succeeded',
+        lastAttemptAt: null,
         lastSuccessfulSyncAt: new Date().toISOString(),
-        attributionStatus: 'healthy',
-      }]))
-      .mockReturnValueOnce(chainable([]))
-      .mockReturnValueOnce(chainable([{
+        lastSuccessfulWindowStart: null,
+        lastSuccessfulWindowEnd: null,
+        lastErrorCode: null,
+      },
+      attribution: {
+        status: 'healthy',
+        lastAttemptAt: null,
+        lastSuccessfulAt: null,
+        lastErrorCode: null,
+        policyVersion: null,
+        engineVersion: null,
+      },
+      activeJob: null,
+      capture: {
         status: 'captured',
         lastAttemptAt: '2026-08-10T12:02:00.000Z',
         lastErrorCode: null,
-      }]))
-      .mockReturnValueOnce(chainable([{
+      },
+      evaluation: {
         status: 'unavailable',
         stage: 'evaluation-requested',
         lastAttemptAt: '2026-08-10T12:03:00.000Z',
         lastSuccessfulAt: null,
         lastErrorCode: 'finance_insight_evaluation_unavailable',
         retryable: true,
-        publicationId: 'private-publication',
-        sourceSequence: 19,
-      }]));
+      },
+    });
     const { GET } = await import('@/app/api/connectors/[id]/health/route');
 
     const response = await GET(new Request(
@@ -407,7 +523,7 @@ describe('finance connector routes', () => {
       type,
       enabled: true,
     };
-    mocks.select.mockReturnValueOnce(chainable([connector]));
+    mocks.getConnector.mockResolvedValueOnce(connector);
     const { GET } = await import('@/app/api/connectors/[id]/health/route');
 
     const response = await GET(new Request('https://mc.example/api/connectors/persisted-finance/health', {
@@ -423,7 +539,7 @@ describe('finance connector routes', () => {
   });
 
   it('does not expose unexpected health errors', async () => {
-    mocks.select.mockImplementationOnce(() => {
+    mocks.getConnector.mockImplementationOnce(() => {
       throw new Error('private token and upstream response body');
     });
     const { GET } = await import('@/app/api/connectors/[id]/health/route');
@@ -465,12 +581,13 @@ describe('finance connector routes', () => {
     'monarch-money',
   ])('returns actionable guidance for an unsafe persisted %s bridge URL', async (type) => {
     const { MonarchBridgeError } = await import('@/lib/connectors/monarch-money/client');
-    mocks.select.mockReturnValueOnce(chainable([{
+    mocks.getConnector.mockResolvedValueOnce({
       id: 'persisted-finance',
       type,
+      enabled: true,
       settings: { bridgeUrl: 'https://tyrion.example' },
       credentials: {},
-    }]));
+    });
     mocks.configFromRow.mockReturnValue({
       id: 'persisted-finance',
       settings: { bridgeUrl: 'https://tyrion.example' },
@@ -481,7 +598,10 @@ describe('finance connector routes', () => {
     );
     const { POST } = await import('@/app/api/connectors/[id]/test/route');
 
-    const response = await POST(new Request('http://localhost'), {
+    const response = await POST(new Request('http://localhost/api/connectors/persisted-finance/test', {
+      method: 'POST',
+      headers: { 'x-mc-api-key': 'test-finance-api-key' },
+    }), {
       params: Promise.resolve({ id: 'persisted-finance' }),
     });
 
@@ -489,5 +609,33 @@ describe('finance connector routes', () => {
       success: false,
       error: 'Tyrion Bridge API URL is invalid. Edit the connector and enter its protected Bridge v1 base URL.',
     });
+    expect(mocks.recordTestResult).toHaveBeenCalledWith(expect.objectContaining({
+      connectorId: 'persisted-finance',
+      status: 'failed',
+    }));
+  });
+
+  it('rejects an untrusted finance connector test before any provider I/O', async () => {
+    mocks.getConnector.mockResolvedValueOnce({
+      id: 'persisted-finance',
+      type: 'finance-manager',
+      enabled: true,
+      settings: {},
+      credentials: {},
+    });
+    const { POST } = await import('@/app/api/connectors/[id]/test/route');
+
+    const response = await POST(new Request('https://mc.example/api/connectors/persisted-finance/test', {
+      method: 'POST',
+      headers: {
+        host: 'mc.example',
+        origin: 'https://attacker.example',
+        'sec-fetch-site': 'cross-site',
+      },
+    }), { params: Promise.resolve({ id: 'persisted-finance' }) });
+
+    expect(response.status).toBe(403);
+    expect(mocks.getHealth).not.toHaveBeenCalled();
+    expect(mocks.recordTestResult).not.toHaveBeenCalled();
   });
 });

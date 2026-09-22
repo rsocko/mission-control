@@ -281,7 +281,7 @@ export function StorageSection() {
             </p>
 
             {availableSources.length === 0 ? (
-              <p className="text-xs text-[var(--text-muted)]">No items in the triage queue.</p>
+              <p className="text-xs text-[var(--text-muted)]">No items in the Inbox.</p>
             ) : (
               <div className="space-y-3">
                 <div className="flex flex-wrap items-end gap-3">

@@ -133,6 +133,8 @@
   "overrides": {
     "@github/copilot": "1.0.76-0",
     "@hono/node-server": "1.19.15",
+    "@radix-ui/react-dismissable-layer": "1.1.19",
+    "@radix-ui/react-focus-scope": "1.1.16",
     "baseline-browser-mapping": "2.11.20",
     "browserslist": "4.28.7",
     "hono": "4.13.5",

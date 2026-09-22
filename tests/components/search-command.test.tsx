@@ -359,6 +359,7 @@ describe('SearchCommand', () => {
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(screen.getByRole('complementary', { name: 'Task preview exact' })).toBeInTheDocument();
+    await waitFor(() => expect(document.body.style.pointerEvents).not.toBe('none'));
 
     semantic.resolve(jsonResponse({
       results: [

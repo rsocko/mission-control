@@ -45,6 +45,10 @@ import {
   writeRecurrenceMetadata,
 } from '@/lib/recurrence/canonical';
 import {
+  applyRecurrenceEditorOptions,
+  getRecurrenceControlState,
+} from '@/lib/recurrence/editor';
+import {
   executeFencedGitHubTaskMutation,
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
@@ -129,6 +133,8 @@ export async function PATCH(
     if (!writeContext) return ApiErrors.notFound('Task');
     const currentTask = writeContext.task;
     const currentSchedule = writeContext.schedule;
+    const parsedCurrentMetadata = parseTaskMetadataCompat(currentTask.metadata);
+    const currentCanonical = readRecurrenceMetadata(parsedCurrentMetadata.metadata);
     const requestedVersion = request.headers.get('x-expected-task-updated-at');
     if (requestedVersion && currentTask.updatedAt !== requestedVersion) {
       return NextResponse.json({
@@ -166,6 +172,25 @@ export async function PATCH(
     ) {
       return ApiErrors.badRequest(
         'Choose a recurrence interval before anchoring it to completion',
+      );
+    }
+    if (
+      (input.recurrenceSkipDates !== undefined || input.recurrenceCatchUp !== undefined)
+      && !(input.recurrence ?? currentSchedule?.recurrence)
+    ) {
+      return ApiErrors.badRequest('Choose a recurrence interval before setting recurrence options');
+    }
+    if (
+      parsed.fields.includes('recurrence')
+      && (
+        currentCanonical.status === 'invalid'
+        || currentCanonical.rule?.source.owner === 'connector'
+      )
+    ) {
+      return ApiErrors.forbidden(
+        currentCanonical.status === 'invalid'
+          ? 'This recurrence cannot be edited because its stored rule is invalid'
+          : 'This recurrence is owned by its provider and must be changed there',
       );
     }
     const [capabilities, connectorEnabled] = localIdentity
@@ -391,9 +416,18 @@ export async function PATCH(
     if (
       input.recurrence !== undefined
       || input.recurrenceMode !== undefined
-      || (input.dueDate !== undefined && Boolean(currentSchedule?.recurrence))
+      || input.recurrenceSkipDates !== undefined
+      || input.recurrenceCatchUp !== undefined
+      || (
+        input.dueDate !== undefined
+        && Boolean(currentSchedule?.recurrence)
+        && (
+          currentCanonical.rule?.source.owner === 'mission-control'
+          || localIdentity
+        )
+      )
     ) {
-      const parsedMetadata = parseTaskMetadataCompat(currentTask.metadata);
+      const parsedMetadata = parsedCurrentMetadata;
       if (
         input.recurrence !== undefined
         && !parsedMetadata.recoveredLegacy
@@ -403,7 +437,6 @@ export async function PATCH(
         delete metadata.recurrence;
         updates.metadata = metadata;
       }
-      const currentCanonical = readRecurrenceMetadata(parsedMetadata.metadata);
       const nextMetadata = (updates.metadata ?? parsedMetadata.metadata) as Record<string, unknown>;
       const nextRecurrence = input.recurrence === undefined
         ? currentSchedule?.recurrence ?? null
@@ -412,31 +445,39 @@ export async function PATCH(
         updates.metadata = writeRecurrenceMetadata(nextMetadata, null);
       } else {
         try {
+          const baseRule = canonicalizeLegacyRecurrence({
+            recurrence: normalizeStoredRecurrence(nextRecurrence),
+            mode: input.recurrenceMode
+              ?? currentSchedule?.recurrenceMode
+              ?? 'schedule',
+            startDate: (
+              input.dueDate
+              ?? currentTask.dueDate
+              ?? currentSchedule?.scheduledDate
+              ?? getLocalToday()
+            ).slice(0, 10),
+            localTime: extractRecurrenceLocalTime(
+              input.dueDate ?? currentTask.dueDate,
+              getTimezone(),
+            ),
+            timezone: getTimezone(),
+            seriesIdentity: currentCanonical.rule?.series.identity ?? {
+              kind: 'mission-control',
+              stableId: currentTask.id,
+              ...(localIdentity
+                ? {}
+                : { connectorInstanceId: currentTask.connectorInstanceId }),
+            },
+            source: currentCanonical.rule?.source,
+          });
           updates.metadata = writeRecurrenceMetadata(
             nextMetadata,
-            canonicalizeLegacyRecurrence({
-              recurrence: normalizeStoredRecurrence(nextRecurrence),
-              mode: input.recurrenceMode
-                ?? currentSchedule?.recurrenceMode
-                ?? 'schedule',
-              startDate: (
-                input.dueDate
-                ?? currentTask.dueDate
-                ?? currentSchedule?.scheduledDate
-                ?? getLocalToday()
-              ).slice(0, 10),
-              localTime: extractRecurrenceLocalTime(
-                input.dueDate ?? currentTask.dueDate,
-                getTimezone(),
-              ),
-              timezone: getTimezone(),
-              seriesIdentity: currentCanonical.rule?.series.identity ?? {
-                kind: 'mission-control',
-                stableId: currentTask.id,
-                ...(localIdentity
-                  ? {}
-                  : { connectorInstanceId: currentTask.connectorInstanceId }),
-              },
+            applyRecurrenceEditorOptions(baseRule, {
+              skipDates: input.recurrenceSkipDates
+                ?? [...(currentCanonical.rule?.semantics.exceptions.skipDates ?? [])],
+              catchUp: input.recurrenceCatchUp
+                ?? currentCanonical.rule?.semantics.materialization.catchUp
+                ?? (baseRule.semantics.mode === 'completion' ? 'none' : 'latest'),
             }),
           );
         } catch (error) {
@@ -1217,6 +1258,7 @@ export async function GET(
     const legacyRecurrence = typeof legacyMetadata.metadata.recurrence === 'string'
       ? legacyMetadata.metadata.recurrence
       : null;
+    const parsedRecurrence = readRecurrenceMetadata(legacyMetadata.metadata);
     const localIdentity = task.sourceId.startsWith('local:') || task.connectorType === 'local';
     const [caps, connectorEnabled] = localIdentity
       ? [null, true] as const
@@ -1242,6 +1284,23 @@ export async function GET(
         estimatedDuration: detail.schedule?.estimatedDuration ?? null,
         recurrence: detail.schedule?.recurrence ?? legacyRecurrence,
         recurrenceMode: detail.schedule?.recurrenceMode ?? 'schedule',
+        recurrenceControl: parsedRecurrence.status === 'invalid'
+          || (
+            parsedRecurrence.status === 'legacy'
+            && Boolean(legacyRecurrence)
+            && !localIdentity
+          )
+          ? {
+              rule: null,
+              owner: 'provider',
+              support: 'unsupported',
+              reasons: parsedRecurrence.status === 'invalid'
+                ? [...parsedRecurrence.issues]
+                : ['legacy_provider_rule_not_canonical'],
+              timezone: getTimezone(),
+              localTime: null,
+            }
+          : getRecurrenceControlState(parsedRecurrence.rule, getTimezone()),
         tagIds: detail.tagIds,
         projectIds: detail.projectIds,
         subtasks: detail.subtasks,

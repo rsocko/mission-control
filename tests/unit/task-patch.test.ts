@@ -80,4 +80,20 @@ describe('parseTaskPatchInput', () => {
     });
     expect(parseTaskPatchInput({ reminderNagInterval: 2 }).success).toBe(false);
   });
+
+  it('maps validated recurrence options to recurrence policy', () => {
+    expect(parseTaskPatchInput({
+      recurrenceSkipDates: ['2026-09-28'],
+      recurrenceCatchUp: 'none',
+    })).toMatchObject({
+      success: true,
+      fields: ['recurrence'],
+    });
+    expect(parseTaskPatchInput({
+      recurrenceSkipDates: ['September 28'],
+    }).success).toBe(false);
+    expect(parseTaskPatchInput({
+      recurrenceCatchUp: 'all',
+    }).success).toBe(false);
+  });
 });

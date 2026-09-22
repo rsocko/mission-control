@@ -13,6 +13,7 @@ import type { TaskDetail, TaskTag } from '@/components/task-detail/task-detail-t
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { notifyTaskChanged } from '@/lib/task-change-events';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
+import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
 
 vi.mock('sonner', () => ({
   toast: {
@@ -235,6 +236,85 @@ describe('useTaskDetailData', () => {
 });
 
 describe('useTaskDetailMutations', () => {
+  it('persists recurrence exceptions and catch-up policy through the recurrence field policy', async () => {
+    const rule = canonicalizeLegacyRecurrence({
+      recurrence: 'weekly',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: { kind: 'mission-control', stableId: 'task-1' },
+    });
+    const fetchMock = stubFetch(() => jsonResponse({}));
+    const onUpdate = vi.fn();
+    const { result } = renderMutations({
+      task: {
+        ...baseTask,
+        recurrence: 'weekly',
+        recurrenceControl: {
+          rule,
+          owner: 'mission-control',
+          support: 'supported',
+          reasons: [],
+          timezone: 'UTC',
+          localTime: null,
+        },
+      },
+      onUpdate,
+    });
+
+    await act(async () => {
+      await result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-08'],
+        catchUp: 'none',
+      });
+    });
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      recurrenceSkipDates: ['2026-08-08'],
+      recurrenceCatchUp: 'none',
+    });
+    expect(result.current.task?.recurrenceControl?.rule?.semantics).toMatchObject({
+      exceptions: { skipDates: ['2026-08-08'] },
+      materialization: { catchUp: 'none' },
+    });
+    expect(onUpdate).toHaveBeenCalledWith({
+      recurrenceSkipDates: ['2026-08-08'],
+      recurrenceCatchUp: 'none',
+    });
+  });
+
+  it('ignores concurrent recurrence option saves that would use stale options', async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => {
+      resolveRequest = resolve;
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderMutations();
+
+    let firstSave: Promise<void>;
+    act(() => {
+      firstSave = result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-08'],
+        catchUp: 'latest',
+      });
+    });
+    expect(result.current.mutations.recurrenceOptionsSaving).toBe(true);
+
+    await act(async () => {
+      await result.current.mutations.handleRecurrenceOptionsChange({
+        skipDates: ['2026-08-15'],
+        catchUp: 'latest',
+      });
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    resolveRequest?.(jsonResponse({}));
+    await act(async () => {
+      await firstSave!;
+    });
+    expect(result.current.mutations.recurrenceOptionsSaving).toBe(false);
+  });
+
   it('saves the canonical relative reminder returned by the server', async () => {
     const reminder = {
       reminderAt: '2026-08-02T13:00:00.000Z',

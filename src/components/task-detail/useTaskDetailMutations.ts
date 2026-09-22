@@ -43,6 +43,7 @@ import type {
   TaskFieldUpdate,
   TaskTag,
 } from './task-detail-types';
+import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 
 /** Confirmation the panel must show before a destructive mutation runs. */
 export interface TaskConfirmRequest {
@@ -110,6 +111,8 @@ export function useTaskDetailMutations({
   const [updatingProjectPhaseIds, setUpdatingProjectPhaseIds] = useState<Set<string>>(new Set());
   const [skippingToCurrent, setSkippingToCurrent] = useState(false);
   const [reminderSaving, setReminderSaving] = useState(false);
+  const [recurrenceOptionsSaving, setRecurrenceOptionsSaving] = useState(false);
+  const recurrenceOptionsSavingRef = useRef(false);
   const [microStatusSuggestion, setMicroStatusSuggestion] = useState<MicroStatusSuggestion | null>(null);
   const [showMicroStatusPicker, setShowMicroStatusPicker] = useState(false);
   const [showCloseReasonPicker, setShowCloseReasonPicker] = useState(false);
@@ -604,7 +607,12 @@ export function useTaskDetailMutations({
     setTask((prev) => prev ? {
       ...prev,
       recurrence: value,
-      ...(value === null ? { recurrenceMode: 'schedule' as const } : {}),
+      ...(value === null
+        ? {
+            recurrenceMode: 'schedule' as const,
+            recurrenceControl: undefined,
+          }
+        : {}),
     } : prev);
   }, [saveField, setTask]);
 
@@ -617,6 +625,53 @@ export function useTaskDetailMutations({
     }
     setTask((prev) => prev ? { ...prev, recurrenceMode } : prev);
     onUpdate?.({ recurrenceMode });
+  }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
+
+  const handleRecurrenceOptionsChange = useCallback(async (options: RecurrenceEditorOptions) => {
+    if (recurrenceOptionsSavingRef.current || !ensureFieldsEditable('recurrence')) return;
+    recurrenceOptionsSavingRef.current = true;
+    setRecurrenceOptionsSaving(true);
+    try {
+      const result = await patchTask(taskId, {
+        recurrenceSkipDates: options.skipDates,
+        recurrenceCatchUp: options.catchUp,
+      });
+      if (!result.ok) {
+        toast.error(typeof result.data.error === 'string'
+          ? result.data.error
+          : 'Failed to save recurrence options');
+        return;
+      }
+      setTask((prev) => {
+        const control = prev?.recurrenceControl;
+        const rule = control?.rule;
+        if (!prev || !control || !rule) return prev;
+        return {
+          ...prev,
+          recurrenceControl: {
+            ...control,
+            rule: {
+              ...rule,
+              semantics: {
+                ...rule.semantics,
+                exceptions: { skipDates: options.skipDates },
+                materialization: {
+                  ...rule.semantics.materialization,
+                  catchUp: rule.semantics.mode === 'completion' ? 'none' : options.catchUp,
+                },
+              },
+            },
+          },
+        };
+      });
+      onUpdate?.({
+        recurrenceSkipDates: options.skipDates,
+        recurrenceCatchUp: options.catchUp,
+      });
+    } finally {
+      recurrenceOptionsSavingRef.current = false;
+      setRecurrenceOptionsSaving(false);
+    }
   }, [ensureFieldsEditable, onUpdate, setTask, taskId]);
 
   const handleMicroStatusChange = useCallback(async (microStatus: string | null) => {
@@ -749,6 +804,8 @@ export function useTaskDetailMutations({
     reminderSaving,
     handleRecurrenceChange,
     handleRecurrenceModeChange,
+    handleRecurrenceOptionsChange,
+    recurrenceOptionsSaving,
     handleMicroStatusChange,
     requestMicroStatusSuggestion,
     dismissMicroStatusSuggestion,

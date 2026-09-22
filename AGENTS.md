@@ -10,16 +10,18 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 ## Dependency Restoration Policy
 
-Corporate development environments use the approved npm registry at
-`https://packagefeedproxy.microsoft.io/npm/`. Some versions locked by this repository may not
-yet be mirrored there.
+Corporate development environments use the approved npm registry configured by IT policy.
+GitHub Actions intentionally overrides that local configuration with
+`NPM_CONFIG_REGISTRY=https://registry.npmjs.org/` at workflow scope.
 
-- Do not run `npm install` or `npm ci` as routine session setup. First use the existing
+- In local development sessions, do not run `npm install` or `npm ci` as routine setup. First use the existing
   `node_modules` and run the smallest relevant validation command; restore only when a command
   fails because dependencies are actually missing.
-- Before any restore, run `npm config get registry`. If it is not the approved registry above,
-  stop and report the configuration problem. Never switch to or retry against the public npm
-  registry.
+- Before a local restore, run `npm config get registry`. If it is not
+  `https://packagefeedproxy.microsoft.io/npm/`, stop and report the configuration problem.
+  Never switch a local session to or retry against the public npm registry.
+- On GitHub Actions, use the workflow-provided public registry. Do not replace it with the
+  corporate registry or require access to corporate infrastructure.
 - The committed `package-lock.json` is authoritative. Restore with
   `npm ci --prefer-offline --no-audit --no-fund --fetch-retries=0 --fetch-timeout=15000`.
   Do not use unconstrained installs or request newer package versions.

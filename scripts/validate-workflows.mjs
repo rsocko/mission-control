@@ -148,6 +148,11 @@ for (const file of workflowFiles) {
     /\$\{\{(?:(?!\}\})[\s\S])*\bsecrets\b/iu,
     `${file} must not reference protected secrets`,
   );
+  assert.equal(
+    workflow.env?.NPM_CONFIG_REGISTRY,
+    'https://registry.npmjs.org/',
+    `${file} must use the public npm registry instead of inheriting developer machine configuration`,
+  );
   validatePermissions(workflow.permissions, file);
 
   const handlesPullRequests = 'pull_request' in workflow.on;

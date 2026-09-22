@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { CONNECTOR_COLORS } from '@/lib/constants/colors';
 import { taskLogger } from '@/lib/client-logger';
 import type { QuickAddDestination } from '@/components/add-task/quick-add-types';
+import type { SourceList } from '@/components/task-detail/task-detail-types';
 
 export const LOCAL_QUICK_ADD_DESTINATION: QuickAddDestination = {
   id: 'local',
@@ -70,6 +71,7 @@ export function useQuickAddDestinations(context: QuickAddDestinationContext) {
   const [destinations, setDestinations] = useState<QuickAddDestination[]>([
     LOCAL_QUICK_ADD_DESTINATION,
   ]);
+  const [sourceLists, setSourceLists] = useState<SourceList[]>([]);
   const [destination, setDestination] = useState<QuickAddDestination>(
     LOCAL_QUICK_ADD_DESTINATION,
   );
@@ -143,9 +145,12 @@ export function useQuickAddDestinations(context: QuickAddDestinationContext) {
             .then((listData) => {
               if (cancelled) return;
               const lists = (listData.sourceLists || listData.lists || []) as Array<{
+                id: string;
                 sourceId: string;
+                connectorInstanceId: string;
                 name: string;
-                groupId?: string;
+                taskCount: number;
+                groupId: string | null;
               }>;
               const groups = (listData.groups || []) as Array<{
                 id: string;
@@ -155,6 +160,10 @@ export function useQuickAddDestinations(context: QuickAddDestinationContext) {
               if (lists.length === 0) return;
 
               const groupMap = new Map(groups.map((group) => [group.id, group]));
+              setSourceLists((current) => [
+                ...current.filter((list) => list.connectorInstanceId !== item.id),
+                ...lists,
+              ]);
               setDestinations((current) => {
                 const existingListIds = new Set(
                   current
@@ -241,5 +250,6 @@ export function useQuickAddDestinations(context: QuickAddDestinationContext) {
     selectDestination,
     isPickerOpen,
     setPickerOpen,
+    sourceLists,
   };
 }

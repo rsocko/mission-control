@@ -83,7 +83,13 @@ vi.mock('@/types/dashboard', () => ({
 }));
 
 vi.mock('@/types', () => ({
-  MICRO_STATUS_CONFIG: {},
+  MICRO_STATUS_CONFIG: {
+    waiting_on_someone: {
+      label: 'Waiting on someone',
+      description: 'Waiting for someone else',
+      color: '#f59e0b',
+    },
+  },
 }));
 
 const item: MyDayItem = {
@@ -140,7 +146,7 @@ describe('SortableTaskRow aligned properties', () => {
     const children = Array.from(row?.children ?? []);
     const actions = screen.getByTestId('task-row-actions');
     const duration = screen.getByTitle('Estimated: 30min');
-    const taskCopy = screen.getByText('Narrow row').closest('.flex-1');
+    const taskCopy = screen.getByText('Narrow row').parentElement?.parentElement;
 
     expect(actions).toHaveAttribute('data-score', '80');
     expect(actions).toHaveAttribute('data-horizon', 'soon');
@@ -156,5 +162,27 @@ describe('SortableTaskRow aligned properties', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Filter status' }));
     expect(onFilterPriority).toHaveBeenCalledWith('high');
     expect(onFilterStatus).toHaveBeenCalledWith('in_progress');
+  });
+
+  it('prioritizes the title and collapses the status reason to its icon in narrow rows', () => {
+    render(
+      <SortableTaskRow
+        item={{ ...item, microStatus: 'waiting_on_someone' }}
+        onComplete={vi.fn()}
+        onFocus={vi.fn()}
+        onSchedule={vi.fn()}
+        onRemove={vi.fn()}
+        onSelect={vi.fn()}
+        isSelected={false}
+        onSetDueDate={vi.fn()}
+        onSetPriority={vi.fn()}
+        onSetStatus={vi.fn()}
+        onOpenNotes={vi.fn()}
+        draggable={false}
+      />,
+    );
+
+    expect(screen.getByText('Narrow row')).toHaveClass('min-w-0', 'flex-1', 'truncate');
+    expect(screen.getByText('Waiting on someone')).toHaveClass('hidden', '@min-[960px]:inline');
   });
 });

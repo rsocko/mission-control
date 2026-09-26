@@ -35,6 +35,7 @@ function response(tasks: Task[], total: number, hasMore = true): TaskResponse {
       inbox: 0,
     },
     sourceCounts: {},
+    facetCounts: { priorities: {}, statuses: {} },
     availableTags: [],
   };
 }

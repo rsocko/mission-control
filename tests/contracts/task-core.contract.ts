@@ -1429,6 +1429,10 @@ export function describeTaskCoreContract(
           projectIds: ['project-1'],
         });
         expect(collection.rows[0].tags.map((tag) => tag.id)).toEqual(['tag-api']);
+        expect(collection.facetCounts).toEqual({
+          priorities: { none: 1 },
+          statuses: { todo: 1 },
+        });
 
         const detail = await harness.persistence.details.getTaskDetail('task-literal', TODAY);
         expect(detail).toMatchObject({

@@ -160,6 +160,7 @@ function fakePersistence(): TaskCorePersistence {
           recentlyCreated: 0, recentlyClosed: 0, waiting: 0, inbox: 0,
         },
         sourceCounts: {},
+        facetCounts: { priorities: {}, statuses: {} },
         availableTags: [],
         connectorContexts: [],
         smartScore: null,
@@ -287,6 +288,7 @@ function fakePersistence(): TaskCorePersistence {
         inbox: 0,
       }),
       getSourceCounts: () => record('getSourceCounts', {}),
+      getFacetCounts: () => record('getFacetCounts', { priorities: {}, statuses: {} }),
       getAvailableTags: () => record('getAvailableTags', []),
     },
     policyIdentities: {

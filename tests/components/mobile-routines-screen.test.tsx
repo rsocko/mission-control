@@ -60,7 +60,7 @@ const { toastError, toastSuccess } = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
 }));
 
-vi.mock('sonner', () => ({ toast: { error: toastError, success: toastSuccess } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: toastError, success: toastSuccess } }));
 vi.mock('@/lib/motion', () => ({ fadeSlideUp: {}, staggerContainer: {} }));
 vi.mock('@/lib/utils', () => ({ cn: (...args: unknown[]) => args.filter(Boolean).join(' ') }));
 vi.mock('@/lib/hooks/usePullToRefresh', () => ({

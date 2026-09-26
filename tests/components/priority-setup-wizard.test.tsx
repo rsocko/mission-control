@@ -97,7 +97,7 @@ vi.mock('@dnd-kit/utilities', () => ({
 // ─── Mock sonner ────────────────────────────────────────────────────────────
 
 const mockToast = { success: vi.fn(), error: vi.fn() };
-vi.mock('sonner', () => ({ toast: mockToast }));
+vi.mock('@/lib/toast', () => ({ toast: mockToast }));
 
 // ─── Mock @/lib/smart-score (used by PriorityEntitiesPanel via index re-export) ─
 

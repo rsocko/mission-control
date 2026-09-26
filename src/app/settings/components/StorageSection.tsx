@@ -6,7 +6,7 @@ import {
   Image as ImageIcon, Database, CheckCircle2,
 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 interface StorageStats {

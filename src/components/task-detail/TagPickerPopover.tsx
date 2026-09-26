@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tag, Search, Plus, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { AnimatePresence, motion } from 'motion/react';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import { useClickOutside } from '@/lib/hooks/useClickOutside';

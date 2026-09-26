@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Circle, Info, ListChecks, Loader2, X } from 'lucide-react';
 import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';

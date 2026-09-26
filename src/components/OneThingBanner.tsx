@@ -7,7 +7,7 @@ import {
   Target, Sparkles, Loader2, X, ChevronDown, ChevronRight, Check, CheckCircle2,
   ArrowRight, Shuffle, Trophy,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { fadeSlideUp, scaleIn, oneThingCelebration, oneThingConfetti, oneThingGlow } from '@/lib/motion';
 import { uiLogger } from '@/lib/client-logger';

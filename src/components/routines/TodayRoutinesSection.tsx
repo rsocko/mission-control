@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion } from 'motion/react';
 import { Repeat, Check, Flame, Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';

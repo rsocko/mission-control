@@ -177,7 +177,7 @@ vi.mock('@xyflow/react', () => ({
 }));
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push: vi.fn() }) }));
-vi.mock('sonner', () => ({ toast: { error: toastError, success: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: toastError, success: vi.fn() } }));
 vi.mock('@/components/ideation/IdeationWorkspaceBar', () => ({
   IdeationWorkspaceBar: () => null,
 }));

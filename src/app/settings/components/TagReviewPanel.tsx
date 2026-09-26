@@ -4,7 +4,7 @@ import { useCallback, useMemo, useReducer, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 import { motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { staggerContainer, fadeSlideUp } from '@/lib/motion';
 import { CONNECTOR_TYPES } from './types';
 import { BulkDeleteTagsDialog } from './tag-review/dialogs/BulkDeleteTagsDialog';

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, type Dispatch, type SetStateAction } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday, getLocalTomorrow as getClientTomorrow } from '@/lib/utils/client-date';

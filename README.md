@@ -57,6 +57,22 @@ npm run dev:orphan-scan       # scan Copilot lifecycle registrations
 See [Managed Development Services](docs/development/dev-services.md) for
 resource limits, TTL behavior, temporary uncapped runs, inventory, and logs.
 
+## Toast preferences
+
+In Settings, search for **Toast notifications** (under **Other**) to choose
+bottom-left or top-right desktop placement. Bottom-left is the default and clears
+both the collapsed and expanded navigation rail. Mobile keeps top-center placement.
+Dismiss a toast with its X or drag/swipe its body in any direction.
+
+Routine confirmations last three seconds; errors, warnings, and actionable messages
+default to eight seconds. Explicit action deadlines are preserved, and repeated
+plain messages are grouped during their display window. Hovering pauses dismissal;
+keyboard focus holds messages open and gives them a fresh reading interval on exit.
+Choose **Errors only** or mute routine toasts for 15 minutes or one hour; errors,
+warnings, progress, and actions such as Undo are never suppressed. Mute expires
+automatically and can be canceled early. These browser-local preferences do not
+change push notifications.
+
 ## MCP Server (AI Agent Integration)
 
 Mission Control includes an MCP (Model Context Protocol) server that lets AI agents like GitHub Copilot manage your projects, tasks, and tags directly.

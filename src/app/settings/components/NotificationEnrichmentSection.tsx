@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { Sparkles, RefreshCw, Loader2, CheckCircle2, AlertTriangle } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 
 type Scope = 'unenriched' | 'all' | 'connector' | 'ids';

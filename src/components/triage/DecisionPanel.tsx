@@ -7,7 +7,7 @@ import { ACTION_META } from '@/components/triage/types';
 import RichPreviewEmbed from '@/components/triage/RichPreviewEmbed';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { cn } from '@/lib/utils/cn';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { TriageActionType, TriageItem } from '@/types';
 import { getInboxTaskMetadata } from '@/lib/inbox/items';
 

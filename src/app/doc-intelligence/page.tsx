@@ -24,7 +24,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumentPreviewSection';

@@ -41,7 +41,7 @@ vi.mock('@/app/settings/components/ConnectorBrandIcon', () => ({
   ConnectorBrandIcon: ({ type }: { type: string }) => <span aria-hidden="true">{type}</span>,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 

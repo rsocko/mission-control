@@ -42,7 +42,7 @@ vi.mock('lucide-react', () => ({
   ShieldAlert: () => <span data-testid="icon-shield-alert">!</span>,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 

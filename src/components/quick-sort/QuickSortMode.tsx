@@ -12,7 +12,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import ModeSelector from './ModeSelector';
 import OrderSelector from './OrderSelector';
 import ScopeFilter from './ScopeFilter';

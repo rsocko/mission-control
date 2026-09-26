@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { SaveTemplateModal } from '@/components/add-task';
 import type { TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import {

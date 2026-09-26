@@ -40,7 +40,7 @@ vi.mock('lucide-react', () => ({
   X: () => <span data-testid="icon-x">×</span>,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: vi.fn(),
     success: vi.fn(),
@@ -259,7 +259,7 @@ describe('GoalsPage', () => {
   });
 
   it('shows error toast when fetch fails', async () => {
-    const { toast } = await import('sonner');
+    const { toast } = await import('@/lib/toast');
     fetchSpy.mockResolvedValue(new Response('error', { status: 500 }));
 
     await act(async () => {

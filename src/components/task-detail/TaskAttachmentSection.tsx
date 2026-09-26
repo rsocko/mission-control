@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Paperclip, Trash2, Image, FileText, File, Loader2, Download } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Tooltip } from '@/components/ui/Tooltip';
 import {
   attachmentContentUrl,

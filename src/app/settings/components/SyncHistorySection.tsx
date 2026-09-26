@@ -9,7 +9,7 @@ import {
   Check, ChevronDown, ListFilter, X,
 } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type {
   ConnectorConfig,
   SyncLogEntry,

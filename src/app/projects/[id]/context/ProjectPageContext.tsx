@@ -12,7 +12,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { HubProject, TaskContextMenuActions } from '@/components/task-list/TaskContextMenu';
 import type {
   TaskDetailMode,

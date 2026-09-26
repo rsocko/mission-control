@@ -44,7 +44,7 @@ import {
   QUICK_ADD_PREFERENCES_EVENT,
   type QuickAddPreferences,
 } from '@/lib/quick-add-preferences';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { taskLogger } from '@/lib/client-logger';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
 import {

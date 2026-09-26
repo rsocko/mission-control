@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -1649,7 +1649,7 @@ function GitHubSetup({ onBack, onClose, onAdded }: { onBack: () => void; onClose
         });
         if (!res.ok) throw new Error(await res.text());
         const result = await res.json();
-        const { toast } = await import('sonner');
+        const { toast } = await import('@/lib/toast');
         if (result.failed === 0) {
           toast.success(`Normalized ${result.succeeded} label${result.succeeded !== 1 ? 's' : ''}`);
         } else {

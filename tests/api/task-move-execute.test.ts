@@ -1538,7 +1538,9 @@ describe('POST /api/tasks/move/execute', () => {
       capabilities: { read: true, write: true, taskCreate: true },
     }]);
     selectResults.push([{ name: 'acme/repo-b', sourceId: 'acme/repo-b' }]);
-    selectResults.push([]);
+    selectResults.push([{
+      id: 'tag-1', name: 'bug', slug: 'bug', type: 'source', color: null,
+    }]);
     selectResults.push([]);
     selectResults.push([]);
     selectResults.push([]);
@@ -1561,7 +1563,11 @@ describe('POST /api/tasks/move/execute', () => {
     expect(mockTransferTask).not.toHaveBeenCalled();
     expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({
       sourceListId: 'acme/repo-b',
+      tags: [
+        expect.objectContaining({ name: 'bug', type: 'source' }),
+      ],
     }));
+    expect(mockAddTagToTask).not.toHaveBeenCalled();
     expect(mockCompleteTask).toHaveBeenCalledWith('acme/repo-a:10');
     const insertedTask = materializedTask('acme/repo-b:42');
     expect(insertedTask.metadata).toMatchObject({

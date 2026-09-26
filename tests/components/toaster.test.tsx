@@ -139,7 +139,7 @@ describe('Toaster', () => {
     expect(onClick).toHaveBeenCalledOnce();
   });
 
-  it('removes existing routine messages when muted but retains Undo and errors', async () => {
+  it.each([0, 8, 15])('removes existing routine messages when muted but retains Undo and errors (frame offset %i ms)', async (frameOffset) => {
     render(<Toaster />);
     act(() => {
       toast.success('Routine');
@@ -147,9 +147,14 @@ describe('Toaster', () => {
       toast.error('Important');
     });
     await advance();
+    await advance(frameOffset);
     act(() => setToastPreferences({ mode: 'errors-only' }));
     expect(entries().map((entry) => entry.title)).not.toContain('Routine');
-    await advance();
+    // Sonner publishes dismissal on one frame and applies it on the next.
+    // Flush React's deletion effect before advancing the exit-animation timer.
+    act(() => { vi.advanceTimersToNextFrame(); });
+    act(() => { vi.advanceTimersToNextFrame(); });
+    expect(screen.getByText('Routine').closest('li')).toHaveAttribute('data-removed', 'true');
     await advance(300);
     expect(screen.queryByText('Routine')).not.toBeInTheDocument();
     expect(screen.getByText('Undoable')).toBeInTheDocument();

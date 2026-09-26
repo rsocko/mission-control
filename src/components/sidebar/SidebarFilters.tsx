@@ -11,7 +11,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from '@/components/ui/select';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
@@ -39,6 +38,18 @@ import {
 import { SidebarNavItem } from './SidebarNavItem';
 
 const TAG_DEFAULT_COUNT = 10;
+
+const QUICK_FILTER_VISIBILITY_LABELS: Record<QuickFilterVisibility, string> = {
+  always: 'Always',
+  'when-not-empty': 'When not empty',
+  hidden: 'Hidden',
+};
+
+function QuickFilterVisibilityIcon({ visibility }: { visibility: QuickFilterVisibility }) {
+  if (visibility === 'always') return <Eye size={14} />;
+  if (visibility === 'when-not-empty') return <Hourglass size={14} />;
+  return <EyeOff size={14} />;
+}
 
 function matchesSourceListFilter(sourceList: SourceList, listFilter: string | null): boolean {
   return listFilter === sourceList.sourceId
@@ -275,7 +286,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
   }
 
   return (
-    <aside aria-label="Task filters" className={`hidden sm:flex flex-col ${sidebarExpanded ? 'w-80' : 'w-56'} bg-[var(--surface-1)] border-r border-[var(--border)] p-4 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-[width] duration-200`}>
+    <aside aria-label="Task filters" className={`hidden sm:flex flex-col ${showFilterSettings ? 'w-96' : sidebarExpanded ? 'w-80' : 'w-56'} bg-[var(--surface-1)] border-r border-[var(--border)] p-4 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-[width] duration-200`}>
       {/* Sources Section */}
       <div className="mb-4">
         <div className="flex items-center justify-between mb-2">
@@ -418,33 +429,46 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           ) : null}
         </div>
         {showFilterSettings && (
-          <div className="mb-2 p-2 rounded-md bg-[var(--surface-2)] border border-[var(--border)] space-y-1.5">
-            <p className="text-xs text-[var(--text-tertiary)] uppercase tracking-wide mb-1">Filter visibility</p>
-            {QUICK_FILTERS.map((filter) => (
-              <div key={filter.id} className="flex items-center justify-between gap-2 text-xs text-[var(--text-secondary)]">
-                <span className="min-w-0 truncate">{filter.label}</span>
-                <Select
-                  value={getQuickFilterVisibility(filter, quickFilterVisibility, hiddenQuickFilters)}
-                  onValueChange={(visibility) => setQuickFilterVisibility(
-                    filter.id,
-                    visibility as QuickFilterVisibility,
-                  )}
-                >
-                  <SelectTrigger
-                    variant="inline"
-                    aria-label={`${filter.label} visibility`}
-                    className="w-32"
+          <div className="mb-2 space-y-1.5 rounded-md border border-[var(--border)] bg-[var(--surface-2)] p-2">
+            <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-1 text-xs uppercase tracking-wide text-[var(--text-tertiary)]">
+              <span>Filter</span>
+              <span className="text-right">Rule</span>
+            </div>
+            {QUICK_FILTERS.map((filter) => {
+              const visibility = getQuickFilterVisibility(
+                filter,
+                quickFilterVisibility,
+                hiddenQuickFilters,
+              );
+              const visibilityLabel = QUICK_FILTER_VISIBILITY_LABELS[visibility];
+
+              return (
+                <div key={filter.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 px-1 text-xs text-[var(--text-secondary)]">
+                  <span className="min-w-0 truncate" title={filter.label}>{filter.label}</span>
+                  <Select
+                    value={visibility}
+                    onValueChange={(nextVisibility) => setQuickFilterVisibility(
+                      filter.id,
+                      nextVisibility as QuickFilterVisibility,
+                    )}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="always">Always</SelectItem>
-                    <SelectItem value="when-not-empty">When not empty</SelectItem>
-                    <SelectItem value="hidden">Hidden</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
+                    <SelectTrigger
+                      variant="inline"
+                      aria-label={`${filter.label} visibility: ${visibilityLabel}`}
+                      title={visibilityLabel}
+                      className="ml-auto w-10 shrink-0 justify-end"
+                    >
+                      <QuickFilterVisibilityIcon visibility={visibility} />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="min-w-40">
+                      <SelectItem value="always">Always</SelectItem>
+                      <SelectItem value="when-not-empty">When not empty</SelectItem>
+                      <SelectItem value="hidden">Hidden</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              );
+            })}
           </div>
         )}
         {!collapsedSections.has('quickFilters') && (

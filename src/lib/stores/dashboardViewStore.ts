@@ -25,6 +25,7 @@ interface DashboardViewState {
   sortDirection: 'asc' | 'desc';
   groupBy: string;
   viewDensity: 'compact' | 'comfortable';
+  wrapTaskTitles: boolean;
   showCompleted: boolean;
   matrixAxisMode: MatrixAxisMode;
   matrixSizeMode: MatrixSizeMode;
@@ -54,6 +55,7 @@ interface DashboardViewState {
   setSortDirection: (v: 'asc' | 'desc') => void;
   setGroupBy: (v: string) => void;
   setViewDensity: (v: 'compact' | 'comfortable') => void;
+  setWrapTaskTitles: (v: boolean) => void;
   setShowCompleted: (v: boolean) => void;
   setMatrixAxisMode: (v: MatrixAxisMode) => void;
   setMatrixSizeMode: (v: MatrixSizeMode) => void;
@@ -84,6 +86,7 @@ export const useDashboardViewStore = create<DashboardViewState>()(
       sortDirection: 'asc',
       groupBy: 'none',
       viewDensity: 'comfortable',
+      wrapTaskTitles: false,
       showCompleted: false,
       matrixAxisMode: 'priority-urgency',
       matrixSizeMode: 'smart-score',
@@ -109,6 +112,7 @@ export const useDashboardViewStore = create<DashboardViewState>()(
       setSortDirection: (v) => set({ sortDirection: v }),
       setGroupBy: (v) => set({ groupBy: v }),
       setViewDensity: (v) => set({ viewDensity: v }),
+      setWrapTaskTitles: (v) => set({ wrapTaskTitles: v }),
       setShowCompleted: (v) => set({ showCompleted: v }),
       setMatrixAxisMode: (v) => set({
         matrixAxisMode: v,
@@ -157,6 +161,7 @@ export const useDashboardViewStore = create<DashboardViewState>()(
         sortDirection: state.sortDirection,
         groupBy: state.groupBy,
         viewDensity: state.viewDensity,
+        wrapTaskTitles: state.wrapTaskTitles,
         showCompleted: state.showCompleted,
         matrixAxisMode: state.matrixAxisMode,
         matrixSizeMode: state.matrixSizeMode,

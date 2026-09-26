@@ -19,7 +19,7 @@ import { OneThingBanner } from '@/components/OneThingBanner';
 import { ShowCompletedToggle } from '@/components/toolbar/ShowCompletedToggle';
 import { GroupByDropdown } from '@/components/toolbar/GroupByDropdown';
 import { SortDropdown } from '@/components/toolbar/SortDropdown';
-import { ViewDensityToggle } from '@/components/toolbar/ViewDensityToggle';
+import { RowLayoutDropdown } from '@/components/toolbar/ViewDensityToggle';
 import { RecentWins } from '@/components/RecentWins';
 import { RoutineSnapshotWidget } from '@/components/routines/RoutineSnapshotWidget';
 import { TriageQueueWidget } from '@/components/triage/TriageQueueWidget';
@@ -130,6 +130,8 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
   const notificationsHook = useNotifications();
   const textFilter = useDashboardViewStore((s) => s.textFilter);
   const setTextFilter = useDashboardViewStore((s) => s.setTextFilter);
+  const wrapTaskTitles = useDashboardViewStore((s) => s.wrapTaskTitles);
+  const setWrapTaskTitles = useDashboardViewStore((s) => s.setWrapTaskTitles);
   const parsedTextFilter = useMemo(() => parseFilterQuery(textFilter), [textFilter]);
   const activeSourceList = state.listFilter
     ? state.sourceLists.find((list) => (
@@ -182,6 +184,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
     groupBy: state.groupBy,
     collapsedGroups: state.collapsedGroups,
     viewDensity: state.viewDensity,
+    wrapTaskTitles,
     listRef: computed.listRef,
     groupTotalCounts: state.groupTotalCounts,
   });
@@ -376,7 +379,15 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                 originLabel={originLabel}
               />
               <ShowCompletedToggle />
-              <ViewDensityToggle />
+              <RowLayoutDropdown
+                value={wrapTaskTitles
+                  ? 'wrapped'
+                  : state.viewDensity === 'compact' ? 'compact' : 'normal'}
+                onChange={(layout) => {
+                  setWrapTaskTitles(layout === 'wrapped');
+                  actions.setViewDensity(layout === 'compact' ? 'compact' : 'comfortable');
+                }}
+              />
               <GroupByDropdown />
               <SortDropdown />
             </div>
@@ -738,6 +749,7 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
                         hideSourceListName={!!state.listFilter || state.groupBy === 'list'}
                         showDivider={virtualItem.index < virtualRows.length - 1}
                         compact={state.viewDensity === 'compact'}
+                        wrapTitle={wrapTaskTitles}
                         bulkMode={state.bulkMode}
                         bulkSelected={state.bulkSelected.has(task.id)}
                         isCompleting={state.completingIds.has(task.id)}

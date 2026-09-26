@@ -9,7 +9,7 @@ import {
   TrendingUp, Lightbulb, Zap, Calendar,
 } from 'lucide-react';
 import DOMPurify from 'isomorphic-dompurify';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';

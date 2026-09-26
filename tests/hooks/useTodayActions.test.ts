@@ -11,7 +11,7 @@ vi.mock('@/lib/stores/undoStore', () => ({
   pushUndoWithToast: mocks.pushUndoWithToast,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
     success: vi.fn(),

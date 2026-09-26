@@ -46,7 +46,7 @@ vi.mock('@/components/task-detail/TaskDetailPanel', () => ({
   ),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: vi.fn(),
     info: vi.fn(),
@@ -59,7 +59,7 @@ vi.mock('@/lib/client-logger', () => ({
 }));
 
 import { SearchCommand } from '@/components/search/SearchCommand';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 interface Deferred<T> {
   promise: Promise<T>;

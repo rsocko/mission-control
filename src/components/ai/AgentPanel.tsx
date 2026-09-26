@@ -28,7 +28,7 @@ import {
   Eye,
   FileText,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
 import {

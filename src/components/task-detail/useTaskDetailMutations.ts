@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { taskLogger } from '@/lib/client-logger';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { formatShortDate } from '@/lib/utils/task-detail-date';

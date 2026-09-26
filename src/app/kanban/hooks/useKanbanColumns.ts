@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { kanbanLogger } from '@/lib/client-logger';
 import { DEFAULT_COLUMNS } from '../components';
 import type {

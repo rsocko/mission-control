@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Zap, Check } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 import { useTaskCompletion } from '@/lib/hooks/useTaskCompletion';
 import { SmartScoreBadge } from '@/components/smart-score/SmartScoreBadge';

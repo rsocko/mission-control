@@ -6,7 +6,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import Image from 'next/image';
 import { Check, Loader2, FolderOpen, Sun, Trash2, List } from 'lucide-react';
 import { IconPickerButton, IconRenderer } from '@/components/ui/icon-picker';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import {
   TaskDetailPanel,

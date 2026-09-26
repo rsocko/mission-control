@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { mapTagApiError, tagReviewApi } from './api';
 import type { ConnectorInfo, ReviewTag, SourceListInfo } from './types';
 

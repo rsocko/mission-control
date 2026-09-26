@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useLayoutEffect, useRef, type FormEvent } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { PlusCircle, Loader2, MapPin, Share2 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { addDays, format, endOfWeek } from 'date-fns';
 
 import { VoiceButton } from '@/components/capture/VoiceButton';

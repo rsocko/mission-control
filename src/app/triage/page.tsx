@@ -32,7 +32,7 @@ import {
 } from '@/lib/inbox/items';
 import { cn } from '@/lib/utils/cn';
 import { buildActionTitle } from '@/lib/triage/actions/build-task-title';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import { shouldVirtualizeList } from '@/lib/ui/list-virtualization';
 import type {

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
 import { Plus, Loader2, Target } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils/cn';
 import { staggerContainer } from '@/lib/motion';
 import { parseLocalDate } from '@/lib/utils/date-format';

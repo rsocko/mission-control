@@ -11,7 +11,7 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { formatTimeAgo } from '@/lib/utils/dashboard-helpers';

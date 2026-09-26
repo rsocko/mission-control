@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Search, X, Loader2, Check } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import emojilib from 'emojilib';
 import { cn } from '@/lib/utils/cn';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';

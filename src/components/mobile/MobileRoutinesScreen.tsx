@@ -18,7 +18,7 @@ import { usePullToRefresh } from '@/lib/hooks/usePullToRefresh';
 import { cn } from '@/lib/utils';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getWeekDates, getWeekMonday } from '@/lib/utils/date-format';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 type ViewMode = 'daily' | 'weekly';
 type CadenceType =

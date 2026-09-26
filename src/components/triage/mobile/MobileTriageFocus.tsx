@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { triggerHaptic, triggerHapticFeedback } from '@/lib/utils/haptics';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { TriageActionRecord, TriageActionType, TriageItem } from '@/types';
 import { SOURCE_META } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';

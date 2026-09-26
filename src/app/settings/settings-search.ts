@@ -119,6 +119,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
   { title: 'Timezone', section: 'general', sectionLabel: 'System', keywords: ['calendar', 'dates', 'schedule'] },
   { title: 'Completion animation', section: 'general', sectionLabel: 'System', keywords: ['particles', 'reduced motion'] },
   { title: 'Sync icon animation', section: 'general', sectionLabel: 'System', keywords: ['satellite', 'particles', 'alternating', 'random'] },
+  { title: 'Toast notifications', section: 'general', sectionLabel: 'System', keywords: ['mute', 'snooze', 'errors only', 'quiet', 'position', 'bottom left', 'top right'] },
   { title: 'Quick Add parsing', section: 'general', sectionLabel: 'System', keywords: ['nlp', 'dates', 'tokens', 'preserve text'] },
   { title: 'Natural-language date suggestions', section: 'general', sectionLabel: 'System', target: 'Natural-language date suggestions', keywords: ['nlp', 'quick add', 'dates'] },
   { title: 'Preserve metadata tokens', section: 'general', sectionLabel: 'System', keywords: ['quick add', 'title', 'tokens'] },

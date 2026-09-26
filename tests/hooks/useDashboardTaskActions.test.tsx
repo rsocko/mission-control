@@ -19,7 +19,7 @@ const toast = vi.hoisted(() => ({
   warning: vi.fn(),
 }));
 
-vi.mock('sonner', () => ({ toast }));
+vi.mock('@/lib/toast', () => ({ toast }));
 
 const task = {
   id: 'task-1',

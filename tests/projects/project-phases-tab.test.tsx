@@ -23,7 +23,7 @@ vi.mock('motion/react', async () => (
 vi.mock('@/components/ui/select', async () => (
   (await import('./project-tab-fixtures')).uiSelectModule()
 ));
-vi.mock('sonner', async () => (
+vi.mock('@/lib/toast', async () => (
   (await import('./project-tab-fixtures')).sonnerModule()
 ));
 vi.mock('@dnd-kit/core', async () => (

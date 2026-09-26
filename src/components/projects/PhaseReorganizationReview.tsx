@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { Check, ChevronDown, ChevronRight, LoaderCircle, Sparkles, X } from 'lucide-react';
 import * as Dialog from '@radix-ui/react-dialog';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {

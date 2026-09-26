@@ -34,6 +34,7 @@ interface TaskRowIdentityProps {
   onOpenSubtasks?: () => void;
   showMicroStatusLabel?: boolean;
   showSubtasks?: boolean;
+  wrapTitle?: boolean;
 }
 
 export function TaskRowIdentity({
@@ -47,6 +48,7 @@ export function TaskRowIdentity({
   onOpenSubtasks,
   showMicroStatusLabel = true,
   showSubtasks = true,
+  wrapTitle = false,
 }: TaskRowIdentityProps) {
   const displayId = getTaskDisplayId(task.connectorType, task.metadata, task.sourceId);
   const microStatus = task.microStatus as MicroStatus | null | undefined;
@@ -76,7 +78,8 @@ export function TaskRowIdentity({
         <div className={cn('flex min-w-0 items-center', compact ? 'gap-1.5' : 'gap-2')}>
           <span
             className={cn(
-              'truncate font-medium',
+              'font-medium',
+              wrapTitle ? 'line-clamp-2 whitespace-normal' : 'truncate',
               compact ? 'text-xs text-[var(--text-secondary)]' : 'text-sm text-[var(--text-primary)]',
               isDone && 'line-through text-[var(--text-muted)]',
             )}

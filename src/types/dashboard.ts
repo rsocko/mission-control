@@ -109,6 +109,10 @@ export const EMPTY_TASK_RESPONSE: DashboardTaskResponseViewModel = {
   },
   hasMore: false,
   sourceCounts: {},
+  facetCounts: {
+    priorities: {},
+    statuses: {},
+  },
   availableTags: [],
 };
 

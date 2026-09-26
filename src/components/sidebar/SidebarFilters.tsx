@@ -662,8 +662,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           <div className="flex flex-wrap gap-1">
             {(['critical', 'high', 'medium', 'low', 'none'] as const).map((p) => {
               const isActive = priorityFilter.includes(p);
-              // Only show counts when no priority filter is active (counts are from unfiltered results)
-              const count = priorityFilter.length === 0 ? taskResponse.tasks.filter((t) => t.priority === p).length : 0;
+              const count = priorityFilter.length === 0 ? taskResponse.facetCounts.priorities[p] ?? 0 : 0;
               return (
                 <button
                   key={p}
@@ -709,8 +708,7 @@ export function SidebarFilters({ data, filters, sidebar, actions, computed }: Si
           <div className="flex flex-wrap gap-1">
             {(['todo', 'in_progress', 'done', 'cancelled'] as const).map((s) => {
               const isActive = statusFilter.includes(s);
-              // Only show counts when no status filter is active (counts are from unfiltered results)
-              const count = statusFilter.length === 0 ? taskResponse.tasks.filter((t) => t.status === s).length : 0;
+              const count = statusFilter.length === 0 ? taskResponse.facetCounts.statuses[s] ?? 0 : 0;
               return (
                 <button
                   key={s}

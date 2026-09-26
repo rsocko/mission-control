@@ -169,6 +169,11 @@ export interface TaskStatsResult {
 
 export type TaskSourceCounts = Record<string, number>;
 
+export interface TaskFacetCounts {
+  readonly priorities: Record<string, number>;
+  readonly statuses: Record<string, number>;
+}
+
 export interface AvailableTaskTag {
   readonly id: string;
   readonly name: string;
@@ -580,6 +585,7 @@ export interface TaskCollectionResult {
   readonly total: number;
   readonly stats: TaskStatsResult;
   readonly sourceCounts: TaskSourceCounts;
+  readonly facetCounts: TaskFacetCounts;
   readonly availableTags: AvailableTaskTag[];
   readonly connectorContexts: TaskCollectionConnectorContext[];
   /**
@@ -1250,6 +1256,7 @@ export interface TaskQueryRepository {
   listTaskIds(spec: TaskFilterSpec, page: TaskListPage): Promise<string[]>;
   getStats(spec: TaskFilterSpec): Promise<TaskStatsResult>;
   getSourceCounts(spec: TaskFilterSpec): Promise<TaskSourceCounts>;
+  getFacetCounts(spec: TaskFilterSpec): Promise<TaskFacetCounts>;
   getAvailableTags(spec: TaskFilterSpec): Promise<AvailableTaskTag[]>;
 }
 

@@ -565,8 +565,7 @@ export interface TaskRowActionsProps {
   /**
    * Trims the action rail so narrow lists (e.g. Plan/Assign phase columns)
    * keep more room for the task title. Drops the smart score and planning
-   * horizon badges entirely and narrows the due-date / trailing-actions
-   * columns instead of reserving their full dashboard width.
+   * horizon badges entirely and reveals populated attributes later.
    */
   dense?: boolean;
   onSetDueDate: (date: string | null) => void | Promise<void>;
@@ -619,14 +618,14 @@ export function TaskRowActions({
     <div
       data-testid="task-row-properties"
       className={cn(
-        'grid shrink-0 items-center gap-1',
+        'grid shrink-0 items-center gap-0.5',
         dense
-          ? 'grid-cols-[30px_32px_32px_32px_32px] @min-[480px]:grid-cols-[30px_30px_32px_56px_32px_32px_64px]'
-          : 'grid-cols-[36px_30px_32px_32px_32px_32px] @min-[480px]:grid-cols-[36px_30px_30px_32px_72px_32px_32px_96px] @min-[960px]:grid-cols-[36px_52px_30px_30px_32px_72px_32px_32px_96px]',
+          ? 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_30px_32px_56px_32px_32px_96px]'
+          : 'grid-cols-[32px_32px_32px] @min-[480px]:grid-cols-[32px_32px_32px_32px] @min-[640px]:grid-cols-[32px_32px_56px_32px_32px] @min-[720px]:grid-cols-[32px_32px_56px_32px_32px_32px] @min-[960px]:grid-cols-[32px_32px_32px_56px_32px_32px_32px] @min-[1280px]:grid-cols-[32px_44px_32px_30px_32px_56px_32px_32px_96px]',
       )}
     >
       {!dense && (
-        <span className="flex h-7 w-9 items-center justify-center">
+        <span className="hidden h-7 items-center justify-center @min-[960px]:flex">
           {smartScore != null && (
             <SmartScoreBadge score={smartScore} breakdown={scoreBreakdown} size="sm" />
           )}
@@ -634,12 +633,14 @@ export function TaskRowActions({
       )}
 
       {!dense && (
-        <span className="hidden h-6 w-[52px] items-center justify-center @min-[960px]:flex">
-          <PlanningHorizonBadge planningHorizon={planningHorizon} />
+        <span className="hidden h-6 items-center justify-center @min-[1280px]:flex">
+          {planningHorizon && (
+            <PlanningHorizonBadge planningHorizon={planningHorizon} />
+          )}
         </span>
       )}
 
-      <span className="flex h-7 w-[30px] items-center justify-center">
+      <span className="flex h-8 w-8 items-center justify-center">
         <PriorityMenu
           priority={priority}
           onChange={onSetPriority}
@@ -649,7 +650,10 @@ export function TaskRowActions({
         />
       </span>
 
-      <span className="hidden h-6 w-[30px] items-center justify-center @min-[480px]:flex">
+      <span className={cn(
+        'hidden h-6 items-center justify-center',
+        '@min-[1280px]:flex',
+      )}>
         {validEffort && (
           <span
             className={cn(
@@ -674,8 +678,8 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'hidden h-9 flex-col items-center justify-center @min-[480px]:flex',
-        dense ? 'w-[56px]' : 'w-[72px]',
+        'h-9 flex-col items-center justify-center',
+        dense ? 'hidden @min-[720px]:flex' : 'hidden @min-[640px]:flex',
         !dueDate && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
         <DateMenu
@@ -697,7 +701,7 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'flex h-8 w-8 items-center justify-center',
+        'hidden h-8 w-8 items-center justify-center @min-[480px]:flex',
         !isInMyDay && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
         <Tooltip content={isInMyDay ? 'Remove from My Day' : 'Add to My Day'}>
@@ -716,7 +720,7 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'flex h-8 w-8 items-center justify-center',
+        'hidden h-8 w-8 items-center justify-center @min-[720px]:flex',
         !hasDescription && EMPTY_PROPERTY_ACTION_CLASS,
       )}>
         {hasDescription ? (
@@ -756,11 +760,10 @@ export function TaskRowActions({
       </span>
 
       <span className={cn(
-        'flex h-8 w-8 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100',
-        dense ? '@min-[480px]:w-16' : '@min-[480px]:w-24',
+        'flex h-8 w-8 items-center justify-end gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 @min-[1280px]:w-24',
       )}>
         {surface === 'dashboard' && onSnoozeUntil && (
-          <span className="hidden @min-[480px]:contents">
+          <span className="hidden @min-[1280px]:contents">
             <SnoozeMenu
               snoozedUntil={snoozedUntil}
               onChange={onSnoozeUntil}
@@ -769,7 +772,7 @@ export function TaskRowActions({
             />
           </span>
         )}
-        <span className="hidden items-center gap-0.5 @min-[480px]:flex">
+        <span className="hidden items-center gap-0.5 @min-[1280px]:flex">
           {surfaceActions}
         </span>
         {onSetLocalDisposition
@@ -777,7 +780,7 @@ export function TaskRowActions({
             option.value !== localDisposition
             && canSetTaskLocalDisposition(editPolicy, localDisposition, option.value)
           )) && (
-          <span className="hidden @min-[480px]:contents">
+          <span className="hidden @min-[1280px]:contents">
             <DispositionMenu
               disposition={localDisposition}
               editPolicy={editPolicy}
@@ -786,7 +789,7 @@ export function TaskRowActions({
           </span>
         )}
         {showMoreActions && (
-          <span className="hidden md:contents">
+          <span className="contents">
             <Tooltip content="More actions">
               <button
                 type="button"

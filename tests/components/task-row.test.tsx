@@ -186,6 +186,21 @@ const actionProps = {
 };
 
 describe('TaskRow', () => {
+  it('wraps the title only when the wrapped layout is selected', () => {
+    const { rerender } = render(
+      <TaskRow task={baseTask} {...actionProps} />,
+    );
+
+    expect(screen.getByText('Test task')).toHaveClass('truncate');
+
+    rerender(
+      <TaskRow task={baseTask} {...actionProps} wrapTitle />,
+    );
+
+    expect(screen.getByText('Test task')).toHaveClass('line-clamp-2', 'whitespace-normal');
+    expect(screen.getByText('Test task')).not.toHaveClass('truncate');
+  });
+
   describe('ProjectBadge', () => {
     it('renders project badge when task has hubProjectIds', () => {
       const projects = [

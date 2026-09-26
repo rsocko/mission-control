@@ -145,6 +145,7 @@ import {
   type TaskDependencyEndpoints,
   type TaskDuplicateDetectionRow,
   type TaskFilterInputRepository,
+  type TaskFacetCounts,
   type TaskFilterSpec,
   type TaskGroupMode,
   type TaskListPage,
@@ -517,6 +518,26 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       accumulator[row.connectorType] = Number(row.count ?? 0);
       return accumulator;
     }, {});
+  }
+
+  async getFacetCounts(spec: TaskFilterSpec): Promise<TaskFacetCounts> {
+    const compiled = compileCanonicalTaskFilter(spec, await this.resolveInputs(spec));
+    const [priorities, statuses] = await Promise.all([
+      this.db
+        .select({ value: tasks.priority, count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(compiled.taskWhere)
+        .groupBy(tasks.priority),
+      this.db
+        .select({ value: tasks.status, count: sql<number>`count(*)` })
+        .from(tasks)
+        .where(compiled.taskWhere)
+        .groupBy(tasks.status),
+    ]);
+    return {
+      priorities: Object.fromEntries(priorities.map((row) => [row.value, Number(row.count ?? 0)])),
+      statuses: Object.fromEntries(statuses.map((row) => [row.value, Number(row.count ?? 0)])),
+    };
   }
 
   async getAvailableTags(spec: TaskFilterSpec): Promise<AvailableTaskTag[]> {
@@ -2822,9 +2843,10 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
     smartScoreCandidateLimit: number;
   }): Promise<TaskCollectionResult> {
     const smart = input.page.order.field === 'smartScore';
-    const [stats, sourceCounts, availableTags, total] = await Promise.all([
+    const [stats, sourceCounts, facetCounts, availableTags, total] = await Promise.all([
       this.queries.getStats(input.spec),
       this.queries.getSourceCounts(input.spec),
+      this.queries.getFacetCounts(input.spec),
       input.countsOnly ? Promise.resolve([]) : this.queries.getAvailableTags(input.spec),
       this.queries.countTasks(input.spec, { includeQuickFilter: true }),
     ]);
@@ -2834,6 +2856,7 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
         total,
         stats,
         sourceCounts,
+        facetCounts,
         availableTags,
         connectorContexts: [],
         smartScore: null,
@@ -2852,6 +2875,7 @@ class PostgresTaskCollectionReadRepository implements TaskCollectionReadReposito
       total,
       stats,
       sourceCounts,
+      facetCounts,
       availableTags,
       smartScore: smart || input.includeScoreInputs
         ? { rows: hydrated.rows, sourceRankings: rankings }

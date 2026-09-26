@@ -77,6 +77,7 @@ export function flattenTaskPages(data: InfiniteData<TaskResponse, number> | unde
       && data.pages.length < DASHBOARD_TASK_PAGE_LIMIT
       && tasks.length < DASHBOARD_TASK_ENTITY_LIMIT,
     sourceCounts: latest.sourceCounts || {},
+    facetCounts: latest.facetCounts || EMPTY_TASK_RESPONSE.facetCounts,
     availableTags: latest.availableTags || [],
   };
 }

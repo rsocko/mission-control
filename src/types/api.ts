@@ -99,6 +99,10 @@ export interface TaskListResponseDto {
   stats: TaskListStatsDto;
   hasMore: boolean;
   sourceCounts: Record<string, number>;
+  facetCounts: {
+    priorities: Record<string, number>;
+    statuses: Record<string, number>;
+  };
   availableTags: TaskTagDto[];
 }
 

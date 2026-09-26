@@ -142,6 +142,7 @@ export async function GET(request: Request) {
         },
         hasMore: false,
         sourceCounts: {},
+        facetCounts: { priorities: {}, statuses: {} },
         availableTags: [],
         pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
       });
@@ -166,6 +167,7 @@ export async function GET(request: Request) {
         stats: collection.stats,
         hasMore: false,
         sourceCounts: collection.sourceCounts,
+        facetCounts: collection.facetCounts,
         availableTags: [],
         pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
       });
@@ -296,6 +298,7 @@ export async function GET(request: Request) {
           : collection.total
       ),
       sourceCounts: collection.sourceCounts,
+      facetCounts: collection.facetCounts,
       availableTags: collection.availableTags,
       pagination: { limit, offset, maxLimit: MAX_TASK_PAGE_SIZE },
       ...(sortBy === 'smartScore' ? {

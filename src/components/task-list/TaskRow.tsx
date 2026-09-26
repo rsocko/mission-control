@@ -146,6 +146,7 @@ interface TaskRowProps {
   hideSourceListName?: boolean;
   showDivider?: boolean;
   compact?: boolean;
+  wrapTitle?: boolean;
   bulkMode?: boolean;
   bulkSelected?: boolean;
   onBulkToggle?: () => void;
@@ -182,6 +183,7 @@ export function TaskRow({
   hideSourceListName = false,
   showDivider,
   compact = false,
+  wrapTitle = false,
   bulkMode = false,
   bulkSelected = false,
   onBulkToggle,
@@ -301,6 +303,7 @@ export function TaskRow({
       <TaskRowIdentity
         task={task}
         isDone={isDone}
+        wrapTitle={wrapTitle}
         onOpenSubtasks={onOpenSubtasks}
         afterConnector={(task.linkedSourceCount ?? 0) > 0 ? (
           <Tooltip content="Also tracked in another source">

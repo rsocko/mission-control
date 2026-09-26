@@ -22,6 +22,9 @@ const LIMIT = 50;
  *    &sourceList=sourceListName           (optional scope filter)
  *    &connectorId=connectorInstanceId     (optional scope filter)
  *
+ * Queue entries, badge counts, and source choices all exclude soft-deleted tasks,
+ * matching task-detail visibility.
+ *
  * Smart sort per mode:
  *   no_priority → most recent first (new items need priority urgently)
  *   quadrant    → most recent first (same candidates, guided decision)

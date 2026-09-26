@@ -948,6 +948,7 @@ class SqliteTaskReadRepository implements TaskReadRepository {
 
   private quickSortScopeConditions(input: TaskQuickSortScope): SQL[] {
     const conditions: SQL[] = [
+      isNull(tasks.deletedAt),
       sql`${tasks.connectorInstanceId} NOT IN (
         SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
         WHERE ${connectorConfigs.deletedAt} IS NOT NULL

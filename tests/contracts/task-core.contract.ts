@@ -3507,6 +3507,7 @@ export function describeTaskCoreContract(
             sourceListName: 'Raw List',
           },
           { id: 'queue-closed', status: 'done', priority: 'none' },
+          { id: 'queue-soft-deleted', deletedAt: '2026-08-09T00:00:00.000Z' },
           { id: 'queue-child', parentId: 'queue-a', priority: 'none' },
           { id: 'queue-snoozed', snoozedUntil: '2026-08-11T00:00:00.000Z', priority: 'none' },
           { id: 'queue-skipped', priority: 'none' },
@@ -3605,6 +3606,59 @@ export function describeTaskCoreContract(
           userDisplayName: 'Queue List',
           hidden: false,
         }));
+      });
+
+      it('excludes soft-deleted tasks from every quick-sort mode, counts, and source choices', async () => {
+        const scope = {
+          now: '2026-08-10T12:00:00.000Z',
+          skipCutoff: '2026-08-03T12:00:00.000Z',
+          sourceTypes: [],
+          sourceListId: null,
+          sourceListName: null,
+          connectorInstanceId: null,
+        };
+        await harness.insertTasks([
+          { id: 'live-task', sourceListId: 'live-list', sourceListName: 'Live list' },
+          {
+            id: 'deleted-task',
+            sourceListId: 'deleted-list',
+            sourceListName: 'Deleted list',
+            deletedAt: '2026-08-09T00:00:00.000Z',
+            createdAt: '2026-08-09T00:00:00.000Z',
+          },
+        ]);
+
+        expect(await harness.persistence.details.getTaskDetail('deleted-task', '2026-08-10'))
+          .toBeNull();
+        expect(await harness.persistence.taskReads.getQuickSortCounts(scope)).toEqual({
+          no_priority: 1,
+          quadrant: 1,
+          no_effort: 1,
+          no_tags: 1,
+          no_planning_horizon: 1,
+        });
+        for (const mode of [
+          'no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon',
+        ] as const) {
+          const queue = await harness.persistence.taskReads.listQuickSortTasks({
+            ...scope, mode, order: 'newest', limit: 1,
+          });
+          expect(queue.map((task) => task.id)).toEqual(['live-task']);
+        }
+        const sources = await harness.persistence.taskReads.listQuickSortSources(scope);
+        expect(sources.rows).toEqual([expect.objectContaining({
+          sourceListId: 'live-list',
+          count: 1,
+        })]);
+        expect(await harness.persistence.taskReads.getQuickSortCounts({
+          ...scope, sourceListId: 'deleted-list',
+        })).toEqual({
+          no_priority: 0,
+          quadrant: 0,
+          no_effort: 0,
+          no_tags: 0,
+          no_planning_horizon: 0,
+        });
       });
 
       it('returns deterministic quick-sort suggestion inputs', async () => {

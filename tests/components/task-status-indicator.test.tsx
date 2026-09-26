@@ -34,9 +34,15 @@ describe('TaskStatusIndicator', () => {
   });
 
   it('provides a compact blocker label for refined statuses', () => {
-    render(<TaskBlockedBadge status="in_progress" microStatus="waiting_on_someone" />);
+    render(
+      <TaskBlockedBadge
+        status="in_progress"
+        microStatus="waiting_on_someone"
+        labelClassName="hidden @min-[960px]:inline"
+      />,
+    );
 
-    expect(screen.getByText('Waiting on someone')).toBeInTheDocument();
+    expect(screen.getByText('Waiting on someone')).toHaveClass('hidden', '@min-[960px]:inline');
     expect(isTaskBlocked('todo', 'started_but_stuck')).toBe(true);
     expect(getTaskBlockerLabel('blocked')).toBe('Blocked');
   });

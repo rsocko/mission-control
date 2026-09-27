@@ -346,7 +346,14 @@ export default function TagGalaxy({
 
       {selectedTaskId ? (
         <div className="fixed inset-y-0 right-0 z-50 w-[min(390px,95%)] overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] shadow-2xl">
-          <TaskDetailPanel taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} mode="panel" />
+          <TaskDetailPanel
+            taskId={selectedTaskId}
+            onClose={(reason) => setSelectedTaskId(
+              null,
+              reason === 'task-removed' ? { history: 'replace' } : undefined,
+            )}
+            mode="panel"
+          />
         </div>
       ) : null}
 

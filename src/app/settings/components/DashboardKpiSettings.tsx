@@ -11,7 +11,7 @@ import {
   useSortable, verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   KPI_REGISTRY, KPI_PRESETS, MAX_KPI_CARDS,
 } from '@/lib/kpi/registry';

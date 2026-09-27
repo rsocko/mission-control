@@ -13,7 +13,7 @@ import Image from 'next/image';
 import { useParams, useSearchParams } from 'next/navigation';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { Columns3 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import PhaseProposalReview, { type PhaseProposal } from '@/components/projects/PhaseProposalReview';
 import { PhaseReorganizationReview } from '@/components/projects/PhaseReorganizationReview';
 import { TaskPickerDialog } from '@/components/projects/TaskPickerDialog';

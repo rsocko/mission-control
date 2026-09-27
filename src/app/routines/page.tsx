@@ -3,7 +3,7 @@
 import { Suspense, type ReactNode, useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
 import { BarChart3, Calendar, CalendarCheck, ChevronLeft, ChevronRight, Loader2, Plus, Repeat } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useSearchParams } from 'next/navigation';
 import { AddRoutineForm, BehaviorHeatmap, CadenceInsightsView, FlexibleRoutineCard, OverCompletionLog, WeeklyGrid, type HeatmapCompletion, type Routine } from '@/components/routines';
 import ResetView from '@/components/reset/ResetView';

@@ -168,7 +168,7 @@ export default function UniverseGraph() {
     hasInitialFitRef.current = false;
     forcesConfiguredRef.current = false;
     resetScene();
-    setSelectedTaskId(null);
+    setSelectedTaskId(null, { history: 'replace' });
     setDetailSuppressed(false);
     setFocusActive(false);
     setHoveredNodeId(null);
@@ -570,7 +570,7 @@ export default function UniverseGraph() {
     if (!methods || !bounds) return;
     const closeOverlay = detailPanelWidth > 0 && graphViewportWidth < 160;
     if (closeOverlay) {
-      setSelectedTaskId(null);
+      setSelectedTaskId(null, { history: 'replace' });
       setDetailSuppressed(true);
       setExplorationMessage('Details closed to fit the selection in the available viewport.');
     }
@@ -731,14 +731,14 @@ export default function UniverseGraph() {
             focusActive={focusActive}
             onClearSelection={() => {
               setSelectedNodeIds([]);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
               setDetailSuppressed(false);
               setFocusActive(false);
               setExplorationMessage(null);
             }}
             onSelectRelated={() => {
               setSelectedNodeIds([...selectedNodeIds, ...unselectedRelatedNodeIds]);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
               setDetailSuppressed(true);
               setExplorationMessage(
                 `${unselectedRelatedNodeIds.length} visible neighbor${unselectedRelatedNodeIds.length === 1 ? '' : 's'} added to the selection.`,
@@ -901,7 +901,7 @@ export default function UniverseGraph() {
               onBackgroundClick={() => {
                 setSelectedNodeIds([]);
                 setHoveredNodeId(null);
-                setSelectedTaskId(null);
+                setSelectedTaskId(null, { history: 'replace' });
                 setFocusActive(false);
                 setExplorationError(null);
                 setExplorationMessage(null);
@@ -977,7 +977,14 @@ export default function UniverseGraph() {
             className="absolute inset-y-0 right-0 z-30 overflow-y-auto border-l border-[var(--border)] bg-[var(--surface-1)] shadow-2xl"
             style={{ width: detailPanelWidth }}
           >
-            <TaskDetailPanel taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} mode="panel" />
+            <TaskDetailPanel
+              taskId={selectedTaskId}
+              onClose={(reason) => setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              )}
+              mode="panel"
+            />
           </div>
         ) : null}
         {reviewCluster && graph && clusterProjection ? (
@@ -996,7 +1003,7 @@ export default function UniverseGraph() {
             onClick={() => {
               setSelectedNodeIds([]);
               setHoveredNodeId(null);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
               setFocusActive(false);
               setLod('medium');
               hasInitialFitRef.current = true;
@@ -1020,7 +1027,7 @@ export default function UniverseGraph() {
             onNodeSelect={(nodeId) => {
               setSelectedNodeIds([nodeId]);
               setHoveredNodeId(null);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
               setDetailSuppressed(false);
             }}
             onTaskActivate={(taskId, nodeId) => {

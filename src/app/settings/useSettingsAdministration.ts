@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { settingsLogger } from '@/lib/client-logger';
 import { loadConnectorData, requestConnectorSync } from '@/lib/connectors/client';
 import type { ConnectorConfig, ListGroup, SourceList } from './components/types';

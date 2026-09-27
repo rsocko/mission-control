@@ -3,13 +3,14 @@
 import { useCallback } from 'react';
 import {
   TaskDetailPanel as SharedTaskDetailPanel,
+  type TaskDetailCloseReason,
   type TaskFieldUpdate,
 } from '@/components/task-detail/TaskDetailPanel';
 import type { KanbanTaskViewModel } from './types';
 
 interface TaskDetailPanelProps {
   task: KanbanTaskViewModel | null;
-  onClose: () => void;
+  onClose: (reason?: TaskDetailCloseReason) => void;
   onTaskUpdate?: (taskId: string, fields: Partial<KanbanTaskViewModel>) => void;
   onRefresh?: () => void | Promise<void>;
 }
@@ -54,7 +55,7 @@ export function TaskDetailPanel({
     <>
       <div
         className="fixed inset-0 z-50 bg-black/40"
-        onClick={onClose}
+        onClick={() => onClose('dismiss')}
         aria-hidden="true"
       />
       <div className="fixed right-0 top-0 z-[51] flex h-full">

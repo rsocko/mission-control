@@ -103,10 +103,12 @@ export function TaskBlockedBadge({
   status,
   microStatus,
   className,
+  labelClassName,
 }: {
   status: string;
   microStatus?: string | null;
   className?: string;
+  labelClassName?: string;
 }) {
   const label = getTaskBlockerLabel(status, microStatus);
   if (!label) return null;
@@ -120,7 +122,7 @@ export function TaskBlockedBadge({
       title={label}
     >
       <Pause size={9} strokeWidth={3} fill="currentColor" aria-hidden="true" />
-      {label}
+      <span className={labelClassName}>{label}</span>
     </span>
   );
 }

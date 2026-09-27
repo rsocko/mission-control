@@ -3,10 +3,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { formatTaskDetailUpdatedAt } from '@/lib/utils/task-detail-date';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),

@@ -80,7 +80,7 @@ export default function WordInsightsView() {
 
   const selectWord = (word: string) => {
     setSelectedWord(word);
-    setSelectedTaskId(null);
+    setSelectedTaskId(null, { history: 'replace' });
   };
   const selectTask = (taskId: string) => {
     setSelectedTaskId(taskId);

@@ -16,7 +16,7 @@ import type {
   DashboardFilterState,
 } from '@/lib/hooks/useDashboardFilterState';
 import clientLogger from '@/lib/client-logger';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 
 const SAVED_VIEWS_STORAGE_KEY = 'mission-control:saved-views';

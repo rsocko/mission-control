@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskRelationshipsSection } from '@/components/task-detail/TaskRelationshipsSection';
 import type { TaskRelationship } from '@/lib/task-relationships-types';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 

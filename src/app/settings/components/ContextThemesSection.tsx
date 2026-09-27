@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Palette, Save } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import type { ContextThemePreferences } from '@/types';
 import {
   CONTEXT_THEME_BACKDROPS,

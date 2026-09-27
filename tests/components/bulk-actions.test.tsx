@@ -496,7 +496,7 @@ describe('useBulkSelection', () => {
 
 // ─── executeBulkOperation ─────────────────────────────────────────────
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -507,7 +507,7 @@ const pushUndoWithToast = vi.hoisted(() => vi.fn());
 vi.mock('@/lib/stores/undoStore', () => ({ pushUndoWithToast }));
 
 import { executeBulkOperation } from '@/components/bulk-actions/executeBulkOperation';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
 describe('executeBulkOperation', () => {
   beforeEach(() => {

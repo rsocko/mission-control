@@ -45,6 +45,7 @@ import type {
   GitHubBulkTransferSuccessionRecord,
   GitHubRecoveryIssuePlanRow,
   GitHubRecoveryPersistence,
+  GitHubRecoveryRepositoryBinding,
   GitHubRepointApplyResult,
   GitHubRepointOperationRecord,
   GitHubRepointPersistence,
@@ -110,7 +111,8 @@ export function createSqliteGitHubRecoveryRepositories(
         binding.external_entity_id AS issueEntityId,
         entity.stable_id AS issueStableId,
         locator.issue_number AS issueNumber,
-        locator.repository_entity_id AS repositoryEntityId
+        locator.repository_entity_id AS repositoryEntityId,
+        binding.state AS bindingState
       FROM tasks AS task
       LEFT JOIN external_entity_bindings AS binding
         ON binding.connector_instance_id = task.connector_instance_id
@@ -158,6 +160,7 @@ export function createSqliteGitHubRecoveryRepositories(
           issueStableId: null,
           issueNumber: null,
           repositoryEntityId: null,
+          bindingState: null,
         };
       }
       const entity = tx.select().from(externalEntities)
@@ -169,6 +172,7 @@ export function createSqliteGitHubRecoveryRepositories(
         issueStableId: entity?.stableId ?? null,
         issueNumber: locator?.issueNumber ?? null,
         repositoryEntityId: locator?.repositoryEntityId ?? null,
+        bindingState: binding.state,
       };
     });
   }
@@ -655,7 +659,8 @@ export function createSqliteGitHubRecoveryRepositories(
       SELECT
         entities.id AS repositoryEntityId,
         entities.stable_id AS repositoryStableId,
-        bindings.local_id AS localId
+        bindings.local_id AS localId,
+        bindings.state AS bindingState
       FROM external_entity_bindings AS bindings
       INNER JOIN external_entities AS entities
         ON entities.id = bindings.external_entity_id
@@ -673,6 +678,7 @@ export function createSqliteGitHubRecoveryRepositories(
       repositoryEntityId: string;
       repositoryStableId: string;
       localId: string;
+      bindingState: GitHubRecoveryRepositoryBinding['bindingState'];
     }>;
     return rows.length === 1 ? rows[0] : null;
   }

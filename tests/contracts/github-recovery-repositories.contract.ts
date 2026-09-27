@@ -246,6 +246,7 @@ export function describeGitHubRecoveryRepositoriesContract(
         repositoryEntityId: 'entity-source-repo',
         repositoryStableId: 'R_source',
         localId: 'list-source',
+        bindingState: 'active',
       });
       expect(await harness.repositories.bulkTransfer.getRepositoryBinding(
         fixture.connectorInstanceId,
@@ -272,6 +273,7 @@ export function describeGitHubRecoveryRepositoriesContract(
         issueStableId: 'I_seven',
         issueNumber: 7,
         repositoryEntityId: 'entity-source-repo',
+        bindingState: 'active',
       }]);
       expect(await harness.repositories.transfer.listIssuePlanRows(
         fixture.connectorInstanceId,

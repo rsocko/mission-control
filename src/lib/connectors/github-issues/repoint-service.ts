@@ -502,10 +502,19 @@ export async function canTransferGitHubIssueSafely(
   const ports = await recovery();
   const issue = (await ports.transfer.listIssuePlanRows(connectorInstanceId, source.repo))
     .find((candidate) => candidate.sourceId === sourceId);
-  if (!issue?.issueEntityId || !issue.issueStableId || !issue.repositoryEntityId) return false;
-  return Boolean(
-    await ports.transfer.getRepositoryBinding(connectorInstanceId, targetRepository),
+  if (
+    !issue?.issueEntityId
+    || !issue.issueStableId
+    || !issue.repositoryEntityId
+    || issue.bindingState !== 'active'
+  ) {
+    return false;
+  }
+  const target = await ports.transfer.getRepositoryBinding(
+    connectorInstanceId,
+    targetRepository,
   );
+  return target?.bindingState === 'active';
 }
 
 export async function transferGitHubIssueByStableIdentity(

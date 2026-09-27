@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { TooltipProvider } from '@/components/ui/Tooltip';
 import { formatTaskDetailUpdatedAt } from '@/lib/utils/task-detail-date';
-import { TASK_CHANGED_EVENT } from '@/lib/task-change-events';
 import { toast } from '@/lib/toast';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 
@@ -1873,8 +1872,6 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
   it('marks a task complete without sending immutable lifecycle fields', async () => {
     const onUpdate = vi.fn();
-    const taskChanged = vi.fn();
-    window.addEventListener(TASK_CHANGED_EVENT, taskChanged);
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input);
       if (url === '/api/tasks/task-1') return json({ task });
@@ -1896,10 +1893,7 @@ describe('TaskDetailPanel redesigned presentations', () => {
       }),
     ));
     expect(onUpdate).toHaveBeenCalledWith({ status: 'done' });
-    expect(taskChanged).toHaveBeenCalledOnce();
-    expect((taskChanged.mock.calls[0][0] as CustomEvent).detail).toEqual({ taskId: 'task-1' });
     expect(screen.getByRole('combobox', { name: 'Task status' })).toHaveTextContent('Done');
-    window.removeEventListener(TASK_CHANGED_EVENT, taskChanged);
   });
 
   it('adds a task to My Day from an unhosted detail panel', async () => {

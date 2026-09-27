@@ -76,10 +76,9 @@ describe('notification push taint decrement', () => {
       /from\s*['"](?:@\/lib\/push\/triggers|\.\/triggers)['"]/,
     );
     const instrumentation = source('src/instrumentation.ts');
-    const sqliteGuard = instrumentation.indexOf("resolveDatabaseBackend() === 'sqlite'");
     const triggerImport = instrumentation.indexOf("import('@/lib/push/triggers')");
-    expect(sqliteGuard).toBeGreaterThan(-1);
-    expect(triggerImport).toBeGreaterThan(sqliteGuard);
+    expect(triggerImport).toBeGreaterThan(-1);
+    expect(instrumentation).not.toContain("resolveDatabaseBackend() === 'sqlite'");
     expect(instrumentation).toContain('registerScheduledPushHandlers({');
   });
 

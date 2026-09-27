@@ -30,20 +30,20 @@ export { UnsupportedGitHubWorkerOperationError } from './github-worker-errors';
  * manual terminal-inaccessible exception mutation, unknown write-outcome
  * resolution, and interrupted write-cycle recovery.
  *
- * These are pre-existing, previously audited worker exclusions (see
- * `github-worker.ts` and `github-worker-errors.ts`), not new exceptions
- * introduced by this port. This interface exists only so the SQLite CLI
- * operator tool (`scripts/github-identity-operator.ts`) and its test suite can
- * reach them through a composition root instead of importing `@/db` directly.
+ * These are pre-existing worker exclusions (see `github-worker.ts` and
+ * `github-worker-errors.ts`), not normal application request paths. This
+ * interface exists so the operator CLI (`scripts/github-identity-operator.ts`)
+ * and its test suite can reach them through a composition root instead of
+ * importing `@/db` directly.
  *
  * The SQLite adapter genuinely implements every member, reusing the exact
  * pre-existing query/mutation logic verbatim. The PostgreSQL adapter is **not**
  * a genuine async implementation: every member synchronously throws
  * `UnsupportedGitHubWorkerOperationError` before any SQLite import/evaluation,
  * transaction acquisition, remote network effect, or durable mutation is
- * attempted. Cross-backend behavioral parity is not claimed or required for
- * this port; only the SQLite adapter's exact prior behavior and the PG
- * adapter's fail-closed contract are covered by tests.
+ * attempted. That remains an explicit PostgreSQL operational gap, not
+ * behavioral parity; only the SQLite adapter's exact prior behavior and the
+ * PostgreSQL adapter's fail-closed contract are covered by tests.
  */
 export interface GitHubIdentityOperatorPersistence {
   /** Operational status report: NodeID coverage, collisions, write-cycle recovery, exceptions. */

@@ -84,6 +84,7 @@ import type { DemoSeedCommandService } from '@/lib/settings/mode-route-services'
 import type { RelativeReminderTimezoneRepository } from './persistence/relative-reminder-timezone';
 import {
   registerDemoSeedCommandService,
+  registerModeRouteCapabilities,
   registerRelativeReminderTimezoneRepository,
 } from '@/lib/settings/mode-route-services';
 import { executeCrossAccountTaskMove } from '@/lib/tasks/task-move-service';
@@ -289,6 +290,7 @@ const modeRouteTimezoneRepository: RelativeReminderTimezoneRepository = {
 function registerModeRouteServices(
   demoSeedCommandService: DemoSeedCommandService,
   timezoneRepository: RelativeReminderTimezoneRepository,
+  databaseBackend: 'sqlite' | 'postgres',
 ): void {
   const runtime = databaseRuntimeRegistry();
   runtime.modeRouteDemoSeedCommandDelegate = demoSeedCommandService;
@@ -297,6 +299,10 @@ function registerModeRouteServices(
   runtime.modeRouteTimezoneRepository ??= modeRouteTimezoneRepository;
   registerDemoSeedCommandService(runtime.modeRouteDemoSeedCommandService);
   registerRelativeReminderTimezoneRepository(runtime.modeRouteTimezoneRepository);
+  registerModeRouteCapabilities({
+    databaseBackend,
+    demoOperationsSupported: databaseBackend === 'sqlite',
+  });
 }
 
 function clearModeRouteServiceDelegates(): void {
@@ -850,6 +856,7 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
     registerModeRouteServices(
       createSqliteDemoSeedCommandService(),
       createSqliteRelativeReminderTimezoneRepository(sqliteRuntime.default),
+      'sqlite',
     );
     return;
   }
@@ -1007,6 +1014,7 @@ async function initializeRuntimeDatabaseOnce(isCurrentGeneration: () => boolean)
   registerModeRouteServices(
     postgresDemoSeedCommandService,
     createPostgresRelativeReminderTimezoneRepository(db),
+    'postgres',
   );
 }
 

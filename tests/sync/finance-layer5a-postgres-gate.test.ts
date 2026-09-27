@@ -42,6 +42,13 @@ const mocks = vi.hoisted(() => ({
     settled: 0,
     stalePreserved: 0,
   })),
+  assignKid: vi.fn(async () => ({
+    status: 'resolved',
+    transactionId: 'transaction-1',
+    kidId: 'kid-1',
+    idempotencyKey: 'assignment-key',
+    replayed: false,
+  })),
 }));
 
 vi.mock('@/db/runtime-backend', () => ({
@@ -94,6 +101,10 @@ vi.mock('@/lib/finance/attention-routing', () => ({
   reconcileFinanceAttention: mocks.attention,
 }));
 
+vi.mock('@/lib/connectors/monarch-money/attribution-service', () => ({
+  applyManualAttributionDecision: mocks.assignKid,
+}));
+
 describe('Layer 5C PostgreSQL finance activation', () => {
   it('runs the complete portable finance flow without evaluating SQLite', async () => {
     const { FinanceManagerConnector } = await import(
@@ -138,5 +149,36 @@ describe('Layer 5C PostgreSQL finance activation', () => {
     expect(mocks.attention).toHaveBeenCalledOnce();
     expect(mocks.sqliteModuleEvaluations).toBe(0);
     expect(mocks.sqliteTouch).not.toHaveBeenCalled();
+  });
+
+  it('delegates manual attribution through the portable persistence path', async () => {
+    const { FinanceManagerConnector } = await import(
+      '@/lib/connectors/monarch-money'
+    );
+    const connector = new FinanceManagerConnector();
+    await connector.initialize({
+      id: 'postgres-finance-gate',
+      type: 'finance-manager',
+      name: 'PostgreSQL finance gate',
+      enabled: true,
+      syncMode: 'poll',
+      capabilities: connector.capabilities,
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+    });
+
+    await expect(
+      connector.assignKid('transaction-1', 'kid-1', 'assignment-key', 'parent-admin'),
+    ).resolves.toMatchObject({ status: 'resolved', kidId: 'kid-1' });
+    expect(mocks.assignKid).toHaveBeenCalledWith({
+      connectorId: 'postgres-finance-gate',
+      transactionId: 'transaction-1',
+      action: 'assign-kid',
+      kidId: 'kid-1',
+      idempotencyKey: 'assignment-key',
+      actorType: 'parent-admin',
+    });
+    expect(mocks.sqliteModuleEvaluations).toBe(0);
   });
 });

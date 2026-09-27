@@ -12,6 +12,7 @@ const {
   mockApplyTimezoneRecompute,
   mockGetDemoSeedCommandService,
   mockGetRelativeReminderTimezoneRepository,
+  mockGetModeRouteCapabilities,
 } = vi.hoisted(() => ({
   mockGetAppMode: vi.fn(),
   mockSetAppMode: vi.fn(),
@@ -24,6 +25,7 @@ const {
   mockApplyTimezoneRecompute: vi.fn(),
   mockGetDemoSeedCommandService: vi.fn(),
   mockGetRelativeReminderTimezoneRepository: vi.fn(),
+  mockGetModeRouteCapabilities: vi.fn(),
 }));
 
 vi.mock('@/lib/mode', () => ({
@@ -43,6 +45,7 @@ vi.mock('@/lib/public-demo', () => ({
 // dynamically, so those modules are not mocked here.
 vi.mock('@/lib/settings/mode-route-services', () => ({
   getDemoSeedCommandService: mockGetDemoSeedCommandService,
+  getModeRouteCapabilities: mockGetModeRouteCapabilities,
   getRelativeReminderTimezoneRepository: mockGetRelativeReminderTimezoneRepository,
 }));
 
@@ -59,6 +62,10 @@ describe('settings/mode route', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsPublicDemoMode.mockReturnValue(false);
+    mockGetModeRouteCapabilities.mockReturnValue({
+      databaseBackend: 'sqlite',
+      demoOperationsSupported: true,
+    });
     mockGetSettings.mockReturnValue({ ...baseSettings });
     mockGetAppMode.mockReturnValue('live');
     mockClearDatabase.mockResolvedValue(undefined);
@@ -80,7 +87,7 @@ describe('settings/mode route', () => {
   });
 
   describe('GET', () => {
-    it('returns settings, mode, and publicDemo flag', async () => {
+    it('returns settings, mode, publicDemo flag, and database capabilities', async () => {
       mockIsPublicDemoMode.mockReturnValue(true);
       const response = await GET();
       expect(response.status).toBe(200);
@@ -88,6 +95,20 @@ describe('settings/mode route', () => {
         ...baseSettings,
         mode: 'live',
         publicDemo: true,
+        databaseBackend: 'sqlite',
+        demoOperationsSupported: true,
+      });
+    });
+
+    it('reports demo operations as unavailable on PostgreSQL', async () => {
+      mockGetModeRouteCapabilities.mockReturnValue({
+        databaseBackend: 'postgres',
+        demoOperationsSupported: false,
+      });
+      const response = await GET();
+      await expect(response.json()).resolves.toMatchObject({
+        databaseBackend: 'postgres',
+        demoOperationsSupported: false,
       });
     });
   });
@@ -112,6 +133,7 @@ describe('settings/mode route', () => {
         method: 'POST',
         body: JSON.stringify({ action: 'reset-demo' }),
       });
+
       const response = await POST(request);
       expect(response.status).toBe(200);
       expect(mockResetDemoDatabase).toHaveBeenCalledTimes(1);
@@ -123,6 +145,26 @@ describe('settings/mode route', () => {
         message: 'Demo data reset successfully',
       });
     });
+
+    it.each(['reset-demo', 'clear-data', 'clear-triage-samples'])(
+      'rejects the %s action on PostgreSQL without touching data',
+      async (action) => {
+        mockGetModeRouteCapabilities.mockReturnValue({
+          databaseBackend: 'postgres',
+          demoOperationsSupported: false,
+        });
+        const request = new Request('http://localhost/api/settings/mode', {
+          method: 'POST',
+          body: JSON.stringify({ action }),
+        });
+        const response = await POST(request);
+        expect(response.status).toBe(409);
+        await expect(response.json()).resolves.toMatchObject({
+          code: 'DEMO_OPERATIONS_UNSUPPORTED',
+        });
+        expect(mockGetDemoSeedCommandService).not.toHaveBeenCalled();
+      },
+    );
 
     it('handles clear-data action', async () => {
       const request = new Request('http://localhost/api/settings/mode', {
@@ -190,12 +232,28 @@ describe('settings/mode route', () => {
         method: 'POST',
         body: JSON.stringify({ mode: 'demo' }),
       });
+
       const response = await POST(request);
       expect(response.status).toBe(200);
       expect(mockResetDemoDatabase).toHaveBeenCalledTimes(1);
       expect(mockUpdateSettings).toHaveBeenCalledWith(
         expect.objectContaining({ demoSeededAt: expect.any(String) }),
       );
+    });
+
+    it('rejects switching PostgreSQL to demo mode before mutating settings', async () => {
+      mockGetModeRouteCapabilities.mockReturnValue({
+        databaseBackend: 'postgres',
+        demoOperationsSupported: false,
+      });
+      const request = new Request('http://localhost/api/settings/mode', {
+        method: 'POST',
+        body: JSON.stringify({ mode: 'demo' }),
+      });
+      const response = await POST(request);
+      expect(response.status).toBe(409);
+      expect(mockSetAppMode).not.toHaveBeenCalled();
+      expect(mockResetDemoDatabase).not.toHaveBeenCalled();
     });
 
     it('does not re-seed demo data when already seeded', async () => {

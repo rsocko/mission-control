@@ -11,14 +11,21 @@ function AppModeSection() {
   const [mode, setMode] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [publicDemo, setPublicDemo] = useState(false);
+  const [demoOperationsSupported, setDemoOperationsSupported] = useState(false);
   const [actionInProgress, setActionInProgress] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [messageType, setMessageType] = useState<'success' | 'error'>('success');
   const [confirmAction, setConfirmAction] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings/mode')
       .then(r => r.json())
-      .then(d => { setMode(d.mode); setPublicDemo(d.publicDemo === true); setLoading(false); })
+      .then(d => {
+        setMode(d.mode);
+        setPublicDemo(d.publicDemo === true);
+        setDemoOperationsSupported(d.demoOperationsSupported === true);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
@@ -40,9 +47,11 @@ function AppModeSection() {
       }
       setMode(newMode);
       setMessage(data.message || `Switched to ${newMode} mode`);
+      setMessageType('success');
       switched = true;
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not switch app mode');
+      setMessageType('error');
     }
     setActionInProgress(null);
     if (switched) {
@@ -62,9 +71,14 @@ function AppModeSection() {
       });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not reset demo data');
+      }
       setMessage(data.message || 'Demo data reset');
-    } catch {
-      setMessage('Demo data reset');
+      setMessageType('success');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not reset demo data');
+      setMessageType('error');
     }
     setActionInProgress(null);
   }
@@ -81,9 +95,14 @@ function AppModeSection() {
       });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not clear data');
+      }
       setMessage(data.message || 'All data cleared');
-    } catch {
-      setMessage('All data cleared');
+      setMessageType('success');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not clear data');
+      setMessageType('error');
     }
     setActionInProgress(null);
   }
@@ -100,9 +119,14 @@ function AppModeSection() {
       });
       const text = await res.text();
       const data = text ? JSON.parse(text) : {};
+      if (!res.ok) {
+        throw new Error(data.error || 'Could not clear triage sample data');
+      }
       setMessage(data.message || 'Triage sample data cleared');
-    } catch {
-      setMessage('Triage sample data cleared');
+      setMessageType('success');
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not clear triage sample data');
+      setMessageType('error');
     }
     setActionInProgress(null);
   }
@@ -118,10 +142,26 @@ function AppModeSection() {
           : 'Switch between demo (sample data) and live (real connectors) modes.'}
       </p>
 
+      {!publicDemo && !demoOperationsSupported && (
+        <div
+          role="status"
+          className="mb-4 p-3 rounded-xl bg-blue-900/20 border border-blue-800/30 text-sm text-blue-300"
+        >
+          This deployment uses PostgreSQL. Demo mode and destructive demo-data tools are
+          disabled to protect production data.
+        </div>
+      )}
+
       {message && (
         <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }}
-          className="mb-4 p-3 rounded-lg bg-emerald-900/30 border border-emerald-800/30 text-sm text-emerald-400 flex items-center gap-2">
-          <CheckCircle2 size={14} /> {message}
+          role={messageType === 'error' ? 'alert' : 'status'}
+          className={`mb-4 p-3 rounded-lg border text-sm flex items-center gap-2 ${
+            messageType === 'error'
+              ? 'bg-red-900/30 border-red-800/30 text-red-400'
+              : 'bg-emerald-900/30 border-emerald-800/30 text-emerald-400'
+          }`}>
+          {messageType === 'error' ? <AlertTriangle size={14} /> : <CheckCircle2 size={14} />}
+          {message}
         </motion.div>
       )}
 
@@ -129,7 +169,8 @@ function AppModeSection() {
       <div className="grid grid-cols-2 gap-4 mb-8">
         <motion.button
           onClick={() => mode !== 'demo' && switchMode('demo')}
-          disabled={publicDemo || !!actionInProgress}
+          disabled={publicDemo || !demoOperationsSupported || !!actionInProgress}
+          title={!demoOperationsSupported ? 'Demo mode requires the SQLite database backend' : undefined}
           whileHover={{ scale: 1.01 }}
           whileTap={{ scale: 0.98 }}
           className={`p-4 rounded-xl border-2 text-left transition-colors ${
@@ -190,7 +231,7 @@ function AppModeSection() {
           ) : (
             <button
               onClick={() => setConfirmAction('reset')}
-              disabled={publicDemo || !!actionInProgress}
+              disabled={publicDemo || !demoOperationsSupported || !!actionInProgress}
               className="px-3 py-1.5 text-sm font-medium rounded-lg bg-amber-900/30 hover:bg-amber-900/50 text-amber-400 border border-amber-800/30 disabled:opacity-50"
             >
               {actionInProgress === 'resetting' ? <><Loader2 size={12} className="inline animate-spin mr-1" /> Resetting...</> : 'Reset'}
@@ -214,7 +255,7 @@ function AppModeSection() {
           ) : (
             <button
               onClick={() => setConfirmAction('clear-triage')}
-              disabled={publicDemo || !!actionInProgress}
+              disabled={publicDemo || !demoOperationsSupported || !!actionInProgress}
               className="px-3 py-1.5 text-sm font-medium rounded-lg bg-blue-900/30 hover:bg-blue-900/50 text-blue-400 border border-blue-800/30 disabled:opacity-50"
             >
               {actionInProgress === 'clearing-triage' ? <><Loader2 size={12} className="inline animate-spin mr-1" /> Clearing...</> : 'Clear Samples'}
@@ -238,7 +279,7 @@ function AppModeSection() {
           ) : (
             <button
               onClick={() => setConfirmAction('clear')}
-              disabled={publicDemo || !!actionInProgress}
+              disabled={publicDemo || !demoOperationsSupported || !!actionInProgress}
               className="px-3 py-1.5 text-sm font-medium rounded-lg bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-800/30 disabled:opacity-50"
             >
               {actionInProgress === 'clearing' ? <><Loader2 size={12} className="inline animate-spin mr-1" /> Clearing...</> : 'Clear All'}

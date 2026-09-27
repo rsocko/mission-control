@@ -193,8 +193,8 @@ describe('MobileSwipeTaskRow haptics', () => {
   });
 
   it.each([
-    ['pending_push', 'Pending'],
-    ['push_error', 'Failed'],
+    ['pending_push', 'Syncing'],
+    ['push_error', 'Sync delayed'],
     ['push_failed', 'Blocked'],
     ['conflict', 'Conflicted'],
   ])('surfaces the %s connector operation state', (syncStatus, label) => {

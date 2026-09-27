@@ -23,6 +23,7 @@ interface OperationPresentation {
   detail: (sourceLabel: string, retryCount: number) => string;
   className: string;
   icon: typeof CheckCircle2;
+  actionLabel?: string;
 }
 
 const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
@@ -35,16 +36,16 @@ const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
   },
   pending: {
     state: 'pending',
-    label: 'Pending',
-    detail: (sourceLabel) => `Saved in Mission Control. Waiting for ${sourceLabel} to confirm the change.`,
+    label: 'Syncing',
+    detail: (sourceLabel) => `Syncing with ${sourceLabel}`,
     className: 'border-blue-800/40 bg-blue-950/35 text-blue-300',
     icon: Loader2,
   },
   failed: {
     state: 'failed',
-    label: 'Failed',
+    label: 'Sync delayed',
     detail: (sourceLabel, retryCount) => (
-      `Delivery to ${sourceLabel} failed${retryCount > 0 ? ` after ${retryCount} attempt${retryCount === 1 ? '' : 's'}` : ''}. It will retry on the next sync.`
+      `Could not sync with ${sourceLabel}${retryCount > 0 ? ` after ${retryCount} attempt${retryCount === 1 ? '' : 's'}` : ''}. Mission Control will try again automatically.`
     ),
     className: 'border-amber-800/40 bg-amber-950/35 text-amber-300',
     icon: AlertTriangle,
@@ -53,10 +54,11 @@ const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
     state: 'blocked',
     label: 'Blocked',
     detail: (sourceLabel, retryCount) => (
-      `Automatic delivery to ${sourceLabel} stopped${retryCount > 0 ? ` after ${retryCount} attempts` : ''}. Check the connector, then retry.`
+      `Automatic sync with ${sourceLabel} stopped${retryCount > 0 ? ` after ${retryCount} attempts` : ''}. Check the connector, then try again.`
     ),
     className: 'border-red-800/40 bg-red-950/35 text-red-300',
     icon: ShieldAlert,
+    actionLabel: 'Try again',
   },
   conflicted: {
     state: 'conflicted',
@@ -66,6 +68,7 @@ const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
     ),
     className: 'border-orange-800/40 bg-orange-950/35 text-orange-300',
     icon: GitMerge,
+    actionLabel: 'Sync now',
   },
   unknown: {
     state: 'unknown',
@@ -75,6 +78,7 @@ const PRESENTATIONS: Record<OperationState, OperationPresentation> = {
     ),
     className: 'border-slate-700 bg-slate-950/35 text-slate-300',
     icon: CircleHelp,
+    actionLabel: 'Check sync',
   },
 };
 
@@ -150,7 +154,7 @@ export function TaskConnectorSyncState({
   const canRetry = !compact
     && connectorType !== 'local'
     && Boolean(connectorInstanceId)
-    && presentation.state !== 'confirmed';
+    && Boolean(presentation.actionLabel);
   const [retrying, setRetrying] = useState(false);
   const [retryMessage, setRetryMessage] = useState<string | null>(null);
 
@@ -209,6 +213,30 @@ export function TaskConnectorSyncState({
     );
   }
 
+  if (presentation.state === 'pending' || presentation.state === 'failed') {
+    return (
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className={cn(
+          'inline-flex min-w-0 items-center gap-2 px-0.5 py-1 text-xs',
+          presentation.state === 'pending' ? 'text-blue-300' : 'text-amber-300',
+        )}
+      >
+        <Icon
+          size={14}
+          aria-hidden="true"
+          className={cn(
+            'shrink-0',
+            presentation.state === 'pending' && 'animate-spin motion-reduce:animate-none',
+          )}
+        />
+        <span>{presentation.detail(sourceLabel, pushRetryCount ?? 0)}</span>
+      </div>
+    );
+  }
+
   return (
     <section
       aria-label="Connector operation state"
@@ -221,10 +249,7 @@ export function TaskConnectorSyncState({
         <Icon
           size={18}
           aria-hidden="true"
-          className={cn(
-            'mt-0.5 shrink-0',
-            presentation.state === 'pending' && 'animate-spin motion-reduce:animate-none',
-          )}
+          className="mt-0.5 shrink-0"
         />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-semibold">{presentation.label}</p>
@@ -244,7 +269,7 @@ export function TaskConnectorSyncState({
               aria-hidden="true"
               className={retrying ? 'animate-spin motion-reduce:animate-none' : undefined}
             />
-            {retrying ? 'Syncing' : 'Retry'}
+            {retrying ? 'Syncing' : presentation.actionLabel}
           </button>
         )}
       </div>

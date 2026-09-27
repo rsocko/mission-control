@@ -20,6 +20,10 @@ import db, { runTransaction } from '@/db';
 import * as schema from '@/db/schema';
 import { taskTimeActivities } from '@/db/schema/tasks';
 import {
+  mergeInboxListEntries,
+  parseConfiguredInboxListEntries,
+} from '@/lib/tasks/core/inbox-list-entries';
+import {
   appSettings,
   connectorConfigs,
   eventOutbox,
@@ -315,23 +319,33 @@ class SqliteTaskFilterInputRepository implements TaskFilterInputRepository {
   }
 
   async listInboxListEntries(): Promise<InboxListEntry[]> {
-    const [row] = await this.database
-      .select({ value: appSettings.value })
-      .from(appSettings)
-      .where(eq(appSettings.key, 'inbox.lists'))
-      .limit(1);
-    if (!row?.value) return [];
+    const [settingsRows, defaultLists] = await Promise.all([
+      this.database
+        .select({ value: appSettings.value })
+        .from(appSettings)
+        .where(eq(appSettings.key, 'inbox.lists'))
+        .limit(1),
+      this.database
+        .select({
+          connectorType: connectorConfigs.type,
+          connectorInstanceId: sourceLists.connectorInstanceId,
+          sourceListId: sourceLists.sourceId,
+        })
+        .from(sourceLists)
+        .innerJoin(connectorConfigs, eq(sourceLists.connectorInstanceId, connectorConfigs.id))
+        .where(and(
+          eq(sourceLists.wellKnownListName, 'defaultList'),
+          eq(connectorConfigs.enabled, true),
+          isNull(connectorConfigs.deletedAt),
+        )),
+    ]);
 
-    return decodeLenientJsonArray(row.value).flatMap((entry): InboxListEntry[] => {
-      if (!entry || typeof entry !== 'object') return [];
-      const record = entry as Record<string, unknown>;
-      if (typeof record.connectorType !== 'string') return [];
-      return [{
-        connectorType: record.connectorType,
-        sourceListId: typeof record.sourceListId === 'string' ? record.sourceListId : undefined,
-        sourceListName: typeof record.sourceListName === 'string' ? record.sourceListName : undefined,
-      }];
-    });
+    return mergeInboxListEntries(
+      parseConfiguredInboxListEntries(
+        settingsRows[0]?.value ? decodeLenientJsonArray(settingsRows[0].value) : [],
+      ),
+      defaultLists,
+    );
   }
 }
 

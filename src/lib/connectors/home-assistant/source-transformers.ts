@@ -31,6 +31,11 @@ function safeId(value: string): string {
   return encodeURIComponent(value);
 }
 
+function humanizeIdentifier(value: string): string {
+  const words = value.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return words ? words[0].toUpperCase() + words.slice(1) : value;
+}
+
 function sourceUrl(baseUrl: string, path: string): string {
   return `${baseUrl.replace(/\/+$/, '')}${path}`;
 }
@@ -189,14 +194,16 @@ export function buildRepairNotifications(input: {
     if (!domain || !issueId || issue.ignored === true) return [];
     const level = repairLevel(issue.severity);
     const createdAt = text(issue.created) ?? new Date().toISOString();
-    const title = text(issue.title) ?? `${domain}: ${issueId.replace(/[_-]+/g, ' ')}`;
+    const repairName = text(issue.translation_key) ?? issueId;
+    const title = text(issue.title)
+      ?? `${humanizeIdentifier(domain)}: ${humanizeIdentifier(repairName)}`;
     return [{
       id: `repair:${safeId(domain)}:${safeId(issueId)}`,
       sourceId: `${domain}:${issueId}`,
       connectorType: input.connectorType,
       connectorInstanceId: input.connectorInstanceId,
       title,
-      body: text(issue.description) ?? text(issue.translation_key) ?? undefined,
+      body: text(issue.description) ?? undefined,
       level,
       category: 'system',
       templateKey: `ha_repair_${String(issue.severity || 'warning')}`,

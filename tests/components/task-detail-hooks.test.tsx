@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTaskDetailData } from '@/components/task-detail/useTaskDetailData';
 import {
   useTaskDetailMutations,
@@ -15,7 +15,7 @@ import { notifyTaskChanged } from '@/lib/task-change-events';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
@@ -564,7 +564,7 @@ describe('useTaskDetailMutations', () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onClose).toHaveBeenCalledWith('task-removed'));
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
     expect(toast.success).toHaveBeenCalledWith('Task deleted');
     expect(onUpdate).toHaveBeenCalled();

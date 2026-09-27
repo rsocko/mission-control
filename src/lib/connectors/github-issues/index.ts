@@ -454,7 +454,15 @@ export class GitHubIssuesConnector implements IConnector {
       'source_repository',
     );
     const routedRepository = `${owner}/${name}`;
-    const labels = task.tags?.filter(t => t.type === 'source').map(t => t.name) || [];
+    const sourceTags = task.tags?.filter(t => t.type === 'source') || [];
+    const labels = sourceTags.map(t => t.name);
+
+    // Labels are repository-scoped. A cross-repository move can carry labels
+    // that do not exist in the destination, and GitHub rejects issue creation
+    // with 422 unless they are created first.
+    for (const tag of sourceTags) {
+      await createLabelInRepo(this.client!, owner, name, tag.name, tag.color);
+    }
 
     // Include the priority label when creating with a priority set
     if (task.priority && task.priority !== 'none') {

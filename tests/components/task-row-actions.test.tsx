@@ -174,17 +174,20 @@ describe('TaskRowActions', () => {
     );
   });
 
-  it('reserves property tracks while revealing only empty writable affordances', () => {
+  it('keeps compact property columns aligned and progressively reveals secondary affordances', () => {
     const { rerender } = renderActions();
 
     expect(screen.getByTestId('task-row-properties')).toHaveClass(
-      'grid-cols-[36px_30px_32px_32px_32px_32px]',
-      '@min-[960px]:grid-cols-[36px_52px_30px_30px_32px_72px_32px_32px_96px]',
+      'grid',
+      'gap-0.5',
+      'grid-cols-[32px_32px_32px]',
+      '@min-[960px]:grid-cols-[32px_32px_32px_56px_32px_32px_32px]',
+      '@min-[1280px]:grid-cols-[32px_44px_32px_30px_32px_56px_32px_32px_96px]',
     );
-    expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('opacity-0');
-    expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('@min-[480px]:flex', 'opacity-0');
-    expect(screen.getByRole('button', { name: 'Add notes' }).parentElement).toHaveClass('opacity-0');
-    expect(screen.getByRole('button', { name: 'Snooze task' }).closest('.hidden')).toHaveClass('@min-[480px]:contents');
+    expect(screen.getByRole('button', { name: 'Add to My Day' }).parentElement).toHaveClass('hidden', '@min-[480px]:flex', 'opacity-0');
+    expect(screen.getByRole('button', { name: 'Add due date' }).parentElement).toHaveClass('hidden', '@min-[640px]:flex', 'opacity-0');
+    expect(screen.getByRole('button', { name: 'Add notes' }).parentElement).toHaveClass('hidden', '@min-[720px]:flex', 'opacity-0');
+    expect(screen.getByRole('button', { name: 'Snooze task' }).closest('.hidden')).toHaveClass('@min-[1280px]:contents');
     expect(screen.getByRole('button', { name: 'Status: To do' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Priority: None' })).toBeVisible();
 
@@ -207,9 +210,9 @@ describe('TaskRowActions', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).not.toHaveClass('opacity-0');
-    expect(screen.getByRole('button', { name: /^Change due date/ }).parentElement).not.toHaveClass('opacity-0');
-    expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).not.toHaveClass('opacity-0');
+    expect(screen.getByRole('button', { name: 'Remove from My Day' }).parentElement).toHaveClass('@min-[480px]:flex');
+    expect(screen.getByRole('button', { name: /^Change due date/ }).parentElement).toHaveClass('@min-[640px]:flex');
+    expect(screen.getByRole('button', { name: 'Open notes' }).parentElement).toHaveClass('@min-[720px]:flex');
   });
 
   it('keeps active My Day status and priority controls visible at narrow widths', () => {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Check, CheckSquare, Clock, FileText, Link2, Repeat, ChevronDown, Maximize2, Minimize2, ClipboardList, X } from 'lucide-react';
+import { Check, CheckSquare, Clock, FileText, Link2, Repeat, ChevronDown, Maximize2, Minimize2, ClipboardList, Search, X } from 'lucide-react';
 import Image from 'next/image';
 import {
   Select,
@@ -31,6 +31,11 @@ import type { QuickAddDestination } from './quick-add-types';
 import type { PlanningHorizon } from '@/types';
 import { PLANNING_HORIZONS } from '@/lib/tasks/planning-horizon';
 import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
+import {
+  groupSourceLists,
+  readRecentSourceListIds,
+  recordRecentSourceListId,
+} from '@/lib/source-list-picker';
 
 interface Tag {
   id: string;
@@ -179,6 +184,7 @@ export function AddTaskModal({
   const [selectedListId, setSelectedListId] = useState<string>(initialListId || initialDestination.listId || '');
   const [listSearchQuery, setListSearchQuery] = useState('');
   const [isListDropdownOpen, setIsListDropdownOpen] = useState(false);
+  const [recentListIds, setRecentListIds] = useState<string[]>(readRecentSourceListIds);
   const [templates, setTemplates] = useState<TaskTemplate[]>([]);
   const [showTemplatePicker, setShowTemplatePicker] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -200,6 +206,22 @@ export function AddTaskModal({
     });
   }, [enableQuickAddSemantics, projects, quickAddPreferences, title]);
   const activeDestination = destination;
+  const listSections = useMemo(
+    () => groupSourceLists({
+      lists: availableLists,
+      groups: listGroups,
+      search: listSearchQuery,
+      recentIds: recentListIds,
+    }),
+    [availableLists, listGroups, listSearchQuery, recentListIds],
+  );
+
+  function selectList(sourceId: string) {
+    setSelectedListId(sourceId);
+    setRecentListIds(recordRecentSourceListId(sourceId));
+    setIsListDropdownOpen(false);
+    setListSearchQuery('');
+  }
 
   // Load lists for the selected connector
   useEffect(() => {
@@ -648,7 +670,7 @@ export function AddTaskModal({
                     setSelectedListId('');
                     if (dest.connectorType !== 'local') setRecurrenceMode('schedule');
                   }}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
+                  className={`flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium transition-colors ${
                     activeDestination.id === dest.id && !activeDestination.listId
                       ? 'border-[var(--accent)] bg-[var(--accent)]/15 text-[var(--accent-400)]'
                       : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-secondary)] hover:bg-[var(--surface-0)]'
@@ -680,74 +702,62 @@ export function AddTaskModal({
                     onFocus={() => { setIsListDropdownOpen(true); setListSearchQuery(''); }}
                     onBlur={(e) => { if (!listDropdownRef.current?.contains(e.relatedTarget as Node)) { setIsListDropdownOpen(false); setListSearchQuery(''); } }}
                     placeholder="Search lists..."
-                    className={`w-full bg-[var(--surface-0)] border rounded-lg px-3 py-2 text-xs text-[var(--text-primary)] outline-none pr-7 ${listRequired ? 'border-amber-400' : 'border-[var(--border)]'}`}
+                    role="combobox"
+                    aria-expanded={isListDropdownOpen}
+                    aria-controls="add-task-list-options"
+                    aria-label={isGitHub ? 'Choose a repository' : 'Choose a list'}
+                    className={`min-h-11 w-full bg-[var(--surface-0)] border rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] outline-none pr-9 sm:text-xs ${listRequired ? 'border-amber-400' : 'border-[var(--border)]'}`}
                   />
-                  <ChevronDown size={12} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                  {isListDropdownOpen
+                    ? <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />
+                    : <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)] pointer-events-none" />}
                 </div>
-                {isListDropdownOpen && (() => {
-                  const query = listSearchQuery.toLowerCase();
-                  const filteredLists = query
-                    ? availableLists.filter(l => l.name.toLowerCase().includes(query))
-                    : availableLists;
-
-                  // Group lists: groups in sortOrder, then ungrouped at the end
-                  const groupedEntries: { groupName: string | null; lists: SourceList[] }[] = [];
-                  const sortedGroups = [...listGroups].sort((a, b) => a.sortOrder - b.sortOrder);
-
-                  for (const group of sortedGroups) {
-                    const groupLists = filteredLists
-                      .filter(l => l.groupId === group.id)
-                      .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-                    if (groupLists.length > 0) {
-                      groupedEntries.push({ groupName: group.name, lists: groupLists });
-                    }
-                  }
-                  const ungrouped = filteredLists
-                    .filter(l => !l.groupId)
-                    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0));
-                  if (ungrouped.length > 0) {
-                    groupedEntries.push({ groupName: null, lists: ungrouped });
-                  }
-
-                  return (
-                    <div className="absolute z-50 mt-1 w-full max-h-52 overflow-y-auto bg-[var(--surface-0)] border border-[var(--border)] rounded-lg shadow-lg py-1">
-                      {/* Default list option — hidden when list selection is required (e.g. GitHub repos) */}
-                      {activeDestination.listSelectionMode !== 'required' && (
-                        <button
-                          type="button"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => { setSelectedListId(''); setIsListDropdownOpen(false); setListSearchQuery(''); }}
-                          className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-2)] ${selectedListId === '' ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
-                        >
-                          Default list
-                        </button>
-                      )}
-                      {groupedEntries.map((entry, gi) => (
-                        <div key={entry.groupName || `ungrouped-${gi}`}>
-                          {entry.groupName && (
-                            <div className="px-3 pt-2 pb-0.5 text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
-                              {entry.groupName}
-                            </div>
-                          )}
-                          {entry.lists.map(l => (
+                {isListDropdownOpen && (
+                    <div
+                      id="add-task-list-options"
+                      role="listbox"
+                      aria-label={isGitHub ? 'Repositories' : 'Lists'}
+                      className="absolute z-50 mt-1 w-full max-h-64 overflow-y-auto bg-[var(--surface-0)] border border-[var(--border)] rounded-lg shadow-lg py-1"
+                    >
+                      {listSections.map((section) => (
+                        <div key={section.id}>
+                          <div className="sticky top-0 flex items-center gap-1.5 bg-[var(--surface-0)] px-3 pt-2.5 pb-1 text-[12px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+                            {section.recent && <Clock size={11} aria-hidden="true" />}
+                            {section.label}
+                          </div>
+                          {section.lists.map(l => (
                             <button
                               key={l.sourceId}
                               type="button"
                               onMouseDown={(e) => e.preventDefault()}
-                              onClick={() => { setSelectedListId(l.sourceId); setIsListDropdownOpen(false); setListSearchQuery(''); }}
-                              className={`w-full text-left px-3 py-1.5 text-xs hover:bg-[var(--surface-2)] ${entry.groupName ? 'pl-5' : ''} ${selectedListId === l.sourceId ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
+                              onClick={() => selectList(l.sourceId)}
+                              role="option"
+                              aria-selected={selectedListId === l.sourceId}
+                              className={`min-h-11 w-full text-left px-5 py-2.5 text-sm hover:bg-[var(--surface-2)] sm:text-xs ${selectedListId === l.sourceId ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
                             >
                               {l.name}
                             </button>
                           ))}
                         </div>
                       ))}
-                      {filteredLists.length === 0 && (
-                        <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No lists found</div>
+                      {/* Default list option — hidden when list selection is required (e.g. GitHub repos) */}
+                      {activeDestination.listSelectionMode !== 'required' && !listSearchQuery && (
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setSelectedListId(''); setIsListDropdownOpen(false); setListSearchQuery(''); }}
+                          role="option"
+                          aria-selected={selectedListId === ''}
+                          className={`min-h-11 w-full text-left px-3 py-2.5 text-sm hover:bg-[var(--surface-2)] sm:text-xs ${selectedListId === '' ? 'text-[var(--accent)] font-medium' : 'text-[var(--text-primary)]'}`}
+                        >
+                          Default list
+                        </button>
+                      )}
+                      {listSections.length === 0 && (
+                        <div className="px-3 py-4 text-center text-xs text-[var(--text-muted)]">No lists found</div>
                       )}
                     </div>
-                  );
-                })()}
+                )}
                 </>) : (
                 <div className="px-3 py-2 bg-[var(--surface-0)] border border-amber-400/40 rounded-lg text-xs text-[var(--text-muted)]">
                   {isGitHub

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Repeat, Check, Flame, Loader2, Plus, ChevronRight } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { fadeSlideUp } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';

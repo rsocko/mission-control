@@ -7,7 +7,7 @@ import {
   Sun, Inbox, ChartNetwork, LayoutDashboard, Columns3, Target, Repeat,
   CalendarDays, Settings, AppWindow, ExternalLink, Bell, Zap, Activity, Search,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import {
   SHORTCUT_PAGES,

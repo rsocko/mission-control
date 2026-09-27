@@ -24,7 +24,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { AgentAttribution } from '@/components/domains/AgentAttribution';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { TaskDocumentPreviewSection } from '@/components/task-detail/TaskDocumentPreviewSection';
@@ -480,7 +480,10 @@ export default function DocIntelligencePage() {
             <div className="h-full min-w-0 flex-1 2xl:max-w-[440px] 2xl:shrink-0">
               <TaskDetailPanel
                 taskId={selectedTaskId}
-                onClose={() => setSelectedTaskId(null)}
+                onClose={(reason) => setSelectedTaskId(
+                  null,
+                  reason === 'task-removed' ? { history: 'replace' } : undefined,
+                )}
                 onUpdate={handleTaskUpdate}
                 mode="panel"
                 minPanelWidth={420}

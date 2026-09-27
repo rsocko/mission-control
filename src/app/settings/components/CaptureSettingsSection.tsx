@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Loader2, Inbox, MapPin, Plus, X, Check } from 'lucide-react';
 import Image from 'next/image';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   Select,
   SelectTrigger,

@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { Sun, Layers, PlusCircle, Zap, Mic, Square } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { HoustonIcon } from '@/components/ui/HoustonIcon';
 import { useVoiceCapture } from '@/lib/hooks/useVoiceCapture';
 import { cn } from '@/lib/utils';

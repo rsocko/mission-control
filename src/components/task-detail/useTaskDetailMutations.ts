@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { taskLogger } from '@/lib/client-logger';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { formatShortDate } from '@/lib/utils/task-detail-date';
@@ -40,6 +40,7 @@ import type {
   MicroStatusSuggestion,
   TagConnectorCaps,
   TaskDetail,
+  TaskDetailCloseReason,
   TaskFieldUpdate,
   TaskTag,
 } from './task-detail-types';
@@ -73,7 +74,7 @@ export interface UseTaskDetailMutationsOptions {
   setPotentialDuplicates: React.Dispatch<React.SetStateAction<DuplicateCandidate[]>>;
   /** Effective My Day membership, host override included. */
   isInMyDay: boolean;
-  onClose: () => void;
+  onClose: (reason?: TaskDetailCloseReason) => void;
   onComplete?: () => void | Promise<void>;
   onDelete?: () => void | Promise<void>;
   onToggleMyDay?: () => void | Promise<void>;
@@ -417,7 +418,7 @@ export function useTaskDetailMutations({
             toast.success('Task deleted');
             onUpdate?.();
             notifyNavigationCountsChanged();
-            onClose();
+            onClose('task-removed');
           } catch {
             toast.error('Failed to delete task');
           }

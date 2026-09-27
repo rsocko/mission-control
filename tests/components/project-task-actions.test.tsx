@@ -20,7 +20,7 @@ vi.mock('next/navigation', () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     dismiss: mocks.toastDismiss,
     error: mocks.toastError,

@@ -123,9 +123,14 @@ describe('GitHub issue tag write-back', () => {
     }));
   });
 
-  it('returns stable identity evidence when creating an issue', async () => {
-    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+  it('creates destination labels before creating an issue', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/repos/acme/app/labels')) {
+        return Response.json({ name: 'bug' }, { status: 201 });
+      }
       if (url.endsWith('/repos/acme/app/issues')) {
         return Response.json({
           node_id: 'I_created',
@@ -165,10 +170,42 @@ describe('GitHub issue tag write-back', () => {
     }, () => connector.createTask({
       title: 'Created issue',
       sourceListId: 'acme/app',
+      tags: [{
+        id: 'tag-1',
+        name: 'bug',
+        slug: 'bug',
+        type: 'source',
+        confirmed: true,
+        createdAt: '2026-08-09T20:00:00.000Z',
+      }],
     }));
 
     expect(created.sourceId).toBe('acme/app:42');
     expect(created.externalIdentity?.entity.identity.stableId).toBe('I_created');
     expect(created.externalIdentity?.repository?.identity.stableId).toBe('R_app');
+    expect(calls.slice(0, 2)).toEqual([
+      expect.objectContaining({
+        url: expect.stringContaining('/repos/acme/app/labels'),
+        init: expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            name: 'bug',
+            color: '6b7280',
+            description: 'Created from Mission Control',
+          }),
+        }),
+      }),
+      expect.objectContaining({
+        url: expect.stringContaining('/repos/acme/app/issues'),
+        init: expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            title: 'Created issue',
+            body: '',
+            labels: ['bug'],
+          }),
+        }),
+      }),
+    ]);
   });
 });

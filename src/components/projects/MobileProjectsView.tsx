@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion, useReducedMotion } from 'motion/react';
 import { CheckCircle2, ChevronRight, Eye, EyeOff, Layers, Loader2, Plus } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { MobileSheet } from '@/components/ui/MobileSheet';

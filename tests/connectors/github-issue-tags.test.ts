@@ -230,7 +230,7 @@ describe('GitHub issue tag write-back', () => {
         return Response.json({
           node_id: 'I_created',
           number: 42,
-          title: 'Avatar Studio - Thread Photos Bug',
+          title: 'Move task with existing labels',
           body: null,
           state: 'open',
           created_at: '2026-09-27T00:00:00.000Z',
@@ -263,7 +263,7 @@ describe('GitHub issue tag write-back', () => {
       issueNumber: null,
       operation: 'create',
     }, () => connector.createTask({
-      title: 'Avatar Studio - Thread Photos Bug',
+      title: 'Move task with existing labels',
       sourceListId: 'acme/app',
       priority: 'high',
       tags: [
@@ -297,7 +297,7 @@ describe('GitHub issue tag write-back', () => {
     expect(calls.filter(({ init }) => init?.method === 'POST')).toHaveLength(1);
     expect(calls.find(({ url }) => url.endsWith('/repos/acme/app/issues'))?.init).toMatchObject({
       body: JSON.stringify({
-        title: 'Avatar Studio - Thread Photos Bug',
+        title: 'Move task with existing labels',
         body: '',
         labels: ['bug', 'priority:high'],
       }),

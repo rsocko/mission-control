@@ -500,6 +500,14 @@ export async function createLabelInRepo(
   tagName: string,
   color?: string,
 ): Promise<void> {
+  const labelPath = `/repos/${owner}/${repo}/labels/${encodeURIComponent(tagName)}`;
+  const existing = await client.restFetch(labelPath);
+  if (existing.ok) return;
+  if (existing.status !== 404) {
+    const body = await existing.text().catch(() => '');
+    throw new Error(`Failed to check label "${tagName}" on ${owner}/${repo}: ${existing.status} ${body}`);
+  }
+
   const labelColor = color ? color.replace(/^#/, '') : '6b7280';
   const res = await client.restFetch(`/repos/${owner}/${repo}/labels`, {
     method: 'POST',
@@ -509,8 +517,11 @@ export async function createLabelInRepo(
       description: 'Created from Mission Control',
     }),
   });
-  if (!res.ok && res.status !== 422) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`Failed to create label "${tagName}" on ${owner}/${repo}: ${res.status} ${body}`);
-  }
+  if (res.ok) return;
+
+  // Another writer can create the label between the lookup and POST.
+  if (res.status === 422 && (await client.restFetch(labelPath)).ok) return;
+
+  const body = await res.text().catch(() => '');
+  throw new Error(`Failed to create label "${tagName}" on ${owner}/${repo}: ${res.status} ${body}`);
 }

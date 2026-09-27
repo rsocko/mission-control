@@ -674,7 +674,10 @@ export async function executeWriteThroughTaskMove(
         }
       }
       if (targetConnectorRow.type === 'github-issues') {
-        tagsForTarget = tagsForTarget.map((tag) => ({ ...tag, type: 'source' as const }));
+        tagsForTarget = [...new Map(tagsForTarget.map((tag) => [
+          tag.name.toLowerCase(),
+          { ...tag, type: 'source' as const },
+        ])).values()];
       }
 
       const taskMetadata = {

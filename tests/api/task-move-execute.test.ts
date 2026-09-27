@@ -1540,6 +1540,8 @@ describe('POST /api/tasks/move/execute', () => {
     selectResults.push([{ name: 'acme/repo-b', sourceId: 'acme/repo-b' }]);
     selectResults.push([{
       id: 'tag-1', name: 'bug', slug: 'bug', type: 'source', color: null,
+    }, {
+      id: 'tag-2', name: 'bug', slug: 'bug', type: 'hub', color: null,
     }]);
     selectResults.push([]);
     selectResults.push([]);

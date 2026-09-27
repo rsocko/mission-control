@@ -115,6 +115,7 @@ export interface GitHubRecoveryRepositoryBinding {
   repositoryStableId: string;
   /** The bound `source_lists.id`. */
   localId: string;
+  bindingState: 'shadow' | 'active' | 'collision' | 'retired';
 }
 
 /** A connector task joined to its active stable issue binding and locator. */
@@ -125,6 +126,7 @@ export interface GitHubRecoveryIssuePlanRow {
   issueStableId: string | null;
   issueNumber: number | null;
   repositoryEntityId: string | null;
+  bindingState: 'shadow' | 'active' | 'collision' | 'retired' | null;
 }
 
 export interface GitHubRecoveryIdentityModeSnapshot {

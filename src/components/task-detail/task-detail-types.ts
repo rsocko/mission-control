@@ -118,6 +118,7 @@ export interface WritableConnector {
 
 /** Surface the panel is rendered in. */
 export type TaskDetailMode = 'panel' | 'dialog' | 'workspace' | 'mobile';
+export type TaskDetailCloseReason = 'dismiss' | 'task-removed';
 
 /** Host request to open the expanded notes dialog for a task. */
 export interface TaskNotesOpenRequest {
@@ -194,7 +195,7 @@ export interface TaskDetailMetadata {
 
 export interface TaskDetailPanelProps {
   taskId: string;
-  onClose: (reason?: 'dismiss' | 'task-removed') => void;
+  onClose: (reason?: TaskDetailCloseReason) => void;
   onUpdate?: (fields?: TaskFieldUpdate) => void;
   onSubtaskCountChange?: (done: number, total: number) => void;
   availableTags?: TaskTag[];

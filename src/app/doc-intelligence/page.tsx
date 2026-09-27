@@ -480,7 +480,10 @@ export default function DocIntelligencePage() {
             <div className="h-full min-w-0 flex-1 2xl:max-w-[440px] 2xl:shrink-0">
               <TaskDetailPanel
                 taskId={selectedTaskId}
-                onClose={() => setSelectedTaskId(null)}
+                onClose={(reason) => setSelectedTaskId(
+                  null,
+                  reason === 'task-removed' ? { history: 'replace' } : undefined,
+                )}
                 onUpdate={handleTaskUpdate}
                 mode="panel"
                 minPanelWidth={420}

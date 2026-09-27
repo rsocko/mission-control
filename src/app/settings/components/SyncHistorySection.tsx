@@ -1437,7 +1437,10 @@ function SyncHistorySection({ connectors }: { connectors: ConnectorConfig[] }) {
           taskId={selectedTaskId}
           mode="dialog"
           portalDialog
-          onClose={() => setSelectedTaskId(null)}
+          onClose={(reason) => setSelectedTaskId(
+            null,
+            reason === 'task-removed' ? { history: 'replace' } : undefined,
+          )}
         />
       )}
       {selectedSnapshotId && (

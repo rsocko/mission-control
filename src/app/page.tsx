@@ -806,8 +806,11 @@ function DashboardWorkspace({ isAllTasksPage = false }: { isAllTasksPage?: boole
           >
             <TaskDetailPanel
               taskId={state.selectedTaskId}
-              onClose={() => {
-                actions.setSelectedTaskId(null);
+              onClose={(reason) => {
+                actions.setSelectedTaskId(
+                  null,
+                  reason === 'task-removed' ? { history: 'replace' } : undefined,
+                );
                 setPendingMoveDialogTaskId(null);
                 setNotesOpenRequest(null);
                 setSubtasksOpenRequest(null);

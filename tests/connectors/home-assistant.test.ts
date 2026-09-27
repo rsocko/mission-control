@@ -302,6 +302,24 @@ describe('Home Assistant source transformers', () => {
     });
   });
 
+  it('uses the repair translation key instead of an opaque issue id as its fallback title', () => {
+    const repairs = buildRepairNotifications({
+      ...common,
+      issues: [{
+        domain: 'phyn',
+        issue_id: '01J8X62M1G1VRHMY2NWRB9B4T374205e8c5dcc48cf9931f7bbe20c72e18090b1f471c6011',
+        translation_key: 'energy_coverage',
+        severity: 'warning',
+      }],
+      immediateActionNeeded: true,
+    });
+
+    expect(repairs[0]).toMatchObject({
+      title: 'Phyn: Energy coverage',
+      body: undefined,
+    });
+  });
+
 });
 
 describe('Home Assistant notification presentation', () => {
@@ -601,6 +619,77 @@ describe('Home Assistant WebSocket client', () => {
     expect(result.errors).toEqual({});
     expect(result.persistentNotifications?.[0].notification_id).toBe('notice-1');
     expect(result.repairs?.[0]).toMatchObject({ domain: 'mqtt', issue_id: 'offline' });
+  });
+
+  it('resolves repair titles and descriptions from Home Assistant translations', async () => {
+    class FakeWebSocket {
+      onopen: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onclose: ((event: CloseEvent) => void) | null = null;
+
+      constructor() {
+        queueMicrotask(() => this.emit({ type: 'auth_required' }));
+      }
+
+      send(data: string) {
+        const message = JSON.parse(data) as Record<string, unknown>;
+        if (message.type === 'auth') {
+          queueMicrotask(() => this.emit({ type: 'auth_ok' }));
+        } else if (message.type === 'repairs/list_issues') {
+          queueMicrotask(() => this.emit({
+            id: message.id,
+            type: 'result',
+            success: true,
+            result: {
+              issues: [{
+                domain: 'phyn',
+                issue_id: 'opaque-id',
+                translation_key: 'energy_coverage',
+                translation_placeholders: { config_entry_name: 'Natick' },
+              }],
+            },
+          }));
+        } else if (message.type === 'frontend/get_translations') {
+          expect(message).toMatchObject({
+            language: 'en',
+            category: 'issues',
+            integration: ['phyn'],
+          });
+          queueMicrotask(() => this.emit({
+            id: message.id,
+            type: 'result',
+            success: true,
+            result: {
+              resources: {
+                'component.phyn.issues.energy_coverage.title':
+                  'Phyn usage missing from Energy: {config_entry_name}',
+                'component.phyn.issues.energy_coverage.description':
+                  'Select the missing water statistics for {config_entry_name}.',
+              },
+            },
+          }));
+        }
+      }
+
+      close() {}
+
+      private emit(message: Record<string, unknown>) {
+        this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
+      }
+    }
+
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const result = await createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    }).fetchWebSocketSources(['repairs']);
+
+    expect(result.errors).toEqual({});
+    expect(result.repairs?.[0]).toMatchObject({
+      title: 'Phyn usage missing from Energy: Natick',
+      description: 'Select the missing water statistics for Natick.',
+    });
   });
 
   it('fetches Markdown release notes for a supported update entity', async () => {

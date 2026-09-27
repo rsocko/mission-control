@@ -7,9 +7,9 @@ import {
   normalizeTaskFilterContext,
   type TaskFilterContext,
 } from '@/lib/task-filter-context';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: Object.assign(vi.fn(), { dismiss: vi.fn() }),
 }));
 

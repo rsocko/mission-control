@@ -1,7 +1,7 @@
 'use client';
 
 import { LoaderCircle, Mic, MicOff, Square } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useVoiceCapture } from '@/lib/hooks/useVoiceCapture';
 import { cn } from '@/lib/utils';
 import styles from './VoiceButton.module.css';

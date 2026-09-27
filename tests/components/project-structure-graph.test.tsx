@@ -17,7 +17,7 @@ const {
   toastSuccess: vi.fn(),
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { error: toastError, success: toastSuccess },
 }));
 

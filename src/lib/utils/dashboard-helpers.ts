@@ -21,6 +21,10 @@ export function removeTaskFromResponse(response: TaskResponse, taskId: string, t
     tasks: nextTasks,
     total: Math.max(0, response.total - 1),
     sourceCounts: nextSourceCounts,
+    facetCounts: {
+      priorities: decrementCount(response.facetCounts.priorities, task.priority),
+      statuses: decrementCount(response.facetCounts.statuses, task.status),
+    },
     stats: {
       ...response.stats,
       totalOpen: Math.max(0, response.stats.totalOpen - 1),
@@ -60,6 +64,10 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
       ...response.sourceCounts,
       [task.connectorType]: (response.sourceCounts[task.connectorType] || 0) + 1,
     },
+    facetCounts: {
+      priorities: incrementCount(response.facetCounts.priorities, task.priority),
+      statuses: incrementCount(response.facetCounts.statuses, task.status),
+    },
     stats: {
       ...response.stats,
       totalOpen: response.stats.totalOpen + 1,
@@ -82,6 +90,20 @@ export function restoreTaskToResponse(response: TaskResponse, task: Task, index:
         ? response.stats.assignedToMe + 1
         : response.stats.assignedToMe,
     },
+  };
+}
+
+function decrementCount(counts: Record<string, number>, key: string): Record<string, number> {
+  return {
+    ...counts,
+    [key]: Math.max(0, (counts[key] ?? 0) - 1),
+  };
+}
+
+function incrementCount(counts: Record<string, number>, key: string): Record<string, number> {
+  return {
+    ...counts,
+    [key]: (counts[key] ?? 0) + 1,
   };
 }
 

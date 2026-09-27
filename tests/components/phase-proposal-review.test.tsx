@@ -32,7 +32,7 @@ vi.mock('motion/react', () => ({
   },
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: Object.assign(vi.fn(), {
     loading: vi.fn(() => 'proposal-toast'),
     success: vi.fn(),

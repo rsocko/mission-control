@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import {
   Timer, Play, Pause, RotateCcw, Target, Clock, AlertTriangle,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useTimer, type TimerMode } from '@/lib/hooks/useTimer';
 import { scaleIn } from '@/lib/motion';
 import { uiLogger } from '@/lib/client-logger';

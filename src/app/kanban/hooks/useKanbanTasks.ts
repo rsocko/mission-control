@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { kanbanLogger } from '@/lib/client-logger';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';

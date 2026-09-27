@@ -53,6 +53,23 @@ describe('dashboard task query retention', () => {
     ]);
   });
 
+  it('preserves server facet counts instead of deriving them from loaded pages', () => {
+    const first = page(['task-1', 'task-2']);
+    const second = {
+      ...page(['task-3'], false),
+      facetCounts: {
+        priorities: { critical: 11, high: 26 },
+        statuses: { todo: 47, in_progress: 3 },
+      },
+    };
+    const data: InfiniteData<TaskResponse, number> = {
+      pages: [first, second],
+      pageParams: [0, 2],
+    };
+
+    expect(flattenTaskPages(data).facetCounts).toEqual(second.facetCounts);
+  });
+
   it('stops advertising load-more once the documented page bound is reached', () => {
     const data: InfiniteData<TaskResponse, number> = {
       pages: Array.from(

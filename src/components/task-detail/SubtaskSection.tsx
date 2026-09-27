@@ -20,7 +20,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Plus, CheckCircle2, Circle, Trash2, ArrowUpFromLine, Sparkles, GripVertical } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import dynamic from 'next/dynamic';
 

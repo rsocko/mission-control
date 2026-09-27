@@ -16,9 +16,10 @@ import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/compo
 import { BadgeSettingsCard } from './BadgeSettingsCard';
 import { NavBadgeSettingsCard } from './NavBadgeSettingsCard';
 import { SyncIconSettingsCard } from './SyncIconSettingsCard';
+import { ToastSettingsCard } from '@/components/settings/ToastSettingsCard';
 import { CaptureDestinationSection, InboxListsSection } from './CaptureSettingsSection';
 import { settingsLogger } from '@/lib/client-logger';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
@@ -185,6 +186,7 @@ function GeneralSettingsSection() {
       </div>
 
       <SyncIconSettingsCard />
+      <ToastSettingsCard />
 
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5">
         <div className="mb-4 flex items-center gap-2">

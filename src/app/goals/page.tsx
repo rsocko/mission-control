@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import dynamic from 'next/dynamic';
 import {
   DevelopPanel, GoalsContent, GoalsFilterChips, GoalsSidebar,

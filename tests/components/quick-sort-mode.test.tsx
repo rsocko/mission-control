@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   hasTasks: true,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: mocks.toastError,
     info: vi.fn(),

@@ -753,7 +753,7 @@ export async function executeWriteThroughTaskMove(
           });
         }
 
-      if (targetConnector.addTagToTask) {
+      if (targetConnectorRow.type !== 'github-issues' && targetConnector.addTagToTask) {
         for (const tag of sourceTags) {
           await targetConnector.addTagToTask(newSourceId, tag.name);
         }

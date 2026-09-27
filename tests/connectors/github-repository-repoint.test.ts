@@ -599,6 +599,46 @@ describe('GitHub repository repoint service', () => {
       .where(eq(schema.connectorOperationLeases.connectorId, 'native')).all()).toEqual([]);
   });
 
+  it('does not advertise native transfer until every write-fence binding is active', async () => {
+    const seeded = await seedRepository(
+      'native-eligibility',
+      'native-eligibility/repo-a',
+      'R_native_eligibility_a',
+      'I_native_eligibility',
+    );
+    await seedTargetRepository(
+      'native-eligibility',
+      'native-eligibility/repo-b',
+      'R_native_eligibility_b',
+    );
+    database.default.update(schema.externalEntityBindings).set({ state: 'shadow' })
+      .where(eq(
+        schema.externalEntityBindings.connectorInstanceId,
+        'native-eligibility',
+      )).run();
+
+    await expect(service.canTransferGitHubIssueSafely(
+      'native-eligibility',
+      'native-eligibility/repo-a:17',
+      'native-eligibility/repo-b',
+    )).resolves.toBe(false);
+
+    database.default.update(schema.externalEntityBindings).set({ state: 'active' })
+      .where(eq(
+        schema.externalEntityBindings.connectorInstanceId,
+        'native-eligibility',
+      )).run();
+    await expect(service.canTransferGitHubIssueSafely(
+      'native-eligibility',
+      'native-eligibility/repo-a:17',
+      'native-eligibility/repo-b',
+    )).resolves.toBe(true);
+
+    const taskBinding = database.default.select().from(schema.externalEntityBindings)
+      .where(eq(schema.externalEntityBindings.localId, seeded.taskId)).get();
+    expect(taskBinding?.state).toBe('active');
+  });
+
   it('waits for the transferred issue to become visible in the target repository', async () => {
     const seeded = await seedRepository('eventual', 'eventual/repo-a', 'R_eventual_a', 'I_eventual');
     await seedTargetRepository('eventual', 'eventual/repo-b', 'R_eventual_b');

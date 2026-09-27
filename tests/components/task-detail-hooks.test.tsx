@@ -564,7 +564,7 @@ describe('useTaskDetailMutations', () => {
       await Promise.resolve();
     });
 
-    await waitFor(() => expect(onClose).toHaveBeenCalledOnce());
+    await waitFor(() => expect(onClose).toHaveBeenCalledWith('task-removed'));
     expect(fetchMock).toHaveBeenCalledWith('/api/tasks/task-1', { method: 'DELETE' });
     expect(toast.success).toHaveBeenCalledWith('Task deleted');
     expect(onUpdate).toHaveBeenCalled();

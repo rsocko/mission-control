@@ -45,6 +45,7 @@ import type {
 import type { QuickFilterVisibility } from '@/lib/tasks/quick-filters';
 import { PAGE_SIZE } from '@/types/dashboard';
 import type { LocalDisposition } from '@/types';
+import type { HistoryParamSelectionSetter } from '@/lib/hooks/useHistoryParamSelection';
 import {
   resolveGroupLoadOffset,
   updateGroupCountsForTaskChange,
@@ -197,7 +198,7 @@ export interface DashboardActions {
   removeFromMyDay: (taskId: string) => Promise<void>;
 
   // UI actions
-  setSelectedTaskId: (id: string | null) => void;
+  setSelectedTaskId: HistoryParamSelectionSetter;
   setBulkMode: (v: boolean) => void;
   setBulkSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   setCollapsedGroups: React.Dispatch<React.SetStateAction<Set<string>>>;

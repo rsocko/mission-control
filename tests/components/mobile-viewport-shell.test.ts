@@ -45,5 +45,11 @@ describe('mobile viewport shell contract', () => {
     expect(webViewController).toContain(
       'webView.scrollView.automaticallyAdjustsScrollIndicatorInsets = false',
     );
+    expect(webViewController).toContain(
+      'webView.scrollView.topEdgeEffect.isHidden = true',
+    );
+    expect(webViewController).toContain(
+      'webView.scrollView.bottomEdgeEffect.isHidden = true',
+    );
   });
 });

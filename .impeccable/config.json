@@ -105,6 +105,12 @@
         "rule": "design-system-color",
         "value": "rgba(14,165,233,.18)",
         "createdAt": "2026-09-12T23:12:57.207Z"
+      },
+      {
+        "rule": "design-system-font-size",
+        "value": "11px",
+        "createdAt": "2026-09-27T22:30:20.144Z",
+        "reason": "Established compact mobile navigation label size documented by the incumbent component"
       }
     ]
   },

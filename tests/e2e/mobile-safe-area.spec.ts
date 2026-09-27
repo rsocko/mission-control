@@ -249,7 +249,7 @@ for (const route of routes) {
     const geometry = await getShellGeometry(page);
     expect(geometry.headerPaddingTop).toBeCloseTo(47, 0);
     expect(geometry.menuTop).toBeGreaterThanOrEqual(47);
-    expect(geometry.navHeight).toBeCloseTo(91, 0);
+    expect(geometry.navHeight).toBeCloseTo(83, 0);
     expect(geometry.navPaddingBottom).toBeCloseTo(34, 0);
     expect(geometry.navPosition).toBe('relative');
     expect(geometry.lowestNavControlBottom).toBeLessThanOrEqual(geometry.viewportHeight - 34 + 0.5);

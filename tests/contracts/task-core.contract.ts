@@ -1999,6 +1999,60 @@ export function describeTaskCoreContract(
         expect(await harness.persistence.filterInputs.listInboxListEntries()).toEqual([]);
       });
 
+      it('includes the enabled Microsoft To Do default list in Inbox automatically', async () => {
+        await harness.insertConnectors([
+          { id: 'ms-1', type: 'microsoft-todo' },
+          { id: 'ms-disabled', type: 'microsoft-todo', enabled: false },
+        ]);
+        await harness.insertSourceLists([
+          {
+            id: 'sl-tasks',
+            connectorInstanceId: 'ms-1',
+            sourceId: 'tasks-list',
+            name: 'Renamed Tasks',
+            wellKnownListName: 'defaultList',
+          },
+          {
+            id: 'sl-disabled',
+            connectorInstanceId: 'ms-disabled',
+            sourceId: 'disabled-tasks-list',
+            name: 'Tasks',
+            wellKnownListName: 'defaultList',
+          },
+        ]);
+        await harness.insertTasks([
+          {
+            ...writableTask('todo-default-list'),
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'ms-1',
+            sourceId: 'mstodo:default-list-task',
+            sourceListId: 'tasks-list',
+            sourceListName: 'Renamed Tasks',
+          },
+          {
+            ...writableTask('todo-other-instance'),
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'other-ms-instance',
+            sourceId: 'mstodo:other-instance-task',
+            sourceListId: 'tasks-list',
+            sourceListName: 'Renamed Tasks',
+          },
+        ]);
+
+        expect(await harness.persistence.filterInputs.listInboxListEntries()).toEqual([
+          {
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'ms-1',
+            sourceListId: 'tasks-list',
+          },
+        ]);
+        expect(await harness.persistence.queries.countTasks(
+          makeSpec({ quickFilter: 'inbox' }),
+          { includeQuickFilter: true },
+        )).toBe(3);
+        expect((await harness.persistence.queries.getStats(makeSpec())).inbox).toBe(3);
+      });
+
       it('counts tasks per connector type over the base filter', async () => {
         expect(await harness.persistence.queries.getSourceCounts(makeSpec())).toEqual({
           'github-issues': 1,

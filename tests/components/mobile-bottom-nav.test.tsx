@@ -243,11 +243,13 @@ describe('MobileBottomNav', () => {
   it('stays in shell flow and owns the bottom safe area once', () => {
     render(<MobileBottomNav />);
     const nav = screen.getByRole('navigation', { name: 'Mobile navigation' });
+    const controls = nav.firstElementChild;
 
     expect(nav.className).toContain('shrink-0');
     expect(nav.className).toContain('safe-area-pb');
     expect(nav.className).not.toContain('fixed');
     expect(nav.className).not.toContain('bottom-0');
+    expect(controls?.className).toContain('h-12');
   });
 
   it('does not show badges when counts are zero', () => {

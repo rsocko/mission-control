@@ -185,9 +185,10 @@ export interface AvailableTaskTag {
   readonly count: number;
 }
 
-/** A user-configured "inbox list" entry from the `inbox.lists` app setting. */
+/** A configured or connector-discovered list whose unorganized tasks belong in Inbox. */
 export interface InboxListEntry {
   readonly connectorType: string;
+  readonly connectorInstanceId?: string;
   readonly sourceListId?: string;
   readonly sourceListName?: string;
 }

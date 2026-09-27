@@ -55,6 +55,12 @@ final class WebViewController: UIViewController {
         // CSS env(safe-area-inset-*) owns edge-to-edge layout for trusted app content.
         webView.scrollView.contentInsetAdjustmentBehavior = .never
         webView.scrollView.automaticallyAdjustsScrollIndicatorInsets = false
+#if compiler(>=6.2)
+        if #available(iOS 26.0, *) {
+            webView.scrollView.topEdgeEffect.isHidden = true
+            webView.scrollView.bottomEdgeEffect.isHidden = true
+        }
+#endif
         self.webView = webView
 
         super.init(nibName: nil, bundle: nil)

@@ -371,6 +371,9 @@ export function getInboxFilterCondition(
       conditions.push(
         and(
           eq(tasks.connectorType, entry.connectorType),
+          ...(entry.connectorInstanceId
+            ? [eq(tasks.connectorInstanceId, entry.connectorInstanceId)]
+            : []),
           eq(tasks.sourceListId, entry.sourceListId),
           isNull(tasks.planningHorizon),
           sql`NOT EXISTS (
@@ -383,6 +386,9 @@ export function getInboxFilterCondition(
       conditions.push(
         and(
           eq(tasks.connectorType, entry.connectorType),
+          ...(entry.connectorInstanceId
+            ? [eq(tasks.connectorInstanceId, entry.connectorInstanceId)]
+            : []),
           eq(tasks.sourceListName, entry.sourceListName),
           isNull(tasks.planningHorizon),
           sql`NOT EXISTS (

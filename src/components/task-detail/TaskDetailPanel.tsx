@@ -23,6 +23,7 @@ import {
   taskRemovalLabel,
 } from '@/lib/tasks/client-edit-policy';
 import { getTaskDisplayId } from '@/lib/utils/task-display-id';
+import { notifyTaskChanged } from '@/lib/task-change-events';
 import { getDeepLinkInfo, getLinkedResourceDeepLinkInfo } from '@/lib/utils/deep-links';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { getNextRecurringDate } from '@/lib/utils/recurrence';
@@ -54,6 +55,7 @@ import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
   TaskDetailPanelProps,
+  TaskFieldUpdate,
 } from './task-detail-types';
 
 export type {
@@ -201,11 +203,16 @@ export function TaskDetailPanel({
     });
   }, []);
 
+  const handleTaskUpdate = useCallback((fields?: TaskFieldUpdate) => {
+    notifyTaskChanged(taskId);
+    onUpdate?.(fields);
+  }, [onUpdate, taskId]);
+
   const mutations = useTaskDetailMutations({
     taskId,
     task,
     setTask,
-    onUpdate,
+    onUpdate: handleTaskUpdate,
     availableTags,
     extraTags,
     setExtraTags,

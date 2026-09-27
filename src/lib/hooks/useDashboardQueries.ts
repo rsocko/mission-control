@@ -1,10 +1,12 @@
 'use client';
 
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { uiLogger } from '@/lib/client-logger';
 import { MAX_TASK_PAGE_SIZE } from '@/app/api/tasks/pagination';
+import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
+import { TASK_CHANGED_EVENT } from '@/lib/task-change-events';
 import type {
   DashboardTaskResponseViewModel as TaskResponse,
   DashboardTaskTagViewModel as TaskTag,
@@ -131,6 +133,12 @@ interface ConnectorsResponse {
   sourceLists?: SourceList[];
 }
 
+const SIDEBAR_COUNT_REFRESH_EVENTS = [
+  TASK_CHANGED_EVENT,
+  NAVIGATION_COUNTS_REFRESH_EVENT,
+  'mc:task-completed',
+] as const;
+
 export function useDashboardQueries(taskParams: string) {
   const queryClient = useQueryClient();
   const today = getClientToday();
@@ -244,6 +252,23 @@ export function useDashboardQueries(taskParams: string) {
         .then(d => d.sourceCounts || {}),
     staleTime: 30 * 1000,
   });
+
+  useEffect(() => {
+    const refreshSidebarCounts = () => {
+      void Promise.all([
+        queryClient.invalidateQueries({ queryKey: dashboardKeys.connectors() }),
+        queryClient.invalidateQueries({ queryKey: dashboardKeys.sourceCounts() }),
+      ]);
+    };
+    for (const eventName of SIDEBAR_COUNT_REFRESH_EVENTS) {
+      window.addEventListener(eventName, refreshSidebarCounts);
+    }
+    return () => {
+      for (const eventName of SIDEBAR_COUNT_REFRESH_EVENTS) {
+        window.removeEventListener(eventName, refreshSidebarCounts);
+      }
+    };
+  }, [queryClient]);
 
   const invalidateAll = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['dashboard'] });

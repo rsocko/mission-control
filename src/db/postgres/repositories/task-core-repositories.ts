@@ -74,6 +74,10 @@ import {
 } from './task-transfer-identity';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { eventSubscriptionMatches, parseEventTypes } from '@/db/persistence/event-outbox';
+import {
+  mergeInboxListEntries,
+  parseConfiguredInboxListEntries,
+} from '@/lib/tasks/core/inbox-list-entries';
 import { NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
 import { isSourceListSelected } from '@/lib/connectors/source-list-selection';
 import {
@@ -300,22 +304,31 @@ class PostgresTaskFilterInputRepository implements TaskFilterInputRepository {
   }
 
   async listInboxListEntries(): Promise<InboxListEntry[]> {
-    const [row] = await this.db
-      .select({ value: appSettings.value })
-      .from(appSettings)
-      .where(eq(appSettings.key, 'inbox.lists'))
-      .limit(1);
-    if (!row?.value) return [];
+    const [settingsRows, defaultLists] = await Promise.all([
+      this.db
+        .select({ value: appSettings.value })
+        .from(appSettings)
+        .where(eq(appSettings.key, 'inbox.lists'))
+        .limit(1),
+      this.db
+        .select({
+          connectorType: connectorConfigs.type,
+          connectorInstanceId: sourceLists.connectorInstanceId,
+          sourceListId: sourceLists.sourceId,
+        })
+        .from(sourceLists)
+        .innerJoin(connectorConfigs, eq(sourceLists.connectorInstanceId, connectorConfigs.id))
+        .where(and(
+          eq(sourceLists.wellKnownListName, 'defaultList'),
+          eq(connectorConfigs.enabled, true),
+          isNull(connectorConfigs.deletedAt),
+        )),
+    ]);
 
-    return asArray(row.value).flatMap((entry): InboxListEntry[] => {
-      const record = asRecord(entry);
-      if (typeof record.connectorType !== 'string') return [];
-      return [{
-        connectorType: record.connectorType,
-        sourceListId: typeof record.sourceListId === 'string' ? record.sourceListId : undefined,
-        sourceListName: typeof record.sourceListName === 'string' ? record.sourceListName : undefined,
-      }];
-    });
+    return mergeInboxListEntries(
+      parseConfiguredInboxListEntries(settingsRows[0]?.value),
+      defaultLists,
+    );
   }
 }
 

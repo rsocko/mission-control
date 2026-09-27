@@ -1,12 +1,29 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Search, Tag } from 'lucide-react';
+import { Plus, Search, Tag } from 'lucide-react';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
+import { toast } from '@/lib/toast';
+
+export interface BulkTagOption {
+  id: string;
+  name: string;
+  slug: string;
+  color: string | null;
+}
+
+function isBulkTagOption(value: unknown): value is BulkTagOption {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const tag = value as Record<string, unknown>;
+  return typeof tag.id === 'string'
+    && typeof tag.name === 'string'
+    && typeof tag.slug === 'string'
+    && (typeof tag.color === 'string' || tag.color === null);
+}
 
 interface BulkTagDropdownProps {
-  availableTags: Array<{ id: string; name: string; slug: string; color: string | null }>;
-  onAddTag: (tagId: string) => Promise<void>;
+  availableTags: BulkTagOption[];
+  onAddTag: (tag: BulkTagOption) => Promise<void>;
   disabled?: boolean;
   disabledReason?: string;
 }
@@ -21,7 +38,10 @@ export function BulkTagDropdown({ availableTags, onAddTag, disabled = false, dis
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch('');
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -29,23 +49,68 @@ export function BulkTagDropdown({ availableTags, onAddTag, disabled = false, dis
 
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 0);
-    else setSearch('');
   }, [open]);
 
-  const filtered = search.length > 0
-    ? availableTags.filter((t) => !isSyntheticTag(t.name) && t.name.toLowerCase().includes(search.toLowerCase()))
-    : availableTags.filter((t) => !isSyntheticTag(t.name));
+  const selectableTags = availableTags.filter((tag) => !isSyntheticTag(tag.name));
+  const normalizedSearch = search.trim();
+  const filtered = normalizedSearch
+    ? selectableTags.filter((tag) => tag.name.toLowerCase().includes(normalizedSearch.toLowerCase()))
+    : selectableTags;
+  const exactMatch = normalizedSearch
+    ? selectableTags.find((tag) => tag.name.toLowerCase() === normalizedSearch.toLowerCase())
+    : undefined;
 
-  function handleSelect(tagId: string) {
+  async function handleSelect(tag: BulkTagOption) {
     setApplying(true);
     setOpen(false);
-    onAddTag(tagId).finally(() => setApplying(false));
+    setSearch('');
+    try {
+      await onAddTag(tag);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to add tag');
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  async function handleCreate() {
+    if (!normalizedSearch || exactMatch) return;
+
+    setApplying(true);
+    try {
+      const response = await fetch('/api/tags', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: normalizedSearch }),
+      });
+      const data: unknown = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const errorMessage = data && typeof data === 'object' && !Array.isArray(data)
+          ? Object.getOwnPropertyDescriptor(data, 'error')?.value
+          : undefined;
+        throw new Error(typeof errorMessage === 'string' ? errorMessage : 'Failed to create tag');
+      }
+      if (!isBulkTagOption(data)) {
+        throw new Error('The tag was created, but the server returned an invalid response');
+      }
+
+      setOpen(false);
+      setSearch('');
+      await onAddTag(data);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to create tag');
+    } finally {
+      setApplying(false);
+    }
   }
 
   return (
     <div className="relative" ref={ref}>
       <button
-        onClick={() => setOpen(!open)}
+        onClick={() => {
+          setOpen(!open);
+          if (open) setSearch('');
+        }}
         disabled={disabled}
         title={disabled ? disabledReason : undefined}
         aria-expanded={open}
@@ -64,16 +129,29 @@ export function BulkTagDropdown({ availableTags, onAddTag, disabled = false, dis
                 type="text"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search tags…"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && normalizedSearch) {
+                    e.preventDefault();
+                    if (exactMatch) void handleSelect(exactMatch);
+                    else void handleCreate();
+                  }
+                  if (e.key === 'Escape') {
+                    setOpen(false);
+                    setSearch('');
+                  }
+                }}
+                placeholder="Search or create tag…"
+                maxLength={100}
                 className="w-full bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
               />
             </div>
           </div>
-          {filtered.length > 0 ? (
+          {filtered.length > 0 && (
             filtered.map((tag) => (
               <button
                 key={tag.id}
-                onClick={() => handleSelect(tag.id)}
+                onClick={() => void handleSelect(tag)}
+                disabled={applying}
                 className="w-full text-left flex items-center gap-2 px-3 py-1.5 text-xs text-[var(--text-primary)] hover:bg-[var(--surface-2)] transition-colors duration-75"
               >
                 <span
@@ -83,9 +161,19 @@ export function BulkTagDropdown({ availableTags, onAddTag, disabled = false, dis
                 {tag.name}
               </button>
             ))
-          ) : (
-            <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No tags found</div>
           )}
+          {normalizedSearch && !exactMatch ? (
+            <button
+              onClick={() => void handleCreate()}
+              disabled={applying}
+              className="w-full text-left flex items-center gap-2 border-t border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--accent)] hover:bg-[var(--surface-2)] transition-colors duration-75 disabled:cursor-wait disabled:opacity-60"
+            >
+              <Plus size={12} className="shrink-0" />
+              <span className="truncate">{applying ? 'Creating tag…' : `Create "${normalizedSearch}"`}</span>
+            </button>
+          ) : filtered.length === 0 ? (
+            <div className="px-3 py-2 text-xs text-[var(--text-muted)]">No tags found</div>
+          ) : null}
         </div>
       )}
     </div>

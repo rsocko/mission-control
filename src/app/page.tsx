@@ -1078,16 +1078,15 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
         availableTags={state.taskResponse.availableTags}
         disabled={Boolean(tagsBlockedReason)}
         disabledReason={tagsBlockedReason}
-        onAddTag={async (tagId) => {
+        onAddTag={async (tag) => {
           const ids = Array.from(state.bulkSelected);
-          const tagName = state.taskResponse.availableTags.find(t => t.id === tagId)?.name;
           const label = `Tagged ${ids.length} task${ids.length > 1 ? 's' : ''}`;
           await executeBulkOperation(
             ids,
             (id) => fetch(`/api/tasks/${id}/tags`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ tags: [tagName].filter(Boolean) }),
+              body: JSON.stringify({ tags: [tag.name] }),
             }),
             label,
             {
@@ -1098,7 +1097,7 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
                 operation: (id) => fetch(`/api/tasks/${id}/tags`, {
                   method: 'DELETE',
                   headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ tagId }),
+                  body: JSON.stringify({ tagId: tag.id }),
                 }),
               },
             },

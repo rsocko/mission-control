@@ -620,6 +620,7 @@ export function NavRail({
   return (
     <nav
       ref={navRef}
+      data-toast-nav={expanded ? 'expanded' : 'collapsed'}
       aria-label="Main navigation"
       className={cn(
         'hidden sm:flex flex-col flex-shrink-0 overflow-hidden bg-[var(--surface-1)] border-r border-[var(--border)] transition-[width] duration-300 ease-[cubic-bezier(0.32,0.72,0,1)]',

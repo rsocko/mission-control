@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { motion } from 'motion/react';
 import Image from 'next/image';
 import { Calendar, Clock, GripVertical, Square, Minus, X } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Tooltip } from '@/components/ui/Tooltip';
 import {
   DndContext, DragOverlay, pointerWithin,

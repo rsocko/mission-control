@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   Plus, Trash2, Loader2, EyeOff, Eye, Pencil, X, Check, Globe,
 } from 'lucide-react';

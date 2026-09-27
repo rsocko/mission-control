@@ -354,7 +354,10 @@ function KanbanPageInner() {
 
       <TaskDetailPanel
         task={selectedTask}
-        onClose={() => setSelectedTaskId(null)}
+        onClose={(reason) => setSelectedTaskId(
+          null,
+          reason === 'task-removed' ? { history: 'replace' } : undefined,
+        )}
         onTaskUpdate={handleTaskUpdate}
         onRefresh={tasksState.fetchData}
       />

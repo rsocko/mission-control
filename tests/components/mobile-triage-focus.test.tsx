@@ -14,7 +14,7 @@ const toastSuccess = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 const triggerHapticFeedback = vi.hoisted(() => vi.fn());
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     success: toastSuccess,
     error: toastError,

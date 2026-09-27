@@ -9,7 +9,7 @@
 'use client';
 
 import { useCallback, useSyncExternalStore } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   onBackgroundAiTaskEvent,
   hasActiveBackgroundAiTasks,

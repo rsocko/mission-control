@@ -12,7 +12,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import ModeSelector from './ModeSelector';
 import OrderSelector from './OrderSelector';
 import ScopeFilter from './ScopeFilter';
@@ -258,7 +258,7 @@ export default function QuickSortMode() {
     if (busy) return;
     setOrder(nextMode === 'no_planning_horizon' ? 'priority' : 'smart');
     setMode(nextMode);
-    setSelectedTaskId(null);
+    setSelectedTaskId(null, { history: 'replace' });
   }, [busy]);
 
   // Fetch tags once when entering no_tags mode
@@ -598,7 +598,7 @@ export default function QuickSortMode() {
 
     if (resolvesCurrentQueue) {
       dismiss(selectedTaskId);
-      setSelectedTaskId(null);
+      setSelectedTaskId(null, { history: 'replace' });
       return;
     }
 
@@ -1204,7 +1204,10 @@ export default function QuickSortMode() {
             <TaskDetailPanel
               taskId={selectedTaskId}
               mode="panel"
-              onClose={() => setSelectedTaskId(null)}
+              onClose={(reason) => setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              )}
               onUpdate={handleTaskDetailUpdate}
               minPanelWidth={320}
               focusPanelOnMount
@@ -1222,7 +1225,10 @@ export default function QuickSortMode() {
                 <TaskDetailPanel
                   taskId={selectedTaskId}
                   mode="mobile"
-                  onClose={() => setSelectedTaskId(null)}
+                  onClose={(reason) => setSelectedTaskId(
+                    null,
+                    reason === 'task-removed' ? { history: 'replace' } : undefined,
+                  )}
                   onUpdate={handleTaskDetailUpdate}
                   focusPanelOnMount
                 />

@@ -8,7 +8,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { pushUndoWithToast } from '@/lib/stores/undoStore';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   ChevronRight, ChevronDown, Trash2, Loader2,
   Plus, Eye, EyeOff, FolderTree, GripVertical,

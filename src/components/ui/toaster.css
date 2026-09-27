@@ -1,0 +1,37 @@
+@media (min-width: 768px) {
+  body:has([data-toast-nav='collapsed']) {
+    --toast-nav-width: 64px;
+  }
+
+  body:has([data-toast-nav='expanded']) {
+    --toast-nav-width: 200px;
+  }
+
+  [data-sonner-toaster][data-x-position='left'] {
+    transition: transform 0.4s ease, left 0.3s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+}
+
+[data-sonner-toast][data-dismissible='true']:not([data-type='loading']) {
+  cursor: grab;
+}
+
+[data-sonner-toast][data-swiping='true'] {
+  cursor: grabbing;
+}
+
+[data-sonner-toaster] [data-sonner-toast][data-styled='true'] [data-close-button] {
+  width: 28px;
+  height: 28px;
+}
+
+[data-sonner-toast] [data-close-button]:focus-visible {
+  outline: 2px solid var(--text-primary);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-sonner-toaster][data-x-position='left'] {
+    transition: none;
+  }
+}

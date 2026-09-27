@@ -70,7 +70,7 @@ export function LabelHealthPanel({ connectorId }: { connectorId: string }) {
       setNormalizeResult(data);
       setStatus('done');
 
-      const { toast } = await import('sonner');
+      const { toast } = await import('@/lib/toast');
       if (data.failed === 0) {
         toast.success(`Normalized ${data.succeeded} label${data.succeeded !== 1 ? 's' : ''} across your repos`);
       } else {

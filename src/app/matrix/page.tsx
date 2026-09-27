@@ -74,7 +74,12 @@ function MatrixPageInner() {
     state.taskResponse.tasks.length,
   ]);
 
-  const closeTaskDetail = () => actions.setSelectedTaskId(null);
+  const closeTaskDetail: ComponentProps<typeof TaskDetailPanel>['onClose'] = (reason) => {
+    actions.setSelectedTaskId(
+      null,
+      reason === 'task-removed' ? { history: 'replace' } : undefined,
+    );
+  };
   const taskDetailProps: Omit<
     ComponentProps<typeof TaskDetailPanel>,
     'mode' | 'onModeChange' | 'portalDialog' | 'minPanelWidth'

@@ -25,7 +25,7 @@ import type { QuickSortSuggestion } from '@/lib/hooks/useQuickSortData';
 import { parseNlpHints } from '@/lib/parse-nlp-hints';
 import { FileText } from 'lucide-react';
 import { taskLogger } from '@/lib/client-logger';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { useVoiceCapture } from '@/lib/hooks/useVoiceCapture';
 import type { TaskEditPolicy, TaskField, TaskTemplate } from '@/types';
 import {

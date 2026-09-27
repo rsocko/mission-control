@@ -18,7 +18,7 @@ vi.mock('@/app/settings/components/tag-review/api', async importOriginal => {
   };
 });
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     error: vi.fn(),
     success: vi.fn(),

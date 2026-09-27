@@ -784,7 +784,10 @@ export default function CapturePageInner() {
           <TaskDetailPanel
             taskId={selectedTaskId}
             mode="mobile"
-            onClose={() => setSelectedTaskId(null)}
+            onClose={(reason) => setSelectedTaskId(
+              null,
+              reason === 'task-removed' ? { history: 'replace' } : undefined,
+            )}
             onUpdate={() => setRefreshKey((key) => key + 1)}
           />
         )}

@@ -53,6 +53,7 @@ import { parseTaskMetadata } from './task-detail-types';
 import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
+  TaskDetailCloseReason,
   TaskDetailPanelProps,
 } from './task-detail-types';
 
@@ -62,6 +63,7 @@ export type {
   Subtask,
   TagConnectorCaps,
   TaskDetail,
+  TaskDetailCloseReason,
   TaskDetailMode,
   TaskDetailPanelProps,
   TaskFieldUpdate,

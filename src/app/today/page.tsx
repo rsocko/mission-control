@@ -44,14 +44,20 @@ export default function TodayPage() {
   async function completeSelectedTask(taskId: string) {
     if (items.some((item) => item.taskId === taskId)) {
       if (await actions.completeTask(taskId)) {
-        setSelectedTaskId((current) => current === taskId ? null : current);
+        setSelectedTaskId(
+          (current) => current === taskId ? null : current,
+          { history: 'replace' },
+        );
       }
     } else if (await actions.completeTask(taskId, {
       title: selectedSuggestion?.title || 'Task',
       status: selectedSuggestion?.status || 'todo',
       editPolicy: selectedSuggestion?.editPolicy,
     })) {
-      setSelectedTaskId((current) => current === taskId ? null : current);
+      setSelectedTaskId(
+        (current) => current === taskId ? null : current,
+        { history: 'replace' },
+      );
     }
   }
   const taskSelection = useTaskSelection({
@@ -337,8 +343,11 @@ export default function TodayPage() {
         <div className="hidden min-w-0 shrink sm:flex">
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => {
-              setSelectedTaskId(null);
+            onClose={(reason) => {
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
@@ -356,7 +365,7 @@ export default function TodayPage() {
             onComplete={() => completeSelectedTask(selectedTaskId)}
             onDelete={() => {
               void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
@@ -369,8 +378,11 @@ export default function TodayPage() {
         <div className="hidden sm:block">
           <TaskDetailPanel
             taskId={selectedTaskId}
-            onClose={() => {
-              setSelectedTaskId(null);
+            onClose={(reason) => {
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
               setPendingMoveDialogTaskId(null);
               setNotesOpenRequest(null);
             }}
@@ -388,7 +400,7 @@ export default function TodayPage() {
             onComplete={() => completeSelectedTask(selectedTaskId)}
             onDelete={() => {
               void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}
@@ -409,7 +421,13 @@ export default function TodayPage() {
           <TaskDetailPanel
             taskId={selectedTaskId}
             mode="mobile"
-            onClose={() => { setSelectedTaskId(null); setPendingMoveDialogTaskId(null); }}
+            onClose={(reason) => {
+              setSelectedTaskId(
+                null,
+                reason === 'task-removed' ? { history: 'replace' } : undefined,
+              );
+              setPendingMoveDialogTaskId(null);
+            }}
             onUpdate={handleTaskDetailUpdate}
             availableTags={selectedTask?.tags}
             onSubtaskCountChange={(done, total) => {
@@ -424,14 +442,14 @@ export default function TodayPage() {
               } else {
                 void actions.addToDay(selectedTaskId);
               }
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             sourceLists={sourceLists}
             onMoveToList={(targetListId) => actions.moveTaskToList(selectedTaskId, targetListId)}
             onComplete={() => completeSelectedTask(selectedTaskId)}
             onDelete={() => {
               void actions.deleteTask(selectedTaskId, selectedSuggestion ? { title: selectedSuggestion.title, editPolicy: selectedSuggestion.editPolicy } : undefined);
-              setSelectedTaskId(null);
+              setSelectedTaskId(null, { history: 'replace' });
             }}
             autoOpenMoveDialog={pendingMoveDialogTaskId === selectedTaskId}
             onMoveDialogDismissed={() => setPendingMoveDialogTaskId(null)}

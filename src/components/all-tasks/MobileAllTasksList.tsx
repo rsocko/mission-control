@@ -403,7 +403,10 @@ export function MobileAllTasksList() {
           <TaskDetailPanel
             taskId={selectedTaskId}
             mode="mobile"
-            onClose={() => setSelectedTaskId(null)}
+            onClose={(reason) => setSelectedTaskId(
+              null,
+              reason === 'task-removed' ? { history: 'replace' } : undefined,
+            )}
             onUpdate={() => actions.fetchData(false, true)}
             onSubtaskCountChange={(done, total) => actions.updateSubtaskCount(selectedTaskId, done, total)}
             sourceLists={state.sourceLists}

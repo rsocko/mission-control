@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'motion/react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { Circle, Info, ListChecks, Loader2, X } from 'lucide-react';
 import { SubtaskSection } from './SubtaskSection';
 import { TaskRelationshipsSection } from './TaskRelationshipsSection';
@@ -53,6 +53,7 @@ import { parseTaskMetadata } from './task-detail-types';
 import type { RecurrenceEditorOptions } from '@/lib/recurrence/editor-contract';
 import type {
   TaskConfirmDialogState,
+  TaskDetailCloseReason,
   TaskDetailPanelProps,
 } from './task-detail-types';
 
@@ -62,6 +63,7 @@ export type {
   Subtask,
   TagConnectorCaps,
   TaskDetail,
+  TaskDetailCloseReason,
   TaskDetailMode,
   TaskDetailPanelProps,
   TaskFieldUpdate,

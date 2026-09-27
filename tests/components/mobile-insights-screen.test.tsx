@@ -54,7 +54,7 @@ vi.mock('lucide-react', () => ({
   TrendingUp: () => <span data-testid="icon-trending-up">↑</span>,
 }));
 
-vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
+vi.mock('@/lib/toast', () => ({ toast: { error: vi.fn(), success: vi.fn() } }));
 vi.mock('@/lib/motion', () => ({ fadeSlideUp: {}, staggerContainer: {} }));
 vi.mock('@/lib/utils', () => ({ cn: (...args: unknown[]) => args.filter(Boolean).join(' ') }));
 vi.mock('@/lib/hooks/usePullToRefresh', () => ({

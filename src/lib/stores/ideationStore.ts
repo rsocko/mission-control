@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   GraphDocumentController,
 } from '@rsocko/generic-graph-canvas-shared-workbench/controllers';

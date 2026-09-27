@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { getLocalToday as getClientToday } from '@/lib/utils/client-date';
 import { getTaskGroupLabels, NO_EFFORT_GROUP_LABEL } from '@/lib/tasks/task-grouping';
@@ -21,6 +21,7 @@ interface UseTaskListVirtualizationOptions {
   groupBy: string;
   collapsedGroups: Set<string>;
   viewDensity: 'compact' | 'comfortable';
+  wrapTaskTitles?: boolean;
   listRef: React.RefObject<HTMLDivElement | null>;
   groupTotalCounts?: Record<string, number>;
   groupProjectId?: string;
@@ -126,6 +127,7 @@ export function useTaskListVirtualization({
   groupBy,
   collapsedGroups,
   viewDensity,
+  wrapTaskTitles = false,
   listRef,
   groupTotalCounts,
   groupProjectId,
@@ -156,10 +158,14 @@ export function useTaskListVirtualization({
       if (!row) return 48;
       if (row.type === 'header') return 32;
       if (row.type === 'load-more' || row.type === 'load-more-group') return 48;
-      return viewDensity === 'compact' ? 36 : 56;
+      return wrapTaskTitles ? 72 : viewDensity === 'compact' ? 36 : 56;
     },
     overscan: 8,
   });
+
+  useEffect(() => {
+    rowVirtualizer.measure();
+  }, [rowVirtualizer, viewDensity, wrapTaskTitles]);
 
   const virtualItems = rowVirtualizer.getVirtualItems();
 

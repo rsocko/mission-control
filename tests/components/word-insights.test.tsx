@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WordInsight } from '@/lib/word-insights/types';
+import { installAppHistory } from '@/lib/navigation/app-history';
 
 vi.mock('lucide-react', () => {
   const Icon = () => <span aria-hidden="true" />;
@@ -106,6 +107,33 @@ describe('WordInsightsView', () => {
     fireEvent.click(within(taskSection!).getByRole('button', { name: /Deploy API/ }));
     expect(screen.getByRole('heading', { name: 'Task word connections (2)' })).toBeInTheDocument();
     expect(screen.getByText('todo - api, deploy')).toBeInTheDocument();
+  });
+
+  it('replaces task detail history when switching to a word', async () => {
+    window.history.replaceState({}, '', '/word-insights');
+    const uninstallHistory = installAppHistory();
+    const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
+
+    try {
+      const { default: WordInsightsView } = await import(
+        '@/components/word-insights/WordInsightsView'
+      );
+      await act(async () => {
+        render(<WordInsightsView />);
+      });
+
+      fireEvent.click(await screen.findByRole('button', { name: 'Cloud word api' }));
+      const taskSection = screen.getByRole('heading', { name: '"api" tasks (2)' }).parentElement;
+      fireEvent.click(within(taskSection!).getByRole('button', { name: /Deploy API/ }));
+      expect(window.location.search).toBe('?taskId=task-1');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Cloud word api' }));
+
+      expect(back).not.toHaveBeenCalled();
+      expect(window.location.search).toBe('');
+    } finally {
+      uninstallHistory();
+    }
   });
 
   it('refetches with deterministic source toggles', async () => {

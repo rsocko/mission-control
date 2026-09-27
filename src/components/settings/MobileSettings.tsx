@@ -22,13 +22,14 @@ import { COMPLETION_ANIMATION_KEY, setCompletionAnimationEnabled } from '@/compo
 import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
 import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
 import { SectionCard, SectionLabel, Toggle } from '@/components/settings/SettingsPrimitives';
+import { ToastSettingsCard } from '@/components/settings/ToastSettingsCard';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
   setQuickAddPreferences,
   type QuickAddPreferences,
 } from '@/lib/quick-add-preferences';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import {
   getLatestConnectorSync,
   loadConnectorData,
@@ -286,6 +287,7 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
         </div>
       </SectionCard>
 
+      <ToastSettingsCard />
       <SectionLabel>Capture</SectionLabel>
       <CaptureDestinationSection mobile />
 

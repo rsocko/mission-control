@@ -19,7 +19,7 @@ const toast = vi.hoisted(() => ({
   warning: vi.fn(),
 }));
 
-vi.mock('sonner', () => ({ toast }));
+vi.mock('@/lib/toast', () => ({ toast }));
 
 const task = {
   id: 'task-1',
@@ -53,6 +53,7 @@ const initialResponse: TaskResponse = {
   total: 1,
   hasMore: false,
   sourceCounts: { local: 1 },
+  facetCounts: { priorities: { none: 1 }, statuses: { todo: 1 } },
   availableTags: [],
   stats: {
     totalOpen: 1,

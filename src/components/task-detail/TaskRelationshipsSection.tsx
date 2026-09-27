@@ -12,7 +12,7 @@ import {
   RefreshCw,
   Trash2,
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { Tooltip, TooltipProvider } from '@/components/ui/Tooltip';
 import type {

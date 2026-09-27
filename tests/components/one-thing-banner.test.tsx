@@ -64,7 +64,7 @@ vi.mock('lucide-react', () => {
   };
 });
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
@@ -295,7 +295,7 @@ describe('OneThingBanner', () => {
   });
 
   it('triggers celebration toast on justCompleted', async () => {
-    const { toast } = await import('sonner');
+    const { toast } = await import('@/lib/toast');
     const justCompleted = {
       ...activeOneThing,
       oneThing: {

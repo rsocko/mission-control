@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { motion } from 'motion/react';
 import { Palette, Trash2, X, EyeOff, Plus, Tag, Type, List, Plug } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { IconPickerButton } from '@/components/ui/icon-picker';
 import { modalContent, modalOverlay } from '@/lib/motion';

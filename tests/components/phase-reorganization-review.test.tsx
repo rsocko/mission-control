@@ -14,7 +14,7 @@ vi.mock('@/lib/projects/hierarchy-client', () => ({
   loadProjectHierarchy,
 }));
 
-vi.mock('sonner', () => ({
+vi.mock('@/lib/toast', () => ({
   toast: {
     loading: vi.fn(() => 'toast-id'),
     success: vi.fn(),

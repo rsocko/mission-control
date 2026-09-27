@@ -15,7 +15,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
-import { toast } from 'sonner';
+import { toast } from '@/lib/toast';
 import { queueAction } from '@/lib/offline-queue';
 
 // ─── Core types ──────────────────────────────────────────────────────────────

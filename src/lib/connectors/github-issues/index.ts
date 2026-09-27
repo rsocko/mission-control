@@ -454,7 +454,11 @@ export class GitHubIssuesConnector implements IConnector {
       'source_repository',
     );
     const routedRepository = `${owner}/${name}`;
-    const sourceTags = task.tags?.filter(t => t.type === 'source') || [];
+    const sourceTags = [...new Map(
+      task.tags
+        ?.filter(t => t.type === 'source')
+        .map(tag => [tag.name.toLowerCase(), tag]) || [],
+    ).values()];
     const labels = sourceTags.map(t => t.name);
 
     // Labels are repository-scoped. A cross-repository move can carry labels

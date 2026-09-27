@@ -128,6 +128,9 @@ describe('GitHub issue tag write-back', () => {
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       calls.push({ url, init });
+      if (url.endsWith('/repos/acme/app/labels/bug')) {
+        return new Response(null, { status: 404 });
+      }
       if (url.endsWith('/repos/acme/app/labels')) {
         return Response.json({ name: 'bug' }, { status: 201 });
       }
@@ -183,7 +186,10 @@ describe('GitHub issue tag write-back', () => {
     expect(created.sourceId).toBe('acme/app:42');
     expect(created.externalIdentity?.entity.identity.stableId).toBe('I_created');
     expect(created.externalIdentity?.repository?.identity.stableId).toBe('R_app');
-    expect(calls.slice(0, 2)).toEqual([
+    expect(calls.slice(0, 3)).toEqual([
+      expect.objectContaining({
+        url: expect.stringContaining('/repos/acme/app/labels/bug'),
+      }),
       expect.objectContaining({
         url: expect.stringContaining('/repos/acme/app/labels'),
         init: expect.objectContaining({
@@ -207,5 +213,94 @@ describe('GitHub issue tag write-back', () => {
         }),
       }),
     ]);
+  });
+
+  it('reuses and deduplicates labels that already exist in the destination', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      calls.push({ url, init });
+      if (url.endsWith('/repos/acme/app/labels/bug')) {
+        return Response.json({ name: 'bug', color: 'd73a4a' });
+      }
+      if (url.endsWith('/repos/acme/app/labels/priority%3Ahigh')) {
+        return Response.json({ name: 'priority:high', color: 'd93f0b' });
+      }
+      if (url.endsWith('/repos/acme/app/issues')) {
+        return Response.json({
+          node_id: 'I_created',
+          number: 42,
+          title: 'Avatar Studio - Thread Photos Bug',
+          body: null,
+          state: 'open',
+          created_at: '2026-09-27T00:00:00.000Z',
+          updated_at: '2026-09-27T00:00:00.000Z',
+          closed_at: null,
+          url: 'https://api.github.com/repos/acme/app/issues/42',
+          html_url: 'https://github.com/acme/app/issues/42',
+          labels: [],
+        });
+      }
+      if (url.endsWith('/repos/acme/app')) {
+        return Response.json({
+          node_id: 'R_app',
+          full_name: 'acme/app',
+          url: 'https://api.github.com/repos/acme/app',
+          html_url: 'https://github.com/acme/app',
+        });
+      }
+      return new Response(null, { status: 404 });
+    }));
+    const { GitHubIssuesConnector } = await import('@/lib/connectors/github-issues');
+    const connector = new GitHubIssuesConnector();
+    await connector.initialize(config);
+
+    await runFencedGitHubWrite(connector, {
+      connectorInstanceId: 'github-1',
+      taskId: 'task-new',
+      owner: 'acme',
+      repository: 'app',
+      issueNumber: null,
+      operation: 'create',
+    }, () => connector.createTask({
+      title: 'Avatar Studio - Thread Photos Bug',
+      sourceListId: 'acme/app',
+      priority: 'high',
+      tags: [
+        {
+          id: 'source-bug',
+          name: 'bug',
+          slug: 'bug',
+          type: 'source',
+          confirmed: true,
+          createdAt: '2026-09-27T00:00:00.000Z',
+        },
+        {
+          id: 'hub-bug',
+          name: 'bug',
+          slug: 'bug',
+          type: 'source',
+          confirmed: true,
+          createdAt: '2026-09-27T00:00:00.000Z',
+        },
+        {
+          id: 'priority-high',
+          name: 'priority:high',
+          slug: 'priority-high',
+          type: 'source',
+          confirmed: true,
+          createdAt: '2026-09-27T00:00:00.000Z',
+        },
+      ],
+    }));
+
+    expect(calls.filter(({ init }) => init?.method === 'POST')).toHaveLength(1);
+    expect(calls.find(({ url }) => url.endsWith('/repos/acme/app/issues'))?.init).toMatchObject({
+      body: JSON.stringify({
+        title: 'Avatar Studio - Thread Photos Bug',
+        body: '',
+        labels: ['bug', 'priority:high'],
+      }),
+    });
   });
 });

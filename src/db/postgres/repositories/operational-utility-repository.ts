@@ -17,6 +17,7 @@ import {
   planDuplicateDeletions,
   planGitHubTransferOrphanDeletions,
   planOpenRecurringDeletions,
+  parseCleanupMetadata,
   type BugReportCommand,
   type BugReportResult,
   type CleanupTaskCandidate,
@@ -106,6 +107,11 @@ async function deleteTasksCascade(
 ): Promise<void> {
   if (taskIds.length === 0) return;
   const ids = [...taskIds];
+  await client.query(
+    `DELETE FROM external_entity_bindings
+     WHERE binding_type = 'task' AND local_id = ANY($1::text[])`,
+    [ids],
+  );
   await client.query('DELETE FROM task_tags WHERE task_id = ANY($1::text[])', [ids]);
   await client.query(
     'DELETE FROM project_auto_include_exclusions WHERE task_id = ANY($1::text[])',
@@ -164,6 +170,52 @@ export function createPostgresOperationalUtilityRepository(
       },
     },
     maintenance: {
+      async listGitHubTransferCandidates() {
+        const result = await pool.query<{
+          id: string;
+          sourceId: string;
+          connectorInstanceId: string;
+          title: string;
+          metadata: unknown;
+        }>(`
+          SELECT id, source_id AS "sourceId",
+                 connector_instance_id AS "connectorInstanceId", title, metadata
+          FROM tasks
+          WHERE connector_type = 'github-issues'
+            AND (connector_instance_id, title) IN (
+              SELECT connector_instance_id, title
+              FROM tasks
+              WHERE connector_type = 'github-issues'
+              GROUP BY connector_instance_id, title
+              HAVING COUNT(*) > 1
+            )
+          ORDER BY connector_instance_id, title, id
+            LIMIT 100
+        `);
+        return result.rows.map((row) => {
+          const metadata = parseCleanupMetadata(row.metadata);
+          return {
+            id: row.id,
+            sourceId: row.sourceId,
+            connectorInstanceId: row.connectorInstanceId,
+            title: row.title,
+            nodeId: typeof metadata?.nodeId === 'string' ? metadata.nodeId : null,
+          };
+        });
+      },
+      async deleteVerifiedGitHubTransferOrphans(taskIds) {
+        if (taskIds.length === 0) return 0;
+        return withTransaction(pool, async (client) => {
+          const existing = (await client.query<{ id: string }>(
+            `SELECT id FROM tasks
+             WHERE id = ANY($1::text[]) AND connector_type = 'github-issues'
+             FOR UPDATE`,
+            [[...taskIds]],
+          )).rows.map((row) => row.id);
+          await deleteTasksCascade(client, existing);
+          return existing.length;
+        });
+      },
       async runDuplicateCleanup(): Promise<MaintenanceCleanupResult> {
         return withTransaction(pool, async (client) => {
           const transferredOrphans = (await client.query<CleanupTaskCandidate>(

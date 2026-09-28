@@ -66,7 +66,22 @@ export interface MaintenanceCleanupResult {
   readonly openRecurringInstancesRemoved: number;
 }
 
+export interface GitHubTransferCleanupCandidate {
+  readonly id: string;
+  readonly sourceId: string;
+  readonly connectorInstanceId: string;
+  readonly title: string;
+  readonly nodeId: string | null;
+}
+
 export interface TaskMaintenanceRepository {
+  /**
+   * Lists GitHub rows that share an exact title within one connector. The API
+   * verifies each possible legacy route against GitHub before deleting it.
+   */
+  listGitHubTransferCandidates?(): Promise<readonly GitHubTransferCleanupCandidate[]>;
+  /** Deletes only still-existing GitHub rows after authoritative transfer verification. */
+  deleteVerifiedGitHubTransferOrphans?(taskIds: readonly string[]): Promise<number>;
   /**
    * Removes duplicate source rows and redundant recurring instances inside a
    * single backend transaction, deleting dependent rows before their tasks and

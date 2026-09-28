@@ -22,6 +22,11 @@ process.env.MC_DB_PATH = ':memory:';
 vi.unmock('drizzle-orm');
 vi.unmock('crypto');
 
+const resolveTaskIdentity = vi.fn();
+vi.mock('@/lib/connectors/runtime', () => ({
+  getOrInitializeConnector: vi.fn(async () => ({ resolveTaskIdentity })),
+}));
+
 let sqlite: Database.Database;
 let harness: OperationalUtilityContractHarness;
 let cleanup: typeof import('@/app/api/sync/cleanup/route').POST;
@@ -169,6 +174,7 @@ describe('POST /api/sync/cleanup', () => {
   beforeEach(async () => {
     await harness.reset();
     vi.restoreAllMocks();
+    resolveTaskIdentity.mockReset();
   });
 
   it('reports exact counts and performs no schema DDL', async () => {
@@ -256,10 +262,10 @@ describe('POST /api/sync/cleanup', () => {
         nodeId: 'I_canonical',
       },
     });
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
-      html_url: 'https://github.com/acme/target/issues/42',
-      node_id: 'I_canonical',
-    }));
+    resolveTaskIdentity.mockResolvedValue({
+      sourceId: 'acme/target:42',
+      stableId: 'I_canonical',
+    });
 
     const response = await cleanup();
 
@@ -283,10 +289,10 @@ describe('POST /api/sync/cleanup', () => {
       title: 'Same title',
       metadata: { nodeId: 'I_destination' },
     });
-    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => Response.json({
-      html_url: 'https://github.com/acme/target/issues/42',
-      node_id: 'I_different',
-    }));
+    resolveTaskIdentity.mockResolvedValue({
+      sourceId: 'acme/target:42',
+      stableId: 'I_different',
+    });
 
     const response = await cleanup();
 

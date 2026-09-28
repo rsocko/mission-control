@@ -208,6 +208,11 @@ export interface IConnector {
     targetSourceListId: string,
   ): Promise<TransferIdentityRefresh>;
 
+  /** Resolve a task route through the source's authenticated canonical read path. */
+  resolveTaskIdentity?(
+    sourceId: string,
+  ): Promise<{ sourceId: string; stableId: string }>;
+
   // 📎 Attachments (optional based on capabilities.attachments) ────────
 
   /** Upload a file attachment to a task in the source */

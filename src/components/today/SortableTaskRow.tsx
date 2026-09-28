@@ -204,7 +204,6 @@ export function SortableTaskRow({
               </span>
             </span>
           )}
-          <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
           {item.sourceListName && (
@@ -257,6 +256,7 @@ export function SortableTaskRow({
           )}
         </div>
       </div>
+      <SubtaskPill done={item.subtaskDone ?? 0} total={item.subtaskTotal ?? 0} />
       <TaskRowActions
         smartScore={item.smartScore}
         scoreBreakdown={item.scoreBreakdown ?? undefined}

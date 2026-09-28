@@ -1,5 +1,5 @@
 import type { HubProject } from '@/components/task-list/TaskContextMenu';
-import type { MyDayItem } from '@/components/today/types';
+import type { MyDayItem, MyDayItemAddedEventDetail } from '@/components/today/types';
 import { getLocalToday } from '@/lib/utils/client-date';
 import { filterTasksByKeyword } from '@/lib/utils/filterTasksByKeyword';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
@@ -38,6 +38,37 @@ export interface MyDayStatusBuckets {
   open: MyDayItem[];
   completed: MyDayItem[];
   cancelled: MyDayItem[];
+}
+
+export function createOptimisticMyDayItem(
+  detail: Partial<MyDayItemAddedEventDetail>,
+  order: number,
+  addedAt = new Date().toISOString(),
+): MyDayItem | null {
+  if (!detail.taskId || !detail.editPolicy) return null;
+
+  return {
+    id: `optimistic-${detail.taskId}`,
+    taskId: detail.taskId,
+    order,
+    isAutoIncluded: false,
+    addedAt,
+    title: detail.title || 'New task',
+    status: detail.status || 'todo',
+    priority: detail.priority || 'none',
+    dueDate: detail.dueDate || null,
+    connectorType: detail.connectorType || 'local',
+    connectorInstanceId: detail.connectorInstanceId || 'local',
+    sourceId: detail.sourceId || undefined,
+    sourceListName: detail.sourceListName || null,
+    createdAt: addedAt,
+    completedAt: null,
+    tags: [],
+    hasDescription: false,
+    localDisposition: detail.localDisposition || 'active',
+    taskSourceModel: detail.taskSourceModel || detail.editPolicy.sourceModel,
+    editPolicy: detail.editPolicy,
+  };
 }
 
 export function partitionMyDayItems(items: MyDayItem[]): MyDayStatusBuckets {

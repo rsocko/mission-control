@@ -44,7 +44,7 @@ vi.mock('@/components/ui/CompletionBurst', () => ({
 }));
 
 vi.mock('@/components/ui/SubtaskPill', () => ({
-  SubtaskPill: () => null,
+  SubtaskPill: () => <span data-testid="subtask-pill" />,
 }));
 
 vi.mock('@/components/smart-score/SmartScoreBadge', () => ({
@@ -145,6 +145,7 @@ describe('SortableTaskRow aligned properties', () => {
     const row = container.firstElementChild;
     const children = Array.from(row?.children ?? []);
     const actions = screen.getByTestId('task-row-actions');
+    const subtaskPill = screen.getByTestId('subtask-pill');
     const duration = screen.getByTitle('Estimated: 30min');
     const taskCopy = screen.getByText('Narrow row').parentElement?.parentElement;
 
@@ -156,6 +157,8 @@ describe('SortableTaskRow aligned properties', () => {
     expect(actions).toHaveAttribute('data-status', 'in_progress');
     expect(duration).toHaveClass('hidden', '@min-[640px]:flex');
     expect(taskCopy).toContainElement(duration);
+    expect(subtaskPill.parentElement).toBe(row);
+    expect(taskCopy).not.toContainElement(subtaskPill);
     expect(children.indexOf(actions)).toBeGreaterThan(children.indexOf(taskCopy!));
 
     fireEvent.click(screen.getByRole('button', { name: 'Filter priority' }));

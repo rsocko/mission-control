@@ -260,7 +260,14 @@ vi.mock('@/lib/connectors/management-service', () => ({
 
 vi.mock('@/lib/connectors/runtime', () => ({
   getOrInitializeConnector: vi.fn(async (id: string) =>
-    (id === 'local' ? null : mockConnector)),
+    (id === 'local'
+      ? null
+      : {
+          ...mockConnector,
+          refreshTransferIdentity: mockConnectorRefreshSupported
+            ? mockRefreshTransferIdentity
+            : undefined,
+        })),
 }));
 
 const organizationFake = {
@@ -774,7 +781,7 @@ describe('POST /api/tasks/move/preview', () => {
     expect(data.nativeTransferNote).toContain('GitHub');
   });
 
-  it('does not advertise native transfer before safety bindings are ready', async () => {
+  it('does not advertise native transfer without bindings or targeted refresh support', async () => {
     mockCanTransferTask.mockReturnValueOnce(false);
     seedPreview({
       task: {
@@ -809,6 +816,44 @@ describe('POST /api/tasks/move/preview', () => {
     expect(res.status, data.detail).toBe(200);
     expect(data.isNativeTransfer).toBe(false);
     expect(data.nativeTransferNote).toBeNull();
+  });
+
+  it('advertises native transfer when targeted identity refresh can prepare the bindings', async () => {
+    mockCanTransferTask.mockReturnValueOnce(false);
+    mockConnectorRefreshSupported = true;
+    seedPreview({
+      task: {
+        id: 'task-1',
+        title: 'Fresh issue',
+        connectorType: 'github-issues',
+        connectorInstanceId: 'inst-2',
+        sourceListId: 'acme/repo-a',
+        sourceId: 'acme/repo-a:1',
+      },
+      connector: {
+        id: 'inst-2',
+        type: 'github-issues',
+        name: 'GitHub',
+        capabilities: { read: true, write: true },
+      },
+      sourceLists: [{ id: 'list-1', name: 'acme/repo-b', sourceId: 'acme/repo-b' }],
+    });
+
+    const { POST } = await import('@/app/api/tasks/move/preview/route');
+    const res = await POST(new Request(`${BASE}/api/tasks/move/preview`, {
+      method: 'POST',
+      body: JSON.stringify({
+        taskId: 'task-1',
+        targetConnectorInstanceId: 'inst-2',
+        targetSourceListId: 'acme/repo-b',
+      }),
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    const data = await res.json();
+
+    expect(res.status, data.detail).toBe(200);
+    expect(data.isNativeTransfer).toBe(true);
+    expect(data.sourceActions[0].description).toContain('history intact');
   });
 });
 
@@ -1509,7 +1554,7 @@ describe('POST /api/tasks/move/execute', () => {
     expect(mockTransferTask).toHaveBeenCalledWith('acme/repo-a:10', 'acme/repo-b');
   });
 
-  it('falls back to create-and-close for a fresh GitHub issue without transfer bindings', async () => {
+  it('fails closed instead of creating and closing when native transfer cannot be prepared', async () => {
     mockCanTransferTask.mockReturnValueOnce(false);
     mockConnectorDeleteSupported = false;
     mockCreateTask.mockResolvedValueOnce({
@@ -1560,24 +1605,12 @@ describe('POST /api/tasks/move/execute', () => {
     }));
     const data = await res.json();
 
-    expect(res.status, data.detail).toBe(201);
-    expect(data.nativeTransfer).toBeUndefined();
+    expect(res.status, data.detail).toBe(409);
+    expect(data.code).toBe('GITHUB_NATIVE_TRANSFER_UNAVAILABLE');
     expect(mockTransferTask).not.toHaveBeenCalled();
-    expect(mockCreateTask).toHaveBeenCalledWith(expect.objectContaining({
-      sourceListId: 'acme/repo-b',
-      tags: [
-        expect.objectContaining({ name: 'bug', type: 'source' }),
-      ],
-    }));
+    expect(mockCreateTask).not.toHaveBeenCalled();
     expect(mockAddTagToTask).not.toHaveBeenCalled();
-    expect(mockCompleteTask).toHaveBeenCalledWith('acme/repo-a:10');
-    const insertedTask = materializedTask('acme/repo-b:42');
-    expect(insertedTask.metadata).toMatchObject({
-      issueNumber: 42,
-      nodeId: 'I_destination',
-      url: 'https://github.com/acme/repo-b/issues/42',
-      retained: true,
-    });
+    expect(mockCompleteTask).not.toHaveBeenCalled();
   });
 
   it('does NOT use native transfer when sourceAction is copy (even if same owner)', async () => {

@@ -564,7 +564,12 @@ describe('GitHub repository repoint service', () => {
             name,
             repository === 'native/repo-a' ? 'R_native_a' : 'R_native_b',
           ),
-          entity: issueObservation(owner, name, issueNumber, 'I_native'),
+          entity: issueObservation(
+            owner,
+            name,
+            issueNumber,
+            repository === 'native/repo-a' ? 'I_native' : 'I_native_successor',
+          ),
         };
       },
       transferIssue,
@@ -579,7 +584,7 @@ describe('GitHub repository repoint service', () => {
     expect(result).toMatchObject({
       newSourceId: 'native/repo-b:42',
       identityVerified: true,
-      issueStableId: 'I_native',
+      issueStableId: 'I_native_successor',
       repositoryStableId: 'R_native_b',
     });
     expect(transferIssue).toHaveBeenCalledWith('I_native', 'R_native_b');
@@ -590,11 +595,16 @@ describe('GitHub repository repoint service', () => {
       sourceListId: 'native/repo-b',
       metadata: {
         issueNumber: 42,
-        nodeId: 'I_native',
+        nodeId: 'I_native_successor',
         url: 'https://github.test/native/repo-b/issues/42',
         retained: true,
       },
     });
+    await expect(service.canTransferGitHubIssueSafely(
+      'native',
+      'native/repo-b:42',
+      'native/repo-a',
+    )).resolves.toBe(true);
     expect(database.default.select().from(schema.connectorOperationLeases)
       .where(eq(schema.connectorOperationLeases.connectorId, 'native')).all()).toEqual([]);
   });

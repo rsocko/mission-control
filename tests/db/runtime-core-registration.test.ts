@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => {
   const clearWorker = vi.fn();
   const registerConnectorRuntime = vi.fn();
   const registerDemoSeedCommandService = vi.fn();
+  const registerModeRouteCapabilities = vi.fn();
   const registerRelativeReminderTimezoneRepository = vi.fn();
   const createPostgresHealthProbe = vi.fn(() => ({
     inspect: vi.fn(),
@@ -62,6 +63,7 @@ const mocks = vi.hoisted(() => {
     clearWorker,
     registerConnectorRuntime,
     registerDemoSeedCommandService,
+    registerModeRouteCapabilities,
     registerRelativeReminderTimezoneRepository,
     createPostgresHealthProbe,
     createPostgresHealthSnapshotStore,
@@ -182,6 +184,7 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 }));
 vi.mock('@/lib/settings/mode-route-services', () => ({
   registerDemoSeedCommandService: mocks.registerDemoSeedCommandService,
+  registerModeRouteCapabilities: mocks.registerModeRouteCapabilities,
   registerRelativeReminderTimezoneRepository: mocks.registerRelativeReminderTimezoneRepository,
 }));
 vi.mock('@/db/postgres/runtime', () => ({
@@ -242,6 +245,10 @@ describe('PostgreSQL runtime core repository registration', () => {
   it('shares PostgreSQL runtime handles across isolated module evaluations', async () => {
     const firstRuntime = await import('@/db/runtime');
     await firstRuntime.initializeRuntimeDatabase();
+    expect(mocks.registerModeRouteCapabilities).toHaveBeenCalledWith({
+      databaseBackend: 'postgres',
+      demoOperationsSupported: false,
+    });
 
     const expectedBackend = firstRuntime.getPostgresPersistenceBackend();
     const expectedSyncJobs = firstRuntime.getPostgresSyncJobRepository();

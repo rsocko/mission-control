@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   _resetModeRouteServicesForTests,
   getDemoSeedCommandService,
+  getModeRouteCapabilities,
   getRelativeReminderTimezoneRepository,
   registerDemoSeedCommandService,
+  registerModeRouteCapabilities,
   registerRelativeReminderTimezoneRepository,
 } from '@/lib/settings/mode-route-services';
 
@@ -69,6 +71,23 @@ describe('mode-route-services registry', () => {
       };
       registerRelativeReminderTimezoneRepository(repository);
       expect(getRelativeReminderTimezoneRepository()).toBe(repository);
+    });
+  });
+
+  describe('ModeRouteCapabilities', () => {
+    it('throws before capabilities have been registered', () => {
+      expect(() => getModeRouteCapabilities()).toThrow(
+        'Mode route capabilities have not been registered',
+      );
+    });
+
+    it('returns the registered backend capabilities', () => {
+      const capabilities = {
+        databaseBackend: 'postgres' as const,
+        demoOperationsSupported: false,
+      };
+      registerModeRouteCapabilities(capabilities);
+      expect(getModeRouteCapabilities()).toBe(capabilities);
     });
   });
 });

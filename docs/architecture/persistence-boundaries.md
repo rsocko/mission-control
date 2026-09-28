@@ -1342,8 +1342,12 @@ dynamic — to `@/db`, `@/lib/seed-api`, or `@/lib/triage/lifecycle`**: no
 backend branching, no generic query facade.
 
 The route's three demo-only actions (`reset-demo`, `clear-data`,
-`clear-triage-samples`) remain SQLite-only, correctly and unapologetically —
-there is no PostgreSQL demo-reset equivalent yet. Both the demo commands and
+`clear-triage-samples`) remain SQLite-only because they replace or delete an
+entire local demo database; they are not production database administration
+operations. The route reports this capability to the settings UI and rejects
+the actions, switching to demo mode, or clearing demo data under PostgreSQL
+before resolving a command service or mutating the app mode. The settings UI
+disables the corresponding controls on PostgreSQL. Both the demo commands and
 the timezone repository are reached exclusively through
 `@/lib/settings/mode-route-services`, a pure backend-neutral registry (a
 plain register/get pair per service, no import edge of its own to any
@@ -1467,8 +1471,8 @@ Promise-returning wrapper. No SQLite public API was preserved by silently
 allowing a PostgreSQL call-time failure: every normal caller was converted to
 `await` its now-`Promise`-returning entry point.
 
-**Five pre-existing, previously audited operator/recovery exclusions are
-unchanged, not newly introduced.** Identity backfill/status, manual
+**Five pre-existing operator/recovery exclusions remain a PostgreSQL
+operational gap.** Identity backfill/status, manual
 terminal-inaccessible exception mutation, unknown write-outcome resolution,
 and interrupted write-cycle recovery (11 methods total, since 3 of them are
 backfill-lifecycle helpers with no direct CLI command) were audited before
@@ -1484,14 +1488,17 @@ functions; the PostgreSQL adapter
 synchronously throws `UnsupportedGitHubWorkerOperationError` before any
 SQLite import/evaluation, transaction acquisition, remote network effect, or
 durable mutation, so it merely returns a Promise already rejected with that
-error. Cross-backend behavioral parity is neither claimed nor required for
-this port. `tests/db/postgres-github-identity-operator-repositories.test.ts`
+error. These commands were isolated while production remained on SQLite, but
+that historical migration boundary is not a justification for permanent
+PostgreSQL exclusion: status and recovery remain operationally useful after
+backfill. They require a dedicated PostgreSQL transactional port before the
+operator CLI can claim cross-backend parity. Normal HTTP/application paths do
+not call this port. `tests/db/postgres-github-identity-operator-repositories.test.ts`
 proves, for all 11 methods, both direct-invocation and awaited rejection with
 the exact established error class/code/message, that the adapter module has
 no static import of `better-sqlite3`/`@/db`/any `@/lib/external-identities`
 module, and that neither a mocked `better-sqlite3` constructor nor `fetch` is
-ever reached. No normal HTTP/application route calls this port; only
-`scripts/github-identity-operator.ts` does.
+ever reached. Only `scripts/github-identity-operator.ts` calls it.
 
 **`github-backfill.ts` is rowid-free by construction, not by a lossy
 rewrite.** The pre-existing implementation ordered cursor pagination by
@@ -2515,7 +2522,10 @@ The adapters preserve these workflow boundaries:
 - Scheduled triggers perform calendar I/O before notification persistence and
   preserve local-date daily dedupe, triage high-water checks, policy snapshots,
   and post-commit dispatcher wakeups. Existing unique identities provide the
-  required retry safety; no additional lock namespace is introduced.
+  required retry safety; no additional lock namespace is introduced. Startup
+  registers the same backend-neutral morning, triage-nudge, carry-forward, and
+  Home Assistant summary handlers before starting the scheduler under either
+  database backend.
 - Notification triage extracts only its pure classifier. The broader AI triage
   route and its SQLite-backed historical query remain outside this layer.
 

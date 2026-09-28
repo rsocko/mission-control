@@ -59,7 +59,9 @@ async function cleanup(): Promise<void> {
     'DELETE FROM github_identity_controls WHERE connector_instance_id = ANY($1::text[])',
     'DELETE FROM connector_maintenance_locks WHERE connector_instance_id = ANY($1::text[])',
     'DELETE FROM connector_operation_leases WHERE connector_id = ANY($1::text[])',
-    'DELETE FROM external_entity_locators WHERE external_entity_id LIKE \'entity-%\'',
+    `DELETE FROM external_entity_locators
+     WHERE external_entity_id LIKE 'entity-%'
+        OR repository_entity_id LIKE 'entity-%'`,
     'DELETE FROM external_entity_bindings WHERE connector_instance_id = ANY($1::text[])',
     'DELETE FROM external_entities WHERE id LIKE \'entity-%\'',
     'DELETE FROM task_linked_sources WHERE connector_instance_id = ANY($1::text[])',

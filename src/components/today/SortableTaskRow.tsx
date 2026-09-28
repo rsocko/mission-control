@@ -208,7 +208,7 @@ export function SortableTaskRow({
         </div>
         <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
           {item.sourceListName && (
-            <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
+            <span className="min-w-0 truncate text-xs text-[var(--text-muted)]">{item.sourceListName}</span>
           )}
           {taskSchedule?.scheduledTime && (
             <span className="text-xs text-purple-400 bg-purple-900/30 px-1.5 py-0.5 rounded flex items-center gap-0.5">

@@ -201,6 +201,18 @@ describe('TaskRow', () => {
     expect(screen.getByText('Test task')).not.toHaveClass('truncate');
   });
 
+  it('lets the source list use available metadata-row space', () => {
+    render(
+      <TaskRow
+        task={{ ...baseTask, sourceListName: 'Home Assistant (Natick)' }}
+        {...actionProps}
+      />,
+    );
+
+    expect(screen.getByText('Home Assistant (Natick)')).toHaveClass('min-w-0', 'truncate');
+    expect(screen.getByText('Home Assistant (Natick)')).not.toHaveClass('max-w-[120px]');
+  });
+
   describe('ProjectBadge', () => {
     it('renders project badge when task has hubProjectIds', () => {
       const projects = [

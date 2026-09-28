@@ -2,11 +2,7 @@ import { NextResponse } from 'next/server';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 import { syncLogger } from '@/lib/logger';
 import { ApiErrors } from '@/lib/api-error';
-
-interface GitHubIssueRouteResponse {
-  html_url?: unknown;
-  node_id?: unknown;
-}
+import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 
 interface GitHubTransferCleanupCandidate {
   id: string;
@@ -30,23 +26,6 @@ function parseGitHubSourceId(sourceId: string): {
   };
 }
 
-function sourceIdFromGitHubUrl(value: unknown): string | null {
-  if (typeof value !== 'string') return null;
-  try {
-    const url = new URL(value);
-    if (url.hostname.toLowerCase() !== 'github.com') return null;
-    const segments = url.pathname.split('/').filter(Boolean);
-    if (
-      segments.length !== 4
-      || segments[2].toLowerCase() !== 'issues'
-      || !/^[1-9]\d*$/.test(segments[3])
-    ) return null;
-    return `${segments[0]}/${segments[1]}:${segments[3]}`.toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
 async function findVerifiedTransferOrphans(
   candidates: readonly GitHubTransferCleanupCandidate[],
 ): Promise<string[]> {
@@ -62,30 +41,18 @@ async function findVerifiedTransferOrphans(
   for (const group of groups.values()) {
     if (group.length < 2) continue;
     const bySourceId = new Map(group.map((task) => [task.sourceId.toLowerCase(), task]));
+    const connector = await getOrInitializeConnector(group[0].connectorInstanceId);
+    if (!connector?.resolveTaskIdentity) continue;
     for (const candidate of group) {
       const route = parseGitHubSourceId(candidate.sourceId);
       if (!route) continue;
       try {
-        const response = await fetch(
-          `https://api.github.com/repos/${encodeURIComponent(route.owner)}/${encodeURIComponent(route.repository)}/issues/${route.issueNumber}`,
-          {
-            headers: {
-              Accept: 'application/vnd.github+json',
-              'User-Agent': 'mission-control-transfer-cleanup',
-              'X-GitHub-Api-Version': '2022-11-28',
-            },
-            cache: 'no-store',
-          },
-        );
-        if (!response.ok) continue;
-        const issue = await response.json() as GitHubIssueRouteResponse;
-        const canonicalSourceId = sourceIdFromGitHubUrl(issue.html_url);
-        const destination = canonicalSourceId ? bySourceId.get(canonicalSourceId) : null;
+        const identity = await connector.resolveTaskIdentity(candidate.sourceId);
+        const destination = bySourceId.get(identity.sourceId.toLowerCase());
         if (
           destination
           && destination.id !== candidate.id
-          && typeof issue.node_id === 'string'
-          && destination.nodeId === issue.node_id
+          && destination.nodeId === identity.stableId
         ) {
           orphanIds.add(candidate.id);
         }

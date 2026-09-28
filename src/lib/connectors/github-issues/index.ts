@@ -1074,6 +1074,26 @@ export class GitHubIssuesConnector implements IConnector {
     };
   }
 
+  async resolveTaskIdentity(
+    sourceId: string,
+  ): Promise<{ sourceId: string; stableId: string }> {
+    const issue = await this.fetchIssue(sourceId);
+    const url = new URL(issue.html_url);
+    const segments = url.pathname.split('/').filter(Boolean);
+    if (
+      url.hostname.toLowerCase() !== 'github.com'
+      || segments.length !== 4
+      || segments[2].toLowerCase() !== 'issues'
+      || !issue.node_id
+    ) {
+      throw new Error(`GitHub issue identity evidence is unavailable for ${sourceId}`);
+    }
+    return {
+      sourceId: `${segments[0]}/${segments[1]}:${issue.number}`,
+      stableId: issue.node_id,
+    };
+  }
+
   private async fetchIssue(sourceId: string): Promise<GitHubRestIssue> {
     const { repo, issueNumber } = parseSourceId(sourceId);
     const response = await this.client!.restFetch(`/repos/${repo}/issues/${issueNumber}`, {

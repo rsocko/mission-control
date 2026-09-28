@@ -4,6 +4,7 @@ import { isPublicDemoMode } from '@/lib/public-demo';
 import { resolveRelativeReminderMutation } from '@/lib/tasks/relative-reminder';
 import {
   getDemoSeedCommandService,
+  getModeRouteCapabilities,
   getRelativeReminderTimezoneRepository,
 } from '@/lib/settings/mode-route-services';
 
@@ -13,24 +14,24 @@ import {
 export async function GET() {
   const mode = getAppMode();
   const settings = getSettings();
-  return NextResponse.json({ ...settings, mode, publicDemo: isPublicDemoMode() });
+  const { databaseBackend, demoOperationsSupported } = getModeRouteCapabilities();
+  return NextResponse.json({
+    ...settings,
+    mode,
+    publicDemo: isPublicDemoMode(),
+    databaseBackend,
+    demoOperationsSupported,
+  });
 }
 
 /**
  * POST /api/settings/mode — Switch between demo and live mode
  * Body: { mode: "demo" | "live" } or { action: "reset-demo" | "clear-data" }
  *
- * `resetDemoDatabase`/`clearDatabase`/`clearTriageSampleData` are the
- * narrow, documented seed/demo exception to the L02 web/API PostgreSQL
- * parity migration (see `docs/architecture/persistence-boundaries.md`):
- * there is no PostgreSQL equivalent yet. They are reached exclusively
- * through `getDemoSeedCommandService()` (see
- * `@/lib/settings/mode-route-services`), a backend-neutral registry with no
- * import edge of its own to `@/db`/SQLite, so this module stays fully clean
- * under PostgreSQL. The concrete implementation registered for
- * `MC_DATABASE_BACKEND=postgres` rejects all three commands before any
- * SQLite-side module is evaluated (see `initializeRuntimeDatabase` in
- * `src/db/runtime.ts`).
+ * Demo seeding and whole-database clearing are intentionally SQLite-only.
+ * PostgreSQL deployments reject these operations before resolving the
+ * registered command service so production data cannot be cleared by a demo
+ * control.
  */
 export async function POST(request: Request) {
   if (isPublicDemoMode()) {
@@ -42,26 +43,34 @@ export async function POST(request: Request) {
 
   const body = await request.json();
   const { mode, action } = body;
+  const { databaseBackend, demoOperationsSupported } = getModeRouteCapabilities();
 
   // Handle special actions
   if (action === 'reset-demo') {
+    if (!demoOperationsSupported) return unsupportedDemoOperation(databaseBackend);
     await getDemoSeedCommandService().resetDemoDatabase();
     updateSettings({ demoSeededAt: new Date().toISOString() });
     return NextResponse.json({ success: true, message: 'Demo data reset successfully' });
   }
 
   if (action === 'clear-data') {
+    if (!demoOperationsSupported) return unsupportedDemoOperation(databaseBackend);
     await getDemoSeedCommandService().clearDatabase();
     return NextResponse.json({ success: true, message: 'All data cleared' });
   }
 
   if (action === 'clear-triage-samples') {
+    if (!demoOperationsSupported) return unsupportedDemoOperation(databaseBackend);
     const deleted = await getDemoSeedCommandService().clearTriageSampleData();
     return NextResponse.json({ success: true, message: `Cleared ${deleted} triage sample item(s)` });
   }
 
   if (!mode || !['demo', 'live'].includes(mode)) {
     return NextResponse.json({ error: 'mode must be "demo" or "live"' }, { status: 400 });
+  }
+
+  if (!demoOperationsSupported && (mode === 'demo' || body.clearDemoData === true)) {
+    return unsupportedDemoOperation(databaseBackend);
   }
 
   const previousMode = getAppMode();
@@ -89,6 +98,16 @@ export async function POST(request: Request) {
     previousMode,
     message: `Switched to ${mode} mode`,
   });
+}
+
+function unsupportedDemoOperation(databaseBackend: string) {
+  return NextResponse.json(
+    {
+      error: `Demo mode and destructive demo-data operations are unavailable with the ${databaseBackend} database backend.`,
+      code: 'DEMO_OPERATIONS_UNSUPPORTED',
+    },
+    { status: 409 },
+  );
 }
 
 /**

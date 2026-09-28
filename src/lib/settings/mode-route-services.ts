@@ -38,18 +38,25 @@ export interface DemoSeedCommandService {
   clearTriageSampleData(): Promise<number>;
 }
 
+export interface ModeRouteCapabilities {
+  databaseBackend: 'sqlite' | 'postgres';
+  demoOperationsSupported: boolean;
+}
+
 interface ModeRouteServiceRegistry {
   demoSeedCommandService: DemoSeedCommandService | null;
   relativeReminderTimezoneRepository: RelativeReminderTimezoneRepository | null;
+  capabilities: ModeRouteCapabilities | null;
 }
 
 const REGISTRY_KEY = 'mission-control.mode-route-service-registry';
-const REGISTRY_SCHEMA_VERSION = 1;
+const REGISTRY_SCHEMA_VERSION = 2;
 
 function registry(): ModeRouteServiceRegistry {
   return getProcessRuntimeSlot(REGISTRY_KEY, REGISTRY_SCHEMA_VERSION, () => ({
     demoSeedCommandService: null,
     relativeReminderTimezoneRepository: null,
+    capabilities: null,
   }));
 }
 
@@ -79,9 +86,22 @@ export function getRelativeReminderTimezoneRepository(): RelativeReminderTimezon
   return relativeReminderTimezoneRepository;
 }
 
+export function registerModeRouteCapabilities(capabilities: ModeRouteCapabilities): void {
+  registry().capabilities = capabilities;
+}
+
+export function getModeRouteCapabilities(): ModeRouteCapabilities {
+  const { capabilities } = registry();
+  if (!capabilities) {
+    throw new Error('Mode route capabilities have not been registered');
+  }
+  return capabilities;
+}
+
 /** Test-only reset hook so unit tests can exercise registration in isolation. */
 export function _resetModeRouteServicesForTests(): void {
   const state = registry();
   state.demoSeedCommandService = null;
   state.relativeReminderTimezoneRepository = null;
+  state.capabilities = null;
 }

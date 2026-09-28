@@ -268,9 +268,9 @@ describe('TaskRow', () => {
   });
 
   describe('subtask navigation', () => {
-    it('opens subtasks directly from the subtask badge', () => {
+    it('aligns the subtask badge on the row rail and opens subtasks directly', () => {
       const onOpenSubtasks = vi.fn();
-      render(
+      const { container } = render(
         <TaskRow
           task={{ ...baseTask, subtaskDone: 1, subtaskTotal: 2 }}
           onComplete={noop}
@@ -281,7 +281,14 @@ describe('TaskRow', () => {
         />
       );
 
-      fireEvent.click(screen.getByRole('button', { name: 'Subtasks' }));
+      const row = container.firstElementChild;
+      const badge = screen.getByRole('button', { name: 'Subtasks' });
+      const titleIdentity = screen.getByText('Test task').closest('.flex-1');
+
+      expect(badge.parentElement).toBe(row);
+      expect(titleIdentity).not.toContainElement(badge);
+
+      fireEvent.click(badge);
 
       expect(onOpenSubtasks).toHaveBeenCalledOnce();
     });

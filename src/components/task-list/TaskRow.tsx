@@ -5,6 +5,7 @@ import { ArrowLeftRight, Bell, ChartNetwork, Clock, RotateCcw, Timer } from 'luc
 import { IconRenderer } from '@/components/ui/icon-picker';
 import { Tooltip } from '@/components/ui/Tooltip';
 import { CompletionBurst } from '@/components/ui/CompletionBurst';
+import { SubtaskPill } from '@/components/ui/SubtaskPill';
 import type { LocalDisposition } from '@/types';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type {
@@ -304,7 +305,7 @@ export function TaskRow({
         task={task}
         isDone={isDone}
         wrapTitle={wrapTitle}
-        onOpenSubtasks={onOpenSubtasks}
+        showSubtasks={false}
         afterConnector={(task.linkedSourceCount ?? 0) > 0 ? (
           <Tooltip content="Also tracked in another source">
             <span className="flex shrink-0 items-center gap-0.5 rounded border border-cyan-800/30 bg-cyan-900/20 px-1 py-0.5 text-[10px] font-medium text-cyan-400">
@@ -393,6 +394,12 @@ export function TaskRow({
             )}
           </div>
         ) : null}
+      />
+
+      <SubtaskPill
+        done={task.subtaskDone ?? 0}
+        total={task.subtaskTotal ?? 0}
+        onClick={onOpenSubtasks}
       />
 
       <TaskRowActions

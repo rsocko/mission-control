@@ -11,11 +11,13 @@ import { ApiErrors } from '@/lib/api-error';
  * deletions inside one backend transaction and returns the exact counts only
  * after that transaction commits.
  *
- * Phase 1: duplicates identified by (sourceId, connectorInstanceId) pairs; the
+ * Phase 1: transferred GitHub orphans whose destination URL has an exact
+ * canonical task row are removed.
+ * Phase 2: duplicates identified by (sourceId, connectorInstanceId) pairs; the
  * most recently synced/updated row wins.
- * Phase 2: completed recurring instances grouped by (title, sourceListId,
+ * Phase 3: completed recurring instances grouped by (title, sourceListId,
  * connectorInstanceId); the most recently completed instance wins.
- * Phase 3: open recurring instances in the same grouping; the nearest due date
+ * Phase 4: open recurring instances in the same grouping; the nearest due date
  * wins, nulls last.
  */
 export async function POST() {

@@ -16,6 +16,7 @@ import {
 import {
   planCompletedRecurringDeletions,
   planDuplicateDeletions,
+  planGitHubTransferOrphanDeletions,
   planOpenRecurringDeletions,
   type BugReportCommand,
   type BugReportResult,
@@ -61,7 +62,8 @@ const connectorExportColumns = {
 };
 
 const CLEANUP_COLUMNS = `
-  id, title, source_list_id AS sourceListId,
+  id, source_id AS sourceId, connector_type AS connectorType, title,
+  source_list_id AS sourceListId,
   connector_instance_id AS connectorInstanceId, due_date AS dueDate,
   completed_at AS completedAt, updated_at AS updatedAt, metadata
 `;
@@ -83,6 +85,12 @@ export function createSqliteOperationalUtilityRepository(
   }
 
   const runCleanup = sqlite.transaction((): MaintenanceCleanupResult => {
+    const transferredOrphans = sqlite.prepare(`
+      SELECT ${CLEANUP_COLUMNS} FROM tasks WHERE connector_type = 'github-issues'
+    `).all() as CleanupTaskCandidate[];
+    const transferredOrphanIds = planGitHubTransferOrphanDeletions(transferredOrphans);
+    for (const id of transferredOrphanIds) deleteTaskCascade(id);
+
     const duplicateGroups = sqlite.prepare(`
       SELECT source_id AS sourceId, connector_instance_id AS connectorInstanceId
       FROM tasks
@@ -91,7 +99,7 @@ export function createSqliteOperationalUtilityRepository(
       ORDER BY source_id, connector_instance_id
     `).all() as Array<{ sourceId: string; connectorInstanceId: string }>;
 
-    let tasksRemoved = 0;
+    let tasksRemoved = transferredOrphanIds.length;
     for (const group of duplicateGroups) {
       const rows = sqlite.prepare(`
         SELECT id, last_synced_at AS lastSyncedAt, updated_at AS updatedAt

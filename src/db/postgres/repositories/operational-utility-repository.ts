@@ -15,6 +15,7 @@ import type { PostgresDatabase } from '../runtime';
 import {
   planCompletedRecurringDeletions,
   planDuplicateDeletions,
+  planGitHubTransferOrphanDeletions,
   planOpenRecurringDeletions,
   type BugReportCommand,
   type BugReportResult,
@@ -69,7 +70,8 @@ const connectorExportColumns = {
 };
 
 const CLEANUP_COLUMNS = `
-  id, title, source_list_id AS "sourceListId",
+  id, source_id AS "sourceId", connector_type AS "connectorType", title,
+  source_list_id AS "sourceListId",
   connector_instance_id AS "connectorInstanceId", due_date AS "dueDate",
   completed_at AS "completedAt", updated_at AS "updatedAt", metadata
 `;
@@ -164,6 +166,12 @@ export function createPostgresOperationalUtilityRepository(
     maintenance: {
       async runDuplicateCleanup(): Promise<MaintenanceCleanupResult> {
         return withTransaction(pool, async (client) => {
+          const transferredOrphans = (await client.query<CleanupTaskCandidate>(
+            `SELECT ${CLEANUP_COLUMNS} FROM tasks WHERE connector_type = 'github-issues'`,
+          )).rows;
+          const transferredOrphanIds = planGitHubTransferOrphanDeletions(transferredOrphans);
+          await deleteTasksCascade(client, transferredOrphanIds);
+
           const duplicateGroups = (await client.query<{
             sourceId: string;
             connectorInstanceId: string;
@@ -176,7 +184,7 @@ export function createPostgresOperationalUtilityRepository(
             ORDER BY source_id, connector_instance_id
           `)).rows;
 
-          let tasksRemoved = 0;
+          let tasksRemoved = transferredOrphanIds.length;
           for (const group of duplicateGroups) {
             const rows = (await client.query<{
               id: string;

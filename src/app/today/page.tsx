@@ -28,7 +28,8 @@ import { dashboardKeys } from '@/lib/hooks/useDashboardQueries';
 import { getLocalToday, getLocalTomorrow } from '@/lib/utils/client-date';
 import type { DashboardProjectViewModel as HubProject, ListGroup } from '@/types/dashboard';
 import { extractRecurrenceFromMetadata, getNextRecurringDate } from '@/lib/utils/recurrence';
-import type { SuggestionTask } from '@/components/today/types';
+import type { MyDayItemAddedEventDetail, SuggestionTask } from '@/components/today/types';
+import { createOptimisticMyDayItem } from '@/lib/utils/my-day-view';
 
 export default function TodayPage() {
   const { progress: syncProgress } = useSyncStream();
@@ -208,37 +209,18 @@ export default function TodayPage() {
   // Optimistic insert: immediately show newly added My Day tasks without waiting for refetch
   useEffect(() => {
     const listener = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
+      const detail = (e as CustomEvent<Partial<MyDayItemAddedEventDetail>>).detail;
       if (!detail?.taskId) return;
       setItems((prev) => {
         if (prev.some((item) => item.taskId === detail.taskId)) return prev;
-        const optimisticItem = {
-          id: `optimistic-${detail.taskId}`,
-          taskId: detail.taskId,
-          order: prev.length + 1,
-          isAutoIncluded: false,
-          addedAt: new Date().toISOString(),
-          title: detail.title || 'New task',
-          status: detail.status || 'todo',
-          priority: detail.priority || 'none',
-          dueDate: detail.dueDate || null,
-          connectorType: detail.connectorType || 'local',
-          connectorInstanceId: 'local',
-          sourceListName: detail.sourceListName || null,
-          createdAt: new Date().toISOString(),
-          completedAt: null,
-          tags: [],
-          hasDescription: false,
-          localDisposition: detail.localDisposition || 'active',
-          taskSourceModel: detail.taskSourceModel || detail.editPolicy?.sourceModel || 'mc-owned',
-          editPolicy: detail.editPolicy,
-        };
-        return [...prev, optimisticItem];
+        const optimisticItem = createOptimisticMyDayItem(detail, prev.length + 1);
+        return optimisticItem ? [...prev, optimisticItem] : prev;
       });
+      if (!detail.editPolicy) void fetchData({ skipSync: true });
     };
     window.addEventListener('mission-control:my-day-item-added', listener);
     return () => window.removeEventListener('mission-control:my-day-item-added', listener);
-  }, [setItems]);
+  }, [fetchData, setItems]);
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden sm:flex-row">

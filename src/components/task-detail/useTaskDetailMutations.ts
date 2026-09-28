@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { taskLogger } from '@/lib/client-logger';
 import { getLocalToday } from '@/lib/utils/client-date';
+import type { MyDayItemAddedEventDetail } from '@/components/today/types';
 import { formatShortDate } from '@/lib/utils/task-detail-date';
 import { EFFORT_TO_DURATION, durationToEffort } from '@/lib/constants/task-formatting';
 import {
@@ -384,9 +385,23 @@ export function useTaskDetailMutations({
       ));
       onUpdate?.();
       notifyNavigationCountsChanged();
-      if (nextIsInMyDay) {
+      if (nextIsInMyDay && task) {
+        const detail = {
+          taskId,
+          title: task.title,
+          status: task.status,
+          priority: task.priority,
+          dueDate: task.dueDate,
+          connectorType: task.connectorType,
+          connectorInstanceId: task.connectorInstanceId,
+          sourceId: task.sourceId,
+          sourceListName: task.sourceListName,
+          localDisposition: task.localDisposition,
+          taskSourceModel: task.taskSourceModel,
+          editPolicy: task.editPolicy,
+        } satisfies MyDayItemAddedEventDetail;
         window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
-          detail: { taskId, title: task?.title },
+          detail,
         }));
       }
       if (result.writeBackAttempted && !result.writeBackSucceeded) {
@@ -399,7 +414,7 @@ export function useTaskDetailMutations({
     } finally {
       setUpdatingMyDay(false);
     }
-  }, [isInMyDay, onToggleMyDay, onUpdate, setTask, task?.title, taskId, updatingMyDay]);
+  }, [isInMyDay, onToggleMyDay, onUpdate, setTask, task, taskId, updatingMyDay]);
 
   const handleDelete = useCallback(() => {
     if (!task || !canRemoveTask(task.editPolicy)) return;

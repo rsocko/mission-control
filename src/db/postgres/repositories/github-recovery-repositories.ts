@@ -632,8 +632,59 @@ export function createPostgresGitHubRecoveryRepositories(
 
     async applyNativeTransferRouting(input) {
       return transaction(pool, async (client) => {
+        const current = await query<{ sourceId: string; metadata: unknown }>(
+          client,
+          `SELECT source_id AS "sourceId", metadata
+           FROM tasks
+           WHERE id = $1 AND connector_instance_id = $2
+           LIMIT 1 FOR UPDATE`,
+          [input.taskId, input.connectorInstanceId],
+        );
+        if (
+          current.rowCount === 0
+          || current.rows[0].sourceId.toLowerCase() !== input.legacySourceId.toLowerCase()
+        ) {
+          throw new Error('Native GitHub transfer task route changed before routing update');
+        }
+        const binding = await query<{ id: string; externalEntityId: string }>(
+          client,
+          `SELECT id, external_entity_id AS "externalEntityId"
+           FROM external_entity_bindings
+           WHERE connector_instance_id = $1
+             AND binding_type = 'task'
+             AND local_id = $2
+             AND state IN ('shadow', 'active')
+           LIMIT 1 FOR UPDATE`,
+          [input.connectorInstanceId, input.taskId],
+        );
+        if (
+          binding.rowCount === 0
+          || binding.rows[0].externalEntityId !== input.issueEntityId
+        ) {
+          throw new Error('Native GitHub transfer binding changed before routing update');
+        }
+        const destinationEntity = await upsertEntity(client, input.identity, input.observedAt);
+        if (destinationEntity.id !== input.issueEntityId) {
+          const occupied = await query<{ id: string }>(
+            client,
+            `SELECT id FROM external_entity_bindings
+             WHERE connector_instance_id = $1 AND external_entity_id = $2
+             LIMIT 1 FOR UPDATE`,
+            [input.connectorInstanceId, destinationEntity.id],
+          );
+          if (occupied.rowCount > 0) {
+            throw new Error('Native GitHub transfer successor identity is already bound');
+          }
+          await query(
+            client,
+            `UPDATE external_entity_locators
+             SET valid_to = $2
+             WHERE external_entity_id = $1 AND valid_to IS NULL`,
+            [input.issueEntityId, input.observedAt],
+          );
+        }
         const observed = await observeOperatorLocator(client, {
-          entityId: input.issueEntityId,
+          entityId: destinationEntity.id,
           identity: input.identity,
           locator: input.locator,
           repositoryEntityId: input.targetRepositoryEntityId,
@@ -645,7 +696,7 @@ export function createPostgresGitHubRecoveryRepositories(
             category: observed.collisionCategory,
             bindingType: 'task',
             localIds: [input.taskId],
-            externalEntityIds: [input.issueEntityId, observed.conflictingEntityId],
+            externalEntityIds: [destinationEntity.id, observed.conflictingEntityId],
             legacyIdentity: input.legacySourceId,
             observedAt: input.observedAt,
           });
@@ -656,13 +707,14 @@ export function createPostgresGitHubRecoveryRepositories(
           );
           return { outcome: 'collision' as const };
         }
-        const current = await query<{ metadata: unknown }>(
-          client,
-          'SELECT metadata FROM tasks WHERE id = $1 LIMIT 1 FOR UPDATE',
-          [input.taskId],
-        );
-        if (current.rowCount === 0) {
-          throw new Error('Native GitHub transfer task disappeared before routing update');
+        if (destinationEntity.id !== input.issueEntityId) {
+          await query(
+            client,
+            `UPDATE external_entity_bindings
+             SET external_entity_id = $2, verified_at = $3, updated_at = $4
+             WHERE id = $1`,
+            [binding.rows[0].id, destinationEntity.id, input.observedAt, input.now],
+          );
         }
         await query(
           client,

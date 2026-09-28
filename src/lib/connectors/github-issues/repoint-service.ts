@@ -622,8 +622,6 @@ export async function transferGitHubIssueWithLease(
     input.targetRepository,
     transferredNumber,
     targetRepository,
-    issue.issueStableId,
-    Boolean(dependencies.onChangedIssueIdentity),
     dependencies.sleep,
   );
   const nowIso = (dependencies.now?.() ?? new Date()).toISOString();
@@ -632,10 +630,6 @@ export async function transferGitHubIssueWithLease(
     throw new Error('Native GitHub transfer destination identity verification failed');
   }
   if (after.entity.identity.stableId !== issue.issueStableId) {
-    if (!dependencies.onChangedIssueIdentity) {
-      await disableConnectorAfterTransferIncident(input.connectorInstanceId);
-      throw new Error('Native GitHub transfer changed issue identity; local routing was not updated');
-    }
     if (
       !after.repository
       || after.repository.identity.stableId !== targetBinding.repositoryStableId
@@ -654,28 +648,30 @@ export async function transferGitHubIssueWithLease(
       await disableConnectorAfterTransferIncident(input.connectorInstanceId);
       throw new Error('Native GitHub transfer destination locator verification failed');
     }
-    try {
-      await dependencies.onChangedIssueIdentity({
-        sourceTaskId: issue.taskId,
-        sourceExternalEntityId: issue.issueEntityId,
-        sourceStableId: issue.issueStableId,
-        sourceId: input.sourceId,
-        targetNumber: transferredNumber,
-        targetRepository: input.targetRepository,
-        targetRepositoryEntityId: targetBinding.repositoryEntityId,
-        targetRepositoryStableId: targetBinding.repositoryStableId,
-        evidence: after,
-      });
-    } catch (error) {
-      await disableConnectorAfterTransferIncident(input.connectorInstanceId);
-      throw error;
+    if (dependencies.onChangedIssueIdentity) {
+      try {
+        await dependencies.onChangedIssueIdentity({
+          sourceTaskId: issue.taskId,
+          sourceExternalEntityId: issue.issueEntityId,
+          sourceStableId: issue.issueStableId,
+          sourceId: input.sourceId,
+          targetNumber: transferredNumber,
+          targetRepository: input.targetRepository,
+          targetRepositoryEntityId: targetBinding.repositoryEntityId,
+          targetRepositoryStableId: targetBinding.repositoryStableId,
+          evidence: after,
+        });
+      } catch (error) {
+        await disableConnectorAfterTransferIncident(input.connectorInstanceId);
+        throw error;
+      }
+      return {
+        newSourceId: `${input.targetRepository}:${transferredNumber}`,
+        identityVerified: true,
+        issueStableId: after.entity.identity.stableId,
+        repositoryStableId: targetBinding.repositoryStableId,
+      };
     }
-    return {
-      newSourceId: `${input.targetRepository}:${transferredNumber}`,
-      identityVerified: true,
-      issueStableId: after.entity.identity.stableId,
-      repositoryStableId: targetBinding.repositoryStableId,
-    };
   }
 
   let result;
@@ -708,7 +704,7 @@ export async function transferGitHubIssueWithLease(
   return {
     newSourceId: `${input.targetRepository}:${transferredNumber}`,
     identityVerified: true,
-    issueStableId: issue.issueStableId,
+    issueStableId: after.entity.identity.stableId,
     repositoryStableId: targetBinding.repositoryStableId,
   };
 }
@@ -718,8 +714,6 @@ async function resolveTransferredIssue(
   targetRepository: string,
   transferredNumber: number,
   targetRepositoryEvidence: ExternalIdentityObservation,
-  expectedIssueStableId: string,
-  acceptChangedIdentity: boolean,
   sleep: (milliseconds: number) => Promise<void> = defaultSleep,
 ): Promise<ExternalIdentityEvidence | null> {
   const retryDelaysMs = [250, 500, 1_000, 2_000, 4_000, 8_000, 16_000];
@@ -728,10 +722,7 @@ async function resolveTransferredIssue(
     transferredNumber,
     targetRepositoryEvidence,
   );
-  if (
-    observation
-    && (acceptChangedIdentity || observation.entity.identity.stableId === expectedIssueStableId)
-  ) return observation;
+  if (observation) return observation;
 
   for (const delayMs of retryDelaysMs) {
     await sleep(delayMs);
@@ -740,12 +731,9 @@ async function resolveTransferredIssue(
       transferredNumber,
       targetRepositoryEvidence,
     );
-    if (
-      observation
-      && (acceptChangedIdentity || observation.entity.identity.stableId === expectedIssueStableId)
-    ) return observation;
+    if (observation) return observation;
   }
-  return observation;
+  return null;
 }
 
 function defaultSleep(milliseconds: number): Promise<void> {

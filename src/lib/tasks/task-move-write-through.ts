@@ -85,6 +85,13 @@ class TaskMoveRemoteCreateError extends Error {
   }
 }
 
+class TaskMoveNativeTransferUnavailableError extends Error {
+  constructor(readonly cause?: unknown) {
+    super('GitHub native transfer could not be prepared');
+    this.name = 'TaskMoveNativeTransferUnavailableError';
+  }
+}
+
 function serviceResult(
   body: Record<string, unknown>,
   status = 200,
@@ -468,9 +475,13 @@ export async function executeWriteThroughTaskMove(
       } catch (error) {
         connectorLogger.warn(
           { ...logContext, ...sanitizeException(error) },
-          'Targeted task identity refresh failed; using safe move fallback',
+          'Targeted task identity refresh failed; native transfer was not attempted',
         );
+        throw new TaskMoveNativeTransferUnavailableError(error);
       }
+    }
+    if (nativeTransferCandidate && !performNativeTransfer) {
+      throw new TaskMoveNativeTransferUnavailableError();
     }
 
     if (sourceAction === 'move' && !performNativeTransfer) {
@@ -1284,6 +1295,19 @@ export async function executeWriteThroughTaskMove(
         ),
         'destination_create_failed',
         error.originalError,
+      );
+    }
+    if (error instanceof TaskMoveNativeTransferUnavailableError && !compensationError) {
+      return failureResponse(
+        serviceResult(
+          {
+            error: 'GitHub native transfer could not be prepared. No issue was created or closed. Run a GitHub sync and try again.',
+            code: 'GITHUB_NATIVE_TRANSFER_UNAVAILABLE',
+          },
+          409,
+        ),
+        'native_transfer_unavailable',
+        error.cause,
       );
     }
     return failureResponse(

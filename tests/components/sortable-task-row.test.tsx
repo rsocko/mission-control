@@ -188,4 +188,26 @@ describe('SortableTaskRow aligned properties', () => {
     expect(screen.getByText('Narrow row')).toHaveClass('min-w-0', 'flex-1', 'truncate');
     expect(screen.getByText('Waiting on someone')).toHaveClass('hidden', '@min-[960px]:inline');
   });
+
+  it('lets the source list use available metadata-row space', () => {
+    render(
+      <SortableTaskRow
+        item={{ ...item, sourceListName: 'Home Assistant (Natick)' }}
+        onComplete={vi.fn()}
+        onFocus={vi.fn()}
+        onSchedule={vi.fn()}
+        onRemove={vi.fn()}
+        onSelect={vi.fn()}
+        isSelected={false}
+        onSetDueDate={vi.fn()}
+        onSetPriority={vi.fn()}
+        onSetStatus={vi.fn()}
+        onOpenNotes={vi.fn()}
+        draggable={false}
+      />,
+    );
+
+    expect(screen.getByText('Home Assistant (Natick)')).toHaveClass('min-w-0', 'truncate');
+    expect(screen.getByText('Home Assistant (Natick)')).not.toHaveClass('max-w-[120px]');
+  });
 });

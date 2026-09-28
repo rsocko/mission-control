@@ -318,7 +318,7 @@ export function TaskRow({
           <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">
             {secondaryMetadata}
             {task.sourceListName && !hideSourceListName && (
-              <span className="max-w-[120px] min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
+              <span className="min-w-0 truncate text-xs text-[var(--text-muted)]">{task.sourceListName}</span>
             )}
             {task.tags?.filter(tag => !isSyntheticTag(tag.name)).map((tag) => {
               const tagClassName = cn(

@@ -27,6 +27,7 @@ export interface SeedSourceListInput {
 export interface SeedTaskInput {
   readonly id: string;
   readonly sourceId: string;
+  readonly connectorType?: string;
   readonly connectorInstanceId: string;
   readonly title: string;
   readonly status?: string;
@@ -138,6 +139,47 @@ export function describeOperationalUtilityPersistenceContract(
         await persistence.maintenance.runDuplicateCleanup();
 
         expect(await harness.listTaskIds()).toEqual(['a-tie']);
+      });
+
+      it('removes a transferred GitHub orphan when the canonical destination exists', async () => {
+        const destinationUrl = 'https://github.com/acme/target/issues/42';
+        await harness.seedTask({
+          id: 'legacy-source',
+          sourceId: 'acme/source:17',
+          connectorType: 'github-issues',
+          connectorInstanceId: 'connector-1',
+          title: 'Transferred issue',
+          metadata: { url: destinationUrl, issueNumber: 42 },
+        });
+        await harness.seedTask({
+          id: 'canonical-destination',
+          sourceId: 'acme/target:42',
+          connectorType: 'github-issues',
+          connectorInstanceId: 'connector-1',
+          title: 'Transferred issue',
+          metadata: { url: destinationUrl, issueNumber: 42 },
+        });
+
+        const result = await persistence.maintenance.runDuplicateCleanup();
+
+        expect(result.tasksRemoved).toBe(1);
+        expect(await harness.listTaskIds()).toEqual(['canonical-destination']);
+      });
+
+      it('keeps a redirected GitHub row when no canonical destination exists', async () => {
+        await harness.seedTask({
+          id: 'legacy-only',
+          sourceId: 'acme/source:17',
+          connectorType: 'github-issues',
+          connectorInstanceId: 'connector-1',
+          title: 'Transferred issue',
+          metadata: { url: 'https://github.com/acme/target/issues/42' },
+        });
+
+        const result = await persistence.maintenance.runDuplicateCleanup();
+
+        expect(result.tasksRemoved).toBe(0);
+        expect(await harness.listTaskIds()).toEqual(['legacy-only']);
       });
 
       it('keeps the most recently completed recurring instance', async () => {

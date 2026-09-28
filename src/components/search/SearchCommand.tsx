@@ -55,6 +55,8 @@ import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import { getLocalToday } from '@/lib/utils/client-date';
 import type { HubProjectSummaryDto } from '@/types/api';
 import type { SourceList } from '@/types/dashboard';
+import type { TaskEditPolicy } from '@/types';
+import type { MyDayItemAddedEventDetail } from '@/components/today/types';
 import {
   getDestinationResults,
   getProjectResults,
@@ -553,7 +555,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
       }
       const createdTask = await response.json() as {
         id: string;
-        editPolicy?: { sourceModel?: string };
+        editPolicy: TaskEditPolicy;
       };
       if (taskToCreate.addToMyDay) {
         const myDayResponse = await fetch('/api/my-day', {
@@ -562,17 +564,18 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
           body: JSON.stringify({ taskId: createdTask.id, date: getLocalToday() }),
         });
         if (myDayResponse.ok) {
+          const detail = {
+            taskId: createdTask.id,
+            title: taskToCreate.title,
+            priority: taskToCreate.priority || 'none',
+            dueDate: taskToCreate.dueDate,
+            connectorType: 'local',
+            sourceListName: null,
+            status: 'todo',
+            editPolicy: createdTask.editPolicy,
+          } satisfies MyDayItemAddedEventDetail;
           window.dispatchEvent(new CustomEvent('mission-control:my-day-item-added', {
-            detail: {
-              taskId: createdTask.id,
-              title: taskToCreate.title,
-              priority: taskToCreate.priority || 'none',
-              dueDate: taskToCreate.dueDate,
-              connectorType: 'local',
-              sourceListName: null,
-              status: 'todo',
-              editPolicy: createdTask.editPolicy,
-            },
+            detail,
           }));
         } else {
           myDayAssignmentFailed = true;

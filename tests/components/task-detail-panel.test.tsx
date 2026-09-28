@@ -1898,6 +1898,8 @@ describe('TaskDetailPanel redesigned presentations', () => {
 
   it('adds a task to My Day from an unhosted detail panel', async () => {
     const onUpdate = vi.fn();
+    const myDayItemAdded = vi.fn();
+    window.addEventListener('mission-control:my-day-item-added', myDayItemAdded, { once: true });
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       if (url === '/api/tasks/task-1') return json({ task });
@@ -1921,6 +1923,13 @@ describe('TaskDetailPanel redesigned presentations', () => {
     }));
     expect(await screen.findByRole('button', { name: 'On My Day' })).toBeInTheDocument();
     expect(onUpdate).toHaveBeenCalledWith();
+    expect(myDayItemAdded).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.objectContaining({
+        taskId: 'task-1',
+        connectorInstanceId: 'local',
+        editPolicy: editableTaskPolicy,
+      }),
+    }));
     expect(toast.success).toHaveBeenCalledWith('Added to My Day');
   });
 

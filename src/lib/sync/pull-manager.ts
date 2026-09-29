@@ -102,6 +102,39 @@ export function recordBlockedTaskIdentityDecision(
   }
 }
 
+export function matchingMetadataIdentityRecoveryWrite(
+  connectorId: string,
+  remoteTask: TaskItem,
+  localTask: ConnectorTaskRecord | undefined,
+  decision: GitHubIdentityResolutionDecision,
+): ExternalIdentityWrite | null {
+  if (
+    decision.outcome !== 'unbound_local_row'
+    || !localTask
+    || !remoteTask.externalIdentity
+  ) {
+    return null;
+  }
+  const metadataNodeId = typeof localTask.metadata?.nodeId === 'string'
+    ? localTask.metadata.nodeId
+    : null;
+  if (
+    !metadataNodeId
+    || metadataNodeId !== remoteTask.externalIdentity.entity.identity.stableId
+  ) {
+    return null;
+  }
+  return {
+    target: {
+      connectorInstanceId: connectorId,
+      bindingType: 'task',
+      localId: localTask.id,
+      legacyIdentity: remoteTask.sourceId,
+    },
+    evidence: remoteTask.externalIdentity,
+  };
+}
+
 function toRemoteTaskVersion(task: TaskItem): RemoteTaskVersion {
   return {
     hasParent: !!task.parentId,
@@ -334,28 +367,75 @@ export async function upsertTasks(
       });
       for (let index = 0; index < comparisonTasks.length; index += 500) {
         const chunk = comparisonTasks.slice(index, index + 500);
-        const decisions = await identityRuntime.resolveBatch(
-          'task',
-          'task',
-          chunk.map((remoteTask) => {
-            const direct = existingBySourceId.get(remoteTask.sourceId);
-            const missionControlTaskId = remoteTask.metadata?.missionControlTaskId;
-            const adopted = !direct && typeof missionControlTaskId === 'string'
-              ? existingById.get(missionControlTaskId)
-              : undefined;
-            const existing = direct ?? (
-              adopted?.sourceId.startsWith('local:') ? adopted : undefined
-            );
-            return {
-              candidateKey: remoteTask.sourceId,
-              locatorMatchedLocalIds: existing ? [existing.id] : [],
-              boundAction: 'update' as const,
-              unboundAction: 'create' as const,
-              evidence: remoteTask.externalIdentity,
-              localTaskId: existing?.id,
-            };
-          }),
+        const candidates = chunk.map((remoteTask) => {
+          const direct = existingBySourceId.get(remoteTask.sourceId);
+          const missionControlTaskId = remoteTask.metadata?.missionControlTaskId;
+          const adopted = !direct && typeof missionControlTaskId === 'string'
+            ? existingById.get(missionControlTaskId)
+            : undefined;
+          const existing = direct ?? (
+            adopted?.sourceId.startsWith('local:') ? adopted : undefined
+          );
+          return {
+            candidateKey: remoteTask.sourceId,
+            locatorMatchedLocalIds: existing ? [existing.id] : [],
+            boundAction: 'update' as const,
+            unboundAction: 'create' as const,
+            evidence: remoteTask.externalIdentity,
+            localTaskId: existing?.id,
+          };
+        });
+        let decisions = await identityRuntime.resolveBatch('task', 'task', candidates);
+        const candidateByKey = new Map(candidates.map((candidate) => [
+          candidate.candidateKey,
+          candidate,
+        ]));
+        const remoteTaskBySourceId = new Map(
+          chunk.map((remoteTask) => [remoteTask.sourceId, remoteTask]),
         );
+        const recoveryWrites = decisions.flatMap((decision) => {
+          const candidate = candidateByKey.get(decision.candidateKey);
+          const remoteTask = remoteTaskBySourceId.get(decision.candidateKey);
+          if (!candidate || !remoteTask) return [];
+          const localTask = candidate.localTaskId
+            ? existingById.get(candidate.localTaskId)
+            : undefined;
+          const write = matchingMetadataIdentityRecoveryWrite(
+            connectorId,
+            remoteTask,
+            localTask,
+            decision,
+          );
+          return write ? [write] : [];
+        });
+        if (recoveryWrites.length > 0) {
+          const recoveryResults = await persistGitHubPrimaryIdentityBatch(
+            recoveryWrites,
+            identityRuntime.modeSnapshot,
+          );
+          const failedRecovery = recoveryResults.find((result) => result.state !== 'bound');
+          if (failedRecovery) {
+            throw new Error(
+              `GitHub task identity recovery failed: ${
+                failedRecovery.collisionCategory ?? failedRecovery.state
+              }`,
+            );
+          }
+          const recoverableKeys = new Set(
+            recoveryWrites.map((write) => write.target.legacyIdentity),
+          );
+          const recoveredDecisions = await identityRuntime.resolveBatch(
+            'task',
+            'task',
+            candidates.filter((candidate) => recoverableKeys.has(candidate.candidateKey)),
+          );
+          const recoveredByKey = new Map(
+            recoveredDecisions.map((decision) => [decision.candidateKey, decision]),
+          );
+          decisions = decisions.map((decision) => (
+            recoveredByKey.get(decision.candidateKey) ?? decision
+          ));
+        }
         for (const decision of decisions) {
           identityDecisionBySourceId.set(decision.candidateKey, decision);
           if (decision.appliedSource === 'blocked') {

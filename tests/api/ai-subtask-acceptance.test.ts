@@ -23,6 +23,8 @@ const mockReorderSubtasks = vi.fn();
 const mockCreateSubtask = vi.fn();
 const mockAcceptSubtaskProposal = vi.fn();
 const mockCompleteSubtaskWriteThrough = vi.fn();
+const mockPersistCreatedTaskIdentity = vi.fn();
+const mockLoggerError = vi.fn();
 
 vi.mock('crypto', () => {
   const createHash = () => {
@@ -85,8 +87,17 @@ vi.mock('@/lib/persistence/worker-runtime', () => ({
 vi.mock('@/lib/sync/write-through-log', () => ({
   logWriteThrough: mockLogWriteThrough,
 }));
+vi.mock('@/lib/connectors/transfer-identity', () => ({
+  persistCreatedTaskIdentity: mockPersistCreatedTaskIdentity,
+}));
+vi.mock('@/lib/external-identities', () => ({
+  executeFencedGitHubTaskMutation: vi.fn(
+    async ({ write }: { write: () => Promise<unknown> }) => write(),
+  ),
+  GitHubUnknownWriteOutcomeError: class GitHubUnknownWriteOutcomeError extends Error {},
+}));
 vi.mock('@/lib/logger', () => ({
-  default: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
+  default: { error: mockLoggerError, warn: vi.fn(), info: vi.fn() },
 }));
 
 const taskVersion = '2026-07-30T12:00:00.000Z';
@@ -172,6 +183,7 @@ beforeEach(() => {
   mockReorderSubtasks.mockResolvedValue({ kind: 'reordered', revision: 1 });
   mockGetConnector.mockReturnValue({ createSubTask: vi.fn() });
   mockCreateSubtask.mockResolvedValue({ kind: 'created' });
+  mockPersistCreatedTaskIdentity.mockResolvedValue(undefined);
   mockAcceptSubtaskProposal.mockResolvedValue({
     kind: 'created',
     snapshot: {
@@ -605,5 +617,119 @@ describe('AI proposal acceptance through the subtask route', () => {
       );
     });
     expect(order).toEqual(['local', 'source', 'complete']);
+  });
+
+  it('persists GitHub subtask identity before marking the local row synchronized', async () => {
+    const order: string[] = [];
+    const externalIdentity = {
+      entity: {
+        identity: { stableId: 'I_child' },
+        locator: {
+          owner: 'acme',
+          repository: 'repo',
+          issueNumber: 42,
+        },
+      },
+    };
+    const createRemoteSubtask = vi.fn(async () => {
+      order.push('source');
+      return {
+        sourceId: 'acme/repo:42',
+        sourceListId: 'acme/repo',
+        metadata: { nodeId: 'I_child', issueNumber: 42 },
+        externalIdentity,
+      };
+    });
+    mockGetCapabilities.mockResolvedValue({
+      write: true,
+      subtasks: true,
+      taskFieldProfile: {
+        dependencies: { authority: 'source', writeBack: 'direct' },
+      },
+    });
+    mockParentTask({
+      sourceId: 'acme/repo:41',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      sourceListId: 'acme/repo',
+      sourceListName: 'acme/repo',
+    });
+    mockGetConnector.mockReturnValue({
+      type: 'github-issues',
+      createSubTask: createRemoteSubtask,
+    });
+    mockCreateSubtask.mockImplementationOnce(async () => {
+      order.push('local');
+      return { kind: 'created' };
+    });
+    mockPersistCreatedTaskIdentity.mockImplementationOnce(async () => {
+      order.push('identity');
+    });
+    mockCompleteSubtaskWriteThrough.mockImplementationOnce(async () => {
+      order.push('complete');
+      return true;
+    });
+
+    const { POST } = await import('@/app/api/tasks/[id]/subtasks/route');
+    const response = await POST(request({ title: 'GitHub child' }), {
+      params: Promise.resolve({ id: 'parent' }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mockCompleteSubtaskWriteThrough).toHaveBeenCalled();
+    });
+    expect(mockPersistCreatedTaskIdentity).toHaveBeenCalledWith({
+      taskId: 'f1176433-0535-4914-aac5-1f79dca24971',
+      connectorInstanceId: 'github-1',
+      sourceId: 'acme/repo:42',
+      sourceListId: 'acme/repo',
+      evidence: externalIdentity,
+    });
+    expect(order).toEqual(['local', 'source', 'identity', 'complete']);
+  });
+
+  it('does not mark a GitHub subtask synchronized without stable identity evidence', async () => {
+    mockGetCapabilities.mockResolvedValue({
+      write: true,
+      subtasks: true,
+      taskFieldProfile: {
+        dependencies: { authority: 'source', writeBack: 'direct' },
+      },
+    });
+    mockParentTask({
+      sourceId: 'acme/repo:41',
+      connectorType: 'github-issues',
+      connectorInstanceId: 'github-1',
+      sourceListId: 'acme/repo',
+      sourceListName: 'acme/repo',
+    });
+    mockGetConnector.mockReturnValue({
+      type: 'github-issues',
+      createSubTask: vi.fn(async () => ({
+        sourceId: 'acme/repo:42',
+        sourceListId: 'acme/repo',
+        metadata: { nodeId: 'I_child', issueNumber: 42 },
+      })),
+    });
+
+    const { POST } = await import('@/app/api/tasks/[id]/subtasks/route');
+    const response = await POST(request({ title: 'GitHub child' }), {
+      params: Promise.resolve({ id: 'parent' }),
+    });
+
+    expect(response.status).toBe(200);
+    await vi.waitFor(() => {
+      expect(mockLoggerError).toHaveBeenCalledWith(
+        expect.objectContaining({
+          err: expect.objectContaining({
+            message: 'GitHub subtask creation returned without stable identity evidence',
+          }),
+        }),
+        'Write-through subtask request failed',
+      );
+    });
+    expect(mockPersistCreatedTaskIdentity).not.toHaveBeenCalled();
+    expect(mockCompleteSubtaskWriteThrough).not.toHaveBeenCalled();
   });
 });

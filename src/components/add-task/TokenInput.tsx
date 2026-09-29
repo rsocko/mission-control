@@ -652,7 +652,7 @@ export function TokenInput({
 
   return (
     <LexicalComposer initialConfig={initialConfig}>
-      <div className={`relative flex-1 ${className || ''}`}>
+      <div className={`relative min-w-0 flex-1 overflow-hidden ${className || ''}`}>
         <PlainTextPlugin
           contentEditable={
             <ContentEditable
@@ -661,7 +661,7 @@ export function TokenInput({
             />
           }
           placeholder={
-            <div className="absolute top-0 left-0 py-2 text-sm text-[var(--text-muted)] pointer-events-none select-none">
+            <div className="pointer-events-none absolute inset-x-0 top-0 truncate py-2 text-sm text-[var(--text-muted)] select-none">
               {placeholder}
             </div>
           }

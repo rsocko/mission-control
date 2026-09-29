@@ -1561,7 +1561,7 @@ export function QuickAddBar({ onTaskAdded }: QuickAddBarProps) {
               title={destination.label}
             >
               <ConnectorIconImg type={destination.connectorType} size={14} />
-              <span className="quick-add-destination-label max-w-[120px] truncate">{destination.shortLabel ?? destination.label}</span>
+              <span className="quick-add-destination-label truncate">{destination.shortLabel ?? destination.label}</span>
               <span className="text-[var(--text-muted)]">▾</span>
             </motion.button>
 

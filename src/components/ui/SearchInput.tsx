@@ -124,7 +124,7 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
       <input
         ref={inputRef}
         id={id}
-        type="text"
+        type="search"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={handleKeyDown}

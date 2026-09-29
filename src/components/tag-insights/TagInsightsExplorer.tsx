@@ -136,6 +136,7 @@ export default function TagInsightsExplorer({
                 value={search}
                 onChange={setSearch}
                 placeholder="Search tag names"
+                ariaLabel="Filter tags"
                 clearLabel="Clear tag search"
                 className="h-9 border-[var(--border-strong)] bg-[var(--surface-1)] px-2.5"
                 inputClassName="text-sm"

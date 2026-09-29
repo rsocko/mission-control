@@ -112,7 +112,7 @@ describe('ProjectsSidebar project status indicators', () => {
 
     await waitFor(() => expect(screen.getByText('Completed Project')).toBeInTheDocument());
 
-    const searchInput = screen.getByRole('textbox', { name: 'Search projects' });
+    const searchInput = screen.getByRole('searchbox', { name: 'Search projects' });
     fireEvent.change(searchInput, { target: { value: 'Healthy' } });
 
     const clearButton = screen.getByRole('button', { name: 'Clear project search' });

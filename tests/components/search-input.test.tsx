@@ -21,7 +21,7 @@ describe('SearchInput', () => {
   it('clears the value and restores focus to the input', () => {
     render(<ControlledSearchInput />);
 
-    const input = screen.getByRole('textbox', { name: 'Search projects' });
+    const input = screen.getByRole('searchbox', { name: 'Search projects' });
     fireEvent.click(screen.getByRole('button', { name: 'Clear project search' }));
 
     expect(input).toHaveValue('');

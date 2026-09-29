@@ -9,7 +9,6 @@ related:
   - "[Task Source Ownership and Editability](task-source-ownership-and-editability.md)"
   - "[Connectors Architecture](../../architecture/connectors.md)"
   - "[Scout Smart Connector](scout-smart-connector.md)"
-  - "[AI & Agent Architecture](../active/ai-agent-architecture.md)"
 issues:
   - "rsocko/homelab-config#633 - Deploy a private, reversible Paperclip pilot stack"
   - "rsocko/mission-control#2012 - Add Paperclip external-agent provider"
@@ -39,11 +38,19 @@ Do not create a bidirectional task synchronization system. An MC task delegates
 to a Paperclip issue/run and retains references to it. Paperclip may decompose
 that work internally without creating an MC task for every child issue.
 
+Houston remains the user-facing assistant rather than becoming a Paperclip
+agent by default. Houston may dispatch directly to one executor or select
+Paperclip when work benefits from durable multi-agent orchestration. An
+optional Paperclip **Mission Control Coordinator** may consume explicitly
+delegated work and return proposals/results, but it receives no ambient
+authority to pull, reprioritize, or mutate arbitrary MC work.
+
 ## Product boundaries
 
 | System | Owns | Does not own |
 |---|---|---|
 | Mission Control | Personal tasks, priorities, projects, human decisions, source provenance, dispatch policy, consolidated notifications | Paperclip's internal work breakdown or runtime sessions |
+| Houston | Conversational intent, recommendations, explanation, and policy-aware delegation through MC | Durable dispatch persistence or Paperclip's internal organization |
 | Paperclip | Agent companies, teams, issue decomposition, budgets, approvals, runs, artifacts, agent governance | The user's canonical cross-source task list |
 | Scout | M365 discovery, evidence, and narrowly authorized M365 actions | General orchestration or canonical task planning |
 | OpenClaw | Persistent general-purpose agent sessions, tools, memory, and channels | Portfolio/task authority or organization-wide governance |
@@ -341,7 +348,8 @@ stable minimum integration contract.
 ### Phase 3: Minimum Mission Control integration
 
 - Register Paperclip as an external-agent execution provider.
-- Add **Delegate to Paperclip** with existing dispatch preview and confirmation.
+- Add a provider-neutral **Delegate...** action with Paperclip as an execution
+  target, using the existing dispatch preview and confirmation.
 - Store MC task-to-Paperclip issue/run correlations.
 - Reconcile state, blockers, results, PRs, and artifacts into the parent task.
 - Add cancellation/revocation and explicit failure states.

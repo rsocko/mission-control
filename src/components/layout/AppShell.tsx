@@ -120,7 +120,7 @@ function ToolbarRow({
       </div>
       {/* Center: QuickAddBar */}
       <div className="flex-1 min-w-0 flex justify-center px-4">
-        <div className="w-full max-w-2xl -translate-y-0.5">
+        <div className="w-full max-w-4xl -translate-y-0.5">
           <QuickAddBar />
         </div>
       </div>

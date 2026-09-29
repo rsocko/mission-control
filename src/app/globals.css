@@ -172,30 +172,34 @@ p, li {
   min-width: 12rem;
 }
 
-@container (max-width: 34rem) {
+.quick-add-destination-label {
+  max-width: 10rem;
+}
+
+@container (max-width: 48rem) {
   .quick-add-secondary-project {
     display: none;
   }
 }
 
-@container (max-width: 30rem) {
+@container (max-width: 42rem) {
   .quick-add-secondary-voice {
     display: none;
   }
+}
 
+@container (max-width: 36rem) {
   .quick-add-input {
     min-width: 8rem;
   }
-}
 
-@container (max-width: 26rem) {
   .quick-add-secondary-my-day,
   .quick-add-secondary-expand {
     display: none;
   }
 }
 
-@container (max-width: 22rem) {
+@container (max-width: 30rem) {
   .quick-add-input {
     min-width: 0;
   }

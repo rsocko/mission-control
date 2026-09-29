@@ -13,6 +13,8 @@ import {
 import { QuickAddBar } from '@/components/add-task';
 import { SyncButton } from '@/components/toolbar';
 import { KeyboardShortcuts } from '@/components/KeyboardShortcuts';
+import { CompletionSoundButton } from '@/components/CompletionSoundButton';
+import { CompletionSoundController } from '@/components/CompletionSoundController';
 import { DemoModeBanner } from '@/components/DemoModeBanner';
 import { DailyCompletionCounter } from '@/components/DailyCompletionCounter';
 import { SearchCommand } from '@/components/search/SearchCommand';
@@ -139,6 +141,7 @@ function ToolbarRow({
 
         <ViewModeButtons />
         <DailyCompletionCounter />
+        <CompletionSoundButton />
 
         {/* Health Indicator */}
         <div
@@ -347,6 +350,7 @@ function AppShellInner({
     <div className="app-viewport flex bg-[var(--background)]">
       <PriorityWizardGate />
       <KeyboardShortcuts />
+      <CompletionSoundController />
       <DopamineMenu />
 
       {/* Left Nav Rail (desktop only) */}
@@ -371,6 +375,7 @@ function AppShellInner({
           menuButtonRef={mobileMenuButtonRef}
           isDrawerOpen={isDrawerOpen}
           navigationCounts={navigationCounts}
+          contextAction={<CompletionSoundButton mobile />}
         />
 
         <DemoModeBanner />

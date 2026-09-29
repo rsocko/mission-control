@@ -203,9 +203,7 @@ export function useDashboardTaskActions(
         });
         notifyTaskChanged(taskId);
         void optionsRef.current.fetchData(false, true, true);
-        window.dispatchEvent(new CustomEvent('mc:task-completed'));
       });
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
       setTimeout(() => void optionsRef.current.fetchData(false, true, true), 3000);
     } else if (outcome === 'failed') {
       toast.error('Failed to complete task');

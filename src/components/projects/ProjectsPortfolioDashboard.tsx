@@ -13,6 +13,7 @@ import {
   Search,
 } from 'lucide-react';
 import { IconRenderer } from '@/components/ui/icon-picker';
+import { SearchInput } from '@/components/ui/SearchInput';
 import {
   buildCategoryPortfolioRows,
   buildDeadlineRunway,
@@ -619,15 +620,14 @@ export function ProjectsPortfolioDashboard({
             </button>
           ))}
         </div>
-        <label className="flex h-9 min-w-0 basis-full items-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-2.5 sm:ml-auto sm:h-8 sm:max-w-72 sm:basis-auto sm:flex-1">
-          <Search size={13} className="shrink-0 text-[var(--text-muted)]" />
-          <input
-            value={search}
-            onChange={event => setSearch(event.target.value)}
-            placeholder="Find a project or phase…"
-            className="min-w-0 flex-1 bg-transparent text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-          />
-        </label>
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Find a project or phase…"
+          clearLabel="Clear portfolio search"
+          className="h-9 min-w-0 basis-full rounded-lg px-2.5 sm:ml-auto sm:h-8 sm:max-w-72 sm:basis-auto sm:flex-1"
+          inputClassName="min-w-0"
+        />
       </div>
 
       {view === 'overview' && (

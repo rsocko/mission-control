@@ -1,8 +1,9 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { LoaderCircle, Network, Search } from 'lucide-react';
+import { Network } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { useProgressiveSearch } from '@/lib/hooks/useProgressiveSearch';
 
 const MAX_SEEDS = 10;
@@ -64,20 +65,18 @@ export function UniverseSeedSearch({
         </div>
       </div>
 
-      <label className="input-glow relative mt-5 flex h-11 items-center rounded-xl border border-[var(--border)] bg-[var(--surface-0)]">
-        <span className="sr-only">Search tasks to seed the Universe</span>
-        <Search size={15} className="ml-3 shrink-0 text-[var(--text-tertiary)]" aria-hidden="true" />
-        <input
-          type="search"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Search by title, concept, or identifier"
-          className="h-full min-w-0 flex-1 bg-transparent px-3 text-sm text-[var(--text-primary)] outline-none"
-        />
-        {keywordLoading || semanticLoading ? (
-          <LoaderCircle size={15} className="mr-3 animate-spin text-[var(--accent-400)]" aria-label="Searching" />
-        ) : null}
-      </label>
+      <SearchInput
+        value={query}
+        onChange={setQuery}
+        placeholder="Search by title, concept, or identifier"
+        ariaLabel="Search tasks to seed the Universe"
+        clearLabel="Clear Universe seed search"
+        loading={keywordLoading || semanticLoading}
+        size="md"
+        className="mt-5 h-11"
+        inputClassName="min-w-0"
+        iconClassName="text-[var(--text-tertiary)]"
+      />
 
       {query.trim() ? (
         <div className="mt-3 max-h-64 overflow-y-auto rounded-xl border border-[var(--border)] bg-[var(--surface-0)] p-1">

@@ -18,7 +18,6 @@ import {
   MessageSquareText,
   PenLine,
   RefreshCw,
-  Search,
   ShieldAlert,
   SlidersHorizontal,
   X,
@@ -32,6 +31,7 @@ import { GroupByDropdown, type GroupOption } from '@/components/toolbar/GroupByD
 import { SortDropdown, type SortOption } from '@/components/toolbar/SortDropdown';
 import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { useTaskSelection } from '@/lib/hooks/useTaskSelection';
 import { cn } from '@/lib/utils/cn';
@@ -328,16 +328,13 @@ export default function DocIntelligencePage() {
         )}
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <div className="relative min-w-[180px] max-w-md flex-1">
-            <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              type="search"
-              placeholder="Search actions, documents, correspondents..."
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              className="w-full rounded-lg border border-[var(--border)] bg-[var(--surface-2)] py-1.5 pl-8 pr-3 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--accent)]"
-            />
-          </div>
+          <SearchInput
+            value={searchQuery}
+            onChange={setSearchQuery}
+            placeholder="Search actions, documents, correspondents..."
+            clearLabel="Clear document search"
+            className="min-w-[180px] max-w-md flex-1 rounded-lg bg-[var(--surface-2)] px-2.5 py-1.5 focus-within:border-[var(--accent)]"
+          />
 
           <button
             type="button"

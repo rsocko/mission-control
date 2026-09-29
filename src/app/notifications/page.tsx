@@ -7,7 +7,7 @@ import { NotificationsSidebar } from '@/components/notifications/NotificationsSi
 import { NotificationViewsBar } from '@/components/notifications/NotificationViewsBar';
 import { AnimatePresence, motion } from 'motion/react';
 import {
-  Bell, Search, Archive, CheckCheck, Trash2,
+  Bell, Archive, CheckCheck, Trash2,
   AlertTriangle, ArrowUpDown, ClipboardCheck, Mail,
   RefreshCw, Loader2, Zap,
 } from 'lucide-react';
@@ -20,6 +20,7 @@ import {
 import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { MobileNotificationsScreen } from '@/components/mobile';
 import { NotificationFilterControls } from '@/components/notifications/NotificationFilterControls';
+import { SearchInput } from '@/components/ui/SearchInput';
 import {
   notificationQueriesEqual,
   hasActiveNotificationFilters,
@@ -662,17 +663,15 @@ function DesktopNotificationsPage() {
           {/* Toolbar: URL-backed search and sort */}
           <div className="mt-2 flex flex-wrap items-center gap-2">
             {/* Search */}
-            <div className="relative min-w-64 flex-1 max-w-lg">
-              <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-              <input
-                id="notification-search"
-                type="text"
-                placeholder="Search notifications... (/ to focus)"
-                value={hook.filters.q ?? ''}
-                onChange={(e) => hook.setSearchFilter(e.target.value || null)}
-                className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--surface-0)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
-              />
-            </div>
+            <SearchInput
+              id="notification-search"
+              value={hook.filters.q ?? ''}
+              onChange={(value) => hook.setSearchFilter(value || null)}
+              placeholder="Search notifications... (/ to focus)"
+              ariaLabel="Search notifications"
+              clearLabel="Clear notification search"
+              className="min-w-64 max-w-lg flex-1 py-1.5"
+            />
 
             <NotificationFilterControls
               query={hook.filters}

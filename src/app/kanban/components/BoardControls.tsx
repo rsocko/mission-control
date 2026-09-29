@@ -1,7 +1,8 @@
 'use client';
 
-import { Plus, Pencil, Search, ArrowUpDown } from 'lucide-react';
+import { Plus, Pencil, ArrowUpDown } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { SearchInput } from '@/components/ui/SearchInput';
 import {
   Select,
   SelectTrigger,
@@ -83,16 +84,13 @@ export function BoardControls({
       </div>
       <div className="flex items-center gap-4">
         {/* Board search */}
-        <div className="relative">
-          <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => onSearchChange(e.target.value)}
-            placeholder="Search board…"
-            className="text-xs pl-6 pr-2 py-1 bg-[var(--surface-0)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] w-36 focus:outline-none transition-[width] duration-150 focus:w-48"
-          />
-        </div>
+        <SearchInput
+          value={searchQuery}
+          onChange={onSearchChange}
+          placeholder="Search board…"
+          clearLabel="Clear board search"
+          className="w-36 transition-[width] focus-within:w-48"
+        />
 
         {/* Score sort toggle */}
         <button

@@ -161,6 +161,10 @@ export function useProjectTaskActions({
     taskId: string,
     status: string,
   ) => {
+    if (status === 'done') {
+      await handleCompleteTask(taskId);
+      return;
+    }
     if (!requireEditableTask(taskId, 'status')) return;
     try {
       const response = await fetch(`/api/tasks/${taskId}`, {
@@ -178,7 +182,7 @@ export function useProjectTaskActions({
     } catch {
       toast.error('Failed to set status');
     }
-  }, [requireEditableTask, setTasks]);
+  }, [handleCompleteTask, requireEditableTask, setTasks]);
 
   const handleSetTaskDueDate = useCallback(async (
     taskId: string,

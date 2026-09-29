@@ -251,9 +251,7 @@ export function useTodayActions({
         });
         notifyTaskChanged(taskId);
         fetchData();
-        window.dispatchEvent(new CustomEvent('mc:task-completed'));
       });
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
       fetchData();
       return true;
     }

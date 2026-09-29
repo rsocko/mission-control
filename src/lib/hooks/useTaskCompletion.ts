@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useSyncExternalStore } from 'react';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 
 export const TASK_COMPLETION_FEEDBACK_MS = 600;
 
@@ -54,6 +55,7 @@ export function useTaskCompletion() {
       optimisticUpdate();
       optimisticUpdateApplied = true;
       await request();
+      notifyTaskCompleted();
       return 'completed';
     } catch {
       if (optimisticUpdateApplied) rollback();

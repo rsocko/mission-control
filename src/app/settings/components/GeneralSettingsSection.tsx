@@ -17,6 +17,7 @@ import { BadgeSettingsCard } from './BadgeSettingsCard';
 import { NavBadgeSettingsCard } from './NavBadgeSettingsCard';
 import { SyncIconSettingsCard } from './SyncIconSettingsCard';
 import { ToastSettingsCard } from '@/components/settings/ToastSettingsCard';
+import { CompletionSoundSettingsCard } from '@/components/settings/CompletionSoundSettingsCard';
 import { CaptureDestinationSection, InboxListsSection } from './CaptureSettingsSection';
 import { settingsLogger } from '@/lib/client-logger';
 import { toast } from '@/lib/toast';
@@ -186,6 +187,7 @@ function GeneralSettingsSection() {
       </div>
 
       <SyncIconSettingsCard />
+      <CompletionSoundSettingsCard />
       <ToastSettingsCard />
 
       <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-2)] p-5">

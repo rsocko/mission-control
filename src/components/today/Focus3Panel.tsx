@@ -253,7 +253,6 @@ export function Focus3Panel({
 
     if (outcome === 'completed') {
       toast.success(`"${title}" completed`);
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
       fetchFocusItems();
       onRefresh?.();
     } else if (outcome === 'failed') {

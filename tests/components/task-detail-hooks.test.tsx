@@ -14,6 +14,7 @@ import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { notifyTaskChanged } from '@/lib/task-change-events';
 import { editableTaskPolicy, makeTaskEditPolicy } from '../fixtures/task-edit-policy';
 import { canonicalizeLegacyRecurrence } from '@/lib/recurrence/canonical';
+import { TASK_COMPLETED_EVENT } from '@/lib/completion-sounds';
 
 vi.mock('@/lib/toast', () => ({
   toast: {
@@ -519,6 +520,21 @@ describe('useTaskDetailMutations', () => {
 
     expect(onComplete).toHaveBeenCalledOnce();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('announces a successful standalone completion', async () => {
+    stubFetch(() => jsonResponse({}));
+    const completed = vi.fn();
+    window.addEventListener(TASK_COMPLETED_EVENT, completed);
+    const { result } = renderMutations();
+
+    await act(async () => {
+      await result.current.mutations.handleStatusChange('done');
+    });
+
+    expect(result.current.task?.status).toBe('done');
+    expect(completed).toHaveBeenCalledOnce();
+    window.removeEventListener(TASK_COMPLETED_EVENT, completed);
   });
 
   it('adds the task to My Day and warns when write-back fails', async () => {

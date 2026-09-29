@@ -30,6 +30,7 @@ import { useIsMobile } from '@/lib/hooks/useIsMobile';
 import { useHistoryParamSelection } from '@/lib/hooks/useHistoryParamSelection';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
 import { getLocalToday } from '@/lib/utils/client-date';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 import type {
   QuickSortOrder,
   QuickSortQueueMode,
@@ -342,6 +343,7 @@ export default function QuickSortMode() {
           action: 'applied',
           label: localDisposition === 'handled' ? 'Mark handled' : 'Dismiss',
         });
+        notifyTaskCompleted();
         dismiss(topTask.id);
         refreshCounts();
         setSessionSorted((count) => count + 1);

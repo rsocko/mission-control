@@ -10,6 +10,7 @@ import React, {
 } from 'react';
 import { createPortal } from 'react-dom';
 import dynamic from 'next/dynamic';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 import { motion, useReducedMotion } from 'motion/react';
 import {
   DndContext,
@@ -1003,6 +1004,7 @@ export function ProjectPhasesTab({
                   onClick={async () => {
                     const ids = Array.from(bulk.bulkSelected);
                     const { failed } = await executeBulkOperation(ids, (id) => fetch(`/api/tasks/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }), `Completed ${ids.length} task${ids.length > 1 ? 's' : ''}`);
+                    if (failed.length < ids.length) notifyTaskCompleted();
                     if (failed.length === 0) {
                       setTasks((prev) => prev.map((t) => ids.includes(t.id) ? { ...t, status: 'done' as TaskStatus } : t));
                       bulk.clearSelection();

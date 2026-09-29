@@ -2,10 +2,10 @@
 title: "External Agent Integration"
 status: proposed
 created: 2026-07-19
-last_reviewed: 2026-09-04
+last_reviewed: 2026-09-29
 category: design
 related:
-  - "[AI & Agent Architecture (consolidated)](../active/ai-agent-architecture.md)"
+  - "[Paperclip Adoption and Integration](paperclip-adoption-and-integration.md)"
   - "[Scout Smart Connector](scout-smart-connector.md)"
   - "[AI Assistant Completion](../active/ai-assistant-completion.md)"
   - "[Houston Identity](../active/houston-ai-identity.md)"
@@ -52,6 +52,31 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
 
 ---
 
+## Orchestration provider boundary
+
+The implemented external-agent control plane remains the canonical MC
+dispatch, disclosure, approval, lifecycle, and receipt substrate. Paperclip
+does not replace it; Paperclip is a first-class provider behind it.
+
+| Route | Use when | Orchestration owner |
+|---|---|---|
+| MC built-in operation | The action is bounded and entirely inside MC | Mission Control |
+| Direct external executor | One known worker can complete the outcome | MC dispatches to Copilot, Scout, OpenClaw, n8n, or another registered worker |
+| Paperclip orchestration | Work benefits from decomposition, multiple agents, budgets, recurring execution, or Paperclip approvals | Paperclip manages its internal issues/runs; MC retains the parent outcome |
+
+MC must not recreate Paperclip's internal agent chaining, org chart, issue
+decomposition, or budgets. Conversely, Paperclip must not bypass MC's
+classification, disclosure preview, source authority, or Scout guardrails.
+Direct execution routes remain valid; adopting Paperclip does not force every
+delegation through it.
+
+Houston is the user-facing intent and explanation surface over this routing
+model. It may recommend or initiate a confirmed dispatch, but it is not the
+dispatch persistence boundary and is not automatically a Paperclip agent. See
+[Houston AI Identity](../active/houston-ai-identity.md).
+
+---
+
 ## Architecture Overview
 
 ```
@@ -79,6 +104,7 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
                      │  │ Copilot     │  │ Copilot SDK      │ │
                      │  │ Cloud Agent │  │ Workspace Agent  │ │
                      │  └─────────────┘  └──────────────────┘ │
+                     │  Paperclip orchestration provider       │
                      │  Copilot app pull worker                │
                      │  Custom agents: MCP / REST / n8n        │
                      └─────────────────────────────────────────┘
@@ -580,21 +606,35 @@ For the `manual` agent type, provide a quick import path:
 
 ## Implementation Phases
 
-### Phase 1: Manual Bridge (Low effort, immediate value)
+### Delivered foundation
+
+- Backend-neutral external-agent registry and durable dispatch lifecycle
+- Immutable payload snapshots, classification, field disclosure, destination
+  binding, preview confirmation, retries, cancellation, and terminal fencing
+- Push, pull/claim, MCP, manual, and inference transport contracts
+- Atomic pull claims with token hashes, leases, expiry, and idempotent results
+- SQLite and PostgreSQL persistence parity
+
+The closed foundation issue is #536. The old generic inbound/outbound issues
+#655 and #658 are fulfilled by that implementation and should not be treated as
+new Paperclip work.
+
+### Remaining manual bridge
+
 - **"Copy as agent context"** action on task lists and project views
 - Context serialization to clipboard (JSON + Markdown formats)
 - **"Import agent results"** on AI page (paste JSON/Markdown/CSV → review queue)
 - Reuse `PhaseProposalReview` for the review step
-- No new schema tables needed — just UI + serialization logic
 
-### Phase 2: Agent Registry + Dispatch Tracking
-- `external_agents` table + settings UI for configuring agents
-- `agent_dispatches` table for tracking sent/received
-- Dispatch API (`POST /api/external-agents/dispatch`)
-- Extend inbound webhook receiver to handle `agent-result` payloads
-- Pending results notification in AI page
+### Provider and user experience delivery
 
-### Phase 3: GitHub Copilot Integration
+- Paperclip provider and correlation contract (#2012)
+- Generic execution-assignment UI with Paperclip as one target (#2013)
+- Paperclip approval notifications (#2014)
+- Paperclip-to-MC-to-Scout guarded requests (#2015)
+
+### Direct executor delivery
+
 - GitHub cloud dispatch through the Agent Tasks REST API
 - User-to-server OAuth/PAT credential flow, entitlement checks, and token-scope diagnostics
 - Issue assignment as a compatibility/fallback entry point, not label-based dispatch
@@ -604,13 +644,15 @@ For the `manual` agent type, provide a quick import path:
 - Task status sync when PRs merge
 - Deep-link generation for Copilot Chat (VS Code + GitHub.com)
 
-### Phase 4: MCP + Automation
+### MCP and automation
+
 - MCP client for invoking tool servers directly from MC
 - Pull-queue tools for agents without a supported inbound API
 - GitHub Copilot app pull-worker feasibility and delivery (#1519)
 - n8n workflow templates for common patterns
 - Scheduled agent dispatches (e.g., "every Monday, run competitor analysis")
-- Agent chaining (output of one agent feeds the next)
+- Direct single-provider chaining only where it does not duplicate Paperclip;
+  multi-agent orchestration belongs to Paperclip when that provider is selected
 
 ---
 

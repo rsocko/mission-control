@@ -2,13 +2,13 @@
 title: "AI Assistant Completion"
 status: design-draft
 created: 2026-07-10
-last_reviewed: 2026-08-03
+last_reviewed: 2026-09-29
 category: design
 related:
-  - "[AI & Agent Architecture (consolidated)](ai-agent-architecture.md)"
   - "[GitHub Copilot Provider and Runtime](copilot-sdk-provider.md)"
   - "[Go-Forward Plan](Mission%20Control%20—%20Go-Forward%20Plan.md) (§2.5)"
   - "[External Agent Integration](../proposed/external-agent-integration.md)"
+  - "[Paperclip Adoption and Integration](../proposed/paperclip-adoption-and-integration.md)"
   - "[Scout Smart Connector](../proposed/scout-smart-connector.md)"
   - "[Houston Identity](houston-ai-identity.md)"
   - "[Insights Page](../proposed/insights-page.md)"
@@ -17,10 +17,10 @@ mockups:
   - "[mockup-ai-assistant-v2.html](../mockups/mockup-ai-assistant-v2.html)"
 dependencies:
   - Vercel AI SDK (existing)
-  - "Policy-aware AI routes and optional direct Copilot SDK runtime (#811)"
+  - "Policy-aware Copilot routing and optional direct SDK runtime (#420)"
   - n8n (deployed)
 issues:
-  - "rsocko/mission-control#811 — policy-aware Copilot provider and runtime"
+  - "rsocko/mission-control#420 — policy-aware Copilot provider and runtime"
 ---
 
 # AI Assistant Completion — Expanded Design Spec
@@ -35,73 +35,86 @@ Section 2.5 covers three interconnected pieces that complete the AI Assistant ex
 2. **Confirmation Dialog** — tiered severity, partial approval, undo
 3. **Tool Result Display** — structured cards for AI tool calls in chat
 
-The current implementation has the foundation (AgentPanel, backgroundAiTaskManager, tool definitions) but lacks **streaming progress**, **persistent history**, **structured tool rendering in chat**, and **integration with external orchestrators** (OpenClaw for AI reasoning, n8n for deterministic workflows).
+The current implementation has the foundation (AgentPanel,
+backgroundAiTaskManager, tool definitions, and a durable external-agent control
+plane) but still needs coherent **streaming progress**, **persistent history**,
+**structured tool rendering in chat**, and executor selection in the UI.
 
-Copilot does not replace this three-tier architecture. Bounded inference may
-reach Copilot through the standalone adapter behind Bifrost. A direct Copilot
-SDK runtime is a separate candidate Tier 2 executor for capabilities that need
-native sessions, tools, MCP, permission hooks, resume, or the SDK agent loop.
-It must use the same durable run and confirmation contracts described here.
+OpenClaw is no longer the default catch-all multi-step tier. Houston routes
+each request by capability, locality, sensitivity, and duration. A request may
+use bounded inference, a deterministic workflow, a direct external executor,
+or Paperclip for durable multi-agent orchestration. All durable execution uses
+the same MC dispatch, disclosure, confirmation, and receipt contracts.
 
 ---
 
-## Architecture: Three-Tier Agent System
+## Architecture: Execution lanes
 
-The key design decision is **not** picking one framework — it's routing to the right executor based on the task type:
+The key design decision is **not** picking one framework. It is routing to the
+smallest executor that can safely complete the task:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Mission Control UI                          │
-│  Chat (streaming) │ Agent Panel │ n8n Workflow Triggers         │
-└────────┬──────────┴──────┬──────┴──────────┬────────────────────┘
-         │                 │                  │
-    ┌────▼────┐     ┌──────▼──────┐    ┌──────▼──────┐
-    │ Tier 1  │     │   Tier 2    │    │   Tier 3    │
-    │ Built-in│     │  OpenClaw   │    │    n8n      │
-    │ Agents  │     │  AI Agents  │    │  Workflows  │
-    └─────────┘     └─────────────┘    └─────────────┘
-    Fast, local      Multi-step AI      Deterministic
-    DB operations    reasoning +        multi-system
-    Dry-runnable     tool chaining      orchestration
+Houston / MC UI
+  |-> bounded answer or classification
+  |-> built-in MC operation
+  |-> deterministic n8n workflow
+  |-> direct external executor
+  `-> Paperclip orchestration -> one or more downstream runtimes
 ```
 
-### Tier 1: Built-in Agents (existing)
+### Lane 1: Bounded inference
+
+- **What**: Answers, extraction, classification, and structured suggestions
+- **Executor**: Policy-selected Ollama, Azure/OpenAI, Copilot/Bifrost, or another
+  approved inference provider
+- **Constraint**: Inference does not imply repository, command, or source-system
+  execution authority
+
+### Lane 2: Built-in MC operations
+
 - **What**: Direct DB operations — dismiss alerts, bulk prioritize, cleanup done, snooze
 - **When**: Predictable, single-domain operations on Mission Control data
 - **Executor**: `dispatchAgent()` in `lib/ai/agents/index.ts`
 - **Confirmation**: Dry-run preview with item-level opt-out
 - **Latency**: <1s
 
-### Tier 2: OpenClaw AI Agents (new)
-- **What**: Multi-step reasoning that requires judgment — "analyze my week and suggest what to drop", "triage these 20 alerts and group by action needed", custom natural-language instructions
-- **When**: User asks something that requires AI reasoning + potential multi-tool execution
-- **Executor**: OpenClaw API via HTTP (deployed at your instance)
-- **Confirmation**: Plan preview → approve/edit → execute with step-by-step streaming
-- **Latency**: 5–30s depending on complexity
-- **Key difference from Tier 1**: OpenClaw can chain multiple tools, maintain context across steps, and handle ambiguous instructions. The custom agent currently fakes this (plan-only, no execution) — OpenClaw actually executes.
+### Lane 3: Deterministic workflows
 
-### Tier 3: n8n Deterministic Workflows (new)
 - **What**: Fixed multi-system flows — "sync completed GitHub issues to MS Todo", "when an alert is critical, send a push notification and create a task", "export weekly summary to Notion"
 - **When**: User triggers a known cross-system automation, or it runs on a schedule/webhook
 - **Executor**: n8n webhook trigger (already have `integrations/n8n.ts` stub)
 - **Confirmation**: Show workflow diagram + expected actions, no AI judgment involved
 - **Latency**: 2–10s
-- **Key difference from Tier 2**: No AI reasoning — n8n runs a fixed graph of steps. Cheaper, faster, auditable, and the user can edit the workflow visually in the n8n UI.
+
+### Lane 4: Durable external execution
+
+- **Direct executor**: Use Copilot, Scout, OpenClaw, or another worker when one
+  known runtime can complete the outcome.
+- **Paperclip**: Use when the outcome benefits from internal decomposition,
+  multiple agents, budgets, recurring heartbeats, or Paperclip approvals.
+- **Constraint**: Both routes use MC's external-agent lifecycle. Paperclip owns
+  its internal issues and agents; MC owns the parent outcome and disclosure.
 
 ### Routing Logic
 
 ```typescript
-function resolveExecutor(request: AgentRequest): 'built-in' | 'openclaw' | 'n8n' {
-  // Tier 1: Known built-in agent types
+function resolveExecutionLane(
+  request: AgentRequest,
+): 'bounded' | 'built-in' | 'n8n' | 'external-agent' {
   if (BUILT_IN_AGENTS.includes(request.agentType)) return 'built-in';
-  
-  // Tier 3: Mapped n8n workflows (user-configured)
   if (request.n8nWorkflowId || N8N_WORKFLOW_MAP[request.agentType]) return 'n8n';
-  
-  // Tier 2: Everything else — AI reasoning needed
-  return 'openclaw';
+  if (request.requiresExecution || request.mayOutliveSession) return 'external-agent';
+  return 'bounded';
 }
 ```
+
+Within `external-agent`, policy and user intent select a direct executor or
+Paperclip. There is no silent fallback between local, cloud, direct, and
+Paperclip execution.
+
+The remaining OpenClaw-specific component names and examples in this document
+are historical prototypes. Implement them as provider-neutral plan, progress,
+and confirmation surfaces; OpenClaw is one possible executor.
 
 ---
 

@@ -10,6 +10,12 @@ sidebar_position: 20
 
 Mission Control's AI assistant is named **Houston** — a direct reference to NASA's Mission Control Center in Houston, Texas. Just as astronauts contact "Houston" for support, guidance, and problem-solving, users contact Houston for task management assistance, planning, and insights.
 
+Houston is primarily a **user-facing assistant identity and policy-aware
+interaction surface**, not a promise that one autonomous runtime owns every
+request. Houston can answer directly, use bounded MC tools, invoke a
+deterministic workflow, or delegate durable work through MC's external-agent
+control plane.
+
 ## Why "Houston"
 
 - **Instantly recognizable** — "Houston, we have a problem" is universally known
@@ -18,15 +24,16 @@ Mission Control's AI assistant is named **Houston** — a direct reference to NA
 - **Personality built-in** — calm, competent, supportive, always available
 - **Scalable metaphor** — NASA Mission Control has many roles, giving us a naming system for sub-agents
 
-## Agent Hierarchy
+## Capability hierarchy
 
-Houston is the primary user-facing orchestrator. As the system grows, specialized sub-agents handle delegated work:
+Houston is the primary user-facing coordinator. As the system grows,
+specialized capability roles handle delegated work:
 
 ### Primary Assistant
 
 | Name | Role | Description |
 |------|------|-------------|
-| **Houston** | Orchestrator | The main AI interface. Receives all user requests, answers questions, and delegates to specialists when needed. |
+| **Houston** | User-facing coordinator | Receives requests, explains recommendations, obtains approval, and routes work through MC policy. |
 
 ### Sub-Agents (Active / Near-term)
 
@@ -47,7 +54,7 @@ Houston is the primary user-facing orchestrator. As the system grows, specialize
 ## Interaction Model
 
 ```
-User → Houston (orchestrator)
+User → Houston (coordinator)
            ├── Direct answer (simple queries)
            ├── CAPCOM (communication tasks)
            ├── Flight (planning/prioritization)
@@ -57,10 +64,55 @@ User → Houston (orchestrator)
            └── Atlas (bulk processing)
 ```
 
-In the UI, Houston is always the conversational partner. Sub-agents appear as attributed actions:
+In the UI, Houston is always the conversational partner. Capability roles
+appear as attributed actions:
 - "Houston routed this to Flight for prioritization"
 - "Beacon flagged 2 tasks at risk of missing their deadline"
 - "CAPCOM prepared your morning digest"
+
+These names are product attribution, not fixed deployment topology. A role may
+map to a built-in MC operation, bounded model call, n8n workflow, Scout,
+direct external executor, or Paperclip agent. The UI must also show the real
+executor and locality whenever work leaves Houston's conversation.
+
+## Houston and Paperclip
+
+Houston and Paperclip are complementary:
+
+| Concern | Owner |
+|---|---|
+| Conversation, intent clarification, recommendations, and explanation | Houston |
+| MC source authority, disclosure policy, approval, durable dispatch, and receipts | Mission Control |
+| Multi-agent decomposition, internal issue assignment, budgets, and agent runs | Paperclip |
+| Actual repository, M365, workflow, or general-purpose execution | Copilot, Scout, n8n, OpenClaw, or another runtime |
+
+Houston should **not** become a Paperclip agent by default. Keeping Houston in
+MC preserves a responsive chat surface and prevents Paperclip's internal
+lifecycle from becoming the authority for ordinary MC conversation or task
+changes.
+
+An optional Paperclip agent such as **Mission Control Coordinator** may be
+useful for durable background work. It should:
+
+- claim only explicitly delegated MC dispatches or a narrowly scoped queue;
+- receive the minimum required task/project context;
+- propose reprioritization, decomposition, or scheduling changes for review;
+- call allowlisted MC tools through a scoped identity;
+- return correlated progress, blockers, artifacts, and receipts.
+
+It must not continuously pull arbitrary MC work, silently reprioritize
+projects, or mutate source-owned fields. Repeated automation requires an
+explicit rule, bounded scope, budget, and approval policy.
+
+```text
+User -> Houston
+          |-> answer or read inside MC
+          |-> bounded MC action with policy
+          |-> direct executor dispatch
+          `-> Paperclip parent issue
+                 `-> Paperclip coordinator and specialist agents
+                        `-> correlated result back to MC
+```
 
 ## Visual Identity
 
@@ -134,8 +186,8 @@ plan.
 ## Related
 
 - [Houston Synthetic Voice Strategy](houston-voice-strategy.md)
-- [AI & Agent Architecture (consolidated)](ai-agent-architecture.md)
 - [AI Assistant Feature](../../features/ai-assistant.md)
 - [Architecture: AI Engine](../../architecture/ai-engine.md)
 - [External Agent Integration](../proposed/external-agent-integration.md)
+- [Paperclip Adoption and Integration](../proposed/paperclip-adoption-and-integration.md)
 - [Scout Smart Connector](../proposed/scout-smart-connector.md)

@@ -12,7 +12,6 @@ import {
   Merge,
   Palette,
   Pencil,
-  Search,
   Trash2,
   XCircle,
   Zap,
@@ -20,6 +19,7 @@ import {
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { getTagPillStyle } from '@/lib/constants/colors';
 import { fadeSlideUp, staggerContainer } from '@/lib/motion';
 import { ConnectorBrandIcon } from '../ConnectorBrandIcon';
@@ -102,16 +102,13 @@ export function TagReviewList(props: TagReviewListProps) {
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)] bg-[var(--surface-0)]/50">
-        <div className="flex-1 relative">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={event => onSearchChange(event.target.value)}
-            placeholder="Filter tags..."
-            className="w-full pl-8 pr-3 py-1.5 text-xs bg-[var(--surface-1)] border border-[var(--border)] rounded-md text-[var(--text-primary)] placeholder:text-[var(--text-muted)] outline-none"
-          />
-        </div>
+        <SearchInput
+          value={searchQuery}
+          onChange={onSearchChange}
+          placeholder="Filter tags..."
+          clearLabel="Clear tag filter"
+          className="flex-1 bg-[var(--surface-1)] py-1.5"
+        />
         <Select value={sortBy} onValueChange={value => onSortChange(value as TagSort)}>
           <SelectTrigger className="h-[30px] min-w-[140px] text-xs">
             <SelectValue />

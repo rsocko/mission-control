@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ProjectsSidebar } from '@/components/projects/ProjectsSidebar';
 
@@ -105,5 +105,21 @@ describe('ProjectsSidebar project status indicators', () => {
       'Cancelled',
       'Done',
     ]);
+  });
+
+  it('clears the project search from the inline clear button', async () => {
+    render(<ProjectsSidebar collapsed={false} onCollapsedChange={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByText('Completed Project')).toBeInTheDocument());
+
+    const searchInput = screen.getByRole('textbox', { name: 'Search projects' });
+    fireEvent.change(searchInput, { target: { value: 'Healthy' } });
+
+    const clearButton = screen.getByRole('button', { name: 'Clear project search' });
+    fireEvent.click(clearButton);
+
+    expect(searchInput).toHaveValue('');
+    expect(searchInput).toHaveFocus();
+    expect(screen.queryByRole('button', { name: 'Clear project search' })).not.toBeInTheDocument();
   });
 });

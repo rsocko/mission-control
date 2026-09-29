@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Network, Search, Table2, Tags } from 'lucide-react';
 import TagGalaxy from './TagGalaxy';
 import TagInsightsMatrix from './TagInsightsMatrix';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { filterTagInsights, TAG_GALAXY_EDGE_LIMIT } from '@/lib/tag-insights/galaxy';
 import type { TagInsights } from '@/lib/tag-insights/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -128,19 +129,19 @@ export default function TagInsightsExplorer({
                 className="accent-[var(--accent-500)]"
               />
             </label>
-            <label className="grid min-w-52 flex-1 gap-1 text-sm sm:max-w-sm">
-              <span className="font-medium">Filter tags</span>
-              <span className="relative">
-                <Search size={14} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]" />
-                <input
-                  type="search"
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search tag names"
-                  className="h-9 w-full rounded-md border border-[var(--border-strong)] bg-[var(--surface-1)] pl-8 pr-3"
-                />
-              </span>
-            </label>
+            <div className="grid min-w-52 flex-1 gap-1 text-sm sm:max-w-sm">
+              <label htmlFor="tag-insights-search" className="font-medium">Filter tags</label>
+              <SearchInput
+                id="tag-insights-search"
+                value={search}
+                onChange={setSearch}
+                placeholder="Search tag names"
+                clearLabel="Clear tag search"
+                className="h-9 border-[var(--border-strong)] bg-[var(--surface-1)] px-2.5"
+                inputClassName="text-sm"
+                iconClassName="text-[var(--text-tertiary)]"
+              />
+            </div>
             <p className="text-xs text-[var(--text-muted)]">
               Limits: 30 tags · {TAG_GALAXY_EDGE_LIMIT} relationships · 5,000 tasks
             </p>

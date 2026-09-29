@@ -12,7 +12,6 @@ import {
   Repeat,
   Activity,
   Settings,
-  Search,
   RefreshCw,
   User,
   ListChecks,
@@ -24,6 +23,7 @@ import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
 import { drawerSlideIn, drawerOverlay } from '@/lib/motion';
 import { NavigationBadge } from '@/components/layout/NavigationBadge';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { useNavigationBadgePreferences } from '@/lib/hooks/useNavigationBadges';
 import {
   EMPTY_NAVIGATION_COUNTS,
@@ -227,18 +227,16 @@ export function MobileDrawer({
             {/* Search bar */}
             <div className="px-4 pb-3">
               <form onSubmit={handleSearchSubmit}>
-                <div className="input-glow flex items-center gap-2 h-9 px-3 rounded-lg bg-[var(--surface-2)] border border-[var(--border)]">
-                  <Search size={14} className="text-[var(--text-tertiary)] flex-shrink-0" />
-                  <input
-                    ref={searchInputRef}
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search…"
-                    className="flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-                    aria-label="Search"
-                  />
-                </div>
+                <SearchInput
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={setSearchQuery}
+                  placeholder="Search…"
+                  ariaLabel="Search"
+                  clearLabel="Clear navigation search"
+                  size="md"
+                  className="h-9 rounded-lg bg-[var(--surface-2)] py-2"
+                />
               </form>
             </div>
 

@@ -6,6 +6,7 @@ last_reviewed: 2026-09-04
 category: design
 related:
   - "[AI & Agent Architecture (consolidated)](../active/ai-agent-architecture.md)"
+  - "[Paperclip Adoption and Integration](paperclip-adoption-and-integration.md)"
   - "[Scout Smart Connector](scout-smart-connector.md)"
   - "[AI Assistant Completion](../active/ai-assistant-completion.md)"
   - "[Houston Identity](../active/houston-ai-identity.md)"

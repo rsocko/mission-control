@@ -5,6 +5,7 @@ import {
   useTaskCompletion,
   type TaskCompletionOutcome,
 } from '@/lib/hooks/useTaskCompletion';
+import { TASK_COMPLETED_EVENT } from '@/lib/completion-sounds';
 
 describe('useTaskCompletion', () => {
   beforeEach(() => {
@@ -17,6 +18,8 @@ describe('useTaskCompletion', () => {
   });
 
   it('shows feedback before applying and persisting the optimistic update', async () => {
+    const completed = vi.fn();
+    window.addEventListener(TASK_COMPLETED_EVENT, completed);
     const optimisticUpdate = vi.fn();
     const request = vi.fn(async () => {});
     const rollback = vi.fn();
@@ -43,10 +46,14 @@ describe('useTaskCompletion', () => {
     expect(optimisticUpdate).toHaveBeenCalledOnce();
     expect(request).toHaveBeenCalledOnce();
     expect(rollback).not.toHaveBeenCalled();
+    expect(completed).toHaveBeenCalledOnce();
     expect(result.current.completingIds.has('task-1')).toBe(false);
+    window.removeEventListener(TASK_COMPLETED_EVENT, completed);
   });
 
   it('rolls back a failed persistence request', async () => {
+    const completed = vi.fn();
+    window.addEventListener(TASK_COMPLETED_EVENT, completed);
     const rollback = vi.fn();
     const { result } = renderHook(() => useTaskCompletion());
 
@@ -67,10 +74,14 @@ describe('useTaskCompletion', () => {
 
     await expect(completion).resolves.toBe('failed');
     expect(rollback).toHaveBeenCalledOnce();
+    expect(completed).not.toHaveBeenCalled();
     expect(result.current.completingIds.has('task-1')).toBe(false);
+    window.removeEventListener(TASK_COMPLETED_EVENT, completed);
   });
 
   it('deduplicates requests across hook instances while sharing visual state', async () => {
+    const completed = vi.fn();
+    window.addEventListener(TASK_COMPLETED_EVENT, completed);
     const request = vi.fn(async () => {});
     const options = {
       optimisticUpdate: vi.fn(),
@@ -95,5 +106,7 @@ describe('useTaskCompletion', () => {
     });
     await expect(first).resolves.toBe('completed');
     expect(request).toHaveBeenCalledOnce();
+    expect(completed).toHaveBeenCalledOnce();
+    window.removeEventListener(TASK_COMPLETED_EVENT, completed);
   });
 });

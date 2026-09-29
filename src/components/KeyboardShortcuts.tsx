@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { useViewMode } from '@/lib/hooks/useViewMode';
 import { useSidebarExpanded } from '@/lib/hooks/useSidebarExpanded';
 import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import {
+  getCompletionSoundPreferences,
+  setCompletionSoundPreferences,
+} from '@/lib/completion-sounds';
+import { toast } from '@/lib/toast';
 
 /**
  * Global keyboard shortcuts for Mission Control.
@@ -24,6 +29,7 @@ import { shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
  *   ? - Show shortcuts help
  *   Z - Toggle Zen Mode
  *   C - Toggle Calm Mode
+ *   M - Mute/unmute completion sounds
  *   [ - Toggle sidebar collapse
  *   ] - Toggle notifications panel
  *   Escape - Close modal/dropdown, clear focus
@@ -100,6 +106,20 @@ export function useKeyboardShortcuts() {
       if (e.key === 's' && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent('mission-control:snooze-selected'));
+        return;
+      }
+
+      // "M" to mute/unmute completion sounds
+      if (e.key === 'm' && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        const preferences = getCompletionSoundPreferences();
+        if (preferences.completionSound !== 'none' || preferences.rewardSound !== 'none') {
+          try {
+            setCompletionSoundPreferences({ muted: !preferences.muted });
+          } catch {
+            toast.error('Could not update completion sound mute');
+          }
+        }
         return;
       }
 

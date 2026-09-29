@@ -113,7 +113,6 @@ export function ZenMode() {
     });
 
     if (outcome === 'completed') {
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
       toast.success(`"${task.title}" completed`, {
         action: {
           label: 'Undo',
@@ -125,7 +124,6 @@ export function ZenMode() {
             });
             setCompletedCount((c) => Math.max(0, c - 1));
             fetchScoreSortedTasks();
-            window.dispatchEvent(new CustomEvent('mc:task-completed'));
           },
         },
         duration: 5000,

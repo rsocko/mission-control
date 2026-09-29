@@ -169,7 +169,6 @@ export function CalmMode() {
     });
 
     if (outcome === 'completed') {
-      window.dispatchEvent(new CustomEvent('mc:task-completed'));
     } else if (outcome === 'failed') {
       toast.error('Failed to complete task');
     }

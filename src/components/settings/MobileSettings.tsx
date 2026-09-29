@@ -23,6 +23,7 @@ import { LocalSourceIcon } from '@/components/ui/LocalSourceIcon';
 import { CaptureDestinationSection } from '@/app/settings/components/CaptureSettingsSection';
 import { SectionCard, SectionLabel, Toggle } from '@/components/settings/SettingsPrimitives';
 import { ToastSettingsCard } from '@/components/settings/ToastSettingsCard';
+import { CompletionSoundSettingsCard } from '@/components/settings/CompletionSoundSettingsCard';
 import {
   DEFAULT_QUICK_ADD_PREFERENCES,
   getQuickAddPreferences,
@@ -287,6 +288,7 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
         </div>
       </SectionCard>
 
+      <CompletionSoundSettingsCard />
       <ToastSettingsCard />
       <SectionLabel>Capture</SectionLabel>
       <CaptureDestinationSection mobile />

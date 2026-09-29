@@ -22,6 +22,7 @@ import {
 import type { ProjectHierarchySnapshot } from '@/lib/projects/hierarchy-types';
 import type { LocalDisposition, PlanningHorizon, TaskField } from '@/types';
 import { notifyNavigationCountsChanged } from '@/lib/navigation/badges';
+import { notifyTaskCompleted } from '@/lib/completion-sounds';
 import { removeMicrosoftTodoTitleTag } from '@/lib/connectors/microsoft-todo/title-tags';
 import type { DuplicateCandidate } from './DuplicateTaskPreview';
 import {
@@ -322,6 +323,7 @@ export function useTaskDetailMutations({
     setTask((prev) => prev ? { ...prev, status, statusReason: null, ...(reminder ?? {}) } : prev);
     onUpdate?.({ status });
     notifyNavigationCountsChanged();
+    if (status === 'done') notifyTaskCompleted();
   }, [ensureFieldsEditable, onUpdate, setTask, task?.connectorType, taskId]);
 
   const handleComplete = useCallback(() => {

@@ -2,6 +2,10 @@ import { fireEvent, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useKeyboardShortcuts } from '@/components/KeyboardShortcuts';
 import { isModalDialogOpen, shouldBlockGlobalShortcut } from '@/lib/keyboard-shortcuts';
+import {
+  getCompletionSoundPreferences,
+  setCompletionSoundPreferences,
+} from '@/lib/completion-sounds';
 
 const shortcuts = vi.hoisted(() => ({
   push: vi.fn(),
@@ -32,6 +36,7 @@ vi.mock('@/lib/hooks/useSidebarExpanded', () => ({
 describe('global keyboard shortcuts', () => {
   beforeEach(() => {
     document.body.replaceChildren();
+    localStorage.clear();
     vi.clearAllMocks();
   });
 
@@ -64,5 +69,14 @@ describe('global keyboard shortcuts', () => {
     fireEvent.keyDown(window, { key: 'z' });
 
     expect(shortcuts.toggleZen).toHaveBeenCalledOnce();
+  });
+
+  it('quickly mutes configured completion sounds with M', () => {
+    setCompletionSoundPreferences({ completionSound: 'soft-tap' });
+    renderHook(() => useKeyboardShortcuts());
+
+    fireEvent.keyDown(window, { key: 'm' });
+
+    expect(getCompletionSoundPreferences().muted).toBe(true);
   });
 });

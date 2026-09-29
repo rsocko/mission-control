@@ -1,5 +1,6 @@
 import {
   COMPANION_ACTION_MAX_PAGE_ITEMS,
+  COMPANION_ACTION_EFFECTIVE_PAGE_ITEMS,
   COMPANION_ACTION_MAX_WRITE_BYTES,
   isCompanionActionFeedPage,
   isCompanionActionMutationReceipt,
@@ -102,7 +103,12 @@ export function createCompanionActionClient(
 
   return {
     async fetchPage(cursor, signal) {
-      const query = new URLSearchParams({ limit: String(COMPANION_ACTION_MAX_PAGE_ITEMS) });
+      const query = new URLSearchParams({
+        limit: String(Math.min(
+          COMPANION_ACTION_MAX_PAGE_ITEMS,
+          COMPANION_ACTION_EFFECTIVE_PAGE_ITEMS,
+        )),
+      });
       if (cursor) query.set('cursor', cursor);
       const response = await request(
         `/v1/integrations/action-feed?${query.toString()}`,
@@ -136,6 +142,12 @@ export function createCompanionActionClient(
       );
       const payload = await response.json().catch(() => null) as unknown;
       if ((response.ok || response.status === 409) && isCompanionActionMutationReceipt(payload)) {
+        if (
+          payload.operationId !== mutation.operationId
+          || payload.actionId !== mutation.actionId
+        ) {
+          throw new CompanionActionHttpError(502, 'receipt_identity_mismatch', false);
+        }
         return payload;
       }
       const code = response.status === 409

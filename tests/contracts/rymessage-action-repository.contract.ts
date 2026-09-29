@@ -54,6 +54,7 @@ function action(relation: CompanionActionMaterialization): CompanionActionV1 {
     },
     lifecycle: { state: 'visible' },
     fieldRevisions: {
+      title: 1,
       lifecycle: 1,
       [`materialization:${relation.materializationId}`]: 1,
     },
@@ -95,6 +96,10 @@ export interface RyMessageActionRepositoryHarness {
     operationId: string;
     mutation: unknown;
   }>>;
+  mutationStatus(operationId: string): Promise<{
+    status: string;
+    errorCode: string | null;
+  } | null>;
 }
 
 export function runRyMessageActionRepositoryContract(
@@ -143,6 +148,151 @@ export function runRyMessageActionRepositoryContract(
         providerTaskStatusSnapshot: 'completed',
         providerVersionSnapshot: '2026-09-29T23:01:00.000Z',
         observedAt: '2026-09-29T23:01:00.000Z',
+      });
+    });
+
+    it('quarantines same-revision divergence until explicit recovery invalidation', async () => {
+      const repository = input.harness.repository();
+      const source = action(materialization());
+      await repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: page(source),
+        requestedCursor: null,
+        receivedAt: NOW,
+      });
+      const divergentPage = page({
+        ...source,
+        content: { ...source.content, title: 'Divergent contract action' },
+      });
+      divergentPage.mode = 'incremental';
+      divergentPage.nextCursor = 'cursor-conflict';
+      divergentPage.items[0] = {
+        ...divergentPage.items[0]!,
+        eventId: uuid(9_301),
+        operationId: uuid(9_401),
+      };
+      await expect(repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: divergentPage,
+        requestedCursor: 'cursor-1',
+        receivedAt: '2026-09-29T23:01:00.000Z',
+      })).resolves.toMatchObject({ conflicts: 1, recoveryRequired: true });
+      expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+        cursor: 'cursor-1',
+        recoveryRequired: true,
+        lastError: expect.stringContaining('REVISION_CONFLICT'),
+      });
+      await expect(repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: divergentPage,
+        requestedCursor: 'cursor-1',
+        receivedAt: '2026-09-29T23:02:00.000Z',
+      })).rejects.toMatchObject({ code: 'RECOVERY_CONFLICT' });
+      await repository.invalidateRecovery({
+        connectorId: CONNECTOR_ID,
+        reason: 'operator-reset',
+        now: '2026-09-29T23:03:00.000Z',
+      });
+      expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+        cursor: null,
+        recoveryGeneration: 1,
+      });
+      divergentPage.mode = 'full';
+      divergentPage.nextCursor = 'cursor-resolved';
+      await expect(repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: divergentPage,
+        requestedCursor: null,
+        receivedAt: '2026-09-29T23:04:00.000Z',
+      })).resolves.toMatchObject({ applied: 1, recoveryCompleted: true });
+      expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+        cursor: 'cursor-resolved',
+        recoveryRequired: false,
+        lastError: null,
+      });
+    });
+
+    it('rejects future revision claims and accepts stale non-overlap', async () => {
+      const repository = input.harness.repository();
+      const source = {
+        ...action(materialization()),
+        revision: 5,
+        fieldRevisions: { title: 5, details: 2, lifecycle: 4 },
+      };
+      await repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: page(source),
+        requestedCursor: null,
+        receivedAt: NOW,
+      });
+      await expect(repository.enqueueMutation({
+        connectorId: CONNECTOR_ID,
+        actionId: source.actionId,
+        operationId: uuid(9_510),
+        baseRevision: 999,
+        expectedFieldRevisions: { title: 5 },
+        mutation: { kind: 'action.user-edit', patch: { title: 'Future base' } },
+        now: NOW,
+      })).rejects.toMatchObject({ code: 'FUTURE_BASE_REVISION' });
+      await expect(repository.enqueueMutation({
+        connectorId: CONNECTOR_ID,
+        actionId: source.actionId,
+        operationId: uuid(9_511),
+        baseRevision: 5,
+        expectedFieldRevisions: { title: 999 },
+        mutation: { kind: 'action.user-edit', patch: { title: 'Future field' } },
+        now: NOW,
+      })).rejects.toMatchObject({ code: 'FUTURE_FIELD_REVISION' });
+      await expect(repository.enqueueMutation({
+        connectorId: CONNECTOR_ID,
+        actionId: source.actionId,
+        operationId: uuid(9_512),
+        baseRevision: 4,
+        expectedFieldRevisions: { details: 2 },
+        mutation: { kind: 'action.user-edit', patch: { details: 'Safe stale edit' } },
+        now: NOW,
+      })).resolves.toBe('queued');
+    });
+
+    it('does not settle a lease with an unrelated receipt', async () => {
+      const repository = input.harness.repository();
+      const source = action(materialization());
+      await repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: page(source),
+        requestedCursor: null,
+        receivedAt: NOW,
+      });
+      const operationId = uuid(9_520);
+      await repository.enqueueMutation({
+        connectorId: CONNECTOR_ID,
+        actionId: source.actionId,
+        operationId,
+        baseRevision: 1,
+        expectedFieldRevisions: { title: 1 },
+        mutation: { kind: 'action.user-edit', patch: { title: 'Changed' } },
+        now: NOW,
+      });
+      const lease = await repository.leaseMutations({
+        connectorId: CONNECTOR_ID,
+        now: '2026-09-29T23:01:00.000Z',
+      });
+      await repository.completeMutation({
+        connectorId: CONNECTOR_ID,
+        operationId,
+        leaseId: lease.leaseId,
+        receipt: {
+          operationId: uuid(9_521),
+          actionId: uuid(9_522),
+          outcome: 'applied',
+          revision: 2,
+        },
+        retryable: false,
+        now: '2026-09-29T23:02:00.000Z',
+      });
+      await expect(input.harness.mutationStatus(operationId)).resolves.toEqual({
+        status: 'conflict',
+        errorCode: 'RECEIPT_IDENTITY_MISMATCH',
       });
     });
   });

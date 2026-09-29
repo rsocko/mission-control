@@ -262,6 +262,22 @@ describe('repointTaskReferences', () => {
         createdAt: now,
       },
     ]);
+    sqlite.prepare(`
+      INSERT INTO connector_configs (
+        id, type, name, enabled, capabilities, credentials, settings, created_at, updated_at
+      ) VALUES ('inventory-rymessage', 'rymessage', 'RyMessage', 1, '{}', '{}', '{}', ?, ?)
+    `).run(now, now);
+    sqlite.prepare(`
+      INSERT INTO rymessage_action_materializations (
+        connector_id, materialization_id, action_id, action_revision, revision,
+        provider, provider_account_id, provider_list_id, provider_task_id, state,
+        local_task_id, relation_state, created_at, updated_at
+      ) VALUES (
+        'inventory-rymessage', 'inventory-materialization', 'inventory-action', 1, 1,
+        'microsoft-todo', 'account', 'list', ?, 'materialized',
+        ?, 'linked', ?, ?
+      )
+    `).run(sourceTaskId, sourceTaskId, now, now);
     const hierarchyRevisionBefore = sqlite.prepare(
       'SELECT hierarchy_revision AS hierarchyRevision FROM hub_projects WHERE id = ?',
     ).get('inventory-project');
@@ -278,6 +294,7 @@ describe('repointTaskReferences', () => {
       ['priority_sync_log', 'task_id'],
       ['task_triage_log', 'task_id'],
       ['quick_sort_operations', 'task_id'],
+      ['rymessage_action_materializations', 'local_task_id'],
       ['project_auto_include_exclusions', 'task_id'],
       ['project_phase_items', 'task_id'],
       ['task_linked_sources', 'task_id'],
@@ -319,6 +336,11 @@ describe('repointTaskReferences', () => {
     expect(sqlite.prepare(
       'SELECT related_task_id AS relatedTaskId FROM notifications WHERE id = ?',
     ).get('inventory-notification')).toEqual({ relatedTaskId: successorTaskId });
+    expect(sqlite.prepare(`
+      SELECT provider_task_id AS providerTaskId
+      FROM rymessage_action_materializations
+      WHERE materialization_id = 'inventory-materialization'
+    `).get()).toEqual({ providerTaskId: sourceTaskId });
     expect(count('task_dependencies', 'task_id', sourceTaskId)).toBe(0);
     expect(count('task_dependencies', 'depends_on_task_id', sourceTaskId)).toBe(0);
     expect(count('task_dependencies', 'task_id', successorTaskId)).toBe(1);

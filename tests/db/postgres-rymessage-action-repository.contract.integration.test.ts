@@ -69,6 +69,18 @@ runRyMessageActionRepositoryContract(
         `, [RYMESSAGE_ACTION_CONTRACT_CONNECTOR_ID]);
         return result.rows;
       },
+      async mutationStatus(operationId) {
+        const result = await pool.query<{
+          status: string;
+          errorCode: string | null;
+        }>(
+          `SELECT status, last_error_code AS "errorCode"
+           FROM rymessage_action_outbound_mutations
+           WHERE connector_id = $1 AND operation_id = $2`,
+          [RYMESSAGE_ACTION_CONTRACT_CONNECTOR_ID, operationId],
+        );
+        return result.rows[0] ?? null;
+      },
     },
   },
 );

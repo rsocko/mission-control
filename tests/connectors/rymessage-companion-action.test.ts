@@ -102,7 +102,7 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
     const url = new URL(String(requestUrl));
     expect(url.pathname).toBe('/v1/integrations/action-feed');
     expect(url.searchParams.get('cursor')).toBe('opaque-cursor');
-    expect(url.searchParams.get('limit')).toBe('100');
+    expect(url.searchParams.get('limit')).toBe('20');
     expect(url.searchParams.has('accountId')).toBe(false);
     expect(url.searchParams.has('providerAccountId')).toBe(false);
     expect(new Headers(init?.headers).get('authorization')).toBe(
@@ -187,6 +187,65 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
     })).resolves.toEqual(receipt);
     const [, init] = mutationFetch.mock.calls[0]!;
     expect(JSON.parse(String(init?.body))).not.toHaveProperty('accountId');
+  });
+
+  it.each([200, 409])(
+    'rejects unrelated mutation receipts returned with HTTP %s',
+    async (status) => {
+      const { client } = await contextPromise;
+      const requestOperationId = uuid(510 + status);
+      const requestActionId = uuid(520 + status);
+      const api = client.createCompanionActionClient({
+        baseUrl: 'https://companion.example.test',
+        credential: 'principal-credential',
+        fetchImpl: vi.fn<typeof fetch>(async () => new Response(JSON.stringify({
+          operationId: uuid(530 + status),
+          actionId: uuid(540 + status),
+          outcome: status === 409 ? 'conflict' : 'applied',
+          revision: 2,
+        }), { status })),
+        maxRetries: 0,
+      });
+      await expect(api.submitMutation({
+        contractVersion: '1.0',
+        operationId: requestOperationId,
+        actionId: requestActionId,
+        baseRevision: 1,
+        mutation: { kind: 'action.user-edit', patch: { title: 'Changed title' } },
+      })).rejects.toMatchObject({
+        status: 502,
+        code: 'receipt_identity_mismatch',
+        retryable: false,
+      });
+    },
+  );
+
+  it('reports unavailable without fetching while revision recovery is quarantined', async () => {
+    const {
+      database,
+      repository,
+      service: { CompanionActionReconciliationService },
+    } = await contextPromise;
+    database.sqlite.prepare(`
+      INSERT INTO rymessage_action_feed_state (
+        connector_id, feed_id, cursor, recovery_generation, recovery_required,
+        last_error, created_at, updated_at
+      ) VALUES (?, ?, 'blocked-cursor', 0, 1, 'REVISION_CONFLICT:test', ?, ?)
+    `).run(CONNECTOR_ID, FEED_ID, NOW, NOW);
+    const client = {
+      fetchPage: vi.fn(),
+      submitMutation: vi.fn(),
+    };
+    const reconciliation = new CompanionActionReconciliationService(
+      CONNECTOR_ID,
+      client,
+      async () => repository,
+    );
+    await expect(reconciliation.sync()).resolves.toMatchObject({
+      status: 'unavailable',
+      relations: { conflicts: 1 },
+    });
+    expect(client.fetchPage).not.toHaveBeenCalled();
   });
 
   it('invalidates expired cursor generations and restarts from a full snapshot once', async () => {

@@ -13,10 +13,13 @@ import {
   RYMESSAGE_ACTION_MAX_LEASE_ITEMS,
   RYMESSAGE_ACTION_MAX_LEASE_SECONDS,
   RYMESSAGE_ACTION_MAX_LIVE_PROJECTIONS,
+  RYMESSAGE_ACTION_MAX_OBSERVATIONS_PER_RECONCILE,
   RYMESSAGE_ACTION_MAX_OUTBOUND_QUEUE,
   RYMESSAGE_ACTION_MAX_RECONCILE_ITEMS,
   RYMESSAGE_ACTION_MAX_RETAINED_RECEIPTS,
+  RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS,
   RyMessageActionPersistenceError,
+  assertCompanionMutationRevisionFence,
   type RyMessageActionPersistence,
   type RyMessageFeedState,
   type RyMessageLeasedMutation,
@@ -68,14 +71,6 @@ async function transaction<T>(pool: Pool, work: (client: PoolClient) => Promise<
   } finally {
     client.release();
   }
-}
-
-function mutationFields(mutation: CompanionActionMutation): string[] {
-  if (mutation.kind === 'action.user-edit') return Object.keys(mutation.patch);
-  if (mutation.kind === 'action.lifecycle' || mutation.kind === 'action.correction') {
-    return ['lifecycle'];
-  }
-  return [`materialization:${mutation.materializationId}`];
 }
 
 function clampLeaseSeconds(value: number | undefined): number {
@@ -261,6 +256,16 @@ export function createPostgresRyMessageActionRepository(
             'RyMessage feed cursor changed during page processing',
           );
         }
+        if (
+          state.recoveryRequired
+          && state.cursor !== null
+          && state.lastError?.startsWith('REVISION_CONFLICT:')
+        ) {
+          throw new RyMessageActionPersistenceError(
+            'RECOVERY_CONFLICT',
+            'Companion feed recovery is blocked by an unresolved revision conflict',
+          );
+        }
         if (state.feedId && state.feedId !== command.page.feedId) {
           throw new RyMessageActionPersistenceError(
             'FEED_IDENTITY_CHANGED',
@@ -272,6 +277,50 @@ export function createPostgresRyMessageActionRepository(
             'FULL_SNAPSHOT_REQUIRED',
             'A fresh Companion reconciliation must begin with a full page',
           );
+        }
+        const authoritativeRecovery = command.requestedCursor === null
+          && command.page.mode === 'full'
+          && state.recoveryRequired;
+        for (const item of command.page.items) {
+          if (item.kind !== 'upsert') continue;
+          const [receipt] = await rows<{ payloadDigest: string } & QueryResultRow>(
+            client,
+            `SELECT payload_digest AS "payloadDigest"
+             FROM rymessage_action_receipts
+             WHERE connector_id = $1 AND event_id = $2`,
+            [command.connectorId, item.eventId],
+          );
+          if (receipt) continue;
+          const existing = await readProjection(client, command.connectorId, item.aggregateId);
+          if (
+            existing
+            && item.aggregateVersion === existing.revision
+            && existing.payloadDigest !== companionActionDigest(sanitizeCompanionAction(item.action))
+            && !authoritativeRecovery
+          ) {
+            const reason = [
+              'REVISION_CONFLICT',
+              item.aggregateId,
+              String(item.aggregateVersion),
+              item.eventId,
+            ].join(':').slice(0, 300);
+            await client.query(
+              `UPDATE rymessage_action_feed_state
+               SET recovery_required = true, last_error = $1, updated_at = $2
+               WHERE connector_id = $3`,
+              [reason, command.receivedAt, command.connectorId],
+            );
+            return {
+              applied: 0,
+              added: 0,
+              updated: 0,
+              ignored: 0,
+              tombstoned: 0,
+              conflicts: 1,
+              recoveryCompleted: false,
+              recoveryRequired: true,
+            };
+          }
         }
 
         const generation = command.page.mode === 'full'
@@ -312,10 +361,15 @@ export function createPostgresRyMessageActionRepository(
               existing
               && item.aggregateVersion === existing.revision
               && existing.payloadDigest !== projectionDigest
+              && !authoritativeRecovery
             ) {
               conflicts++;
               outcome = 'revision-conflict';
-            } else if (existing && item.aggregateVersion <= existing.revision) {
+            } else if (
+              existing
+              && item.aggregateVersion <= existing.revision
+              && !(authoritativeRecovery && item.aggregateVersion === existing.revision)
+            ) {
               ignored++;
               outcome = 'stale';
             } else {
@@ -519,21 +573,68 @@ export function createPostgresRyMessageActionRepository(
           tombstoned += missing.length;
           recoveryCompleted = true;
         }
-        await client.query(
-          `UPDATE rymessage_action_feed_state
-           SET feed_id = $1, cursor = $2, recovery_required = $3,
-               full_sync_generation = $4, last_synced_at = $5,
-               last_error = NULL, updated_at = $5
-           WHERE connector_id = $6`,
-          [
-            command.page.feedId,
-            command.page.nextCursor,
-            recoveryCompleted ? false : state.recoveryRequired,
-            recoveryCompleted ? null : generation,
-            command.receivedAt,
-            command.connectorId,
-          ],
+        const [tombstones] = await rows<{ count: string } & QueryResultRow>(
+          client,
+          `SELECT COUNT(*)::text AS count
+           FROM rymessage_action_projections
+           WHERE connector_id = $1 AND tombstoned_at IS NOT NULL`,
+          [command.connectorId],
         );
+        const tombstoneOverflow = Number(tombstones?.count ?? 0)
+          - RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS;
+        const pruneTombstones = tombstoneOverflow > 0;
+        const retentionRecoveryRequired = pruneTombstones
+          && !(command.page.mode === 'full' && command.page.complete);
+        if (pruneTombstones) {
+          const deleted = await rows<{ actionId: string } & QueryResultRow>(
+            client,
+            `DELETE FROM rymessage_action_projections
+             WHERE (connector_id, action_id) IN (
+               SELECT connector_id, action_id
+               FROM rymessage_action_projections
+               WHERE connector_id = $1 AND tombstoned_at IS NOT NULL
+               ORDER BY tombstoned_at, action_id
+               LIMIT $2
+             )
+             RETURNING action_id AS "actionId"`,
+            [command.connectorId, tombstoneOverflow],
+          );
+          if (deleted.length > 0) {
+            await client.query(
+              `DELETE FROM rymessage_action_materializations
+               WHERE connector_id = $1 AND action_id = ANY($2::text[])`,
+              [command.connectorId, deleted.map((row) => row.actionId)],
+            );
+          }
+        }
+        if (retentionRecoveryRequired) {
+          await client.query(
+            `UPDATE rymessage_action_feed_state
+             SET feed_id = NULL, cursor = NULL,
+                 recovery_generation = recovery_generation + 1,
+                 recovery_required = true, full_sync_generation = NULL,
+                 last_synced_at = $1, last_error = 'TOMBSTONE_RETENTION_RECOVERY',
+                 updated_at = $1
+             WHERE connector_id = $2`,
+            [command.receivedAt, command.connectorId],
+          );
+        } else {
+          await client.query(
+            `UPDATE rymessage_action_feed_state
+             SET feed_id = $1, cursor = $2, recovery_required = $3,
+                 full_sync_generation = $4, last_synced_at = $5,
+                 last_error = NULL, updated_at = $5
+             WHERE connector_id = $6`,
+            [
+              command.page.feedId,
+              command.page.nextCursor,
+              recoveryCompleted ? false : state.recoveryRequired,
+              recoveryCompleted ? null : generation,
+              command.receivedAt,
+              command.connectorId,
+            ],
+          );
+        }
         await client.query(
           `DELETE FROM rymessage_action_receipts
            WHERE (connector_id, event_id) IN (
@@ -545,7 +646,16 @@ export function createPostgresRyMessageActionRepository(
            )`,
           [command.connectorId, RYMESSAGE_ACTION_MAX_RETAINED_RECEIPTS],
         );
-        return { applied, added, updated, ignored, tombstoned, conflicts, recoveryCompleted };
+        return {
+          applied,
+          added,
+          updated,
+          ignored,
+          tombstoned,
+          conflicts,
+          recoveryCompleted,
+          recoveryRequired: retentionRecoveryRequired,
+        };
       });
     },
 
@@ -570,123 +680,136 @@ export function createPostgresRyMessageActionRepository(
         const relations = await rows<{
           materializationId: string;
           actionId: string;
-          actionRevision: number;
-          providerListId: string;
-          providerTaskId: string;
-          state: string;
-          localTaskId: string | null;
+          relationState: string;
           statusSnapshot: string | null;
           versionSnapshot: string | null;
+          taskStatus: string | null;
+          taskUpdatedAt: string | null;
+          projectionPayload: PortableCompanionAction | null;
         } & QueryResultRow>(
           client,
-          `SELECT materialization_id AS "materializationId", action_id AS "actionId",
-                  action_revision AS "actionRevision", provider_list_id AS "providerListId",
-                  provider_task_id AS "providerTaskId", state,
-                  local_task_id AS "localTaskId",
-                  provider_task_status_snapshot AS "statusSnapshot",
-                  provider_version_snapshot AS "versionSnapshot"
-           FROM rymessage_action_materializations
-           WHERE connector_id = $1
-           ORDER BY updated_at, materialization_id
-           LIMIT $2
-           FOR UPDATE`,
-          [input.connectorId, RYMESSAGE_ACTION_MAX_RECONCILE_ITEMS],
+          `WITH selected AS (
+             SELECT materialization_id, action_id, state, local_task_id, relation_state,
+                    provider_list_id, provider_task_id,
+                    provider_task_status_snapshot, provider_version_snapshot
+             FROM rymessage_action_materializations
+             WHERE connector_id = $1
+             ORDER BY updated_at, materialization_id
+             LIMIT $2
+             FOR UPDATE SKIP LOCKED
+           ), matched AS (
+             SELECT selected.*, task.match_count, task.task_id, task.task_status,
+                    task.task_updated_at
+             FROM selected
+             LEFT JOIN LATERAL (
+               SELECT COUNT(*)::int AS match_count,
+                      MIN(candidate.id) AS task_id,
+                      MIN(candidate.status) AS task_status,
+                      MIN(candidate.updated_at) AS task_updated_at
+               FROM (
+                 SELECT id, status, updated_at
+                 FROM tasks
+                 WHERE connector_type = 'microsoft-todo'
+                   AND source_id = selected.provider_list_id || ':' || selected.provider_task_id
+                   AND is_checklist_item = false AND deleted_at IS NULL
+                 ORDER BY connector_instance_id, id
+                 LIMIT 2
+               ) candidate
+             ) task ON true
+           ), classified AS (
+             SELECT matched.*,
+                    CASE
+                      WHEN state = 'deleted' THEN 'deleted'
+                      WHEN state = 'link-broken' THEN 'link-broken'
+                      WHEN match_count > 1 THEN 'conflict'
+                      WHEN match_count = 1 THEN 'linked'
+                      WHEN local_task_id IS NOT NULL OR relation_state = 'link-broken'
+                        THEN 'link-broken'
+                      ELSE 'pending-import'
+                    END AS next_relation_state,
+                    CASE WHEN match_count = 1 THEN task_id ELSE NULL END AS next_local_task_id,
+                    CASE
+                      WHEN match_count > 1 THEN 'AMBIGUOUS_PROVIDER_IDENTITY'
+                      WHEN match_count = 0
+                        AND (local_task_id IS NOT NULL OR relation_state = 'link-broken')
+                        THEN 'PROVIDER_TASK_MISSING'
+                      ELSE NULL
+                    END AS next_conflict_code
+             FROM matched
+           ), updated AS (
+             UPDATE rymessage_action_materializations materialization
+             SET local_task_id = classified.next_local_task_id,
+                 relation_state = classified.next_relation_state,
+                 conflict_code = classified.next_conflict_code,
+                 updated_at = $3
+             FROM classified
+             WHERE materialization.connector_id = $1
+               AND materialization.materialization_id = classified.materialization_id
+             RETURNING materialization.materialization_id, materialization.action_id,
+                       classified.next_relation_state,
+                       classified.provider_task_status_snapshot,
+                       classified.provider_version_snapshot,
+                       CASE WHEN classified.task_status = 'done'
+                         THEN 'completed' ELSE classified.task_status END AS task_status,
+                       classified.task_updated_at
+           )
+           SELECT updated.materialization_id AS "materializationId",
+                  updated.action_id AS "actionId",
+                  updated.next_relation_state AS "relationState",
+                  updated.provider_task_status_snapshot AS "statusSnapshot",
+                  updated.provider_version_snapshot AS "versionSnapshot",
+                  updated.task_status AS "taskStatus",
+                  updated.task_updated_at AS "taskUpdatedAt",
+                  projection.payload AS "projectionPayload"
+           FROM updated
+           LEFT JOIN rymessage_action_projections projection
+             ON projection.connector_id = $1 AND projection.action_id = updated.action_id
+           ORDER BY updated.materialization_id`,
+          [input.connectorId, RYMESSAGE_ACTION_MAX_RECONCILE_ITEMS, input.now],
         );
-        let linked = 0;
-        let pendingImport = 0;
-        let conflicts = 0;
-        let broken = 0;
+        const linked = relations.filter((row) => row.relationState === 'linked').length;
+        const pendingImport = relations.filter(
+          (row) => row.relationState === 'pending-import',
+        ).length;
+        const conflicts = relations.filter((row) => row.relationState === 'conflict').length;
+        const broken = relations.filter((row) => row.relationState === 'link-broken').length;
         let observationsQueued = 0;
+        let observationCandidates = 0;
         for (const relation of relations) {
-          if (relation.state === 'deleted' || relation.state === 'link-broken') {
-            const relationState = relation.state === 'deleted' ? 'deleted' : 'link-broken';
-            await client.query(
-              `UPDATE rymessage_action_materializations
-               SET relation_state = $1, updated_at = $2
-               WHERE connector_id = $3 AND materialization_id = $4`,
-              [relationState, input.now, input.connectorId, relation.materializationId],
-            );
-            if (relationState === 'link-broken') broken++;
-            continue;
-          }
-          const sourceId = `${relation.providerListId}:${relation.providerTaskId}`;
-          const matches = await rows<{
-            id: string;
-            status: string;
-            updatedAt: string;
-          } & QueryResultRow>(
-            client,
-            `SELECT id, status, updated_at AS "updatedAt"
-             FROM tasks
-             WHERE connector_type = 'microsoft-todo' AND source_id = $1
-               AND is_checklist_item = false AND deleted_at IS NULL
-             ORDER BY connector_instance_id, id
-             LIMIT 2`,
-            [sourceId],
-          );
-          if (matches.length === 0) {
-            const relationState = relation.localTaskId ? 'link-broken' : 'pending-import';
-            await client.query(
-              `UPDATE rymessage_action_materializations
-               SET local_task_id = NULL, relation_state = $1, conflict_code = $2,
-                   updated_at = $3
-               WHERE connector_id = $4 AND materialization_id = $5`,
-              [
-                relationState,
-                relation.localTaskId ? 'PROVIDER_TASK_MISSING' : null,
-                input.now,
-                input.connectorId,
-                relation.materializationId,
-              ],
-            );
-            if (relation.localTaskId) broken++;
-            else pendingImport++;
-            continue;
-          }
-          if (matches.length > 1) {
-            await client.query(
-              `UPDATE rymessage_action_materializations
-               SET local_task_id = NULL, relation_state = 'conflict',
-                   conflict_code = 'AMBIGUOUS_PROVIDER_IDENTITY', updated_at = $1
-               WHERE connector_id = $2 AND materialization_id = $3`,
-              [input.now, input.connectorId, relation.materializationId],
-            );
-            conflicts++;
-            continue;
-          }
-          const task = matches[0]!;
-          await client.query(
-            `UPDATE rymessage_action_materializations
-             SET local_task_id = $1, relation_state = 'linked',
-                 conflict_code = NULL, updated_at = $2
-             WHERE connector_id = $3 AND materialization_id = $4`,
-            [task.id, input.now, input.connectorId, relation.materializationId],
-          );
-          linked++;
-          const status = task.status === 'done' ? 'completed' : task.status;
-          if (relation.statusSnapshot !== status || relation.versionSnapshot !== task.updatedAt) {
-            const projection = await readProjection(client, input.connectorId, relation.actionId);
-            if (projection?.payload) {
+          if (
+            relation.relationState !== 'linked'
+            || !relation.taskStatus
+            || !relation.taskUpdatedAt
+          ) continue;
+          if (
+            relation.statusSnapshot !== relation.taskStatus
+            || relation.versionSnapshot !== relation.taskUpdatedAt
+          ) {
+            if (observationCandidates >= RYMESSAGE_ACTION_MAX_OBSERVATIONS_PER_RECONCILE) {
+              continue;
+            }
+            observationCandidates++;
+            if (relation.projectionPayload) {
               const operationId = stableCompanionOperationId(
-                `${input.connectorId}:${relation.materializationId}:observe:${status}:${task.updatedAt}`,
+                `${input.connectorId}:${relation.materializationId}:observe:${relation.taskStatus}:${relation.taskUpdatedAt}`,
               );
               const result = await enqueue(client, {
                 connectorId: input.connectorId,
                 actionId: relation.actionId,
                 operationId,
-                baseRevision: projection.payload.revision,
+                baseRevision: relation.projectionPayload.revision,
                 expectedFieldRevisions: {
                   [`materialization:${relation.materializationId}`]:
-                    projection.payload.fieldRevisions[
+                    relation.projectionPayload.fieldRevisions[
                       `materialization:${relation.materializationId}`
                     ] ?? 0,
                 },
                 mutation: {
                   kind: 'materialization.observe',
                   materializationId: relation.materializationId,
-                  providerTaskStatusSnapshot: status,
-                  providerVersionSnapshot: task.updatedAt,
-                  observedAt: task.updatedAt,
+                  providerTaskStatusSnapshot: relation.taskStatus,
+                  providerVersionSnapshot: relation.taskUpdatedAt,
+                  observedAt: relation.taskUpdatedAt,
                 },
                 now: input.now,
               });
@@ -715,6 +838,29 @@ export function createPostgresRyMessageActionRepository(
     async enqueueMutation(command) {
       return transaction(pool, async (client) => {
         await assertConnector(client, command.connectorId);
+        const digest = companionActionDigest({
+          actionId: command.actionId,
+          baseRevision: command.baseRevision,
+          mutation: command.mutation,
+        });
+        const [existingMutation] = await rows<{
+          mutationDigest: string;
+        } & QueryResultRow>(
+          client,
+          `SELECT mutation_digest AS "mutationDigest"
+           FROM rymessage_action_outbound_mutations
+           WHERE connector_id = $1 AND operation_id = $2`,
+          [command.connectorId, command.operationId],
+        );
+        if (existingMutation) {
+          if (existingMutation.mutationDigest !== digest) {
+            throw new RyMessageActionPersistenceError(
+              'IDEMPOTENCY_CONFLICT',
+              'Mutation identity was reused with different content',
+            );
+          }
+          return 'duplicate';
+        }
         const projection = await readProjection(client, command.connectorId, command.actionId);
         if (!projection || projection.tombstonedAt) {
           throw new RyMessageActionPersistenceError(
@@ -722,6 +868,18 @@ export function createPostgresRyMessageActionRepository(
             'Canonical Companion action does not exist',
           );
         }
+        if (!projection.payload) {
+          throw new RyMessageActionPersistenceError(
+            'ACTION_NOT_FOUND',
+            'Canonical Companion action does not exist',
+          );
+        }
+        assertCompanionMutationRevisionFence({
+          action: projection.payload,
+          baseRevision: command.baseRevision,
+          expectedFieldRevisions: command.expectedFieldRevisions,
+          mutation: command.mutation,
+        });
         if (command.mutation.kind === 'materialization.observe') {
           const [relation] = await rows<QueryResultRow>(
             client,
@@ -791,19 +949,26 @@ export function createPostgresRyMessageActionRepository(
             );
             continue;
           }
-          const overlap = mutationFields(candidate.mutation).filter(
-            (field) => (
-              projection.payload!.fieldRevisions[field] ?? 0
-            ) > (candidate.expectedFieldRevisions[field] ?? 0),
-          );
-          if (overlap.length > 0) {
+          try {
+            assertCompanionMutationRevisionFence({
+              action: projection.payload,
+              baseRevision: candidate.baseRevision,
+              expectedFieldRevisions: candidate.expectedFieldRevisions,
+              mutation: candidate.mutation,
+            });
+          } catch (error) {
+            const persistenceError = error instanceof RyMessageActionPersistenceError
+              ? error
+              : null;
             await client.query(
               `UPDATE rymessage_action_outbound_mutations
-               SET status = 'conflict', last_error_code = 'FIELD_REVISION_CONFLICT',
-                   last_error = $1, updated_at = $2
-               WHERE connector_id = $3 AND operation_id = $4`,
+               SET status = 'conflict', last_error_code = $1,
+                   last_error = $2, updated_at = $3
+               WHERE connector_id = $4 AND operation_id = $5`,
               [
-                `Conflicting fields: ${overlap.join(', ')}`.slice(0, 300),
+                persistenceError?.code ?? 'REVISION_FENCE_INVALID',
+                persistenceError?.message.slice(0, 300)
+                  ?? 'Mutation revision fence is invalid',
                 input.now,
                 input.connectorId,
                 candidate.operationId,
@@ -841,9 +1006,12 @@ export function createPostgresRyMessageActionRepository(
 
     async completeMutation(outcome) {
       await transaction(pool, async (client) => {
-        const [row] = await rows<{ attemptCount: number } & QueryResultRow>(
+        const [row] = await rows<{
+          attemptCount: number;
+          actionId: string;
+        } & QueryResultRow>(
           client,
-          `SELECT attempt_count AS "attemptCount"
+          `SELECT attempt_count AS "attemptCount", action_id AS "actionId"
            FROM rymessage_action_outbound_mutations
            WHERE connector_id = $1 AND operation_id = $2
              AND status = 'leased' AND lease_id = $3
@@ -857,6 +1025,27 @@ export function createPostgresRyMessageActionRepository(
           );
         }
         if (outcome.receipt) {
+          if (
+            outcome.receipt.operationId !== outcome.operationId
+            || outcome.receipt.actionId !== row.actionId
+          ) {
+            await client.query(
+              `UPDATE rymessage_action_outbound_mutations
+               SET status = 'conflict', receipt = NULL, lease_id = NULL,
+                   lease_expires_at = NULL,
+                   last_error_code = 'RECEIPT_IDENTITY_MISMATCH',
+                   last_error = 'Companion receipt does not match the leased mutation',
+                   updated_at = $1
+               WHERE connector_id = $2 AND operation_id = $3 AND lease_id = $4`,
+              [
+                outcome.now,
+                outcome.connectorId,
+                outcome.operationId,
+                outcome.leaseId,
+              ],
+            );
+            return;
+          }
           await client.query(
             `UPDATE rymessage_action_outbound_mutations
              SET status = $1, receipt = $2::jsonb, lease_id = NULL,

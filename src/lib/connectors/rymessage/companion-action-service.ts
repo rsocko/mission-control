@@ -72,6 +72,21 @@ export class CompanionActionReconciliationService {
     let itemsUpdated = 0;
     let itemsRemoved = 0;
 
+    if (
+      state.recoveryRequired
+      && state.cursor !== null
+      && state.lastError?.startsWith('REVISION_CONFLICT:')
+    ) {
+      return {
+        itemsAdded,
+        itemsUpdated,
+        itemsRemoved,
+        status: 'unavailable',
+        relations: { linked: 0, pendingImport: 0, conflicts: 1, broken: 0 },
+        mutations: { succeeded: 0, conflicts: 0, deferred: 0 },
+      };
+    }
+
     while (pageCount < COMPANION_ACTION_MAX_SYNC_PAGES) {
       if (signal?.aborted) throw signal.reason ?? new Error('RyMessage action sync aborted');
       let page;
@@ -106,6 +121,29 @@ export class CompanionActionReconciliationService {
         itemsAdded += result.added;
         itemsUpdated += result.updated;
         itemsRemoved += result.tombstoned;
+        if (result.recoveryRequired) {
+          if (result.conflicts > 0) {
+            return {
+              itemsAdded,
+              itemsUpdated,
+              itemsRemoved,
+              status: 'unavailable',
+              relations: {
+                linked: 0,
+                pendingImport: 0,
+                conflicts: result.conflicts,
+                broken: 0,
+              },
+              mutations: { succeeded: 0, conflicts: 0, deferred: 0 },
+            };
+          }
+          if (recoveryRetried) {
+            throw new Error('Companion action feed recovery restarted more than once');
+          }
+          cursor = null;
+          recoveryRetried = true;
+          continue;
+        }
       } catch (error) {
         if (
           error instanceof Error

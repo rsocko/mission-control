@@ -7,6 +7,7 @@ import type {
 } from '@/lib/connectors/rymessage/action-contract';
 
 export const RYMESSAGE_ACTION_MAX_LIVE_PROJECTIONS = 25_000;
+export const RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS = 25_000;
 export const RYMESSAGE_ACTION_MAX_RETAINED_RECEIPTS = 200_000;
 export const RYMESSAGE_ACTION_MAX_OUTBOUND_QUEUE = 10_000;
 export const RYMESSAGE_ACTION_DEFAULT_LEASE_SECONDS = 300;
@@ -14,6 +15,7 @@ export const RYMESSAGE_ACTION_MAX_LEASE_SECONDS = 1_800;
 export const RYMESSAGE_ACTION_MAX_LEASE_ITEMS = 20;
 export const RYMESSAGE_ACTION_MAX_ATTEMPTS = 8;
 export const RYMESSAGE_ACTION_MAX_RECONCILE_ITEMS = 5_000;
+export const RYMESSAGE_ACTION_MAX_OBSERVATIONS_PER_RECONCILE = 100;
 
 export class RyMessageActionPersistenceError extends Error {
   constructor(
@@ -22,6 +24,52 @@ export class RyMessageActionPersistenceError extends Error {
   ) {
     super(message);
     this.name = 'RyMessageActionPersistenceError';
+  }
+}
+
+export function companionMutationFields(mutation: CompanionActionMutation): string[] {
+  if (mutation.kind === 'action.user-edit') return Object.keys(mutation.patch);
+  if (mutation.kind === 'action.lifecycle' || mutation.kind === 'action.correction') {
+    return ['lifecycle'];
+  }
+  return [`materialization:${mutation.materializationId}`];
+}
+
+export function assertCompanionMutationRevisionFence(input: {
+  action: PortableCompanionAction;
+  baseRevision: number;
+  expectedFieldRevisions: Readonly<Record<string, number>>;
+  mutation: CompanionActionMutation;
+}): void {
+  if (input.baseRevision > input.action.revision) {
+    throw new RyMessageActionPersistenceError(
+      'FUTURE_BASE_REVISION',
+      'Mutation base revision is newer than the canonical action',
+    );
+  }
+  const conflicts: string[] = [];
+  for (const field of companionMutationFields(input.mutation)) {
+    const expected = input.expectedFieldRevisions[field];
+    const current = input.action.fieldRevisions[field] ?? 0;
+    if (!Number.isSafeInteger(expected) || (expected ?? -1) < 0) {
+      throw new RyMessageActionPersistenceError(
+        'FIELD_REVISION_REQUIRED',
+        `Expected revision is required for field ${field}`,
+      );
+    }
+    if (expected! > current) {
+      throw new RyMessageActionPersistenceError(
+        'FUTURE_FIELD_REVISION',
+        `Expected revision for field ${field} is newer than canonical state`,
+      );
+    }
+    if (expected! < current) conflicts.push(field);
+  }
+  if (conflicts.length > 0) {
+    throw new RyMessageActionPersistenceError(
+      'FIELD_REVISION_CONFLICT',
+      `Conflicting fields: ${conflicts.join(', ')}`.slice(0, 300),
+    );
   }
 }
 
@@ -76,6 +124,7 @@ export interface RyMessageApplyFeedResult {
   tombstoned: number;
   conflicts: number;
   recoveryCompleted: boolean;
+  recoveryRequired: boolean;
 }
 
 export interface RyMessageRelationReconciliationResult {

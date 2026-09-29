@@ -8,6 +8,7 @@ import type {
   CompanionActionMaterialization,
   CompanionActionV1,
 } from '@/lib/connectors/rymessage/action-contract';
+import { RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS } from '@/db/persistence/rymessage-actions';
 
 vi.unmock('drizzle-orm');
 
@@ -264,6 +265,111 @@ describe('SQLite RyMessage action repository', () => {
     expect((await repository.readFeedState(CONNECTOR_ID)).cursor).toBe('cursor-2');
   });
 
+  it('quarantines same-revision divergent payloads without consuming the cursor', async () => {
+    const { repository } = await contextPromise;
+    const original = action(31, 1, [], { title: 1 });
+    await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({ action: original, event: 31, cursor: 'cursor-safe' }),
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    const divergent = {
+      ...original,
+      content: { ...original.content, title: 'Divergent title' },
+    };
+    const result = await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({
+        action: divergent,
+        event: 32,
+        cursor: 'cursor-must-not-commit',
+        mode: 'incremental',
+      }),
+      requestedCursor: 'cursor-safe',
+      receivedAt: '2026-09-29T20:01:00.000Z',
+    });
+    expect(result).toMatchObject({ conflicts: 1, recoveryRequired: true, applied: 0 });
+    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+      cursor: 'cursor-safe',
+      recoveryRequired: true,
+      lastError: expect.stringContaining('REVISION_CONFLICT'),
+    });
+    await expect(repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({
+        action: action(32),
+        event: 33,
+        cursor: 'later-cursor',
+        mode: 'incremental',
+      }),
+      requestedCursor: 'cursor-safe',
+      receivedAt: '2026-09-29T20:02:00.000Z',
+    })).rejects.toMatchObject({ code: 'RECOVERY_CONFLICT' });
+
+    await repository.invalidateRecovery({
+      connectorId: CONNECTOR_ID,
+      reason: 'operator-reset',
+      now: '2026-09-29T20:03:00.000Z',
+    });
+    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+      cursor: null,
+      recoveryGeneration: 1,
+      recoveryRequired: true,
+    });
+    await expect(repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({
+        action: divergent,
+        event: 32,
+        cursor: 'cursor-resolved',
+        mode: 'full',
+      }),
+      requestedCursor: null,
+      receivedAt: '2026-09-29T20:04:00.000Z',
+    })).resolves.toMatchObject({ applied: 1, recoveryCompleted: true });
+    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+      cursor: 'cursor-resolved',
+      recoveryRequired: false,
+      lastError: null,
+    });
+    expect((await repository.getProjection(CONNECTOR_ID, original.actionId))?.action?.content.title)
+      .toBe('Divergent title');
+  });
+
+  it('keeps repeated tombstones bounded to one projection', async () => {
+    const { database, repository } = await contextPromise;
+    const actionId = uuid(340);
+    await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({
+        tombstoneActionId: actionId,
+        aggregateVersion: 1,
+        event: 34,
+        cursor: 'cursor-1',
+      }),
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({
+        tombstoneActionId: actionId,
+        aggregateVersion: 1,
+        event: 35,
+        cursor: 'cursor-2',
+        mode: 'incremental',
+      }),
+      requestedCursor: 'cursor-1',
+      receivedAt: '2026-09-29T20:01:00.000Z',
+    });
+    const count = database.sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM rymessage_action_projections
+      WHERE connector_id = ? AND action_id = ?
+    `).get(CONNECTOR_ID, actionId) as { count: number };
+    expect(count.count).toBe(1);
+  });
+
   it('links only exact imported provider tasks and surfaces missing, ambiguous, and broken relations', async () => {
     const { database, repository } = await contextPromise;
     const exact = materialization(101, 'list-exact', 'task-exact');
@@ -345,6 +451,7 @@ describe('SQLite RyMessage action repository', () => {
       requestedCursor: null,
       receivedAt: NOW,
     });
+
     const operationId = uuid(301);
     await repository.enqueueMutation({
       connectorId: CONNECTOR_ID,
@@ -425,6 +532,149 @@ describe('SQLite RyMessage action repository', () => {
       status: 'conflict',
       errorCode: 'FIELD_REVISION_CONFLICT',
     });
+    await expect(repository.enqueueMutation({
+      connectorId: CONNECTOR_ID,
+      actionId: initial.actionId,
+      operationId,
+      baseRevision: 1,
+      expectedFieldRevisions: { title: 1 },
+      mutation: { kind: 'action.user-edit', patch: { title: 'Local edit' } },
+      now: '2026-09-29T20:07:00.000Z',
+    })).resolves.toBe('duplicate');
+  });
+
+  it('rejects future aggregate and field revisions while preserving stale non-overlap', async () => {
+    const { repository } = await contextPromise;
+    const current = action(51, 5, [], { title: 5, details: 2, lifecycle: 4 });
+    await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({ action: current, event: 51, cursor: 'cursor-5' }),
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    await expect(repository.enqueueMutation({
+      connectorId: CONNECTOR_ID,
+      actionId: current.actionId,
+      operationId: uuid(511),
+      baseRevision: 999,
+      expectedFieldRevisions: { title: 5 },
+      mutation: { kind: 'action.user-edit', patch: { title: 'Future aggregate' } },
+      now: NOW,
+    })).rejects.toMatchObject({ code: 'FUTURE_BASE_REVISION' });
+    await expect(repository.enqueueMutation({
+      connectorId: CONNECTOR_ID,
+      actionId: current.actionId,
+      operationId: uuid(512),
+      baseRevision: 5,
+      expectedFieldRevisions: { title: 999 },
+      mutation: { kind: 'action.user-edit', patch: { title: 'Future field' } },
+      now: NOW,
+    })).rejects.toMatchObject({ code: 'FUTURE_FIELD_REVISION' });
+    await expect(repository.enqueueMutation({
+      connectorId: CONNECTOR_ID,
+      actionId: current.actionId,
+      operationId: uuid(513),
+      baseRevision: 4,
+      expectedFieldRevisions: { details: 2 },
+      mutation: { kind: 'action.user-edit', patch: { details: 'Safe stale edit' } },
+      now: NOW,
+    })).resolves.toBe('queued');
+  });
+
+  it('defensively rejects a receipt that does not match the leased mutation', async () => {
+    const { database, repository } = await contextPromise;
+    const current = action(52);
+    await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({ action: current, event: 52, cursor: 'cursor-1' }),
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    const operationId = uuid(521);
+    await repository.enqueueMutation({
+      connectorId: CONNECTOR_ID,
+      actionId: current.actionId,
+      operationId,
+      baseRevision: 1,
+      expectedFieldRevisions: { title: 1 },
+      mutation: { kind: 'action.user-edit', patch: { title: 'Changed' } },
+      now: NOW,
+    });
+    const lease = await repository.leaseMutations({
+      connectorId: CONNECTOR_ID,
+      now: '2026-09-29T20:01:00.000Z',
+    });
+    await repository.completeMutation({
+      connectorId: CONNECTOR_ID,
+      operationId,
+      leaseId: lease.leaseId,
+      receipt: {
+        operationId: uuid(522),
+        actionId: uuid(523),
+        outcome: 'applied',
+        revision: 2,
+      },
+      retryable: false,
+      now: '2026-09-29T20:02:00.000Z',
+    });
+    expect(database.sqlite.prepare(`
+      SELECT status, last_error_code AS errorCode, receipt
+      FROM rymessage_action_outbound_mutations WHERE operation_id = ?
+    `).get(operationId)).toEqual({
+      status: 'conflict',
+      errorCode: 'RECEIPT_IDENTITY_MISMATCH',
+      receipt: null,
+    });
+  });
+
+  it('bounds tombstone projections through explicit recovery without consuming live quota', async () => {
+    const { database, repository } = await contextPromise;
+    const insert = database.sqlite.prepare(`
+      INSERT INTO rymessage_action_projections (
+        connector_id, action_id, source_id, revision, payload, payload_digest,
+        last_event_id, last_operation_id, tombstoned_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 1, NULL, ?, ?, ?, ?, ?, ?)
+    `);
+    database.sqlite.transaction(() => {
+      for (let index = 0; index < RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS; index++) {
+        const id = `retained-tombstone-${String(index).padStart(5, '0')}`;
+        insert.run(CONNECTOR_ID, id, id, id, id, id, NOW, NOW, NOW);
+      }
+    })();
+
+    const live = action(61);
+    const liveResult = await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({ action: live, event: 61, cursor: 'cursor-live' }),
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    expect(liveResult).toMatchObject({ added: 1, recoveryRequired: false });
+
+    const overflow = await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: page({
+        tombstoneActionId: uuid(620),
+        aggregateVersion: 1,
+        event: 62,
+        cursor: 'cursor-overflow',
+        mode: 'incremental',
+      }),
+      requestedCursor: 'cursor-live',
+      receivedAt: '2026-09-29T20:01:00.000Z',
+    });
+    expect(overflow).toMatchObject({ tombstoned: 1, recoveryRequired: true });
+    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+      cursor: null,
+      recoveryGeneration: 1,
+      lastError: 'TOMBSTONE_RETENTION_RECOVERY',
+    });
+    const count = database.sqlite.prepare(`
+      SELECT COUNT(*) AS count FROM rymessage_action_projections
+      WHERE connector_id = ? AND tombstoned_at IS NOT NULL
+    `).get(CONNECTOR_ID) as { count: number };
+    expect(count.count).toBe(RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS);
+    expect((await repository.getProjection(CONNECTOR_ID, live.actionId))?.action).not.toBeNull();
   });
 
   it('enforces outbound idempotency and rejects observations for unknown relations', async () => {

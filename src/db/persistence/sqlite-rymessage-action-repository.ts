@@ -13,10 +13,13 @@ import {
   RYMESSAGE_ACTION_MAX_LEASE_ITEMS,
   RYMESSAGE_ACTION_MAX_LEASE_SECONDS,
   RYMESSAGE_ACTION_MAX_LIVE_PROJECTIONS,
+  RYMESSAGE_ACTION_MAX_OBSERVATIONS_PER_RECONCILE,
   RYMESSAGE_ACTION_MAX_OUTBOUND_QUEUE,
   RYMESSAGE_ACTION_MAX_RECONCILE_ITEMS,
   RYMESSAGE_ACTION_MAX_RETAINED_RECEIPTS,
+  RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS,
   RyMessageActionPersistenceError,
+  assertCompanionMutationRevisionFence,
   type RyMessageActionPersistence,
   type RyMessageActionProjection,
   type RyMessageFeedState,
@@ -54,13 +57,6 @@ function feedState(row: FeedStateRow): RyMessageFeedState {
     ...row,
     recoveryRequired: row.recoveryRequired === 1,
   };
-}
-
-function mutationFields(mutation: CompanionActionMutation): string[] {
-  if (mutation.kind === 'action.user-edit') return Object.keys(mutation.patch);
-  if (mutation.kind === 'action.lifecycle') return ['lifecycle'];
-  if (mutation.kind === 'action.correction') return ['lifecycle'];
-  return [`materialization:${mutation.materializationId}`];
 }
 
 function clampLeaseSeconds(value: number | undefined): number {
@@ -220,6 +216,16 @@ export function createSqliteRyMessageActionRepository(
             'RyMessage feed cursor changed during page processing',
           );
         }
+        if (
+          state.recoveryRequired === 1
+          && state.cursor !== null
+          && state.lastError?.startsWith('REVISION_CONFLICT:')
+        ) {
+          throw new RyMessageActionPersistenceError(
+            'RECOVERY_CONFLICT',
+            'Companion feed recovery is blocked by an unresolved revision conflict',
+          );
+        }
         if (state.feedId && state.feedId !== command.page.feedId) {
           throw new RyMessageActionPersistenceError(
             'FEED_IDENTITY_CHANGED',
@@ -231,6 +237,48 @@ export function createSqliteRyMessageActionRepository(
             'FULL_SNAPSHOT_REQUIRED',
             'A fresh Companion reconciliation must begin with a full page',
           );
+        }
+        const authoritativeRecovery = command.requestedCursor === null
+          && command.page.mode === 'full'
+          && state.recoveryRequired === 1;
+
+        for (const item of command.page.items) {
+          if (item.kind !== 'upsert') continue;
+          const receipt = database.prepare(`
+            SELECT payload_digest AS payloadDigest
+            FROM rymessage_action_receipts
+            WHERE connector_id = ? AND event_id = ?
+          `).get(command.connectorId, item.eventId) as { payloadDigest: string } | undefined;
+          if (receipt) continue;
+          const existing = readProjection(command.connectorId, item.aggregateId);
+          if (
+            existing
+            && item.aggregateVersion === existing.revision
+            && existing.payloadDigest !== companionActionDigest(sanitizeCompanionAction(item.action))
+            && !authoritativeRecovery
+          ) {
+            const reason = [
+              'REVISION_CONFLICT',
+              item.aggregateId,
+              String(item.aggregateVersion),
+              item.eventId,
+            ].join(':').slice(0, 300);
+            database.prepare(`
+              UPDATE rymessage_action_feed_state
+              SET recovery_required = 1, last_error = ?, updated_at = ?
+              WHERE connector_id = ?
+            `).run(reason, command.receivedAt, command.connectorId);
+            return {
+              applied: 0,
+              added: 0,
+              updated: 0,
+              ignored: 0,
+              tombstoned: 0,
+              conflicts: 1,
+              recoveryCompleted: false,
+              recoveryRequired: true,
+            };
+          }
         }
 
         const generation = command.page.mode === 'full'
@@ -270,10 +318,15 @@ export function createSqliteRyMessageActionRepository(
               existing
               && item.aggregateVersion === existing.revision
               && existing.payloadDigest !== projectionDigest
+              && !authoritativeRecovery
             ) {
               conflicts++;
               outcome = 'revision-conflict';
-            } else if (existing && item.aggregateVersion <= existing.revision) {
+            } else if (
+              existing
+              && item.aggregateVersion <= existing.revision
+              && !(authoritativeRecovery && item.aggregateVersion === existing.revision)
+            ) {
               ignored++;
               outcome = 'stale';
             } else {
@@ -488,21 +541,61 @@ export function createSqliteRyMessageActionRepository(
           recoveryCompleted = true;
         }
 
-        database.prepare(`
-          UPDATE rymessage_action_feed_state
-          SET feed_id = ?, cursor = ?, recovery_required = ?,
-              full_sync_generation = ?, last_synced_at = ?, last_error = NULL,
-              updated_at = ?
-          WHERE connector_id = ?
-        `).run(
-          command.page.feedId,
-          command.page.nextCursor,
-          recoveryCompleted ? 0 : state.recoveryRequired,
-          recoveryCompleted ? null : generation,
-          command.receivedAt,
-          command.receivedAt,
-          command.connectorId,
-        );
+        const tombstoneCount = database.prepare(`
+          SELECT COUNT(*) AS count
+          FROM rymessage_action_projections
+          WHERE connector_id = ? AND tombstoned_at IS NOT NULL
+        `).get(command.connectorId) as { count: number };
+        const tombstoneOverflow = tombstoneCount.count
+          - RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS;
+        const pruneTombstones = tombstoneOverflow > 0;
+        const retentionRecoveryRequired = pruneTombstones
+          && !(command.page.mode === 'full' && command.page.complete);
+        if (pruneTombstones) {
+          database.prepare(`
+            DELETE FROM rymessage_action_materializations
+            WHERE connector_id = ? AND action_id IN (
+              SELECT action_id FROM rymessage_action_projections
+              WHERE connector_id = ? AND tombstoned_at IS NOT NULL
+              ORDER BY tombstoned_at, action_id LIMIT ?
+            )
+          `).run(command.connectorId, command.connectorId, tombstoneOverflow);
+          database.prepare(`
+            DELETE FROM rymessage_action_projections
+            WHERE rowid IN (
+              SELECT rowid FROM rymessage_action_projections
+              WHERE connector_id = ? AND tombstoned_at IS NOT NULL
+              ORDER BY tombstoned_at, action_id LIMIT ?
+            )
+          `).run(command.connectorId, tombstoneOverflow);
+        }
+        if (retentionRecoveryRequired) {
+          database.prepare(`
+            UPDATE rymessage_action_feed_state
+            SET feed_id = NULL, cursor = NULL,
+                recovery_generation = recovery_generation + 1,
+                recovery_required = 1, full_sync_generation = NULL,
+                last_synced_at = ?, last_error = 'TOMBSTONE_RETENTION_RECOVERY',
+                updated_at = ?
+            WHERE connector_id = ?
+          `).run(command.receivedAt, command.receivedAt, command.connectorId);
+        } else {
+          database.prepare(`
+            UPDATE rymessage_action_feed_state
+            SET feed_id = ?, cursor = ?, recovery_required = ?,
+                full_sync_generation = ?, last_synced_at = ?, last_error = NULL,
+                updated_at = ?
+            WHERE connector_id = ?
+          `).run(
+            command.page.feedId,
+            command.page.nextCursor,
+            recoveryCompleted ? 0 : state.recoveryRequired,
+            recoveryCompleted ? null : generation,
+            command.receivedAt,
+            command.receivedAt,
+            command.connectorId,
+          );
+        }
 
         const receiptCount = database.prepare(`
           SELECT COUNT(*) AS count FROM rymessage_action_receipts WHERE connector_id = ?
@@ -517,7 +610,16 @@ export function createSqliteRyMessageActionRepository(
           `).run(command.connectorId, overflow);
         }
 
-        return { applied, added, updated, ignored, tombstoned, conflicts, recoveryCompleted };
+        return {
+          applied,
+          added,
+          updated,
+          ignored,
+          tombstoned,
+          conflicts,
+          recoveryCompleted,
+          recoveryRequired: retentionRecoveryRequired,
+        };
       });
     },
 
@@ -565,6 +667,7 @@ export function createSqliteRyMessageActionRepository(
         let conflicts = 0;
         let broken = 0;
         let observationsQueued = 0;
+        let observationCandidates = 0;
 
         for (const relation of relations) {
           if (relation.state === 'deleted') {
@@ -599,7 +702,8 @@ export function createSqliteRyMessageActionRepository(
             metadata: string;
           }>;
           if (matches.length === 0) {
-            const state = relation.localTaskId ? 'link-broken' : 'pending-import';
+            const wasLinked = relation.localTaskId || relation.relationState === 'link-broken';
+            const state = wasLinked ? 'link-broken' : 'pending-import';
             database.prepare(`
               UPDATE rymessage_action_materializations
               SET local_task_id = NULL, relation_state = ?, conflict_code = ?,
@@ -607,12 +711,12 @@ export function createSqliteRyMessageActionRepository(
               WHERE connector_id = ? AND materialization_id = ?
             `).run(
               state,
-              relation.localTaskId ? 'PROVIDER_TASK_MISSING' : null,
+              wasLinked ? 'PROVIDER_TASK_MISSING' : null,
               input.now,
               input.connectorId,
               relation.materializationId,
             );
-            if (relation.localTaskId) broken++;
+            if (wasLinked) broken++;
             else pendingImport++;
             continue;
           }
@@ -645,6 +749,10 @@ export function createSqliteRyMessageActionRepository(
             relation.statusSnapshot !== status
             || relation.versionSnapshot !== task.updatedAt
           ) {
+            if (observationCandidates >= RYMESSAGE_ACTION_MAX_OBSERVATIONS_PER_RECONCILE) {
+              continue;
+            }
+            observationCandidates++;
             const projection = readProjection(input.connectorId, relation.actionId);
             const action = parseJson<PortableCompanionAction>(projection?.payload ?? null);
             if (action) {
@@ -693,13 +801,41 @@ export function createSqliteRyMessageActionRepository(
     async enqueueMutation(command) {
       return immediate(() => {
         assertConnector(command.connectorId);
+        const digest = companionActionDigest({
+          actionId: command.actionId,
+          baseRevision: command.baseRevision,
+          mutation: command.mutation,
+        });
+        const existingMutation = database.prepare(`
+          SELECT mutation_digest AS mutationDigest
+          FROM rymessage_action_outbound_mutations
+          WHERE connector_id = ? AND operation_id = ?
+        `).get(command.connectorId, command.operationId) as {
+          mutationDigest: string;
+        } | undefined;
+        if (existingMutation) {
+          if (existingMutation.mutationDigest !== digest) {
+            throw new RyMessageActionPersistenceError(
+              'IDEMPOTENCY_CONFLICT',
+              'Mutation identity was reused with different content',
+            );
+          }
+          return 'duplicate';
+        }
         const projection = readProjection(command.connectorId, command.actionId);
-        if (!projection || projection.tombstonedAt) {
+        const action = parseJson<PortableCompanionAction>(projection?.payload ?? null);
+        if (!projection || projection.tombstonedAt || !action) {
           throw new RyMessageActionPersistenceError(
             'ACTION_NOT_FOUND',
             'Canonical Companion action does not exist',
           );
         }
+        assertCompanionMutationRevisionFence({
+          action,
+          baseRevision: command.baseRevision,
+          expectedFieldRevisions: command.expectedFieldRevisions,
+          mutation: command.mutation,
+        });
         if (command.mutation.kind === 'materialization.observe') {
           const relation = database.prepare(`
             SELECT 1 FROM rymessage_action_materializations
@@ -771,17 +907,25 @@ export function createSqliteRyMessageActionRepository(
             candidate.expectedFieldRevisions,
           ) ?? {};
           const mutation = parseJson<CompanionActionMutation>(candidate.mutation)!;
-          const overlap = mutationFields(mutation).filter(
-            (field) => (action.fieldRevisions[field] ?? 0) > (expected[field] ?? 0),
-          );
-          if (overlap.length > 0) {
+          try {
+            assertCompanionMutationRevisionFence({
+              action,
+              baseRevision: candidate.baseRevision,
+              expectedFieldRevisions: expected,
+              mutation,
+            });
+          } catch (error) {
+            const persistenceError = error instanceof RyMessageActionPersistenceError
+              ? error
+              : null;
             database.prepare(`
               UPDATE rymessage_action_outbound_mutations
-              SET status = 'conflict', last_error_code = 'FIELD_REVISION_CONFLICT',
+              SET status = 'conflict', last_error_code = ?,
                   last_error = ?, updated_at = ?
               WHERE connector_id = ? AND operation_id = ?
             `).run(
-              `Conflicting fields: ${overlap.join(', ')}`.slice(0, 300),
+              persistenceError?.code ?? 'REVISION_FENCE_INVALID',
+              persistenceError?.message.slice(0, 300) ?? 'Mutation revision fence is invalid',
               input.now,
               input.connectorId,
               candidate.operationId,
@@ -818,11 +962,12 @@ export function createSqliteRyMessageActionRepository(
     async completeMutation(outcome) {
       immediate(() => {
         const row = database.prepare(`
-          SELECT attempt_count AS attemptCount
+          SELECT attempt_count AS attemptCount, action_id AS actionId
           FROM rymessage_action_outbound_mutations
           WHERE connector_id = ? AND operation_id = ? AND status = 'leased' AND lease_id = ?
         `).get(outcome.connectorId, outcome.operationId, outcome.leaseId) as {
           attemptCount: number;
+          actionId: string;
         } | undefined;
         if (!row) {
           throw new RyMessageActionPersistenceError(
@@ -831,6 +976,26 @@ export function createSqliteRyMessageActionRepository(
           );
         }
         if (outcome.receipt) {
+          if (
+            outcome.receipt.operationId !== outcome.operationId
+            || outcome.receipt.actionId !== row.actionId
+          ) {
+            database.prepare(`
+              UPDATE rymessage_action_outbound_mutations
+              SET status = 'conflict', receipt = NULL, lease_id = NULL,
+                  lease_expires_at = NULL,
+                  last_error_code = 'RECEIPT_IDENTITY_MISMATCH',
+                  last_error = 'Companion receipt does not match the leased mutation',
+                  updated_at = ?
+              WHERE connector_id = ? AND operation_id = ? AND lease_id = ?
+            `).run(
+              outcome.now,
+              outcome.connectorId,
+              outcome.operationId,
+              outcome.leaseId,
+            );
+            return;
+          }
           const status = outcome.receipt.outcome === 'conflict' ? 'conflict' : 'succeeded';
           database.prepare(`
             UPDATE rymessage_action_outbound_mutations

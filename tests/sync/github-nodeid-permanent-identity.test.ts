@@ -437,6 +437,50 @@ describe('permanent GitHub NodeID identity', () => {
     expect(JSON.stringify(audit)).not.toContain('externalEntityId');
   });
 
+  it('recovers an unbound task only when local and remote NodeIDs match', async () => {
+    const { matchingMetadataIdentityRecoveryWrite } = await import('@/lib/sync/pull-manager');
+    const remoteTask = {
+      id: 'remote',
+      sourceId: 'acme/app:3',
+      externalIdentity: githubIssueEvidence({
+        issueStableId: 'I_unbound',
+        repositoryStableId: 'R_app',
+        owner: 'acme',
+        repository: 'app',
+        issueNumber: 3,
+      }),
+    } as import('@/types').TaskItem;
+    const localTask = {
+      id: 'task-unbound',
+      sourceId: 'acme/app:3',
+      metadata: { nodeId: 'I_unbound' },
+    } as import('@/db/persistence/connector-execution').ConnectorTaskRecord;
+    const decision = {
+      outcome: 'unbound_local_row',
+    } as import('@/lib/external-identities/stable-identity-types').GitHubIdentityResolutionDecision;
+
+    expect(matchingMetadataIdentityRecoveryWrite(
+      'github-permanent',
+      remoteTask,
+      localTask,
+      decision,
+    )).toEqual({
+      target: {
+        connectorInstanceId: 'github-permanent',
+        bindingType: 'task',
+        localId: 'task-unbound',
+        legacyIdentity: 'acme/app:3',
+      },
+      evidence: remoteTask.externalIdentity,
+    });
+    expect(matchingMetadataIdentityRecoveryWrite(
+      'github-permanent',
+      remoteTask,
+      { ...localTask, metadata: { nodeId: 'I_other' } },
+      decision,
+    )).toBeNull();
+  });
+
   it('blocks a write when the task has no NodeID binding', async () => {
     const cycleId = await identity.beginGitHubWriteCycle({
       connectorInstanceId: 'github-permanent',

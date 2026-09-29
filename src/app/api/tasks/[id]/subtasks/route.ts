@@ -17,6 +17,7 @@ import {
   GitHubUnknownWriteOutcomeError,
 } from '@/lib/external-identities';
 import { getTaskCorePersistence } from '@/lib/tasks/core/runtime';
+import { persistCreatedTaskIdentity } from '@/lib/connectors/transfer-identity';
 import type {
   TaskCoreTaskRow,
   TaskMoveTaskInsert,
@@ -516,6 +517,19 @@ async function writeThroughSubtask(params: {
           write: createRemote,
         })
       : await createRemote();
+
+    if (connector.type === 'github-issues') {
+      if (!created.externalIdentity) {
+        throw new Error('GitHub subtask creation returned without stable identity evidence');
+      }
+      await persistCreatedTaskIdentity({
+        taskId: params.subtaskId,
+        connectorInstanceId: params.connectorInstanceId,
+        sourceId: created.sourceId,
+        sourceListId: created.sourceListId,
+        evidence: created.externalIdentity,
+      });
+    }
 
     const { ancillary } = await getTaskCorePersistence();
     await ancillary.completeSubtaskWriteThrough({

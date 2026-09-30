@@ -61,7 +61,10 @@ describePostgres('PostgreSQL schema integration', () => {
       .map((table) => getTableName(table))
       .sort();
     const actualTables = result.rows.map(({ tableName }) => tableName);
-    const allowedRuntimeTables = new Set(['public_demo_runtime']);
+    const allowedRuntimeTables = new Set([
+      'public_demo_runtime',
+      'semantic_vector_ann',
+    ]);
 
     expect(declaredTables).toHaveLength(173);
     expect(actualTables.filter((table) => declaredTables.includes(table)))

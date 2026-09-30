@@ -4,6 +4,13 @@ import { useMemo, useState } from 'react';
 import { Loader2, Plus, Trash2, X } from 'lucide-react';
 import { useQuickAddDestinations } from '@/lib/hooks/useQuickAddDestinations';
 import type { QuickAddDestination } from '@/components/add-task/quick-add-types';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 interface PromotionSeed {
   title: string;
@@ -184,19 +191,36 @@ export function RyMessagePromotionDialog({
               <label className="text-xs font-medium text-[var(--text-secondary)]">
                 Task {index + 1}
                 <input value={row.title} disabled={row.state === 'created'} onChange={event => patchRow(row.intentId, { title: event.target.value, state: 'idle' })}
-                  className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60" />
+                  className="input-glow mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none disabled:opacity-60" />
               </label>
-              <label className="text-xs font-medium text-[var(--text-secondary)]">
-                Destination
-                <select value={row.destinationKey} disabled={row.state === 'created'} onChange={event => patchRow(row.intentId, { destinationKey: event.target.value, state: 'idle' })}
-                  className="mt-1 w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-60">
+              <div className="text-xs font-medium text-[var(--text-secondary)]">
+                <span>Destination</span>
+                <Select
+                  value={row.destinationKey}
+                  disabled={row.state === 'created'}
+                  onValueChange={value => patchRow(row.intentId, {
+                    destinationKey: value,
+                    state: 'idle',
+                  })}
+                >
+                  <SelectTrigger
+                    aria-label={`Destination for task ${index + 1}`}
+                    className="mt-1 w-full"
+                  >
+                    <SelectValue placeholder="Choose a destination" />
+                  </SelectTrigger>
+                  <SelectContent>
                   {eligibleDestinations.map(destination => (
-                    <option key={destinationKey(destination)} value={destinationKey(destination)}>
+                    <SelectItem
+                      key={destinationKey(destination)}
+                      value={destinationKey(destination)}
+                    >
                       {destination.label}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
-              </label>
+                  </SelectContent>
+                </Select>
+              </div>
               <button onClick={() => setRows(current => current.filter(candidate => candidate.intentId !== row.intentId))}
                 disabled={rows.length === 1 || row.state === 'creating'}
                 aria-label={`Remove task ${index + 1}`}

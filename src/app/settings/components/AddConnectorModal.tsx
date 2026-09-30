@@ -267,27 +267,27 @@ function RyMessageSetup({ onBack, onClose, onAdded }: { onBack: () => void; onCl
         <div>
           <label htmlFor="rymessage-name" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Display name</label>
           <input id="rymessage-name" value={name} onChange={event => setName(event.target.value)}
-            className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
         </div>
         <div>
           <label htmlFor="rymessage-base-url" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Companion base URL</label>
           <input id="rymessage-base-url" type="url" value={companionBaseUrl} onChange={event => setCompanionBaseUrl(event.target.value)}
             placeholder="http://rymessage-companion:8080"
-            className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">Reachable from both the Mission Control web and worker runtimes.</p>
         </div>
         <div>
           <label htmlFor="rymessage-trusted-origin" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Mission Control trusted origin</label>
           <input id="rymessage-trusted-origin" type="url" value={trustedOrigin} onChange={event => setTrustedOrigin(event.target.value)}
             placeholder="https://mission-control.example.com"
-            className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">Must exactly match an origin provisioned in Companion; paths, queries, and fragments are not allowed.</p>
         </div>
         <div>
           <label htmlFor="rymessage-credential-env" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Bearer credential environment variable</label>
           <input id="rymessage-credential-env" value={credentialEnv} onChange={event => setCredentialEnv(event.target.value)}
             spellCheck={false}
-            className="w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none" />
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">The bearer value stays environment-only and must be available to both runtimes.</p>
         </div>
       </div>

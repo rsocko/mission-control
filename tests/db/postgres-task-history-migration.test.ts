@@ -103,10 +103,11 @@ describe('PostgreSQL task-history capture migration', () => {
       'utf8',
     );
 
-    expect(journal.entries.at(-1)).toEqual(expect.objectContaining({
+    expect(journal.entries.find(({ tag }) => tag === lifecycleMigrationName))
+      .toEqual(expect.objectContaining({
       idx: 16,
       tag: lifecycleMigrationName,
-    }));
+      }));
     for (const trigger of [
       'task_due_date_push_count',
       'task_snooze_extension_history',

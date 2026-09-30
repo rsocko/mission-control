@@ -804,23 +804,23 @@ function RyMessageConnectorEditPanel({
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Instance name
           <input value={name} onChange={event => { setName(event.target.value); setSaveError(''); }}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Companion base URL
           <input type="url" value={baseUrl} onChange={event => updateConnection(setBaseUrl, event.target.value)}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Mission Control trusted origin
           <input type="url" value={trustedOrigin} onChange={event => updateConnection(setTrustedOrigin, event.target.value)}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
           <span className="mt-1 block font-normal text-[var(--text-tertiary)]">Exact provisioned origin; no path, query, or fragment.</span>
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Bearer credential environment variable
           <input value={credentialEnv} spellCheck={false} onChange={event => updateConnection(setCredentialEnv, event.target.value)}
-            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+            className="input-glow mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none" />
           <span className="mt-1 block font-normal text-[var(--text-tertiary)]">Must be set in both web and worker runtimes.</span>
         </label>
       </div>

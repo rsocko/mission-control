@@ -53,7 +53,7 @@ describe.runIf(Boolean(connectionString))('PostgreSQL task-history triggers', ()
   ) => {
     const database = await getPool();
     await reset(database);
-    const now = '2026-09-30T01:00:00.000Z';
+    const now = '2026-09-29T21:00:00.000Z';
     const completedAt = '2026-09-29T22:00:00.000Z';
 
     await database.query(

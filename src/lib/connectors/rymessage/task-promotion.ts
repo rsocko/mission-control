@@ -57,7 +57,12 @@ async function promotionClient(connectorId: string) {
     throw new Error('RyMessage Companion promotion runtime is not configured');
   }
   return {
-    client: createCompanionActionClient({ baseUrl, credential, maxRetries: 0 }),
+    client: createCompanionActionClient({
+      baseUrl,
+      credential,
+      maxRetries: 0,
+      trustedMissionControlOrigin: trustedOrigin,
+    }),
     trustedOrigin,
   };
 }
@@ -71,7 +76,9 @@ async function findIntent(
     const page = await client.fetchPageV2(cursor);
     for (const item of page.items) {
       if (item.kind !== 'upsert' || item.aggregateId !== identity.actionId) continue;
-      const intent = item.creationIntents.find(candidate => candidate.intentId === identity.intentId);
+      const intent = item.projection.creationIntents.find(
+        candidate => candidate.intentId === identity.intentId,
+      );
       if (intent) return intent.state;
     }
 
@@ -110,7 +117,6 @@ export async function claimRyMessagePromotionIntent(
     mutation: {
       kind: 'creation-intent.claim',
       intentId: identity.intentId,
-      claimedAt: new Date().toISOString(),
     },
   });
   if (receipt.outcome !== 'conflict') return receipt.revision;
@@ -183,25 +189,22 @@ export async function fulfillRyMessagePromotionIntent(
     providerTaskId,
   };
   const canonicalUrl = `${trustedOrigin}/tasks/${encodeURIComponent(task.id)}`;
-  const materialization: CompanionTaskMaterializationV2 = {
-    relationId: companionTaskRelationIdV2(tuple),
-    revision: 1,
+  const underlying = {
     providerId,
     providerAccountId,
     ...(task.sourceListId ? { providerContainerId: task.sourceListId } : {}),
     providerTaskId,
-    state: 'linked',
-    snapshot: {
-      providerLabel: task.connectorType === 'local' ? 'Mission Control' : task.connectorType,
-      providerIconKey: providerId,
-      title: task.title,
-      status: normalizedStatus(task.status),
-      providerVersion: task.updatedAt,
-      openUrl: canonicalUrl,
-      observedAt: new Date().toISOString(),
-      availability: 'live',
-    },
-    updatedAt: new Date().toISOString(),
+  };
+  const relationId = companionTaskRelationIdV2(tuple);
+  const snapshot: CompanionTaskMaterializationV2['snapshot'] = {
+    providerLabel: task.connectorType === 'local' ? 'Mission Control' : task.connectorType,
+    providerIconKey: providerId,
+    title: task.title,
+    status: normalizedStatus(task.status),
+    providerVersion: task.updatedAt,
+    openUrl: canonicalUrl,
+    observedAt: new Date().toISOString(),
+    availability: 'live',
   };
   const receipt = await submitDurableRyMessageV2Mutation(identity.connectorId, client, {
     contractVersion: '2.0',
@@ -209,9 +212,14 @@ export async function fulfillRyMessagePromotionIntent(
     actionId: identity.actionId,
     expectedRevision: identity.expectedRevision ?? await currentActionRevision(identity),
     mutation: {
-      kind: 'creation-intent.fulfill',
+      kind: 'materialization.fulfill-intent',
       intentId: identity.intentId,
-      materialization,
+      relationId,
+      underlying,
+      snapshot,
+      managerTaskId: task.id,
+      managerVersion: task.updatedAt,
+      managerCanonicalUrl: canonicalUrl,
     },
   });
   if (receipt.outcome === 'conflict') {
@@ -220,26 +228,6 @@ export async function fulfillRyMessagePromotionIntent(
       throw new Error(`RyMessage promotion intent cannot be fulfilled (${state ?? 'missing'})`);
     }
   }
-  await submitDurableRyMessageV2Mutation(identity.connectorId, client, {
-    contractVersion: '2.0',
-    operationId: stableCompanionOperationId(`rymessage:manager:attach:${identity.intentId}`),
-    actionId: identity.actionId,
-    expectedRevision: receipt.revision,
-    mutation: {
-      kind: 'materialization.attach-manager',
-      relationId: materialization.relationId,
-      underlying: {
-        providerId,
-        providerAccountId,
-        ...(task.sourceListId ? { providerContainerId: task.sourceListId } : {}),
-        providerTaskId,
-      },
-      snapshot: materialization.snapshot,
-      managerTaskId: task.id,
-      managerVersion: task.updatedAt,
-      managerCanonicalUrl: canonicalUrl,
-    },
-  });
 }
 
 export async function observeManagedRyMessageTasks(
@@ -250,7 +238,7 @@ export async function observeManagedRyMessageTasks(
   const taskRepository = getCorePersistenceRepositories().tasks;
   for (const item of page.items) {
     if (item.kind !== 'upsert') continue;
-    for (const relation of item.taskMaterializations) {
+    for (const relation of item.projection.taskMaterializations) {
       if (!relation.management || relation.state === 'unlinked') continue;
       const task = await taskRepository.get(relation.management.managerTaskId);
       const status = task ? normalizedStatus(task.status) : 'deleted';
@@ -284,10 +272,9 @@ export async function observeManagedRyMessageTasks(
             observedAt,
             availability,
           },
-          management: {
-            managerVersion: task?.updatedAt ?? relation.management.managerVersion,
-            canonicalUrl: relation.management.canonicalUrl,
-          },
+          state: task ? 'linked' : 'deleted',
+          managerVersion: task?.updatedAt ?? relation.management.managerVersion,
+          managerCanonicalUrl: relation.management.canonicalUrl,
         },
       });
     }
@@ -306,17 +293,17 @@ export async function attachImportedRyMessageManagers(
   for (const item of page.items) {
     if (item.kind !== 'upsert') continue;
     let expectedRevision = item.aggregateVersion;
-    for (const relation of item.taskMaterializations) {
+    for (const relation of item.projection.taskMaterializations) {
       if (
         relation.management
         || relation.state !== 'linked'
-        || !['microsoft-todo', 'microsoft_todo'].includes(relation.providerId)
+        || !['microsoft-todo', 'microsoft_todo'].includes(relation.underlying.providerId)
       ) continue;
       const task = await taskRepository.findByProviderIdentity({
-        connectorInstanceId: relation.providerAccountId,
-        providerTaskId: relation.providerTaskId,
-        ...(relation.providerContainerId
-          ? { providerContainerId: relation.providerContainerId }
+        connectorInstanceId: relation.underlying.providerAccountId,
+        providerTaskId: relation.underlying.providerTaskId,
+        ...(relation.underlying.providerContainerId
+          ? { providerContainerId: relation.underlying.providerContainerId }
           : {}),
       });
       if (!task) continue;
@@ -331,12 +318,7 @@ export async function attachImportedRyMessageManagers(
           kind: 'materialization.attach-manager',
           relationId: relation.relationId,
           underlying: {
-            providerId: relation.providerId,
-            providerAccountId: relation.providerAccountId,
-            ...(relation.providerContainerId
-              ? { providerContainerId: relation.providerContainerId }
-              : {}),
-            providerTaskId: relation.providerTaskId,
+            ...relation.underlying,
           },
           snapshot: relation.snapshot,
           managerTaskId: task.id,
@@ -426,9 +408,9 @@ export async function applyManagedRyMessageCommands(
     const taskRepository = getCorePersistenceRepositories().tasks;
     for (const item of page.items) {
       if (item.kind !== 'upsert') continue;
-      for (const command of item.managedTaskCommands) {
+      for (const command of item.projection.managedTaskCommands) {
         if (command.state !== 'pending' && command.state !== 'claimed') continue;
-        const relation = item.taskMaterializations.find(
+        const relation = item.projection.taskMaterializations.find(
           candidate => candidate.relationId === command.relationId,
         );
         if (!relation?.management) continue;
@@ -464,9 +446,8 @@ export async function applyManagedRyMessageCommands(
               actionId: item.aggregateId,
               expectedRevision: item.aggregateVersion,
               mutation: {
-                kind: 'managed-command.claim',
+                kind: 'managed-task-command.claim',
                 commandId: command.commandId,
-                claimedAt: new Date().toISOString(),
               },
             });
             if (claim.outcome === 'conflict') continue;
@@ -553,10 +534,17 @@ export async function applyManagedRyMessageCommands(
             actionId: item.aggregateId,
             expectedRevision: item.aggregateVersion + (command.state === 'pending' ? 1 : 0),
             mutation: {
-              kind: 'managed-command.complete',
+              kind: 'managed-task-command.complete',
               commandId: command.commandId,
+              snapshot: {
+                ...relation.snapshot,
+                title: updated.title,
+                status: normalizedStatus(updated.status),
+                providerVersion: updated.updatedAt,
+                observedAt: new Date().toISOString(),
+                availability: 'live',
+              },
               managerVersion: updated.updatedAt,
-              completedAt: new Date().toISOString(),
             },
           });
         } catch (error) {
@@ -571,10 +559,9 @@ export async function applyManagedRyMessageCommands(
             actionId: item.aggregateId,
             expectedRevision: item.aggregateVersion + (command.state === 'pending' ? 1 : 0),
             mutation: {
-              kind: 'managed-command.fail',
+              kind: 'managed-task-command.fail',
               commandId: command.commandId,
-              errorCode: code,
-              failedAt: new Date().toISOString(),
+              failureCode: code,
             },
           });
         }

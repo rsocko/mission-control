@@ -116,7 +116,10 @@ export async function projectCompanionActionV2PageToNotifications(
         tombstonedAt: item.occurredAt,
       });
     }
-    const relations = item.taskMaterializations.filter(relation => relation.state !== 'unlinked');
+    const { projection } = item;
+    const relations = projection.taskMaterializations.filter(
+      relation => relation.state !== 'unlinked',
+    );
     const activeRelations = relations.filter(relation => (
       relation.state === 'link-broken'
       || relation.snapshot.availability !== 'live'
@@ -127,15 +130,15 @@ export async function projectCompanionActionV2PageToNotifications(
       actionId: item.aggregateId,
       revision: item.aggregateVersion,
       sourceId: item.sourceId,
-      action: sanitizeCompanionAction(item.action),
+      action: sanitizeCompanionAction(projection.action),
       tombstonedAt: null,
     });
     return {
       ...base,
       sourceActivityKey: [
         base.sourceActivityKey,
-        item.taskLifecycleProvenance.source,
-        item.taskLifecycleProvenance.state,
+        projection.taskLifecycle.provenance,
+        projection.taskLifecycle.state,
         ...relations.map(relation => `${relation.relationId}:${relation.revision}`),
       ].join(':'),
       metadata: {
@@ -145,11 +148,11 @@ export async function projectCompanionActionV2PageToNotifications(
         linkedRelationIds: relations.map(relation => relation.relationId),
         activeLinkedTaskCount: activeRelations.length,
         terminalLinkedTaskCount: relations.length - activeRelations.length,
-        taskLifecycleSource: item.taskLifecycleProvenance.source,
-        taskLifecycleState: item.taskLifecycleProvenance.state,
+        taskLifecycleSource: projection.taskLifecycle.provenance,
+        taskLifecycleState: projection.taskLifecycle.state,
       },
       enrichmentRevision: `rymessage-v2:${item.aggregateVersion}:${
-        item.taskLifecycleProvenance.updatedAt
+        projection.taskLifecycle.derivedAt ?? projection.action.updatedAt
       }`,
     };
   });

@@ -308,7 +308,14 @@ export function createSqliteRyMessageActionRepository(
             : 'applied';
           if (outcome === 'applied') {
             const storedItem = item.kind === 'upsert'
-              ? { ...item, action: sanitizeCompanionAction(item.action) }
+              ? {
+                  ...item,
+                  action: sanitizeCompanionAction(item.action),
+                  projection: {
+                    ...item.projection,
+                    action: sanitizeCompanionAction(item.projection.action),
+                  },
+                }
               : item;
             database.prepare(`
               INSERT INTO rymessage_action_v2_projections (
@@ -506,13 +513,26 @@ export function createSqliteRyMessageActionRepository(
     async settleV2Mutation(input) {
       return immediate(() => {
         const row = database.prepare(`
-          SELECT attempt_count AS attemptCount
+          SELECT attempt_count AS attemptCount, action_id AS actionId
           FROM rymessage_action_v2_outbound_mutations
           WHERE connector_id = ? AND operation_id = ? AND lease_id = ? AND status = 'leased'
         `).get(input.connectorId, input.operationId, input.leaseId) as {
           attemptCount: number;
+          actionId: string;
         } | undefined;
         if (!row) return false;
+        if (
+          input.receipt
+          && (
+            input.receipt.operationId !== input.operationId
+            || input.receipt.actionId !== row.actionId
+          )
+        ) {
+          throw new RyMessageActionPersistenceError(
+            'RECEIPT_IDENTITY_MISMATCH',
+            'ActionV2 receipt does not match the leased operation',
+          );
+        }
         const status = input.receipt
           ? input.receipt.outcome === 'conflict' ? 'conflict' : 'succeeded'
           : input.retryable && row.attemptCount < RYMESSAGE_ACTION_MAX_ATTEMPTS

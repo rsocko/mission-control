@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "2.0",
+  "feedId": "00000000-0000-4000-8000-000000000010",
+  "mode": "full",
+  "producedAt": "2026-09-29T22:00:00.000Z",
+  "nextCursor": "cursor",
+  "complete": true,
+  "items": [
+    {
+      "eventId": "00000000-0000-4000-8000-000000000011",
+      "operationId": "00000000-0000-4000-8000-000000000012",
+      "aggregateId": "d63fea91-4cb0-5f7e-8125-aee79af81e7a",
+      "aggregateVersion": 1,
+      "sourceId": "source",
+      "occurredAt": "2026-09-29T22:00:00.000Z",
+      "kind": "upsert",
+      "action": {
+        "contractVersion": 1,
+        "actionId": "d63fea91-4cb0-5f7e-8125-aee79af81e7a",
+        "stableKey": "ak1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "revision": 1,
+        "createdAt": "2026-09-29T22:00:00.000Z",
+        "updatedAt": "2026-09-29T22:00:00.000Z",
+        "lastSeenAt": "2026-09-29T22:00:00.000Z",
+        "source": {
+          "identity": {
+            "kind": "provider_message",
+            "provider": "microsoft",
+            "id": "private"
+          },
+          "sourceKind": "message"
+        },
+        "content": {
+          "title": "Review report",
+          "actionType": "follow-up",
+          "priority": "high"
+        },
+        "classification": {
+          "derivationMethod": "deterministic",
+          "inputFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "lifecycle": {
+          "state": "visible"
+        },
+        "fieldRevisions": {
+          "title": 1,
+          "lifecycle": 1
+        },
+        "materializations": []
+      },
+      "projection": {
+        "action": {
+          "contractVersion": 1,
+          "actionId": "d63fea91-4cb0-5f7e-8125-aee79af81e7a",
+          "stableKey": "ak1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "revision": 1,
+          "createdAt": "2026-09-29T22:00:00.000Z",
+          "updatedAt": "2026-09-29T22:00:00.000Z",
+          "lastSeenAt": "2026-09-29T22:00:00.000Z",
+          "source": {
+            "identity": {
+              "kind": "provider_message",
+              "provider": "microsoft",
+              "id": "private"
+            },
+            "sourceKind": "message"
+          },
+          "content": {
+            "title": "Review report",
+            "actionType": "follow-up",
+            "priority": "high"
+          },
+          "classification": {
+            "derivationMethod": "deterministic",
+            "inputFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "lifecycle": {
+            "state": "visible"
+          },
+          "fieldRevisions": {
+            "title": 1,
+            "lifecycle": 1
+          },
+          "materializations": []
+        },
+        "taskMaterializations": [],
+        "creationIntents": [],
+        "managedTaskCommands": [],
+        "taskLifecycle": {
+          "state": "none",
+          "provenance": "none"
+        }
+      }
+    }
+  ]
+}

@@ -57,6 +57,9 @@ export async function submitDurableRyMessageV2Mutation(
   request: CompanionActionMutationRequestV2,
   signal?: AbortSignal,
 ): Promise<CompanionActionMutationReceiptV2> {
+  if (!client.validateMutationV2(request)) {
+    throw new Error('RyMessage ActionV2 mutation is outside the trusted contract');
+  }
   const repository = (await getWorkerPersistenceRepositories())
     .connectorState.rymessageActions;
   await repository.enqueueV2Mutation({

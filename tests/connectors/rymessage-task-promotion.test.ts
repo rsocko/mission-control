@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
-import type { CompanionActionFeedPageV2 } from '@/lib/connectors/rymessage/action-contract-v2';
+import type {
+  CompanionActionFeedPageV2,
+  CompanionActionFeedProjectionV2,
+} from '@/lib/connectors/rymessage/action-contract-v2';
 
 const getTask = vi.hoisted(() => vi.fn());
 const upsertTask = vi.hoisted(() => vi.fn());
@@ -40,7 +43,9 @@ const NOW = '2026-09-29T22:00:00.000Z';
 const ACTION_ID = '00000000-0000-4000-8000-000000000001';
 const RELATION_ID = '00000000-0000-5000-8000-000000000002';
 
-function page(overrides: Partial<CompanionActionFeedPageV2['items'][number]> = {}): CompanionActionFeedPageV2 {
+function page(
+  overrides: Partial<CompanionActionFeedProjectionV2> = {},
+): CompanionActionFeedPageV2 {
   return {
     schemaVersion: '2.0',
     feedId: '00000000-0000-4000-8000-000000000010',
@@ -57,40 +62,48 @@ function page(overrides: Partial<CompanionActionFeedPageV2['items'][number]> = {
       occurredAt: NOW,
       kind: 'upsert',
       action: {} as never,
-      taskMaterializations: [{
-        relationId: RELATION_ID,
-        revision: 1,
-        providerId: 'github-issues',
-        providerAccountId: 'github-1',
-        providerTaskId: 'owner/repo#1',
-        state: 'linked',
-        snapshot: {
-          providerLabel: 'GitHub',
-          providerIconKey: 'github-issues',
-          title: 'Task',
-          status: 'in-progress',
-          providerVersion: 'old',
-          openUrl: 'https://mc.example.test/',
-          observedAt: NOW,
-          availability: 'live',
+      projection: {
+        action: {} as never,
+        taskMaterializations: [{
+          contractVersion: 2,
+          relationId: RELATION_ID,
+          revision: 1,
+          actionId: ACTION_ID,
+          underlying: {
+            providerId: 'github-issues',
+            providerAccountId: 'github-1',
+            providerTaskId: 'owner/repo#1',
+          },
+          state: 'linked',
+          snapshot: {
+            providerLabel: 'GitHub',
+            providerIconKey: 'github-issues',
+            title: 'Task',
+            status: 'in-progress',
+            providerVersion: 'old',
+            openUrl: 'https://mc.example.test/',
+            observedAt: NOW,
+            availability: 'live',
+          },
+          management: {
+            manager: 'mission-control',
+            managerInstanceId: 'principal-injected',
+            managerTaskId: 'mc-task',
+            managerVersion: 'old',
+            canonicalUrl: 'https://mc.example.test/',
+          },
+          createdAt: NOW,
+          updatedAt: NOW,
+        }],
+        creationIntents: [],
+        managedTaskCommands: [],
+        taskLifecycle: {
+          provenance: 'task-aggregate',
+          state: 'linked',
+          derivedAt: NOW,
         },
-        management: {
-          manager: 'mission-control',
-          managerInstanceId: 'principal-injected',
-          managerTaskId: 'mc-task',
-          managerVersion: 'old',
-          canonicalUrl: 'https://mc.example.test/',
-        },
-        updatedAt: NOW,
-      }],
-      creationIntents: [],
-      managedTaskCommands: [],
-      taskLifecycleProvenance: {
-        source: 'task-aggregate',
-        state: 'linked',
-        updatedAt: NOW,
+        ...overrides,
       },
-      ...overrides,
     } as CompanionActionFeedPageV2['items'][number]],
   };
 }
@@ -99,6 +112,7 @@ function client(): CompanionActionClient {
   return {
     fetchPage: vi.fn(),
     fetchPageV2,
+    validateMutationV2: vi.fn(() => true),
     submitMutation: vi.fn(),
     submitMutationV2,
   };
@@ -125,7 +139,7 @@ beforeEach(() => {
 });
 
 describe('RyMessage task promotion convergence', () => {
-  it('fulfills the immutable provider tuple before attaching principal-injected management', async () => {
+  it('fulfills the immutable provider tuple with principal-injected management atomically', async () => {
     await fulfillRyMessagePromotionIntent({
       actionId: ACTION_ID,
       intentId: '00000000-0000-4000-8000-000000000020',
@@ -143,18 +157,8 @@ describe('RyMessage task promotion convergence', () => {
     });
 
     const fulfill = submitMutationV2.mock.calls[0]![0];
-    expect(fulfill.mutation.kind).toBe('creation-intent.fulfill');
-    expect(fulfill.mutation.materialization).toMatchObject({
-      providerId: 'github-issues',
-      providerAccountId: 'github-1',
-      providerContainerId: 'owner/repo',
-      providerTaskId: 'owner/repo#1',
-    });
-    expect(fulfill.mutation.materialization.management).toBeUndefined();
-
-    const attach = submitMutationV2.mock.calls[1]![0];
-    expect(attach.mutation).toMatchObject({
-      kind: 'materialization.attach-manager',
+    expect(fulfill.mutation).toMatchObject({
+      kind: 'materialization.fulfill-intent',
       underlying: {
         providerId: 'github-issues',
         providerAccountId: 'github-1',
@@ -165,6 +169,7 @@ describe('RyMessage task promotion convergence', () => {
       managerVersion: NOW,
       managerCanonicalUrl: 'https://mc.example.test/tasks/mc-task',
     });
+    expect(submitMutationV2).toHaveBeenCalledTimes(1);
   });
 
   it('reports provider deletion as terminal instead of recreating the task', async () => {
@@ -190,12 +195,16 @@ describe('RyMessage task promotion convergence', () => {
 
     const importedPage = page({
       taskMaterializations: [{
+        contractVersion: 2,
         relationId: RELATION_ID,
         revision: 1,
-        providerId: 'microsoft-todo',
-        providerAccountId: 'todo-connector',
-        providerContainerId: 'list-1',
-        providerTaskId: 'todo-task-1',
+        actionId: ACTION_ID,
+        underlying: {
+          providerId: 'microsoft-todo',
+          providerAccountId: 'todo-connector',
+          providerContainerId: 'list-1',
+          providerTaskId: 'todo-task-1',
+        },
         state: 'linked',
         snapshot: {
           providerLabel: 'Microsoft To Do',
@@ -207,6 +216,7 @@ describe('RyMessage task promotion convergence', () => {
           observedAt: NOW,
           availability: 'live',
         },
+        createdAt: NOW,
         updatedAt: NOW,
       }],
     });
@@ -280,8 +290,8 @@ describe('RyMessage task promotion convergence', () => {
     expect(upsertTask).not.toHaveBeenCalled();
     expect(submitMutationV2).toHaveBeenLastCalledWith(expect.objectContaining({
       mutation: expect.objectContaining({
-        kind: 'managed-command.fail',
-        errorCode: 'provider_update_unavailable',
+        kind: 'managed-task-command.fail',
+        failureCode: 'provider_update_unavailable',
       }),
     }));
   });
@@ -316,8 +326,8 @@ describe('RyMessage task promotion convergence', () => {
     expect(getOrInitializeConnector).not.toHaveBeenCalled();
     expect(submitMutationV2).toHaveBeenLastCalledWith(expect.objectContaining({
       mutation: expect.objectContaining({
-        kind: 'managed-command.fail',
-        errorCode: 'manager_version_conflict',
+        kind: 'managed-task-command.fail',
+        failureCode: 'manager_version_conflict',
       }),
     }));
 
@@ -351,8 +361,8 @@ describe('RyMessage task promotion convergence', () => {
     expect(getOrInitializeConnector).not.toHaveBeenCalled();
     expect(submitMutationV2).toHaveBeenLastCalledWith(expect.objectContaining({
       mutation: expect.objectContaining({
-        kind: 'managed-command.fail',
-        errorCode: 'provider_field_unsupported',
+        kind: 'managed-task-command.fail',
+        failureCode: 'provider_field_unsupported',
       }),
     }));
   });

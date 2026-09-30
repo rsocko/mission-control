@@ -167,7 +167,10 @@ async function testUnsavedConnector(
             error: 'Enter an absolute HTTP(S) Companion URL',
           };
         }
-        if (!normalizeTrustedOrigin(settings.trustedMissionControlOrigin)) {
+        const trustedMissionControlOrigin = normalizeTrustedOrigin(
+          settings.trustedMissionControlOrigin,
+        );
+        if (!trustedMissionControlOrigin) {
           return {
             success: false,
             latencyMs: Date.now() - start,
@@ -196,6 +199,7 @@ async function testUnsavedConnector(
           baseUrl,
           credential,
           maxRetries: 0,
+          trustedMissionControlOrigin,
         }).fetchPageV2(null);
         return {
           success: true,

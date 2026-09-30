@@ -3,6 +3,7 @@ import { ApiErrors } from '@/lib/api-error';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { createCompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
 import { submitDurableRyMessageV2Mutation } from '@/lib/connectors/rymessage/durable-v2-mutations';
+import { normalizeTrustedOrigin } from '@/lib/connectors/rymessage/action-contract-v2';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -47,13 +48,21 @@ export async function POST(
     ? settings.credentialEnv
     : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
   const credential = process.env[credentialEnv];
-  if (!baseUrl || !credential) {
+  const trustedMissionControlOrigin = normalizeTrustedOrigin(
+    settings.trustedMissionControlOrigin,
+  );
+  if (!baseUrl || !credential || !trustedMissionControlOrigin) {
     return ApiErrors.conflict(
       `RyMessage Companion requires ${credentialEnv} in the Mission Control web runtime`,
     );
   }
 
-  const client = createCompanionActionClient({ baseUrl, credential, maxRetries: 0 });
+  const client = createCompanionActionClient({
+    baseUrl,
+    credential,
+    maxRetries: 0,
+    trustedMissionControlOrigin,
+  });
   const results = [];
   for (const item of items) {
     const intentId = typeof item.intentId === 'string' ? item.intentId : '';

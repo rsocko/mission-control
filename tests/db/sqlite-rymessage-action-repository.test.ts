@@ -148,6 +148,30 @@ function page(input: {
   };
 }
 
+function v2Upsert(canonicalAction: CompanionActionV1, event: number) {
+  return {
+    eventId: uuid(30_000 + event),
+    operationId: uuid(40_000 + event),
+    aggregateId: canonicalAction.actionId,
+    aggregateVersion: canonicalAction.revision,
+    sourceId: `source-${canonicalAction.actionId}`,
+    occurredAt: NOW,
+    kind: 'upsert' as const,
+    action: canonicalAction,
+    projection: {
+      action: canonicalAction,
+      taskMaterializations: [],
+      creationIntents: [],
+      managedTaskCommands: [],
+      taskLifecycle: {
+        provenance: 'manual-user' as const,
+        state: 'none' as const,
+        derivedAt: NOW,
+      },
+    },
+  };
+}
+
 describe('SQLite RyMessage action repository', () => {
   beforeEach(async () => {
     const { database } = await contextPromise;
@@ -181,24 +205,7 @@ describe('SQLite RyMessage action repository', () => {
       producedAt: NOW,
       nextCursor: 'v2-cursor-1',
       complete: true,
-      items: [{
-        eventId: uuid(52),
-        operationId: uuid(53),
-        aggregateId: actionId,
-        aggregateVersion: 1,
-        sourceId: 'source-51',
-        occurredAt: NOW,
-        kind: 'upsert',
-        action: action(51),
-        taskMaterializations: [],
-        creationIntents: [],
-        managedTaskCommands: [],
-        taskLifecycleProvenance: {
-          source: 'manual-user',
-          state: 'visible',
-          updatedAt: NOW,
-        },
-      }],
+      items: [v2Upsert(action(51), 52)],
     };
     await repository.readV2FeedState(CONNECTOR_ID);
     await expect(repository.applyV2FeedPage({
@@ -247,12 +254,52 @@ describe('SQLite RyMessage action repository', () => {
       request,
       now: NOW,
     })).resolves.toBe('duplicate');
+    const reorderedRequest: CompanionActionMutationRequestV2 = {
+      mutation: {
+        draft: { priority: true, notes: 'Portable notes', title: 'Create a task' },
+        intentId: uuid(55),
+        kind: 'creation-intent.register',
+      },
+      expectedRevision: 1,
+      actionId,
+      operationId: uuid(54),
+      contractVersion: '2.0',
+    };
+    await expect(repository.enqueueV2Mutation({
+      connectorId: CONNECTOR_ID,
+      request: reorderedRequest,
+      now: NOW,
+    })).resolves.toBe('duplicate');
+    await expect(repository.enqueueV2Mutation({
+      connectorId: CONNECTOR_ID,
+      request: {
+        ...reorderedRequest,
+        mutation: {
+          kind: 'creation-intent.register',
+          intentId: uuid(55),
+          draft: { title: 'Changed content' },
+        },
+      },
+      now: NOW,
+    })).rejects.toMatchObject({ code: 'OPERATION_DIGEST_CONFLICT' });
     const lease = await repository.leaseV2Mutations({
       connectorId: CONNECTOR_ID,
       now: NOW,
     });
 
     expect(lease.items).toHaveLength(1);
+    await expect(repository.settleV2Mutation({
+      connectorId: CONNECTOR_ID,
+      operationId: request.operationId,
+      leaseId: lease.leaseId,
+      now: NOW,
+      receipt: {
+        operationId: request.operationId,
+        actionId: uuid(999),
+        outcome: 'applied',
+        revision: 2,
+      },
+    })).rejects.toMatchObject({ code: 'RECEIPT_IDENTITY_MISMATCH' });
     await expect(repository.settleV2Mutation({
       connectorId: CONNECTOR_ID,
       operationId: request.operationId,
@@ -296,24 +343,7 @@ describe('SQLite RyMessage action repository', () => {
       ...basePage,
       mode: 'full',
       nextCursor: 'cursor-1',
-      items: [{
-        eventId: uuid(62),
-        operationId: uuid(63),
-        aggregateId: actionId,
-        aggregateVersion: 1,
-        sourceId: 'source-61',
-        occurredAt: NOW,
-        kind: 'upsert',
-        action: action(61),
-        taskMaterializations: [],
-        creationIntents: [],
-        managedTaskCommands: [],
-        taskLifecycleProvenance: {
-          source: 'manual-user',
-          state: 'visible',
-          updatedAt: NOW,
-        },
-      }],
+      items: [v2Upsert(action(61), 62)],
     };
     await repository.applyV2FeedPage({
       connectorId: CONNECTOR_ID,
@@ -328,16 +358,15 @@ describe('SQLite RyMessage action repository', () => {
         mode: 'incremental',
         nextCursor: 'cursor-2',
         items: [{
-          ...fullPage.items[0]!,
-          eventId: uuid(64),
-          operationId: uuid(65),
-          action: {
+          ...v2Upsert({
             ...action(61),
             content: {
               ...action(61).content,
               title: 'Conflicting title',
             },
-          },
+          }, 64),
+          eventId: uuid(64),
+          operationId: uuid(65),
         }],
       },
       requestedCursor: 'cursor-1',

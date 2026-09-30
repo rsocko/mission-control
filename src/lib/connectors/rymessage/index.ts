@@ -113,12 +113,16 @@ export class RyMessageConnector implements IConnector {
       if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
         throw new Error('Companion action feed URL must be an absolute HTTP(S) URL');
       }
-      this.companionV2Enabled = Boolean(
-        normalizeTrustedOrigin(this.settings.trustedMissionControlOrigin),
+      const trustedMissionControlOrigin = normalizeTrustedOrigin(
+        this.settings.trustedMissionControlOrigin,
       );
+      this.companionV2Enabled = Boolean(trustedMissionControlOrigin);
       this.companionClient = createCompanionActionClient({
         baseUrl,
         credential,
+        ...(trustedMissionControlOrigin
+          ? { trustedMissionControlOrigin }
+          : {}),
       });
       this.companionService = new CompanionActionReconciliationService(
         config.id,

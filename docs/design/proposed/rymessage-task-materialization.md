@@ -97,8 +97,9 @@ Each row receives a durable UUID intent before provider delivery:
 2. claim it before one delivery attempt;
 3. create the Mission Control task with the same UUID as its idempotency key;
 4. deliver through the selected provider adapter; and
-5. fulfill the intent with the immutable provider tuple, then attach Mission
-   Control management in a separate principal-injected mutation.
+5. fulfill the intent atomically with `materialization.fulfill-intent`, the
+   immutable provider tuple, provider snapshot, and Mission Control manager
+   identifiers.
 
 Replays return the existing local task. Concurrent requests converge on the
 same task ID, provider push leases fence delivery, and stable Companion
@@ -125,6 +126,24 @@ registration; destination selection remains a Mission Control concern.
 Mutation receipts contain only `operationId`, `actionId`, `outcome`,
 `revision`, and the applicable optional `relationId`, `intentId`, or
 `commandId`.
+
+The V2 feed preserves each V1 item byte shape and adds `projection` to upserts.
+That projection contains the canonical action, materializations, creation
+intents, managed commands, and
+`taskLifecycle: { state: none|linked|completed, provenance:
+none|task-aggregate|manual-user, derivedAt? }`. Tombstones are unchanged.
+Materializations keep provider identity under immutable `underlying`, carry
+`contractVersion: 2`, `actionId`, optional `creationIntentId`, and both
+timestamps. Provider snapshot version and open URL are optional.
+
+Post-registration mutations use the frozen discriminants
+`creation-intent.claim`, `creation-intent.fail`,
+`materialization.fulfill-intent`, `materialization.attach-manager`,
+`materialization.observe`, `materialization.unlink`,
+`managed-task-command.claim`, `managed-task-command.complete`, and
+`managed-task-command.fail`. Mutation and feed receipt digests are lowercase
+SHA-256 over RFC 8785/JCS canonical JSON so key order cannot change
+idempotency.
 
 Relation identity is RFC 4122 UUIDv5 under namespace
 `60ed6d9d-c9d5-5fd6-9c7a-dbb312af3fb5`, using the UTF-8 RFC 8785/JCS JSON bytes

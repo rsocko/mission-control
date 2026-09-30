@@ -83,6 +83,7 @@ describe('RyMessage Companion connector setup', () => {
       baseUrl: 'http://companion:8080',
       credential: 'secret-value',
       maxRetries: 0,
+      trustedMissionControlOrigin: 'http://localhost:3099',
     });
     expect(fetchPageV2).toHaveBeenCalledWith(null);
   });
@@ -114,9 +115,6 @@ describe('RyMessage Companion connector setup', () => {
         companionBaseUrl: 'http://companion:8080',
       },
       syncedLists: [],
-      createdAt: NOW,
-      updatedAt: NOW,
-      deletedAt: null,
     });
     await expect(connector.testConnection()).resolves.toEqual({
       success: true,

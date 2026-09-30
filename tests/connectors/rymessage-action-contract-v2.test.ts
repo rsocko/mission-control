@@ -1,248 +1,253 @@
-import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
+  companionActionV2Digest,
   companionTaskRelationIdV2,
   isCompanionActionFeedPageV2,
+  isCompanionActionMutationReceiptV2,
   isCompanionActionMutationRequestV2,
   isCompanionTaskMaterializationV2,
   isManagedTaskCommandV1,
   normalizeTrustedOrigin,
   normalizeTrustedTaskUrl,
-  type CompanionTaskMaterializationV2,
 } from '@/lib/connectors/rymessage/action-contract-v2';
-import {
-  isCompanionActionV1,
-  type CompanionActionV1,
-} from '@/lib/connectors/rymessage/action-contract';
+import { isCompanionActionV1 } from '@/lib/connectors/rymessage/action-contract';
 
-const NOW = '2026-09-29T22:00:00.000Z';
+const FIXTURE_ROOT = join(
+  process.cwd(),
+  'tests',
+  'fixtures',
+  'rymessage-action-task-links',
+  'v2',
+);
+const NOW = '2026-01-02T03:04:05.000Z';
+const ACTION_ID = '00000000-0000-4000-8000-000000000001';
+const RELATION_ID = 'cc1ee9ad-ad34-5b29-957c-08fb19507768';
+const TRUSTED_MC_ORIGIN = 'https://mission-control.example';
+const TRUSTED_ORIGINS = new Set([
+  TRUSTED_MC_ORIGIN,
+  'https://github.com',
+  'https://to-do.office.com',
+]);
 
-function uuidFromDigest(namespace: string, value: string): string {
-  const bytes = createHash('sha256')
-    .update(`${namespace}\0`, 'utf8')
-    .update(value, 'utf8')
-    .digest()
-    .subarray(0, 16);
-  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
-  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
-  const hex = bytes.toString('hex');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${
-    hex.slice(16, 20)
-  }-${hex.slice(20)}`;
+function fixture(name: string): Record<string, unknown> {
+  return JSON.parse(readFileSync(join(FIXTURE_ROOT, name), 'utf8')) as Record<string, unknown>;
 }
 
-function action(): CompanionActionV1 {
-  const stableKey = `ak1:${'a'.repeat(64)}`;
+function snapshot() {
   return {
-    contractVersion: 1,
-    actionId: uuidFromDigest('rymessage:action:v1', stableKey),
-    stableKey,
-    revision: 1,
-    createdAt: NOW,
-    updatedAt: NOW,
-    lastSeenAt: NOW,
-    source: {
-      identity: { kind: 'provider_message', provider: 'microsoft', id: 'private' },
-      sourceKind: 'message',
-    },
-    content: { title: 'Review report', actionType: 'follow-up', priority: 'high' },
-    classification: {
-      derivationMethod: 'deterministic',
-      inputFingerprint: 'b'.repeat(64),
-    },
-    lifecycle: { state: 'visible' },
-    fieldRevisions: { title: 1, lifecycle: 1 },
-    materializations: [],
+    providerLabel: 'Microsoft To Do',
+    providerIconKey: 'microsoft-todo',
+    title: 'Review report',
+    status: 'in-progress',
+    observedAt: NOW,
+    availability: 'live',
   };
 }
 
-function materialization(actionId: string): CompanionTaskMaterializationV2 {
-  const tuple = {
-    actionId,
-    providerId: 'microsoft-todo',
-    providerAccountId: 'account',
-    providerContainerId: 'list',
-    providerTaskId: 'task',
-  };
+function request(mutation: Record<string, unknown>) {
   return {
-    relationId: companionTaskRelationIdV2(tuple),
-    revision: 1,
-    providerId: tuple.providerId,
-    providerAccountId: tuple.providerAccountId,
-    providerContainerId: tuple.providerContainerId,
-    providerTaskId: tuple.providerTaskId,
-    state: 'linked',
-    snapshot: {
-      providerLabel: 'Microsoft To Do',
-      providerIconKey: 'microsoft-todo',
-      title: 'Review report',
-      status: 'in-progress',
-      providerVersion: 'etag-1',
-      openUrl: 'https://tasks.example.test/task',
-      observedAt: NOW,
-      availability: 'live',
-    },
-    updatedAt: NOW,
+    contractVersion: '2.0',
+    operationId: '00000000-0000-4000-8000-000000000021',
+    actionId: ACTION_ID,
+    expectedRevision: 1,
+    mutation,
   };
 }
 
-describe('Companion ActionV2 contract', () => {
-  it('pins the standard relation UUIDv5 vector without tuple normalization', () => {
+describe('Companion ActionV2 canonical contract parity', () => {
+  it('validates the byte-equivalent frozen RyMessage materialization fixture', () => {
+    const value = fixture('materializations.json');
+    const trustedOrigins = new Set(value.trustedOrigins as string[]);
+    expect(value.materializations).toEqual(expect.any(Array));
+    for (const materialization of value.materializations as unknown[]) {
+      expect(isCompanionTaskMaterializationV2(materialization, trustedOrigins)).toBe(true);
+    }
+    expect(value.expectedTaskLifecycle).toEqual({
+      state: 'linked',
+      provenance: 'task-aggregate',
+    });
+  });
+
+  it('validates every frozen RyMessage request and receipt without shape widening', () => {
+    const value = fixture('mutations.json');
+    expect(value.path).toBe('/v2/integrations/action-feed/mutations');
+    for (const candidate of Object.values(value.requests as Record<string, unknown>)) {
+      expect(isCompanionActionMutationRequestV2(candidate, TRUSTED_ORIGINS)).toBe(true);
+    }
+    for (const candidate of Object.values(value.receipts as Record<string, unknown>)) {
+      expect(isCompanionActionMutationReceiptV2(candidate)).toBe(true);
+    }
+    const attach = (value.requests as Record<string, Record<string, unknown>>).attachManager;
+    expect(isCompanionActionMutationRequestV2({
+      ...attach,
+      mutation: {
+        ...(attach.mutation as Record<string, unknown>),
+        managerCanonicalUrl: 'https://attacker.example/tasks/1',
+      },
+    }, new Set([TRUSTED_MC_ORIGIN]))).toBe(false);
+  });
+
+  it('accepts the canonical V1-plus-projection route envelope and rejects flattening', () => {
+    const page = fixture('feed-page.json');
+    expect(isCompanionActionFeedPageV2(page, isCompanionActionV1)).toBe(true);
+    const upsert = (page.items as Array<Record<string, unknown>>)[0]!;
+    const projection = upsert.projection as Record<string, unknown>;
+    const flattened = {
+      ...upsert,
+      ...projection,
+    };
+    delete flattened.projection;
+    expect(isCompanionActionFeedPageV2({
+      ...page,
+      items: [flattened],
+    }, isCompanionActionV1)).toBe(false);
+    expect(isCompanionActionFeedPageV2({
+      ...page,
+      items: [{
+        ...upsert,
+        projection: {
+          ...projection,
+          action: {
+            ...(projection.action as Record<string, unknown>),
+            revision: 2,
+          },
+        },
+      }],
+    }, isCompanionActionV1)).toBe(false);
+  });
+
+  it('pins RFC 4122 UUIDv5 identity without tuple normalization', () => {
     expect(companionTaskRelationIdV2({
-      actionId: '00000000-0000-4000-8000-000000000001',
+      actionId: ACTION_ID,
       providerId: 'microsoft-todo',
       providerAccountId: 'account',
       providerContainerId: 'list',
       providerTaskId: 'task',
-    })).toBe('cc1ee9ad-ad34-5b29-957c-08fb19507768');
+    })).toBe(RELATION_ID);
+    expect(companionTaskRelationIdV2({
+      actionId: ACTION_ID,
+      providerId: 'microsoft-todo',
+      providerAccountId: 'Account',
+      providerContainerId: 'list',
+      providerTaskId: 'task',
+    })).not.toBe(RELATION_ID);
   });
 
-  it('validates tuple-derived relation identity and bounded task commands', () => {
-    const canonicalAction = action();
-    const relation = materialization(canonicalAction.actionId);
-    expect(isCompanionTaskMaterializationV2(relation, canonicalAction.actionId)).toBe(true);
-    expect(isCompanionTaskMaterializationV2({
-      ...relation,
-      relationId: '00000000-0000-4000-8000-000000000002',
-    }, canonicalAction.actionId)).toBe(false);
-    expect(isManagedTaskCommandV1({
-      commandId: '00000000-0000-4000-8000-000000000003',
-      revision: 1,
-      actionId: canonicalAction.actionId,
-      relationId: relation.relationId,
-      kind: 'patch',
-      patch: { status: 'completed', notes: '' },
-      state: 'pending',
-      createdAt: NOW,
-      updatedAt: NOW,
-    })).toBe(true);
-    expect(isManagedTaskCommandV1({
-      commandId: '00000000-0000-4000-8000-000000000003',
-      revision: 1,
-      actionId: canonicalAction.actionId,
-      relationId: relation.relationId,
-      kind: 'patch',
-      patch: { status: 'deleted' },
-      state: 'pending',
-      createdAt: NOW,
-      updatedAt: NOW,
-    })).toBe(false);
+  it('uses canonical JSON for digest key-order equivalence and content changes', () => {
+    expect(companionActionV2Digest({
+      z: 1,
+      nested: { b: true, a: ['x', 2] },
+    })).toBe(companionActionV2Digest({
+      nested: { a: ['x', 2], b: true },
+      z: 1,
+    }));
+    expect(companionActionV2Digest({ a: 1 })).not.toBe(
+      companionActionV2Digest({ a: 2 }),
+    );
   });
 
-  it('accepts an additive V2 page while preserving the exact V1 action validator', () => {
-    const canonicalAction = action();
-    const relation = materialization(canonicalAction.actionId);
-    expect(isCompanionActionFeedPageV2({
-      schemaVersion: '2.0',
-      feedId: '00000000-0000-4000-8000-000000000010',
-      mode: 'full',
-      producedAt: NOW,
-      nextCursor: 'cursor',
-      complete: true,
-      items: [{
-        eventId: '00000000-0000-4000-8000-000000000011',
-        operationId: '00000000-0000-4000-8000-000000000012',
-        aggregateId: canonicalAction.actionId,
-        aggregateVersion: 1,
-        sourceId: 'source',
-        occurredAt: NOW,
-        kind: 'upsert',
-        action: canonicalAction,
-        taskMaterializations: [relation],
-        creationIntents: [],
-        managedTaskCommands: [],
-        taskLifecycleProvenance: {
-          source: 'task-aggregate',
-          state: 'linked',
-          updatedAt: NOW,
-        },
-      }],
-    }, isCompanionActionV1)).toBe(true);
-  });
-
-  it('enforces exact trusted origins and strips no task URL data silently', () => {
-    expect(normalizeTrustedOrigin('HTTP://LOCALHOST:3099')).toBe('http://localhost:3099');
-    expect(normalizeTrustedOrigin('http://localhost:3099/path')).toBeNull();
-    expect(normalizeTrustedTaskUrl(
-      'http://localhost:3099/tasks/123',
-      'http://localhost:3099',
-    )).toBe('http://localhost:3099/tasks/123');
-    expect(normalizeTrustedTaskUrl(
-      'http://localhost:3099/tasks/123?token=secret',
-      'http://localhost:3099',
-    )).toBeNull();
-    expect(normalizeTrustedTaskUrl(
-      'http://127.0.0.1:3099/tasks/123',
-      'http://localhost:3099',
-    )).toBeNull();
-  });
-
-  it('freezes provider-neutral register, attach-manager, and unlink envelopes', () => {
-    const actionId = action().actionId;
-    const operationId = '00000000-0000-4000-8000-000000000021';
-    const intentId = '00000000-0000-4000-8000-000000000022';
-    expect(isCompanionActionMutationRequestV2({
-      contractVersion: '2.0',
-      operationId,
-      actionId,
-      expectedRevision: 1,
-      mutation: {
-        kind: 'creation-intent.register',
-        intentId,
-        draft: {
-          title: 'Review report',
-          notes: 'Portable notes',
-          dueAt: NOW,
-          reminderAt: NOW,
-          priority: true,
-        },
+  it('validates the canonical claim, fail, fulfill, observe, and command mutations', () => {
+    const underlying = {
+      providerId: 'microsoft-todo',
+      providerAccountId: 'account',
+      providerContainerId: 'list',
+      providerTaskId: 'task',
+    };
+    const candidates = [
+      { kind: 'creation-intent.claim', intentId: '00000000-0000-4000-8000-000000000011' },
+      {
+        kind: 'creation-intent.fail',
+        intentId: '00000000-0000-4000-8000-000000000011',
+        failureCode: 'provider_delivery_failed',
       },
-    })).toBe(true);
-    expect(isCompanionActionMutationRequestV2({
-      contractVersion: '2.0',
-      operationId,
-      actionId,
-      expectedRevision: 1,
-      mutation: {
-        kind: 'creation-intent.register',
-        intentId,
-        draft: {
-          title: 'Review report',
-          providerAccountId: 'forbidden',
-        },
-      },
-    })).toBe(false);
-
-    const relation = materialization(actionId);
-    expect(isCompanionActionMutationRequestV2({
-      contractVersion: '2.0',
-      operationId,
-      actionId,
-      expectedRevision: 2,
-      mutation: {
-        kind: 'materialization.attach-manager',
-        relationId: relation.relationId,
-        underlying: {
-          providerId: relation.providerId,
-          providerAccountId: relation.providerAccountId,
-          providerContainerId: relation.providerContainerId,
-          providerTaskId: relation.providerTaskId,
-        },
-        snapshot: relation.snapshot,
-        managerTaskId: 'mc-task-1',
+      {
+        kind: 'materialization.fulfill-intent',
+        intentId: '00000000-0000-4000-8000-000000000011',
+        relationId: RELATION_ID,
+        underlying,
+        snapshot: snapshot(),
+        managerTaskId: 'mc-task',
         managerVersion: '7',
-        managerCanonicalUrl: 'https://mc.example.test/tasks/mc-task-1',
+        managerCanonicalUrl: `${TRUSTED_MC_ORIGIN}/tasks/mc-task`,
       },
-    })).toBe(true);
-    expect(isCompanionActionMutationRequestV2({
-      contractVersion: '2.0',
-      operationId,
-      actionId,
-      expectedRevision: 3,
-      mutation: {
-        kind: 'materialization.unlink',
-        relationId: relation.relationId,
+      {
+        kind: 'materialization.observe',
+        relationId: RELATION_ID,
+        snapshot: snapshot(),
+        state: 'linked',
+        managerVersion: '8',
+        managerCanonicalUrl: `${TRUSTED_MC_ORIGIN}/tasks/mc-task`,
       },
-    })).toBe(true);
+      {
+        kind: 'managed-task-command.claim',
+        commandId: '00000000-0000-4000-8000-000000000031',
+      },
+      {
+        kind: 'managed-task-command.complete',
+        commandId: '00000000-0000-4000-8000-000000000031',
+        snapshot: snapshot(),
+        managerVersion: '9',
+      },
+      {
+        kind: 'managed-task-command.fail',
+        commandId: '00000000-0000-4000-8000-000000000031',
+        failureCode: 'provider_update_failed',
+      },
+    ];
+    for (const mutation of candidates) {
+      expect(isCompanionActionMutationRequestV2(
+        request(mutation),
+        new Set([TRUSTED_MC_ORIGIN]),
+      )).toBe(true);
+    }
+  });
+
+  it('enforces optional snapshots, exact bounds, and text semantics', () => {
+    const materializations = fixture('materializations.json').materializations as unknown[];
+    expect(isCompanionTaskMaterializationV2(
+      materializations[0],
+      TRUSTED_ORIGINS,
+    )).toBe(true);
+    expect(isCompanionTaskMaterializationV2({
+      ...(materializations[0] as Record<string, unknown>),
+      management: {
+        manager: 'mission-control',
+        managerInstanceId: 'm'.repeat(129),
+        managerTaskId: 'task',
+      },
+    }, TRUSTED_ORIGINS)).toBe(false);
+    expect(isCompanionActionMutationRequestV2(request({
+      kind: 'creation-intent.register',
+      intentId: '00000000-0000-4000-8000-000000000011',
+      draft: { title: 'Valid', notes: 'control\u0007' },
+    }))).toBe(false);
+    expect(isManagedTaskCommandV1({
+      commandId: '00000000-0000-4000-8000-000000000031',
+      revision: 1,
+      actionId: ACTION_ID,
+      relationId: RELATION_ID,
+      kind: 'patch',
+      patch: { notes: '' },
+      state: 'pending',
+      createdAt: NOW,
+      updatedAt: NOW,
+    }, ACTION_ID)).toBe(true);
+  });
+
+  it('normalizes exact trusted origins and rejects origin drift', () => {
+    expect(normalizeTrustedOrigin('HTTPS://MISSION-CONTROL.EXAMPLE')).toBe(
+      TRUSTED_MC_ORIGIN,
+    );
+    expect(normalizeTrustedOrigin(`${TRUSTED_MC_ORIGIN}/path`)).toBeNull();
+    expect(normalizeTrustedTaskUrl(
+      `${TRUSTED_MC_ORIGIN}/tasks/123`,
+      TRUSTED_MC_ORIGIN,
+    )).toBe(`${TRUSTED_MC_ORIGIN}/tasks/123`);
+    expect(normalizeTrustedTaskUrl(
+      'https://attacker.example/tasks/123',
+      TRUSTED_MC_ORIGIN,
+    )).toBeNull();
   });
 });

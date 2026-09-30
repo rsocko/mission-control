@@ -352,7 +352,14 @@ export function createPostgresRyMessageActionRepository(
             : 'applied';
           if (outcome === 'applied') {
             const storedItem = item.kind === 'upsert'
-              ? { ...item, action: sanitizeCompanionAction(item.action) }
+              ? {
+                  ...item,
+                  action: sanitizeCompanionAction(item.action),
+                  projection: {
+                    ...item.projection,
+                    action: sanitizeCompanionAction(item.projection.action),
+                  },
+                }
               : item;
             await client.query(
               `INSERT INTO rymessage_action_v2_projections (
@@ -543,9 +550,12 @@ export function createPostgresRyMessageActionRepository(
 
     async settleV2Mutation(input) {
       return transaction(pool, async client => {
-        const [leased] = await rows<{ attemptCount: number } & QueryResultRow>(
+        const [leased] = await rows<{
+          attemptCount: number;
+          actionId: string;
+        } & QueryResultRow>(
           client,
-          `SELECT attempt_count AS "attemptCount"
+          `SELECT attempt_count AS "attemptCount", action_id AS "actionId"
            FROM rymessage_action_v2_outbound_mutations
            WHERE connector_id = $1 AND operation_id = $2
              AND lease_id = $3 AND status = 'leased'
@@ -553,6 +563,18 @@ export function createPostgresRyMessageActionRepository(
           [input.connectorId, input.operationId, input.leaseId],
         );
         if (!leased) return false;
+        if (
+          input.receipt
+          && (
+            input.receipt.operationId !== input.operationId
+            || input.receipt.actionId !== leased.actionId
+          )
+        ) {
+          throw new RyMessageActionPersistenceError(
+            'RECEIPT_IDENTITY_MISMATCH',
+            'ActionV2 receipt does not match the leased operation',
+          );
+        }
         const status = input.receipt
           ? input.receipt.outcome === 'conflict' ? 'conflict' : 'succeeded'
           : input.retryable && leased.attemptCount < RYMESSAGE_ACTION_MAX_ATTEMPTS

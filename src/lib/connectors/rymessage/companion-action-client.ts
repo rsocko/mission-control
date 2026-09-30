@@ -15,6 +15,7 @@ import {
   isCompanionActionFeedPageV2,
   isCompanionActionMutationRequestV2,
   isCompanionActionMutationReceiptV2,
+  normalizeTrustedOrigin,
   type CompanionActionFeedPageV2,
   type CompanionActionMutationRequestV2,
   type CompanionActionMutationReceiptV2,
@@ -36,6 +37,7 @@ export class CompanionActionHttpError extends Error {
 export interface CompanionActionClient {
   fetchPage(cursor: string | null, signal?: AbortSignal): Promise<CompanionActionFeedPage>;
   fetchPageV2(cursor: string | null, signal?: AbortSignal): Promise<CompanionActionFeedPageV2>;
+  validateMutationV2(request: CompanionActionMutationRequestV2): boolean;
   submitMutationV2(
     request: CompanionActionMutationRequestV2,
     signal?: AbortSignal,
@@ -51,6 +53,7 @@ export interface CompanionActionClientOptions {
   credential: string;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
+  trustedMissionControlOrigin?: string;
 }
 
 function abortableDelay(delayMs: number, signal?: AbortSignal): Promise<void> {
@@ -85,6 +88,12 @@ export function createCompanionActionClient(
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   const fetchImpl = options.fetchImpl ?? fetch;
   const maxRetries = Math.min(Math.max(options.maxRetries ?? 3, 0), 5);
+  const normalizedTrustedOrigin = normalizeTrustedOrigin(
+    options.trustedMissionControlOrigin,
+  );
+  const trustedMutationOrigins = new Set(
+    normalizedTrustedOrigin ? [normalizedTrustedOrigin] : [],
+  );
 
   async function request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
     let lastError: unknown;
@@ -118,6 +127,10 @@ export function createCompanionActionClient(
   }
 
   return {
+    validateMutationV2(mutation) {
+      return isCompanionActionMutationRequestV2(mutation, trustedMutationOrigins);
+    },
+
     async fetchPage(cursor, signal) {
       const query = new URLSearchParams({
         limit: String(Math.min(
@@ -172,7 +185,7 @@ export function createCompanionActionClient(
     },
 
     async submitMutationV2(mutation, signal) {
-      if (!isCompanionActionMutationRequestV2(mutation)) {
+      if (!this.validateMutationV2(mutation)) {
         throw new CompanionActionHttpError(400, 'mutation_invalid', false);
       }
       const body = JSON.stringify(mutation);

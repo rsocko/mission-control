@@ -36,6 +36,7 @@ async function reset(database: Pool): Promise<void> {
 }
 
 afterAll(async () => {
+  if (pool) await reset(pool);
   await pool?.end();
   pool = null;
 });

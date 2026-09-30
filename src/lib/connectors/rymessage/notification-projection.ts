@@ -6,7 +6,17 @@ import type { CreateNotificationInput } from '@/db/persistence/notification-deli
 import type { NotificationLevel, NotificationSourceState } from '@/types';
 import { createNotifications } from '@/lib/notifications/service';
 import type { CompanionActionFeedPageV2 } from './action-contract-v2';
-import { sanitizeCompanionAction } from './action-contract';
+import {
+  sanitizeCompanionAction,
+  type CompanionActionV1,
+  type PortableCompanionAction,
+} from './action-contract';
+
+function portableAction(
+  action: CompanionActionV1 | PortableCompanionAction,
+): PortableCompanionAction {
+  return 'source' in action ? sanitizeCompanionAction(action) : action;
+}
 
 function notificationSourceId(connectorId: string, actionId: string): string {
   return `rymessage:companion:${connectorId}:${actionId}`;
@@ -130,7 +140,7 @@ export async function projectCompanionActionV2PageToNotifications(
       actionId: item.aggregateId,
       revision: item.aggregateVersion,
       sourceId: item.sourceId,
-      action: sanitizeCompanionAction(projection.action),
+      action: portableAction(projection.action),
       tombstonedAt: null,
     });
     return {

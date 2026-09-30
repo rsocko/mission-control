@@ -14,6 +14,7 @@ import { createRyMessageClient } from './rymessage-client';
 import type { RyMessageClient } from './rymessage-client';
 import { normalizeActionRecord, shouldImportAction, mapActionToAlert } from './message-transformer';
 import type { RyMessageAction } from './message-transformer';
+import { companionActionV2Digest } from './action-contract-v2';
 import {
   CompanionActionHttpError,
   createCompanionActionClient,
@@ -33,7 +34,10 @@ import {
 } from './task-promotion';
 import { flushRyMessageV2MutationOutbox } from './durable-v2-mutations';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
-import { RyMessageActionPersistenceError } from '@/db/persistence/rymessage-actions';
+import {
+  RyMessageActionPersistenceError,
+  type RyMessageActionV2Projection,
+} from '@/db/persistence/rymessage-actions';
 
 export type { RyMessageAction } from './message-transformer';
 
@@ -60,6 +64,34 @@ interface RyMessageConfig {
 }
 
 const DEFAULT_MIN_CONFIDENCE = 0.7;
+
+function summarizeV2Changes(
+  before: readonly RyMessageActionV2Projection[],
+  after: readonly RyMessageActionV2Projection[],
+): Pick<DomainSyncResult, 'itemsAdded' | 'itemsUpdated' | 'itemsRemoved'> {
+  const previous = new Map(before.map(projection => [projection.actionId, projection]));
+  let itemsAdded = 0;
+  let itemsUpdated = 0;
+  let itemsRemoved = 0;
+  for (const projection of after) {
+    const prior = previous.get(projection.actionId);
+    if (!projection.item) {
+      if (!prior || prior.item) itemsRemoved++;
+      continue;
+    }
+    if (!prior || !prior.item) {
+      itemsAdded++;
+      continue;
+    }
+    if (
+      projection.revision !== prior.revision
+      || companionActionV2Digest(projection.item) !== companionActionV2Digest(prior.item)
+    ) {
+      itemsUpdated++;
+    }
+  }
+  return { itemsAdded, itemsUpdated, itemsRemoved };
+}
 
 export class RyMessageConnector implements IConnector {
   readonly id: string = '';
@@ -142,11 +174,11 @@ export class RyMessageConnector implements IConnector {
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
       if (this.settings.mode === 'companion') {
-        await this.companionClient!.fetchPage(null);
         if (this.companionV2Enabled) {
           await this.companionClient!.fetchPageV2(null);
-          return { success: true, message: 'Connected to Companion ActionV1 and ActionV2 feeds' };
+          return { success: true, message: 'Connected to Companion ActionV2 feed' };
         }
+        await this.companionClient!.fetchPage(null);
         return {
           success: true,
           message: 'Connected to Companion ActionV1 feed; configure a trusted Mission Control origin to enable ActionV2',
@@ -223,6 +255,9 @@ export class RyMessageConnector implements IConnector {
     if (this.settings.mode === 'companion') {
       const persistence = (await getWorkerPersistenceRepositories())
         .connectorState.rymessageActions;
+      if (this.companionV2Enabled) {
+        return (await persistence.readV2FeedState(this.id)).cursor;
+      }
       return (await persistence.readFeedState(this.id)).cursor;
     }
     return null;
@@ -232,8 +267,8 @@ export class RyMessageConnector implements IConnector {
     if (this.settings.mode !== 'companion') {
       return { itemsAdded: 0, itemsUpdated: 0, itemsRemoved: 0, status: 'fresh' };
     }
-    const result = await this.companionService!.sync(context.signal);
     if (!this.companionV2Enabled) {
+      const result = await this.companionService!.sync(context.signal);
       return {
         itemsAdded: result.itemsAdded,
         itemsUpdated: result.itemsUpdated,
@@ -243,6 +278,7 @@ export class RyMessageConnector implements IConnector {
     }
     const persistence = (await getWorkerPersistenceRepositories())
       .connectorState.rymessageActions;
+    const initialProjections = await persistence.listV2Projections(this.id);
     await flushRyMessageV2MutationOutbox(this.id, this.companionClient!, context.signal);
     let v2Cursor = (await persistence.readV2FeedState(this.id)).cursor;
     let recoveryAttempted = false;
@@ -284,7 +320,8 @@ export class RyMessageConnector implements IConnector {
       }
     }
     const v2State = await persistence.readV2FeedState(this.id);
-    const persistedItems = (await persistence.listV2Projections(this.id)).map(projection => (
+    const finalProjections = await persistence.listV2Projections(this.id);
+    const persistedItems = finalProjections.map(projection => (
       projection.item ?? {
         eventId: randomUUID(),
         operationId: randomUUID(),
@@ -321,11 +358,10 @@ export class RyMessageConnector implements IConnector {
       this.companionClient!,
       this.id,
     );
+    const changes = summarizeV2Changes(initialProjections, finalProjections);
     return {
-      itemsAdded: result.itemsAdded,
-      itemsUpdated: result.itemsUpdated,
-      itemsRemoved: result.itemsRemoved,
-      status: result.status,
+      ...changes,
+      status: 'fresh',
     };
   }
 

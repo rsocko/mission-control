@@ -8,6 +8,10 @@ import type {
   CompanionActionMaterialization,
   CompanionActionV1,
 } from '@/lib/connectors/rymessage/action-contract';
+import type {
+  CompanionActionFeedPageV2,
+  CompanionActionMutationRequestV2,
+} from '@/lib/connectors/rymessage/action-contract-v2';
 import { RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS } from '@/db/persistence/rymessage-actions';
 
 vi.unmock('drizzle-orm');
@@ -144,6 +148,30 @@ function page(input: {
   };
 }
 
+function v2Upsert(canonicalAction: CompanionActionV1, event: number) {
+  return {
+    eventId: uuid(30_000 + event),
+    operationId: uuid(40_000 + event),
+    aggregateId: canonicalAction.actionId,
+    aggregateVersion: canonicalAction.revision,
+    sourceId: `source-${canonicalAction.actionId}`,
+    occurredAt: NOW,
+    kind: 'upsert' as const,
+    action: canonicalAction,
+    projection: {
+      action: canonicalAction,
+      taskMaterializations: [],
+      creationIntents: [],
+      managedTaskCommands: [],
+      taskLifecycle: {
+        provenance: 'manual-user' as const,
+        state: 'none' as const,
+        derivedAt: NOW,
+      },
+    },
+  };
+}
+
 describe('SQLite RyMessage action repository', () => {
   beforeEach(async () => {
     const { database } = await contextPromise;
@@ -153,6 +181,10 @@ describe('SQLite RyMessage action repository', () => {
       DELETE FROM rymessage_action_materializations;
       DELETE FROM rymessage_action_projections;
       DELETE FROM rymessage_action_feed_state;
+      DELETE FROM rymessage_action_v2_outbound_mutations;
+      DELETE FROM rymessage_action_v2_receipts;
+      DELETE FROM rymessage_action_v2_projections;
+      DELETE FROM rymessage_action_v2_feed_state;
       DELETE FROM tasks;
       DELETE FROM connector_configs;
     `);
@@ -161,6 +193,185 @@ describe('SQLite RyMessage action repository', () => {
         id, type, name, enabled, capabilities, credentials, settings, created_at, updated_at
       ) VALUES (?, 'rymessage', 'RyMessage', 1, '{}', '{}', '{}', ?, ?)
     `).run(CONNECTOR_ID, NOW, NOW);
+  });
+
+  it('persists ActionV2 pages and leases replay-safe outbound mutations', async () => {
+    const { repository } = await contextPromise;
+    const actionId = uuid(51);
+    const v2Page: CompanionActionFeedPageV2 = {
+      schemaVersion: '2.0',
+      feedId: FEED_ID,
+      mode: 'full',
+      producedAt: NOW,
+      nextCursor: 'v2-cursor-1',
+      complete: true,
+      items: [v2Upsert(action(51), 52)],
+    };
+    await repository.readV2FeedState(CONNECTOR_ID);
+    await expect(repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: v2Page,
+      requestedCursor: null,
+      receivedAt: NOW,
+    })).resolves.toEqual({ applied: 1, replayed: 0 });
+    expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor).toBe('v2-cursor-1');
+    const projections = await repository.listV2Projections(CONNECTOR_ID);
+    expect(projections).toHaveLength(1);
+    expect(JSON.stringify(projections)).not.toContain('raw-message-identity');
+    expect(JSON.stringify(projections)).not.toContain('Private Sender');
+    expect(JSON.stringify(projections)).not.toContain('Private model reasoning');
+    await expect(repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: {
+        ...v2Page,
+        mode: 'full',
+        nextCursor: 'v2-cursor-2',
+        items: [],
+      },
+      requestedCursor: 'v2-cursor-1',
+      receivedAt: '2026-09-29T20:01:00.000Z',
+    })).resolves.toEqual({ applied: 0, replayed: 0 });
+    expect((await repository.listV2Projections(CONNECTOR_ID))[0]?.item).toBeNull();
+
+    const request: CompanionActionMutationRequestV2 = {
+      contractVersion: '2.0',
+      operationId: uuid(54),
+      actionId,
+      expectedRevision: 1,
+      mutation: {
+        kind: 'creation-intent.register',
+        intentId: uuid(55),
+        draft: { title: 'Create a task', notes: 'Portable notes', priority: true },
+      },
+    };
+    await expect(repository.enqueueV2Mutation({
+      connectorId: CONNECTOR_ID,
+      request,
+      now: NOW,
+    })).resolves.toBe('queued');
+    await expect(repository.enqueueV2Mutation({
+      connectorId: CONNECTOR_ID,
+      request,
+      now: NOW,
+    })).resolves.toBe('duplicate');
+    const reorderedRequest: CompanionActionMutationRequestV2 = {
+      mutation: {
+        draft: { priority: true, notes: 'Portable notes', title: 'Create a task' },
+        intentId: uuid(55),
+        kind: 'creation-intent.register',
+      },
+      expectedRevision: 1,
+      actionId,
+      operationId: uuid(54),
+      contractVersion: '2.0',
+    };
+    await expect(repository.enqueueV2Mutation({
+      connectorId: CONNECTOR_ID,
+      request: reorderedRequest,
+      now: NOW,
+    })).resolves.toBe('duplicate');
+    await expect(repository.enqueueV2Mutation({
+      connectorId: CONNECTOR_ID,
+      request: {
+        ...reorderedRequest,
+        mutation: {
+          kind: 'creation-intent.register',
+          intentId: uuid(55),
+          draft: { title: 'Changed content' },
+        },
+      },
+      now: NOW,
+    })).rejects.toMatchObject({ code: 'OPERATION_DIGEST_CONFLICT' });
+    const lease = await repository.leaseV2Mutations({
+      connectorId: CONNECTOR_ID,
+      now: NOW,
+    });
+
+    expect(lease.items).toHaveLength(1);
+    await expect(repository.settleV2Mutation({
+      connectorId: CONNECTOR_ID,
+      operationId: request.operationId,
+      leaseId: lease.leaseId,
+      now: NOW,
+      receipt: {
+        operationId: request.operationId,
+        actionId: uuid(999),
+        outcome: 'applied',
+        revision: 2,
+      },
+    })).rejects.toMatchObject({ code: 'RECEIPT_IDENTITY_MISMATCH' });
+    await expect(repository.settleV2Mutation({
+      connectorId: CONNECTOR_ID,
+      operationId: request.operationId,
+      leaseId: lease.leaseId,
+      now: NOW,
+      receipt: {
+        operationId: request.operationId,
+        actionId,
+        outcome: 'applied',
+        revision: 2,
+        intentId: uuid(55),
+      },
+    })).resolves.toBe(true);
+    expect((await repository.leaseV2Mutations({
+      connectorId: CONNECTOR_ID,
+      now: NOW,
+    })).items).toHaveLength(0);
+  });
+
+  it('rejects incremental recovery and same-revision ActionV2 conflicts', async () => {
+    const { repository } = await contextPromise;
+    const basePage: CompanionActionFeedPageV2 = {
+      schemaVersion: '2.0',
+      feedId: FEED_ID,
+      mode: 'incremental',
+      producedAt: NOW,
+      nextCursor: 'bad-cursor',
+      complete: true,
+      items: [],
+    };
+    await repository.readV2FeedState(CONNECTOR_ID);
+    await expect(repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: basePage,
+      requestedCursor: null,
+      receivedAt: NOW,
+    })).rejects.toMatchObject({ code: 'RECOVERY_REQUIRED' });
+
+    const fullPage: CompanionActionFeedPageV2 = {
+      ...basePage,
+      mode: 'full',
+      nextCursor: 'cursor-1',
+      items: [v2Upsert(action(61), 62)],
+    };
+    await repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: fullPage,
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    await expect(repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: {
+        ...fullPage,
+        mode: 'incremental',
+        nextCursor: 'cursor-2',
+        items: [{
+          ...v2Upsert({
+            ...action(61),
+            content: {
+              ...action(61).content,
+              title: 'Conflicting title',
+            },
+          }, 64),
+          eventId: uuid(64),
+          operationId: uuid(65),
+        }],
+      },
+      requestedCursor: 'cursor-1',
+      receivedAt: '2026-09-29T20:01:00.000Z',
+    })).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
+    expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor).toBe('cursor-1');
   });
 
   it('commits cursor pages atomically and tombstones omissions only after recovery completes', async () => {

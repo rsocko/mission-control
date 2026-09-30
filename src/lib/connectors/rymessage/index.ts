@@ -15,6 +15,7 @@ import type { RyMessageClient } from './rymessage-client';
 import { normalizeActionRecord, shouldImportAction, mapActionToAlert } from './message-transformer';
 import type { RyMessageAction } from './message-transformer';
 import {
+  CompanionActionHttpError,
   createCompanionActionClient,
   type CompanionActionClient,
 } from './companion-action-client';
@@ -22,7 +23,17 @@ import { CompanionActionReconciliationService } from './companion-action-service
 import type {
   CompanionActionMutation,
 } from './action-contract';
+import { COMPANION_ACTION_MAX_SYNC_PAGES } from './action-contract';
+import { normalizeTrustedOrigin } from './action-contract-v2';
+import { projectCompanionActionV2PageToNotifications } from './notification-projection';
+import {
+  applyManagedRyMessageCommands,
+  attachImportedRyMessageManagers,
+  observeManagedRyMessageTasks,
+} from './task-promotion';
+import { flushRyMessageV2MutationOutbox } from './durable-v2-mutations';
 import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
+import { RyMessageActionPersistenceError } from '@/db/persistence/rymessage-actions';
 
 export type { RyMessageAction } from './message-transformer';
 
@@ -43,6 +54,7 @@ interface RyMessageConfig {
   restUrl?: string;
   apiKey?: string;
   companionBaseUrl?: string;
+  trustedMissionControlOrigin?: string;
   credentialEnv?: string;
   minConfidence: number;
 }
@@ -72,6 +84,7 @@ export class RyMessageConnector implements IConnector {
   private client: RyMessageClient | null = null;
   private companionClient: CompanionActionClient | null = null;
   private companionService: CompanionActionReconciliationService | null = null;
+  private companionV2Enabled = false;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -100,9 +113,16 @@ export class RyMessageConnector implements IConnector {
       if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
         throw new Error('Companion action feed URL must be an absolute HTTP(S) URL');
       }
+      const trustedMissionControlOrigin = normalizeTrustedOrigin(
+        this.settings.trustedMissionControlOrigin,
+      );
+      this.companionV2Enabled = Boolean(trustedMissionControlOrigin);
       this.companionClient = createCompanionActionClient({
         baseUrl,
         credential,
+        ...(trustedMissionControlOrigin
+          ? { trustedMissionControlOrigin }
+          : {}),
       });
       this.companionService = new CompanionActionReconciliationService(
         config.id,
@@ -123,7 +143,14 @@ export class RyMessageConnector implements IConnector {
     try {
       if (this.settings.mode === 'companion') {
         await this.companionClient!.fetchPage(null);
-        return { success: true, message: 'Connected to Companion ActionV1 feed' };
+        if (this.companionV2Enabled) {
+          await this.companionClient!.fetchPageV2(null);
+          return { success: true, message: 'Connected to Companion ActionV1 and ActionV2 feeds' };
+        }
+        return {
+          success: true,
+          message: 'Connected to Companion ActionV1 feed; configure a trusted Mission Control origin to enable ActionV2',
+        };
       }
       if (this.settings.mode === 'webhook') {
         return { success: true, message: 'Webhook mode: awaiting pushes from RyMessage' };
@@ -152,6 +179,7 @@ export class RyMessageConnector implements IConnector {
     this.client = null;
     this.companionClient = null;
     this.companionService = null;
+    this.companionV2Enabled = false;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -205,6 +233,94 @@ export class RyMessageConnector implements IConnector {
       return { itemsAdded: 0, itemsUpdated: 0, itemsRemoved: 0, status: 'fresh' };
     }
     const result = await this.companionService!.sync(context.signal);
+    if (!this.companionV2Enabled) {
+      return {
+        itemsAdded: result.itemsAdded,
+        itemsUpdated: result.itemsUpdated,
+        itemsRemoved: result.itemsRemoved,
+        status: result.status,
+      };
+    }
+    const persistence = (await getWorkerPersistenceRepositories())
+      .connectorState.rymessageActions;
+    await flushRyMessageV2MutationOutbox(this.id, this.companionClient!, context.signal);
+    let v2Cursor = (await persistence.readV2FeedState(this.id)).cursor;
+    let recoveryAttempted = false;
+    for (let pageIndex = 0; pageIndex < COMPANION_ACTION_MAX_SYNC_PAGES; pageIndex++) {
+      let page;
+      try {
+        page = await this.companionClient!.fetchPageV2(v2Cursor, context.signal);
+        await persistence.applyV2FeedPage({
+          connectorId: this.id,
+          page,
+          requestedCursor: v2Cursor,
+          receivedAt: new Date().toISOString(),
+        });
+      } catch (error) {
+        const recoverable = (
+          error instanceof CompanionActionHttpError && error.status === 410
+        ) || (
+          error instanceof RyMessageActionPersistenceError
+          && ['FEED_IDENTITY_CHANGED', 'REVISION_CONFLICT'].includes(error.code)
+        );
+        if (!recoverable || recoveryAttempted) throw error;
+        await persistence.invalidateV2Recovery({
+          connectorId: this.id,
+          reason: error instanceof Error ? error.message : 'ActionV2 recovery required',
+          now: new Date().toISOString(),
+        });
+        recoveryAttempted = true;
+        v2Cursor = null;
+        pageIndex = -1;
+        continue;
+      }
+      if (page.complete) break;
+      if (!page.nextCursor || page.nextCursor === v2Cursor) {
+        throw new Error('Companion ActionV2 feed did not advance its cursor');
+      }
+      v2Cursor = page.nextCursor;
+      if (pageIndex === COMPANION_ACTION_MAX_SYNC_PAGES - 1) {
+        throw new Error('Companion ActionV2 feed exceeded the bounded page limit');
+      }
+    }
+    const v2State = await persistence.readV2FeedState(this.id);
+    const persistedItems = (await persistence.listV2Projections(this.id)).map(projection => (
+      projection.item ?? {
+        eventId: randomUUID(),
+        operationId: randomUUID(),
+        aggregateId: projection.actionId,
+        aggregateVersion: projection.revision,
+        sourceId: projection.sourceId,
+        occurredAt: projection.tombstonedAt ?? new Date().toISOString(),
+        kind: 'tombstone' as const,
+      }
+    ));
+    const persistedPage = {
+      schemaVersion: '2.0' as const,
+      feedId: v2State.feedId ?? randomUUID(),
+      mode: 'incremental' as const,
+      producedAt: new Date().toISOString(),
+      nextCursor: v2State.cursor ?? 'recovery',
+      complete: true,
+      items: persistedItems,
+    };
+    await projectCompanionActionV2PageToNotifications(this.id, persistedPage);
+    await attachImportedRyMessageManagers(
+      persistedPage,
+      this.companionClient!,
+      this.id,
+      this.settings.trustedMissionControlOrigin!,
+    );
+    await applyManagedRyMessageCommands(
+      persistedPage,
+      this.companionClient!,
+      this.id,
+    );
+    await observeManagedRyMessageTasks(
+      persistedPage,
+      this.companionClient!,
+      this.id,
+    );
     return {
       itemsAdded: result.itemsAdded,
       itemsUpdated: result.itemsUpdated,

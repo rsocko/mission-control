@@ -7,6 +7,7 @@ import type {
   CompanionActionMutationReceipt,
   CompanionActionV1,
 } from '@/lib/connectors/rymessage/action-contract';
+import { companionTaskRelationIdV2 } from '@/lib/connectors/rymessage/action-contract-v2';
 import { RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS } from '@/db/persistence/rymessage-actions';
 
 vi.unmock('drizzle-orm');
@@ -91,6 +92,52 @@ function companionAction(value: number): CompanionActionV1 {
 }
 
 describe('Companion ActionV1 HTTP and reconciliation seam', () => {
+  it('validates manager task URLs against the exact configured Mission Control origin', async () => {
+    const { client } = await contextPromise;
+    const actionId = uuid(900);
+    const underlying = {
+      providerId: 'github',
+      providerAccountId: 'installation-1',
+      providerTaskId: '1093',
+    };
+    const relationId = companionTaskRelationIdV2({ actionId, ...underlying });
+    const api = client.createCompanionActionClient({
+      baseUrl: 'https://companion.example.test',
+      credential: 'principal-credential',
+      trustedMissionControlOrigin: 'HTTPS://MISSION-CONTROL.EXAMPLE',
+    });
+    const request = {
+      contractVersion: '2.0' as const,
+      operationId: uuid(901),
+      actionId,
+      expectedRevision: 1,
+      mutation: {
+        kind: 'materialization.attach-manager' as const,
+        relationId,
+        underlying,
+        snapshot: {
+          providerLabel: 'GitHub',
+          providerIconKey: 'github',
+          title: 'Task',
+          status: 'in-progress' as const,
+          openUrl: 'https://github.com/rsocko/rymessage/issues/1093',
+          observedAt: NOW,
+          availability: 'live' as const,
+        },
+        managerTaskId: 'mc-task',
+        managerCanonicalUrl: 'https://mission-control.example/tasks/mc-task',
+      },
+    };
+    expect(api.validateMutationV2(request)).toBe(true);
+    expect(api.validateMutationV2({
+      ...request,
+      mutation: {
+        ...request.mutation,
+        managerCanonicalUrl: 'https://attacker.example/tasks/mc-task',
+      },
+    })).toBe(false);
+  });
+
   beforeEach(async () => {
     const { database } = await contextPromise;
     database.sqlite.exec(`
@@ -260,7 +307,10 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
     `).run(CONNECTOR_ID, FEED_ID, NOW, NOW);
     const client = {
       fetchPage: vi.fn(),
+      fetchPageV2: vi.fn(),
+      validateMutationV2: vi.fn(() => true),
       submitMutation: vi.fn(),
+      submitMutationV2: vi.fn(),
     };
     const reconciliation = new CompanionActionReconciliationService(
       CONNECTOR_ID,
@@ -394,7 +444,10 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
       fetchPage: vi.fn(async (cursor: string | null) => (
         cursor === null ? recovery : incremental
       )),
+      fetchPageV2: vi.fn(),
+      validateMutationV2: vi.fn(() => true),
       submitMutation: vi.fn(),
+      submitMutationV2: vi.fn(),
     };
     const reconciliation = new CompanionActionReconciliationService(
       CONNECTOR_ID,

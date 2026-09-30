@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "2.0",
+  "actionId": "00000000-0000-4000-8000-000000000001",
+  "trustedOrigins": [
+    "https://github.com",
+    "https://mission-control.example",
+    "https://to-do.office.com"
+  ],
+  "materializations": [
+    {
+      "contractVersion": 2,
+      "relationId": "d1adb6a2-7ddd-5220-87b3-ce2fe6a4e1bb",
+      "revision": 1,
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "creationIntentId": "00000000-0000-4000-8000-000000000011",
+      "underlying": {
+        "providerId": "mission-control-local",
+        "providerAccountId": "mc-home",
+        "providerTaskId": "local-1"
+      },
+      "state": "linked",
+      "snapshot": {
+        "providerLabel": "Mission Control",
+        "providerIconKey": "mission-control",
+        "title": "Review local follow-up",
+        "status": "not-started",
+        "observedAt": "2026-01-02T03:04:05.000Z",
+        "availability": "live"
+      },
+      "management": {
+        "manager": "mission-control",
+        "managerInstanceId": "mc-home",
+        "managerTaskId": "local-1",
+        "canonicalUrl": "https://mission-control.example/tasks/local-1"
+      },
+      "createdAt": "2026-01-02T03:04:05.000Z",
+      "updatedAt": "2026-01-02T03:04:05.000Z"
+    },
+    {
+      "contractVersion": 2,
+      "relationId": "a9e4e78b-c88b-53e5-aebe-55a71cb22701",
+      "revision": 3,
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "creationIntentId": "00000000-0000-4000-8000-000000000012",
+      "underlying": {
+        "providerId": "github",
+        "providerAccountId": "installation-1",
+        "providerContainerId": "rsocko/rymessage",
+        "providerTaskId": "1093"
+      },
+      "state": "linked",
+      "snapshot": {
+        "providerLabel": "GitHub",
+        "providerIconKey": "github",
+        "title": "Implement provider-neutral action links",
+        "status": "in-progress",
+        "providerVersion": "etag-3",
+        "openUrl": "https://github.com/rsocko/rymessage/issues/1093",
+        "observedAt": "2026-01-02T03:05:05.000Z",
+        "availability": "stale"
+      },
+      "management": {
+        "manager": "mission-control",
+        "managerInstanceId": "mc-home",
+        "managerTaskId": "github-1093",
+        "managerVersion": "7",
+        "canonicalUrl": "https://mission-control.example/tasks/github-1093"
+      },
+      "createdAt": "2026-01-02T03:04:05.000Z",
+      "updatedAt": "2026-01-02T03:05:05.000Z"
+    },
+    {
+      "contractVersion": 2,
+      "relationId": "cc1ee9ad-ad34-5b29-957c-08fb19507768",
+      "revision": 2,
+      "actionId": "00000000-0000-4000-8000-000000000001",
+      "underlying": {
+        "providerId": "microsoft-todo",
+        "providerAccountId": "account",
+        "providerContainerId": "list",
+        "providerTaskId": "task"
+      },
+      "state": "link-broken",
+      "snapshot": {
+        "providerLabel": "Microsoft To Do",
+        "providerIconKey": "microsoft-todo",
+        "title": "Existing managed To Do task",
+        "status": "unknown",
+        "openUrl": "https://to-do.office.com/tasks/id/task",
+        "observedAt": "2026-01-02T03:06:05.000Z",
+        "availability": "unavailable"
+      },
+      "management": {
+        "manager": "mission-control",
+        "managerInstanceId": "mc-home",
+        "managerTaskId": "todo-task",
+        "canonicalUrl": "https://mission-control.example/tasks/todo-task"
+      },
+      "createdAt": "2026-01-02T03:04:05.000Z",
+      "updatedAt": "2026-01-02T03:06:05.000Z"
+    }
+  ],
+  "expectedTaskLifecycle": {
+    "state": "linked",
+    "provenance": "task-aggregate"
+  }
+}

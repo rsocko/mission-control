@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import {
   TASK_ASSOCIATION_TABLES,
+  TASK_EXTERNAL_BINDING_TABLE,
 } from './task-deletion';
 
 type SqliteDatabase = Database.Database;
@@ -25,6 +26,10 @@ export function cleanupTaskAssociations(database: SqliteDatabase, taskId: string
   for (const table of TASK_ASSOCIATION_TABLES) {
     database.prepare(`DELETE FROM ${table} WHERE task_id = ?`).run(taskId);
   }
+  database.prepare(
+    `DELETE FROM ${TASK_EXTERNAL_BINDING_TABLE}
+     WHERE binding_type = 'task' AND local_id = ?`,
+  ).run(taskId);
   database.prepare(
     'DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?',
   ).run(taskId, taskId);

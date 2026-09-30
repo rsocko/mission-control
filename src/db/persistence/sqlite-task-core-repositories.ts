@@ -28,6 +28,7 @@ import {
   connectorConfigs,
   eventOutbox,
   eventOutboxDeliveries,
+  externalEntityBindings,
   focusItems,
   hubProjects,
   myDayExclusions,
@@ -1338,6 +1339,10 @@ function deleteTaskWithinTransaction(
   tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId)).run();
   tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId)).run();
   tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId)).run();
+  tx.delete(externalEntityBindings).where(and(
+    eq(externalEntityBindings.bindingType, 'task'),
+    eq(externalEntityBindings.localId, taskId),
+  )).run();
   tx.update(notifications)
     .set({ relatedTaskId: null })
     .where(eq(notifications.relatedTaskId, taskId))

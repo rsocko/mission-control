@@ -155,14 +155,26 @@ describe.runIf(Boolean(connectionString))('PostgreSQL task-history triggers', ()
       `UPDATE tasks
        SET status = 'todo', completed_at = NULL, micro_status = 'blocked',
            kanban_column = 'doing', effort = 3, local_disposition = 'handled',
+           due_date = '2026-10-01', snoozed_until = '2026-10-01T01:00:00.000Z',
+           updated_at = $1
+       WHERE id = 'task-1'`,
+      [now],
+    );
+    await database.query(
+      `UPDATE tasks
+       SET due_date = '2026-10-04',
+           snoozed_until = '2026-10-01T13:00:00.000Z',
            updated_at = $1
        WHERE id = 'task-1'`,
       [now],
     );
     await database.query(`DELETE FROM task_projects WHERE task_id = 'task-1'`);
 
-    const result = await database.query<{ event_type: string }>(
-      `SELECT event_type FROM task_history_events
+    const result = await database.query<{
+      event_type: string;
+      metadata: Record<string, unknown>;
+    }>(
+      `SELECT event_type, metadata FROM task_history_events
        WHERE task_id = 'task-1' ORDER BY id`,
     );
     expect(result.rows.map(({ event_type }) => event_type)).toEqual(expect.arrayContaining([
@@ -175,9 +187,27 @@ describe.runIf(Boolean(connectionString))('PostgreSQL task-history triggers', ()
       'kanban_column_changed',
       'effort_changed',
       'local_disposition_changed',
+      'due_date_pushed',
+      'snooze_extended',
       'phase_removed',
       'project_removed',
     ]));
+    expect(result.rows.find(({ event_type }) => event_type === 'due_date_pushed')?.metadata)
+      .toEqual({ delayDays: 3 });
+    expect(result.rows.find(({ event_type }) => event_type === 'snooze_extended')?.metadata)
+      .toEqual({ delayHours: 12 });
+
+    const historyId = await database.query<{ id: number }>(
+      `SELECT id FROM task_history_events WHERE task_id = 'task-1' ORDER BY id LIMIT 1`,
+    );
+    await expect(database.query(
+      `UPDATE task_history_events SET metadata = '{}' WHERE id = $1`,
+      [historyId.rows[0]?.id],
+    )).rejects.toThrow(/append-only/);
+    await expect(database.query(
+      `DELETE FROM task_history_events WHERE id = $1`,
+      [historyId.rows[0]?.id],
+    )).rejects.toThrow(/append-only/);
   });
 });
 

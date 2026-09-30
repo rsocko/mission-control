@@ -281,6 +281,9 @@ export function createPostgresRyMessageActionRepository(
         const authoritativeRecovery = command.requestedCursor === null
           && command.page.mode === 'full'
           && state.recoveryRequired;
+        const generation = command.page.mode === 'full'
+          ? state.fullSyncGeneration ?? randomUUID()
+          : state.fullSyncGeneration;
         for (const item of command.page.items) {
           if (item.kind !== 'upsert') continue;
           const [receipt] = await rows<{ payloadDigest: string } & QueryResultRow>(
@@ -323,9 +326,6 @@ export function createPostgresRyMessageActionRepository(
           }
         }
 
-        const generation = command.page.mode === 'full'
-          ? state.fullSyncGeneration ?? randomUUID()
-          : state.fullSyncGeneration;
         let applied = 0;
         let added = 0;
         let updated = 0;
@@ -335,24 +335,63 @@ export function createPostgresRyMessageActionRepository(
 
         for (const item of command.page.items) {
           const digest = companionActionDigest(item);
-          const [receipt] = await rows<{ payloadDigest: string } & QueryResultRow>(
+          const [receipt] = await rows<{
+            operationId: string;
+            actionId: string;
+            aggregateRevision: number;
+            payloadDigest: string;
+          } & QueryResultRow>(
             client,
-            `SELECT payload_digest AS "payloadDigest"
+            `SELECT operation_id AS "operationId", action_id AS "actionId",
+                    aggregate_revision AS "aggregateRevision",
+                    payload_digest AS "payloadDigest"
              FROM rymessage_action_receipts
              WHERE connector_id = $1 AND event_id = $2`,
             [command.connectorId, item.eventId],
           );
+          const existing = await readProjection(client, command.connectorId, item.aggregateId);
           if (receipt) {
-            if (receipt.payloadDigest !== digest) {
+            if (
+              receipt.operationId !== item.operationId
+              || receipt.actionId !== item.aggregateId
+              || receipt.aggregateRevision !== item.aggregateVersion
+              || receipt.payloadDigest !== digest
+            ) {
               throw new RyMessageActionPersistenceError(
                 'EVENT_IDENTITY_CONFLICT',
                 'Companion event identity was reused with different content',
               );
             }
-            ignored++;
-            continue;
+            if (command.page.mode === 'full' && generation && item.kind === 'upsert') {
+              const projectionDigest = companionActionDigest(
+                sanitizeCompanionAction(item.action),
+              );
+              if (
+                existing?.payload
+                && !existing.tombstonedAt
+                && existing.revision === item.aggregateVersion
+                && existing.payloadDigest === projectionDigest
+              ) {
+                await client.query(
+                  `UPDATE rymessage_action_projections
+                   SET last_seen_generation = $1
+                   WHERE connector_id = $2 AND action_id = $3`,
+                  [generation, command.connectorId, item.aggregateId],
+                );
+                ignored++;
+                continue;
+              }
+              if (existing && !existing.tombstonedAt) {
+                throw new RyMessageActionPersistenceError(
+                  'EVENT_PROJECTION_CONFLICT',
+                  'Companion event replay does not match the live projection',
+                );
+              }
+            } else {
+              ignored++;
+              continue;
+            }
           }
-          const existing = await readProjection(client, command.connectorId, item.aggregateId);
           let outcome = 'ignored';
           if (item.kind === 'upsert') {
             const sanitized = sanitizeCompanionAction(item.action);
@@ -536,7 +575,8 @@ export function createPostgresRyMessageActionRepository(
             `INSERT INTO rymessage_action_receipts (
                connector_id, event_id, operation_id, action_id, aggregate_revision,
                payload_digest, outcome, received_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT (connector_id, event_id) DO NOTHING`,
             [
               command.connectorId,
               item.eventId,

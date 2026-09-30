@@ -81,6 +81,29 @@ runRyMessageActionRepositoryContract(
         );
         return result.rows[0] ?? null;
       },
+      async seedTombstoneQuota(count) {
+        await pool.query(`
+          INSERT INTO rymessage_action_projections (
+            connector_id, action_id, source_id, revision, payload, payload_digest,
+            last_event_id, last_operation_id, tombstoned_at, created_at, updated_at
+          )
+          SELECT $1, 'retained-tombstone-' || value,
+                 'retained-tombstone-source-' || value, 1, NULL,
+                 'retained-tombstone-digest-' || value,
+                 'retained-tombstone-event-' || value,
+                 'retained-tombstone-operation-' || value, $2, $2, $2
+          FROM generate_series(1, $3) AS value
+        `, [RYMESSAGE_ACTION_CONTRACT_CONNECTOR_ID, '2026-09-29T22:00:00.000Z', count]);
+      },
+      async projectionGeneration(actionId) {
+        const result = await pool.query<{ generation: string | null }>(
+          `SELECT last_seen_generation AS generation
+           FROM rymessage_action_projections
+           WHERE connector_id = $1 AND action_id = $2`,
+          [RYMESSAGE_ACTION_CONTRACT_CONNECTOR_ID, actionId],
+        );
+        return result.rows[0]?.generation ?? null;
+      },
     },
   },
 );

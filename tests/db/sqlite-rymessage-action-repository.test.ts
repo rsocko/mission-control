@@ -675,6 +675,41 @@ describe('SQLite RyMessage action repository', () => {
     `).get(CONNECTOR_ID) as { count: number };
     expect(count.count).toBe(RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS);
     expect((await repository.getProjection(CONNECTOR_ID, live.actionId))?.action).not.toBeNull();
+
+    const recoveryPage = page({
+      action: live,
+      event: 61,
+      cursor: 'cursor-recovered',
+    });
+    recoveryPage.items.push(page({
+      tombstoneActionId: uuid(620),
+      aggregateVersion: 1,
+      event: 62,
+      cursor: 'unused',
+    }).items[0]!);
+    await expect(repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: recoveryPage,
+      requestedCursor: null,
+      receivedAt: '2026-09-29T20:02:00.000Z',
+    })).resolves.toMatchObject({
+      ignored: 2,
+      recoveryCompleted: true,
+      recoveryRequired: false,
+    });
+    expect(await repository.getProjection(CONNECTOR_ID, live.actionId))
+      .toMatchObject({ action: expect.objectContaining({ actionId: live.actionId }) });
+    expect(database.sqlite.prepare(`
+      SELECT last_seen_generation AS generation
+      FROM rymessage_action_projections
+      WHERE connector_id = ? AND action_id = ?
+    `).get(CONNECTOR_ID, live.actionId)).toMatchObject({
+      generation: expect.any(String),
+    });
+    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+      cursor: 'cursor-recovered',
+      recoveryRequired: false,
+    });
   });
 
   it('enforces outbound idempotency and rejects observations for unknown relations', async () => {

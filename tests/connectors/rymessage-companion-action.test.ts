@@ -5,7 +5,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CompanionActionFeedPage,
   CompanionActionMutationReceipt,
+  CompanionActionV1,
 } from '@/lib/connectors/rymessage/action-contract';
+import { RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS } from '@/db/persistence/rymessage-actions';
 
 vi.unmock('drizzle-orm');
 
@@ -62,6 +64,30 @@ function tombstones(count: number): CompanionActionFeedPage['items'] {
     occurredAt: NOW,
     kind: 'tombstone' as const,
   }));
+}
+
+function companionAction(value: number): CompanionActionV1 {
+  return {
+    contractVersion: 1,
+    actionId: uuid(value),
+    stableKey: `ak1:${String(value).padStart(64, '0')}`,
+    revision: 1,
+    createdAt: NOW,
+    updatedAt: NOW,
+    lastSeenAt: NOW,
+    source: {
+      identity: { kind: 'provider_message', provider: 'microsoft', id: `message-${value}` },
+      sourceKind: 'message',
+    },
+    content: { title: `Action ${value}`, actionType: 'follow-up' },
+    classification: {
+      derivationMethod: 'deterministic',
+      inputFingerprint: String(value).padStart(64, 'a'),
+    },
+    lifecycle: { state: 'visible' },
+    fieldRevisions: { title: 1, lifecycle: 1 },
+    materializations: [],
+  };
 }
 
 describe('Companion ActionV1 HTTP and reconciliation seam', () => {
@@ -294,6 +320,106 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
     });
     expect(String(fetchMock.mock.calls[0]![0])).toContain('cursor=expired-cursor');
     expect(String(fetchMock.mock.calls[1]![0])).not.toContain('cursor=');
+  });
+
+  it('preserves receipted live actions through tombstone-retention recovery', async () => {
+    const {
+      database,
+      repository,
+      service: { CompanionActionReconciliationService },
+    } = await contextPromise;
+    const insert = database.sqlite.prepare(`
+      INSERT INTO rymessage_action_projections (
+        connector_id, action_id, source_id, revision, payload, payload_digest,
+        last_event_id, last_operation_id, tombstoned_at, created_at, updated_at
+      ) VALUES (?, ?, ?, 1, NULL, ?, ?, ?, ?, ?, ?)
+    `);
+    database.sqlite.transaction(() => {
+      for (
+        let index = 0;
+        index < RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS;
+        index++
+      ) {
+        const id = `service-tombstone-${String(index).padStart(5, '0')}`;
+        insert.run(
+          CONNECTOR_ID,
+          id,
+          id,
+          id,
+          id,
+          id,
+          '2026-09-29T20:00:00.000Z',
+          '2026-09-29T20:00:00.000Z',
+          '2026-09-29T20:00:00.000Z',
+        );
+      }
+    })();
+    await repository.applyFeedPage({
+      connectorId: CONNECTOR_ID,
+      page: emptyPage({ nextCursor: 'cursor-before-overflow' }),
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+
+    const live = companionAction(7_001);
+    const liveEvent = {
+      eventId: uuid(7_101),
+      operationId: uuid(7_201),
+      aggregateId: live.actionId,
+      aggregateVersion: live.revision,
+      sourceId: 'rymessage:service-live',
+      occurredAt: '2026-09-29T21:01:00.000Z',
+      kind: 'upsert' as const,
+      action: live,
+    };
+    const overflowTombstone = {
+      eventId: uuid(7_102),
+      operationId: uuid(7_202),
+      aggregateId: uuid(7_002),
+      aggregateVersion: 1,
+      sourceId: 'rymessage:service-tombstone',
+      occurredAt: '2026-09-29T21:01:00.000Z',
+      kind: 'tombstone' as const,
+    };
+    const incremental = emptyPage({
+      mode: 'incremental',
+      nextCursor: 'cursor-overflow',
+      items: [liveEvent, overflowTombstone],
+    });
+    const recovery = emptyPage({
+      nextCursor: 'cursor-recovered',
+      items: [liveEvent, overflowTombstone],
+    });
+    const client = {
+      fetchPage: vi.fn(async (cursor: string | null) => (
+        cursor === null ? recovery : incremental
+      )),
+      submitMutation: vi.fn(),
+    };
+    const reconciliation = new CompanionActionReconciliationService(
+      CONNECTOR_ID,
+      client,
+      async () => repository,
+    );
+
+    await expect(reconciliation.sync()).resolves.toMatchObject({
+      itemsAdded: 1,
+      itemsRemoved: 1,
+      status: 'fresh',
+    });
+    expect(client.fetchPage).toHaveBeenNthCalledWith(
+      1,
+      'cursor-before-overflow',
+      undefined,
+    );
+    expect(client.fetchPage).toHaveBeenNthCalledWith(2, null, undefined);
+    expect(await repository.getProjection(CONNECTOR_ID, live.actionId))
+      .toMatchObject({ action: expect.objectContaining({ actionId: live.actionId }) });
+    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+      cursor: 'cursor-recovered',
+      recoveryGeneration: 1,
+      recoveryRequired: false,
+    });
   });
 
   it('pages until the feed reports complete', async () => {

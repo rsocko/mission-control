@@ -1,5 +1,8 @@
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import type { RyMessageActionPersistence } from '@/db/persistence/rymessage-actions';
+import {
+  RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS,
+  type RyMessageActionPersistence,
+} from '@/db/persistence/rymessage-actions';
 import type {
   CompanionActionFeedPage,
   CompanionActionMaterialization,
@@ -27,10 +30,13 @@ function materialization(): CompanionActionMaterialization {
   };
 }
 
-function action(relation: CompanionActionMaterialization): CompanionActionV1 {
+function action(
+  relation: CompanionActionMaterialization,
+  value = 9_200,
+): CompanionActionV1 {
   return {
     contractVersion: 1,
-    actionId: uuid(9_200),
+    actionId: uuid(value),
     stableKey: `ak1:${'c'.repeat(64)}`,
     revision: 1,
     createdAt: NOW,
@@ -100,6 +106,8 @@ export interface RyMessageActionRepositoryHarness {
     status: string;
     errorCode: string | null;
   } | null>;
+  seedTombstoneQuota(count: number): Promise<void>;
+  projectionGeneration(actionId: string): Promise<string | null>;
 }
 
 export function runRyMessageActionRepositoryContract(
@@ -293,6 +301,118 @@ export function runRyMessageActionRepositoryContract(
       await expect(input.harness.mutationStatus(operationId)).resolves.toEqual({
         status: 'conflict',
         errorCode: 'RECEIPT_IDENTITY_MISMATCH',
+      });
+    });
+
+    it('keeps verified live replays seen across tombstone-retention recovery', async () => {
+      const repository = input.harness.repository();
+      const first = action(materialization());
+      await repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: page(first),
+        requestedCursor: null,
+        receivedAt: NOW,
+      });
+      await input.harness.seedTombstoneQuota(
+        RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS,
+      );
+
+      const secondRelation = {
+        ...materialization(),
+        materializationId: uuid(9_101),
+        providerTaskId: 'task-2',
+      };
+      const second = action(secondRelation, 9_201);
+      const secondUpsert: Extract<
+        CompanionActionFeedPage['items'][number],
+        { kind: 'upsert' }
+      > = {
+        eventId: uuid(9_310),
+        operationId: uuid(9_410),
+        aggregateId: second.actionId,
+        aggregateVersion: second.revision,
+        sourceId: 'rymessage:contract-recovery-action',
+        occurredAt: '2026-09-29T23:01:00.000Z',
+        kind: 'upsert',
+        action: second,
+      };
+      const overflowTombstone = {
+        eventId: uuid(9_311),
+        operationId: uuid(9_411),
+        aggregateId: uuid(9_211),
+        aggregateVersion: 1,
+        sourceId: 'rymessage:overflow-tombstone',
+        occurredAt: '2026-09-29T23:01:00.000Z',
+        kind: 'tombstone' as const,
+      };
+      const overflowPage: CompanionActionFeedPage = {
+        ...page(second),
+        mode: 'incremental',
+        producedAt: '2026-09-29T23:01:00.000Z',
+        nextCursor: 'cursor-overflow',
+        items: [secondUpsert, overflowTombstone],
+      };
+      await expect(repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: overflowPage,
+        requestedCursor: 'cursor-1',
+        receivedAt: '2026-09-29T23:01:00.000Z',
+      })).resolves.toMatchObject({ recoveryRequired: true });
+      expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+        cursor: null,
+        recoveryGeneration: 1,
+      });
+
+      const conflictingReplay: CompanionActionFeedPage = {
+        ...overflowPage,
+        mode: 'full',
+        nextCursor: 'cursor-conflicting',
+        items: [{
+          ...secondUpsert,
+          action: {
+            ...second,
+            content: { ...second.content, title: 'Conflicting replay' },
+          },
+        }, overflowTombstone],
+      };
+      await expect(repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: conflictingReplay,
+        requestedCursor: null,
+        receivedAt: '2026-09-29T23:02:00.000Z',
+      })).rejects.toMatchObject({ code: 'EVENT_IDENTITY_CONFLICT' });
+      expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+        cursor: null,
+        recoveryRequired: true,
+      });
+
+      const recoveryPage: CompanionActionFeedPage = {
+        ...overflowPage,
+        mode: 'full',
+        producedAt: '2026-09-29T23:03:00.000Z',
+        nextCursor: 'cursor-recovered',
+      };
+      await expect(repository.applyFeedPage({
+        connectorId: CONNECTOR_ID,
+        page: recoveryPage,
+        requestedCursor: null,
+        receivedAt: '2026-09-29T23:03:00.000Z',
+      })).resolves.toMatchObject({
+        ignored: 2,
+        recoveryCompleted: true,
+        recoveryRequired: false,
+      });
+      expect(await repository.getProjection(CONNECTOR_ID, second.actionId))
+        .toMatchObject({ action: expect.objectContaining({ actionId: second.actionId }) });
+      expect(await input.harness.projectionGeneration(second.actionId))
+        .not.toBeNull();
+      expect(await repository.getProjection(CONNECTOR_ID, first.actionId))
+        .toMatchObject({ action: null, tombstonedAt: '2026-09-29T23:03:00.000Z' });
+      expect(await repository.getProjection(CONNECTOR_ID, overflowTombstone.aggregateId))
+        .toMatchObject({ action: null });
+      expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+        cursor: 'cursor-recovered',
+        recoveryRequired: false,
       });
     });
   });

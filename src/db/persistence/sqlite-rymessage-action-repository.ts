@@ -241,6 +241,9 @@ export function createSqliteRyMessageActionRepository(
         const authoritativeRecovery = command.requestedCursor === null
           && command.page.mode === 'full'
           && state.recoveryRequired === 1;
+        const generation = command.page.mode === 'full'
+          ? state.fullSyncGeneration ?? randomUUID()
+          : state.fullSyncGeneration;
 
         for (const item of command.page.items) {
           if (item.kind !== 'upsert') continue;
@@ -281,9 +284,6 @@ export function createSqliteRyMessageActionRepository(
           }
         }
 
-        const generation = command.page.mode === 'full'
-          ? state.fullSyncGeneration ?? randomUUID()
-          : state.fullSyncGeneration;
         let applied = 0;
         let added = 0;
         let updated = 0;
@@ -294,22 +294,60 @@ export function createSqliteRyMessageActionRepository(
         for (const item of command.page.items) {
           const digest = companionActionDigest(item);
           const receipt = database.prepare(`
-            SELECT payload_digest AS payloadDigest
+            SELECT operation_id AS operationId, action_id AS actionId,
+                   aggregate_revision AS aggregateRevision,
+                   payload_digest AS payloadDigest
             FROM rymessage_action_receipts
             WHERE connector_id = ? AND event_id = ?
-          `).get(command.connectorId, item.eventId) as { payloadDigest: string } | undefined;
+          `).get(command.connectorId, item.eventId) as {
+            operationId: string;
+            actionId: string;
+            aggregateRevision: number;
+            payloadDigest: string;
+          } | undefined;
+          const existing = readProjection(command.connectorId, item.aggregateId);
           if (receipt) {
-            if (receipt.payloadDigest !== digest) {
+            if (
+              receipt.operationId !== item.operationId
+              || receipt.actionId !== item.aggregateId
+              || receipt.aggregateRevision !== item.aggregateVersion
+              || receipt.payloadDigest !== digest
+            ) {
               throw new RyMessageActionPersistenceError(
                 'EVENT_IDENTITY_CONFLICT',
                 'Companion event identity was reused with different content',
               );
             }
-            ignored++;
-            continue;
+            if (command.page.mode === 'full' && generation && item.kind === 'upsert') {
+              const projectionDigest = companionActionDigest(
+                sanitizeCompanionAction(item.action),
+              );
+              if (
+                existing?.payload
+                && !existing.tombstonedAt
+                && existing.revision === item.aggregateVersion
+                && existing.payloadDigest === projectionDigest
+              ) {
+                database.prepare(`
+                  UPDATE rymessage_action_projections
+                  SET last_seen_generation = ?
+                  WHERE connector_id = ? AND action_id = ?
+                `).run(generation, command.connectorId, item.aggregateId);
+                ignored++;
+                continue;
+              }
+              if (existing && !existing.tombstonedAt) {
+                throw new RyMessageActionPersistenceError(
+                  'EVENT_PROJECTION_CONFLICT',
+                  'Companion event replay does not match the live projection',
+                );
+              }
+            } else {
+              ignored++;
+              continue;
+            }
           }
 
-          const existing = readProjection(command.connectorId, item.aggregateId);
           let outcome = 'ignored';
           if (item.kind === 'upsert') {
             const sanitized = sanitizeCompanionAction(item.action);
@@ -504,6 +542,7 @@ export function createSqliteRyMessageActionRepository(
               connector_id, event_id, operation_id, action_id, aggregate_revision,
               payload_digest, outcome, received_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(connector_id, event_id) DO NOTHING
           `).run(
             command.connectorId,
             item.eventId,

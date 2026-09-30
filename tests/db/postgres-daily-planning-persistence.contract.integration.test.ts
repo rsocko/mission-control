@@ -37,9 +37,9 @@ describe.skipIf(!connectionString)('PostgreSQL daily-planning adapter', () => {
           DELETE FROM weekly_one_thing;
           DELETE FROM energy_checkins;
           DELETE FROM task_schedules;
-          DELETE FROM task_history_events;
           DELETE FROM task_tags;
           DELETE FROM task_projects;
+          TRUNCATE task_history_events;
           DELETE FROM tasks;
           DELETE FROM triage_items;
           DELETE FROM notifications;

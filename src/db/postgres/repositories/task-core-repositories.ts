@@ -1486,11 +1486,6 @@ async function collectTaskGraphIds(
 class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
-  /**
-   * Unlike SQLite, the PostgreSQL schema has no `task_history_events`
-   * append-only DELETE trigger, so this path does not need the SQLite
-   * adapter's drop-trigger/recreate-trigger dance around the history purge.
-   */
   async hardDeleteScoutTask(taskId: string): Promise<ScoutHardDeleteOutcome> {
     return this.db.transaction(async (tx): Promise<ScoutHardDeleteOutcome> => {
       await lockTaskTagMutation(tx);
@@ -1528,6 +1523,9 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
         await tx.insert(taskIngestSuppressions).values(suppressions).onConflictDoNothing();
       }
 
+      await tx.execute(
+        sql`SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+      );
       await tx.delete(taskDependencies).where(or(
         inArray(taskDependencies.taskId, taskIds),
         inArray(taskDependencies.dependsOnTaskId, taskIds),

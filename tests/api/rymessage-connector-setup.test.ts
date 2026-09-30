@@ -122,4 +122,43 @@ describe('RyMessage Companion connector setup', () => {
     expect(fetchPage).toHaveBeenCalledWith(null);
     expect(fetchPageV2).not.toHaveBeenCalled();
   });
+
+  it('uses only ActionV2 for configured connector connection checks', async () => {
+    process.env.RYMESSAGE_COMPANION_ACTION_FEED_TOKEN = 'secret-value';
+    fetchPage.mockRejectedValue(new Error('integration_scope_required'));
+    fetchPageV2.mockResolvedValue({ schemaVersion: '2.0', items: [] });
+    const connector = new RyMessageConnector();
+    await connector.initialize({
+      id: 'rymessage-v2',
+      type: 'rymessage',
+      name: 'RyMessage',
+      enabled: true,
+      syncMode: 'poll',
+      pollIntervalMinutes: 5,
+      capabilities: {
+        read: true,
+        write: false,
+        delete: false,
+        sync: true,
+        lists: false,
+        subtasks: false,
+        tags: false,
+        tagWriteBack: false,
+      },
+      credentials: {},
+      settings: {
+        mode: 'companion',
+        companionBaseUrl: 'http://companion:8080',
+        trustedMissionControlOrigin: 'http://localhost:3099',
+      },
+      syncedLists: [],
+    });
+
+    await expect(connector.testConnection()).resolves.toEqual({
+      success: true,
+      message: 'Connected to Companion ActionV2 feed',
+    });
+    expect(fetchPageV2).toHaveBeenCalledWith(null);
+    expect(fetchPage).not.toHaveBeenCalled();
+  });
 });

@@ -738,8 +738,12 @@ async function preflightGitHubRecovery(
   }
 }
 
-async function deleteTaskRows(client: Client, taskId: string): Promise<void> {
-  await cleanupTaskAssociations(client, [taskId]);
+async function deleteTaskRows(
+  client: Client,
+  taskId: string,
+  options: { preserveIdentityBinding?: boolean } = {},
+): Promise<void> {
+  await cleanupTaskAssociations(client, [taskId], options);
   await client.query(
     `
       WITH RECURSIVE descendants(id, depth, path) AS (
@@ -2447,7 +2451,7 @@ export function createPostgresConnectorExecutionRepositories(
               githubFence?.bindingRevision ?? null,
             ],
           );
-          await deleteTaskRows(client, taskId);
+          await deleteTaskRows(client, taskId, { preserveIdentityBinding: true });
           return { snapshotId, taskTitle: task.title, sourceId: task.sourceId };
         });
       },

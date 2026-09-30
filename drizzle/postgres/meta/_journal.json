@@ -110,15 +110,29 @@
     {
       "idx": 15,
       "version": "7",
-      "when": 1790736857627,
-      "tag": "0015_thick_genesis",
+      "when": 1790733600000,
+      "tag": "0015_task_history_capture",
       "breakpoints": true
     },
     {
       "idx": 16,
       "version": "7",
+      "when": 1790733900000,
+      "tag": "0016_task_lifecycle_parity",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790736857627,
+      "tag": "0017_thick_genesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
       "when": 1790738395508,
-      "tag": "0016_chunky_phil_sheldon",
+      "tag": "0018_chunky_phil_sheldon",
       "breakpoints": true
     }
   ]

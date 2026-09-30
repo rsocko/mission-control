@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -32,7 +33,21 @@ const TRUSTED_ORIGINS = new Set([
 ]);
 
 function fixture(name: string): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(FIXTURE_ROOT, name), 'utf8')) as Record<string, unknown>;
+  return JSON.parse(fixtureText(name)) as Record<string, unknown>;
+}
+
+function fixtureText(name: string): string {
+  return readFileSync(join(FIXTURE_ROOT, name), 'utf8').replaceAll('\r\n', '\n');
+}
+
+function hydrateFixture<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)
+    .replaceAll('<feed-id>', '00000000-0000-4000-8000-000000000010')
+    .replaceAll('<timestamp>', NOW)
+    .replaceAll('<opaque-cursor>', 'cursor')
+    .replaceAll('<event-id>', '00000000-0000-4000-8000-000000000011')
+    .replaceAll('<operation-id>', '00000000-0000-4000-8000-000000000012')
+    .replaceAll('<action-id>', ACTION_ID)) as T;
 }
 
 function snapshot() {
@@ -57,6 +72,21 @@ function request(mutation: Record<string, unknown>) {
 }
 
 describe('Companion ActionV2 canonical contract parity', () => {
+  it('pins the normalized bytes of all three vendored RyMessage #1184 fixtures', () => {
+    const expectedHashes = {
+      'materializations.json':
+        '2c7f37f0953f15a0f5cd7312254237cdab6a8641ce4f719ec95c150c43e00655',
+      'mutations.json':
+        '74603a39b7e348038273974ea8fc4dd501bd1e6216852c655650f7d29a4f7579',
+      'feed-page.json':
+        '2db759654bec4f2feb798b04aa62a2b5e59183a6dac99c2fcb513ffb4f0048e7',
+    };
+    for (const [name, expectedHash] of Object.entries(expectedHashes)) {
+      expect(createHash('sha256').update(fixtureText(name), 'utf8').digest('hex'))
+        .toBe(expectedHash);
+    }
+  });
+
   it('validates the byte-equivalent frozen RyMessage materialization fixture', () => {
     const value = fixture('materializations.json');
     const trustedOrigins = new Set(value.trustedOrigins as string[]);
@@ -90,8 +120,14 @@ describe('Companion ActionV2 canonical contract parity', () => {
   });
 
   it('accepts the canonical V1-plus-projection route envelope and rejects flattening', () => {
-    const page = fixture('feed-page.json');
-    expect(isCompanionActionFeedPageV2(page, isCompanionActionV1)).toBe(true);
+    const wrapper = fixture('feed-page.json');
+    expect(wrapper.path).toBe('/v2/integrations/action-feed');
+    const page = hydrateFixture(wrapper.upsertPage as Record<string, unknown>);
+    expect(isCompanionActionFeedPageV2(
+      page,
+      isCompanionActionV1,
+      TRUSTED_ORIGINS,
+    )).toBe(true);
     const upsert = (page.items as Array<Record<string, unknown>>)[0]!;
     const projection = upsert.projection as Record<string, unknown>;
     const flattened = {
@@ -102,7 +138,7 @@ describe('Companion ActionV2 canonical contract parity', () => {
     expect(isCompanionActionFeedPageV2({
       ...page,
       items: [flattened],
-    }, isCompanionActionV1)).toBe(false);
+    }, isCompanionActionV1, TRUSTED_ORIGINS)).toBe(false);
     expect(isCompanionActionFeedPageV2({
       ...page,
       items: [{
@@ -111,11 +147,25 @@ describe('Companion ActionV2 canonical contract parity', () => {
           ...projection,
           action: {
             ...(projection.action as Record<string, unknown>),
-            revision: 2,
+            content: {
+              ...((projection.action as Record<string, unknown>)
+                .content as Record<string, unknown>),
+              title: 'Divergent title',
+            },
           },
         },
       }],
-    }, isCompanionActionV1)).toBe(false);
+    }, isCompanionActionV1, TRUSTED_ORIGINS)).toBe(false);
+
+    const tombstoneItem = hydrateFixture(
+      wrapper.tombstoneItem as Record<string, unknown>,
+    );
+    expect(isCompanionActionFeedPageV2({
+      ...page,
+      items: [tombstoneItem],
+    }, isCompanionActionV1, TRUSTED_ORIGINS)).toBe(true);
+    expect(tombstoneItem).not.toHaveProperty('projection');
+    expect(tombstoneItem).not.toHaveProperty('action');
   });
 
   it('pins RFC 4122 UUIDv5 identity without tuple normalization', () => {

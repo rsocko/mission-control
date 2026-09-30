@@ -79,7 +79,6 @@ export async function POST(
       results.push({ intentId, success: false, error: 'Invalid promotion intent' });
       continue;
     }
-    const now = new Date().toISOString();
     try {
       const receipt = await submitDurableRyMessageV2Mutation(
         notification.connectorInstanceId,

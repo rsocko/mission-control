@@ -15,7 +15,6 @@ import { POST } from '@/app/api/connectors/test-pre-save/route';
 import { RyMessageConnector } from '@/lib/connectors/rymessage';
 
 const previousToken = process.env.RYMESSAGE_COMPANION_ACTION_FEED_TOKEN;
-const NOW = '2026-09-29T22:00:00.000Z';
 
 afterEach(() => {
   vi.clearAllMocks();

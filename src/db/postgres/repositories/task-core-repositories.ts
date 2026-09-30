@@ -72,6 +72,7 @@ import {
   reconcilePostgresTaskTransferIdentityRefreshInTransaction,
   resolvePostgresTaskTransferIdentityTargets,
 } from './task-transfer-identity';
+import { cleanupTaskAssociationsInTransaction } from './task-deletion';
 import { decodeLenientJsonArray, decodeLenientJsonObject } from '@/db/persistence/value-codecs';
 import { eventSubscriptionMatches, parseEventTypes } from '@/db/persistence/event-outbox';
 import {
@@ -1325,31 +1326,7 @@ async function deleteSingleTaskWithinTransaction(
   taskId: string,
 ): Promise<void> {
   await lockTaskTagMutation(tx);
-  await tx.delete(taskTags).where(eq(taskTags.taskId, taskId));
-  await tx.delete(projectAutoIncludeExclusions)
-    .where(eq(projectAutoIncludeExclusions.taskId, taskId));
-  await tx.delete(taskProjects).where(eq(taskProjects.taskId, taskId));
-  await tx.delete(taskSchedules).where(eq(taskSchedules.taskId, taskId));
-  await tx.delete(myDayItems).where(eq(myDayItems.taskId, taskId));
-  await tx.delete(myDayExclusions).where(eq(myDayExclusions.taskId, taskId));
-  await tx.delete(focusItems).where(eq(focusItems.taskId, taskId));
-  await tx.delete(weeklyOneThing).where(eq(weeklyOneThing.taskId, taskId));
-  await tx.delete(prioritySyncLog).where(eq(prioritySyncLog.taskId, taskId));
-  await tx.delete(quickSortLog).where(eq(quickSortLog.taskId, taskId));
-  await tx.delete(quickSortOperations).where(eq(quickSortOperations.taskId, taskId));
-  await tx.delete(taskLinkedSources).where(eq(taskLinkedSources.taskId, taskId));
-  await tx.delete(taskAttachments).where(eq(taskAttachments.taskId, taskId));
-  await tx.delete(projectPhaseItems).where(eq(projectPhaseItems.taskId, taskId));
-  await tx.update(notifications)
-    .set({ relatedTaskId: null })
-    .where(eq(notifications.relatedTaskId, taskId));
-  await tx.update(taskRecurrenceBackfillDecisions)
-    .set({ taskId: null })
-    .where(eq(taskRecurrenceBackfillDecisions.taskId, taskId));
-  await tx.delete(taskDependencies).where(or(
-    eq(taskDependencies.taskId, taskId),
-    eq(taskDependencies.dependsOnTaskId, taskId),
-  ));
+  await cleanupTaskAssociationsInTransaction(tx, taskId);
   await tx.delete(tasks).where(eq(tasks.id, taskId));
 }
 
@@ -1509,11 +1486,6 @@ async function collectTaskGraphIds(
 class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteRepository {
   constructor(private readonly db: PostgresDatabase) {}
 
-  /**
-   * Unlike SQLite, the PostgreSQL schema has no `task_history_events`
-   * append-only DELETE trigger, so this path does not need the SQLite
-   * adapter's drop-trigger/recreate-trigger dance around the history purge.
-   */
   async hardDeleteScoutTask(taskId: string): Promise<ScoutHardDeleteOutcome> {
     return this.db.transaction(async (tx): Promise<ScoutHardDeleteOutcome> => {
       await lockTaskTagMutation(tx);
@@ -1551,6 +1523,9 @@ class PostgresScoutTaskHardDeleteRepository implements ScoutTaskHardDeleteReposi
         await tx.insert(taskIngestSuppressions).values(suppressions).onConflictDoNothing();
       }
 
+      await tx.execute(
+        sql`SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+      );
       await tx.delete(taskDependencies).where(or(
         inArray(taskDependencies.taskId, taskIds),
         inArray(taskDependencies.dependsOnTaskId, taskIds),

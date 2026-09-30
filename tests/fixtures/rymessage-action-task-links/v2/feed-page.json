@@ -1,96 +1,148 @@
 {
-  "schemaVersion": "2.0",
-  "feedId": "00000000-0000-4000-8000-000000000010",
-  "mode": "full",
-  "producedAt": "2026-09-29T22:00:00.000Z",
-  "nextCursor": "cursor",
-  "complete": true,
-  "items": [
-    {
-      "eventId": "00000000-0000-4000-8000-000000000011",
-      "operationId": "00000000-0000-4000-8000-000000000012",
-      "aggregateId": "d63fea91-4cb0-5f7e-8125-aee79af81e7a",
-      "aggregateVersion": 1,
-      "sourceId": "source",
-      "occurredAt": "2026-09-29T22:00:00.000Z",
-      "kind": "upsert",
-      "action": {
-        "contractVersion": 1,
-        "actionId": "d63fea91-4cb0-5f7e-8125-aee79af81e7a",
-        "stableKey": "ak1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "revision": 1,
-        "createdAt": "2026-09-29T22:00:00.000Z",
-        "updatedAt": "2026-09-29T22:00:00.000Z",
-        "lastSeenAt": "2026-09-29T22:00:00.000Z",
-        "source": {
-          "identity": {
-            "kind": "provider_message",
-            "provider": "microsoft",
-            "id": "private"
-          },
-          "sourceKind": "message"
-        },
-        "content": {
-          "title": "Review report",
-          "actionType": "follow-up",
-          "priority": "high"
-        },
-        "classification": {
-          "derivationMethod": "deterministic",
-          "inputFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        },
-        "lifecycle": {
-          "state": "visible"
-        },
-        "fieldRevisions": {
-          "title": 1,
-          "lifecycle": 1
-        },
-        "materializations": []
-      },
-      "projection": {
+  "path": "/v2/integrations/action-feed",
+  "upsertPage": {
+    "schemaVersion": "2.0",
+    "feedId": "<feed-id>",
+    "mode": "full",
+    "producedAt": "<timestamp>",
+    "nextCursor": "<opaque-cursor>",
+    "complete": true,
+    "items": [
+      {
+        "eventId": "<event-id>",
+        "operationId": "10000000-0000-4000-8000-000000000002",
+        "aggregateId": "1a4026a4-5cc7-521a-ad0c-070c31c2600c",
+        "aggregateVersion": 2,
+        "sourceId": "rymessage:<feed-id>:action:1a4026a4-5cc7-521a-ad0c-070c31c2600c",
+        "occurredAt": "<timestamp>",
+        "kind": "upsert",
         "action": {
+          "actionId": "1a4026a4-5cc7-521a-ad0c-070c31c2600c",
+          "classification": {
+            "derivationMethod": "ai",
+            "inputFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "content": {
+            "actionType": "follow-up",
+            "priority": "high",
+            "title": "Track provider-neutral task"
+          },
           "contractVersion": 1,
-          "actionId": "d63fea91-4cb0-5f7e-8125-aee79af81e7a",
-          "stableKey": "ak1:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "revision": 1,
-          "createdAt": "2026-09-29T22:00:00.000Z",
-          "updatedAt": "2026-09-29T22:00:00.000Z",
-          "lastSeenAt": "2026-09-29T22:00:00.000Z",
+          "createdAt": "2026-01-02T03:04:05.000Z",
+          "fieldRevisions": {
+            "lifecycle": 1,
+            "priority": 1,
+            "title": 1
+          },
+          "lastSeenAt": "2026-01-02T03:04:05.000Z",
+          "lifecycle": {
+            "state": "linked"
+          },
+          "materializations": [],
+          "revision": 2,
           "source": {
             "identity": {
-              "kind": "provider_message",
-              "provider": "microsoft",
-              "id": "private"
+              "kind": "bluebubbles_message",
+              "thread": {
+                "kind": "bluebubbles_chat_guid",
+                "value": "chat-provider-neutral"
+              },
+              "value": "message-provider-neutral"
             },
             "sourceKind": "message"
           },
-          "content": {
-            "title": "Review report",
-            "actionType": "follow-up",
-            "priority": "high"
-          },
-          "classification": {
-            "derivationMethod": "deterministic",
-            "inputFingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-          },
-          "lifecycle": {
-            "state": "visible"
-          },
-          "fieldRevisions": {
-            "title": 1,
-            "lifecycle": 1
-          },
-          "materializations": []
+          "stableKey": "ak1:d7d6d01c0799c17a93582e996528ef3299a654ff4bb7b53764303fd46607c1fd",
+          "updatedAt": "<timestamp>"
         },
-        "taskMaterializations": [],
-        "creationIntents": [],
-        "managedTaskCommands": [],
-        "taskLifecycle": {
-          "state": "none",
-          "provenance": "none"
+        "projection": {
+          "action": {
+            "actionId": "1a4026a4-5cc7-521a-ad0c-070c31c2600c",
+            "classification": {
+              "derivationMethod": "ai",
+              "inputFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            "content": {
+              "actionType": "follow-up",
+              "priority": "high",
+              "title": "Track provider-neutral task"
+            },
+            "contractVersion": 1,
+            "createdAt": "2026-01-02T03:04:05.000Z",
+            "fieldRevisions": {
+              "lifecycle": 1,
+              "priority": 1,
+              "title": 1
+            },
+            "lastSeenAt": "2026-01-02T03:04:05.000Z",
+            "lifecycle": {
+              "state": "linked"
+            },
+            "materializations": [],
+            "revision": 2,
+            "source": {
+              "identity": {
+                "kind": "bluebubbles_message",
+                "thread": {
+                  "kind": "bluebubbles_chat_guid",
+                  "value": "chat-provider-neutral"
+                },
+                "value": "message-provider-neutral"
+              },
+              "sourceKind": "message"
+            },
+            "stableKey": "ak1:d7d6d01c0799c17a93582e996528ef3299a654ff4bb7b53764303fd46607c1fd",
+            "updatedAt": "<timestamp>"
+          },
+          "taskMaterializations": [
+            {
+              "actionId": "1a4026a4-5cc7-521a-ad0c-070c31c2600c",
+              "contractVersion": 2,
+              "createdAt": "<timestamp>",
+              "management": {
+                "canonicalUrl": "https://mission-control.example/tasks/mc-task-1093",
+                "manager": "mission-control",
+                "managerInstanceId": "mission-control-homelab",
+                "managerTaskId": "mc-task-1093"
+              },
+              "relationId": "1fc42638-35bf-5aa5-b20d-831a6372d688",
+              "revision": 1,
+              "snapshot": {
+                "availability": "live",
+                "observedAt": "2026-01-02T03:04:05.000Z",
+                "openUrl": "https://github.com/rsocko/rymessage/issues/1093",
+                "providerIconKey": "github",
+                "providerLabel": "GitHub",
+                "status": "in-progress",
+                "title": "Implement Action Center links"
+              },
+              "state": "linked",
+              "underlying": {
+                "providerAccountId": "installation-1",
+                "providerContainerId": "rsocko/rymessage",
+                "providerId": "github",
+                "providerTaskId": "1093"
+              },
+              "updatedAt": "<timestamp>"
+            }
+          ],
+          "creationIntents": [],
+          "managedTaskCommands": [],
+          "taskLifecycle": {
+            "state": "linked",
+            "provenance": "task-aggregate",
+            "derivedAt": "<timestamp>"
+          }
         }
       }
-    }
-  ]
+    ]
+  },
+  "tombstoneItem": {
+    "eventId": "<event-id>",
+    "operationId": "<operation-id>",
+    "aggregateId": "<action-id>",
+    "aggregateVersion": 3,
+    "sourceId": "rymessage:<feed-id>:action:<action-id>",
+    "occurredAt": "<timestamp>",
+    "kind": "tombstone"
+  }
 }

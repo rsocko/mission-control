@@ -321,7 +321,6 @@ describe('SQLite RyMessage action repository', () => {
 
   it('rejects incremental recovery and same-revision ActionV2 conflicts', async () => {
     const { repository } = await contextPromise;
-    const actionId = uuid(61);
     const basePage: CompanionActionFeedPageV2 = {
       schemaVersion: '2.0',
       feedId: FEED_ID,

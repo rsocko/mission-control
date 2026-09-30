@@ -66,12 +66,19 @@ describe('PostgreSQL generic connector execution support', () => {
     for (const type of [
       'microsoft-todo',
       'microsoft-todo-work',
-      'rymessage',
       'document-intelligence',
     ]) {
       expect(() => support.assertConfigSupported(config({ type }))).not.toThrow();
       expect(() => support.assertConnectorSupported({ type })).not.toThrow();
     }
+  });
+
+  it('accepts RyMessage connector-owned domain execution once its state is composed', () => {
+    expect(() => support.assertConfigSupported(config({ type: 'rymessage' }))).not.toThrow();
+    expect(() => support.assertConnectorSupported({
+      type: 'rymessage',
+      syncDomainData: () => undefined,
+    })).not.toThrow();
   });
 
   it.each(['finance', 'finance-manager', 'monarch-money'])(

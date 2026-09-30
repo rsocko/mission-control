@@ -61,6 +61,7 @@ async function insertRows(
 }
 
 afterAll(async () => {
+  if (sharedPool) await clear(sharedPool);
   await sharedPool?.end();
   sharedPool = null;
 });

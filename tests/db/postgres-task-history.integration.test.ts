@@ -53,8 +53,7 @@ describe.runIf(Boolean(connectionString))('PostgreSQL task-history triggers', ()
   ) => {
     const database = await getPool();
     await reset(database);
-    const now = '2026-09-29T21:00:00.000Z';
-    const completedAt = '2026-09-29T22:00:00.000Z';
+    const now = '2026-09-30T01:00:00.000Z';
 
     await database.query(
       `INSERT INTO connector_configs (id, type, name, capabilities, created_at, updated_at)
@@ -76,6 +75,13 @@ describe.runIf(Boolean(connectionString))('PostgreSQL task-history triggers', ()
     await database.query(
       `INSERT INTO task_projects (task_id, project_id) VALUES ('task-1', 'project-1')`,
     );
+    const baseline = await database.query<{ occurred_at: string }>(
+      `SELECT occurred_at FROM task_history_events
+       WHERE task_id = 'task-1' AND event_type = 'baseline'`,
+    );
+    const completedAt = new Date(
+      new Date(baseline.rows[0]!.occurred_at).getTime() + 1_000,
+    ).toISOString();
     await database.query(
       `UPDATE tasks
        SET status = 'done', completed_at = $1, updated_at = $1, sync_status = 'synced'

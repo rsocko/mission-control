@@ -9,6 +9,7 @@ import {
   Server, CheckSquare, DollarSign, Home, AtSign, Package, Truck,
   GitPullRequest, Shield, BarChart3, Zap, Archive, LoaderCircle, BellOff,
   RefreshCw,
+  Unlink,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { toast } from '@/lib/toast';
@@ -30,6 +31,38 @@ import {
 import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
+import { RyMessagePromotionDialog } from './RyMessagePromotionDialog';
+
+interface NotificationActionExecutionResult {
+  success: boolean;
+  error?: string;
+  result?: {
+    type?: string;
+    taskData?: Record<string, unknown>;
+  };
+}
+
+function promotionSeed(
+  result: NotificationActionExecutionResult,
+): React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null {
+  if (result.result?.type !== 'rymessage_promote') return null;
+  const data = result.result.taskData;
+  if (
+    !data
+    || typeof data.title !== 'string'
+    || typeof data.actionId !== 'string'
+    || typeof data.connectorId !== 'string'
+    || typeof data.sourceNotificationId !== 'string'
+  ) return null;
+  return {
+    title: data.title,
+    body: typeof data.body === 'string' ? data.body : null,
+    priority: typeof data.priority === 'string' ? data.priority : 'none',
+    actionId: data.actionId,
+    connectorId: data.connectorId,
+    sourceNotificationId: data.sourceNotificationId,
+  };
+}
 
 // ─── ICON MAPS ──────────────────────────────────────────────────────────────
 
@@ -73,6 +106,9 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   skip_update: ArrowRight,
   dismiss_persistent_notification: X,
   ignore_repair: EyeOff,
+  rymessage_promote: Plus,
+  rymessage_mark_handled: CheckCircle,
+  rymessage_unlink: Unlink,
 };
 
 function NotificationActionConfirmation({
@@ -141,7 +177,7 @@ interface NotificationCardProps {
   onExecuteAction?: (
     actionId: string,
     params?: Record<string, unknown>,
-  ) => void | Promise<{ success: boolean; error?: string }>;
+  ) => void | Promise<NotificationActionExecutionResult>;
 }
 
 interface PresentationMetadataChip {
@@ -515,6 +551,7 @@ export function NotificationCard({
   const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
   const acceptedSourceAction = acceptedSourceActionFor === notification.id;
   const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
+  const [promotion, setPromotion] = useState<React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -555,11 +592,16 @@ export function NotificationCard({
         : await onExecuteAction(action.id);
       if (result?.success === false) {
         toast.error(result.error || `${action.label} failed`);
-      } else if (
-        notification.connectorType === 'home-assistant'
-        && action.requiresConfirmation
-      ) {
-        setAcceptedSourceActionFor(notification.id);
+      } else {
+        const seed = result ? promotionSeed(result) : null;
+        if (seed) {
+          setPromotion(seed);
+        } else if (
+          notification.connectorType === 'home-assistant'
+          && action.requiresConfirmation
+        ) {
+          setAcceptedSourceActionFor(notification.id);
+        }
       }
     } catch {
       toast.error(`${action.label} failed`);
@@ -580,6 +622,7 @@ export function NotificationCard({
   };
 
   return (
+    <>
     <motion.div
       layout
       initial={{ opacity: 0, y: 8 }}
@@ -788,6 +831,8 @@ export function NotificationCard({
         }}
       />
     </motion.div>
+    {promotion && <RyMessagePromotionDialog seed={promotion} onClose={() => setPromotion(null)} />}
+    </>
   );
 }
 
@@ -796,7 +841,7 @@ export interface NotificationDetailProps {
   onExecuteAction: (
     actionId: string,
     params?: Record<string, unknown>,
-  ) => Promise<{ success: boolean; error?: string }>;
+  ) => Promise<NotificationActionExecutionResult>;
   onMarkRead?: () => void | Promise<void>;
   onDismiss?: () => void | Promise<void>;
   onArchive?: () => void | Promise<void>;
@@ -911,6 +956,7 @@ export function NotificationDetail({
   const [acceptedSourceActionFor, setAcceptedSourceActionFor] = useState<string | null>(null);
   const acceptedSourceAction = acceptedSourceActionFor === notification.id;
   const [confirmationAction, setConfirmationAction] = useState<NotificationAction | null>(null);
+  const [promotion, setPromotion] = useState<React.ComponentProps<typeof RyMessagePromotionDialog>['seed'] | null>(null);
   const levelConfig = NOTIFICATION_LEVELS[notification.level] || NOTIFICATION_LEVELS.fyi;
   const LevelIcon = LEVEL_ICONS[notification.level] || Info;
   const CategoryIcon = CATEGORY_ICONS[notification.category] || CATEGORY_ICONS.system;
@@ -937,7 +983,10 @@ export function NotificationDetail({
         ? await onExecuteAction(action.id, params)
         : await onExecuteAction(action.id);
       if (result.success) {
-        if (
+        const seed = promotionSeed(result);
+        if (seed) {
+          setPromotion(seed);
+        } else if (
           notification.connectorType === 'home-assistant'
           && action.requiresConfirmation
         ) {
@@ -970,6 +1019,7 @@ export function NotificationDetail({
   };
 
   return (
+    <>
     <div className={`flex min-h-0 flex-col bg-[var(--surface-1)] ${className}`}>
       <div className="flex items-start justify-between gap-3 border-b border-[var(--border)] px-5 py-4">
         <div className="flex min-w-0 items-center gap-3">
@@ -1145,6 +1195,8 @@ export function NotificationDetail({
         }}
       />
     </div>
+    {promotion && <RyMessagePromotionDialog seed={promotion} onClose={() => setPromotion(null)} />}
+    </>
   );
 }
 

@@ -28,6 +28,18 @@ provider task fields and execution. Mission Control imports the existing To Do
 task first, then binds the canonical relation by exact immutable provider
 identity. It never creates a task from an ActionV1 relation.
 
+Task promotion and provider-neutral task links use the independent additive
+ActionV2 surface:
+
+- `GET /v2/integrations/action-feed`
+- `POST /v2/integrations/action-feed/mutations`
+
+V1 is frozen for compatibility. V2 does not change V1 routes, payloads,
+cursors, receipts, UUID vectors, persisted rows, or `action_state_v1`.
+Mission Control reads the unchanged `ActionV1` embedded in each V2 upsert and
+handles task relations, creation intents, managed commands, and lifecycle
+provenance as V2 sidecars.
+
 The older notification webhook remains a compatibility path. It is not part of
 canonical ActionV1 reconciliation and does not gain mutation authority.
 
@@ -54,17 +66,131 @@ configured environment variable, defaulting to
 `RYMESSAGE_COMPANION_ACTION_FEED_TOKEN`; credentials are not persisted in
 connector settings.
 
+## Notification projection
+
+Every canonical action projects to one Mission Control notification. The
+stable source identity is:
+
+```text
+rymessage:companion:${connectorId}:${actionId}
+```
+
+Lifecycle controls whether the notification is active, resolved, or deleted.
+Priority and confidence only select presentation severity; they never filter an
+action out. Tombstones delete the source projection. Notification persistence
+contains portable action content and bounded presentation metadata only. Raw
+provider identity, sender/contact data, conversation titles, message excerpts,
+source URLs, classification reasoning, model names, extracted payloads, and
+feedback bodies are excluded.
+
+## User-initiated task promotion
+
+Promotion is explicit in the first release. The notification's **Create task**
+action opens a multi-row dialog backed by Mission Control's writable
+destination discovery, so each row may target Mission Control local tasks,
+GitHub, Microsoft To Do, or another writable adapter. A batch may contain up to
+16 rows and partial success is retained for targeted retry.
+
+Each row receives a durable UUID intent before provider delivery:
+
+1. register the V2 creation intent in Companion;
+2. claim it before one delivery attempt;
+3. create the Mission Control task with the same UUID as its idempotency key;
+4. deliver through the selected provider adapter; and
+5. fulfill the intent with the immutable provider tuple, then attach Mission
+   Control management in a separate principal-injected mutation.
+
+Replays return the existing local task. Concurrent requests converge on the
+same task ID, provider push leases fence delivery, and stable Companion
+operation IDs make response-loss retries safe. A failed row does not replay
+successful rows. An unavailable provider leaves the persisted intent
+recoverable rather than synthesizing success.
+
+The frozen V2 request envelope is:
+
+```json
+{
+  "contractVersion": "2.0",
+  "operationId": "<uuid>",
+  "actionId": "<uuid>",
+  "expectedRevision": 7,
+  "mutation": {}
+}
+```
+
+`creation-intent.register` contains only `intentId` and a provider-neutral
+`draft` (`title`, optional `notes`, `dueAt`, `reminderAt`, and boolean
+`priority`). Provider account and container identity are forbidden at
+registration; destination selection remains a Mission Control concern.
+Mutation receipts contain only `operationId`, `actionId`, `outcome`,
+`revision`, and the applicable optional `relationId`, `intentId`, or
+`commandId`.
+
+Relation identity is RFC 4122 UUIDv5 under namespace
+`60ed6d9d-c9d5-5fd6-9c7a-dbb312af3fb5`, using the UTF-8 RFC 8785/JCS JSON bytes
+of:
+
+```json
+["actionId","providerId","providerAccountId","providerContainerId-or-empty","providerTaskId"]
+```
+
+No trimming, case folding, Unicode normalization, or alternate delimiters are
+permitted. The canonical fixture
+`["00000000-0000-4000-8000-000000000001","microsoft-todo","account","list","task"]`
+produces `cc1ee9ad-ad34-5b29-957c-08fb19507768`.
+
+## Linked-task lifecycle and managed edits
+
+Companion derives canonical lifecycle atomically. Any nonterminal relation,
+including blocked, unknown, unavailable, or link-broken, keeps the action
+linked/in progress. Completed, cancelled, and provider-deleted relations are
+terminal; only when all linked relations are terminal does Companion complete
+the action and Mission Control resolve the notification. Manual **Mark
+handled** queues the canonical lifecycle mutation and remains available for
+early resolution. Manual handled/dismissed disposition is sticky; only
+task-derived completion may reopen when a new active relation appears.
+Explicit `materialization.unlink` removes the relation from lifecycle
+aggregation without deleting the provider task. Mission Control retains no
+implicit deletion-to-unlink shortcut.
+
+Mission Control reports managed task observations from provider-authoritative
+task state. V2 managed commands are claimed before execution. Remote commands
+go through the selected Mission Control provider adapter and never fall back to
+a direct RyMessage provider write. Unsupported fields fail with a bounded
+symbolic code rather than being silently ignored.
+
+## Companion setup
+
+The connector stores only non-secret `mode: companion`, `companionBaseUrl`,
+`trustedMissionControlOrigin`, and the credential environment-variable name.
+The bearer defaults to `RYMESSAGE_COMPANION_ACTION_FEED_TOKEN` and must be
+available to both the web runtime (connection tests and user promotion) and the
+worker runtime (feed reconciliation and observations).
+
+Stop Companion before principal provisioning, then run:
+
+```text
+node --enable-source-maps dist/companion/integrationAdmin.js provision \
+  --manager-instance-id <stable-id> \
+  --trusted-origin <exact-origin>
+```
+
+Capture the one-time credential directly into secret storage without logging
+it. Trusted origins are exact HTTP(S) roots with no userinfo, path, query, or
+fragment. Explicitly allowlisted private, loopback, and link-local HTTP origins
+are supported for trusted homelab deployments.
+
 ## Portable persistence
 
-SQLite and PostgreSQL store the same five reconciliation entities:
+SQLite and PostgreSQL preserve the frozen V1 tables and add the same four V2
+sidecar entities:
 
 | Entity | Purpose |
 |---|---|
-| Feed state | Opaque cursor, feed identity, recovery generation, and full-snapshot generation |
-| Action projection | Sanitized portable ActionV1 state and monotonic revision |
-| Materialization relation | Canonical provider tuple, local imported task binding, and surfaced relation state |
+| Feed state | Opaque cursor, feed identity, and recovery state |
+| Action projection | Sanitized V2 action/link state and monotonic revision |
 | Ingress receipt | Stable event identity, content digest, aggregate revision, and outcome |
-| Mutation outbox | Stable operation identity, expected field revisions, lease, retry, and receipt |
+| Mutation outbox | Exact request, aggregate `expectedRevision`, lease, retry/dead-letter state, and receipt |
 
 All tables cascade from the connector configuration, so connector erasure
 removes reconciliation state. They participate in ordinary database
@@ -104,23 +230,17 @@ duplicate tombstones update one projection rather than growing the set.
 
 ## Relation reconciliation
 
-For each non-deleted Microsoft To Do materialization, Mission Control searches
-active imported tasks for the exact source identity:
+For each linked Microsoft To Do materialization without management, Mission
+Control searches imported tasks by the exact immutable provider tuple:
 
 ```text
-${providerListId}:${providerTaskId}
+providerAccountId + providerContainerId + providerTaskId
 ```
 
-| Match result | Relation state |
-|---|---|
-| Zero, never linked | `pending-import` |
-| Exactly one | `linked` |
-| More than one | `conflict` with `AMBIGUOUS_PROVIDER_IDENTITY` |
-| Zero after a prior link | `link-broken` |
-| Canonical relation/action deleted | `deleted` |
-
-No match causes no task synthesis. A removed or inaccessible provider task is
-not recreated.
+An exact match emits `materialization.attach-manager` with the existing Mission
+Control task ID and current snapshot; it never registers an intent or creates
+a provider task. No match causes no task synthesis. A removed or inaccessible
+provider task is not recreated.
 
 When a linked task's provider status or version differs from the canonical
 snapshot, reconciliation queues `materialization.observe`. Its operation ID and
@@ -131,12 +251,11 @@ candidates, rotating processed rows for eventual fairness.
 
 ## Mutation concurrency and delivery
 
-Every caller mutation supplies a stable UUID operation ID, aggregate base
-revision, and expected revisions for touched fields. Reusing an operation ID
+Every caller mutation supplies a stable UUID operation ID, action ID, and
+aggregate `expectedRevision`. Reusing an operation ID
 with identical content returns the existing queue outcome; reuse with different
-content is rejected. Future aggregate or touched-field revisions are rejected
-at enqueue and revalidated under the lease transaction. A stale aggregate may
-rebase only when every touched field still has the exact expected revision.
+content is rejected. Companion performs the aggregate CAS and returns a durable
+conflict receipt with its current revision.
 
 At lease time:
 

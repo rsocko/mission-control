@@ -10,6 +10,7 @@ import {
   CompanionActionHttpError,
   type CompanionActionClient,
 } from './companion-action-client';
+import { projectCompanionActionsToNotifications } from './notification-projection';
 
 export interface CompanionActionSyncResult {
   itemsAdded: number;
@@ -55,11 +56,25 @@ export async function queueCompanionActionMutation(
 }
 
 export class CompanionActionReconciliationService {
+  private readonly persistence: () => Promise<RyMessageActionPersistence>;
+  private readonly projectNotifications: (
+    connectorId: string,
+    repository: RyMessageActionPersistence,
+  ) => Promise<unknown>;
+
   constructor(
     private readonly connectorId: string,
     private readonly client: CompanionActionClient,
-    private readonly persistence: () => Promise<RyMessageActionPersistence> = defaultPersistence,
-  ) {}
+    persistence?: () => Promise<RyMessageActionPersistence>,
+    projectNotifications?: (
+      connectorId: string,
+      repository: RyMessageActionPersistence,
+    ) => Promise<unknown>,
+  ) {
+    this.persistence = persistence ?? defaultPersistence;
+    this.projectNotifications = projectNotifications
+      ?? (persistence ? async () => undefined : projectCompanionActionsToNotifications);
+  }
 
   async sync(signal?: AbortSignal): Promise<CompanionActionSyncResult> {
     const repository = await this.persistence();
@@ -177,6 +192,7 @@ export class CompanionActionReconciliationService {
       connectorId: this.connectorId,
       now: new Date().toISOString(),
     });
+    await this.projectNotifications(this.connectorId, repository);
     const mutations = await this.flushMutations(repository, signal);
     return {
       itemsAdded,

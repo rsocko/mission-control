@@ -694,6 +694,183 @@ function DocumentIntelligenceConnectorEditPanel(props: ConnectorEditPanelProps) 
   return <DefaultConnectorEditPanel {...props} variant="document-intelligence" />;
 }
 
+function RyMessageConnectorEditPanel({
+  connector,
+  onUpdate,
+  onDelete,
+  confirmDelete,
+  setConfirmDelete,
+  onTested,
+}: ConnectorEditPanelProps) {
+  const initial = asSettingsRecord(connector.settings);
+  const [name, setName] = useState(getConnectorDisplayName(connector));
+  const [baseUrl, setBaseUrl] = useState(
+    typeof initial.companionBaseUrl === 'string' ? initial.companionBaseUrl : '',
+  );
+  const [trustedOrigin, setTrustedOrigin] = useState(
+    typeof initial.trustedMissionControlOrigin === 'string'
+      ? initial.trustedMissionControlOrigin
+      : '',
+  );
+  const [credentialEnv, setCredentialEnv] = useState(
+    typeof initial.credentialEnv === 'string'
+      ? initial.credentialEnv
+      : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
+  );
+  const [testing, setTesting] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [testResult, setTestResult] = useState<{ success: boolean; details?: string; error?: string } | null>(null);
+  const [testedFingerprint, setTestedFingerprint] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState('');
+
+  const settings = {
+    ...initial,
+    mode: 'companion',
+    companionBaseUrl: baseUrl.trim().replace(/\/+$/, ''),
+    trustedMissionControlOrigin: trustedOrigin.trim().replace(/\/+$/, ''),
+    credentialEnv: credentialEnv.trim() || 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
+  };
+  const fingerprint = JSON.stringify({
+    companionBaseUrl: settings.companionBaseUrl,
+    trustedMissionControlOrigin: settings.trustedMissionControlOrigin,
+    credentialEnv: settings.credentialEnv,
+  });
+  const initialFingerprint = JSON.stringify({
+    companionBaseUrl: typeof initial.companionBaseUrl === 'string'
+      ? initial.companionBaseUrl.replace(/\/+$/, '')
+      : '',
+    trustedMissionControlOrigin: typeof initial.trustedMissionControlOrigin === 'string'
+      ? initial.trustedMissionControlOrigin.replace(/\/+$/, '')
+      : '',
+    credentialEnv: typeof initial.credentialEnv === 'string'
+      ? initial.credentialEnv
+      : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
+  });
+  const connectionChanged = fingerprint !== initialFingerprint;
+  const canSave = Boolean(name.trim())
+    && Boolean(settings.companionBaseUrl)
+    && Boolean(settings.trustedMissionControlOrigin)
+    && (!connectionChanged || testedFingerprint === fingerprint);
+
+  function updateConnection(setter: (value: string) => void, value: string) {
+    setter(value);
+    setTestResult(null);
+    setTestedFingerprint(null);
+    setSaveError('');
+  }
+
+  async function test() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const response = await fetch('/api/connectors/test-pre-save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'rymessage', connectorId: connector.id, settings }),
+      });
+      const data = await response.json() as { success?: boolean; details?: string; error?: string };
+      const successful = response.ok && data.success === true;
+      setTestResult({ ...data, success: successful });
+      setTestedFingerprint(successful ? fingerprint : null);
+      await onTested?.();
+    } catch {
+      setTestResult({ success: false, error: 'Connection test request failed' });
+      setTestedFingerprint(null);
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  async function save() {
+    if (!canSave) return;
+    setSaving(true);
+    setSaveError('');
+    try {
+      await onUpdate(connector.id, {
+        name: name.trim(),
+        syncMode: 'poll',
+        settings,
+      });
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Failed to save connector');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="border-t border-[var(--border)] bg-[var(--surface-0)]/50 px-4 py-5">
+      <div className="grid gap-4 lg:grid-cols-2">
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Instance name
+          <input value={name} onChange={event => { setName(event.target.value); setSaveError(''); }}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Companion base URL
+          <input type="url" value={baseUrl} onChange={event => updateConnection(setBaseUrl, event.target.value)}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Mission Control trusted origin
+          <input type="url" value={trustedOrigin} onChange={event => updateConnection(setTrustedOrigin, event.target.value)}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <span className="mt-1 block font-normal text-[var(--text-tertiary)]">Exact provisioned origin; no path, query, or fragment.</span>
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Bearer credential environment variable
+          <input value={credentialEnv} spellCheck={false} onChange={event => updateConnection(setCredentialEnv, event.target.value)}
+            className="mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          <span className="mt-1 block font-normal text-[var(--text-tertiary)]">Must be set in both web and worker runtimes.</span>
+        </label>
+      </div>
+
+      <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-1)] p-3 text-xs leading-5 text-[var(--text-tertiary)]">
+        The bearer value is never stored here. Stop Companion before provisioning or rotating the principal, then update the environment variable in both Mission Control runtimes.
+      </div>
+
+      {testResult && (
+        <div role="status" className={`mt-4 rounded-lg border p-3 text-sm ${
+          testResult.success
+            ? 'border-emerald-800/40 bg-emerald-950/30 text-emerald-300'
+            : 'border-red-800/40 bg-red-950/30 text-red-300'
+        }`}>
+          {testResult.success ? testResult.details || 'Connection succeeded' : testResult.error || 'Connection failed'}
+        </div>
+      )}
+      {saveError && <p role="alert" className="mt-3 text-sm text-red-400">{saveError}</p>}
+      {connectionChanged && testedFingerprint !== fingerprint && (
+        <p className="mt-3 text-xs text-amber-300">Test the updated connection before saving.</p>
+      )}
+
+      <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          {confirmDelete === connector.id ? (
+            <div className="flex items-center gap-2">
+              <button onClick={() => onDelete(connector.id)} className="rounded bg-red-900/40 px-3 py-2 text-xs font-medium text-red-300">Confirm remove</button>
+              <button onClick={() => setConfirmDelete(null)} className="px-2 py-2 text-xs text-[var(--text-secondary)]">Cancel</button>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmDelete(connector.id)} className="px-2 py-2 text-xs text-red-400 hover:text-red-300">Remove connector</button>
+          )}
+        </div>
+        <div className="flex gap-2">
+          <button onClick={test} disabled={testing || !settings.companionBaseUrl || !settings.trustedMissionControlOrigin}
+            className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-strong)] px-3 py-2 text-sm text-[var(--text-secondary)] disabled:opacity-50">
+            {testing ? <Loader2 size={14} className="animate-spin" /> : <Activity size={14} />}
+            Test connection
+          </button>
+          <button onClick={save} disabled={saving || !canSave}
+            className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:opacity-50">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+            Save changes
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function HomeAssistantConnectorEditPanel({
   connector,
   sourceLists,
@@ -1123,6 +1300,8 @@ function ConnectorEditPanel(props: ConnectorEditPanelProps) {
     panel = <DocumentIntelligenceConnectorEditPanel {...props} />;
   } else if (props.connector.type === 'home-assistant') {
     panel = <HomeAssistantConnectorEditPanel {...props} />;
+  } else if (props.connector.type === 'rymessage') {
+    panel = <RyMessageConnectorEditPanel {...props} />;
   } else {
     panel = <DefaultConnectorEditPanel {...props} />;
   }

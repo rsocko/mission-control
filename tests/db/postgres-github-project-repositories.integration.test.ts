@@ -37,14 +37,27 @@ async function initialize(): Promise<void> {
 
 async function cleanup(): Promise<void> {
   const pool = backend.context.pool;
-  await pool.query('DELETE FROM task_projects WHERE project_id LIKE $1', ['gh-project:%']);
-  await pool.query('DELETE FROM hub_projects WHERE id LIKE $1', ['gh-project:%']);
-  await pool.query('DELETE FROM external_entity_locators WHERE external_entity_id LIKE $1', ['gh-proj-%']);
-  await pool.query('DELETE FROM external_entity_bindings WHERE connector_instance_id = ANY($1::text[])', [CONNECTORS]);
-  await pool.query('DELETE FROM external_entities WHERE id LIKE $1', ['gh-proj-%']);
-  await pool.query('DELETE FROM github_identity_controls WHERE connector_instance_id = ANY($1::text[])', [CONNECTORS]);
-  await pool.query('DELETE FROM tasks WHERE connector_instance_id = ANY($1::text[])', [CONNECTORS]);
-  await pool.query('DELETE FROM connector_configs WHERE id = ANY($1::text[])', [CONNECTORS]);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query(
+      `SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+    );
+    await client.query('DELETE FROM task_projects WHERE project_id LIKE $1', ['gh-project:%']);
+    await client.query('DELETE FROM hub_projects WHERE id LIKE $1', ['gh-project:%']);
+    await client.query('DELETE FROM external_entity_locators WHERE external_entity_id LIKE $1', ['gh-proj-%']);
+    await client.query('DELETE FROM external_entity_bindings WHERE connector_instance_id = ANY($1::text[])', [CONNECTORS]);
+    await client.query('DELETE FROM external_entities WHERE id LIKE $1', ['gh-proj-%']);
+    await client.query('DELETE FROM github_identity_controls WHERE connector_instance_id = ANY($1::text[])', [CONNECTORS]);
+    await client.query('DELETE FROM tasks WHERE connector_instance_id = ANY($1::text[])', [CONNECTORS]);
+    await client.query('DELETE FROM connector_configs WHERE id = ANY($1::text[])', [CONNECTORS]);
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 async function seedConnectors(): Promise<void> {

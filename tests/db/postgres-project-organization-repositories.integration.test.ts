@@ -30,28 +30,41 @@ describe.skipIf(!connectionString)('PostgreSQL project-organization adapters', (
 
     seed = {
       async reset() {
-        await pool.query(`
-          DELETE FROM project_hierarchy_mutation_context
-            WHERE project_id LIKE 'organization-contract-%';
-          DELETE FROM project_hierarchy_commands
-            WHERE project_id LIKE 'organization-contract-%';
-          DELETE FROM project_phase_items
-            WHERE phase_id LIKE 'organization-contract-%';
-          DELETE FROM project_auto_include_exclusions
-            WHERE project_id LIKE 'organization-contract-%';
-          DELETE FROM task_projects
-            WHERE project_id LIKE 'organization-contract-%';
-          DELETE FROM project_phases
-            WHERE id LIKE 'organization-contract-%';
-          DELETE FROM hub_projects
-            WHERE id LIKE 'organization-contract-%';
-          DELETE FROM tasks
-            WHERE id LIKE 'organization-contract-%';
-          DELETE FROM source_lists
-            WHERE id LIKE 'organization-contract-%';
-          DELETE FROM list_groups
-            WHERE id LIKE 'organization-contract-%'
-        `);
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          await client.query(
+            `SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+          );
+          await client.query(`
+            DELETE FROM project_hierarchy_mutation_context
+              WHERE project_id LIKE 'organization-contract-%';
+            DELETE FROM project_hierarchy_commands
+              WHERE project_id LIKE 'organization-contract-%';
+            DELETE FROM project_phase_items
+              WHERE phase_id LIKE 'organization-contract-%';
+            DELETE FROM project_auto_include_exclusions
+              WHERE project_id LIKE 'organization-contract-%';
+            DELETE FROM task_projects
+              WHERE project_id LIKE 'organization-contract-%';
+            DELETE FROM project_phases
+              WHERE id LIKE 'organization-contract-%';
+            DELETE FROM hub_projects
+              WHERE id LIKE 'organization-contract-%';
+            DELETE FROM tasks
+              WHERE id LIKE 'organization-contract-%';
+            DELETE FROM source_lists
+              WHERE id LIKE 'organization-contract-%';
+            DELETE FROM list_groups
+              WHERE id LIKE 'organization-contract-%'
+          `);
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
       },
       async seed() {
         await pool.query(`

@@ -3243,6 +3243,7 @@ export function createPostgresConnectorExecutionRepositories(
       assertConnectorSupported(connector) {
         if (
           connector.syncDomainData
+          && connector.type !== 'rymessage'
           && !normalizeFinanceProviderAlias(connector.type)
         ) {
           throw new UnsupportedConnectorExecutionError('connector-owned domain state');

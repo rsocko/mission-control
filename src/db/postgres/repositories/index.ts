@@ -21,6 +21,7 @@ import { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-re
 import { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 import { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 import { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+import { createPostgresRyMessageActionRepository } from './rymessage-action-repository';
 import { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 import { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
 import { createPostgresFinanceOperatorPersistence } from './finance-operator-repository';
@@ -77,6 +78,7 @@ export { createPostgresGitHubHierarchyRepositories } from './github-hierarchy-re
 export { createPostgresGitHubProjectRepositories } from './github-project-repositories';
 export { createPostgresGitHubRecoveryRepositories } from './github-recovery-repositories';
 export { createPostgresWorkTodoRepositories } from './work-todo-repositories';
+export { createPostgresRyMessageActionRepository } from './rymessage-action-repository';
 export { createPostgresFinanceWorkerPersistence } from './finance-worker-repositories';
 export { createPostgresFinanceConnectionRecoveryPersistence } from './finance-recovery-repository';
 export { createPostgresFinanceOperatorPersistence } from './finance-operator-repository';
@@ -181,6 +183,7 @@ export function createPostgresNonFinanceConnectorStateRepositories(
 ): NonFinanceConnectorStateRepositories {
   return {
     workTodo: createPostgresWorkTodoRepositories(pool),
+    rymessageActions: createPostgresRyMessageActionRepository(pool),
   };
 }
 

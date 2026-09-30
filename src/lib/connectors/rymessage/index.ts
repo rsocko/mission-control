@@ -5,6 +5,8 @@ import type {
   ConnectorConfig,
   ConnectorCapabilities,
   SourceList,
+  DomainSyncContext,
+  DomainSyncResult,
 } from '@/types';
 import { randomUUID } from 'crypto';
 
@@ -12,6 +14,15 @@ import { createRyMessageClient } from './rymessage-client';
 import type { RyMessageClient } from './rymessage-client';
 import { normalizeActionRecord, shouldImportAction, mapActionToAlert } from './message-transformer';
 import type { RyMessageAction } from './message-transformer';
+import {
+  createCompanionActionClient,
+  type CompanionActionClient,
+} from './companion-action-client';
+import { CompanionActionReconciliationService } from './companion-action-service';
+import type {
+  CompanionActionMutation,
+} from './action-contract';
+import { getWorkerPersistenceRepositories } from '@/lib/persistence/worker-runtime';
 
 export type { RyMessageAction } from './message-transformer';
 
@@ -27,10 +38,12 @@ export type { RyMessageAction } from './message-transformer';
  */
 
 interface RyMessageConfig {
-  mode: 'webhook' | 'sqlite' | 'rest';
+  mode: 'companion' | 'webhook' | 'sqlite' | 'rest';
   sqlitePath?: string;
   restUrl?: string;
   apiKey?: string;
+  companionBaseUrl?: string;
+  credentialEnv?: string;
   minConfidence: number;
 }
 
@@ -57,6 +70,8 @@ export class RyMessageConnector implements IConnector {
   private config: ConnectorConfig | null = null;
   private settings: RyMessageConfig = { mode: 'rest', minConfidence: DEFAULT_MIN_CONFIDENCE };
   private client: RyMessageClient | null = null;
+  private companionClient: CompanionActionClient | null = null;
+  private companionService: CompanionActionReconciliationService | null = null;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -66,6 +81,36 @@ export class RyMessageConnector implements IConnector {
       minConfidence: DEFAULT_MIN_CONFIDENCE,
       ...(config.settings as unknown as Partial<RyMessageConfig>),
     };
+    if (this.settings.mode === 'companion') {
+      if (this.settings.apiKey) {
+        throw new Error(
+          'Companion credentials must be supplied through an environment variable, not connector settings',
+        );
+      }
+      const credentialEnv = this.settings.credentialEnv
+        ?? 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
+      if (!/^[A-Z][A-Z0-9_]{1,127}$/.test(credentialEnv)) {
+        throw new Error('Invalid Companion credential environment variable name');
+      }
+      const credential = process.env[credentialEnv];
+      if (!credential) {
+        throw new Error(`Companion credential environment variable ${credentialEnv} is not set`);
+      }
+      const baseUrl = this.settings.companionBaseUrl?.trim();
+      if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
+        throw new Error('Companion action feed URL must be an absolute HTTP(S) URL');
+      }
+      this.companionClient = createCompanionActionClient({
+        baseUrl,
+        credential,
+      });
+      this.companionService = new CompanionActionReconciliationService(
+        config.id,
+        this.companionClient,
+      );
+      this.client = null;
+      return;
+    }
     this.client = createRyMessageClient({
       mode: this.settings.mode,
       restUrl: this.settings.restUrl,
@@ -76,6 +121,10 @@ export class RyMessageConnector implements IConnector {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
+      if (this.settings.mode === 'companion') {
+        await this.companionClient!.fetchPage(null);
+        return { success: true, message: 'Connected to Companion ActionV1 feed' };
+      }
       if (this.settings.mode === 'webhook') {
         return { success: true, message: 'Webhook mode: awaiting pushes from RyMessage' };
       }
@@ -101,6 +150,8 @@ export class RyMessageConnector implements IConnector {
   async dispose(): Promise<void> {
     this.config = null;
     this.client = null;
+    this.companionClient = null;
+    this.companionService = null;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -121,7 +172,7 @@ export class RyMessageConnector implements IConnector {
   }
 
   async fetchNotifications(since?: Date): Promise<InboundNotification[]> {
-    if (this.settings.mode === 'webhook') return [];
+    if (this.settings.mode === 'webhook' || this.settings.mode === 'companion') return [];
 
     const rawActions = await this.client!.fetchActions(since);
     const actions = rawActions
@@ -141,7 +192,38 @@ export class RyMessageConnector implements IConnector {
   }
 
   async getLastSyncToken(): Promise<string | null> {
+    if (this.settings.mode === 'companion') {
+      const persistence = (await getWorkerPersistenceRepositories())
+        .connectorState.rymessageActions;
+      return (await persistence.readFeedState(this.id)).cursor;
+    }
     return null;
+  }
+
+  async syncDomainData(context: DomainSyncContext): Promise<DomainSyncResult> {
+    if (this.settings.mode !== 'companion') {
+      return { itemsAdded: 0, itemsUpdated: 0, itemsRemoved: 0, status: 'fresh' };
+    }
+    const result = await this.companionService!.sync(context.signal);
+    return {
+      itemsAdded: result.itemsAdded,
+      itemsUpdated: result.itemsUpdated,
+      itemsRemoved: result.itemsRemoved,
+      status: result.status,
+    };
+  }
+
+  async queueActionMutation(input: {
+    actionId: string;
+    operationId: string;
+    baseRevision: number;
+    expectedFieldRevisions: Readonly<Record<string, number>>;
+    mutation: Exclude<CompanionActionMutation, { kind: 'materialization.observe' }>;
+  }): Promise<{ operationId: string; queued: boolean }> {
+    if (this.settings.mode !== 'companion' || !this.companionService) {
+      throw new Error('Companion action reconciliation is not enabled');
+    }
+    return this.companionService.queueMutation(input);
   }
 
   /**
@@ -150,7 +232,7 @@ export class RyMessageConnector implements IConnector {
    * so their notifications get auto-resolved.
    */
   async getActiveAlertSourceIds(since?: Date): Promise<string[] | null> {
-    if (this.settings.mode === 'webhook') return null; // Can't poll in webhook mode
+    if (this.settings.mode === 'webhook' || this.settings.mode === 'companion') return null;
 
     try {
       const notifications = await this.fetchNotifications(since);

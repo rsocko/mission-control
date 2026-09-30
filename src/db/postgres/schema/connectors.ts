@@ -127,6 +127,146 @@ export const workTodoOutboundChanges = pgTable('work_todo_outbound_changes', {
   index('idx_work_todo_change_task').on(table.taskId),
 ]);
 
+// ─── RYMESSAGE COMPANION ACTION FEED ───────────────────────────────────────
+
+export const rymessageActionFeedState = pgTable('rymessage_action_feed_state', {
+  connectorId: text('connector_id')
+    .primaryKey()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  feedId: text('feed_id'),
+  cursor: text('cursor'),
+  recoveryGeneration: integer('recovery_generation').notNull().default(0),
+  recoveryRequired: boolean('recovery_required').notNull().default(true),
+  fullSyncGeneration: text('full_sync_generation'),
+  lastSyncedAt: text('last_synced_at'),
+  lastError: text('last_error'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const rymessageActionProjections = pgTable('rymessage_action_projections', {
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  actionId: text('action_id').notNull(),
+  sourceId: text('source_id').notNull(),
+  stableKey: text('stable_key'),
+  revision: integer('revision').notNull(),
+  payload: jsonb('payload').$type<Record<string, unknown>>(),
+  payloadDigest: text('payload_digest').notNull(),
+  lastEventId: text('last_event_id').notNull(),
+  lastOperationId: text('last_operation_id').notNull(),
+  lastSeenGeneration: text('last_seen_generation'),
+  tombstonedAt: text('tombstoned_at'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.connectorId, table.actionId] }),
+  uniqueIndex('idx_rymessage_action_source').on(table.connectorId, table.sourceId),
+  index('idx_rymessage_action_generation')
+    .on(table.connectorId, table.lastSeenGeneration, table.tombstonedAt),
+]);
+
+export const rymessageActionMaterializations = pgTable(
+  'rymessage_action_materializations',
+  {
+    connectorId: text('connector_id')
+      .notNull()
+      .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+    materializationId: text('materialization_id').notNull(),
+    actionId: text('action_id').notNull(),
+    actionRevision: integer('action_revision').notNull(),
+    revision: integer('revision').notNull(),
+    provider: text('provider').$type<'microsoft-todo'>().notNull(),
+    providerAccountId: text('provider_account_id').notNull(),
+    providerListId: text('provider_list_id').notNull(),
+    providerTaskId: text('provider_task_id').notNull(),
+    state: text('state').notNull(),
+    providerTaskStatusSnapshot: text('provider_task_status_snapshot'),
+    providerVersionSnapshot: text('provider_version_snapshot'),
+    lastObservedAt: text('last_observed_at'),
+    localTaskId: text('local_task_id'),
+    relationState: text('relation_state')
+      .$type<'pending-import' | 'linked' | 'conflict' | 'deleted' | 'link-broken'>()
+      .notNull(),
+    conflictCode: text('conflict_code'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectorId, table.materializationId] }),
+    uniqueIndex('idx_rymessage_materialization_provider_identity').on(
+      table.connectorId,
+      table.provider,
+      table.providerAccountId,
+      table.providerListId,
+      table.providerTaskId,
+    ),
+    index('idx_rymessage_materialization_action').on(table.connectorId, table.actionId),
+    index('idx_rymessage_materialization_relation').on(
+      table.connectorId,
+      table.relationState,
+    ),
+  ],
+);
+
+export const rymessageActionReceipts = pgTable('rymessage_action_receipts', {
+  connectorId: text('connector_id')
+    .notNull()
+    .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+  eventId: text('event_id').notNull(),
+  operationId: text('operation_id').notNull(),
+  actionId: text('action_id').notNull(),
+  aggregateRevision: integer('aggregate_revision').notNull(),
+  payloadDigest: text('payload_digest').notNull(),
+  outcome: text('outcome').notNull(),
+  receivedAt: text('received_at').notNull(),
+}, (table) => [
+  primaryKey({ columns: [table.connectorId, table.eventId] }),
+  index('idx_rymessage_receipt_operation').on(table.connectorId, table.operationId),
+  index('idx_rymessage_receipt_retention').on(table.connectorId, table.receivedAt),
+]);
+
+export const rymessageActionOutboundMutations = pgTable(
+  'rymessage_action_outbound_mutations',
+  {
+    connectorId: text('connector_id')
+      .notNull()
+      .references(() => connectorConfigs.id, { onDelete: 'cascade' }),
+    operationId: text('operation_id').notNull(),
+    actionId: text('action_id').notNull(),
+    baseRevision: integer('base_revision').notNull(),
+    expectedFieldRevisions: jsonb('expected_field_revisions')
+      .$type<Record<string, number>>()
+      .notNull(),
+    mutation: jsonb('mutation').$type<Record<string, unknown>>().notNull(),
+    mutationDigest: text('mutation_digest').notNull(),
+    status: text('status')
+      .$type<'pending' | 'leased' | 'retry' | 'succeeded' | 'conflict' | 'dead-letter'>()
+      .notNull()
+      .default('pending'),
+    leaseId: text('lease_id'),
+    leaseExpiresAt: text('lease_expires_at'),
+    availableAt: text('available_at').notNull(),
+    attemptCount: integer('attempt_count').notNull().default(0),
+    receipt: jsonb('receipt').$type<Record<string, unknown>>(),
+    lastErrorCode: text('last_error_code'),
+    lastError: text('last_error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.connectorId, table.operationId] }),
+    index('idx_rymessage_mutation_ready').on(
+      table.connectorId,
+      table.status,
+      table.availableAt,
+      table.leaseExpiresAt,
+    ),
+    index('idx_rymessage_mutation_action').on(table.connectorId, table.actionId),
+  ],
+);
+
 // ─── SYNC LOG ───────────────────────────────────────────────────────────────
 
 export const syncLog = pgTable('sync_log', {

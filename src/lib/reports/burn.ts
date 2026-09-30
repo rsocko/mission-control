@@ -176,6 +176,18 @@ function reconstructTaskLifecycles(
       && completedAt <= event.occurredAt
     );
     if ((baseline.status === 'done' || baseline.status === 'cancelled') && !hasKnownClosure) {
+      const scopedBaseline = addScopeToBaseline(baseline, scope, scopeId);
+      reconstructed.push({
+        ...event,
+        id: -Math.abs(event.id * 2),
+        occurredAt: createdAt,
+        recordedAt: event.recordedAt,
+        provenance: 'task_lifecycle_reconstruction',
+        newValue: JSON.stringify({
+          ...scopedBaseline,
+          status: 'todo',
+        }),
+      });
       reconstructed.push(event);
       continue;
     }
@@ -349,7 +361,6 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
     }
 
     const isFuture = date > today;
-    const isBeforeCompleteHistory = completeFromDate !== null && date < completeFromDate;
     const membershipStates = [...states.entries()].filter(([, state]) => (
       state.localDisposition === 'active'
       && (
@@ -369,7 +380,7 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
     ));
     const coverage = scopedStates.length === 0 ? 1 : estimatedStates.length / scopedStates.length;
     const estimateIncomplete = coverage < 1;
-    const hideActual = isFuture || isBeforeCompleteHistory;
+    const hideActual = isFuture;
 
     const countTotal = scopedStates.length;
     const countCompleted = completedStates.length;

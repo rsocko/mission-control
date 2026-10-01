@@ -45,7 +45,7 @@ beforeAll(async () => {
   transports = modules[3];
   receiveInboundResult = modules[4].POST;
   sqlite.prepare('SELECT 1').get();
-});
+}, 30_000);
 
 beforeEach(() => {
   sqlite.exec(`
@@ -164,13 +164,20 @@ describe('external-agent registry boundaries', () => {
       authCredentialRef: 'push-agent-key',
       endpoint: 'https://api.github.com/agents',
     })).rejects.toMatchObject({ code: 'EXECUTION_BOUNDARY_MISMATCH' });
+    await expect(registry.createExternalAgent({
+      name: 'Untrusted cloud endpoint',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://example.test',
+    })).rejects.toMatchObject({ code: 'EXECUTION_BOUNDARY_MISMATCH' });
 
     const hosted = await registry.createExternalAgent({
       name: 'Hosted coding',
       type: 'copilot-cloud',
       authType: 'github-user',
       authCredentialRef: 'push-agent-key',
-      endpoint: 'https://api.github.com/agents',
+      endpoint: 'https://api.github.com',
     });
     expect(hosted).toMatchObject({
       transport: 'push',
@@ -182,11 +189,6 @@ describe('external-agent registry boundaries', () => {
       scope: { repository: 'owner/repo' },
       idempotencyKey: 'cloud-preview',
     })).resolves.toMatchObject({ status: 'needs_confirmation' });
-    await expect(service.confirmDispatch(
-      (await service.listDispatches())[0].id,
-      (await service.listDispatches())[0].previewHash,
-    )).rejects.toMatchObject({ code: 'TRANSPORT_NOT_IMPLEMENTED' });
-    expect((await service.listDispatches())[0].status).toBe('failed');
   });
 
   it('never returns credential references to registry clients', async () => {
@@ -203,6 +205,104 @@ describe('external-agent registry boundaries', () => {
       type: 'manual',
       endpoint: 'https://user:password@example.test/agent',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('reconciles a persisted Copilot task after restart', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-reconcile',
+      name: 'Hosted reconciliation',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+      capabilities: { canWriteCode: true, canCreatePullRequest: true },
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Fix the parser',
+      scope: {
+        repository: 'octo/example',
+        baseRef: 'main',
+        createPullRequest: true,
+      },
+      allowedActions: ['write_code', 'create_pull_request'],
+      idempotencyKey: 'restart-reconciliation',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'queued',
+            providerTaskId: 'provider-task-1',
+            providerState: 'queued',
+          };
+        },
+      }),
+    });
+
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/provider-task-1')) {
+        return Response.json({
+          id: 'provider-task-1',
+          name: 'Fix parser',
+          state: 'completed',
+          sessions: [{ base_ref: 'main', head_ref: 'copilot/fix-parser' }],
+          artifacts: [{
+            provider: 'github',
+            type: 'branch',
+            data: { base_ref: 'main', head_ref: 'copilot/fix-parser' },
+          }],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      providerTaskId: 'provider-task-1',
+      repository: 'octo/example',
+      baseRef: 'main',
+      branchRef: 'copilot/fix-parser',
+    });
+  });
+
+  it('does not pretend a submitted Copilot task was cancelled locally', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-cancel',
+      name: 'Hosted cancellation',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Keep provider state truthful',
+      scope: { repository: 'octo/example', baseRef: 'main' },
+      idempotencyKey: 'unsupported-cancel',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'in_progress',
+            providerTaskId: 'provider-task-2',
+            providerState: 'in_progress',
+          };
+        },
+      }),
+    });
+
+    await expect(service.cancelDispatch(preview.id)).rejects.toMatchObject({
+      code: 'CANCELLATION_UNSUPPORTED',
+      status: 409,
+    });
+    expect((await service.getDispatch(preview.id))?.status).toBe('in_progress');
   });
 });
 

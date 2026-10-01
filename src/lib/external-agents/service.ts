@@ -24,6 +24,7 @@ import {
   type TransportDispatchResult,
   type TransportResolver,
 } from './transports';
+import { getCopilotCloudTask } from './copilot-cloud';
 
 const ACTION_CAPABILITIES = {
   analyze_code: 'canAnalyzeCode',
@@ -48,7 +49,14 @@ export interface DispatchPreviewInput {
 }
 
 export interface DispatchResultInput {
-  status?: 'queued' | 'in_progress' | 'waiting_for_user' | 'completed' | 'failed';
+  status?:
+    | 'queued'
+    | 'in_progress'
+    | 'waiting_for_user'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled';
   result?: AgentDispatchResult;
   summary?: string;
   tasks?: Array<Record<string, unknown>>;
@@ -120,6 +128,7 @@ function normalizeScope(value: AgentDispatchScope | undefined): AgentDispatchSco
       ? requiredText(scope.defaultBranch, 'scope.defaultBranch', 255)
       : undefined,
     baseRef: scope.baseRef ? requiredText(scope.baseRef, 'scope.baseRef', 255) : undefined,
+    model: scope.model ? requiredText(scope.model, 'scope.model', 255) : undefined,
     createPullRequest: scope.createPullRequest === true,
   };
 }
@@ -227,6 +236,7 @@ async function loadPayloadSource(
       execution: {
         locality: agent.executionLocality,
         baseRef: scope.baseRef,
+        model: scope.model,
         createPullRequest: scope.createPullRequest,
       },
       tasks: snapshot.tasks.map(({ connectorType: _connectorType, ...task }) => task),
@@ -440,7 +450,12 @@ async function finishAttemptFromTransport(
     providerDetail: safeDetail,
     errorMessage: safeError ?? undefined,
   });
-  const resultDigest = result.status === 'completed' || result.status === 'failed'
+  const resultDigest = [
+    'completed',
+    'failed',
+    'timed_out',
+    'cancelled',
+  ].includes(result.status)
     ? hashCanonical(normalized)
     : null;
   const references = extractReferences(normalized.result);
@@ -610,7 +625,15 @@ function normalizeReferences(
 
 function normalizeResult(input: DispatchResultInput) {
   const status = input.status ?? 'completed';
-  if (!['queued', 'in_progress', 'waiting_for_user', 'completed', 'failed'].includes(status)) {
+  if (![
+    'queued',
+    'in_progress',
+    'waiting_for_user',
+    'completed',
+    'failed',
+    'timed_out',
+    'cancelled',
+  ].includes(status)) {
     throw new ExternalAgentError('Result status is invalid', 'VALIDATION_ERROR', 422);
   }
   const raw = input.result ?? (
@@ -728,10 +751,108 @@ export async function submitDispatchResult(
 }
 
 export async function cancelDispatch(id: string) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  if (agent?.type === 'copilot-cloud' && dispatch.providerTaskId) {
+    throw new ExternalAgentError(
+      'GitHub Agent Tasks does not currently expose task cancellation; the provider task remains active',
+      'CANCELLATION_UNSUPPORTED',
+      409,
+    );
+  }
   return (await getExternalAgentControlPersistence()).dispatches.cancel(
     id,
     new Date().toISOString(),
   );
+}
+
+export async function reconcileDispatch(
+  id: string,
+  options: { fetcher?: typeof fetch } = {},
+) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  if (
+    dispatch.executionLocality !== 'github-hosted'
+    || !dispatch.providerTaskId
+    || !dispatch.repository
+  ) {
+    return dispatch;
+  }
+  if ([
+    'completed',
+    'failed',
+    'timed_out',
+    'dead_letter',
+    'cancelled',
+  ].includes(dispatch.status)) {
+    return dispatch;
+  }
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  assertAgentEnabled(agent);
+  if (agent.type !== 'copilot-cloud') {
+    throw new ExternalAgentError(
+      'GitHub-hosted dispatch is not backed by the Copilot cloud adapter',
+      'EXECUTION_BOUNDARY_MISMATCH',
+      409,
+    );
+  }
+  const provider = await getCopilotCloudTask(
+    agent,
+    dispatch.repository,
+    dispatch.baseRef ?? dispatch.scope.defaultBranch ?? 'main',
+    dispatch.providerTaskId,
+    options.fetcher,
+  );
+  await submitDispatchResult(
+    dispatch.id,
+    {
+      status: provider.status,
+      result: provider.result,
+      providerTaskId: provider.providerTaskId,
+      providerState: provider.providerState,
+      providerDetail: provider.providerDetail,
+      errorMessage: provider.errorMessage,
+    },
+    { agentAuthenticated: true },
+  );
+  return (await getDispatch(id))!;
+}
+
+export async function reconcileActiveCopilotCloudDispatches(
+  options: { fetcher?: typeof fetch } = {},
+) {
+  const activeStatuses: AgentDispatchRecord['status'][] = [
+    'queued',
+    'in_progress',
+    'waiting_for_user',
+  ];
+  const dispatches = (await Promise.all(
+    activeStatuses.map((status) => listDispatches({ status, limit: 500 })),
+  )).flat();
+  let reconciled = 0;
+  const failures: Array<{ dispatchId: string; error: string }> = [];
+  for (const dispatch of dispatches) {
+    if (dispatch.executionLocality !== 'github-hosted') continue;
+    try {
+      if (!dispatch.providerTaskId) {
+        const recovered = await confirmDispatch(dispatch.id, dispatch.previewHash, {
+          transportResolver: createTransportResolver({ fetcher: options.fetcher }),
+        });
+        if (recovered.dispatch.providerTaskId) reconciled += 1;
+        continue;
+      }
+      await reconcileDispatch(dispatch.id, options);
+      reconciled += 1;
+    } catch (error) {
+      failures.push({
+        dispatchId: dispatch.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { reconciled, failures };
 }
 
 export async function retryDispatch(

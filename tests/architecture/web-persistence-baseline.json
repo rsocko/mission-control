@@ -40,10 +40,10 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 277,
+    "apiRoutes": 278,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 270,
+    "cleanRoutes": 271,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 3,
@@ -128,6 +128,7 @@
     "src/app/api/external-agents/dispatches/claim/route.ts",
     "src/app/api/external-agents/dispatches/route.ts",
     "src/app/api/external-agents/import/route.ts",
+    "src/app/api/external-agents/reconcile/route.ts",
     "src/app/api/external-agents/route.ts",
     "src/app/api/features/route.ts",
     "src/app/api/finance/alerts/[id]/dismiss/route.ts",
@@ -416,6 +417,7 @@
     "src/app/api/external-agents/dispatches/claim/route.ts",
     "src/app/api/external-agents/dispatches/route.ts",
     "src/app/api/external-agents/import/route.ts",
+    "src/app/api/external-agents/reconcile/route.ts",
     "src/app/api/external-agents/route.ts",
     "src/app/api/features/route.ts",
     "src/app/api/finance/alerts/[id]/dismiss/route.ts",

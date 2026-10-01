@@ -73,6 +73,7 @@ export interface AgentDispatchScope {
   repository?: string;
   defaultBranch?: string;
   baseRef?: string;
+  model?: string;
   createPullRequest?: boolean;
 }
 

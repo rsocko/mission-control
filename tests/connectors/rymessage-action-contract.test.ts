@@ -131,21 +131,26 @@ describe('Companion ActionV1 contract', () => {
     })).toBe(false);
   });
 
-  it('sanitizes non-portable message and model data and derives stable operation IDs', () => {
+  it('retains bounded presentation fields while removing raw identity and extracted data', () => {
     const portable = sanitizeCompanionAction(canonicalAction());
     const persisted = JSON.stringify(portable);
     for (const sensitive of [
       'private-message-id',
-      'Private Sender',
-      'Private Thread',
-      'Private excerpt',
-      'Private reasoning',
-      'private-model',
       'payload',
       'feedbackId',
     ]) {
       expect(persisted).not.toContain(sensitive);
     }
+    expect(portable.source).toEqual({
+      senderDisplayName: 'Private Sender',
+      conversationTitle: 'Private Thread',
+      messageExcerpt: 'Private excerpt',
+      sourceUrl: 'https://example.test/private',
+    });
+    expect(portable.classification).toMatchObject({
+      reason: 'Private reasoning',
+      model: 'private-model',
+    });
     const first = stableCompanionOperationId('same-observation');
     expect(stableCompanionOperationId('same-observation')).toBe(first);
     expect(stableCompanionOperationId('different-observation')).not.toBe(first);

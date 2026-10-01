@@ -1,6 +1,25 @@
 import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
+import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
+import { stableCompanionOperationId } from '@/lib/connectors/rymessage/action-contract';
+
+function record(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
 
 /**
  * POST /api/notifications/:id/snooze
@@ -42,6 +61,40 @@ export async function POST(
 
     const web = await getNotificationWebPersistence();
     const snoozeAt = snoozeUntil.toISOString();
+    const notification = await web.findNotificationForAction(id);
+    if (!notification) {
+      return ApiErrors.notFound('Notification');
+    }
+    if (notification.connectorType === 'rymessage') {
+      const metadata = record(notification.metadata);
+      const actionId = typeof metadata.actionId === 'string' ? metadata.actionId : '';
+      const revision = Number(metadata.revision);
+      const lifecycleRevision = Number(metadata.lifecycleRevision);
+      if (
+        !actionId
+        || !notification.connectorInstanceId
+        || !Number.isSafeInteger(revision)
+      ) {
+        return ApiErrors.conflict('RyMessage action identity is incomplete');
+      }
+      await queueCompanionActionMutation(notification.connectorInstanceId, {
+        operationId: stableCompanionOperationId(
+          `rymessage:snoozed:${notification.connectorInstanceId}:${actionId}:${revision}:${snoozeAt}`,
+        ),
+        actionId,
+        baseRevision: revision,
+        expectedFieldRevisions: {
+          lifecycle: Number.isSafeInteger(lifecycleRevision)
+            ? lifecycleRevision
+            : revision,
+        },
+        mutation: {
+          kind: 'action.lifecycle',
+          state: 'snoozed',
+          snoozedUntil: snoozeAt,
+        },
+      });
+    }
     const found = await web.snoozeNotification(id, snoozeAt);
 
     if (!found) {

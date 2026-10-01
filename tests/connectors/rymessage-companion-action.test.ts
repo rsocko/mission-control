@@ -533,6 +533,31 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
       ...companionAction(8_001),
       actionId: '1a4026a4-5cc7-521a-ad0c-070c31c2600c',
       stableKey: 'ak1:d7d6d01c0799c17a93582e996528ef3299a654ff4bb7b53764303fd46607c1fd',
+      source: {
+        ...companionAction(8_001).source,
+        senderDisplayName: 'Avery Chen',
+        conversationTitle: 'Launch planning',
+        messageExcerpt: 'Can you send the revised estimate by Friday?',
+      },
+      content: {
+        title: 'Send the revised estimate',
+        summary: 'Please send the revised estimate by Friday.',
+        details: 'Include the updated vendor lead times.',
+        actionType: 'follow-up',
+        category: 'work',
+        direction: 'received' as const,
+        recommendation: 'create-task',
+        priority: 'high' as const,
+      },
+      classification: {
+        ...companionAction(8_001).classification,
+        confidenceClass: 'high' as const,
+        confidenceScore: 0.92,
+        reason: 'Direct request with a deadline.',
+        derivationMethod: 'ai' as const,
+        model: 'action-model',
+        derivationVersion: '3',
+      },
     };
     const upsert = {
       eventId: uuid(8_101),
@@ -564,15 +589,26 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
       occurredAt: '2026-09-29T21:02:00.000Z',
       kind: 'tombstone' as const,
     };
-    const v1Requests: string[] = [];
+    const v1FeedRequests: string[] = [];
+    const v1MutationRequests: string[] = [];
     const v2Requests: string[] = [];
-    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+    const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input));
       if (url.pathname === '/v1/integrations/action-feed') {
-        v1Requests.push(url.toString());
+        v1FeedRequests.push(url.toString());
         return new Response(JSON.stringify({
           error: { code: 'integration_scope_required' },
         }), { status: 403 });
+      }
+      if (url.pathname === '/v1/integrations/action-feed/mutations') {
+        v1MutationRequests.push(String(init?.body));
+        const request = JSON.parse(String(init?.body)) as { operationId: string; actionId: string };
+        return new Response(JSON.stringify({
+          operationId: request.operationId,
+          actionId: request.actionId,
+          outcome: 'applied',
+          revision: 2,
+        }), { status: 200 });
       }
       v2Requests.push(url.toString());
       const cursor = url.searchParams.get('cursor');
@@ -666,23 +702,62 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
           tombstonedAt: null,
         }),
       ]);
-      expect(database.sqlite.prepare(`
-        SELECT source_state AS sourceState, metadata
+      const projected = database.sqlite.prepare(`
+        SELECT body, source_state AS sourceState, metadata
         FROM notifications
         WHERE source_id = ?
       `).get(
         `rymessage:companion:${CONNECTOR_ID}:${live.actionId}`,
-      )).toMatchObject({
+      ) as { body: string; sourceState: string; metadata: string };
+      expect(projected).toMatchObject({
+        body: 'Can you send the revised estimate by Friday?',
         sourceState: 'active',
-        metadata: expect.stringContaining('"contract":"companion-action-v2"'),
+      });
+      expect(JSON.parse(projected.metadata)).toMatchObject({
+        contract: 'companion-action-v2',
+        senderDisplayName: 'Avery Chen',
+        conversationTitle: 'Launch planning',
+        messageExcerpt: 'Can you send the revised estimate by Friday?',
+        details: 'Include the updated vendor lead times.',
+        actionType: 'follow-up',
+        category: 'work',
+        direction: 'received',
+        recommendation: 'create-task',
+        confidenceScore: 0.92,
+        classificationReason: 'Direct request with a deadline.',
+        classificationModel: 'action-model',
+        derivationVersion: '3',
       });
 
+      await expect(actionConnector.queueActionMutation({
+        actionId: live.actionId,
+        operationId: uuid(8_301),
+        baseRevision: live.revision,
+        expectedFieldRevisions: { lifecycle: 1 },
+        mutation: { kind: 'action.lifecycle', state: 'handled' },
+      })).resolves.toEqual({
+        operationId: uuid(8_301),
+        queued: true,
+      });
+      expect(database.sqlite.prepare(`
+        SELECT status FROM rymessage_action_outbound_mutations
+        WHERE connector_id = ? AND operation_id = ?
+      `).get(CONNECTOR_ID, uuid(8_301))).toEqual({ status: 'pending' });
       await expect(actionConnector.syncDomainData({ full: false })).resolves.toMatchObject({
         itemsAdded: 0,
         itemsUpdated: 0,
         itemsRemoved: 1,
       });
       expect(await actionConnector.getLastSyncToken()).toBe('v2-cursor-2');
+      expect(database.sqlite.prepare(`
+        SELECT status, last_error_code AS lastErrorCode, last_error AS lastError
+        FROM rymessage_action_outbound_mutations
+        WHERE connector_id = ? AND operation_id = ?
+      `).get(CONNECTOR_ID, uuid(8_301))).toEqual({
+        status: 'succeeded',
+        lastErrorCode: null,
+        lastError: null,
+      });
       expect(database.sqlite.prepare(`
         SELECT source_state AS sourceState
         FROM notifications
@@ -702,7 +777,12 @@ describe('Companion ActionV1 HTTP and reconciliation seam', () => {
         FROM rymessage_action_v2_receipts
         WHERE connector_id = ?
       `).get(CONNECTOR_ID)).toEqual({ count: 2 });
-      expect(v1Requests).toEqual([]);
+      expect(v1FeedRequests).toEqual([]);
+      expect(v1MutationRequests).toHaveLength(1);
+      expect(JSON.parse(v1MutationRequests[0]!)).toMatchObject({
+        actionId: live.actionId,
+        mutation: { kind: 'action.lifecycle', state: 'handled' },
+      });
       expect(v2Requests).toHaveLength(4);
     } finally {
       vi.unstubAllGlobals();

@@ -50,6 +50,105 @@ afterEach(() => {
 });
 
 describe('notification provider registry', () => {
+  it('presents rich RyMessage context and durable source actions', async () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'rymessage',
+      connectorInstanceId: 'rymessage-1',
+      title: 'Send the revised estimate',
+      body: 'Please send the revised estimate by Friday.',
+      category: 'social',
+      metadata: {
+        contract: 'companion-action-v2',
+        actionId: '00000000-0000-4000-8000-000000000001',
+        revision: 7,
+        lifecycleRevision: 6,
+        senderDisplayName: 'Avery Chen',
+        conversationTitle: 'Launch planning',
+        messageExcerpt: 'Can you send the revised estimate by Friday?',
+        details: 'Include the updated vendor lead times.',
+        actionType: 'follow-up',
+        category: 'work',
+        direction: 'received',
+        recommendation: 'create-task',
+        priority: 'high',
+        confidenceScore: 0.92,
+        classificationReason: 'Direct request with a deadline.',
+        derivationMethod: 'ai',
+        classificationModel: 'action-model',
+        derivationVersion: '3',
+        lifecycle: 'visible',
+        linkedTaskCount: 1,
+        activeLinkedTaskCount: 1,
+        linkedRelationIds: ['relation-1'],
+        taskMaterializations: [{
+          relationId: 'relation-1',
+          state: 'linked',
+          providerLabel: 'Microsoft To Do',
+          title: 'Send the revised estimate',
+          status: 'in-progress',
+          availability: 'live',
+          openUrl: 'https://to-do.office.com/tasks/id/1',
+        }],
+      },
+    }));
+
+    expect(resolved?.presentation.presentation).toMatchObject({
+      sourceName: 'RyMessage Action Center',
+      subtitle: 'Avery Chen · Launch planning',
+      metadataChips: [
+        { label: 'Action', value: 'Follow Up' },
+        { label: 'Category', value: 'Work' },
+        { label: 'Direction', value: 'Received' },
+        { label: 'State', value: 'Visible' },
+      ],
+      richContent: {
+        primaryText: 'Include the updated vendor lead times.',
+        secondaryText: 'Recommendation: Create Task',
+      },
+    });
+    expect(resolved?.presentation.presentation?.richContent?.stats).toEqual(
+      expect.arrayContaining([
+        { label: 'Confidence', value: '92%', tone: 'success' },
+        { label: 'Tasks', value: '1 linked', tone: 'success' },
+      ]),
+    );
+    expect(resolved?.presentation.presentation?.richContent?.footerText)
+      .toContain('Direct request with a deadline.');
+    expect(resolved?.presentation.actions?.map(action => action.actionType)).toEqual([
+      'rymessage_promote',
+      'rymessage_unlink',
+      'rymessage_mark_handled',
+      'rymessage_dismiss',
+    ]);
+
+    await expect(executeNotificationProviderAction({
+      notification: {
+        id: 'rymessage-notification',
+        sourceId: 'rymessage:companion:rymessage-1:action-1',
+        connectorType: 'rymessage',
+        connectorInstanceId: 'rymessage-1',
+        title: 'Send the revised estimate',
+        body: null,
+        category: 'social',
+        navigationTarget: null,
+        metadata: {},
+        presentation: {},
+      },
+      action: {
+        id: 'dismiss-action',
+        notificationId: 'rymessage-notification',
+        actionType: 'rymessage_dismiss',
+        payload: {},
+      },
+      payload: {},
+      input: {},
+    })).resolves.toEqual({
+      state: 'dismissed',
+      result: { type: 'rymessage_dismiss', queued: true },
+    });
+  });
+
   it('lets a source define signatures, presentation, and CTAs', () => {
     registerNotificationProvider({
       sourceType: 'test-source',

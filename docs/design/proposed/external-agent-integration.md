@@ -2,7 +2,7 @@
 title: "External Agent Integration"
 status: proposed
 created: 2026-07-19
-last_reviewed: 2026-09-29
+last_reviewed: 2026-09-30
 category: design
 related:
   - "[Paperclip Adoption and Integration](paperclip-adoption-and-integration.md)"
@@ -263,16 +263,33 @@ logs.
 #### `copilot-cloud` (GitHub-hosted cloud agent)
 
 1. MC previews the exact prompt, repository, base ref, model selection, and whether a PR should be created.
-2. After confirmation, MC calls `POST /agents/repos/{owner}/{repo}/tasks` with `prompt`, optional `base_ref`, optional `model`, and `create_pull_request`.
-3. MC stores the returned GitHub agent task ID and polls its status. Supported states include `queued`, `in_progress`, `idle`, `waiting_for_user`, and terminal outcomes.
-4. PR/issue webhooks and the existing GitHub connector associate created branches and PRs with the dispatch.
-5. If the Agent Tasks API is unavailable, MC may assign an issue to `copilot-swe-agent[bot]` with an explicit `agent_assignment`; merely adding a `copilot` label is not a supported dispatch contract.
+2. Before transmission, MC validates the user credential, exact repository identity, base ref, Copilot repository eligibility, and Agent tasks read permission. The create request then validates write permission.
+3. After confirmation, MC calls `POST /agents/repos/{owner}/{repo}/tasks` with the reviewed context serialized into `prompt`, optional `base_ref`, optional `model`, and `create_pull_request`.
+4. MC stores the returned GitHub agent task ID and polls `GET /agents/repos/{owner}/{repo}/tasks/{task_id}`. `idle` maps to canonical `in_progress`; all other documented provider states map directly.
+5. The persisted provider task ID is the normal restart-reconciliation anchor. If a process stopped after GitHub accepted a create request but before that ID was stored, MC resumes the fenced attempt after its lease expires and scans recent Agent tasks for the dispatch marker in the exact prompt so a response-loss retry does not create duplicate work.
+6. Branch artifacts are recorded directly. Pull artifacts are resolved through the existing GitHub REST client, verified against the confirmed repository, and persisted as branch, commit, and PR references.
 
 The Agent Tasks API is public preview and currently accepts only user-to-server
 credentials, such as a PAT, OAuth user token, or GitHub App user token. GitHub
 App installation access tokens are not supported for this cloud-dispatch API.
-MC must report entitlement, repository-policy, and token-scope failures without
-falling back to another execution mode.
+Tokens remain server-side behind `auth_credential_ref`; they are never included
+in previews, provider details, events, or API responses. MC reports credential,
+entitlement, repository-policy, token-scope, validation, and rate-limit failures
+with actionable errors and never falls back to another execution mode or
+repository.
+
+`POST /api/external-agents/reconcile` performs bounded reconciliation of all
+persisted active GitHub-hosted dispatches and is safe to run after process
+restart. Reading an individual dispatch also refreshes its provider state.
+GitHub does not currently expose an Agent Tasks cancellation endpoint. Once a
+provider task ID exists, MC returns `CANCELLATION_UNSUPPORTED` instead of
+claiming that the upstream task was cancelled; cancellation before submission
+remains local and durable.
+
+Issue assignment to `copilot-swe-agent[bot]` with an explicit
+`agent_assignment` remains a documented compatibility path, but this adapter
+does not silently switch to it when direct Agent Tasks dispatch fails. A
+`copilot` label alone is never a dispatch contract.
 
 #### `copilot-sdk-workspace` (MC-hosted workspace agent)
 

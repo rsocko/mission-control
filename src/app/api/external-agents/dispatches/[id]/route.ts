@@ -3,6 +3,7 @@ import {
   cancelDispatch,
   getDispatch,
   markDispatchWaiting,
+  reconcileDispatch,
   retryDispatch,
   reviewDispatchResult,
 } from '@/lib/external-agents/service';
@@ -18,7 +19,12 @@ type Context = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: Context) {
   try {
     requireTrustedMutation(request);
-    const dispatch = await getDispatch((await params).id);
+    const id = (await params).id;
+    const current = await getDispatch(id);
+    const dispatch = current?.executionLocality === 'github-hosted'
+      && current.providerTaskId
+      ? await reconcileDispatch(id)
+      : current;
     if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
     return NextResponse.json({ dispatch: publicDispatch(dispatch) });
   } catch (error) {

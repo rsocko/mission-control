@@ -652,7 +652,7 @@ export function createSqliteExternalAgentControlRepository(
           expireOne(sqlite, current, input.now);
           return 'expired' as const;
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = sqlite.prepare(`
           UPDATE agent_dispatches SET
             status = ?, provider_task_id = COALESCE(?, provider_task_id),
@@ -812,7 +812,7 @@ export function createSqliteExternalAgentControlRepository(
             );
           }
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = sqlite.prepare(`
           UPDATE agent_dispatches SET
             status = ?, provider_task_id = COALESCE(?, provider_task_id),

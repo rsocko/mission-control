@@ -28,7 +28,13 @@ export interface DispatchFinalizeInput {
   leaseExpiresAt: string;
   status: Extract<
     AgentDispatchStatus,
-    'queued' | 'in_progress' | 'waiting_for_user' | 'completed' | 'failed'
+    | 'queued'
+    | 'in_progress'
+    | 'waiting_for_user'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
   >;
   providerTaskId?: string;
   providerDetail?: Record<string, unknown>;

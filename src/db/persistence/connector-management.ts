@@ -30,6 +30,7 @@ export interface ConnectorOverview {
   }>;
   syncOutcomes: Array<{
     connectorId: string;
+    lastSyncAt: string;
     lastSyncedAt: string | null;
     success: boolean | null;
     error: string | null;

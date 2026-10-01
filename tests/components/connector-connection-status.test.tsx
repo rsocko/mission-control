@@ -173,12 +173,102 @@ describe('ConnectionStatus', () => {
           type: 'outlook-email',
           hasCredentials: true,
           lastTestStatus: 'success',
+          lastTestAt: '2026-09-30T20:00:00.000Z',
           lastSyncStatus: 'failed',
           lastSyncError: 'Token expired — re-authenticate',
+          lastSyncAt: '2026-09-30T19:00:00.000Z',
         }}
       />
     );
 
     expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('shows an environment-backed RyMessage connector as active after a successful manual test', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          id: 'rymessage',
+          type: 'rymessage',
+          settings: { credentialEnv: 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN' },
+          hasCredentials: false,
+          lastTestStatus: 'success',
+          lastTestAt: '2026-09-30T20:00:00.000Z',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('shows an environment-backed RyMessage connector as active after a successful sync', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          id: 'rymessage',
+          type: 'rymessage',
+          settings: { credentialEnv: 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN' },
+          hasCredentials: false,
+          lastSyncStatus: 'success',
+          lastSyncAt: '2026-09-30T20:00:00.000Z',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Active')).toBeInTheDocument();
+    expect(screen.queryByText('Not Connected')).not.toBeInTheDocument();
+  });
+
+  it('lets a newer successful sync recover from an older failed manual test', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'rymessage',
+          hasCredentials: false,
+          lastTestStatus: 'failed',
+          lastTestError: 'Token expired',
+          lastTestAt: '2026-09-30T19:00:00.000Z',
+          lastSyncStatus: 'success',
+          lastSyncAt: '2026-09-30T20:00:00.000Z',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Active')).toBeInTheDocument();
+  });
+
+  it('shows an explicit environment-backed connector failure without stored credentials', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'rymessage',
+          hasCredentials: false,
+          lastSyncStatus: 'failed',
+          lastSyncError: 'HTTP 500: Internal Server Error',
+          lastSyncAt: '2026-09-30T20:00:00.000Z',
+        }}
+      />
+    );
+
+    expect(screen.getByText('Connection Failed')).toBeInTheDocument();
+  });
+
+  it('does not treat a configured credential environment name as a connection result', () => {
+    render(
+      <ConnectionStatus
+        connector={{
+          ...connector,
+          type: 'rymessage',
+          settings: { credentialEnv: 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN' },
+          hasCredentials: false,
+        }}
+      />
+    );
+
+    expect(screen.getByText('Not Connected')).toBeInTheDocument();
   });
 });

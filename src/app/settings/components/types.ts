@@ -35,6 +35,7 @@ export interface ConnectorConfig {
   /** Outcome of the most recent scheduled/triggered sync attempt (from sync_log). */
   lastSyncStatus?: 'success' | 'failed' | null;
   lastSyncError?: string | null;
+  lastSyncAt?: string | null;
 }
 
 export interface SourceList {

@@ -572,6 +572,15 @@ export function NotificationCard({
   const presentationSubtitle = presentation.subtitle || null;
   const subjectIcon = presentation.subjectIcon?.trim() || undefined;
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
+  const compactSecondaryText = notification.connectorType === 'rymessage'
+    ? displayBody || richContent?.primaryText
+    : null;
+  const compactContextStats = notification.connectorType === 'rymessage'
+    ? (richContent?.stats ?? []).filter(stat => (
+        stat.label === 'Confidence'
+        || (stat.label === 'Lifecycle' && stat.value !== 'Visible')
+      )).slice(0, 2)
+    : [];
 
   const primaryAction = useMemo(() =>
     notification.actions?.find(a => a.isPrimary),
@@ -687,6 +696,12 @@ export function NotificationCard({
             </p>
           )}
 
+          {(compact || panel) && compactSecondaryText && (
+            <p className="mt-1 truncate text-xs leading-relaxed text-[var(--text-tertiary)]">
+              {compactSecondaryText}
+            </p>
+          )}
+
           {/* Rows stay compact; full content belongs in the detail surface. */}
           {displayBody && !compact && !richContent && (
             <p className="text-xs text-[var(--text-tertiary)] mt-1 leading-relaxed line-clamp-2">
@@ -727,6 +742,15 @@ export function NotificationCard({
               <LevelIcon size={10} />
               {levelConfig.label}
             </span>
+            {compactContextStats.map(stat => (
+              <span
+                key={stat.label}
+                className="text-xs text-[var(--text-muted)]"
+                title={stat.label}
+              >
+                {stat.value}
+              </span>
+            ))}
             <span className="text-xs text-[var(--text-muted)]">
               {formatTimeAgo(notification.receivedAt)}
             </span>

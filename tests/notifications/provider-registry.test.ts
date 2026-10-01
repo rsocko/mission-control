@@ -149,6 +149,39 @@ describe('notification provider registry', () => {
     });
   });
 
+  it('gives legacy RyMessage actions a useful action-type subtitle', () => {
+    registerDefaultNotificationProviders();
+    const resolved = resolveNotificationProvider(notification({
+      connectorType: 'rymessage',
+      connectorInstanceId: 'rymessage-1',
+      title: 'Reply to Casey',
+      body: undefined,
+      category: 'social',
+      metadata: {
+        contract: 'companion-action-v2',
+        actionId: '00000000-0000-4000-8000-000000000001',
+        revision: 1,
+        actionType: 'waiting-on-reply',
+        confidenceClass: 'high',
+        confidenceScore: 0.88,
+        lifecycle: 'visible',
+        sourceKind: 'message',
+      },
+    }));
+
+    expect(resolved?.presentation.presentation).toMatchObject({
+      sourceName: 'RyMessage Action Center',
+      subtitle: 'Waiting on reply',
+      richContent: {
+        primaryText: undefined,
+        stats: expect.arrayContaining([
+          { label: 'Confidence', value: '88%', tone: 'success' },
+          { label: 'Lifecycle', value: 'Visible', tone: 'info' },
+        ]),
+      },
+    });
+  });
+
   it('lets a source define signatures, presentation, and CTAs', () => {
     registerNotificationProvider({
       sourceType: 'test-source',

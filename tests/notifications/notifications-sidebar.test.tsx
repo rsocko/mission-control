@@ -122,4 +122,36 @@ describe('notifications sidebar', () => {
     expect(level.compareDocumentPosition(type) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(type.compareDocumentPosition(savedViews) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  it('shows a user-facing RyMessage type label without changing the selected key', () => {
+    const setNotificationTypeFilter = vi.fn();
+    render(
+      <NotificationsSidebar
+        hook={{
+          facets: {
+            level: { fyi: 2 },
+            category: {},
+            source: { rymessage: 2 },
+            sourceAccount: [],
+            notificationType: [
+              { key: 'rymessage.companion-action', label: 'rymessage.companion-action', count: 2 },
+            ],
+            state: {},
+            merchant: [],
+          },
+          filters: { ...DEFAULT_NOTIFICATION_QUERY, source: 'rymessage' },
+          setLevelFilter: vi.fn(),
+          setSourceFilter: vi.fn(),
+          setSourceAccountFilter: vi.fn(),
+          setNotificationTypeFilter,
+          setStateFilter: vi.fn(),
+          setDateRangeFilter: vi.fn(),
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Action Center 2' }));
+    expect(setNotificationTypeFilter).toHaveBeenCalledWith('rymessage.companion-action');
+    expect(screen.queryByText('Rymessage.companion Action')).not.toBeInTheDocument();
+  });
 });

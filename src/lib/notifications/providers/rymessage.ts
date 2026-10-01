@@ -20,6 +20,13 @@ function humanize(value: string): string {
     .replace(/\b\w/g, character => character.toUpperCase());
 }
 
+function actionTypeLabel(value: string): string {
+  const normalized = value.replace(/[-_]+/g, ' ').trim().toLowerCase();
+  return normalized
+    ? normalized.charAt(0).toUpperCase() + normalized.slice(1)
+    : value;
+}
+
 function taskMaterializations(value: unknown): Array<Record<string, unknown>> {
   return Array.isArray(value)
     ? value.filter((item): item is Record<string, unknown> => (
@@ -72,9 +79,10 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
       const classificationModel = text(metadata.classificationModel);
       const derivationVersion = text(metadata.derivationVersion);
       const subtitle = [sender, conversation].filter(Boolean).join(' · ')
+        || (actionType ? actionTypeLabel(actionType) : null)
         || (linkedCount > 0
           ? `${linkedCount} linked task${linkedCount === 1 ? '' : 's'}`
-          : 'Companion action');
+          : 'Action Center');
       const primaryText = details && details !== notification.body
         ? details
         : excerpt && excerpt !== notification.body

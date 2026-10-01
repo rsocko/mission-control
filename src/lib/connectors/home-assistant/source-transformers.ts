@@ -179,9 +179,11 @@ function repairLevel(value: unknown): NotificationLevel {
   }
 }
 
-function isCoreRestartRepair(issue: HomeAssistantRepairIssue): boolean {
+function isHomeAssistantRestartRepair(issue: HomeAssistantRepairIssue): boolean {
   const domain = text(issue.domain)?.toLowerCase();
-  if (domain !== 'homeassistant' && domain !== 'hassio') return false;
+  if (!['homeassistant', 'hassio', 'hacs', 'marketplace'].includes(domain ?? '')) {
+    return false;
+  }
 
   return [issue.translation_key, issue.issue_id, issue.title].some((value) => {
     const marker = text(value)?.toLowerCase().replace(/[\s-]+/g, '_');
@@ -235,7 +237,7 @@ export function buildRepairNotifications(input: {
         severity: String(issue.severity || 'warning'),
         isFixable: issue.is_fixable === true,
         isPersistent: issue.is_persistent === true,
-        requiresRestart: isCoreRestartRepair(issue),
+        requiresRestart: isHomeAssistantRestartRepair(issue),
         translationKey: text(issue.translation_key),
         baseUrl: input.baseUrl,
         actionsEnabled: input.actionsEnabled,

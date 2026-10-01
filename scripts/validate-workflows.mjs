@@ -156,6 +156,7 @@ for (const file of workflowFiles) {
   validatePermissions(workflow.permissions, file);
 
   const handlesPullRequests = 'pull_request' in workflow.on;
+  const controlsDemoEnvironment = file === 'control-demo-environment.yml';
   hasPullRequestWorkflow ||= handlesPullRequests;
   const hasWritePermissions = Object.values(workflow.jobs ?? {}).some((job) =>
     Object.values(job.permissions ?? {}).includes('write'),
@@ -706,7 +707,17 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
   }
 
-  if (hasWritePermissions) {
+  if (controlsDemoEnvironment) {
+    const control = workflow.jobs?.control;
+    assert.deepEqual(
+      control?.permissions,
+      { contents: 'read', 'id-token': 'write' },
+      `${file} control job must limit its token to Azure OIDC`,
+    );
+    assert.equal(control.environment, 'demo', `${file} control job must use the demo environment`);
+  }
+
+  if (hasWritePermissions && !controlsDemoEnvironment) {
     assert.ok(!('push' in workflow.on), `${file} must not publish directly from a push event`);
     assert.ok(!('pull_request' in workflow.on), `${file} must not publish from pull requests`);
     assert.deepEqual(
@@ -875,7 +886,10 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
       `${file} action references must use a full commit SHA`,
     );
     const action = uses.slice(0, uses.indexOf('@'));
-    assert.ok(allowedActions.has(action), `${file} uses action ${action}, which is not allowlisted`);
+    assert.ok(
+      allowedActions.has(action) || (controlsDemoEnvironment && action === 'azure/login'),
+      `${file} uses action ${action}, which is not allowlisted`,
+    );
   }
 }
 

@@ -303,13 +303,26 @@ describe('Home Assistant source transformers', () => {
     });
   });
 
-  it('marks only Home Assistant core restart repairs as restartable', () => {
+  it('marks Home Assistant host restart repairs as restartable', () => {
     const repairs = buildRepairNotifications({
       ...common,
       issues: [
         {
           domain: 'homeassistant',
           issue_id: 'restart_required',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+        {
+          domain: 'hacs',
+          issue_id: 'restart_required_ntk_hass_v1.2.3',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+        {
+          domain: 'marketplace',
+          issue_domain: 'ntk_hass',
+          issue_id: 'restart_required_123_v1.2.3',
           translation_key: 'restart_required',
           severity: 'warning',
         },
@@ -323,7 +336,17 @@ describe('Home Assistant source transformers', () => {
       immediateActionNeeded: true,
     });
 
-    expect(repairs.map(item => item.metadata.requiresRestart)).toEqual([true, false]);
+    expect(repairs.map(item => item.metadata.requiresRestart)).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+    for (const repair of repairs.slice(1, 3)) {
+      const presented = homeAssistantNotificationProvider.signatures[0].present(repair);
+      expect(presented.actions?.map(action => action.actionType))
+        .toContain('restart_home_assistant');
+    }
   });
 
   it('uses the repair translation key instead of an opaque issue id as its fallback title', () => {

@@ -235,6 +235,20 @@ export class PostgresNotificationRepository implements NotificationRepository {
     });
   }
 
+  async completeActions(notificationId: string, completedAt: string): Promise<void> {
+    await this.db
+      .update(notificationActions)
+      .set({
+        executionState: 'completed',
+        completedAt,
+        lastError: null,
+      })
+      .where(and(
+        eq(notificationActions.notificationId, notificationId),
+        eq(notificationActions.executionState, 'pending'),
+      ));
+  }
+
   async delete(id: string): Promise<boolean> {
     return this.db.transaction(async (tx) => {
       await tx.delete(notificationActions).where(eq(notificationActions.notificationId, id));

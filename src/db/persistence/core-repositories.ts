@@ -91,6 +91,7 @@ export interface NotificationRepository {
    * history owned by notification execution.
    */
   upsert(notification: NotificationItem): Promise<NotificationItem>;
+  completeActions?(notificationId: string, completedAt: string): Promise<void>;
   delete(id: string): Promise<boolean>;
 }
 

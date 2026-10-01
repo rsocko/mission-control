@@ -302,6 +302,11 @@ The first version opens Paperclip to decide. A later version may approve or
 reject through MC only after adding narrowly scoped API authority, explicit
 confirmation, concurrency protection, and authoritative response handling.
 
+Implementation and operational details are documented in
+[Paperclip](../../integrations/paperclip.md). The notification mirror uses the
+existing durable notification identity and metadata contract, so SQLite and
+PostgreSQL require no approval-specific migration.
+
 ### Human work
 
 Paperclip may assign issues to a human, but the user should retain one human

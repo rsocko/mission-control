@@ -58,6 +58,7 @@ export async function runPackagedSyncWorker(
       { WorkerHealthSnapshotScheduler },
       { taskReminderScheduler },
       { taskDeletionRetentionScheduler },
+      { paperclipApprovalScheduler },
       { financeConnectionRecoveryScheduler },
       { houstonMemoryRetentionScheduler },
       { getWorkerPersistenceRepositories },
@@ -89,6 +90,7 @@ export async function runPackagedSyncWorker(
       import('@/lib/telemetry/health-snapshot'),
       import('@/lib/push/task-reminder-scheduler'),
       import('@/lib/tasks/deletion-retention'),
+      import('@/lib/external-agents/paperclip-approval-scheduler'),
       import('@/lib/connectors/monarch-money/recovery-scheduler'),
       import('@/lib/houston-memory/retention'),
       import('@/lib/persistence/worker-runtime'),
@@ -281,6 +283,11 @@ export async function runPackagedSyncWorker(
         name: 'task-deletion-retention',
         start: () => taskDeletionRetentionScheduler.start(),
         stop: () => taskDeletionRetentionScheduler.stop(),
+      },
+      {
+        name: 'paperclip-approvals',
+        start: () => paperclipApprovalScheduler.start(),
+        stop: () => paperclipApprovalScheduler.stop(),
       },
       {
         name: 'event-outbox',

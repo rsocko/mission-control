@@ -163,6 +163,18 @@ export async function register() {
         'Instrumentation: task deletion retention scheduler init failed (non-fatal)',
       );
     }
+    try {
+      const { paperclipApprovalScheduler } = await import(
+        '@/lib/external-agents/paperclip-approval-scheduler'
+      );
+      await paperclipApprovalScheduler.start();
+      syncLogger.info('Instrumentation: Paperclip approval scheduler initialized');
+    } catch (err) {
+      syncLogger.warn(
+        { err },
+        'Instrumentation: Paperclip approval scheduler init failed (non-fatal)',
+      );
+    }
   }
   markRuntimeReady();
 }

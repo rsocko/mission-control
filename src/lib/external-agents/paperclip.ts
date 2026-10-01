@@ -7,6 +7,7 @@ import type {
 } from './contracts';
 import { ExternalAgentError } from './errors';
 import { canonicalJson, redactForPersistence } from './policy';
+import { redactPushText } from '@/lib/notifications/push-text';
 
 const RESPONSE_LIMIT = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -18,7 +19,7 @@ export interface PaperclipConnection {
   fetcher?: typeof fetch;
 }
 
-interface PaperclipAgent {
+export interface PaperclipAgent {
   id: string;
   companyId: string;
   name?: string;
@@ -53,6 +54,34 @@ interface PaperclipIssue {
   updatedAt?: string;
   deduplicated?: boolean;
   deduplicationReason?: string;
+}
+
+export interface PaperclipApproval {
+  id: string;
+  companyId: string;
+  type: string;
+  requestedByAgentId: string | null;
+  requestedByUserId: string | null;
+  status: string;
+  payload: Record<string, unknown>;
+  decisionNote: string | null;
+  decidedByUserId: string | null;
+  decidedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PaperclipApprovalIssue {
+  id: string;
+  identifier?: string;
+  companyId?: string;
+  title?: string;
+  executionRunId?: string | null;
+}
+
+export interface PaperclipCompany {
+  id: string;
+  name?: string;
 }
 
 interface PaperclipRun {
@@ -154,15 +183,17 @@ async function request<T>(
     });
     const body = await readBounded(response);
     if (!response.ok) {
-      const providerMessage = body && typeof body === 'object' && 'error' in body
+      const providerMessage = redactPushText(body && typeof body === 'object' && 'error' in body
         ? String((body as { error: unknown }).error)
-        : `HTTP ${response.status}`;
+        : `HTTP ${response.status}`, 500);
       const code = response.status === 401
         ? 'CREDENTIAL_INVALID'
         : response.status === 403
           ? 'PROVIDER_FORBIDDEN'
           : response.status === 404
             ? 'PROVIDER_NOT_FOUND'
+            : response.status === 429
+              ? 'PROVIDER_RATE_LIMITED'
             : response.status === 409
               ? 'PROVIDER_CONFLICT'
               : response.status === 422
@@ -229,6 +260,7 @@ export async function validatePaperclipConnection(connection: PaperclipConnectio
       503,
     );
   }
+
   const agent = await request<PaperclipAgent>(
     connection,
     `/agents/${encodeURIComponent(config.assigneeAgentId)}`,
@@ -264,6 +296,197 @@ export async function validatePaperclipConnection(connection: PaperclipConnectio
       adapterType: agent.adapterType ?? null,
     },
   };
+}
+
+function assertApprovalScope(
+  connection: PaperclipConnection,
+  approval: PaperclipApproval,
+  expectedApprovalId?: string,
+) {
+  const config = requiredConfig(connection);
+  if (
+    !approval.id
+    || (expectedApprovalId && approval.id !== expectedApprovalId)
+    || approval.companyId !== config.companyId
+  ) {
+    throw new ExternalAgentError(
+      'Paperclip returned an approval outside the configured company or correlation',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+}
+
+function parseApproval(
+  connection: PaperclipConnection,
+  value: unknown,
+  expectedApprovalId?: string,
+): PaperclipApproval {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ExternalAgentError(
+      'Paperclip returned an invalid approval response',
+      'PROVIDER_RESPONSE_INVALID',
+      502,
+    );
+  }
+  const approval = value as Partial<PaperclipApproval>;
+  if (
+    typeof approval.id !== 'string'
+    || typeof approval.companyId !== 'string'
+    || typeof approval.type !== 'string'
+    || typeof approval.status !== 'string'
+    || !approval.payload
+    || typeof approval.payload !== 'object'
+    || Array.isArray(approval.payload)
+    || typeof approval.createdAt !== 'string'
+    || typeof approval.updatedAt !== 'string'
+  ) {
+    throw new ExternalAgentError(
+      'Paperclip returned an invalid approval response',
+      'PROVIDER_RESPONSE_INVALID',
+      502,
+    );
+  }
+  const normalized: PaperclipApproval = {
+    id: approval.id,
+    companyId: approval.companyId,
+    type: approval.type,
+    requestedByAgentId: typeof approval.requestedByAgentId === 'string'
+      ? approval.requestedByAgentId
+      : null,
+    requestedByUserId: typeof approval.requestedByUserId === 'string'
+      ? approval.requestedByUserId
+      : null,
+    status: approval.status,
+    payload: approval.payload as Record<string, unknown>,
+    decisionNote: typeof approval.decisionNote === 'string' ? approval.decisionNote : null,
+    decidedByUserId: typeof approval.decidedByUserId === 'string'
+      ? approval.decidedByUserId
+      : null,
+    decidedAt: typeof approval.decidedAt === 'string' ? approval.decidedAt : null,
+    createdAt: approval.createdAt,
+    updatedAt: approval.updatedAt,
+  };
+  assertApprovalScope(connection, normalized, expectedApprovalId);
+  return normalized;
+}
+
+export async function getPaperclipCompany(
+  connection: PaperclipConnection,
+): Promise<PaperclipCompany> {
+  const config = requiredConfig(connection);
+  const company = await request<PaperclipCompany>(
+    connection,
+    `/companies/${encodeURIComponent(config.companyId)}`,
+  );
+  if (!company || company.id !== config.companyId) {
+    throw new ExternalAgentError(
+      'Paperclip returned a company outside the configured scope',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+  return company;
+}
+
+export async function getPaperclipAgent(
+  connection: PaperclipConnection,
+  agentId: string,
+): Promise<PaperclipAgent> {
+  const agent = await request<PaperclipAgent>(
+    connection,
+    `/agents/${encodeURIComponent(agentId)}`,
+  );
+  if (!agent?.id || agent.id !== agentId || agent.companyId !== requiredConfig(connection).companyId) {
+    throw new ExternalAgentError(
+      'Paperclip returned an agent outside the configured company',
+      'PROVIDER_SCOPE_MISMATCH',
+      502,
+    );
+  }
+  return agent;
+}
+
+export async function listPaperclipApprovals(
+  connection: PaperclipConnection,
+  status?: string,
+): Promise<PaperclipApproval[]> {
+  const config = requiredConfig(connection);
+  const query = status ? `?status=${encodeURIComponent(status)}` : '';
+  const response = await request<unknown>(
+    connection,
+    `/companies/${encodeURIComponent(config.companyId)}/approvals${query}`,
+  );
+  if (!Array.isArray(response) || response.length > 500) {
+    throw new ExternalAgentError(
+      'Paperclip returned an invalid or unbounded approval list',
+      'PROVIDER_RESPONSE_INVALID',
+      502,
+    );
+  }
+  return response.map((value) => parseApproval(connection, value));
+}
+
+export async function getPaperclipApproval(
+  connection: PaperclipConnection,
+  approvalId: string,
+): Promise<PaperclipApproval> {
+  return parseApproval(
+    connection,
+    await request<unknown>(connection, `/approvals/${encodeURIComponent(approvalId)}`),
+    approvalId,
+  );
+}
+
+export async function listPaperclipApprovalIssues(
+  connection: PaperclipConnection,
+  approvalId: string,
+): Promise<PaperclipApprovalIssue[]> {
+  const response = await request<unknown>(
+    connection,
+    `/approvals/${encodeURIComponent(approvalId)}/issues`,
+  );
+  if (!Array.isArray(response) || response.length > 100) {
+    throw new ExternalAgentError(
+      'Paperclip returned an invalid or unbounded approval issue list',
+      'PROVIDER_RESPONSE_INVALID',
+      502,
+    );
+  }
+  const companyId = requiredConfig(connection).companyId;
+  return response.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new ExternalAgentError(
+        'Paperclip returned an invalid approval issue',
+        'PROVIDER_RESPONSE_INVALID',
+        502,
+      );
+    }
+    const issue = value as PaperclipApprovalIssue;
+    if (
+      typeof issue.id !== 'string'
+      || (issue.companyId !== undefined && issue.companyId !== companyId)
+    ) {
+      throw new ExternalAgentError(
+        'Paperclip returned an approval issue outside the configured company',
+        'PROVIDER_SCOPE_MISMATCH',
+        502,
+      );
+    }
+    return issue;
+  });
+}
+
+export function paperclipApprovalDeepLink(
+  connection: PaperclipConnection,
+  approvalId: string,
+): string {
+  const url = new URL(`/approvals/${encodeURIComponent(approvalId)}`, connection.endpoint);
+  url.username = '';
+  url.password = '';
+  url.search = '';
+  url.hash = '';
+  return url.toString();
 }
 
 function titleFromPayload(payload: Record<string, unknown>) {

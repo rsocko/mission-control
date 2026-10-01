@@ -1178,6 +1178,14 @@ export class SqliteNotificationRepository implements NotificationRepository {
     return this.getSync(notification.id)!;
   }
 
+  async completeActions(notificationId: string, completedAt: string): Promise<void> {
+    this.database.prepare(`
+      UPDATE notification_actions
+      SET execution_state = 'completed', completed_at = ?, last_error = NULL
+      WHERE notification_id = ? AND execution_state = 'pending'
+    `).run(completedAt, notificationId);
+  }
+
   async delete(id: string): Promise<boolean> {
     const remove = this.database.transaction(() => {
       this.database.prepare(

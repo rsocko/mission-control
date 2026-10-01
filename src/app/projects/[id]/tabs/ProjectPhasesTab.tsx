@@ -709,6 +709,11 @@ export function ProjectPhasesTab({
     }
 
     if (!startSavingPhase(phase.id)) return;
+    let renamePersisted = false;
+    setPhases((current) => current.map((entry) => (
+      entry.id === phase.id ? { ...entry, name: trimmed } : entry
+    )));
+
     try {
       const response = await fetch(`/api/project-phases/${phase.id}`, {
         method: 'PATCH',
@@ -720,10 +725,18 @@ export function ProjectPhasesTab({
         throw new Error(payload?.error || 'Failed to rename phase');
       }
 
+      renamePersisted = true;
       setPhases((current) => current.map((entry) => (entry.id === phase.id ? payload.phase! : entry)));
       await refreshProjectHierarchy();
       toast.success('Phase renamed');
     } catch (caughtError) {
+      if (!renamePersisted) {
+        setPhases((current) => current.map((entry) => (
+          entry.id === phase.id && entry.name === trimmed
+            ? { ...entry, name: phase.name }
+            : entry
+        )));
+      }
       toast.error(caughtError instanceof Error ? caughtError.message : 'Failed to rename phase');
     } finally {
       finishSavingPhase(phase.id);

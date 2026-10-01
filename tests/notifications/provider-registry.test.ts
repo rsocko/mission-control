@@ -97,8 +97,7 @@ describe('notification provider registry', () => {
       sourceName: 'RyMessage Action Center',
       subtitle: 'Avery Chen · Launch planning',
       metadataChips: [
-        { label: 'Action', value: 'Follow Up' },
-        { label: 'Category', value: 'Work' },
+        { label: 'Type', value: 'Work' },
         { label: 'Direction', value: 'Received' },
         { label: 'State', value: 'Visible' },
       ],
@@ -172,6 +171,10 @@ describe('notification provider registry', () => {
     expect(resolved?.presentation.presentation).toMatchObject({
       sourceName: 'RyMessage Action Center',
       subtitle: 'Waiting on reply',
+      metadataChips: [
+        { label: 'Type', value: 'Waiting On Reply' },
+        { label: 'State', value: 'Visible' },
+      ],
       richContent: {
         primaryText: undefined,
         stats: expect.arrayContaining([

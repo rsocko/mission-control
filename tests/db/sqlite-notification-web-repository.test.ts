@@ -126,6 +126,76 @@ describe('SQLite NotificationWebPersistence', () => {
     ]);
   });
 
+  it('derives RyMessage semantic type facets without changing the connector template key', async () => {
+    const now = new Date().toISOString();
+    const handle = sqlite as unknown as SqliteHandle;
+    const insert = handle.prepare(`
+      INSERT INTO notifications (
+        id, source_id, connector_type, connector_instance_id, title, body,
+        template_key, metadata, received_at, sort_at
+      ) VALUES (?, ?, 'rymessage', 'rymessage-1', ?, ?, 'rymessage.companion-action', ?, ?, ?)
+    `);
+    insert.run(
+      'rymessage-needs-reply',
+      'rymessage:needs-reply',
+      'Reply to Avery',
+      'Synthetic excerpt',
+      JSON.stringify({
+        semanticType: 'needs-reply',
+        messageExcerpt: 'Synthetic excerpt',
+        senderDisplayName: 'Synthetic Sender',
+      }),
+      now,
+      now,
+    );
+    insert.run(
+      'rymessage-legacy',
+      'rymessage:legacy',
+      'Waiting for Casey',
+      null,
+      JSON.stringify({ actionType: 'waiting-on-reply' }),
+      now,
+      now,
+    );
+
+    const semanticResult = await repo.queryNotifications({
+      query: {
+        q: null, level: null, category: null, merchant: null,
+        source: 'rymessage', sourceAccount: null,
+        notificationType: 'rymessage.needs-reply', state: null,
+        actionableOnly: false, dateRange: null, repository: null,
+        owner: null, reason: null, subjectType: null, participating: false,
+        sort: 'newest',
+      },
+      limit: 50,
+      cursor: null,
+    });
+    const legacyCompatibilityResult = await repo.queryNotifications({
+      query: {
+        q: null, level: null, category: null, merchant: null,
+        source: 'rymessage', sourceAccount: null,
+        notificationType: 'rymessage.companion-action', state: null,
+        actionableOnly: false, dateRange: null, repository: null,
+        owner: null, reason: null, subjectType: null, participating: false,
+        sort: 'newest',
+      },
+      limit: 50,
+      cursor: null,
+    });
+
+    expect(semanticResult.items).toHaveLength(1);
+    expect(semanticResult.items[0]).toMatchObject({
+      id: 'rymessage-needs-reply',
+      body: 'Synthetic excerpt',
+      templateKey: 'rymessage.companion-action',
+    });
+    expect(semanticResult.facets.notificationType).toEqual([
+      { key: 'rymessage.needs-reply', label: 'rymessage.needs-reply', count: 1 },
+      { key: 'rymessage.waiting-on-reply', label: 'rymessage.waiting-on-reply', count: 1 },
+    ]);
+    expect(legacyCompatibilityResult.items).toHaveLength(2);
+  });
+
   it('retryWritebacks returns empty when no retryable jobs', async () => {
     const { retried } = await repo.retryWritebacks('id', ['nonexistent'], new Date().toISOString());
     expect(retried).toEqual([]);

@@ -27,6 +27,19 @@ import { wakeNotificationWritebackDispatcher } from '@/lib/notifications/notific
 import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+const RYMESSAGE_TEMPLATE_KEY = 'rymessage.companion-action';
+const RYMESSAGE_TYPE_SQL = `CASE
+  WHEN connector_type = 'rymessage' AND template_key = '${RYMESSAGE_TEMPLATE_KEY}'
+  THEN COALESCE(
+    'rymessage.' || NULLIF(lower(replace(replace(COALESCE(
+      metadata->>'semanticType',
+      metadata->>'category',
+      metadata->>'actionType'
+    ), '_', '-'), ' ', '-')), ''),
+    template_key
+  )
+  ELSE template_key
+END`;
 
 const NOTIFICATION_SELECT_COLUMNS = `
   id,
@@ -149,7 +162,12 @@ function buildBulkWhereClausesPg(query: NotificationQuery, params: unknown[]): s
     }
   }
   if (query.sourceAccount) { conditions.push(`connector_instance_id = $${params.length + 1}`); params.push(query.sourceAccount); }
-  if (query.notificationType) { conditions.push(`template_key = $${params.length + 1}`); params.push(query.notificationType); }
+  if (query.notificationType) {
+    conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+      ? `template_key = $${params.length + 1}`
+      : `${RYMESSAGE_TYPE_SQL} = $${params.length + 1}`);
+    params.push(query.notificationType);
+  }
   if (query.level) { conditions.push(`level = $${params.length + 1}`); params.push(query.level); }
   if (query.category) { conditions.push(`category = $${params.length + 1}`); params.push(query.category); }
   if (query.merchant) {
@@ -500,7 +518,13 @@ export function createPostgresNotificationWebRepository(
         }
       }
       if (query.sourceAccount) { conditions.push(`connector_instance_id = $${paramIdx}`); params.push(query.sourceAccount); paramIdx += 1; }
-      if (query.notificationType) { conditions.push(`template_key = $${paramIdx}`); params.push(query.notificationType); paramIdx += 1; }
+      if (query.notificationType) {
+        conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+          ? `template_key = $${paramIdx}`
+          : `${RYMESSAGE_TYPE_SQL} = $${paramIdx}`);
+        params.push(query.notificationType);
+        paramIdx += 1;
+      }
       if (query.level) { conditions.push(`level = $${paramIdx}`); params.push(query.level); paramIdx += 1; }
       if (query.category) { conditions.push(`category = $${paramIdx}`); params.push(query.category); paramIdx += 1; }
       if (query.merchant) {
@@ -587,7 +611,7 @@ export function createPostgresNotificationWebRepository(
       const typeFacetConditions = [
         inboxConditionPg(1).sql,
         `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
-        `template_key IS NOT NULL`,
+        `${RYMESSAGE_TYPE_SQL} IS NOT NULL`,
       ];
       if (query.source) {
         const sourceTypes = financeProviderFilterValues(query.source);
@@ -637,11 +661,11 @@ export function createPostgresNotificationWebRepository(
           GROUP BY notifications.connector_instance_id, notifications.connector_type, connector_configs.name
         `, [now]),
         pool.query(`
-          SELECT template_key AS key, COUNT(*) AS count
+          SELECT ${RYMESSAGE_TYPE_SQL} AS key, COUNT(*) AS count
           FROM notifications
           WHERE ${typeFacetConditions.join(' AND ')}
-          GROUP BY template_key
-          ORDER BY COUNT(*) DESC, template_key ASC
+          GROUP BY ${RYMESSAGE_TYPE_SQL}
+          ORDER BY COUNT(*) DESC, key ASC
         `, typeFacetParams),
         pool.query(`SELECT state AS value, COUNT(*) AS count FROM notifications WHERE connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY state`),
         pool.query(`

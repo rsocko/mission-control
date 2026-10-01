@@ -14,6 +14,11 @@ import {
   type CompanionActionV1,
   type PortableCompanionAction,
 } from './action-contract';
+import {
+  resolveRyMessageSemanticType,
+  ryMessageNotificationCategory,
+  ryMessageNotificationLevel,
+} from './notification-semantics';
 
 function portableAction(
   action: CompanionActionV1 | PortableCompanionAction,
@@ -29,20 +34,14 @@ function notificationLevel(
   projection: RyMessageActionProjection,
 ): NotificationLevel {
   const action = projection.action;
-  const priority = action?.content.priority ?? 'none';
-  const confidence = action?.classification.confidenceClass;
-  if (priority === 'critical') return 'urgent';
-  if (priority === 'high') return confidence === 'low' ? 'heads_up' : 'action_needed';
-  if (priority === 'medium') return confidence === 'high' ? 'action_needed' : 'heads_up';
-  return confidence === 'high' ? 'heads_up' : 'fyi';
-}
-
-function notificationCategory(category: string | undefined): string {
-  if (!category) return 'social';
-  if (category === 'security') return 'security';
-  if (category === 'automation') return 'automation';
-  if (category === 'development') return 'development';
-  return 'social';
+  return ryMessageNotificationLevel({
+    priority: action?.content.priority,
+    semanticType: resolveRyMessageSemanticType(
+      action?.content.category,
+      action?.content.actionType,
+    ),
+    confidenceClass: action?.classification.confidenceClass,
+  });
 }
 
 function sourceState(projection: RyMessageActionProjection): NotificationSourceState {
@@ -60,6 +59,10 @@ function projectionInput(
   const lifecycle = action?.lifecycle.state ?? 'completed';
   const receivedAt = action?.createdAt ?? projection.tombstonedAt ?? new Date().toISOString();
   const updatedAt = action?.updatedAt ?? projection.tombstonedAt ?? receivedAt;
+  const semanticType = resolveRyMessageSemanticType(
+    action?.content.category,
+    action?.content.actionType,
+  );
   const body = action?.source?.messageExcerpt
     ?? action?.content.summary
     ?? action?.content.details
@@ -72,7 +75,7 @@ function projectionInput(
     title: action?.content.title ?? 'RyMessage action removed',
     body,
     level: notificationLevel(projection),
-    category: notificationCategory(action?.content.category),
+    category: ryMessageNotificationCategory(semanticType),
     templateKey: 'rymessage.companion-action',
     sourceState: sourceState(projection),
     sourceActivityAt: updatedAt,
@@ -90,6 +93,7 @@ function projectionInput(
       lifecycleRevision: action?.fieldRevisions.lifecycle ?? projection.revision,
       actionType: action?.content.actionType,
       category: action?.content.category,
+      semanticType,
       direction: action?.content.direction,
       recommendation: action?.content.recommendation,
       priority: action?.content.priority ?? 'none',

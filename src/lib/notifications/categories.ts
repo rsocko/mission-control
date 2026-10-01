@@ -41,7 +41,12 @@ const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
 };
 
 export function formatNotificationTypeLabel(notificationType: string): string {
-  return NOTIFICATION_TYPE_LABELS[notificationType] ?? formatIdentifier(notificationType);
+  const configuredLabel = NOTIFICATION_TYPE_LABELS[notificationType];
+  if (configuredLabel) return configuredLabel;
+  if (notificationType.startsWith('rymessage.')) {
+    return formatIdentifier(notificationType.slice('rymessage.'.length));
+  }
+  return formatIdentifier(notificationType);
 }
 
 function formatIdentifier(value: string): string {

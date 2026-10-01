@@ -25,8 +25,8 @@ function action(overrides: Partial<CompanionActionV1> = {}): CompanionActionV1 {
     content: {
       title: 'Review report',
       summary: 'Portable summary',
-      actionType: 'follow-up',
-      priority: 'high',
+      actionType: 'needs-reply',
+      priority: 'none',
     },
     classification: {
       confidenceClass: 'low',
@@ -56,27 +56,88 @@ function projection(canonicalAction: CompanionActionV1 | null): RyMessageActionP
 }
 
 describe('RyMessage notification projection', () => {
-  it('projects every confidence class with stable identity and severity-only confidence effects', () => {
+  it('maps semantic urgency while honoring an explicit priority first', () => {
     const low = rymessageNotificationProjection.projectionInput(
       'rymessage-1',
       projection(action()),
     );
-    const high = rymessageNotificationProjection.projectionInput(
+    const waiting = rymessageNotificationProjection.projectionInput(
       'rymessage-1',
       projection(action({
-        classification: {
-          ...action().classification,
-          confidenceClass: 'high',
-          confidenceScore: 0.95,
+        content: {
+          ...action().content,
+          actionType: 'waiting-on-reply',
+        },
+      })),
+    );
+    const critical = rymessageNotificationProjection.projectionInput(
+      'rymessage-1',
+      projection(action({
+        content: {
+          ...action().content,
+          category: 'critical-alert',
+        },
+      })),
+    );
+    const explicitLow = rymessageNotificationProjection.projectionInput(
+      'rymessage-1',
+      projection(action({
+        content: {
+          ...action().content,
+          category: 'critical-alert',
+          priority: 'low',
         },
       })),
     );
     expect(low.sourceId).toBe(
       'rymessage:companion:rymessage-1:00000000-0000-4000-8000-000000000001',
     );
-    expect(low.level).toBe('heads_up');
-    expect(high.level).toBe('action_needed');
+    expect(low.level).toBe('action_needed');
+    expect(waiting.level).toBe('heads_up');
+    expect(critical.level).toBe('urgent');
+    expect(explicitLow.level).toBe('fyi');
     expect(low.sourceState).toBe('active');
+  });
+
+  it('maps the published RyMessage action classes to relative Mission Control urgency', () => {
+    for (const semanticType of [
+      'needs-reply',
+      'action-required',
+      'security-code',
+      'travel',
+      'financial',
+      'shipping-delivery',
+      'delivery',
+      'scheduling',
+      'repeated-ask',
+    ]) {
+      expect(rymessageNotificationProjection.projectionInput(
+        'rymessage-1',
+        projection(action({
+          content: {
+            ...action().content,
+            actionType: semanticType,
+          },
+        })),
+      ).level).toBe('action_needed');
+    }
+
+    for (const semanticType of [
+      'waiting-on-reply',
+      'waiting-on-action',
+      'commitment',
+      'snoozed-chat',
+    ]) {
+      expect(rymessageNotificationProjection.projectionInput(
+        'rymessage-1',
+        projection(action({
+          content: {
+            ...action().content,
+            actionType: semanticType,
+          },
+        })),
+      ).level).toBe('heads_up');
+    }
   });
 
   it('projects bounded message identity, content, and classification context', () => {
@@ -91,12 +152,41 @@ describe('RyMessage notification projection', () => {
       senderDisplayName: 'Secret Sender',
       conversationTitle: 'Secret Thread',
       messageExcerpt: 'Secret excerpt',
+      semanticType: 'needs-reply',
       classificationReason: 'Secret model reasoning',
       classificationModel: 'secret-model',
       lifecycle: 'visible',
     });
     expect(serialized).not.toContain('secret-message');
     expect(serialized).not.toContain('"secret":true');
+  });
+
+  it('uses category semantics first and falls back to action type for legacy rows', () => {
+    const categorized = rymessageNotificationProjection.projectionInput(
+      'rymessage-1',
+      projection(action({
+        content: {
+          ...action().content,
+          actionType: 'needs-reply',
+          category: 'travel',
+        },
+      })),
+    );
+    const legacy = rymessageNotificationProjection.projectionInput(
+      'rymessage-1',
+      projection(action({
+        content: {
+          ...action().content,
+          actionType: 'shipping-delivery',
+          category: undefined,
+        },
+      })),
+    );
+
+    expect(categorized.metadata).toMatchObject({ semanticType: 'travel' });
+    expect(categorized.category).toBe('social');
+    expect(legacy.metadata).toMatchObject({ semanticType: 'shipping-delivery' });
+    expect(legacy.category).toBe('packages');
   });
 
   it('converges handled, completed, and tombstoned actions to resolved/deleted state', () => {

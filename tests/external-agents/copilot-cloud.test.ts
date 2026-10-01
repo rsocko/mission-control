@@ -20,6 +20,7 @@ function agent(): ExternalAgent {
     endpoint: 'https://api.github.com/',
     authType: 'github-user',
     authCredentialRef: credentialReference,
+    providerConfig: {},
     capabilities: {
       canAnalyzeCode: true,
       canWriteCode: true,

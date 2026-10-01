@@ -161,6 +161,9 @@ describe('PostgreSQL schema', () => {
     expect(postgresSchema.taskHistoryEvents.id.columnType).toBe('PgSerial');
     expect(postgresSchema.tasks.createdAt.columnType).toBe('PgText');
     expect(postgresSchema.financeTransactions.tags.columnType).toBe('PgJsonb');
+    expect(postgresSchema.externalAgents.providerConfig.columnType).toBe('PgJsonb');
+    expect(postgresSchema.externalAgents.providerConfig.notNull).toBe(true);
+    expect(postgresSchema.externalAgents.providerConfig.default).toEqual({});
   });
 
   it('preserves representative keys, cascades, checks, and critical indexes', () => {
@@ -274,7 +277,8 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(20);
+    expect(migrations).toHaveLength(21);
+    expect(migrations).toContain('0020_paperclip_provider_config.sql');
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.

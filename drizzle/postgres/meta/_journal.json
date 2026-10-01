@@ -141,6 +141,13 @@
       "when": 1790817118838,
       "tag": "0019_cleanup_orphan_external_bindings",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790826674054,
+      "tag": "0020_paperclip_provider_config",
+      "breakpoints": true
     }
   ]
 }

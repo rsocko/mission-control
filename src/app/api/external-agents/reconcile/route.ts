@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { reconcileActiveCopilotCloudDispatches } from '@/lib/external-agents/service';
+import { reconcileActiveExternalAgentDispatches } from '@/lib/external-agents/service';
 import {
   externalAgentErrorResponse,
   requireTrustedMutation,
@@ -8,7 +8,7 @@ import {
 export async function POST(request: Request) {
   try {
     requireTrustedMutation(request);
-    const result = await reconcileActiveCopilotCloudDispatches();
+    const result = await reconcileActiveExternalAgentDispatches();
     return NextResponse.json(result, {
       status: result.failures.length > 0 ? 207 : 200,
     });

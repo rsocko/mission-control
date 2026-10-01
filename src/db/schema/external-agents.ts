@@ -13,6 +13,7 @@ import {
   type ExternalAgentAuthType,
   type ExternalAgentCapabilities,
   type ExternalAgentDataPolicy,
+  type ExternalAgentProviderConfig,
   type AgentDataClassification,
   type AgentDispatchScope,
   type AgentDispatchStatus,
@@ -37,6 +38,7 @@ export type {
   ExternalAgentAuthType,
   ExternalAgentCapabilities,
   ExternalAgentDataPolicy,
+  ExternalAgentProviderConfig,
   AgentDataClassification,
   AgentDispatchScope,
   AgentDispatchStatus,
@@ -55,6 +57,10 @@ export const externalAgents = sqliteTable('external_agents', {
   endpoint: text('endpoint'),
   authType: text('auth_type').$type<ExternalAgentAuthType>().notNull().default('none'),
   authCredentialRef: text('auth_credential_ref'),
+  providerConfig: text('provider_config', { mode: 'json' })
+    .$type<ExternalAgentProviderConfig>()
+    .notNull()
+    .default({}),
   capabilities: text('capabilities', { mode: 'json' })
     .$type<ExternalAgentCapabilities>()
     .notNull()

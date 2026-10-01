@@ -30,7 +30,8 @@ const ACTIVE_RESULT = new Set<AgentDispatchStatus>([
 const AGENT_COLUMNS = `
   id, name, type, transport, execution_locality AS executionLocality,
   description, endpoint, auth_type AS authType,
-  auth_credential_ref AS authCredentialRef, capabilities,
+  auth_credential_ref AS authCredentialRef, provider_config AS providerConfig,
+  capabilities,
   input_format AS inputFormat, output_format AS outputFormat,
   inbound_webhook_id AS inboundWebhookId, data_policy AS dataPolicy,
   enabled, created_at AS createdAt, updated_at AS updatedAt,
@@ -66,6 +67,7 @@ function agentFromRow(row: Row): ExternalAgentRecord {
   return {
     ...(row as unknown as ExternalAgentRecord),
     enabled: Boolean(row.enabled),
+    providerConfig: json(row.providerConfig, {}),
     capabilities: json(row.capabilities, {}),
     dataPolicy: json(row.dataPolicy, {
       allowedClassifications: [],
@@ -163,6 +165,7 @@ function destinationMatches(
     && current.endpoint === expected.endpoint
     && current.authType === expected.authType
     && current.authCredentialRef === expected.authCredentialRef
+    && canonical(current.providerConfig) === canonical(expected.providerConfig)
     && current.inboundWebhookId === expected.inboundWebhookId
     && canonical(current.capabilities) === canonical(expected.capabilities)
     && canonical(current.dataPolicy) === canonical(expected.dataPolicy)
@@ -279,6 +282,7 @@ function agentValues(record: ExternalAgentCreateRecord | ExternalAgentUpdateReco
     record.endpoint,
     record.authType,
     record.authCredentialRef,
+    JSON.stringify(record.providerConfig),
     JSON.stringify(record.capabilities),
     record.inputFormat,
     record.outputFormat,
@@ -315,10 +319,11 @@ export function createSqliteExternalAgentControlRepository(
         sqlite.prepare(`
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, capabilities, input_format, output_format,
+            auth_type, auth_credential_ref, provider_config, capabilities,
+            input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(record.id, ...agentValues(record).slice(0, 14), record.createdAt,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(record.id, ...agentValues(record).slice(0, 15), record.createdAt,
           record.updatedAt, record.deletedAt);
       }).immediate();
       return (await registry.get(record.id, true))!;
@@ -330,7 +335,7 @@ export function createSqliteExternalAgentControlRepository(
           UPDATE external_agents SET
             name = ?, type = ?, transport = ?, execution_locality = ?,
             description = ?, endpoint = ?, auth_type = ?, auth_credential_ref = ?,
-            capabilities = ?, input_format = ?, output_format = ?,
+            provider_config = ?, capabilities = ?, input_format = ?, output_format = ?,
             inbound_webhook_id = ?, data_policy = ?, enabled = ?,
             updated_at = ?, deleted_at = ?
           WHERE id = ? AND deleted_at IS NULL

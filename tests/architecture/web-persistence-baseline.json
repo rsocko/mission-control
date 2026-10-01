@@ -40,10 +40,10 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 278,
+    "apiRoutes": 279,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 271,
+    "cleanRoutes": 272,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
     "directDbNamespaceRoutes": 3,
@@ -284,6 +284,7 @@
     "src/app/api/tasks/[id]/attachments/route.ts",
     "src/app/api/tasks/[id]/breakdown/route.ts",
     "src/app/api/tasks/[id]/copy/route.ts",
+    "src/app/api/tasks/[id]/delegation/route.ts",
     "src/app/api/tasks/[id]/document-preview/route.ts",
     "src/app/api/tasks/[id]/github-attachment/route.ts",
     "src/app/api/tasks/[id]/hard-delete/route.ts",
@@ -571,6 +572,7 @@
     "src/app/api/tasks/[id]/attachments/route.ts",
     "src/app/api/tasks/[id]/breakdown/route.ts",
     "src/app/api/tasks/[id]/copy/route.ts",
+    "src/app/api/tasks/[id]/delegation/route.ts",
     "src/app/api/tasks/[id]/document-preview/route.ts",
     "src/app/api/tasks/[id]/github-attachment/route.ts",
     "src/app/api/tasks/[id]/hard-delete/route.ts",

@@ -15,6 +15,9 @@ vi.mock('@/lib/smart-score', () => ({
   createScoreInput: vi.fn(),
   computeBatchSmartScores: vi.fn(() => []),
 }));
+vi.mock('@/lib/external-agents/task-delegation', () => ({
+  listTaskDelegationSummaries: vi.fn(async () => new Map()),
+}));
 vi.mock('@/lib/logger', () => ({
   default: { error: vi.fn(), info: vi.fn(), warn: vi.fn() },
 }));

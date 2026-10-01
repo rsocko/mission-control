@@ -367,10 +367,18 @@ export function SortablePhaseItem({ phaseId, isMenuOpen, children }: { phaseId: 
   );
 }
 
-export function DraggableTaskItem({ taskId, children }: { taskId: string; children: (dragHandleProps: Record<string, unknown>) => React.ReactNode }) {
+export function DraggableTaskItem({
+  taskId,
+  dropTargetId,
+  children,
+}: {
+  taskId: string;
+  dropTargetId?: string;
+  children: (dragHandleProps: Record<string, unknown>) => React.ReactNode;
+}) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: `task:${taskId}`,
-    data: { type: 'task' },
+    data: { type: 'task', dropTargetId },
   });
 
   const style = {

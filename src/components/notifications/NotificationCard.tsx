@@ -38,6 +38,7 @@ interface NotificationActionExecutionResult {
   error?: string;
   result?: {
     type?: string;
+    confirmation?: string;
     taskData?: Record<string, unknown>;
   };
 }
@@ -105,6 +106,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   install_update: RefreshCw,
   skip_update: ArrowRight,
   dismiss_persistent_notification: X,
+  restart_home_assistant: RefreshCw,
   ignore_repair: EyeOff,
   rymessage_promote: Plus,
   rymessage_mark_handled: CheckCircle,
@@ -142,12 +144,14 @@ function NotificationActionConfirmation({
       message={
         action?.actionType === 'install_update'
           ? `Install ${String(metadata.latestVersion || 'this update')} on ${String(metadata.instanceName || 'Home Assistant')}? Home Assistant acceptance will be confirmed on the next poll.`
+          : action?.actionType === 'restart_home_assistant'
+            ? `Restart ${String(metadata.instanceName || 'Home Assistant')} now? Automations and connected devices may be briefly unavailable while it comes back online.`
           : action?.actionType === 'dismiss_persistent_notification'
             ? `Dismiss this notification in ${String(metadata.instanceName || 'Home Assistant')} and remove it from Mission Control?`
           : `${action?.label || 'Apply this action'} in ${String(metadata.instanceName || 'Home Assistant')}? Mission Control will confirm the final state on the next poll.`
       }
       confirmLabel={action?.label || 'Confirm'}
-      confirmVariant="warning"
+      confirmVariant={action?.actionType === 'restart_home_assistant' ? 'danger' : 'warning'}
       onCancel={cancel}
       onConfirm={confirm}
     >
@@ -602,6 +606,9 @@ export function NotificationCard({
         ) {
           setAcceptedSourceActionFor(notification.id);
         }
+        if (result?.result?.confirmation) {
+          toast.success(result.result.confirmation);
+        }
       }
     } catch {
       toast.error(`${action.label} failed`);
@@ -993,9 +1000,10 @@ export function NotificationDetail({
           setAcceptedSourceActionFor(notification.id);
         }
         toast.success(
-          notification.connectorType === 'home-assistant'
-            ? `${action.label} request accepted`
-            : `${action.label} completed`,
+          result.result?.confirmation
+            || (notification.connectorType === 'home-assistant'
+              ? `${action.label} request accepted`
+              : `${action.label} completed`),
         );
       } else {
         toast.error(result.error || `${action.label} failed`);
@@ -1466,7 +1474,7 @@ function ActionButton({
       `}
     >
       {isLoading ? <LoaderCircle size={12} className="animate-spin" /> : <Icon size={12} />}
-      <span>{action.label}</span>
+      <span>{isLoading && action.actionType === 'restart_home_assistant' ? 'Restarting…' : action.label}</span>
       {action.opensExternal && <ExternalLink size={9} className="opacity-60" />}
       {isAiSuggested && (
         <span className="absolute -top-1.5 -right-1.5 flex items-center gap-0.5 text-[9px] bg-purple-900/60 text-purple-300 px-1 py-0 rounded-full border border-purple-700/40">

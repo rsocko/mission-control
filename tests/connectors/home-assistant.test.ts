@@ -298,8 +298,32 @@ describe('Home Assistant source transformers', () => {
     expect(repairs[0].metadata).toMatchObject({
       domain: 'mqtt',
       issueId: 'broker_unavailable',
+      requiresRestart: false,
       pushDelivery: 'immediate',
     });
+  });
+
+  it('marks only Home Assistant core restart repairs as restartable', () => {
+    const repairs = buildRepairNotifications({
+      ...common,
+      issues: [
+        {
+          domain: 'homeassistant',
+          issue_id: 'restart_required',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+        {
+          domain: 'shelly',
+          issue_id: 'restart_required',
+          translation_key: 'restart_required',
+          severity: 'warning',
+        },
+      ],
+      immediateActionNeeded: true,
+    });
+
+    expect(repairs.map(item => item.metadata.requiresRestart)).toEqual([true, false]);
   });
 
   it('uses the repair translation key instead of an opaque issue id as its fallback title', () => {
@@ -524,6 +548,45 @@ describe('Home Assistant notification presentation', () => {
     expect(result.actions?.find(action => action.actionType === 'open_url')?.payload).toEqual({
       url: 'https://ha.example.test/config/updates',
     });
+  });
+
+  it('makes restart primary only for restart-required repairs', () => {
+    const restartRepair = present({
+      ...notification,
+      title: 'Restart required',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        actionsEnabled: true,
+        requiresRestart: true,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+    const otherRepair = present({
+      ...notification,
+      title: 'MQTT broker unavailable',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        actionsEnabled: true,
+        requiresRestart: false,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+
+    expect(restartRepair.actions?.map(action => action.actionType)).toEqual([
+      'restart_home_assistant',
+      'open_url',
+      'ignore_repair',
+      'create_task',
+    ]);
+    expect(restartRepair.actions?.find(action => action.isPrimary)?.actionType)
+      .toBe('restart_home_assistant');
+    expect(otherRepair.actions?.map(action => action.actionType)).toEqual([
+      'open_url',
+      'ignore_repair',
+      'create_task',
+    ]);
   });
 
   it('upgrades a persisted root action URL for an update notification', () => {
@@ -804,6 +867,37 @@ describe('Home Assistant REST client', () => {
       'skip',
       { entity_id: 'update.router' },
     )).rejects.toBe(timeout);
+  });
+
+  it('waits for Home Assistant to become available after a restart', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response('Unavailable', { status: 503 }))
+      .mockResolvedValueOnce(Response.json({ message: 'API running.' }));
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.waitUntilAvailable({
+      initialDelayMs: 0,
+      pollIntervalMs: 1,
+      timeoutMs: 100,
+    })).resolves.toBeUndefined();
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails explicitly when Home Assistant does not recover in time', async () => {
+    globalThis.fetch = vi.fn(async () => new Response('Unavailable', { status: 503 }));
+    const client = createHAClient({
+      baseUrl: 'https://ha.example.test',
+      accessToken: 'secret',
+    });
+
+    await expect(client.waitUntilAvailable({
+      initialDelayMs: 0,
+      pollIntervalMs: 1,
+      timeoutMs: 5,
+    })).rejects.toThrow('Home Assistant did not come back online within 1 seconds');
   });
 });
 
@@ -1095,6 +1189,73 @@ describe('HomeAssistantConnector', () => {
     );
 
     expect(calls).toEqual([{ domain: 'mqtt', issueId: 'broker_unavailable' }]);
+  });
+
+  it('restarts Home Assistant for an active restart-required repair', async () => {
+    const calls: unknown[][] = [];
+    const waitUntilAvailable = vi.fn(async () => undefined);
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          repairs: [{ domain: 'homeassistant', issue_id: 'restart_required', ignored: false }],
+          errors: {},
+        }),
+        callService: async (...args: unknown[]) => {
+          calls.push(args);
+        },
+        waitUntilAvailable,
+      },
+    });
+
+    await connector.executeNotificationAction(
+      'restart_home_assistant',
+      {
+        domain: 'homeassistant',
+        issueId: 'restart_required',
+        requiresRestart: true,
+      },
+      {},
+    );
+
+    expect(calls).toEqual([[
+      'homeassistant',
+      'restart',
+      {},
+      { acceptOnTimeout: true, timeoutMs: 5_000 },
+    ]]);
+    expect(waitUntilAvailable).toHaveBeenCalledOnce();
+  });
+
+  it('explains when restart requires an administrator connection', async () => {
+    const connector = new HomeAssistantConnector();
+    await connector.initialize(config);
+    Object.assign(connector, {
+      client: {
+        fetchWebSocketSources: async () => ({
+          repairs: [{ domain: 'homeassistant', issue_id: 'restart_required', ignored: false }],
+          errors: {},
+        }),
+        callService: async () => {
+          throw new Error('Home Assistant request failed: HTTP 403');
+        },
+        waitUntilAvailable: async () => undefined,
+      },
+    });
+
+    await expect(connector.executeNotificationAction(
+      'restart_home_assistant',
+      {
+        domain: 'homeassistant',
+        issueId: 'restart_required',
+        requiresRestart: true,
+      },
+      {},
+    )).rejects.toMatchObject({
+      status: 403,
+      message: expect.stringContaining('administrator-authorized'),
+    });
   });
 
   it('rejects a stale update version before calling Home Assistant', async () => {

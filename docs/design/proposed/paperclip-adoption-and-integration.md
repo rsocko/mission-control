@@ -425,6 +425,26 @@ stable minimum integration contract.
 - Add cancellation/revocation and explicit failure states.
 - Keep Paperclip child issues out of MC by default.
 
+#### Task delegation surface
+
+Mission Control evaluates enabled execution targets against the task's source
+classification and each target's locality/data policy on the server. The task
+detail surface lists only eligible targets, then creates the existing durable
+dispatch preview. Confirmation shows the exact destination, locality,
+classification, disclosed field paths, authorized actions, and payload before
+the existing preview hash is confirmed.
+
+The original task remains canonical. Task details show the execution target and
+active executor separately from the task's human owner and source assignee,
+including Paperclip company, issue/run links, canonical dispatch state, coarse
+progress, blockers, pending approvals, and returned pull request, commit, check,
+and artifact references. Task and project lists carry a compact execution badge
+without importing Paperclip child issues.
+
+Cancellation/revocation is shown only for active dispatch states. Re-dispatch is
+shown only for failed, timed-out, dead-letter, or cancelled states; both actions
+are revalidated by the authoritative dispatch state machine on the server.
+
 **Exit:** one MC task can be delegated, observed, completed, and reconciled
 without copy/paste or duplicate task authority.
 

@@ -462,6 +462,15 @@ export function createSqliteExternalAgentControlRepository(
         predicates.push('external_agent_id = ?');
         values.push(options.agentId);
       }
+      if (options.taskIds?.length) {
+        predicates.push(`
+          EXISTS (
+            SELECT 1 FROM json_each(agent_dispatches.scope, '$.taskIds')
+            WHERE json_each.value IN (${options.taskIds.map(() => '?').join(', ')})
+          )
+        `);
+        values.push(...options.taskIds);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       const rows = sqlite.prepare(`
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches

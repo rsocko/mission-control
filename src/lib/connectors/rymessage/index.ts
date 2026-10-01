@@ -1,4 +1,5 @@
 import type { ConnectorFactory, IConnector } from '../index';
+import type { NotificationWritebackAction } from '../notification-writeback-contract';
 import type {
   TaskItem,
   InboundNotification,
@@ -24,7 +25,10 @@ import { CompanionActionReconciliationService } from './companion-action-service
 import type {
   CompanionActionMutation,
 } from './action-contract';
-import { COMPANION_ACTION_MAX_SYNC_PAGES } from './action-contract';
+import {
+  COMPANION_ACTION_MAX_SYNC_PAGES,
+  stableCompanionOperationId,
+} from './action-contract';
 import { normalizeTrustedOrigin } from './action-contract-v2';
 import { projectCompanionActionV2PageToNotifications } from './notification-projection';
 import {
@@ -279,6 +283,7 @@ export class RyMessageConnector implements IConnector {
     const persistence = (await getWorkerPersistenceRepositories())
       .connectorState.rymessageActions;
     const initialProjections = await persistence.listV2Projections(this.id);
+    await this.companionService!.flushMutationOutbox(context.signal);
     await flushRyMessageV2MutationOutbox(this.id, this.companionClient!, context.signal);
     let v2Cursor = (await persistence.readV2FeedState(this.id)).cursor;
     let recoveryAttempted = false;
@@ -376,6 +381,42 @@ export class RyMessageConnector implements IConnector {
       throw new Error('Companion action reconciliation is not enabled');
     }
     return this.companionService.queueMutation(input);
+  }
+
+  async writeNotificationAction(
+    sourceId: string,
+    action: NotificationWritebackAction,
+  ): Promise<void> {
+    if (action !== 'mark_done') {
+      throw new Error(`RyMessage does not support notification action ${action}`);
+    }
+    if (this.settings.mode !== 'companion' || !this.companionService) {
+      throw new Error('Companion action reconciliation is not enabled');
+    }
+    const match = /^companion:[^:]+:([0-9a-f-]+)$/i.exec(sourceId);
+    const actionId = match?.[1];
+    if (!actionId) throw new Error('RyMessage notification source identity is invalid');
+    const repository = (await getWorkerPersistenceRepositories())
+      .connectorState.rymessageActions;
+    const projection = await repository.getV2Projection(this.id, actionId);
+    const v2Action = projection?.item?.kind === 'upsert'
+      ? projection.item.projection.action
+      : null;
+    const canonical = v2Action
+      ?? (await repository.getProjection(this.id, actionId))?.action
+      ?? null;
+    if (!canonical) throw new Error('RyMessage action is no longer available');
+    await this.companionService.queueMutation({
+      actionId,
+      operationId: stableCompanionOperationId(
+        `rymessage:dismiss:${this.id}:${actionId}:${canonical.revision}`,
+      ),
+      baseRevision: canonical.revision,
+      expectedFieldRevisions: {
+        lifecycle: canonical.fieldRevisions.lifecycle ?? canonical.revision,
+      },
+      mutation: { kind: 'action.lifecycle', state: 'dismissed' },
+    });
   }
 
   /**

@@ -417,6 +417,23 @@ export function createSqliteRyMessageActionRepository(
       }));
     },
 
+    async getV2Projection(connectorId, actionId) {
+      assertConnector(connectorId);
+      const row = database.prepare(`
+        SELECT connector_id AS connectorId, action_id AS actionId, source_id AS sourceId,
+               revision, payload, tombstoned_at AS tombstonedAt
+        FROM rymessage_action_v2_projections
+        WHERE connector_id = ? AND action_id = ?
+      `).get(connectorId, actionId) as {
+        connectorId: string; actionId: string; sourceId: string; revision: number;
+        payload: string | null; tombstonedAt: string | null;
+      } | undefined;
+      return row ? {
+        ...row,
+        item: parseJson<CompanionActionFeedItemV2>(row.payload),
+      } : null;
+    },
+
     async enqueueV2Mutation(input) {
       return immediate(() => {
         assertConnector(input.connectorId);
@@ -1262,8 +1279,23 @@ export function createSqliteRyMessageActionRepository(
           return 'duplicate';
         }
         const projection = readProjection(command.connectorId, command.actionId);
-        const action = parseJson<PortableCompanionAction>(projection?.payload ?? null);
-        if (!projection || projection.tombstonedAt || !action) {
+        let action = parseJson<PortableCompanionAction>(projection?.payload ?? null);
+        let tombstonedAt = projection?.tombstonedAt ?? null;
+        if (!action) {
+          const v2Projection = database.prepare(`
+            SELECT payload, tombstoned_at AS tombstonedAt
+            FROM rymessage_action_v2_projections
+            WHERE connector_id = ? AND action_id = ?
+          `).get(command.connectorId, command.actionId) as {
+            payload: string | null; tombstonedAt: string | null;
+          } | undefined;
+          const item = parseJson<CompanionActionFeedItemV2>(v2Projection?.payload ?? null);
+          action = item?.kind === 'upsert'
+            ? sanitizeCompanionAction(item.projection.action)
+            : null;
+          tombstonedAt = v2Projection?.tombstonedAt ?? null;
+        }
+        if (tombstonedAt || !action) {
           throw new RyMessageActionPersistenceError(
             'ACTION_NOT_FOUND',
             'Canonical Companion action does not exist',
@@ -1332,7 +1364,19 @@ export function createSqliteRyMessageActionRepository(
         const items: RyMessageLeasedMutation[] = [];
         for (const candidate of candidates) {
           const projection = readProjection(input.connectorId, candidate.actionId);
-          const action = parseJson<PortableCompanionAction>(projection?.payload ?? null);
+          let action = parseJson<PortableCompanionAction>(projection?.payload ?? null);
+          if (!action) {
+            const v2Projection = database.prepare(`
+              SELECT payload FROM rymessage_action_v2_projections
+              WHERE connector_id = ? AND action_id = ? AND tombstoned_at IS NULL
+            `).get(input.connectorId, candidate.actionId) as {
+              payload: string | null;
+            } | undefined;
+            const item = parseJson<CompanionActionFeedItemV2>(v2Projection?.payload ?? null);
+            action = item?.kind === 'upsert'
+              ? sanitizeCompanionAction(item.projection.action)
+              : null;
+          }
           if (!action) {
             database.prepare(`
               UPDATE rymessage_action_outbound_mutations

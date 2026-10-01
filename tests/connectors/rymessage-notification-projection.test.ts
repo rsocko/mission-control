@@ -79,20 +79,24 @@ describe('RyMessage notification projection', () => {
     expect(low.sourceState).toBe('active');
   });
 
-  it('stores only portable action content and bounded classification metadata', () => {
+  it('projects bounded message identity, content, and classification context', () => {
     const input = rymessageNotificationProjection.projectionInput(
       'rymessage-1',
       projection(action()),
     );
     const serialized = JSON.stringify(input);
     expect(input.title).toBe('Review report');
-    expect(input.body).toBe('Portable summary');
-    expect(serialized).not.toContain('Secret Sender');
-    expect(serialized).not.toContain('Secret Thread');
-    expect(serialized).not.toContain('Secret excerpt');
-    expect(serialized).not.toContain('Secret model reasoning');
-    expect(serialized).not.toContain('secret-model');
+    expect(input.body).toBe('Secret excerpt');
+    expect(input.metadata).toMatchObject({
+      senderDisplayName: 'Secret Sender',
+      conversationTitle: 'Secret Thread',
+      messageExcerpt: 'Secret excerpt',
+      classificationReason: 'Secret model reasoning',
+      classificationModel: 'secret-model',
+      lifecycle: 'visible',
+    });
     expect(serialized).not.toContain('secret-message');
+    expect(serialized).not.toContain('"secret":true');
   });
 
   it('converges handled, completed, and tombstoned actions to resolved/deleted state', () => {

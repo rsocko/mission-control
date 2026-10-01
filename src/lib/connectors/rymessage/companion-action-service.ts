@@ -219,6 +219,12 @@ export class CompanionActionReconciliationService {
     return queueCompanionActionMutation(this.connectorId, input, this.persistence);
   }
 
+  async flushMutationOutbox(
+    signal?: AbortSignal,
+  ): Promise<{ succeeded: number; conflicts: number; deferred: number }> {
+    return this.flushMutations(await this.persistence(), signal);
+  }
+
   private async flushMutations(
     repository: RyMessageActionPersistence,
     signal?: AbortSignal,

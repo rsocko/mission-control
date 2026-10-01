@@ -458,6 +458,23 @@ export function createPostgresRyMessageActionRepository(
       return projections;
     },
 
+    async getV2Projection(connectorId, actionId) {
+      await assertConnector(pool, connectorId);
+      const [projection] = await rows<{
+        connectorId: string; actionId: string; sourceId: string; revision: number;
+        item: CompanionActionFeedItemV2 | null; tombstonedAt: string | null;
+      } & QueryResultRow>(
+        pool,
+        `SELECT connector_id AS "connectorId", action_id AS "actionId",
+                source_id AS "sourceId", revision, payload AS item,
+                tombstoned_at AS "tombstonedAt"
+         FROM rymessage_action_v2_projections
+         WHERE connector_id = $1 AND action_id = $2`,
+        [connectorId, actionId],
+      );
+      return projection ?? null;
+    },
+
     async enqueueV2Mutation(input) {
       return transaction(pool, async client => {
         await assertConnector(client, input.connectorId);
@@ -1306,20 +1323,32 @@ export function createPostgresRyMessageActionRepository(
           return 'duplicate';
         }
         const projection = await readProjection(client, command.connectorId, command.actionId);
-        if (!projection || projection.tombstonedAt) {
-          throw new RyMessageActionPersistenceError(
-            'ACTION_NOT_FOUND',
-            'Canonical Companion action does not exist',
+        let action = projection?.payload ?? null;
+        let tombstonedAt = projection?.tombstonedAt ?? null;
+        if (!action) {
+          const [v2Projection] = await rows<{
+            item: CompanionActionFeedItemV2 | null;
+            tombstonedAt: string | null;
+          } & QueryResultRow>(
+            client,
+            `SELECT payload AS item, tombstoned_at AS "tombstonedAt"
+             FROM rymessage_action_v2_projections
+             WHERE connector_id = $1 AND action_id = $2`,
+            [command.connectorId, command.actionId],
           );
+          action = v2Projection?.item?.kind === 'upsert'
+            ? sanitizeCompanionAction(v2Projection.item.projection.action)
+            : null;
+          tombstonedAt = v2Projection?.tombstonedAt ?? null;
         }
-        if (!projection.payload) {
+        if (tombstonedAt || !action) {
           throw new RyMessageActionPersistenceError(
             'ACTION_NOT_FOUND',
             'Canonical Companion action does not exist',
           );
         }
         assertCompanionMutationRevisionFence({
-          action: projection.payload,
+          action,
           baseRevision: command.baseRevision,
           expectedFieldRevisions: command.expectedFieldRevisions,
           mutation: command.mutation,
@@ -1383,7 +1412,21 @@ export function createPostgresRyMessageActionRepository(
         const items: RyMessageLeasedMutation[] = [];
         for (const candidate of candidates) {
           const projection = await readProjection(client, input.connectorId, candidate.actionId);
-          if (!projection?.payload) {
+          let action = projection?.payload ?? null;
+          if (!action) {
+            const [v2Projection] = await rows<{
+              item: CompanionActionFeedItemV2 | null;
+            } & QueryResultRow>(
+              client,
+              `SELECT payload AS item FROM rymessage_action_v2_projections
+               WHERE connector_id = $1 AND action_id = $2 AND tombstoned_at IS NULL`,
+              [input.connectorId, candidate.actionId],
+            );
+            action = v2Projection?.item?.kind === 'upsert'
+              ? sanitizeCompanionAction(v2Projection.item.projection.action)
+              : null;
+          }
+          if (!action) {
             await client.query(
               `UPDATE rymessage_action_outbound_mutations
                SET status = 'conflict', last_error_code = 'ACTION_NOT_FOUND',
@@ -1395,7 +1438,7 @@ export function createPostgresRyMessageActionRepository(
           }
           try {
             assertCompanionMutationRevisionFence({
-              action: projection.payload,
+              action,
               baseRevision: candidate.baseRevision,
               expectedFieldRevisions: candidate.expectedFieldRevisions,
               mutation: candidate.mutation,
@@ -1428,7 +1471,7 @@ export function createPostgresRyMessageActionRepository(
             [
               leaseId,
               leaseExpiresAt,
-              projection.payload.revision,
+              action.revision,
               input.now,
               input.connectorId,
               candidate.operationId,
@@ -1438,7 +1481,7 @@ export function createPostgresRyMessageActionRepository(
             operationId: candidate.operationId,
             connectorId: input.connectorId,
             actionId: candidate.actionId,
-            baseRevision: projection.payload.revision,
+            baseRevision: action.revision,
             expectedFieldRevisions: candidate.expectedFieldRevisions,
             mutation: candidate.mutation,
             attemptCount: candidate.attemptCount + 1,

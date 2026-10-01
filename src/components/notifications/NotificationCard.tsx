@@ -111,6 +111,7 @@ const ACTION_ICONS: Record<string, React.ComponentType<{ size?: number; classNam
   rymessage_promote: Plus,
   rymessage_mark_handled: CheckCircle,
   rymessage_unlink: Unlink,
+  rymessage_dismiss: X,
 };
 
 function NotificationActionConfirmation({
@@ -1253,9 +1254,17 @@ function RichNotificationContent({ content }: { content: NotificationRichContent
   return (
     <div className="mt-1.5 space-y-1.5">
       {(content.primaryText || content.secondaryText) && (
-        <div className="flex items-center justify-between gap-2 text-xs">
-          <span className="text-[var(--text-secondary)] font-medium">{content.primaryText}</span>
-          <span className="text-[var(--text-muted)]">{content.secondaryText}</span>
+        <div className="space-y-1 text-xs">
+          {content.primaryText && (
+            <p className="whitespace-pre-wrap break-words font-medium leading-5 text-[var(--text-secondary)]">
+              {content.primaryText}
+            </p>
+          )}
+          {content.secondaryText && (
+            <p className="whitespace-pre-wrap break-words leading-5 text-[var(--text-muted)]">
+              {content.secondaryText}
+            </p>
+          )}
         </div>
       )}
       {content.progress && (
@@ -1290,7 +1299,9 @@ function RichNotificationContent({ content }: { content: NotificationRichContent
         </div>
       )}
       {!content.progress && content.footerText && (
-        <p className="text-xs text-[var(--text-muted)]">{content.footerText}</p>
+        <p className="break-words text-xs leading-5 text-[var(--text-muted)]">
+          {content.footerText}
+        </p>
       )}
       {content.links?.filter(link => isSafeExternalUrl(link.url)).map(link => (
         <a

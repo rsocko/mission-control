@@ -118,7 +118,10 @@ export async function POST(
     }
     if (
       notification.connectorType === 'rymessage'
-      && action.actionType === 'rymessage_mark_handled'
+      && (
+        action.actionType === 'rymessage_mark_handled'
+        || action.actionType === 'rymessage_dismiss'
+      )
     ) {
       const companionActionId = String(payload.actionId || '');
       const connectorId = String(payload.connectorId || '');
@@ -129,7 +132,9 @@ export async function POST(
       }
       await queueCompanionActionMutation(connectorId, {
         operationId: stableCompanionOperationId(
-          `rymessage:handled:${connectorId}:${companionActionId}:${baseRevision}`,
+          `rymessage:${
+            action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled'
+          }:${connectorId}:${companionActionId}:${baseRevision}`,
         ),
         actionId: companionActionId,
         baseRevision,
@@ -138,7 +143,10 @@ export async function POST(
             ? lifecycleRevision
             : baseRevision,
         },
-        mutation: { kind: 'action.lifecycle', state: 'handled' },
+        mutation: {
+          kind: 'action.lifecycle',
+          state: action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled',
+        },
       });
     }
     if (

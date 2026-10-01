@@ -134,11 +134,20 @@ export interface PortableCompanionAction {
   lastSeenAt: string;
   sourceKind: 'message' | 'thread';
   sourceFamily?: string;
+  source?: {
+    senderDisplayName?: string;
+    conversationTitle?: string;
+    messageExcerpt?: string;
+    sourceUrl?: string;
+    sourceCreatedAt?: string;
+  };
   content: CompanionActionContent;
   classification: {
     confidenceClass?: 'low' | 'medium' | 'high';
     confidenceScore?: number;
+    reason?: string;
     derivationMethod: 'deterministic' | 'pattern' | 'extraction' | 'ai' | 'manual';
+    model?: string;
     derivationVersion?: string;
     inputFingerprint: string;
   };
@@ -787,6 +796,21 @@ export function isCompanionActionMutationReceipt(
 export function sanitizeCompanionAction(action: CompanionActionV1): PortableCompanionAction {
   const lifecycle = { ...action.lifecycle };
   delete lifecycle.feedback;
+  const source = {
+    ...(action.source.senderDisplayName
+      ? { senderDisplayName: action.source.senderDisplayName }
+      : {}),
+    ...(action.source.conversationTitle
+      ? { conversationTitle: action.source.conversationTitle }
+      : {}),
+    ...(action.source.messageExcerpt
+      ? { messageExcerpt: action.source.messageExcerpt }
+      : {}),
+    ...(action.source.sourceUrl ? { sourceUrl: action.source.sourceUrl } : {}),
+    ...(action.source.sourceCreatedAt
+      ? { sourceCreatedAt: action.source.sourceCreatedAt }
+      : {}),
+  };
   return {
     contractVersion: 1,
     actionId: action.actionId,
@@ -797,6 +821,7 @@ export function sanitizeCompanionAction(action: CompanionActionV1): PortableComp
     lastSeenAt: action.lastSeenAt,
     sourceKind: action.source.sourceKind,
     ...(action.source.sourceFamily ? { sourceFamily: action.source.sourceFamily } : {}),
+    ...(Object.keys(source).length > 0 ? { source } : {}),
     content: { ...action.content },
     classification: {
       ...(action.classification.confidenceClass
@@ -805,7 +830,11 @@ export function sanitizeCompanionAction(action: CompanionActionV1): PortableComp
       ...(action.classification.confidenceScore !== undefined
         ? { confidenceScore: action.classification.confidenceScore }
         : {}),
+      ...(action.classification.reason
+        ? { reason: action.classification.reason }
+        : {}),
       derivationMethod: action.classification.derivationMethod,
+      ...(action.classification.model ? { model: action.classification.model } : {}),
       ...(action.classification.derivationVersion
         ? { derivationVersion: action.classification.derivationVersion }
         : {}),

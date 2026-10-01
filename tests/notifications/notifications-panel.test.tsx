@@ -142,6 +142,61 @@ it('distinguishes done from dismiss with consequence-focused labels', () => {
   );
 });
 
+it('renders rich RyMessage identity, rationale, lifecycle, and linked-task state', () => {
+  const rymessage = makeNotification({
+    connectorType: 'rymessage',
+    connectorInstanceId: 'rymessage-1',
+    title: 'Send the revised estimate',
+    body: 'Please send the revised estimate by Friday.',
+    category: 'social',
+    presentation: {},
+    metadata: {
+      contract: 'companion-action-v2',
+      senderDisplayName: 'Avery Chen',
+      conversationTitle: 'Launch planning',
+      messageExcerpt: 'Can you send the revised estimate by Friday?',
+      details: 'Include the updated vendor lead times.',
+      actionType: 'follow-up',
+      category: 'work',
+      direction: 'received',
+      recommendation: 'create-task',
+      confidenceScore: 0.92,
+      classificationReason: 'Direct request with a deadline.',
+      derivationMethod: 'ai',
+      classificationModel: 'action-model',
+      derivationVersion: '3',
+      lifecycle: 'visible',
+      linkedTaskCount: 1,
+      activeLinkedTaskCount: 1,
+      taskMaterializations: [{
+        relationId: 'relation-1',
+        title: 'Send the revised estimate',
+        providerLabel: 'Microsoft To Do',
+        status: 'in-progress',
+        availability: 'live',
+        openUrl: 'https://to-do.office.com/tasks/id/1',
+      }],
+    },
+    actions: [],
+  });
+
+  render(
+    <NotificationDetail
+      notification={rymessage}
+      onExecuteAction={vi.fn(async () => ({ success: true }))}
+    />,
+  );
+
+  expect(screen.getByText('Avery Chen · Launch planning')).toBeInTheDocument();
+  expect(screen.getByText('Include the updated vendor lead times.')).toBeInTheDocument();
+  expect(screen.getByText('Recommendation: Create Task')).toBeInTheDocument();
+  expect(screen.getByText('Confidence: 92%')).toBeInTheDocument();
+  expect(screen.getByText('Tasks: 1 linked')).toBeInTheDocument();
+  expect(screen.getByText(/Direct request with a deadline/)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Open Send the revised estimate' }))
+    .toHaveAttribute('href', 'https://to-do.office.com/tasks/id/1');
+});
+
 function Harness({
   initialUnread = false,
   isLoading = false,

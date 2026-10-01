@@ -21,6 +21,7 @@ const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
   'install_update',
   'skip_update',
   'dismiss_persistent_notification',
+  'restart_home_assistant',
   'ignore_repair',
 ]);
 type RemindLaterDuration = typeof REMIND_LATER_DURATIONS[number];

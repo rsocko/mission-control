@@ -83,6 +83,11 @@ export interface HAClient {
     data: Record<string, unknown>,
     options?: { acceptOnTimeout?: boolean; timeoutMs?: number },
   ): Promise<void>;
+  waitUntilAvailable(options?: {
+    initialDelayMs?: number;
+    pollIntervalMs?: number;
+    timeoutMs?: number;
+  }): Promise<void>;
   ignoreRepair(domain: string, issueId: string): Promise<void>;
   testConnection(): Promise<HomeAssistantConnectionResult>;
 }
@@ -268,6 +273,10 @@ function isTimeoutError(error: unknown): boolean {
   );
 }
 
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 export function createHAClient(options: HAClientOptions): HAClient {
   const baseUrl = options.baseUrl.replace(/\/+$/, '');
   const repairTranslations = new Map<string, string>();
@@ -448,6 +457,31 @@ export function createHAClient(options: HAClientOptions): HAClient {
         }
         throw error;
       }
+    },
+
+    async waitUntilAvailable(waitOptions): Promise<void> {
+      const initialDelayMs = waitOptions?.initialDelayMs ?? 5_000;
+      const pollIntervalMs = waitOptions?.pollIntervalMs ?? 2_000;
+      const timeoutMs = waitOptions?.timeoutMs ?? 90_000;
+      const startedAt = Date.now();
+      await delay(initialDelayMs);
+
+      while (Date.now() - startedAt < timeoutMs) {
+        try {
+          await fetchJson('/api/');
+          return;
+        } catch (error) {
+          connectorLogger.debug(
+            { err: error },
+            'Waiting for Home Assistant to become available after restart',
+          );
+        }
+        await delay(pollIntervalMs);
+      }
+
+      throw new Error(
+        `Home Assistant did not come back online within ${Math.max(1, Math.round(timeoutMs / 1_000))} seconds`,
+      );
     },
 
     async ignoreRepair(domain, issueId): Promise<void> {

@@ -112,17 +112,33 @@ export const homeAssistantNotificationProvider: NotificationSourceProvider = {
           requiresConfirmation: true,
           createdBy: 'connector',
         });
-      } else if (source === 'repairs' && metadata.actionsEnabled === true) {
-        actions.push({
-          actionType: 'ignore_repair',
-          label: 'Ignore repair',
-          icon: 'eye-off',
-          variant: 'secondary',
-          requiresConfirmation: true,
-          createdBy: 'connector',
-        });
+      } else if (source === 'repairs') {
+        if (metadata.actionsEnabled === true && metadata.requiresRestart === true) {
+          actions.push({
+            actionType: 'restart_home_assistant',
+            label: 'Restart Home Assistant',
+            icon: 'refresh-cw',
+            variant: 'primary',
+            isPrimary: true,
+            requiresConfirmation: true,
+            createdBy: 'connector',
+          });
+        }
+        actions.push(...openAction(actionUrl));
+        if (metadata.actionsEnabled === true) {
+          actions.push({
+            actionType: 'ignore_repair',
+            label: 'Ignore repair',
+            icon: 'eye-off',
+            variant: 'secondary',
+            requiresConfirmation: true,
+            createdBy: 'connector',
+          });
+        }
       }
-      actions.push(...openAction(actionUrl));
+      if (source !== 'repairs') {
+        actions.push(...openAction(actionUrl));
+      }
       actions.push({
         actionType: 'create_task',
         label: 'Create task',

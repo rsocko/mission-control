@@ -103,7 +103,7 @@ export interface NotificationProviderActionResult {
   state?: Extract<NotificationState, 'read' | 'resolved' | 'dismissed'>;
   error?: {
     message: string;
-    status: 400 | 409 | 503;
+    status: 400 | 401 | 403 | 409 | 503;
   };
 }
 

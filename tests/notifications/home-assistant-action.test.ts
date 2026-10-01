@@ -78,6 +78,7 @@ describe('Home Assistant notification actions', () => {
     'install_update',
     'skip_update',
     'dismiss_persistent_notification',
+    'restart_home_assistant',
     'ignore_repair',
   ])('routes %s through a connector from a prior module evaluation', async (actionType) => {
     const actionContext = {
@@ -99,7 +100,9 @@ describe('Home Assistant notification actions', () => {
             result: {
               type: 'home_assistant_action_accepted',
               action: actionType,
-              confirmation: 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
+              confirmation: actionType === 'restart_home_assistant'
+                ? 'Restart complete. Home Assistant is back online.'
+                : 'Home Assistant accepted the request. Mission Control will confirm it on the next poll.',
             },
           },
     );
@@ -124,6 +127,27 @@ describe('Home Assistant notification actions', () => {
       error: {
         message: 'This notification is no longer active in Home Assistant',
         status: 409,
+      },
+    });
+  });
+
+  it('preserves an administrator permission failure from Home Assistant', async () => {
+    const error = new Error('Restart requires an administrator-authorized Home Assistant connection');
+    error.name = 'HomeAssistantActionError';
+    Object.assign(error, { status: 403 });
+    mocks.executeNotificationAction.mockRejectedValue(error);
+
+    await expect(executeHomeAssistantProviderAction({
+      ...context,
+      action: { ...context.action, actionType: 'restart_home_assistant' },
+    })).resolves.toEqual({
+      result: {
+        type: 'home_assistant_action_failed',
+        action: 'restart_home_assistant',
+      },
+      error: {
+        message: 'Restart requires an administrator-authorized Home Assistant connection',
+        status: 403,
       },
     });
   });

@@ -239,6 +239,7 @@ export function createPostgresConnectorManagementRepository(
         ),
         rows<{
           connectorId: string;
+          lastSyncAt: string;
           lastSyncedAt: string | null;
           success: boolean;
           errors: unknown;
@@ -248,6 +249,7 @@ export function createPostgresConnectorManagementRepository(
             WITH ranked AS (
               SELECT
                 connector_id AS "connectorId",
+                synced_at AS "lastSyncAt",
                 success,
                 errors,
                 row_number() OVER (
@@ -258,7 +260,7 @@ export function createPostgresConnectorManagementRepository(
                   OVER (PARTITION BY connector_id) AS "lastSyncedAt"
               FROM sync_log
             )
-            SELECT "connectorId", "lastSyncedAt", success, errors
+            SELECT "connectorId", "lastSyncAt", "lastSyncedAt", success, errors
             FROM ranked
             WHERE rn = 1
           `,
@@ -272,6 +274,7 @@ export function createPostgresConnectorManagementRepository(
           const errors = Array.isArray(row.errors) ? row.errors : [];
           return {
             connectorId: row.connectorId,
+            lastSyncAt: row.lastSyncAt,
             lastSyncedAt: row.lastSyncedAt,
             success: row.success,
             error: errors.length > 0 ? String(errors[0]) : null,

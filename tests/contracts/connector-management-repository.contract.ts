@@ -528,6 +528,32 @@ export function runConnectorManagementRepositoryContract(
       });
     });
 
+    it('reports the latest sync attempt separately from the latest successful sync', async () => {
+      const repository = harness.repository();
+      const connectorId = `${PREFIX}-outcome`;
+      await repository.createConnector(connector(connectorId));
+      await harness.seedSyncHistory([
+        history(`${PREFIX}-outcome-success`, '2099-09-04T01:00:00.000Z', {
+          connectorId,
+        }),
+        history(`${PREFIX}-outcome-failure`, '2099-09-04T02:00:00.000Z', {
+          connectorId,
+          success: false,
+          errors: ['offline'],
+        }),
+      ]);
+
+      const overview = await repository.getOverview(false);
+
+      expect(overview.syncOutcomes.find(outcome => outcome.connectorId === connectorId)).toEqual({
+        connectorId,
+        lastSyncAt: '2099-09-04T02:00:00.000Z',
+        lastSyncedAt: '2099-09-04T01:00:00.000Z',
+        success: false,
+        error: 'offline',
+      });
+    });
+
     it('filters sync history by connectors and result categories before paging', async () => {
       const repository = harness.repository();
       const connectorA = `${PREFIX}-filter-a`;

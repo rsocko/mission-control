@@ -1,0 +1,113 @@
+name: Control demo environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Action to perform on the demo Container App
+        required: true
+        type: choice
+        default: status
+        options:
+          - status
+          - start
+          - stop
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
+concurrency:
+  group: control-demo-environment
+  cancel-in-progress: false
+
+jobs:
+  control:
+    name: ${{ github.event_name == 'schedule' && 'Nightly stop' || format('Demo {0}', inputs.action) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    environment: demo
+    env:
+      API_VERSION: "2026-07-01"
+      RESOURCE_ID: /subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ vars.DEMO_RESOURCE_GROUP }}/providers/Microsoft.App/containerApps/${{ vars.DEMO_CONTAINER_APP }}
+    steps:
+      - name: Sign in to Azure
+        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Control demo Container App
+        env:
+          REQUESTED_ACTION: ${{ github.event_name == 'schedule' && 'stop' || inputs.action }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          resource_url="https://management.azure.com${RESOURCE_ID}"
+          read_status() {
+            az rest \
+              --method get \
+              --url "${resource_url}?api-version=${API_VERSION}" \
+              --query properties.runningStatus \
+              --output tsv
+          }
+
+          current_status="$(read_status)"
+          if [[ "${REQUESTED_ACTION}" == "status" ]]; then
+            {
+              echo "## Demo environment"
+              echo
+              echo "Status: \`${current_status}\`"
+            } >> "${GITHUB_STEP_SUMMARY}"
+            exit 0
+          fi
+
+          case "${REQUESTED_ACTION}" in
+            start)
+              target_status="Running"
+              ;;
+            stop)
+              target_status="Stopped"
+              ;;
+            *)
+              echo "::error::Unsupported action: ${REQUESTED_ACTION}"
+              exit 1
+              ;;
+          esac
+
+          if [[ "${current_status}" != "${target_status}" ]]; then
+            az rest \
+              --method post \
+              --url "${resource_url}/${REQUESTED_ACTION}?api-version=${API_VERSION}" \
+              --output none
+
+            for attempt in {1..40}; do
+              current_status="$(read_status)"
+              if [[ "${current_status}" == "${target_status}" ]]; then
+                break
+              fi
+              sleep 10
+            done
+          fi
+
+          if [[ "${current_status}" != "${target_status}" ]]; then
+            echo "::error::Demo remained ${current_status}; expected ${target_status}"
+            exit 1
+          fi
+
+          {
+            echo "## Demo environment"
+            echo
+            echo "Action: \`${REQUESTED_ACTION}\`"
+            echo
+            echo "Status: \`${current_status}\`"
+          } >> "${GITHUB_STEP_SUMMARY}"

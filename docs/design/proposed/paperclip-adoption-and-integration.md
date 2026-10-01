@@ -116,6 +116,9 @@ Paperclip-to-Scout actions pass through MC rather than calling Scout directly:
 
 Paperclip's MCP gateway may additionally govern tools used through it, but it
 cannot protect calls that a runtime makes directly outside the gateway.
+The implemented request, authentication, claim, result, and configuration
+contract is documented in
+[`docs/features/paperclip-scout-bridge.md`](../../features/paperclip-scout-bridge.md).
 
 Default policies:
 

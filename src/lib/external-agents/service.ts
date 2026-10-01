@@ -6,6 +6,7 @@ import type {
   AgentDispatchRecord,
   AgentDispatchResult,
   AgentDispatchScope,
+  PaperclipScoutBrokerRequest,
   AgentResultReference,
 } from './contracts';
 import { ExternalAgentError } from './errors';
@@ -55,6 +56,7 @@ export interface DispatchPreviewInput {
   callbackBaseUrl?: string;
   maxAttempts?: number;
   timeoutMs?: number;
+  brokerRequest?: PaperclipScoutBrokerRequest;
 }
 
 export interface DispatchResultInput {
@@ -144,10 +146,13 @@ function normalizeScope(value: AgentDispatchScope | undefined): AgentDispatchSco
 
 function validateAllowedActions(agent: ExternalAgent, actions: string[]) {
   const unique = [...new Set(actions.map((action) =>
-    requiredText(action, 'allowedActions[]', 80)))];
+    requiredText(action, 'allowedActions[]', 256)))];
   for (const action of unique) {
     const capability = ACTION_CAPABILITIES[action as keyof typeof ACTION_CAPABILITIES];
-    if (!capability || agent.capabilities[capability] !== true) {
+    if (
+      (!capability || agent.capabilities[capability] !== true)
+      && !agent.capabilities.allowedActions?.includes(action)
+    ) {
       throw new ExternalAgentError(
         `Agent does not support allowed action "${action}"`,
         'CAPABILITY_MISMATCH',
@@ -205,6 +210,7 @@ async function loadPayloadSource(
   classification: AgentDataClassification,
   allowedActions: string[],
   callbackBaseUrl?: string,
+  brokerRequest?: PaperclipScoutBrokerRequest,
 ) {
   if (scope.repository && agent.executionLocality === 'inference') {
     throw new ExternalAgentError(
@@ -257,6 +263,7 @@ async function loadPayloadSource(
       dispatchId,
       dataClassification: classification,
       allowedActions,
+      brokerRequest,
     },
     connectorTypes: snapshot.tasks.map(({ connectorType }) => connectorType),
   };
@@ -303,6 +310,7 @@ export async function createDispatchPreview(input: DispatchPreviewInput) {
     input.dataClassification ?? 'standard',
     allowedActions,
     input.callbackBaseUrl,
+    input.brokerRequest,
   );
   const classification = resolveDispatchClassification(
     preliminary.connectorTypes,
@@ -319,6 +327,7 @@ export async function createDispatchPreview(input: DispatchPreviewInput) {
       classification,
       allowedActions,
       input.callbackBaseUrl,
+      input.brokerRequest,
     );
   const { payload, disclosedFields } = selectAllowedPayloadFields(
     loaded.source,

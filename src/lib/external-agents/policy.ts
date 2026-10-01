@@ -39,6 +39,7 @@ export const EXTERNAL_AGENT_FIELDS = [
   'phases.taskIds',
   'phases.sortOrder',
   'callbackUrl',
+  'brokerRequest',
 ] as const;
 
 const FIELD_SET = new Set<string>(EXTERNAL_AGENT_FIELDS);

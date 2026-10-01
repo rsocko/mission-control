@@ -59,6 +59,7 @@ export interface ExternalAgentCapabilities {
   canCreatePullRequest?: boolean;
   canProposeTasks?: boolean;
   canProposePhases?: boolean;
+  allowedActions?: string[];
 }
 
 export interface ExternalAgentDataPolicy {
@@ -73,6 +74,54 @@ export interface PaperclipProviderConfig {
   assigneeAgentId: string;
   projectId?: string;
   requiredAdapterType?: string;
+  scoutBridge?: PaperclipScoutBridgePolicy;
+}
+
+export type PaperclipScoutRisk =
+  | 'low'
+  | 'messaging'
+  | 'destructive'
+  | 'identity'
+  | 'financial'
+  | 'high';
+
+export interface PaperclipScoutCapability {
+  tool: string;
+  actions: string[];
+  inputFields: string[];
+  risk: PaperclipScoutRisk;
+}
+
+export interface PaperclipScoutAutomationPolicy {
+  enabled: boolean;
+  capabilities: Array<{ tool: string; action: string }>;
+}
+
+export interface PaperclipScoutBridgePolicy {
+  destinationAgentId: string;
+  tenantId: string;
+  capabilities: PaperclipScoutCapability[];
+  automation?: PaperclipScoutAutomationPolicy;
+}
+
+export interface PaperclipScoutBrokerRequest {
+  version: 1;
+  requestId: string;
+  source: {
+    externalAgentId: string;
+    companyId: string;
+    agentId: string;
+  };
+  destination: {
+    externalAgentId: string;
+    tenantId: string;
+  };
+  capability: {
+    tool: string;
+    action: string;
+    risk: PaperclipScoutRisk;
+  };
+  input: Record<string, unknown>;
 }
 
 export interface ExternalAgentProviderConfig {

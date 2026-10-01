@@ -4,7 +4,14 @@ import {
   externalAgentErrorResponse,
   requireAgentAuthentication,
 } from '@/lib/external-agents/http';
-import { claimNextDispatch, expireDispatches } from '@/lib/external-agents/service';
+import {
+  claimNextDispatch,
+  expireDispatches,
+  submitDispatchResult,
+} from '@/lib/external-agents/service';
+import {
+  validateScoutBridgeClaim,
+} from '@/lib/external-agents/scout-bridge';
 
 export async function POST(request: Request) {
   try {
@@ -18,6 +25,24 @@ export async function POST(request: Request) {
     }
     await expireDispatches();
     const claim = await claimNextDispatch(agent.id, { leaseMs: body.leaseMs });
+    if (claim) {
+      try {
+        await validateScoutBridgeClaim(agent, claim);
+      } catch (error) {
+        await submitDispatchResult(
+          claim.dispatchId,
+          {
+            status: 'failed',
+            providerDetail: { policyRevalidation: 'rejected' },
+            errorMessage: error instanceof Error
+              ? error.message
+              : 'Scout claim policy revalidation failed',
+          },
+          { claimToken: claim.claimToken },
+        );
+        throw error;
+      }
+    }
     return claim
       ? NextResponse.json(claim)
       : new Response(null, { status: 204 });

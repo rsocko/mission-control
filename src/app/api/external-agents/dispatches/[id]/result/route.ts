@@ -9,6 +9,7 @@ import {
   submitDispatchResult,
   type DispatchResultInput,
 } from '@/lib/external-agents/service';
+import { validateScoutBridgeResult } from '@/lib/external-agents/scout-bridge';
 
 type Context = { params: Promise<{ id: string }> };
 
@@ -23,9 +24,11 @@ export async function POST(request: Request, { params }: Context) {
       await requireAgentAuthentication(request, dispatch.externalAgentId);
       agentAuthenticated = true;
     }
+    const body = await request.json() as DispatchResultInput;
+    validateScoutBridgeResult(dispatch, body);
     const result = await submitDispatchResult(
       id,
-      await request.json() as DispatchResultInput,
+      body,
       { claimToken, agentAuthenticated },
     );
     return NextResponse.json(result, { status: result.duplicate ? 200 : 202 });

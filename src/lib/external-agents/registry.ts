@@ -13,6 +13,8 @@ import {
   type ExternalAgentRecord,
   type ExternalAgentTransport,
   type ExternalAgentType,
+  type PaperclipScoutCapability,
+  type PaperclipScoutRisk,
 } from './contracts';
 import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
@@ -86,6 +88,85 @@ function requiredUuid(value: unknown, field: string): string {
   return normalized;
 }
 
+function requiredText(value: unknown, field: string, maxLength = 255): string {
+  const normalized = optionalText(value, field);
+  if (!normalized) {
+    throw new ExternalAgentError(`${field} is required`, 'VALIDATION_ERROR', 422);
+  }
+  if (normalized.length > maxLength) {
+    throw new ExternalAgentError(
+      `${field} exceeds ${maxLength} characters`,
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  return normalized;
+}
+
+const PAPERCLIP_SCOUT_RISKS = new Set<PaperclipScoutRisk>([
+  'low',
+  'messaging',
+  'destructive',
+  'identity',
+  'financial',
+  'high',
+]);
+
+function validateScoutCapability(value: unknown, index: number): PaperclipScoutCapability {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ExternalAgentError(
+      `providerConfig.paperclip.scoutBridge.capabilities[${index}] must be an object`,
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const capability = value as Partial<PaperclipScoutCapability>;
+  const actions = capability.actions;
+  const inputFields = capability.inputFields;
+  if (
+    !Array.isArray(actions)
+    || actions.length === 0
+    || actions.length > 50
+    || actions.some((action) => typeof action !== 'string' || !action.trim())
+  ) {
+    throw new ExternalAgentError(
+      `providerConfig.paperclip.scoutBridge.capabilities[${index}].actions is invalid`,
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (
+    !Array.isArray(inputFields)
+    || inputFields.length > 100
+    || inputFields.some((field) =>
+      typeof field !== 'string'
+      || !/^[A-Za-z][A-Za-z0-9_.-]{0,127}$/.test(field))
+  ) {
+    throw new ExternalAgentError(
+      `providerConfig.paperclip.scoutBridge.capabilities[${index}].inputFields is invalid`,
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (!capability.risk || !PAPERCLIP_SCOUT_RISKS.has(capability.risk)) {
+    throw new ExternalAgentError(
+      `providerConfig.paperclip.scoutBridge.capabilities[${index}].risk is invalid`,
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  return {
+    tool: requiredText(
+      capability.tool,
+      `providerConfig.paperclip.scoutBridge.capabilities[${index}].tool`,
+      120,
+    ),
+    actions: [...new Set(actions.map((action) => action.trim()))],
+    inputFields: [...new Set(inputFields)],
+    risk: capability.risk,
+  };
+}
+
 function validateProviderConfig(
   type: ExternalAgentType,
   value: ExternalAgentProviderConfig | undefined,
@@ -103,6 +184,102 @@ function validateProviderConfig(
     paperclip.requiredAdapterType,
     'providerConfig.paperclip.requiredAdapterType',
   );
+  const scoutBridge = paperclip.scoutBridge;
+  let normalizedScoutBridge;
+  if (scoutBridge !== undefined) {
+    if (!scoutBridge || typeof scoutBridge !== 'object' || Array.isArray(scoutBridge)) {
+      throw new ExternalAgentError(
+        'providerConfig.paperclip.scoutBridge must be an object',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    if (
+      !Array.isArray(scoutBridge.capabilities)
+      || scoutBridge.capabilities.length === 0
+      || scoutBridge.capabilities.length > 100
+    ) {
+      throw new ExternalAgentError(
+        'providerConfig.paperclip.scoutBridge.capabilities must contain 1-100 entries',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    const capabilities = scoutBridge.capabilities.map(validateScoutCapability);
+    const capabilityKeys = capabilities.flatMap((capability) =>
+      capability.actions.map((action) => `${capability.tool}:${action}`));
+    if (new Set(capabilityKeys).size !== capabilityKeys.length) {
+      throw new ExternalAgentError(
+        'providerConfig.paperclip.scoutBridge.capabilities contains duplicate tool actions',
+        'VALIDATION_ERROR',
+        422,
+      );
+    }
+    const automation = scoutBridge.automation;
+    let normalizedAutomation;
+    if (automation !== undefined) {
+      if (
+        !automation
+        || typeof automation !== 'object'
+        || Array.isArray(automation)
+        || typeof automation.enabled !== 'boolean'
+        || !Array.isArray(automation.capabilities)
+        || automation.capabilities.length > 100
+      ) {
+        throw new ExternalAgentError(
+          'providerConfig.paperclip.scoutBridge.automation is invalid',
+          'VALIDATION_ERROR',
+          422,
+        );
+      }
+      normalizedAutomation = {
+        enabled: automation.enabled,
+        capabilities: automation.capabilities.map((entry, index) => {
+          if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new ExternalAgentError(
+              `providerConfig.paperclip.scoutBridge.automation.capabilities[${index}] is invalid`,
+              'VALIDATION_ERROR',
+              422,
+            );
+          }
+          return {
+            tool: requiredText(
+              entry.tool,
+              `providerConfig.paperclip.scoutBridge.automation.capabilities[${index}].tool`,
+              120,
+            ),
+            action: requiredText(
+              entry.action,
+              `providerConfig.paperclip.scoutBridge.automation.capabilities[${index}].action`,
+              120,
+            ),
+          };
+        }),
+      };
+      const unknownAutomation = normalizedAutomation.capabilities.find((entry) =>
+        !capabilities.some((capability) =>
+          capability.tool === entry.tool && capability.actions.includes(entry.action)));
+      if (unknownAutomation) {
+        throw new ExternalAgentError(
+          'providerConfig.paperclip.scoutBridge.automation contains an unauthorized tool action',
+          'VALIDATION_ERROR',
+          422,
+        );
+      }
+    }
+    normalizedScoutBridge = {
+      destinationAgentId: requiredText(
+        scoutBridge.destinationAgentId,
+        'providerConfig.paperclip.scoutBridge.destinationAgentId',
+      ),
+      tenantId: requiredText(
+        scoutBridge.tenantId,
+        'providerConfig.paperclip.scoutBridge.tenantId',
+      ),
+      capabilities,
+      ...(normalizedAutomation ? { automation: normalizedAutomation } : {}),
+    };
+  }
   return {
     paperclip: {
       companyId: requiredUuid(
@@ -122,6 +299,7 @@ function validateProviderConfig(
         }
         : {}),
       ...(requiredAdapterType ? { requiredAdapterType } : {}),
+      ...(normalizedScoutBridge ? { scoutBridge: normalizedScoutBridge } : {}),
     },
   };
 }
@@ -267,7 +445,29 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
       422,
     );
   }
-  const capabilities = input.capabilities ?? {};
+  const capabilities: ExternalAgentCapabilities = {
+    ...(input.capabilities ?? {}),
+  };
+  if (
+    capabilities.allowedActions !== undefined
+    && (
+      !Array.isArray(capabilities.allowedActions)
+      || capabilities.allowedActions.length > 500
+      || capabilities.allowedActions.some((action) =>
+        typeof action !== 'string' || !action.trim() || action.length > 256)
+    )
+  ) {
+    throw new ExternalAgentError(
+      'capabilities.allowedActions is invalid',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (input.capabilities?.allowedActions) {
+    capabilities.allowedActions = [
+      ...new Set(input.capabilities.allowedActions.map((action) => action.trim())),
+    ];
+  }
   if (
     executionLocality === 'inference'
     && (

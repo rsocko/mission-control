@@ -263,11 +263,12 @@ export function createSqliteConnectorManagementRepository(
               OVER (PARTITION BY connector_id) AS lastSyncedAt
           FROM sync_log
         )
-        SELECT connectorId, lastSyncedAt, success, errors
+        SELECT connectorId, syncedAt AS lastSyncAt, lastSyncedAt, success, errors
         FROM ranked
         WHERE rn = 1
       `).all() as Array<{
         connectorId: string;
+        lastSyncAt: string;
         lastSyncedAt: string | null;
         success: number;
         errors: unknown;
@@ -280,6 +281,7 @@ export function createSqliteConnectorManagementRepository(
           const errors = decodeLenientJsonArray(row.errors);
           return {
             connectorId: row.connectorId,
+            lastSyncAt: row.lastSyncAt,
             lastSyncedAt: row.lastSyncedAt,
             success: row.success !== 0,
             error: errors.length > 0 ? String(errors[0]) : null,

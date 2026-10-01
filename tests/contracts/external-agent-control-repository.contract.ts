@@ -24,6 +24,7 @@ function agent(id: string, inboundWebhookId: string | null = null): ExternalAgen
     endpoint: null,
     authType: 'bearer',
     authCredentialRef: 'contract-secret',
+    providerConfig: {},
     capabilities: { canProposeTasks: true },
     inputFormat: 'mc-tasks',
     outputFormat: 'mc-tasks',

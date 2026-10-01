@@ -28,7 +28,8 @@ const MAX_TRANSACTION_ATTEMPTS = 3;
 const AGENT_COLUMNS = `
   id, name, type, transport, execution_locality AS "executionLocality",
   description, endpoint, auth_type AS "authType",
-  auth_credential_ref AS "authCredentialRef", capabilities,
+  auth_credential_ref AS "authCredentialRef", provider_config AS "providerConfig",
+  capabilities,
   input_format AS "inputFormat", output_format AS "outputFormat",
   inbound_webhook_id AS "inboundWebhookId", data_policy AS "dataPolicy",
   enabled, created_at AS "createdAt", updated_at AS "updatedAt",
@@ -129,6 +130,7 @@ function destinationMatches(
     && current.endpoint === expected.endpoint
     && current.authType === expected.authType
     && current.authCredentialRef === expected.authCredentialRef
+    && canonical(current.providerConfig) === canonical(expected.providerConfig)
     && current.inboundWebhookId === expected.inboundWebhookId
     && canonical(current.capabilities) === canonical(expected.capabilities)
     && canonical(current.dataPolicy) === canonical(expected.dataPolicy)
@@ -314,19 +316,20 @@ export function createPostgresExternalAgentControlRepository(
         const [created] = await query<ExternalAgentRecord & QueryResultRow>(client, `
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, capabilities, input_format, output_format,
+            auth_type, auth_credential_ref, provider_config, capabilities,
+            input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12,
-            $13, $14::jsonb, $15, $16, $17, $18
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12,
+            $13, $14, $15::jsonb, $16, $17, $18, $19
           )
           RETURNING ${AGENT_COLUMNS}
         `, [
           record.id, record.name, record.type, record.transport,
           record.executionLocality, record.description, record.endpoint,
-          record.authType, record.authCredentialRef, JSON.stringify(record.capabilities),
-          record.inputFormat, record.outputFormat, record.inboundWebhookId,
-          JSON.stringify(record.dataPolicy), record.enabled, record.createdAt,
+          record.authType, record.authCredentialRef, JSON.stringify(record.providerConfig),
+          JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
+          record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.createdAt,
           record.updatedAt, record.deletedAt,
         ]);
         return created;
@@ -339,18 +342,18 @@ export function createPostgresExternalAgentControlRepository(
           UPDATE external_agents SET
             name = $2, type = $3, transport = $4, execution_locality = $5,
             description = $6, endpoint = $7, auth_type = $8,
-            auth_credential_ref = $9, capabilities = $10::jsonb,
-            input_format = $11, output_format = $12, inbound_webhook_id = $13,
-            data_policy = $14::jsonb, enabled = $15, updated_at = $16,
-            deleted_at = $17
+            auth_credential_ref = $9, provider_config = $10::jsonb,
+            capabilities = $11::jsonb, input_format = $12, output_format = $13,
+            inbound_webhook_id = $14, data_policy = $15::jsonb, enabled = $16,
+            updated_at = $17, deleted_at = $18
           WHERE id = $1 AND deleted_at IS NULL
           RETURNING ${AGENT_COLUMNS}
         `, [
           id, record.name, record.type, record.transport, record.executionLocality,
           record.description, record.endpoint, record.authType,
-          record.authCredentialRef, JSON.stringify(record.capabilities),
-          record.inputFormat, record.outputFormat, record.inboundWebhookId,
-          JSON.stringify(record.dataPolicy), record.enabled, record.updatedAt,
+          record.authCredentialRef, JSON.stringify(record.providerConfig),
+          JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
+          record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.updatedAt,
           record.deletedAt,
         ]);
         return updated ?? null;

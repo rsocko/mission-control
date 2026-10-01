@@ -11,6 +11,7 @@ import { resolveAgentCredential } from './registry';
 import { canonicalJson, redactForPersistence } from './policy';
 import { ExternalAgentError } from './errors';
 import { createCopilotCloudTransport } from './copilot-cloud';
+import { dispatchToPaperclip } from './paperclip';
 
 export interface TransportDispatch {
   dispatchId: string;
@@ -277,7 +278,35 @@ export function createTransportResolver(options: {
     mcp: createMcpTransport(options.mcpInvoker),
   };
   const copilotCloud = createCopilotCloudTransport(options.fetcher);
-  return (agent) => agent.type === 'copilot-cloud'
-    ? copilotCloud
-    : adapters[agent.transport];
+  return (agent) => {
+    if (agent.type === 'copilot-cloud') return copilotCloud;
+    if (agent.type === 'paperclip') {
+      return {
+        kind: 'push',
+        async dispatch(paperclipAgent, dispatch) {
+          const config = paperclipAgent.providerConfig.paperclip;
+          if (!paperclipAgent.endpoint || !config) {
+            throw new ExternalAgentError(
+              'Paperclip endpoint and provider configuration are missing',
+              'TRANSPORT_INVALID',
+              500,
+            );
+          }
+          return dispatchToPaperclip(
+            {
+              endpoint: paperclipAgent.endpoint,
+              credential: resolveAgentCredential(paperclipAgent.authCredentialRef),
+              config,
+              fetcher: options.fetcher,
+            },
+            {
+              dispatchId: dispatch.dispatchId,
+              payload: dispatch.payload,
+            },
+          );
+        },
+      };
+    }
+    return adapters[agent.transport];
+  };
 }

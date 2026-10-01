@@ -518,8 +518,9 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
   it('derives the complete JSON target inventory from the PostgreSQL schema', () => {
     const columns = expectedJsonTargetColumns();
 
-    expect(columns).toHaveLength(126);
-    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(126);
+    expect(columns).toHaveLength(127);
+    expect(new Set(columns.map(({ table, column }) => `${table}.${column}`))).toHaveLength(127);
+    expect(columns).toContainEqual({ table: 'external_agents', column: 'provider_config' });
     expect(columns).toContainEqual({ table: 'app_settings', column: 'value' });
     expect(columns).toContainEqual({ table: 'hub_projects', column: 'appearance' });
     expect(columns).toContainEqual({ table: 'source_lists', column: 'appearance' });
@@ -835,7 +836,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
 
       expect(result.evidence.schema).toMatchObject({
         importTableCount: 175,
-        jsonTargetColumnCount: 126,
+        jsonTargetColumnCount: 127,
       });
       expect(result.evidence.schema.jsonRowsScanned).toBeGreaterThan(0);
     } finally {
@@ -1377,7 +1378,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     expect(result.evidence.command.activationChanged).toBe(false);
     expect(result.evidence.source.kind).toBe('persisted-state-fixture');
     expect(result.evidence.source.sha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(result.evidence.schema.sqliteMigrationCount).toBe(243);
+    expect(result.evidence.schema.sqliteMigrationCount).toBe(244);
     expect(result.evidence.schema.importTableCount).toBe(175);
     expect(result.copiedTables).toHaveLength(175);
     expect(result.evidence.quiescence.acceptedForSyntheticFixture).toBe(true);
@@ -1418,7 +1419,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
       ).run(SQLITE_SUPERSEDED_MIGRATION_HASHES[0], historicalTimestamp);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(143);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(144);
     } finally {
       sqlite.close();
     }
@@ -1429,7 +1430,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     try {
       replacePriorityEntityTable(sqlite, historicalPriorityEntityColumns);
 
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(142);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(143);
     } finally {
       sqlite.close();
     }
@@ -1485,7 +1486,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
           supportedHistoricalShape: true,
         }),
       ]));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(243);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(244);
     } finally {
       fixture.close();
     }
@@ -1522,7 +1523,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         'reminder_nag_series_id',
         'reminder_nag_sequence',
       ]);
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(243);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(244);
     } finally {
       fixture.close();
     }
@@ -1542,7 +1543,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
         actualColumnOrder: deriveTrustedTasksColumnOrders().get('continuous-production'),
         supportedHistoricalShape: true,
       }));
-      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(243);
+      expect(validateSqliteMigrationState(fixture, migrationsDirectory)).toBe(244);
     } finally {
       fixture.close();
     }
@@ -1789,7 +1790,7 @@ describe('SQLite-to-PostgreSQL import tooling', () => {
     const sqlite = currentSqlite();
     try {
       replaceInboundWebhookTable(sqlite, historicalInboundWebhookColumns);
-      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(142);
+      expect(validateSqliteMigrationState(sqlite, migrationsDirectory)).toBe(143);
     } finally {
       sqlite.close();
     }

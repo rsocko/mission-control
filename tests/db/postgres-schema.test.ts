@@ -274,7 +274,7 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(19);
+    expect(migrations).toHaveLength(20);
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.
@@ -311,6 +311,17 @@ describe('PostgreSQL schema', () => {
     );
     expect(recurringOccurrenceSql).toContain(
       'CREATE UNIQUE INDEX IF NOT EXISTS "idx_task_recurrence_occurrences_identity"',
+    );
+
+    const orphanBindingCleanupSql = readFileSync(
+      resolve(migrationDirectory, '0019_cleanup_orphan_external_bindings.sql'),
+      'utf8',
+    );
+    expect(orphanBindingCleanupSql).toContain(
+      `WHERE "binding_type" = 'task'`,
+    );
+    expect(orphanBindingCleanupSql).toContain(
+      `"tasks"."connector_instance_id" = "external_entity_bindings"."connector_instance_id"`,
     );
 
     const enrichmentSql = readFileSync(resolve(migrationDirectory, migrations[1]), 'utf8');

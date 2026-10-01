@@ -200,6 +200,47 @@ describe('project phases (Plan) tab', () => {
     expect(screen.queryByRole('toolbar', { name: 'Bulk actions' })).not.toBeInTheDocument();
   });
 
+  it('shows an assignment rename in the list while the save is pending', async () => {
+    await renderProjectTab('Plan');
+    await screen.findByRole('region', { name: 'Discovery phase' });
+    const releaseRename = harness.holdOnce('/api/project-phases/phase-discovery');
+
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discovery' }));
+    const editor = screen.getByRole('textbox', { name: 'Rename Discovery' });
+    fireEvent.change(editor, { target: { value: 'Research' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
+    expect(await screen.findByRole('region', { name: 'Research phase' })).toBeInTheDocument();
+
+    releaseRename();
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ name: 'Research' });
+    });
+  });
+
+  it('restores the previous phase name when an assignment rename fails', async () => {
+    await renderProjectTab('Plan');
+    await screen.findByRole('region', { name: 'Discovery phase' });
+    harness.failOnce('/api/project-phases/phase-discovery', {
+      method: 'PATCH',
+      error: 'Rename failed',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discovery' }));
+    const editor = screen.getByRole('textbox', { name: 'Rename Discovery' });
+    fireEvent.change(editor, { target: { value: 'Research' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
+
+    expect(await screen.findByRole('region', { name: 'Discovery phase' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Research phase' })).not.toBeInTheDocument();
+    expect(toasts).toContainEqual({ level: 'error', message: 'Rename failed' });
+  });
+
   it('creates the first phase from the empty state and opens it for renaming', async () => {
     harness = installProjectPageHarness({
       project: { name: 'Plan Project' },

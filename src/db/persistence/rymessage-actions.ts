@@ -252,6 +252,10 @@ export interface RyMessageActionPersistence {
     receivedAt: string;
   }): Promise<{ applied: number; replayed: number }>;
   listV2Projections(connectorId: string): Promise<RyMessageActionV2Projection[]>;
+  getV2Projection(
+    connectorId: string,
+    actionId: string,
+  ): Promise<RyMessageActionV2Projection | null>;
   enqueueV2Mutation(input: {
     connectorId: string;
     request: CompanionActionMutationRequestV2;

@@ -5,7 +5,10 @@ import type {
 import type { CreateNotificationInput } from '@/db/persistence/notification-delivery';
 import type { NotificationLevel, NotificationSourceState } from '@/types';
 import { createNotifications } from '@/lib/notifications/service';
-import type { CompanionActionFeedPageV2 } from './action-contract-v2';
+import {
+  companionActionV2Digest,
+  type CompanionActionFeedPageV2,
+} from './action-contract-v2';
 import {
   sanitizeCompanionAction,
   type CompanionActionV1,
@@ -15,7 +18,7 @@ import {
 function portableAction(
   action: CompanionActionV1 | PortableCompanionAction,
 ): PortableCompanionAction {
-  return 'source' in action ? sanitizeCompanionAction(action) : action;
+  return 'materializations' in action ? sanitizeCompanionAction(action) : action;
 }
 
 function notificationSourceId(connectorId: string, actionId: string): string {
@@ -57,7 +60,11 @@ function projectionInput(
   const lifecycle = action?.lifecycle.state ?? 'completed';
   const receivedAt = action?.createdAt ?? projection.tombstonedAt ?? new Date().toISOString();
   const updatedAt = action?.updatedAt ?? projection.tombstonedAt ?? receivedAt;
-  const body = action?.content.summary ?? action?.content.details ?? null;
+  const body = action?.source?.messageExcerpt
+    ?? action?.content.summary
+    ?? action?.content.details
+    ?? action?.classification.reason
+    ?? null;
   return {
     sourceId: notificationSourceId(connectorId, projection.actionId),
     connectorType: 'rymessage',
@@ -83,12 +90,32 @@ function projectionInput(
       lifecycleRevision: action?.fieldRevisions.lifecycle ?? projection.revision,
       actionType: action?.content.actionType,
       category: action?.content.category,
+      direction: action?.content.direction,
+      recommendation: action?.content.recommendation,
       priority: action?.content.priority ?? 'none',
+      details: action?.content.details,
+      senderDisplayName: action?.source?.senderDisplayName,
+      conversationTitle: action?.source?.conversationTitle,
+      messageExcerpt: action?.source?.messageExcerpt,
+      sourceUrl: action?.source?.sourceUrl,
+      sourceCreatedAt: action?.source?.sourceCreatedAt,
       confidenceClass: action?.classification.confidenceClass,
       confidenceScore: action?.classification.confidenceScore,
+      classificationReason: action?.classification.reason,
       derivationMethod: action?.classification.derivationMethod,
+      classificationModel: action?.classification.model,
+      derivationVersion: action?.classification.derivationVersion,
       lifecycle,
+      snoozedUntil: action?.lifecycle.snoozedUntil,
+      dismissedAt: action?.lifecycle.dismissedAt,
+      dismissedReason: action?.lifecycle.dismissedReason,
+      handledAt: action?.lifecycle.handledAt,
+      correction: action?.lifecycle.correction,
+      actionCreatedAt: action?.createdAt,
+      actionUpdatedAt: action?.updatedAt,
+      lastSeenAt: action?.lastSeenAt,
       sourceKind: action?.sourceKind,
+      sourceFamily: action?.sourceFamily,
       tombstoned: Boolean(projection.tombstonedAt),
     },
     enrichmentRevision: `rymessage:${projection.revision}:${lifecycle}`,
@@ -143,10 +170,16 @@ export async function projectCompanionActionV2PageToNotifications(
       action: portableAction(projection.action),
       tombstonedAt: null,
     });
+    const presentationDigest = companionActionV2Digest({
+      action: projection.action,
+      taskMaterializations: relations,
+      taskLifecycle: projection.taskLifecycle,
+    });
     return {
       ...base,
       sourceActivityKey: [
         base.sourceActivityKey,
+        presentationDigest,
         projection.taskLifecycle.provenance,
         projection.taskLifecycle.state,
         ...relations.map(relation => `${relation.relationId}:${relation.revision}`),
@@ -160,10 +193,22 @@ export async function projectCompanionActionV2PageToNotifications(
         terminalLinkedTaskCount: relations.length - activeRelations.length,
         taskLifecycleSource: projection.taskLifecycle.provenance,
         taskLifecycleState: projection.taskLifecycle.state,
+        taskMaterializations: relations.map(relation => ({
+          relationId: relation.relationId,
+          revision: relation.revision,
+          state: relation.state,
+          providerLabel: relation.snapshot.providerLabel,
+          providerIconKey: relation.snapshot.providerIconKey,
+          title: relation.snapshot.title,
+          status: relation.snapshot.status,
+          availability: relation.snapshot.availability,
+          observedAt: relation.snapshot.observedAt,
+          openUrl: relation.snapshot.openUrl,
+          managedByMissionControl: relation.management?.manager === 'mission-control',
+          managerTaskId: relation.management?.managerTaskId,
+        })),
       },
-      enrichmentRevision: `rymessage-v2:${item.aggregateVersion}:${
-        projection.taskLifecycle.derivedAt ?? projection.action.updatedAt
-      }`,
+      enrichmentRevision: `rymessage-v2:${item.aggregateVersion}:${presentationDigest}`,
     };
   });
   const results = await createNotifications(inputs);

@@ -10,6 +10,24 @@ function record(value: unknown): Record<string, unknown> {
     : {};
 }
 
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function humanize(value: string): string {
+  return value
+    .replace(/[-_]+/g, ' ')
+    .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function taskMaterializations(value: unknown): Array<Record<string, unknown>> {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => (
+        item !== null && typeof item === 'object' && !Array.isArray(item)
+      )).slice(0, 16)
+    : [];
+}
+
 function matchesRyMessageAction(notification: InboundNotification): boolean {
   const contract = record(notification.metadata).contract;
   return notification.connectorType === 'rymessage'
@@ -27,12 +45,100 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
       const lifecycle = typeof metadata.lifecycle === 'string'
         ? metadata.lifecycle
         : 'visible';
+      const terminal = ['dismissed', 'handled', 'completed'].includes(lifecycle);
       const linkedCount = typeof metadata.linkedTaskCount === 'number'
         ? metadata.linkedTaskCount
         : 0;
+      const activeLinkedCount = typeof metadata.activeLinkedTaskCount === 'number'
+        ? metadata.activeLinkedTaskCount
+        : linkedCount;
       const linkedRelationIds = Array.isArray(metadata.linkedRelationIds)
         ? metadata.linkedRelationIds.filter((value): value is string => typeof value === 'string')
         : [];
+      const sender = text(metadata.senderDisplayName);
+      const conversation = text(metadata.conversationTitle);
+      const excerpt = text(metadata.messageExcerpt);
+      const details = text(metadata.details);
+      const recommendation = text(metadata.recommendation);
+      const reason = text(metadata.classificationReason);
+      const actionType = text(metadata.actionType);
+      const sourceUrl = text(metadata.sourceUrl);
+      const materializations = taskMaterializations(metadata.taskMaterializations);
+      const confidenceScore = typeof metadata.confidenceScore === 'number'
+        && Number.isFinite(metadata.confidenceScore)
+        ? Math.round(metadata.confidenceScore * 100)
+        : null;
+      const classificationMethod = text(metadata.derivationMethod);
+      const classificationModel = text(metadata.classificationModel);
+      const derivationVersion = text(metadata.derivationVersion);
+      const subtitle = [sender, conversation].filter(Boolean).join(' · ')
+        || (linkedCount > 0
+          ? `${linkedCount} linked task${linkedCount === 1 ? '' : 's'}`
+          : 'Companion action');
+      const primaryText = details && details !== notification.body
+        ? details
+        : excerpt && excerpt !== notification.body
+          ? excerpt
+          : undefined;
+      const lifecycleTimestamp = text(metadata.handledAt)
+        ?? text(metadata.dismissedAt)
+        ?? text(metadata.snoozedUntil);
+      const footerParts = [
+        reason,
+        classificationMethod
+          ? `Classified by ${humanize(classificationMethod)}${
+              classificationModel ? ` (${classificationModel}${
+                derivationVersion ? ` ${derivationVersion}` : ''
+              })` : ''
+            }`
+          : null,
+        lifecycleTimestamp ? `${humanize(lifecycle)} ${lifecycleTimestamp}` : null,
+      ].filter((value): value is string => Boolean(value));
+      const stats = [
+        actionType ? { label: 'Action', value: humanize(actionType), tone: 'info' as const } : null,
+        confidenceScore !== null
+          ? {
+              label: 'Confidence',
+              value: `${confidenceScore}%`,
+              tone: confidenceScore >= 80
+                ? 'success' as const
+                : confidenceScore >= 50
+                  ? 'warning' as const
+                  : 'danger' as const,
+            }
+          : text(metadata.confidenceClass)
+            ? {
+                label: 'Confidence',
+                value: humanize(String(metadata.confidenceClass)),
+                tone: 'neutral' as const,
+              }
+            : null,
+        {
+          label: 'Lifecycle',
+          value: humanize(lifecycle),
+          tone: terminal ? 'neutral' as const : 'info' as const,
+        },
+        linkedCount > 0
+          ? {
+              label: 'Tasks',
+              value: activeLinkedCount === linkedCount
+                ? `${linkedCount} linked`
+                : `${activeLinkedCount} active · ${linkedCount} total`,
+              tone: activeLinkedCount > 0 ? 'success' as const : 'neutral' as const,
+            }
+          : null,
+      ].filter((value): value is NonNullable<typeof value> => value !== null);
+      const links = [
+        ...(sourceUrl ? [{ label: 'Open conversation', url: sourceUrl }] : []),
+        ...materializations.flatMap(task => {
+          const url = text(task.openUrl);
+          if (!url) return [];
+          return [{
+            label: `Open ${text(task.title) ?? text(task.providerLabel) ?? 'linked task'}`,
+            url,
+          }];
+        }),
+      ];
       return {
         title: notification.title,
         body: notification.body ?? null,
@@ -40,24 +146,38 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
         category: notification.category,
         templateKey: 'rymessage.companion-action',
         metadata,
-        isActionable: lifecycle !== 'completed',
+        isActionable: !terminal,
         presentation: {
           sourceName: 'RyMessage Action Center',
           subjectIcon: 'message-circle',
-          subtitle: linkedCount > 0
-            ? `${linkedCount} linked task${linkedCount === 1 ? '' : 's'}`
-            : 'Companion action',
+          subtitle,
+          metadataChips: [
+            ...(actionType ? [{ label: 'Action', value: humanize(actionType) }] : []),
+            ...(text(metadata.category)
+              ? [{ label: 'Category', value: humanize(String(metadata.category)) }]
+              : []),
+            ...(text(metadata.direction)
+              ? [{ label: 'Direction', value: humanize(String(metadata.direction)) }]
+              : []),
+            { label: 'State', value: humanize(lifecycle) },
+          ],
           richContent: {
-            footerText: lifecycle === 'link-broken'
-              ? 'A linked task needs attention.'
+            primaryText,
+            secondaryText: recommendation
+              ? `Recommendation: ${humanize(recommendation)}`
               : undefined,
+            stats,
+            footerText: footerParts.join(' · ') || (
+              lifecycle === 'link-broken' ? 'A linked task needs attention.' : undefined
+            ),
+            links,
           },
         },
-        actions: lifecycle === 'completed'
+        actions: terminal
           ? []
           : [{
               actionType: 'rymessage_promote',
-              label: linkedCount > 0 ? 'Create another task' : 'Create task',
+              label: linkedCount > 0 ? 'Create another linked task' : 'Create linked task',
               icon: 'plus',
               variant: 'primary',
               isPrimary: true,
@@ -95,6 +215,19 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
                 lifecycleRevision: metadata.lifecycleRevision,
               },
               createdBy: 'connector',
+            }, {
+              actionType: 'rymessage_dismiss',
+              label: 'Dismiss',
+              icon: 'x',
+              variant: 'ghost',
+              isPrimary: false,
+              payload: {
+                actionId: metadata.actionId,
+                connectorId: notification.connectorInstanceId,
+                revision: metadata.revision,
+                lifecycleRevision: metadata.lifecycleRevision,
+              },
+              createdBy: 'connector',
             }],
       };
     },
@@ -118,6 +251,12 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
     if (context.action.actionType === 'rymessage_unlink') {
       return {
         result: { type: 'rymessage_unlink', queued: true },
+      };
+    }
+    if (context.action.actionType === 'rymessage_dismiss') {
+      return {
+        state: 'dismissed',
+        result: { type: 'rymessage_dismiss', queued: true },
       };
     }
     if (context.action.actionType !== 'rymessage_mark_handled') return null;

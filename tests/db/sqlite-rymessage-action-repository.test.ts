@@ -217,9 +217,11 @@ describe('SQLite RyMessage action repository', () => {
     expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor).toBe('v2-cursor-1');
     const projections = await repository.listV2Projections(CONNECTOR_ID);
     expect(projections).toHaveLength(1);
-    expect(JSON.stringify(projections)).not.toContain('raw-message-identity');
-    expect(JSON.stringify(projections)).not.toContain('Private Sender');
-    expect(JSON.stringify(projections)).not.toContain('Private model reasoning');
+    const serializedProjections = JSON.stringify(projections);
+    expect(serializedProjections).not.toContain('raw-message-identity');
+    expect(serializedProjections).not.toContain('Private extracted payload');
+    expect(serializedProjections).toContain('Private Sender');
+    expect(serializedProjections).toContain('Private model reasoning');
     await expect(repository.applyV2FeedPage({
       connectorId: CONNECTOR_ID,
       page: {
@@ -1032,7 +1034,7 @@ describe('SQLite RyMessage action repository', () => {
     })).items).toHaveLength(1);
   });
 
-  it('persists only portable fields and erases reconciliation state with the connector', async () => {
+  it('persists bounded presentation fields and erases reconciliation state with the connector', async () => {
     const { database, repository } = await contextPromise;
     const source = action(7);
     await repository.applyFeedPage({
@@ -1047,16 +1049,19 @@ describe('SQLite RyMessage action repository', () => {
     `).get(CONNECTOR_ID, source.actionId) as { payload: string };
     for (const sensitive of [
       'raw-message-identity',
-      'Private Sender',
-      'Private Thread',
-      'Private message excerpt',
-      'private-message',
-      'Private model reasoning',
-      'private-model-name',
       'Private extracted payload',
       'Private feedback body',
     ]) {
       expect(payload.payload).not.toContain(sensitive);
+    }
+    for (const presentationField of [
+      'Private Sender',
+      'Private Thread',
+      'Private message excerpt',
+      'Private model reasoning',
+      'private-model-name',
+    ]) {
+      expect(payload.payload).toContain(presentationField);
     }
 
     await database.sqlite.backup(backupPath);

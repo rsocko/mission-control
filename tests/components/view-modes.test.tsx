@@ -34,12 +34,23 @@ vi.mock('lucide-react', () => ({
   Link2: () => <span data-testid="icon-link">L</span>,
   List: () => <span data-testid="icon-list">•</span>,
   AlertTriangle: () => <span data-testid="icon-alert-triangle">!</span>,
+  Ban: () => <span data-testid="icon-ban">×</span>,
+  Bot: () => <span data-testid="icon-bot">B</span>,
   CheckCircle2: () => <span data-testid="icon-check-circle">✓</span>,
+  ChevronDown: () => <span data-testid="icon-chevron-down">⌄</span>,
   CircleHelp: () => <span data-testid="icon-circle-help">?</span>,
+  CirclePause: () => <span data-testid="icon-circle-pause">Ⅱ</span>,
+  Clock3: () => <span data-testid="icon-clock">◷</span>,
+  ExternalLink: () => <span data-testid="icon-external-link">↗</span>,
+  GitCommit: () => <span data-testid="icon-git-commit">○</span>,
   GitMerge: () => <span data-testid="icon-git-merge">⇄</span>,
+  GitPullRequest: () => <span data-testid="icon-git-pull-request">⑂</span>,
   Loader2: () => <span data-testid="icon-loader">↻</span>,
+  Play: () => <span data-testid="icon-play">▶</span>,
   RefreshCw: () => <span data-testid="icon-refresh">↻</span>,
+  RotateCcw: () => <span data-testid="icon-rotate">↶</span>,
   ShieldAlert: () => <span data-testid="icon-shield-alert">!</span>,
+  ShieldCheck: () => <span data-testid="icon-shield-check">✓</span>,
 }));
 
 vi.mock('@/lib/toast', () => ({

@@ -541,14 +541,16 @@ export function TaskDelegationSection({
                   </fieldset>
                   <label className="block">
                     <span className="text-xs font-medium text-[var(--text-secondary)]">Instruction</span>
-                    <textarea
-                      value={instruction}
-                      onChange={(event) => setInstruction(event.target.value)}
-                      rows={4}
-                      maxLength={32_000}
-                      placeholder="Describe the outcome this executor should deliver."
-                      className="mt-1.5 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-                    />
+                    <div className="input-glow mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-0)]">
+                      <textarea
+                        value={instruction}
+                        onChange={(event) => setInstruction(event.target.value)}
+                        rows={4}
+                        maxLength={32_000}
+                        placeholder="Describe the outcome this executor should deliver."
+                        className="w-full resize-y bg-transparent px-3 py-2 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+                      />
+                    </div>
                   </label>
                   {error && <p className="text-xs text-red-300" role="alert">{error}</p>}
                   <button

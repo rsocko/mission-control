@@ -71,6 +71,7 @@ function validateEndpoint(
   endpoint: string | null,
   transport: ExternalAgentTransport,
   authType: ExternalAgentAuthType,
+  agentType: ExternalAgentType,
 ) {
   if (transport === 'pull') return null;
   if (transport === 'manual' && !endpoint) return null;
@@ -94,6 +95,23 @@ function validateEndpoint(
     throw new ExternalAgentError(
       'endpoint must not contain embedded credentials',
       'VALIDATION_ERROR',
+      422,
+    );
+  }
+  if (
+    agentType === 'copilot-cloud'
+    && (
+      url.protocol !== 'https:'
+      || url.hostname.toLowerCase() !== 'api.github.com'
+      || url.port
+      || (url.pathname !== '/' && url.pathname !== '')
+      || url.search
+      || url.hash
+    )
+  ) {
+    throw new ExternalAgentError(
+      'copilot-cloud endpoint must be the official https://api.github.com API origin',
+      'EXECUTION_BOUNDARY_MISMATCH',
       422,
     );
   }
@@ -185,7 +203,12 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
     transport,
     executionLocality,
     description: optionalText(input.description, 'description'),
-    endpoint: validateEndpoint(optionalText(input.endpoint, 'endpoint'), transport, authType),
+    endpoint: validateEndpoint(
+      optionalText(input.endpoint, 'endpoint'),
+      transport,
+      authType,
+      input.type,
+    ),
     authType,
     authCredentialRef: credentialRef,
     capabilities,

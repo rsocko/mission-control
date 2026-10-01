@@ -18,6 +18,7 @@ export const DEFAULT_EXTERNAL_AGENT_FIELDS = [
   'repository.defaultBranch',
   'execution.locality',
   'execution.baseRef',
+  'execution.model',
   'execution.createPullRequest',
   'tasks.id',
   'tasks.title',

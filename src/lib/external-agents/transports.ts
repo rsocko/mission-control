@@ -10,6 +10,7 @@ import type { ExternalAgent } from './registry';
 import { resolveAgentCredential } from './registry';
 import { canonicalJson, redactForPersistence } from './policy';
 import { ExternalAgentError } from './errors';
+import { createCopilotCloudTransport } from './copilot-cloud';
 
 export interface TransportDispatch {
   dispatchId: string;
@@ -20,7 +21,13 @@ export interface TransportDispatch {
 export interface TransportDispatchResult {
   status: Extract<
     AgentDispatchStatus,
-    'queued' | 'in_progress' | 'waiting_for_user' | 'completed' | 'failed'
+    | 'queued'
+    | 'in_progress'
+    | 'waiting_for_user'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled'
   >;
   providerTaskId?: string;
   providerState?: string;
@@ -112,13 +119,6 @@ function providerStatus(value: unknown): TransportDispatchResult['status'] {
 }
 
 function assertImplementedAgent(agent: ExternalAgent) {
-  if (agent.type === 'copilot-cloud') {
-    throw new ExternalAgentError(
-      'GitHub-hosted Copilot dispatch is reserved for issue #931 and is not configured',
-      'TRANSPORT_NOT_IMPLEMENTED',
-      501,
-    );
-  }
   if (agent.type === 'copilot-sdk-workspace') {
     throw new ExternalAgentError(
       'Mission Control-hosted Copilot workspace execution is reserved for issue #2123',
@@ -276,5 +276,8 @@ export function createTransportResolver(options: {
     manual: createManualTransport(),
     mcp: createMcpTransport(options.mcpInvoker),
   };
-  return (agent) => adapters[agent.transport];
+  const copilotCloud = createCopilotCloudTransport(options.fetcher);
+  return (agent) => agent.type === 'copilot-cloud'
+    ? copilotCloud
+    : adapters[agent.transport];
 }

@@ -687,7 +687,7 @@ export function createPostgresExternalAgentControlRepository(
           await expireOne(client, current, input.now);
           return 'expired' as const;
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = await client.query(`
           UPDATE agent_dispatches SET
             status = $1, provider_task_id = COALESCE($2, provider_task_id),
@@ -845,7 +845,7 @@ export function createPostgresExternalAgentControlRepository(
             );
           }
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = await client.query(`
           UPDATE agent_dispatches SET
             status = $1, provider_task_id = COALESCE($2, provider_task_id),

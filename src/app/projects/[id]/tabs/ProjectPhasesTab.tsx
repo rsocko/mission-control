@@ -145,6 +145,7 @@ import {
   getPhaseColor,
   getTaskStatusColor,
   getTimelineRange,
+  isUnassignedTaskDropTarget,
   toRgba,
 } from '../utils';
 import type {
@@ -615,8 +616,10 @@ export function ProjectPhasesTab({
     ))?.id ?? null;
     let targetPhaseId: string | null = null;
     let targetIndex = 0;
-    const droppedOnUnassigned = overStr === 'unassigned-drop'
-      || over.data.current?.type === 'unassigned-drop';
+    const droppedOnUnassigned = isUnassignedTaskDropTarget(
+      overStr,
+      over.data.current,
+    );
     if (droppedOnUnassigned) {
       if (!sourcePhaseId) return;
     } else if (overStr.startsWith('phase-drop:')) {

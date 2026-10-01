@@ -190,7 +190,11 @@ function AssignPhaseTarget({
                 <SortableContext items={entries.map(({ task }) => `task:${task.id}`)} strategy={verticalListSortingStrategy}>
                   {entries.map(({ task }) => {
                     return (
-                      <DraggableTaskItem key={task.id} taskId={task.id}>
+                      <DraggableTaskItem
+                        key={task.id}
+                        taskId={task.id}
+                        dropTargetId={`phase-drop:${phase.id}`}
+                      >
                         {(dragHandleProps) => (
                           <PlanTaskRow
                             task={task}
@@ -432,7 +436,11 @@ export function PhaseAssignView({
                 <div className="space-y-2">
                   {filteredUnassigned.map((task) => {
                     return (
-                      <DraggableTaskItem key={task.id} taskId={task.id}>
+                      <DraggableTaskItem
+                        key={task.id}
+                        taskId={task.id}
+                        dropTargetId="unassigned-drop"
+                      >
                         {(dragHandleProps) => (
                           <PlanTaskRow
                             task={task}

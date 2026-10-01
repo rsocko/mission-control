@@ -29,6 +29,7 @@ export function formatNotificationSourceLabel(source: string): string {
 }
 
 const NOTIFICATION_TYPE_LABELS: Record<string, string> = {
+  'rymessage.companion-action': 'Action Center',
   home_assistant_entity_alert: 'Device alert',
   ha_update_available: 'Update available',
   ha_update_critical: 'Critical update available',

@@ -197,6 +197,61 @@ it('renders rich RyMessage identity, rationale, lifecycle, and linked-task state
     .toHaveAttribute('href', 'https://to-do.office.com/tasks/id/1');
 });
 
+it('makes legacy RyMessage compact cards distinct without displacing enriched context', () => {
+  const legacy = makeNotification({
+    id: 'rymessage-legacy',
+    connectorType: 'rymessage',
+    connectorInstanceId: 'rymessage-1',
+    title: 'Reply to Casey',
+    body: null,
+    category: 'social',
+    presentation: {},
+    metadata: {
+      contract: 'companion-action-v2',
+      actionType: 'waiting-on-reply',
+      confidenceClass: 'high',
+      confidenceScore: 0.88,
+      lifecycle: 'visible',
+      sourceKind: 'message',
+    },
+    actions: [],
+  });
+  const enriched = makeNotification({
+    id: 'rymessage-enriched',
+    connectorType: 'rymessage',
+    connectorInstanceId: 'rymessage-1',
+    title: 'Send the revised estimate',
+    body: 'Can you send the revised estimate by Friday?',
+    category: 'social',
+    presentation: {},
+    metadata: {
+      contract: 'companion-action-v2',
+      senderDisplayName: 'Avery Chen',
+      conversationTitle: 'Launch planning',
+      messageExcerpt: 'Can you send the revised estimate by Friday?',
+      actionType: 'follow-up',
+      confidenceScore: 0.92,
+      lifecycle: 'visible',
+    },
+    actions: [],
+  });
+
+  render(
+    <>
+      <NotificationCard notification={legacy} compact />
+      <NotificationCard notification={enriched} compact />
+      <NotificationCard notification={actionable} compact />
+    </>,
+  );
+
+  expect(screen.getByText('Waiting on reply')).toBeInTheDocument();
+  expect(screen.getByText('88%')).toHaveAttribute('title', 'Confidence');
+  expect(screen.queryByText('Companion action')).not.toBeInTheDocument();
+  expect(screen.getByText('Avery Chen · Launch planning')).toBeInTheDocument();
+  expect(screen.getByText('Can you send the revised estimate by Friday?')).toBeInTheDocument();
+  expect(screen.queryByText('A pull request is waiting for review.')).not.toBeInTheDocument();
+});
+
 function Harness({
   initialUnread = false,
   isLoading = false,

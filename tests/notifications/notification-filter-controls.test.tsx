@@ -21,6 +21,7 @@ const facets: NotificationFacets = {
   ],
   notificationType: [
     { key: 'finance_spending_alert', label: 'finance_spending_alert', count: 3 },
+    { key: 'rymessage.companion-action', label: 'rymessage.companion-action', count: 2 },
   ],
   state: { unread: 5 },
   merchant: [{ key: merchant, label: 'Invented Market', count: 2 }],
@@ -130,6 +131,26 @@ describe('shared notification filter controls', () => {
       source: 'finance-manager',
       sourceAccount: 'finance-home',
       notificationType: null,
+    });
+  });
+
+  it('labels the RyMessage type for people while retaining its filter key', () => {
+    const onChange = vi.fn();
+    render(
+      <NotificationFilterControls
+        query={DEFAULT_NOTIFICATION_QUERY}
+        facets={facets}
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Add filter' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Type' }));
+    fireEvent.click(screen.getByRole('button', { name: /Action Center\s+2/ }));
+
+    expect(onChange).toHaveBeenCalledWith({
+      ...DEFAULT_NOTIFICATION_QUERY,
+      notificationType: 'rymessage.companion-action',
     });
   });
 

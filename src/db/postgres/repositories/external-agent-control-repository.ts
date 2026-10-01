@@ -474,6 +474,10 @@ export function createPostgresExternalAgentControlRepository(
         values.push(options.agentId);
         predicates.push(`external_agent_id = $${values.length}`);
       }
+      if (options.taskIds?.length) {
+        values.push(options.taskIds);
+        predicates.push(`scope->'taskIds' ?| $${values.length}::text[]`);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       return query<AgentDispatchRecord & QueryResultRow>(pool, `
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches

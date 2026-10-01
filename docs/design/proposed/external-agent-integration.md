@@ -158,6 +158,7 @@ CREATE TABLE external_agents (
 |------|-------------|-----------------|-------------------|
 | `copilot-cloud` | GitHub-hosted Copilot cloud agent | `POST /agents/repos/{owner}/{repo}/tasks`; issue assignment is a compatibility path | Agent Tasks polling plus PR/issue webhooks |
 | `copilot-sdk-workspace` | MC-hosted Copilot SDK coding runtime | Provision isolated clone/worktree, then start a scoped SDK session | SDK events plus Git/PR references |
+| `paperclip` | Paperclip parent issue assigned to a configured Paperclip agent | `POST /api/companies/{companyId}/issues` with a stable MC idempotency key | Issue, heartbeat-run, approval, and work-product polling |
 | `webhook-roundtrip` | Any system that accepts a POST and calls back | POST to `endpoint` with MC context | Agent POSTs back to `inbound_webhook_id` |
 | `mcp` | MCP-compatible tool server | MCP tool invocation protocol | Inline response |
 | `pull-queue` | Agent without a supported inbound API, such as Scout or a Copilot app local automation | Agent polls MC and atomically claims a dispatch | Agent completes/fails through scoped MC tools |

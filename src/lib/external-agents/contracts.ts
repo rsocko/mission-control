@@ -1,6 +1,7 @@
 export const EXTERNAL_AGENT_TYPES = [
   'copilot-cloud',
   'copilot-sdk-workspace',
+  'paperclip',
   'webhook-roundtrip',
   'mcp',
   'pull-queue',
@@ -67,6 +68,17 @@ export interface ExternalAgentDataPolicy {
   maxRequestsPerMinute: number;
 }
 
+export interface PaperclipProviderConfig {
+  companyId: string;
+  assigneeAgentId: string;
+  projectId?: string;
+  requiredAdapterType?: string;
+}
+
+export interface ExternalAgentProviderConfig {
+  paperclip?: PaperclipProviderConfig;
+}
+
 export interface AgentDispatchScope {
   projectId?: string;
   taskIds?: string[];
@@ -112,6 +124,7 @@ export interface ExternalAgentRecord {
   endpoint: string | null;
   authType: ExternalAgentAuthType;
   authCredentialRef: string | null;
+  providerConfig: ExternalAgentProviderConfig;
   capabilities: ExternalAgentCapabilities;
   inputFormat: string;
   outputFormat: string;

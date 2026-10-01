@@ -1,0 +1,1 @@
+ALTER TABLE "external_agents" ADD COLUMN "provider_config" jsonb DEFAULT '{}'::jsonb NOT NULL;

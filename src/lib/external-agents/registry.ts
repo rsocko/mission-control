@@ -8,6 +8,7 @@ import {
   type ExternalAgentAuthType,
   type ExternalAgentCapabilities,
   type ExternalAgentDataPolicy,
+  type ExternalAgentProviderConfig,
   type ExternalAgentLocality,
   type ExternalAgentRecord,
   type ExternalAgentTransport,
@@ -19,6 +20,10 @@ import {
   DEFAULT_EXTERNAL_AGENT_DATA_POLICY,
   validateDataPolicy,
 } from './policy';
+import {
+  validatePaperclipConnection,
+  type PaperclipConnection,
+} from './paperclip';
 
 export type ExternalAgent = ExternalAgentRecord;
 
@@ -32,6 +37,7 @@ export interface ExternalAgentInput {
   endpoint?: string | null;
   authType?: ExternalAgentAuthType;
   authCredentialRef?: string | null;
+  providerConfig?: ExternalAgentProviderConfig;
   capabilities?: ExternalAgentCapabilities;
   inputFormat?: string;
   outputFormat?: string;
@@ -46,6 +52,7 @@ const TYPE_DEFAULTS: Record<
 > = {
   'copilot-cloud': { transport: 'push', locality: 'github-hosted' },
   'copilot-sdk-workspace': { transport: 'pull', locality: 'mission-control-host' },
+  paperclip: { transport: 'push', locality: 'external' },
   'webhook-roundtrip': { transport: 'push', locality: 'external' },
   mcp: { transport: 'mcp', locality: 'external' },
   'pull-queue': { transport: 'pull', locality: 'external' },
@@ -65,6 +72,58 @@ function optionalText(value: unknown, field: string): string | null {
   const normalized = value.trim();
   if (!normalized) return null;
   return normalized;
+}
+
+function requiredUuid(value: unknown, field: string): string {
+  const normalized = optionalText(value, field);
+  if (
+    !normalized
+    || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+      .test(normalized)
+  ) {
+    throw new ExternalAgentError(`${field} must be a UUID`, 'VALIDATION_ERROR', 422);
+  }
+  return normalized;
+}
+
+function validateProviderConfig(
+  type: ExternalAgentType,
+  value: ExternalAgentProviderConfig | undefined,
+): ExternalAgentProviderConfig {
+  if (type !== 'paperclip') return {};
+  const paperclip = value?.paperclip;
+  if (!paperclip || typeof paperclip !== 'object' || Array.isArray(paperclip)) {
+    throw new ExternalAgentError(
+      'providerConfig.paperclip is required',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const requiredAdapterType = optionalText(
+    paperclip.requiredAdapterType,
+    'providerConfig.paperclip.requiredAdapterType',
+  );
+  return {
+    paperclip: {
+      companyId: requiredUuid(
+        paperclip.companyId,
+        'providerConfig.paperclip.companyId',
+      ),
+      assigneeAgentId: requiredUuid(
+        paperclip.assigneeAgentId,
+        'providerConfig.paperclip.assigneeAgentId',
+      ),
+      ...(paperclip.projectId
+        ? {
+          projectId: requiredUuid(
+            paperclip.projectId,
+            'providerConfig.paperclip.projectId',
+          ),
+        }
+        : {}),
+      ...(requiredAdapterType ? { requiredAdapterType } : {}),
+    },
+  };
 }
 
 function validateEndpoint(
@@ -115,10 +174,31 @@ function validateEndpoint(
       422,
     );
   }
+  if (
+    agentType === 'paperclip'
+    && (
+      url.pathname !== '/'
+      || url.search
+      || url.hash
+    )
+  ) {
+    throw new ExternalAgentError(
+      'paperclip endpoint must be an API origin without a path, query, or fragment',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
   const local = url.hostname === 'localhost'
     || url.hostname === '127.0.0.1'
     || url.hostname === '::1'
     || url.hostname.endsWith('.localhost');
+  if (agentType === 'paperclip' && authType === 'none' && !local) {
+    throw new ExternalAgentError(
+      'unauthenticated Paperclip endpoints must be local',
+      'EXECUTION_BOUNDARY_MISMATCH',
+      422,
+    );
+  }
   if (url.protocol !== 'https:' && (!local || authType !== 'none')) {
     throw new ExternalAgentError(
       'credentialed or non-local endpoints must use HTTPS',
@@ -173,6 +253,13 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
       422,
     );
   }
+  if (input.type === 'paperclip' && authType !== 'none' && authType !== 'bearer') {
+    throw new ExternalAgentError(
+      'paperclip supports bearer credentials or local-trusted access',
+      'EXECUTION_BOUNDARY_MISMATCH',
+      422,
+    );
+  }
   if (transport === 'pull' && authType === 'none') {
     throw new ExternalAgentError(
       'pull agents require scoped credentials',
@@ -211,6 +298,7 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
     ),
     authType,
     authCredentialRef: credentialRef,
+    providerConfig: validateProviderConfig(input.type, input.providerConfig),
     capabilities,
     inputFormat: optionalText(input.inputFormat, 'inputFormat') ?? 'mc-tasks',
     outputFormat: optionalText(input.outputFormat, 'outputFormat') ?? 'mc-tasks',
@@ -242,6 +330,7 @@ export async function getExternalAgent(id: string, includeDeleted = false) {
 export async function createExternalAgent(input: ExternalAgentInput) {
   const now = new Date().toISOString();
   const values = validateExternalAgentInput(input);
+  await validateProviderConnection(values);
   const id = optionalText(input.id, 'id') ?? crypto.randomUUID();
   return (await getExternalAgentControlPersistence()).registry.create({
     ...values,
@@ -261,6 +350,7 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
     dataPolicy: patch.dataPolicy ?? existing.dataPolicy,
     capabilities: patch.capabilities ?? existing.capabilities,
   });
+  await validateProviderConnection(values);
   const updated = await (await getExternalAgentControlPersistence()).registry.update(id, {
     ...values,
     updatedAt: new Date().toISOString(),
@@ -290,6 +380,7 @@ export function resolveAgentCredential(reference: string | null): string | null 
       500,
     );
   }
+
   if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials)) {
     throw new ExternalAgentError(
       'External-agent credential store is invalid',
@@ -306,4 +397,24 @@ export function resolveAgentCredential(reference: string | null): string | null 
     );
   }
   return value;
+}
+
+async function validateProviderConnection(
+  values: Omit<ExternalAgentRecord, 'id' | 'createdAt' | 'updatedAt'>,
+) {
+  if (values.type !== 'paperclip') return;
+  const config = values.providerConfig.paperclip;
+  if (!values.endpoint || !config) {
+    throw new ExternalAgentError(
+      'Paperclip endpoint and provider configuration are required',
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const connection: PaperclipConnection = {
+    endpoint: values.endpoint,
+    credential: resolveAgentCredential(values.authCredentialRef),
+    config,
+  };
+  await validatePaperclipConnection(connection);
 }

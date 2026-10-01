@@ -99,6 +99,7 @@ export interface ExternalAgentControlPersistence {
         | 'endpoint'
         | 'authType'
         | 'authCredentialRef'
+        | 'providerConfig'
         | 'inboundWebhookId'
         | 'capabilities'
         | 'dataPolicy'

@@ -17,7 +17,9 @@ on:
 
 permissions:
   contents: read
-  id-token: write
+
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
 
 concurrency:
   group: control-demo-environment
@@ -28,6 +30,9 @@ jobs:
     name: ${{ github.event_name == 'schedule' && 'Nightly stop' || format('Demo {0}', inputs.action) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     environment: demo
     env:
       API_VERSION: "2026-07-01"

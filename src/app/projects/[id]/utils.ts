@@ -67,6 +67,15 @@ function includesValue<T extends string>(
   return typeof value === 'string' && values.some((candidate) => candidate === value);
 }
 
+export function isUnassignedTaskDropTarget(
+  overId: string,
+  data?: Record<string, unknown>,
+): boolean {
+  return overId === 'unassigned-drop'
+    || data?.type === 'unassigned-drop'
+    || data?.dropTargetId === 'unassigned-drop';
+}
+
 export function applyProjectTaskFieldUpdate(
   task: ProjectTask,
   fields: TaskFieldUpdate,

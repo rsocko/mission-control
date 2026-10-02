@@ -11,6 +11,7 @@ import type {
 } from '@/db/persistence/connector-management';
 import type { SourceListRecord } from '@/db/persistence/connector-execution';
 import { initializePostgresGitHubConnectorIdentityStateInTransaction } from './github-identity-repositories';
+import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 
 type Client = Pool | PoolClient;
 
@@ -231,11 +232,18 @@ export function createPostgresConnectorManagementRepository(
               source_list_id AS "sourceListId",
               count(*)::text AS count
             FROM tasks
-            WHERE status NOT IN ('done', 'cancelled')
+            WHERE deleted_at IS NULL
+              AND local_disposition = 'active'
+              AND connector_instance_id NOT IN (
+                SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+              )
+              AND NOT (connector_type = ANY($1::text[]))
+              AND status NOT IN ('done', 'cancelled')
               AND parent_id IS NULL
               AND is_checklist_item = false
             GROUP BY connector_instance_id, source_list_id
           `,
+          [[...NOTIFICATION_ONLY_CONNECTOR_TYPES]],
         ),
         rows<{
           connectorId: string;
@@ -313,13 +321,16 @@ export function createPostgresConnectorManagementRepository(
               SELECT source_list_id AS "sourceListId", count(*)::text AS count
               FROM tasks
               WHERE connector_instance_id = $1
+                AND deleted_at IS NULL
+                AND local_disposition = 'active'
+                AND NOT (connector_type = ANY($2::text[]))
                 AND status NOT IN ('done', 'cancelled')
                 AND parent_id IS NULL
                 AND is_checklist_item = false
               GROUP BY source_list_id
               ORDER BY source_list_id ASC
             `,
-            [connectorId],
+            [connectorId, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]],
           ),
           rows<{ id: string; name: string; sortOrder: number }>(
             client,

@@ -6,6 +6,7 @@ import {
   captureQuickSortTask,
   snapshotsMatch,
 } from '@/lib/quick-sort/operations';
+import { removeTasksFromProject } from '@/lib/projects/hierarchy-service';
 
 export async function POST(
   request: Request,
@@ -24,6 +25,10 @@ export async function POST(
 
   const before = operation.beforeSnapshot;
   const hasTaskPatch = Object.keys(before.originalPatch).length > 0;
+  const projectAssignment = before.originalPatch.projectAssignment as
+    | { projectId?: string }
+    | undefined;
+  const hasProjectAssignment = typeof projectAssignment?.projectId === 'string';
   if (hasTaskPatch) {
     const current = await captureQuickSortTask(operation.taskId);
     if (!current || !snapshotsMatch(current, operation.afterSnapshot)) {
@@ -39,7 +44,18 @@ export async function POST(
     return NextResponse.json({ error: 'Undo operation is already in progress' }, { status: 409 });
   }
 
-  if (hasTaskPatch) {
+  if (hasProjectAssignment) {
+    try {
+      await removeTasksFromProject({
+        projectId: projectAssignment.projectId!,
+        taskIds: [operation.taskId],
+        actor: { type: 'user' },
+      });
+    } catch {
+      await quickSort.releaseUndo(id);
+      return NextResponse.json({ error: 'Failed to undo project assignment' }, { status: 409 });
+    }
+  } else if (hasTaskPatch) {
     const undoPatch = buildUndoPatch(before, before.originalPatch);
     const patchResponse = await patchTask(
       new Request(new URL(`/api/tasks/${operation.taskId}`, request.url), {

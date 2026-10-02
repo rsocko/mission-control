@@ -97,6 +97,33 @@ describe('Companion ActionV1 contract', () => {
     expect(isCompanionActionV1({ ...action, accountId: 'caller-supplied' })).toBe(false);
   });
 
+  it('accepts Unicode free text and rejects ASCII control characters', () => {
+    const action = canonicalAction();
+    expect(isCompanionActionV1({
+      ...action,
+      source: {
+        ...action.source,
+        senderDisplayName: 'Renée Example',
+        conversationTitle: 'Planificación de viaje ✈️',
+        messageExcerpt: 'I’ll send the café details shortly.',
+      },
+    })).toBe(true);
+    expect(isCompanionActionV1({
+      ...action,
+      source: {
+        ...action.source,
+        messageExcerpt: 'First line\nSecond line',
+      },
+    })).toBe(false);
+    expect(isCompanionActionV1({
+      ...action,
+      content: {
+        ...action.content,
+        summary: 'Summary\u007fwith control',
+      },
+    })).toBe(false);
+  });
+
   it('accepts only exact bounded integration mutations', () => {
     expect(isCompanionActionMutation({
       kind: 'action.user-edit',

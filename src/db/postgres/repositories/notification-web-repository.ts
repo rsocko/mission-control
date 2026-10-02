@@ -191,6 +191,41 @@ function buildBulkWhereClausesPg(query: NotificationQuery, params: unknown[]): s
   return conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 }
 
+type NotificationFacetDimension =
+  | 'level'
+  | 'category'
+  | 'source'
+  | 'sourceAccount'
+  | 'notificationType'
+  | 'state'
+  | 'merchant'
+  | 'dateRange';
+
+function queryWithoutFacet(
+  query: NotificationQuery,
+  facet: NotificationFacetDimension,
+): NotificationQuery {
+  switch (facet) {
+    case 'source':
+      return { ...query, source: null, sourceAccount: null, notificationType: null };
+    case 'sourceAccount':
+      return { ...query, sourceAccount: null, notificationType: null };
+    default:
+      return { ...query, [facet]: null };
+  }
+}
+
+function postgresFacetWhere(
+  query: NotificationQuery,
+  facet: NotificationFacetDimension,
+): { sql: string; params: unknown[] } {
+  const params: unknown[] = [];
+  return {
+    sql: buildBulkWhereClausesPg(queryWithoutFacet(query, facet), params),
+    params,
+  };
+}
+
 /**
  * PostgreSQL writeback mutation SQL builder. Mirrors the SQLite
  * `mutationUpdateSql` reference. `idCount` is the number of notification ids
@@ -581,31 +616,19 @@ export function createPostgresNotificationWebRepository(
         actions = actionResult.rows as NotificationActionRow[];
       }
 
-      // Stats, facets, matching count in parallel
-      const typeFacetParams: unknown[] = [now];
-      let typeFacetParamIdx = 2;
-      const typeFacetConditions = [
-        inboxConditionPg(1).sql,
-        `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
-        `template_key IS NOT NULL`,
-      ];
-      if (query.source) {
-        const sourceTypes = financeProviderFilterValues(query.source);
-        const placeholders = sourceTypes.map((_, index) => `$${typeFacetParamIdx + index}`).join(',');
-        typeFacetConditions.push(sourceTypes.length === 1
-          ? `connector_type = $${typeFacetParamIdx}`
-          : `connector_type IN (${placeholders})`);
-        typeFacetParams.push(...sourceTypes);
-        typeFacetParamIdx += sourceTypes.length;
-      }
-      if (query.sourceAccount) {
-        typeFacetConditions.push(`connector_instance_id = $${typeFacetParamIdx}`);
-        typeFacetParams.push(query.sourceAccount);
-      }
+      // Stats, contextual facets, and matching count in parallel.
+      const levelFacetWhere = postgresFacetWhere(query, 'level');
+      const categoryFacetWhere = postgresFacetWhere(query, 'category');
+      const sourceFacetWhere = postgresFacetWhere(query, 'source');
+      const sourceAccountFacetWhere = postgresFacetWhere(query, 'sourceAccount');
+      const typeFacetWhere = postgresFacetWhere(query, 'notificationType');
+      const merchantFacetWhere = postgresFacetWhere(query, 'merchant');
+      const stateBaseQuery = queryWithoutFacet(query, 'state');
+      const dateRangeBaseQuery = queryWithoutFacet(query, 'dateRange');
 
       const [
         statsResult, levelResult, categoryResult, sourceResult, sourceAccountResult,
-        notificationTypeResult, stateResult, merchantResult, matchingResult,
+        notificationTypeResult, stateResult, dateRangeResult, merchantResult, matchingResult,
       ] = await Promise.all([
         pool.query(`
           SELECT COUNT(*) AS total,
@@ -620,9 +643,9 @@ export function createPostgresNotificationWebRepository(
           FROM notifications
           WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
         `, [now, now]),
-        pool.query(`SELECT level AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY level`, [now]),
-        pool.query(`SELECT category AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY category`, [now]),
-        pool.query(`SELECT connector_type AS value, COUNT(*) AS count FROM notifications WHERE ${inboxConditionPg(1).sql} AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY connector_type`, [now]),
+        pool.query(`SELECT level AS value, COUNT(*) AS count FROM notifications ${levelFacetWhere.sql} GROUP BY level`, levelFacetWhere.params),
+        pool.query(`SELECT category AS value, COUNT(*) AS count FROM notifications ${categoryFacetWhere.sql} GROUP BY category`, categoryFacetWhere.params),
+        pool.query(`SELECT connector_type AS value, COUNT(*) AS count FROM notifications ${sourceFacetWhere.sql} GROUP BY connector_type`, sourceFacetWhere.params),
         pool.query(`
           SELECT notifications.connector_instance_id AS key,
                  notifications.connector_type AS source,
@@ -630,32 +653,56 @@ export function createPostgresNotificationWebRepository(
                  COUNT(*) AS count
           FROM notifications
           LEFT JOIN connector_configs ON connector_configs.id = notifications.connector_instance_id
-          WHERE ${inboxConditionPg(1).sql}
-            AND notifications.connector_instance_id NOT IN (
-              SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
-            )
+          ${sourceAccountFacetWhere.sql}
           GROUP BY notifications.connector_instance_id, notifications.connector_type, connector_configs.name
-        `, [now]),
+        `, sourceAccountFacetWhere.params),
         pool.query(`
           SELECT template_key AS key, COUNT(*) AS count
           FROM notifications
-          WHERE ${typeFacetConditions.join(' AND ')}
+          ${typeFacetWhere.sql}${typeFacetWhere.sql ? ' AND' : ' WHERE'} template_key IS NOT NULL
           GROUP BY template_key
           ORDER BY COUNT(*) DESC, template_key ASC
-        `, typeFacetParams),
-        pool.query(`SELECT state AS value, COUNT(*) AS count FROM notifications WHERE connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL) GROUP BY state`),
+        `, typeFacetWhere.params),
+        Promise.all((['unread', 'read', 'dismissed'] as const).map(async value => {
+          const facetParams: unknown[] = [];
+          const facetWhere = buildBulkWhereClausesPg(
+            { ...stateBaseQuery, state: value },
+            facetParams,
+          );
+          const result = await pool.query(
+            `SELECT COUNT(*) AS count FROM notifications ${facetWhere}`,
+            facetParams,
+          );
+          return { value, count: Number(result.rows[0]?.count ?? 0) };
+        })),
+        Promise.all(([
+          ['any', null],
+          ['today', 'today'],
+          ['week', 'week'],
+          ['month', 'month'],
+        ] as const).map(async ([key, dateRange]) => {
+          const facetParams: unknown[] = [];
+          const facetWhere = buildBulkWhereClausesPg(
+            { ...dateRangeBaseQuery, dateRange },
+            facetParams,
+          );
+          const result = await pool.query(
+            `SELECT COUNT(*) AS count FROM notifications ${facetWhere}`,
+            facetParams,
+          );
+          return [key, Number(result.rows[0]?.count ?? 0)] as const;
+        })),
         pool.query(`
           SELECT presentation->>'financeMerchantKey' AS key,
                  MIN(presentation->>'financeMerchantLabel') AS label,
                  COUNT(*) AS count
           FROM notifications
-          WHERE ${inboxConditionPg(1).sql}
-            AND connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)
-            AND ${merchantMetadataConditionPg(2).sql}
+          ${merchantFacetWhere.sql}${merchantFacetWhere.sql ? ' AND' : ' WHERE'}
+            ${merchantMetadataConditionPg(merchantFacetWhere.params.length + 1).sql}
           GROUP BY presentation->>'financeMerchantKey'
           ORDER BY COUNT(*) DESC, presentation->>'financeMerchantKey' ASC
           LIMIT ${MAX_NOTIFICATION_MERCHANT_FACETS}
-        `, [now]),
+        `, merchantFacetWhere.params),
         pool.query(`SELECT COUNT(*) AS count FROM notifications ${unpaginatedWhere}`, unpaginatedParams),
       ]);
 
@@ -698,8 +745,9 @@ export function createPostgresNotificationWebRepository(
             label: facet.key as string,
             count: Number(facet.count),
           })),
-          state: toRecord(stateResult.rows),
+          state: toRecord(stateResult),
           merchant: normalizedMerchantFacets,
+          dateRange: Object.fromEntries(dateRangeResult),
         },
         matchingCount: Number(matchingResult.rows[0]?.count ?? 0),
       };

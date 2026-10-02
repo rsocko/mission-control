@@ -81,6 +81,7 @@ import {
   compileCanonicalTaskFilter,
   compileQuickFilterCondition,
   enabledGitHubConnectorCondition,
+  getTaskSourceVisibilityConditions,
   withCondition,
   type CanonicalTaskFilterInputs,
 } from './sqlite-task-filter';
@@ -779,7 +780,11 @@ class SqliteTaskReadRepository implements TaskReadRepository {
     const [sourceTask] = await this.database
       .select({ id: tasks.id })
       .from(tasks)
-      .where(eq(tasks.id, input.taskId))
+      .where(and(
+        eq(tasks.id, input.taskId),
+        ...getTaskSourceVisibilityConditions(),
+        eq(tasks.localDisposition, 'active'),
+      ))
       .limit(1);
     if (!sourceTask) return null;
 
@@ -793,6 +798,8 @@ class SqliteTaskReadRepository implements TaskReadRepository {
       sourceListName: tasks.sourceListName,
     }).from(tasks).where(and(
       ne(tasks.id, input.taskId),
+      ...getTaskSourceVisibilityConditions(),
+      eq(tasks.localDisposition, 'active'),
       normalizedQuery ? like(tasks.title, `%${normalizedQuery}%`) : undefined,
     )).orderBy(
       asc(sql`${tasks.title} COLLATE BINARY`),
@@ -843,18 +850,24 @@ class SqliteTaskReadRepository implements TaskReadRepository {
       sourceId: tasks.sourceId,
       connectorType: tasks.connectorType,
       createdAt: tasks.createdAt,
-    }).from(tasks).where(
+    }).from(tasks).where(and(
+      ...getTaskSourceVisibilityConditions(),
+      eq(tasks.localDisposition, 'active'),
       input.includeClosedTasks
         ? undefined
         : inArray(tasks.status, ['todo', 'in_progress']),
-    );
+    ));
   }
 
   async listDistinctTaskAssignees(): Promise<string[]> {
     const rows = await this.database
       .select({ assignee: tasks.assignee })
       .from(tasks)
-      .where(isNotNull(tasks.assignee))
+      .where(and(
+        ...getTaskSourceVisibilityConditions(),
+        eq(tasks.localDisposition, 'active'),
+        isNotNull(tasks.assignee),
+      ))
       .groupBy(tasks.assignee)
       .orderBy(asc(sql`${tasks.assignee} COLLATE BINARY`));
     return rows.map((row) => row.assignee!);

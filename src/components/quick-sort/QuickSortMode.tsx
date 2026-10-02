@@ -53,7 +53,7 @@ const MODE_LABELS: Record<QuickSortQueueMode, string> = {
   no_effort: 'Estimate Effort',
   no_tags: 'Add Tags',
   no_planning_horizon: 'Set Horizon',
-  no_project: 'Organize',
+  no_project: 'Add to Project',
 };
 
 const EFFORT_LABELS: Record<number, string> = { 1: 'XS', 2: 'S', 3: 'M', 4: 'L', 5: 'XL' };

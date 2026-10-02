@@ -129,6 +129,27 @@ describe('Quick Sort planning horizon queue', () => {
     );
   });
 
+  it('labels project assignment clearly and uses the Projects navigation icon', () => {
+    const { container } = render(
+      <ModeSelector
+        counts={{
+          no_priority: 1,
+          quadrant: 1,
+          no_effort: 1,
+          no_tags: 1,
+          no_project: 1,
+          no_planning_horizon: 1,
+        }}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    const projectQueue = screen.getByRole('button', { name: /Add to Project/i });
+    expect(projectQueue).toBeEnabled();
+    expect(projectQueue.querySelector('.lucide-chart-network')).not.toBeNull();
+    expect(container.querySelector('.lucide-folder-kanban')).toBeNull();
+  });
+
   it('marks the active desktop queue as selected', () => {
     render(
       <ModeSelector

@@ -90,6 +90,15 @@ const NOTIFICATION_SELECT_COLUMNS = `
   group_key AS "groupKey",
   dedupe_key AS "dedupeKey",
   related_task_id AS "relatedTaskId",
+  CASE
+    WHEN related_task_id IS NULL THEN NULL
+    WHEN EXISTS (
+      SELECT 1 FROM tasks
+      WHERE tasks.id = notifications.related_task_id
+        AND tasks.deleted_at IS NULL
+    ) THEN 'available'
+    ELSE 'unavailable'
+  END AS "relatedTaskAvailability",
   related_project_id AS "relatedProjectId",
   related_entity_type AS "relatedEntityType",
   related_entity_id AS "relatedEntityId",
@@ -1246,6 +1255,15 @@ export function createSqliteNotificationWebRepository(
           category, template_key AS templateKey, state,
           read_state AS readState, disposition, source_state AS sourceState,
           navigation_target AS navigationTarget, related_task_id AS relatedTaskId,
+          CASE
+            WHEN related_task_id IS NULL THEN NULL
+            WHEN EXISTS (
+              SELECT 1 FROM tasks
+              WHERE tasks.id = notifications.related_task_id
+                AND tasks.deleted_at IS NULL
+            ) THEN 'available'
+            ELSE 'unavailable'
+          END AS relatedTaskAvailability,
           related_project_id AS relatedProjectId, group_key AS groupKey,
           metadata, presentation,
           last_source_activity_at AS lastSourceActivityAt,

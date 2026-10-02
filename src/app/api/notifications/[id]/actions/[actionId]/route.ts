@@ -15,6 +15,7 @@ import { syncLogger } from '@/lib/logger';
 import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
 import { stableCompanionOperationId } from '@/lib/connectors/rymessage/operation-id';
 import { unlinkRyMessageMaterialization } from '@/lib/connectors/rymessage/task-promotion';
+import { isUnavailableTaskAction } from '@/lib/notifications/task-association';
 
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
 const HOME_ASSISTANT_MUTATING_ACTIONS = new Set([
@@ -100,6 +101,9 @@ export async function POST(
 
     const now = new Date().toISOString();
     const payload = parseActionPayload(action.payload);
+    if (isUnavailableTaskAction(notification, { ...action, payload })) {
+      return ApiErrors.conflict('The related task is no longer available');
+    }
     const requiresProviderClaim = notification.connectorType === 'home-assistant'
       && HOME_ASSISTANT_MUTATING_ACTIONS.has(action.actionType);
     if (requiresProviderClaim) {

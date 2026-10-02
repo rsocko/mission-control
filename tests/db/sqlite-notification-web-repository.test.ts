@@ -230,19 +230,31 @@ function createSqliteContractSeed(sqlite: SqliteHandle): NotificationWebContract
       sqlite.prepare('DELETE FROM push_subscriptions').run();
       sqlite.prepare('DELETE FROM notification_actions').run();
       sqlite.prepare('DELETE FROM notifications').run();
+      sqlite.prepare('DELETE FROM tasks').run();
+    },
+    async insertTask(row) {
+      const now = '2024-01-01T00:00:00.000Z';
+      sqlite.prepare(`
+        INSERT INTO tasks (
+          id, source_id, connector_type, connector_instance_id, title,
+          created_at, updated_at, last_synced_at, deleted_at
+        ) VALUES (?, ?, 'local', 'local', ?, ?, ?, ?, ?)
+      `).run(row.id, `local:${row.id}`, row.id, now, now, now, row.deletedAt ?? null);
     },
     async insertNotification(row: ContractSeedNotification) {
       sqlite.prepare(`
         INSERT INTO notifications (
           id, source_id, connector_type, connector_instance_id,
-          title, received_at, sort_at, metadata, presentation, is_actionable
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          title, received_at, sort_at, metadata, presentation, is_actionable,
+          related_task_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         row.id, row.sourceId, row.connectorType, row.connectorInstanceId,
         row.title, row.receivedAt, row.sortAt,
         JSON.stringify(row.metadata ?? {}),
         JSON.stringify(row.presentation ?? {}),
         row.isActionable ? 1 : 0,
+        row.relatedTaskId ?? null,
       );
     },
     async insertNotificationAction(row: ContractSeedNotificationAction) {

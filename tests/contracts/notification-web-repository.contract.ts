@@ -31,6 +31,12 @@ export interface ContractSeedNotification {
   metadata?: unknown;
   presentation?: unknown;
   isActionable?: boolean;
+  relatedTaskId?: string | null;
+}
+
+export interface ContractSeedTask {
+  id: string;
+  deletedAt?: string | null;
 }
 
 export interface ContractSeedNotificationAction {
@@ -91,6 +97,7 @@ export interface ContractSeededJob {
  */
 export interface NotificationWebContractSeed {
   reset(): Promise<void>;
+  insertTask(row: ContractSeedTask): Promise<void>;
   insertNotification(row: ContractSeedNotification): Promise<void>;
   insertNotificationAction(row: ContractSeedNotificationAction): Promise<void>;
   insertWritebackJob(row: ContractSeedWritebackJob): Promise<void>;
@@ -278,6 +285,7 @@ export function notificationWebRepositoryContractSuite(
         connectorInstanceId: 'di-conn', title: 'One',
         receivedAt: '2024-01-01T00:00:00.000Z', sortAt: '2024-01-01T00:00:00.000Z',
       });
+
       await seed.insertNotification({
         id: 'n2', sourceId: 'di:2', connectorType: 'document-intelligence',
         connectorInstanceId: 'di-conn', title: 'Two',
@@ -307,6 +315,68 @@ export function notificationWebRepositoryContractSuite(
 
       const oldest = await repo.queryNotifications({ query: emptyQuery({ sort: 'oldest' }), limit: 50, cursor: null });
       expect(oldest.items.map(n => n.id)).toEqual(['n1', 'n2', 'n3']);
+    });
+
+    it('exposes current task-association availability without hiding notification history', async () => {
+      await seed.insertTask({ id: 'visible-task' });
+      await seed.insertTask({
+        id: 'deleted-task',
+        deletedAt: '2024-01-02T00:00:00.000Z',
+      });
+      await seed.insertNotification({
+        id: 'visible-association',
+        sourceId: 'task:visible',
+        connectorType: 'system',
+        connectorInstanceId: 'system',
+        title: 'Visible association',
+        receivedAt: '2024-01-03T00:00:00.000Z',
+        sortAt: '2024-01-03T00:00:00.000Z',
+        relatedTaskId: 'visible-task',
+      });
+      await seed.insertNotification({
+        id: 'deleted-association',
+        sourceId: 'task:deleted',
+        connectorType: 'system',
+        connectorInstanceId: 'system',
+        title: 'Deleted association',
+        receivedAt: '2024-01-02T00:00:00.000Z',
+        sortAt: '2024-01-02T00:00:00.000Z',
+        relatedTaskId: 'deleted-task',
+      });
+      await seed.insertNotification({
+        id: 'orphaned-association',
+        sourceId: 'task:missing',
+        connectorType: 'system',
+        connectorInstanceId: 'system',
+        title: 'Missing association',
+        receivedAt: '2024-01-01T00:00:00.000Z',
+        sortAt: '2024-01-01T00:00:00.000Z',
+        relatedTaskId: 'missing-task',
+      });
+
+      const result = await repo.queryNotifications({
+        query: emptyQuery(),
+        limit: 50,
+        cursor: null,
+      });
+
+      expect(result.items).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          id: 'visible-association',
+          relatedTaskId: 'visible-task',
+          relatedTaskAvailability: 'available',
+        }),
+        expect.objectContaining({
+          id: 'deleted-association',
+          relatedTaskId: 'deleted-task',
+          relatedTaskAvailability: 'unavailable',
+        }),
+        expect.objectContaining({
+          id: 'orphaned-association',
+          relatedTaskId: 'missing-task',
+          relatedTaskAvailability: 'unavailable',
+        }),
+      ]));
     });
 
     it('hides dismissed notifications from the inbox but includes them under the dismissed filter', async () => {

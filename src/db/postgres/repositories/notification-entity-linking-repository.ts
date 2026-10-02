@@ -19,6 +19,7 @@ export function createPostgresNotificationEntityLinkingRepository(
          FROM tasks
          WHERE connector_instance_id = $1
            AND source_id = $2
+           AND deleted_at IS NULL
          LIMIT 1`,
         [input.connectorInstanceId, sourceId],
       );
@@ -35,6 +36,7 @@ export function createPostgresNotificationEntityLinkingRepository(
          FROM tasks
          WHERE connector_instance_id = $1
            AND translate(source_id, $3, $4) LIKE $2
+           AND deleted_at IS NULL
          ORDER BY id
          LIMIT 2`,
         [input.connectorInstanceId, asciiFoldLower(`%${sourceId}`), ASCII_UPPER, ASCII_LOWER],

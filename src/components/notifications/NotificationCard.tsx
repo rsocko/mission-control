@@ -605,6 +605,7 @@ export function NotificationCard({
         || (stat.label === 'Lifecycle' && stat.value !== 'Visible')
       )).slice(0, 2)
     : [];
+  const taskUnavailable = notification.relatedTaskAvailability === 'unavailable';
 
   const primaryAction = useMemo(() =>
     notification.actions?.find(a => a.isPrimary),
@@ -783,6 +784,16 @@ export function NotificationCard({
               notification={notification}
             />
           </div>
+
+          {taskUnavailable && !compact && (
+            <div
+              role="status"
+              className="mt-2 flex items-center gap-1.5 text-xs text-amber-400"
+            >
+              <Unlink size={12} aria-hidden="true" />
+              Related task is no longer available
+            </div>
+          )}
 
           {/* Actions row — severity-colored buttons */}
           {!compact && (primaryAction || (!panel && secondaryActions.length > 0)) && (
@@ -1029,6 +1040,7 @@ export function NotificationDetail({
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
   const primaryAction = notification.actions?.find(action => action.isPrimary);
   const secondaryActions = notification.actions?.filter(action => !action.isPrimary).slice(0, 3) || [];
+  const taskUnavailable = notification.relatedTaskAvailability === 'unavailable';
 
   const executeAction = async (
     action: NotificationAction,
@@ -1153,6 +1165,19 @@ export function NotificationDetail({
         {richContent && (
           <div className="mt-4 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] p-3">
             <RichNotificationContent content={richContent} />
+          </div>
+        )}
+
+        {taskUnavailable && (
+          <div
+            role="status"
+            className="mt-4 flex items-start gap-2 rounded-md border border-amber-800/40 bg-amber-950/20 px-3 py-2 text-sm text-amber-300"
+          >
+            <Unlink size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+            <span>
+              The related task is no longer available. This notification remains for history,
+              but task actions have been removed.
+            </span>
           </div>
         )}
 

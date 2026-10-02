@@ -32,7 +32,7 @@ const compositeControlSources = [
   ['src/components/bulk-actions/BulkTagDropdown.tsx', 1],
   ['src/components/mobile/MobileSearchScreen.tsx', 1],
   ['src/components/projects/TaskPickerDialog.tsx', 1],
-  ['src/components/quick-sort/QuickSortActions.tsx', 1],
+  ['src/components/quick-sort/QuickSortActions.tsx', 2],
   ['src/components/quick-sort/ScopeFilter.tsx', 1],
   ['src/components/reset/ResetView.tsx', 2],
   ['src/components/search/SearchCommand.tsx', 1],

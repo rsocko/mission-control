@@ -3691,6 +3691,7 @@ export function describeTaskCoreContract(
           no_effort: 4,
           no_tags: 3,
           no_planning_horizon: 4,
+          no_project: 3,
         });
         const queue = await harness.persistence.taskReads.listQuickSortTasks({
           ...scope,
@@ -3753,9 +3754,10 @@ export function describeTaskCoreContract(
           no_effort: 1,
           no_tags: 1,
           no_planning_horizon: 1,
+          no_project: 1,
         });
         for (const mode of [
-          'no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon',
+          'no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon', 'no_project',
         ] as const) {
           const queue = await harness.persistence.taskReads.listQuickSortTasks({
             ...scope, mode, order: 'newest', limit: 1,
@@ -3775,6 +3777,7 @@ export function describeTaskCoreContract(
           no_effort: 0,
           no_tags: 0,
           no_planning_horizon: 0,
+          no_project: 0,
         });
       });
 
@@ -3797,6 +3800,11 @@ export function describeTaskCoreContract(
           name: 'Local',
           rank: 1,
         }]);
+        await harness.insertProjects([{ id: 'suggestion-project', name: 'Suggested Project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'other-task',
+          projectId: 'suggestion-project',
+        }]);
 
         const inputs = await harness.persistence.taskReads
           .getQuickSortSuggestionInputs(['suggestion-task', 'missing']);
@@ -3810,6 +3818,15 @@ export function describeTaskCoreContract(
         }]);
         expect(inputs.tags.map((tag) => tag.id)).toEqual(['tag-a', 'tag-b']);
         expect(inputs.taskTags).toHaveLength(2);
+        expect(inputs.projectAffinities).toContainEqual(expect.objectContaining({
+          taskId: 'other-task',
+          projectId: 'suggestion-project',
+          projectName: 'Suggested Project',
+        }));
+        expect(inputs.projectAffinities).toContainEqual(expect.objectContaining({
+          taskId: 'suggestion-task',
+          projectId: null,
+        }));
       });
     });
 

@@ -1043,11 +1043,12 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         .where(and(...scope, condition));
       return Number(row?.count ?? 0);
     };
-    const [noPriority, noEffort, noTags, noPlanningHorizon] = await Promise.all([
+    const [noPriority, noEffort, noTags, noPlanningHorizon, noProject] = await Promise.all([
       countWhere(eq(tasks.priority, 'none')),
       countWhere(isNull(tasks.effort)),
       countWhere(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`),
       countWhere(isNull(tasks.planningHorizon)),
+      countWhere(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`),
     ]);
     return {
       no_priority: noPriority,
@@ -1055,6 +1056,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       no_effort: noEffort,
       no_tags: noTags,
       no_planning_horizon: noPlanningHorizon,
+      no_project: noProject,
     };
   }
 
@@ -1072,6 +1074,8 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       conditions.push(isNull(tasks.effort));
     } else if (input.mode === 'no_tags') {
       conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskTags.taskId} FROM ${taskTags})`);
+    } else if (input.mode === 'no_project') {
+      conditions.push(sql`${tasks.id} NOT IN (SELECT ${taskProjects.taskId} FROM ${taskProjects})`);
     } else {
       conditions.push(isNull(tasks.planningHorizon));
     }
@@ -1200,7 +1204,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
     taskIds: readonly string[],
   ): Promise<TaskQuickSortSuggestionInputs> {
     if (taskIds.length === 0) {
-      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [], projectAffinities: [] };
     }
     const taskRows = await this.db.select({
       id: tasks.id,
@@ -1212,16 +1216,18 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       updatedAt: tasks.updatedAt,
       connectorType: tasks.connectorType,
       connectorInstanceId: tasks.connectorInstanceId,
+      sourceListId: tasks.sourceListId,
       sourceListName: tasks.sourceListName,
       assignee: tasks.assignee,
       snoozedUntil: tasks.snoozedUntil,
       effort: tasks.effort,
     }).from(tasks).where(inArray(tasks.id, [...taskIds]));
     if (taskRows.length === 0) {
-      return { tasks: [], sourceRankings: [], tags: [], taskTags: [] };
+      return { tasks: [], sourceRankings: [], tags: [], taskTags: [], projectAffinities: [] };
     }
 
-    const [rankingRows, tagRows, assignmentRows] = await Promise.all([
+    const connectorInstanceIds = [...new Set(taskRows.map((row) => row.connectorInstanceId))];
+    const [rankingRows, tagRows, assignmentRows, projectAffinityRows] = await Promise.all([
       this.db.select({
         id: sourceRankings.id,
         connectorType: sourceRankings.connectorType,
@@ -1237,6 +1243,25 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         taskId: taskTags.taskId,
         tagId: taskTags.tagId,
       }).from(taskTags),
+      this.db.select({
+        taskId: tasks.id,
+        connectorInstanceId: tasks.connectorInstanceId,
+        sourceListId: tasks.sourceListId,
+        projectId: taskProjects.projectId,
+        projectName: hubProjects.name,
+        projectColor: hubProjects.color,
+      }).from(tasks)
+        .leftJoin(taskProjects, eq(taskProjects.taskId, tasks.id))
+        .leftJoin(hubProjects, eq(hubProjects.id, taskProjects.projectId))
+        .where(and(
+          inArray(tasks.connectorInstanceId, connectorInstanceIds),
+          isNull(tasks.deletedAt),
+          notInArray(tasks.status, [...CLOSED_TASK_STATUSES]),
+          or(
+            isNull(taskProjects.projectId),
+            and(eq(hubProjects.hidden, false), ne(hubProjects.status, 'completed')),
+          ),
+        )),
     ]);
     return {
       tasks: taskRows.map((row) => ({
@@ -1244,6 +1269,7 @@ class PostgresTaskReadRepository implements TaskReadRepository {
         description: row.description ?? null,
         priority: row.priority as TaskQuickSortSuggestionInputs['tasks'][number]['priority'],
         dueDate: row.dueDate ?? null,
+        sourceListId: row.sourceListId ?? null,
         sourceListName: row.sourceListName ?? null,
         assignee: row.assignee ?? null,
         snoozedUntil: row.snoozedUntil ?? null,
@@ -1252,6 +1278,10 @@ class PostgresTaskReadRepository implements TaskReadRepository {
       sourceRankings: rankingRows,
       tags: tagRows,
       taskTags: assignmentRows,
+      projectAffinities: projectAffinityRows.map((row) => ({
+        ...row,
+        sourceListId: row.sourceListId ?? null,
+      })),
     };
   }
 }
@@ -4793,6 +4823,12 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
       .where(eq(tasks.id, taskId));
     const task = rows[0];
     if (!task) return null;
+    const [projectRows, phaseRows] = await Promise.all([
+      this.db.select({ id: taskProjects.projectId }).from(taskProjects)
+        .where(eq(taskProjects.taskId, taskId)),
+      this.db.select({ id: projectPhaseItems.phaseId }).from(projectPhaseItems)
+        .where(eq(projectPhaseItems.taskId, taskId)),
+    ]);
     return {
       updatedAt: task.updatedAt,
       status: task.status,
@@ -4807,6 +4843,8 @@ class PostgresTaskQuickSortRepository implements TaskQuickSortPersistenceReposit
       reminderAt: task.reminderAt,
       effort: task.effort,
       tagIds: rows.flatMap((row) => row.tagId === null ? [] : [row.tagId]).sort(),
+      projectIds: projectRows.map((row) => row.id).sort(),
+      phaseIds: phaseRows.map((row) => row.id).sort(),
     };
   }
 

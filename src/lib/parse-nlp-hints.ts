@@ -151,7 +151,7 @@ export function parseNlpHints(
   }
 
   if (!priority && !effort && matchedTags.length === 0) return null;
-  return { priority, effort, tags: matchedTags };
+  return { priority, effort, tags: matchedTags, projects: [] };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

@@ -54,6 +54,7 @@ export function createFakeTaskReadRepository(
       no_effort: 0,
       no_tags: 0,
       no_planning_horizon: 0,
+      no_project: 0,
     }),
     listQuickSortTasks: async () => [],
     getQuickSortSuggestionInputs: async () => ({
@@ -61,6 +62,7 @@ export function createFakeTaskReadRepository(
       sourceRankings: [],
       tags: [],
       taskTags: [],
+      projectAffinities: [],
     }),
     ...overrides,
   };

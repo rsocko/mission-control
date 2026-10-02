@@ -43,6 +43,8 @@ const mocks = vi.hoisted(() => ({
   claimUndo: vi.fn(),
   releaseUndo: vi.fn(),
   finalizeUndo: vi.fn(),
+  assignTasksToProject: vi.fn(),
+  removeTasksFromProject: vi.fn(),
   patchTask: vi.fn(async (
     _request: Request,
     _context: { params: Promise<{ id: string }> },
@@ -68,6 +70,12 @@ vi.mock('@/app/api/tasks/[id]/route', () => ({
   PATCH: mocks.patchTask,
 }));
 
+vi.mock('@/lib/projects/hierarchy-service', () => ({
+  assignTasksToProject: mocks.assignTasksToProject,
+  removeTasksFromProject: mocks.removeTasksFromProject,
+  ProjectHierarchyServiceError: class ProjectHierarchyServiceError extends Error {},
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getOperation.mockResolvedValue(operation);
@@ -82,6 +90,8 @@ beforeEach(() => {
   mocks.releaseUndo.mockResolvedValue(true);
   mocks.finalizeUndo.mockResolvedValue(true);
   mocks.patchTask.mockResolvedValue(Response.json({ success: true }));
+  mocks.assignTasksToProject.mockResolvedValue({ success: true });
+  mocks.removeTasksFromProject.mockResolvedValue({ success: true });
 });
 
 describe('Quick Sort operation apply route', () => {
@@ -124,6 +134,59 @@ describe('Quick Sort operation apply route', () => {
       .toBeLessThan(mocks.patchTask.mock.invocationCallOrder[0]);
     expect(mocks.patchTask.mock.invocationCallOrder[0])
       .toBeLessThan(mocks.finalizeOperation.mock.invocationCallOrder[0]);
+  });
+
+  it('assigns a project and phase as an undoable Quick Sort operation', async () => {
+    const after = {
+      ...snapshot,
+      projectIds: ['project-1'],
+      phaseIds: ['phase-1'],
+    };
+    mocks.getOperation.mockResolvedValue(null);
+    mocks.captureTask
+      .mockResolvedValueOnce(snapshot)
+      .mockResolvedValueOnce(after);
+    mocks.finalizeOperation.mockResolvedValue({
+      ...operation,
+      mode: 'no_project',
+      afterSnapshot: after,
+    });
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/route');
+
+    const response = await POST(new Request(
+      'http://localhost/api/tasks/quick-sort/operations',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          operationId: operation.id,
+          taskId: operation.taskId,
+          mode: 'no_project',
+          action: operation.action,
+          label: 'Assign project',
+          contextKey: 'queue:no-project',
+          queueIndex: operation.queueIndex,
+          patch: {},
+          assignment: { projectId: 'project-1', phaseId: 'phase-1' },
+        }),
+      },
+    ));
+
+    expect(response.status).toBe(200);
+    expect(mocks.assignTasksToProject).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      taskIds: ['task-1'],
+      phaseId: 'phase-1',
+      actor: { type: 'user' },
+    });
+    expect(mocks.patchTask).not.toHaveBeenCalled();
+    expect(mocks.reserveOperation).toHaveBeenCalledWith(expect.objectContaining({
+      beforeSnapshot: expect.objectContaining({
+        originalPatch: {
+          projectAssignment: { projectId: 'project-1', phaseId: 'phase-1' },
+        },
+      }),
+    }));
   });
 });
 
@@ -190,6 +253,42 @@ describe('Quick Sort operation undo route', () => {
       undone: true,
     });
     expect(mocks.claimUndo).not.toHaveBeenCalled();
+    expect(mocks.patchTask).not.toHaveBeenCalled();
+  });
+
+  it('undoes a project assignment through the hierarchy service', async () => {
+    const projectOperation: TaskQuickSortOperation = {
+      ...operation,
+      mode: 'no_project',
+      beforeSnapshot: {
+        ...snapshot,
+        originalPatch: {
+          projectAssignment: { projectId: 'project-1', phaseId: 'phase-1' },
+        },
+      },
+      afterSnapshot: {
+        ...snapshot,
+        projectIds: ['project-1'],
+        phaseIds: ['phase-1'],
+      },
+    };
+    mocks.getOperation.mockResolvedValue(projectOperation);
+    mocks.captureTask.mockResolvedValue(projectOperation.afterSnapshot);
+    const { POST } = await import('@/app/api/tasks/quick-sort/operations/[id]/undo/route');
+
+    const response = await POST(
+      new Request('http://localhost/api/tasks/quick-sort/operations/operation-1/undo', {
+        method: 'POST',
+      }),
+      { params: Promise.resolve({ id: operation.id }) },
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.removeTasksFromProject).toHaveBeenCalledWith({
+      projectId: 'project-1',
+      taskIds: ['task-1'],
+      actor: { type: 'user' },
+    });
     expect(mocks.patchTask).not.toHaveBeenCalled();
   });
 });

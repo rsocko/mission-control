@@ -213,6 +213,27 @@ describe('burn report reconstruction', () => {
     expect(result.points.map((point) => point.total)).toEqual([0, 1, 1, 0, 0]);
   });
 
+  it('preserves pre-deletion points while excluding a soft-deleted task from later snapshots', () => {
+    const result = report({
+      events: [
+        baseline('task-1', '2026-07-01T08:00:00.000Z', {
+          projectIds: ['project-1'],
+        }),
+      ],
+      tasks: [{
+        id: 'task-1',
+        title: 'Deleted later',
+        createdAt: '2026-07-01T08:00:00.000Z',
+        completedAt: null,
+        deletedAt: '2026-07-04T10:00:00.000Z',
+      }],
+    });
+
+    expect(result.points.map((point) => point.total)).toEqual([1, 1, 1, 0, 0]);
+    expect(result.points.at(-1)?.remainingTaskIds).toEqual([]);
+    expect(result.tasks).toEqual([]);
+  });
+
   it('treats recently organized project tasks as scoped from their creation dates', () => {
     const result = report({
       startDate: '2025-03-24',

@@ -1951,6 +1951,35 @@ export function describeTaskCoreContract(
         )).toBe(2);
       });
 
+      it('finds local schedules and provider-owned recurrence metadata', async () => {
+        await harness.insertTasks([
+          {
+            ...writableTask('local-recurring'),
+            metadata: {},
+          },
+          {
+            ...writableTask('provider-recurring'),
+            connectorType: 'microsoft-todo',
+            connectorInstanceId: 'todo-1',
+            sourceId: 'list:provider-recurring',
+            metadata: { recurrence: 'monthly' },
+          },
+        ]);
+        await harness.insertTaskSchedules([{
+          taskId: 'local-recurring',
+          scheduledDate: TODAY,
+          recurrence: 'every 4 days',
+          recurrenceMode: 'completion',
+        }]);
+
+        const recurring = makeSpec({ quickFilter: 'recurring' });
+        expect(await harness.persistence.queries.countTasks(
+          recurring,
+          { includeQuickFilter: true },
+        )).toBe(2);
+        expect((await harness.persistence.queries.getStats(makeSpec())).recurring).toBe(2);
+      });
+
       it('computes every stat counter over the same base filter', async () => {
         const stats = await harness.persistence.queries.getStats(makeSpec());
         expect(stats.totalOpen).toBe(3);
@@ -1962,6 +1991,7 @@ export function describeTaskCoreContract(
         expect(stats.myDay).toBe(1);
         expect(stats.waiting).toBe(1);
         expect(stats.recentlyClosed).toBe(1);
+        expect(stats.recurring).toBe(0);
       });
 
       it('reads GitHub identity evidence only from enabled, non-deleted connectors', async () => {

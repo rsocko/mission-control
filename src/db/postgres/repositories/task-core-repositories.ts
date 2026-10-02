@@ -488,6 +488,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       myDay,
       recentlyCreated,
       recentlyClosed,
+      recurring,
       waiting,
       inbox,
     ] = await Promise.all([
@@ -501,6 +502,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       this.countWhere(withCondition(openWhere, quick('myDay'))),
       this.countWhere(withCondition(openWhere, quick('recentlyCreated'))),
       this.countWhere(withCondition(compiled.baseWhere, quick('recentlyClosed'))),
+      this.countWhere(withCondition(openWhere, quick('recurring'))),
       this.countWhere(withCondition(openWhere, quick('waiting'))),
       this.countWhere(withCondition(openWhere, quick('inbox'))),
     ]);
@@ -516,6 +518,7 @@ class PostgresTaskQueryRepository implements TaskQueryRepository {
       myDay,
       recentlyCreated,
       recentlyClosed,
+      recurring,
       waiting,
       inbox,
     };

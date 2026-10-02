@@ -43,6 +43,7 @@ const EMPTY_COLLECTION = {
     myDay: 0,
     recentlyCreated: 0,
     recentlyClosed: 0,
+    recurring: 0,
     waiting: 0,
     inbox: 0,
   },

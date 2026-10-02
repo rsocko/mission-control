@@ -157,7 +157,7 @@ function fakePersistence(): TaskCorePersistence {
         stats: {
           totalOpen: 0, overdue: 0, dueToday: 0, dueThisWeek: 0,
           noDate: 0, highPriority: 0, assignedToMe: 0, myDay: 0,
-          recentlyCreated: 0, recentlyClosed: 0, waiting: 0, inbox: 0,
+          recentlyCreated: 0, recentlyClosed: 0, recurring: 0, waiting: 0, inbox: 0,
         },
         sourceCounts: {},
         facetCounts: { priorities: {}, statuses: {} },
@@ -286,6 +286,7 @@ function fakePersistence(): TaskCorePersistence {
         myDay: 0,
         recentlyCreated: 0,
         recentlyClosed: 0,
+        recurring: 0,
         waiting: 0,
         inbox: 0,
       }),

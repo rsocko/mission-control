@@ -89,6 +89,7 @@ export interface TaskListStatsDto {
   myDay: number;
   recentlyCreated: number;
   recentlyClosed: number;
+  recurring: number;
   waiting: number;
   inbox: number;
 }

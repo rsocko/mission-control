@@ -40,6 +40,7 @@ export const TASK_QUICK_FILTERS = [
   'myDay',
   'recentlyCreated',
   'recentlyClosed',
+  'recurring',
   'waiting',
   'assigned',
   'inbox',
@@ -163,6 +164,7 @@ export interface TaskStatsResult {
   readonly myDay: number;
   readonly recentlyCreated: number;
   readonly recentlyClosed: number;
+  readonly recurring: number;
   readonly waiting: number;
   readonly inbox: number;
 }

@@ -16,15 +16,9 @@ import type { SearchableTask } from './search-indexer';
 import { detectDeletions } from './deletion-detector';
 import { archiveAndDeleteTask } from './deletion-recovery';
 import {
-  findOpenRecurringTaskDuplicates,
-  findOrphanedRecurringTasks,
   getRecurringSeriesKey,
-  getRecurringTitleKey,
-  hasRecurrenceEvidence,
-  inferRecurringTitleKeys,
-  shouldSuppressNonRecurringDuplicate,
+  isMissionControlOwnedRecurrence,
 } from './recurring-task-reconciliation';
-import { getLocalToday } from '@/lib/utils/date';
 import {
   persistGitHubLinkedSourceIdentityBatch,
 } from '@/lib/external-identities/linked-source-identity';
@@ -220,29 +214,15 @@ export async function upsertTasks(
 
   // ─── PRE-FETCH: Load all existing tasks for this connector in one query ───
   const snapshot = await pullPersistence.loadSnapshot(connectorId, {
-    includeArchivedRecurringDuplicates: connector.type === 'microsoft-todo',
     includeLinkedSources: connector.type === 'github-issues' && Boolean(identityRuntime),
   });
   const existingTaskRows = snapshot.tasks;
-  const archivedRecurringDuplicateSourceIds = new Set(
-    snapshot.archivedRecurringDuplicateSourceIds,
-  );
 
   const existingBySourceId = new Map<string, ConnectorTaskRecord>();
   const existingById = new Map<string, ConnectorTaskRecord>();
-  const openRecurringTitleKeys = connector.type === 'microsoft-todo'
-    ? inferRecurringTitleKeys(existingTaskRows.filter(row => row.depth === 0))
-    : new Set<string>();
   for (const row of existingTaskRows) {
     existingBySourceId.set(row.sourceId, row);
     existingById.set(row.id, row);
-    if (
-      row.depth === 0
-      && (row.status === 'todo' || row.status === 'in_progress')
-      && hasRecurrenceEvidence(row)
-    ) {
-      openRecurringTitleKeys.add(getRecurringTitleKey(row));
-    }
   }
   const githubLinkedSourceRows = snapshot.linkedSources;
   const githubLinkedSourceBySourceId = new Map(
@@ -499,19 +479,6 @@ export async function upsertTasks(
           identityDecisionBySourceId.get(task.sourceId)?.appliedSource === 'stable'
         ))
       : pageTasks;
-    if (connector.type === 'microsoft-todo') {
-      for (const task of applicablePageTasks) {
-        if (
-          !task.isChecklistItem
-          && !task.parentId
-          && task.status !== 'done'
-          && task.status !== 'cancelled'
-          && hasRecurrenceEvidence(task)
-        ) {
-          openRecurringTitleKeys.add(getRecurringTitleKey(task));
-        }
-      }
-    }
     for (const task of applicablePageTasks) {
       const listId = task.sourceListId || null;
       const existing = tasksByList.get(listId);
@@ -550,24 +517,6 @@ export async function upsertTasks(
         const existing = stableDecision?.selectedLocalId
           ? existingById.get(stableDecision.selectedLocalId)
           : existingBySourceId.get(remoteTask.sourceId);
-        if (
-          connector.type === 'microsoft-todo'
-          && !existing
-          && !remoteTask.isChecklistItem
-          && !remoteTask.parentId
-          && remoteTask.status !== 'done'
-          && remoteTask.status !== 'cancelled'
-          && archivedRecurringDuplicateSourceIds.has(remoteTask.sourceId)
-          && shouldSuppressNonRecurringDuplicate(remoteTask, openRecurringTitleKeys)
-        ) {
-          audit.push({
-            action: 'skipped',
-            taskTitle: remoteTask.title,
-            taskSourceId: remoteTask.sourceId,
-            reason: 'Suppressed exact-title Microsoft To Do copy without recurrence metadata',
-          });
-          continue;
-        }
         const missionControlTaskId = remoteTask.metadata?.missionControlTaskId;
         if (!existing && typeof missionControlTaskId === 'string') {
           const localTask = existingById.get(missionControlTaskId);
@@ -1067,9 +1016,6 @@ export async function upsertTasks(
   if (isFullSync) {
     removed += await cleanupCompletedRecurringTasks(connectorId, audit);
   }
-  if (connector.type === 'microsoft-todo') {
-    removed += await cleanupOpenRecurringTasks(connectorId, audit);
-  }
 
   // Single summary audit entry for skipped pending-push tasks (avoids per-task bloat)
   if (skippedPendingPush > 0) {
@@ -1326,7 +1272,10 @@ async function cleanupCompletedRecurringTasks(
 ): Promise<number> {
   const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
   const completedTasks = (await persistence.listTasks(connectorId))
-    .filter((task) => task.status === 'done');
+    .filter((task) => {
+      if (task.status !== 'done') return false;
+      return isMissionControlOwnedRecurrence(task.metadata);
+    });
 
   const groups = new Map<string, Array<{ id: string; sourceId: string; title: string; completedAt: string | null; updatedAt: string }>>();
 
@@ -1365,63 +1314,6 @@ async function cleanupCompletedRecurringTasks(
 
   if (removed > 0) {
     syncLogger.info({ connectorId, removedCount: removed }, 'Cleaned up old completed recurring task instances');
-  }
-
-  return removed;
-}
-
-async function cleanupOpenRecurringTasks(
-  connectorId: string,
-  audit: SyncAuditEntry[],
-): Promise<number> {
-  const persistence = (await getWorkerPersistenceRepositories()).execution.pulls;
-  const historyTasks = (await persistence.listTasks(connectorId))
-    .filter((task) => task.depth === 0);
-  const openTasks = historyTasks.filter(
-    (task) => task.status === 'todo' || task.status === 'in_progress',
-  );
-  const knownRecurringTitleKeys = inferRecurringTitleKeys(historyTasks);
-  const duplicateGroups = findOpenRecurringTaskDuplicates(
-    openTasks,
-    getLocalToday(),
-    knownRecurringTitleKeys,
-  );
-  let removed = 0;
-  const removedIds = new Set<string>();
-
-  for (const group of duplicateGroups) {
-    for (const duplicate of group.duplicates) {
-      const reason = `Duplicate open Microsoft To Do recurrence — kept ${group.keeper.id}`;
-      const archivedTasks = await deleteSyncedTask(duplicate.id, reason);
-      removed++;
-      removedIds.add(duplicate.id);
-      for (const archived of archivedTasks) {
-        audit.push({ action: 'removed', ...archived });
-      }
-    }
-  }
-
-  // Some duplicate recurrence chains never overlap as open rows at the same
-  // time (e.g. an old chain sits overdue and untouched while a separate,
-  // newer chain for the same title keeps completing and regenerating). The
-  // duplicate-group check above can't see those since only one row is ever
-  // open per chain at a time — catch them by comparing against completed
-  // history instead.
-  const orphanedTasks = findOrphanedRecurringTasks(
-    openTasks.filter((task) => !removedIds.has(task.id)),
-    historyTasks,
-  );
-  for (const orphaned of orphanedTasks) {
-    const reason = 'Stale open Microsoft To Do recurrence superseded by a later completed occurrence';
-    const archivedTasks = await deleteSyncedTask(orphaned.id, reason);
-    removed++;
-    for (const archived of archivedTasks) {
-      audit.push({ action: 'removed', ...archived });
-    }
-  }
-
-  if (removed > 0) {
-    syncLogger.info({ connectorId, removedCount: removed }, 'Cleaned up duplicate open recurring task instances');
   }
 
   return removed;

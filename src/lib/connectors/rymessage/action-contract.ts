@@ -12,6 +12,7 @@ const UUID_RE =
 const STABLE_KEY_RE = /^ak1:[0-9a-f]{64}$/;
 const TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
 const UTC_MILLIS_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const ASCII_CONTROL_RE = /[\u0000-\u001f\u007f]/u;
 const SECRET_KEY_RE = /(?:access[_-]?token|api[_-]?key|authorization|credential|password|secret)/i;
 const PROHIBITED_KEYS = new Set([
   'token',
@@ -297,7 +298,7 @@ function isString(value: unknown, max = 8_192): value is string {
     && value.length > 0
     && value.trim() === value
     && Buffer.byteLength(value, 'utf8') <= max
-    && !/[^\u0009\u000a\u000d\u0020-\u007e]/.test(value);
+    && !ASCII_CONTROL_RE.test(value);
 }
 
 function isToken(value: unknown, max: number): value is string {

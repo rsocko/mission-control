@@ -35,6 +35,22 @@ import {
 import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+const RYMESSAGE_TEMPLATE_KEY = 'rymessage.companion-action';
+const RYMESSAGE_TYPE_SQL = `CASE
+  WHEN connector_type = 'rymessage' AND template_key = '${RYMESSAGE_TEMPLATE_KEY}'
+  THEN COALESCE(
+    NULLIF(
+      'rymessage.' || lower(replace(replace(COALESCE(
+        json_extract(metadata, '$.semanticType'),
+        json_extract(metadata, '$.category'),
+        json_extract(metadata, '$.actionType')
+      ), '_', '-'), ' ', '-')),
+      'rymessage.'
+    ),
+    template_key
+  )
+  ELSE template_key
+END`;
 
 const NOTIFICATION_SELECT_COLUMNS = `
   id,
@@ -182,7 +198,9 @@ function buildWhereClauses(
     params.push(query.sourceAccount);
   }
   if (query.notificationType) {
-    conditions.push(`template_key = ?`);
+    conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+      ? `template_key = ?`
+      : `${RYMESSAGE_TYPE_SQL} = ?`);
     params.push(query.notificationType);
   }
   if (query.level) {
@@ -667,11 +685,11 @@ export function createSqliteNotificationWebRepository(
       }>;
       const typeFacetWhere = sqliteFacetWhere(query, 'notificationType');
       const notificationTypeFacets = sqlite.prepare(`
-        SELECT template_key AS key, COUNT(*) AS count
+        SELECT ${RYMESSAGE_TYPE_SQL} AS key, COUNT(*) AS count
         FROM notifications
-        ${typeFacetWhere.sql}${typeFacetWhere.sql ? ' AND' : ' WHERE'} template_key IS NOT NULL
-        GROUP BY template_key
-        ORDER BY COUNT(*) DESC, template_key ASC
+        ${typeFacetWhere.sql}${typeFacetWhere.sql ? ' AND' : ' WHERE'} ${RYMESSAGE_TYPE_SQL} IS NOT NULL
+        GROUP BY ${RYMESSAGE_TYPE_SQL}
+        ORDER BY COUNT(*) DESC, key ASC
       `).all(...typeFacetWhere.params) as Array<{ key: string; count: number }>;
       const stateBaseQuery = queryWithoutFacet(query, 'state');
       const stateFacets = (['unread', 'read', 'dismissed'] as const).map(value => ({

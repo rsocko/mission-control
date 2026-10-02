@@ -64,11 +64,13 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
         : [];
       const sender = text(metadata.senderDisplayName);
       const conversation = text(metadata.conversationTitle);
-      const excerpt = text(metadata.messageExcerpt);
       const details = text(metadata.details);
       const recommendation = text(metadata.recommendation);
       const reason = text(metadata.classificationReason);
       const actionType = text(metadata.actionType);
+      const semanticType = text(metadata.semanticType)
+        ?? text(metadata.category)
+        ?? actionType;
       const sourceUrl = text(metadata.sourceUrl);
       const materializations = taskMaterializations(metadata.taskMaterializations);
       const confidenceScore = typeof metadata.confidenceScore === 'number'
@@ -79,15 +81,13 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
       const classificationModel = text(metadata.classificationModel);
       const derivationVersion = text(metadata.derivationVersion);
       const subtitle = [sender, conversation].filter(Boolean).join(' · ')
-        || (actionType ? actionTypeLabel(actionType) : null)
+        || (semanticType ? actionTypeLabel(semanticType) : null)
         || (linkedCount > 0
           ? `${linkedCount} linked task${linkedCount === 1 ? '' : 's'}`
           : 'Action Center');
       const primaryText = details && details !== notification.body
         ? details
-        : excerpt && excerpt !== notification.body
-          ? excerpt
-          : undefined;
+        : undefined;
       const lifecycleTimestamp = text(metadata.handledAt)
         ?? text(metadata.dismissedAt)
         ?? text(metadata.snoozedUntil);
@@ -103,7 +103,9 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
         lifecycleTimestamp ? `${humanize(lifecycle)} ${lifecycleTimestamp}` : null,
       ].filter((value): value is string => Boolean(value));
       const stats = [
-        actionType ? { label: 'Action', value: humanize(actionType), tone: 'info' as const } : null,
+        semanticType
+          ? { label: 'Type', value: humanize(semanticType), tone: 'info' as const }
+          : null,
         confidenceScore !== null
           ? {
               label: 'Confidence',
@@ -160,10 +162,7 @@ export const rymessageNotificationProvider: NotificationSourceProvider = {
           subjectIcon: 'message-circle',
           subtitle,
           metadataChips: [
-            ...(actionType ? [{ label: 'Action', value: humanize(actionType) }] : []),
-            ...(text(metadata.category)
-              ? [{ label: 'Category', value: humanize(String(metadata.category)) }]
-              : []),
+            ...(semanticType ? [{ label: 'Type', value: humanize(semanticType) }] : []),
             ...(text(metadata.direction)
               ? [{ label: 'Direction', value: humanize(String(metadata.direction)) }]
               : []),

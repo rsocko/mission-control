@@ -188,6 +188,7 @@ it('renders rich RyMessage identity, rationale, lifecycle, and linked-task state
   );
 
   expect(screen.getByText('Avery Chen · Launch planning')).toBeInTheDocument();
+  expect(screen.getByText('Can you send the revised estimate by Friday?')).toBeInTheDocument();
   expect(screen.getByText('Include the updated vendor lead times.')).toBeInTheDocument();
   expect(screen.getByText('Recommendation: Create Task')).toBeInTheDocument();
   expect(screen.getByText('Confidence: 92%')).toBeInTheDocument();
@@ -250,6 +251,29 @@ it('makes legacy RyMessage compact cards distinct without displacing enriched co
   expect(screen.getByText('Avery Chen · Launch planning')).toBeInTheDocument();
   expect(screen.getByText('Can you send the revised estimate by Friday?')).toBeInTheDocument();
   expect(screen.queryByText('A pull request is waiting for review.')).not.toBeInTheDocument();
+});
+
+it('renders a RyMessage excerpt on a full notification card', () => {
+  const notification = makeNotification({
+    connectorType: 'rymessage',
+    connectorInstanceId: 'rymessage-1',
+    title: 'Reply to Avery',
+    body: 'Fallback summary',
+    category: 'social',
+    presentation: {},
+    metadata: {
+      contract: 'companion-action-v2',
+      messageExcerpt: 'Synthetic message excerpt',
+      actionType: 'needs-reply',
+      lifecycle: 'visible',
+    },
+    actions: [],
+  });
+
+  render(<NotificationCard notification={notification} />);
+
+  expect(screen.getByText('Synthetic message excerpt')).toBeInTheDocument();
+  expect(screen.queryByText('Fallback summary')).not.toBeInTheDocument();
 });
 
 function Harness({

@@ -29,6 +29,7 @@ export interface BurnReportTask {
   title: string;
   createdAt?: string;
   completedAt?: string | null;
+  deletedAt?: string | null;
 }
 
 export interface BurnReport {

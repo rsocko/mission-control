@@ -542,6 +542,7 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
           title: taskToCreate.title,
           dueDate: taskToCreate.dueDate,
           priority: taskToCreate.priority || 'none',
+          planningHorizon: taskToCreate.planningHorizon,
           connectorType: 'local',
           estimatedDuration: taskToCreate.estimatedDuration || undefined,
           recurrence: taskToCreate.recurrence || undefined,
@@ -600,15 +601,6 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
       setCreatingTask(false);
     }
   }, [creatingTask, query, quickAddPreferences, projects, handleOpenChange, projectsLoadState]);
-
-  const acceptDateSuggestion = useCallback(() => {
-    const suggestion = parsedCreateTask.dateSuggestion;
-    if (!suggestion) return;
-    const matchIndex = query.toLowerCase().lastIndexOf(suggestion.matchedText.toLowerCase());
-    if (matchIndex < 0) return;
-    const nextQuery = `${query.slice(0, matchIndex)}/due:${query.slice(matchIndex)}`;
-    handleQueryChange(nextQuery);
-  }, [parsedCreateTask.dateSuggestion, query, handleQueryChange]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent) => {
     if (event.key === 'Escape' && previewTaskId) {
@@ -943,6 +935,10 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
                             </span>
                             <span className="mt-1 flex flex-wrap gap-1 text-[10px] text-[var(--text-tertiary)]">
                               {parsedCreateTask.priority && <span>!{parsedCreateTask.priority}</span>}
+                              {parsedCreateTask.planningHorizon && <span>~{parsedCreateTask.planningHorizon}</span>}
+                              {parsedCreateTask.estimatedDuration && <span>~{parsedCreateTask.estimatedDuration}m</span>}
+                              {parsedCreateTask.effort && <span>^{parsedCreateTask.effort}</span>}
+                              {parsedCreateTask.recurrenceLabel && <span>{parsedCreateTask.recurrenceLabel}</span>}
                               {parsedCreateTask.tags.map(tag => <span key={tag}>#{tag}</span>)}
                               {parsedCreateTask.project && <span>+{parsedCreateTask.project}</span>}
                               {parsedCreateTask.dueDateLabel && <span>{parsedCreateTask.dueDateLabel}</span>}
@@ -955,13 +951,9 @@ export function SearchCommand({ features }: { features?: SearchFeatures | null }
                           </span>
                         </button>
                         {parsedCreateTask.dateSuggestion && (
-                          <button
-                            type="button"
-                            onClick={acceptDateSuggestion}
-                            className="ml-11 mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-green-300 transition-colors hover:bg-green-900/30"
-                          >
-                            <Calendar size={11} /> Use {parsedCreateTask.dateSuggestion.label} as due date
-                          </button>
+                          <span className="ml-11 mt-1 inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-green-300">
+                            <Calendar size={11} /> Due {parsedCreateTask.dateSuggestion.label}
+                          </span>
                         )}
                       </div>
                     ) : null}

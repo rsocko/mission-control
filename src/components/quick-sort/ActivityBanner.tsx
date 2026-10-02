@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Flame, Target, AlertCircle, Telescope, Grid2X2, Sigma, Tag } from 'lucide-react';
+import { Flame, Target, AlertCircle, FolderKanban, Telescope, Grid2X2, Sigma, Tag } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 
 interface TriageStats {
@@ -13,6 +13,7 @@ interface TriageStats {
       no_effort: number;
       no_tags: number;
       no_planning_horizon: number;
+      no_project: number;
     };
   };
   streak: number;
@@ -38,6 +39,7 @@ export default function ActivityBanner() {
     no_effort,
     no_tags,
     no_planning_horizon,
+    no_project,
   } = thisWeek.byMode;
 
   return (
@@ -98,6 +100,12 @@ export default function ActivityBanner() {
             <span className="flex items-center gap-1">
               <Telescope size={11} className="text-emerald-400" />
               <AnimatedCounter value={no_planning_horizon} className="tabular-nums" /> planned
+            </span>
+          )}
+          {no_project > 0 && (
+            <span className="flex items-center gap-1">
+              <FolderKanban size={11} className="text-cyan-400" />
+              <AnimatedCounter value={no_project} className="tabular-nums" /> organized
             </span>
           )}
         </div>

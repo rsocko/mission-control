@@ -21,6 +21,7 @@ export interface HomeAssistantPersistentNotification {
 }
 
 export interface HomeAssistantRepairIssue {
+  breaks_in_ha_version?: string;
   domain: string;
   issue_domain?: string;
   issue_id: string;
@@ -30,6 +31,7 @@ export interface HomeAssistantRepairIssue {
   is_persistent?: boolean;
   title?: string;
   description?: string;
+  learn_more_url?: string;
   translation_key?: string;
   translation_placeholders?: Record<string, string>;
   created?: string;

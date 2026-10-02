@@ -3433,11 +3433,29 @@ export function describeTaskCoreContract(
       });
 
       it('searches relationship candidates with SQLite LIKE wildcard and binary ordering', async () => {
+        await harness.insertConnectors([{
+          id: 'deleted-candidate-connector',
+          type: 'test',
+          deletedAt: NOW,
+        }]);
         await harness.insertTasks([
           { id: 'source', title: 'Source task' },
           { id: 'candidate-b', title: 'alpha task' },
           { id: 'candidate-a', title: 'Alpha task' },
           { id: 'candidate-other', title: 'Other' },
+          { id: 'candidate-deleted', title: 'Alpha deleted', deletedAt: NOW },
+          { id: 'candidate-handled', title: 'Alpha handled', localDisposition: 'handled' },
+          {
+            id: 'candidate-notification',
+            title: 'Alpha notification',
+            connectorType: 'outlook-email',
+          },
+          {
+            id: 'candidate-deleted-connector',
+            title: 'Alpha disconnected',
+            connectorInstanceId: 'deleted-candidate-connector',
+          },
+          { id: 'source-deleted', title: 'Deleted source', deletedAt: NOW },
         ]);
         await harness.insertProjects([{ id: 'project-read', name: 'Read Project' }]);
         await harness.insertTaskProjects([
@@ -3465,14 +3483,38 @@ export function describeTaskCoreContract(
           query: '',
           limit: 20,
         })).toBeNull();
+        expect(await harness.persistence.taskReads.searchRelationshipCandidates({
+          taskId: 'source-deleted',
+          query: '',
+          limit: 20,
+        })).toBeNull();
       });
 
-      it('preserves duplicate candidate visibility and binary assignee ordering', async () => {
+      it('limits duplicate candidates and assignee options to current-visible tasks', async () => {
+        await harness.insertConnectors([{
+          id: 'deleted-read-connector',
+          type: 'test',
+          deletedAt: NOW,
+        }]);
         await harness.insertTasks([
           { id: 'open-a', status: 'todo', assignee: 'alice' },
           { id: 'open-b', status: 'in_progress', assignee: ' Bob ' },
           { id: 'closed', status: 'done', assignee: 'alice' },
           { id: 'blank', status: 'todo', assignee: '   ' },
+          { id: 'soft-deleted', status: 'todo', assignee: 'deleted', deletedAt: NOW },
+          { id: 'handled', status: 'todo', assignee: 'handled', localDisposition: 'handled' },
+          {
+            id: 'notification-only',
+            status: 'todo',
+            assignee: 'notification',
+            connectorType: 'outlook-email',
+          },
+          {
+            id: 'deleted-connector-task',
+            status: 'todo',
+            assignee: 'disconnected',
+            connectorInstanceId: 'deleted-read-connector',
+          },
         ]);
 
         expect((await harness.persistence.taskReads.listDuplicateDetectionTasks({
@@ -3486,6 +3528,11 @@ export function describeTaskCoreContract(
       });
 
       it('computes scalar and many-to-many groups with canonical visibility', async () => {
+        await harness.insertConnectors([{
+          id: 'group-deleted-connector',
+          type: 'test',
+          deletedAt: NOW,
+        }]);
         await harness.insertTasks([
           {
             id: 'group-a',
@@ -3505,6 +3552,18 @@ export function describeTaskCoreContract(
             connectorType: '',
             dueDate: null,
             effort: null,
+          },
+          { id: 'group-deleted', priority: 'critical', deletedAt: NOW },
+          { id: 'group-handled', priority: 'critical', localDisposition: 'handled' },
+          {
+            id: 'group-notification',
+            priority: 'critical',
+            connectorType: 'outlook-email',
+          },
+          {
+            id: 'group-disconnected',
+            priority: 'critical',
+            connectorInstanceId: 'group-deleted-connector',
           },
         ]);
         await harness.insertSourceLists([{
@@ -3538,7 +3597,7 @@ export function describeTaskCoreContract(
         } as const;
         for (const groupBy of Object.keys(expected) as Array<keyof typeof expected>) {
           expect(await harness.persistence.taskReads.getGroupCounts({
-            spec: makeSpec(),
+            spec: makeSpec({ localDispositions: ['active'] }),
             groupBy,
           })).toEqual(expected[groupBy]);
         }
@@ -3632,6 +3691,7 @@ export function describeTaskCoreContract(
           no_effort: 4,
           no_tags: 3,
           no_planning_horizon: 4,
+          no_project: 3,
         });
         const queue = await harness.persistence.taskReads.listQuickSortTasks({
           ...scope,
@@ -3694,9 +3754,10 @@ export function describeTaskCoreContract(
           no_effort: 1,
           no_tags: 1,
           no_planning_horizon: 1,
+          no_project: 1,
         });
         for (const mode of [
-          'no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon',
+          'no_priority', 'quadrant', 'no_effort', 'no_tags', 'no_planning_horizon', 'no_project',
         ] as const) {
           const queue = await harness.persistence.taskReads.listQuickSortTasks({
             ...scope, mode, order: 'newest', limit: 1,
@@ -3716,6 +3777,7 @@ export function describeTaskCoreContract(
           no_effort: 0,
           no_tags: 0,
           no_planning_horizon: 0,
+          no_project: 0,
         });
       });
 
@@ -3738,6 +3800,11 @@ export function describeTaskCoreContract(
           name: 'Local',
           rank: 1,
         }]);
+        await harness.insertProjects([{ id: 'suggestion-project', name: 'Suggested Project' }]);
+        await harness.insertTaskProjects([{
+          taskId: 'other-task',
+          projectId: 'suggestion-project',
+        }]);
 
         const inputs = await harness.persistence.taskReads
           .getQuickSortSuggestionInputs(['suggestion-task', 'missing']);
@@ -3751,6 +3818,15 @@ export function describeTaskCoreContract(
         }]);
         expect(inputs.tags.map((tag) => tag.id)).toEqual(['tag-a', 'tag-b']);
         expect(inputs.taskTags).toHaveLength(2);
+        expect(inputs.projectAffinities).toContainEqual(expect.objectContaining({
+          taskId: 'other-task',
+          projectId: 'suggestion-project',
+          projectName: 'Suggested Project',
+        }));
+        expect(inputs.projectAffinities).toContainEqual(expect.objectContaining({
+          taskId: 'suggestion-task',
+          projectId: null,
+        }));
       });
     });
 

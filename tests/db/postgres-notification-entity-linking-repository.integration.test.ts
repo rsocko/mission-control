@@ -36,11 +36,18 @@ describePostgres('PostgreSQL notification entity-linking integration', () => {
         await backend.context.pool.query(
           `INSERT INTO tasks (
              id, source_id, connector_type, connector_instance_id, title, status,
-             priority, created_at, updated_at, last_synced_at
+             priority, created_at, updated_at, last_synced_at, deleted_at
            ) VALUES (
-             $1, $2, 'github-issues', $3, 'Entity-link contract', 'todo', 'normal', $4, $4, $4
+             $1, $2, 'github-issues', $3, 'Entity-link contract', 'todo', 'normal',
+             $4, $4, $4, $5
            )`,
-          [input.id, input.sourceId, input.connectorInstanceId, timestamp],
+          [
+            input.id,
+            input.sourceId,
+            input.connectorInstanceId,
+            timestamp,
+            input.deletedAt ?? null,
+          ],
         );
       },
       seedProject: async (input) => {

@@ -140,6 +140,12 @@ async function taskFacetRows(
         FROM task_search_documents d
         INNER JOIN tasks t ON t.id = d.id
         WHERE d.search_vector @@ websearch_to_tsquery('english', $1)
+          AND t.deleted_at IS NULL
+          AND t.local_disposition = 'active'
+          AND t.connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
+          AND NOT (t.connector_type = ANY($8::text[]))
           AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
           AND ($3::text IS NULL OR t.status = $3)
           AND ($4::text IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4)
@@ -161,6 +167,11 @@ async function taskFacetRows(
         WHERE $10::integer IS NOT NULL
           AND t.connector_type = 'github-issues'
           AND t.source_id LIKE ('%:' || $10::text)
+          AND t.deleted_at IS NULL
+          AND t.local_disposition = 'active'
+          AND t.connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
           AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
           AND ($3::text IS NULL OR t.status = $3)
           AND ($4::text IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4)
@@ -275,6 +286,11 @@ async function searchTasksByIssueNumber(
       FROM tasks t
       WHERE t.connector_type = 'github-issues'
         AND t.source_id LIKE $1
+        AND t.deleted_at IS NULL
+        AND t.local_disposition = 'active'
+        AND t.connector_instance_id NOT IN (
+          SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+        )
         AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
         AND ($3::text IS NULL OR t.status = $3)
         AND ($4::text IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4)
@@ -376,6 +392,12 @@ async function searchTasks(
       FROM task_search_documents d
       INNER JOIN tasks t ON t.id = d.id
       WHERE d.search_vector @@ websearch_to_tsquery('english', $1)
+        AND t.deleted_at IS NULL
+        AND t.local_disposition = 'active'
+        AND t.connector_instance_id NOT IN (
+          SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+        )
+        AND NOT (t.connector_type = ANY($8::text[]))
         AND ($2::text IS NULL OR t.source_list_name = $2 OR t.connector_type = $2)
         AND ($3::text IS NULL OR t.status = $3)
         AND ($4::text IS NULL OR COALESCE(NULLIF(t.due_date, ''), t.updated_at) >= $4)
@@ -519,8 +541,15 @@ export class PostgresKeywordSearchRepository implements KeywordSearchRepository 
       await client.query('TRUNCATE task_search_documents');
       await client.query(`
         INSERT INTO task_search_documents (id, title, description, source_list_name, connector_type)
-        SELECT id, title, description, source_list_name, connector_type FROM tasks
-      `);
+        SELECT id, title, description, source_list_name, connector_type
+        FROM tasks
+        WHERE deleted_at IS NULL
+          AND local_disposition = 'active'
+          AND connector_instance_id NOT IN (
+            SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+          )
+          AND NOT (connector_type = ANY($1::text[]))
+      `, [[...NOTIFICATION_ONLY_CONNECTOR_TYPES]]);
       await client.query('TRUNCATE notification_search_documents');
       await client.query(`
         INSERT INTO notification_search_documents (id, title, body, category, connector_type)

@@ -5,6 +5,7 @@ import {
   Archive,
   CheckCircle2,
   Clock,
+  FolderKanban,
   ExternalLink,
   Focus,
   Search,
@@ -63,6 +64,169 @@ export interface TagOption {
   slug: string;
   color: string | null;
   usageCount?: number;
+}
+
+export interface ProjectOption {
+  id: string;
+  name: string;
+  color: string;
+  status?: string;
+  phases: Array<{ id: string; name: string; color: string | null }>;
+}
+
+function ProjectPicker({
+  projects,
+  suggestions,
+  loading,
+  busy,
+  onApply,
+}: {
+  projects: ProjectOption[];
+  suggestions: QuickSortSuggestion['projects'];
+  loading: boolean;
+  busy: boolean;
+  onApply: (projectId: string, projectName: string, phaseId?: string, phaseName?: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+
+  const filteredProjects = projects.filter((project) => (
+    project.name.toLowerCase().includes(query.trim().toLowerCase())
+  ));
+  const selectedProject = projects.find((project) => project.id === selectedProjectId);
+  const suggestedProjects = suggestions.flatMap((suggestion) => {
+    const project = projects.find((candidate) => candidate.id === suggestion.id);
+    return project ? [{ project, suggestion }] : [];
+  });
+
+  return (
+    <div className="flex min-h-0 flex-col gap-2">
+      <div className="input-glow flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3">
+        <Search size={14} className="flex-shrink-0 text-[var(--text-tertiary)]" />
+        <input
+          type="search"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Find a project…"
+          aria-label="Find a project"
+          className="min-h-11 flex-1 bg-transparent text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
+          disabled={busy}
+        />
+      </div>
+      {selectedProject ? (
+        <div className="rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-3">
+          <button
+            type="button"
+            onClick={() => setSelectedProjectId(null)}
+            className="mb-3 flex min-h-11 w-full items-center gap-2 text-left"
+          >
+            <span
+              className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+              style={{ backgroundColor: selectedProject.color }}
+            />
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text-primary)]">
+              {selectedProject.name}
+            </span>
+            <span className="text-xs text-cyan-300">Change</span>
+          </button>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => onApply(selectedProject.id, selectedProject.name)}
+              disabled={busy}
+              className="min-h-11 rounded-lg border border-cyan-600/45 bg-cyan-900/35 px-3 text-sm font-medium text-cyan-200 transition-colors hover:bg-cyan-900/55 disabled:opacity-50"
+            >
+              Project only
+            </button>
+            {selectedProject.phases.map((phase) => (
+              <button
+                key={phase.id}
+                type="button"
+                onClick={() => onApply(
+                  selectedProject.id,
+                  selectedProject.name,
+                  phase.id,
+                  phase.name,
+                )}
+                disabled={busy}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-3)] px-3 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] disabled:opacity-50"
+              >
+                {phase.color && (
+                  <span
+                    className="h-2 w-2 flex-shrink-0 rounded-full"
+                    style={{ backgroundColor: phase.color }}
+                  />
+                )}
+                <span className="truncate">{phase.name}</span>
+              </button>
+            ))}
+          </div>
+          {selectedProject.phases.length === 0 && (
+            <p className="mt-2 text-center text-xs text-[var(--text-muted)]">
+              This project has no phases yet.
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="max-h-52 overflow-y-auto overscroll-contain pr-1">
+          {suggestedProjects.length > 0 && (
+            <div className="mb-3 rounded-xl border border-cyan-700/45 bg-cyan-950/25 p-2">
+              <p className="px-1 pb-2 text-xs font-medium text-cyan-200">
+                Suggested from similar items
+              </p>
+              <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                {suggestedProjects.map(({ project, suggestion }) => (
+                  <button
+                    key={project.id}
+                    type="button"
+                    onClick={() => setSelectedProjectId(project.id)}
+                    disabled={busy}
+                    className="flex min-h-11 items-center gap-2 rounded-lg border border-cyan-700/40 bg-cyan-950/35 px-3 text-left transition-colors hover:bg-cyan-900/35 disabled:opacity-50"
+                  >
+                    <span
+                      className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                      style={{ backgroundColor: project.color }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-medium text-cyan-100">
+                        {project.name}
+                      </span>
+                      <span className="block truncate text-xs text-cyan-300/70">
+                        {suggestion.reason}
+                      </span>
+                    </span>
+                    <Sparkles size={13} className="flex-shrink-0 text-cyan-300" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+          {loading && <span className="text-xs text-[var(--text-muted)]">Loading projects…</span>}
+          {!loading && filteredProjects.length === 0 && (
+            <span className="text-xs text-[var(--text-muted)]">No active projects found</span>
+          )}
+          {filteredProjects.map((project) => (
+            <button
+              key={project.id}
+              type="button"
+              onClick={() => setSelectedProjectId(project.id)}
+              disabled={busy}
+              className="flex min-h-11 items-center gap-2 rounded-xl border border-[var(--border)] bg-[var(--surface-2)] px-3 text-left text-sm text-[var(--text-secondary)] transition-colors hover:border-cyan-700/55 hover:bg-cyan-950/20 disabled:opacity-50"
+            >
+              <span
+                className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                style={{ backgroundColor: project.color }}
+              />
+              <span className="min-w-0 flex-1 truncate">{project.name}</span>
+              <FolderKanban size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
+            </button>
+          ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function TagPicker({
@@ -176,7 +340,10 @@ interface QuickSortActionsProps {
   onApplyEffort: (effort: number) => void;
   onApplyTag: (tagId: string, tagName: string) => void;
   onApplyPlanningHorizon: (planningHorizon: PlanningHorizon) => void;
+  onApplyProject?: (projectId: string, projectName: string, phaseId?: string, phaseName?: string) => void;
   allTags: TagOption[];
+  projects?: ProjectOption[];
+  projectsLoading?: boolean;
   tagsLoading: boolean;
   recentTagIds: string[];
   busy: boolean;
@@ -195,7 +362,10 @@ export default function QuickSortActions({
   onApplyEffort,
   onApplyTag,
   onApplyPlanningHorizon,
+  onApplyProject = () => {},
   allTags,
+  projects = [],
+  projectsLoading = false,
   tagsLoading,
   recentTagIds,
   busy,
@@ -205,7 +375,7 @@ export default function QuickSortActions({
   const suggestedEffort = suggestion?.effort?.value;
   const suggestedTagIds = new Set(suggestion?.tags?.map((t) => t.id) ?? []);
   const recentTagSet = new Set(recentTagIds);
-  const fieldByMode: Record<QuickSortQueueMode, TaskField> = {
+  const fieldByMode: Partial<Record<QuickSortQueueMode, TaskField>> = {
     no_priority: 'priority',
     quadrant: 'priority',
     no_effort: 'effort',
@@ -213,8 +383,10 @@ export default function QuickSortActions({
     no_planning_horizon: 'planningHorizon',
   };
   const modeField = fieldByMode[mode];
-  const canApplyMode = canEditTaskField(task.editPolicy, modeField);
-  const modeBlockedReason = taskFieldBlockedReason(task.editPolicy, modeField);
+  const canApplyMode = modeField ? canEditTaskField(task.editPolicy, modeField) : true;
+  const modeBlockedReason = modeField
+    ? taskFieldBlockedReason(task.editPolicy, modeField)
+    : undefined;
   const quadrantPermission = (fields: TaskField[]) => {
     const blockedField = fields.find((field) => !canEditTaskField(task.editPolicy, field));
     return {
@@ -420,6 +592,17 @@ export default function QuickSortActions({
             </button>
           ))}
           </div>
+        )}
+
+        {mode === 'no_project' && (
+          <ProjectPicker
+            key={task.id}
+            projects={projects}
+            suggestions={suggestion?.projects ?? []}
+            loading={projectsLoading}
+            busy={busy}
+            onApply={onApplyProject}
+          />
         )}
 
         {dispositionOptions.length > 0 && (

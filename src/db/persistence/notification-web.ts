@@ -67,6 +67,7 @@ export interface NotificationRow {
   groupKey: string | null;
   dedupeKey: string | null;
   relatedTaskId: string | null;
+  relatedTaskAvailability: 'available' | 'unavailable' | null;
   relatedProjectId: string | null;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
@@ -228,6 +229,7 @@ export interface NotificationActionNotification {
   sourceState: string;
   navigationTarget: string | null;
   relatedTaskId: string | null;
+  relatedTaskAvailability: 'available' | 'unavailable' | null;
   relatedProjectId: string | null;
   groupKey: string | null;
   metadata: unknown;

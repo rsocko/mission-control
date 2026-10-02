@@ -266,13 +266,13 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
         </div>
         <div className="flex items-center justify-between px-4 py-3.5 border-b border-[var(--border-subtle)]">
           <div className="flex-1 min-w-0 mr-3">
-            <p className="text-sm text-[var(--text-primary)]">Date Suggestions</p>
-            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Recognize trailing natural-language dates</p>
+            <p className="text-sm text-[var(--text-primary)]">Natural-language Due Dates</p>
+            <p className="text-xs text-[var(--text-tertiary)] mt-0.5">Apply trailing dates when creating a task</p>
           </div>
           <Toggle
             enabled={quickAddPreferences.naturalLanguageDates}
             onChange={(enabled) => updateQuickAddPreferences({ naturalLanguageDates: enabled })}
-            label="Natural-language date suggestions"
+            label="Natural-language due dates"
           />
         </div>
         <div className="flex items-center justify-between px-4 py-3.5">

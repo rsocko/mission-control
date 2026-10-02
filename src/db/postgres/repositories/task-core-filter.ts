@@ -22,6 +22,7 @@ import {
   sourceLists,
   tags,
   taskProjects,
+  taskSchedules,
   taskTags,
   tasks,
 } from '../schema';
@@ -292,6 +293,19 @@ export function getQuickFilterCondition(
     return and(
       inArray(tasks.status, [...CLOSED_TASK_STATUSES]),
       gte(tasks.completedAt, recentCutoff),
+    );
+  }
+  if (quickFilter === 'recurring') {
+    return or(
+      sql`EXISTS (
+        SELECT 1 FROM ${taskSchedules}
+        WHERE ${taskSchedules.taskId} = ${tasks.id}
+          AND ${taskSchedules.recurrence} IS NOT NULL
+          AND ${taskSchedules.recurrence} <> ''
+          AND ${taskSchedules.recurrence} <> 'none'
+      )`,
+      sql`COALESCE(${tasks.metadata}->>'recurrence', 'none') <> 'none'`,
+      sql`jsonb_typeof(${tasks.metadata}->'canonicalRecurrence') = 'object'`,
     );
   }
   if (quickFilter === 'waiting') {

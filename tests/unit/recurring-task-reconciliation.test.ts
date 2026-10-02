@@ -5,6 +5,7 @@ import {
   getRecurringSeriesKey,
   getRecurringTitleKey,
   inferRecurringTitleKeys,
+  isMissionControlOwnedRecurrence,
   isMatchingRecurringSuccessor,
   shouldSuppressNonRecurringDuplicate,
   shouldSuppressRecurringMyDaySuccessor,
@@ -24,6 +25,43 @@ describe('recurring task reconciliation', () => {
         metadata: { recurrence: 'weekly', recurrenceIdentity: '{"type":"weekly","interval":1,"daysOfWeek":["monday"],"dayOfMonth":null,"month":null}' },
       }));
     expect(getRecurringSeriesKey({ ...base, metadata: {} })).toBeNull();
+  });
+
+  it('distinguishes Mission Control recurrence from provider-owned recurrence', () => {
+    const missionControlRule = canonicalizeLegacyRecurrence({
+      recurrence: 'every 4 days',
+      mode: 'completion',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'mission-control',
+        stableId: 'mc-series',
+      },
+    });
+    const providerRule = canonicalizeLegacyRecurrence({
+      recurrence: 'monthly',
+      mode: 'schedule',
+      startDate: '2026-08-01',
+      timezone: 'UTC',
+      seriesIdentity: {
+        kind: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        externalSeriesId: 'provider-series',
+        stability: 'provider',
+      },
+      source: {
+        owner: 'connector',
+        connectorType: 'microsoft-todo',
+        connectorInstanceId: 'todo-1',
+        support: { status: 'supported', reasons: [] },
+        raw: {},
+      },
+    });
+
+    expect(isMissionControlOwnedRecurrence({ canonicalRecurrence: missionControlRule })).toBe(true);
+    expect(isMissionControlOwnedRecurrence({ canonicalRecurrence: providerRule })).toBe(false);
+    expect(isMissionControlOwnedRecurrence(recurringMetadata)).toBe(false);
   });
 
   it('keeps legacy and canonical Microsoft rows compatible during migration', () => {

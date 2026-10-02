@@ -106,6 +106,11 @@ export function hasRecurrenceEvidence(task: { metadata: unknown }): boolean {
   return hasRecurringIdentity(task) || getRecurrenceLabel(task.metadata) !== null;
 }
 
+export function isMissionControlOwnedRecurrence(metadata: unknown): boolean {
+  const recurrence = readRecurrenceMetadata(parseMetadata(metadata));
+  return recurrence.rule?.source.owner === 'mission-control';
+}
+
 export function shouldSuppressNonRecurringDuplicate(
   task: {
     title: string;

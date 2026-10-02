@@ -45,7 +45,9 @@ function visibleTask(alias: string): string {
 }
 
 function activeVisibleTask(alias: string): string {
-  return `${visibleTask(alias)} AND ${alias}.local_disposition = 'active'`;
+  return `${visibleTask(alias)}
+    AND ${alias}.deleted_at IS NULL
+    AND ${alias}.local_disposition = 'active'`;
 }
 
 function topLevelTask(alias: string): string {

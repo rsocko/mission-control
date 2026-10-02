@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { RyMessageActionProjection } from '@/db/persistence/rymessage-actions';
-import type { CompanionActionV1 } from '@/lib/connectors/rymessage/action-contract';
-import { sanitizeCompanionAction } from '@/lib/connectors/rymessage/action-contract';
+import type { ActionV2 } from '@/lib/connectors/rymessage/action-contract';
 import { rymessageNotificationProjection } from '@/lib/connectors/rymessage/notification-projection';
 
 const NOW = '2026-09-29T22:00:00.000Z';
 
-function action(overrides: Partial<CompanionActionV1> = {}): CompanionActionV1 {
+function action(overrides: Partial<ActionV2> = {}): ActionV2 {
   return {
-    contractVersion: 1,
+    contractVersion: 2,
     actionId: '00000000-0000-4000-8000-000000000001',
     stableKey: `ak1:${'a'.repeat(64)}`,
     revision: 1,
@@ -44,13 +42,13 @@ function action(overrides: Partial<CompanionActionV1> = {}): CompanionActionV1 {
   };
 }
 
-function projection(canonicalAction: CompanionActionV1 | null): RyMessageActionProjection {
+function projection(canonicalAction: ActionV2 | null) {
   return {
     connectorId: 'rymessage-1',
     actionId: canonicalAction?.actionId ?? '00000000-0000-4000-8000-000000000001',
     revision: canonicalAction?.revision ?? 2,
     sourceId: 'private-source-id',
-    action: canonicalAction ? sanitizeCompanionAction(canonicalAction) : null,
+    action: canonicalAction,
     tombstonedAt: canonicalAction ? null : NOW,
   };
 }

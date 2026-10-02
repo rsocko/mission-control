@@ -13,7 +13,7 @@ import {
 import { executeHomeAssistantProviderAction } from '@/lib/notifications/providers/home-assistant-action';
 import { syncLogger } from '@/lib/logger';
 import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
-import { stableCompanionOperationId } from '@/lib/connectors/rymessage/action-contract';
+import { stableCompanionOperationId } from '@/lib/connectors/rymessage/operation-id';
 import { unlinkRyMessageMaterialization } from '@/lib/connectors/rymessage/task-promotion';
 
 const REMIND_LATER_DURATIONS = ['15m', '1h', 'tomorrow_morning'] as const;
@@ -126,11 +126,11 @@ export async function POST(
       const companionActionId = String(payload.actionId || '');
       const connectorId = String(payload.connectorId || '');
       const baseRevision = Number(payload.revision);
-      const lifecycleRevision = Number(payload.lifecycleRevision);
       if (!companionActionId || !connectorId || !Number.isSafeInteger(baseRevision)) {
         return ApiErrors.conflict('RyMessage action identity is incomplete');
       }
       await queueCompanionActionMutation(connectorId, {
+        contractVersion: '2.0',
         operationId: stableCompanionOperationId(
           `rymessage:${
             action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled'
@@ -138,11 +138,6 @@ export async function POST(
         ),
         actionId: companionActionId,
         baseRevision,
-        expectedFieldRevisions: {
-          lifecycle: Number.isSafeInteger(lifecycleRevision)
-            ? lifecycleRevision
-            : baseRevision,
-        },
         mutation: {
           kind: 'action.lifecycle',
           state: action.actionType === 'rymessage_dismiss' ? 'dismissed' : 'handled',

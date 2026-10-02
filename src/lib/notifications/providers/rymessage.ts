@@ -38,14 +38,14 @@ function taskMaterializations(value: unknown): Array<Record<string, unknown>> {
 function matchesRyMessageAction(notification: InboundNotification): boolean {
   const contract = record(notification.metadata).contract;
   return notification.connectorType === 'rymessage'
-    && (contract === 'companion-action-v1' || contract === 'companion-action-v2');
+    && contract === 'companion-action-v2';
 }
 
 export const rymessageNotificationProvider: NotificationSourceProvider = {
   sourceType: 'rymessage',
   displayName: 'RyMessage',
   signatures: [{
-    key: 'companion-action-v1',
+    key: 'companion-action-v2',
     matches: matchesRyMessageAction,
     present(notification) {
       const metadata = record(notification.metadata);

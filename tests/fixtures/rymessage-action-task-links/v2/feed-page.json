@@ -16,57 +16,23 @@
         "sourceId": "rymessage:<feed-id>:action:1a4026a4-5cc7-521a-ad0c-070c31c2600c",
         "occurredAt": "<timestamp>",
         "kind": "upsert",
-        "action": {
-          "actionId": "1a4026a4-5cc7-521a-ad0c-070c31c2600c",
-          "classification": {
-            "derivationMethod": "ai",
-            "inputFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-          },
-          "content": {
-            "actionType": "follow-up",
-            "priority": "high",
-            "title": "Track provider-neutral task"
-          },
-          "contractVersion": 1,
-          "createdAt": "2026-01-02T03:04:05.000Z",
-          "fieldRevisions": {
-            "lifecycle": 1,
-            "priority": 1,
-            "title": 1
-          },
-          "lastSeenAt": "2026-01-02T03:04:05.000Z",
-          "lifecycle": {
-            "state": "linked"
-          },
-          "materializations": [],
-          "revision": 2,
-          "source": {
-            "identity": {
-              "kind": "bluebubbles_message",
-              "thread": {
-                "kind": "bluebubbles_chat_guid",
-                "value": "chat-provider-neutral"
-              },
-              "value": "message-provider-neutral"
-            },
-            "sourceKind": "message"
-          },
-          "stableKey": "ak1:d7d6d01c0799c17a93582e996528ef3299a654ff4bb7b53764303fd46607c1fd",
-          "updatedAt": "<timestamp>"
-        },
         "projection": {
           "action": {
             "actionId": "1a4026a4-5cc7-521a-ad0c-070c31c2600c",
             "classification": {
               "derivationMethod": "ai",
+              "reason": "The latest message contains a direct request for confirmation.",
               "inputFingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             },
             "content": {
               "actionType": "follow-up",
+              "category": "follow-up",
               "priority": "high",
+              "recommendation": "reply",
+              "summary": "Avery is waiting for confirmation.",
               "title": "Track provider-neutral task"
             },
-            "contractVersion": 1,
+            "contractVersion": 2,
             "createdAt": "2026-01-02T03:04:05.000Z",
             "fieldRevisions": {
               "lifecycle": 1,
@@ -88,6 +54,8 @@
                 },
                 "value": "message-provider-neutral"
               },
+              "conversationTitle": "Weekend plans",
+              "senderDisplayName": "Avery Sockalosky",
               "sourceKind": "message"
             },
             "stableKey": "ak1:d7d6d01c0799c17a93582e996528ef3299a654ff4bb7b53764303fd46607c1fd",

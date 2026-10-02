@@ -1609,7 +1609,6 @@ async function repointTaskReferences(
     sql`UPDATE priority_sync_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE task_triage_log SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
     sql`UPDATE quick_sort_operations SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
-    sql`UPDATE rymessage_action_materializations SET local_task_id = ${successorTaskId} WHERE local_task_id = ${sourceTaskId}`,
     sql`UPDATE project_auto_include_exclusions SET task_id = ${successorTaskId} WHERE task_id = ${sourceTaskId}`,
   ];
   for (const statement of simpleRepoints) await tx.execute(statement);

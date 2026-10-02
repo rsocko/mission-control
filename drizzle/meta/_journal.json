@@ -1002,6 +1002,13 @@
       "when": 1790826674037,
       "tag": "0142_paperclip_provider_config",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "6",
+      "when": 1790907497835,
+      "tag": "0143_premium_gravity",
+      "breakpoints": true
     }
   ]
 }

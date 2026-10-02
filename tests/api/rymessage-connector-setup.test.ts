@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const fetchPageV2 = vi.hoisted(() => vi.fn());
-const fetchPage = vi.hoisted(() => vi.fn());
 const createCompanionActionClient = vi.hoisted(() => vi.fn(() => ({
-  fetchPage,
   fetchPageV2,
 })));
 
@@ -83,49 +81,29 @@ describe('RyMessage Companion connector setup', () => {
       credential: 'secret-value',
       maxRetries: 0,
       trustedMissionControlOrigin: 'http://localhost:3099',
+      trustedTaskOrigins: [],
     });
     expect(fetchPageV2).toHaveBeenCalledWith(null);
   });
 
-  it('keeps existing ActionV1 connector settings operational without V2 configuration', async () => {
+  it('rejects malformed task-origin allowlists before connecting', async () => {
     process.env.RYMESSAGE_COMPANION_ACTION_FEED_TOKEN = 'secret-value';
-    fetchPage.mockResolvedValue({ schemaVersion: '1.0', items: [] });
-    const connector = new RyMessageConnector();
-    await connector.initialize({
-      id: 'rymessage-v1',
-      type: 'rymessage',
-      name: 'Existing RyMessage',
-      enabled: true,
-      syncMode: 'poll',
-      pollIntervalMinutes: 5,
-      capabilities: {
-        read: true,
-        write: false,
-        delete: false,
-        sync: true,
-        lists: false,
-        subtasks: false,
-        tags: false,
-        tagWriteBack: false,
-      },
-      credentials: {},
-      settings: {
-        mode: 'companion',
-        companionBaseUrl: 'http://companion:8080',
-      },
-      syncedLists: [],
+    const response = await POST(request({
+      mode: 'companion',
+      companionBaseUrl: 'http://companion:8080',
+      trustedMissionControlOrigin: 'http://localhost:3099',
+      trustedTaskOrigins: ['https://github.com/path'],
+    }));
+
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining('exact HTTP(S) trusted task origins'),
     });
-    await expect(connector.testConnection()).resolves.toEqual({
-      success: true,
-      message: expect.stringContaining('ActionV1 feed'),
-    });
-    expect(fetchPage).toHaveBeenCalledWith(null);
-    expect(fetchPageV2).not.toHaveBeenCalled();
+    expect(createCompanionActionClient).not.toHaveBeenCalled();
   });
 
   it('uses only ActionV2 for configured connector connection checks', async () => {
     process.env.RYMESSAGE_COMPANION_ACTION_FEED_TOKEN = 'secret-value';
-    fetchPage.mockRejectedValue(new Error('integration_scope_required'));
     fetchPageV2.mockResolvedValue({ schemaVersion: '2.0', items: [] });
     const connector = new RyMessageConnector();
     await connector.initialize({
@@ -159,6 +137,5 @@ describe('RyMessage Companion connector setup', () => {
       message: 'Connected to Companion ActionV2 feed',
     });
     expect(fetchPageV2).toHaveBeenCalledWith(null);
-    expect(fetchPage).not.toHaveBeenCalled();
   });
 });

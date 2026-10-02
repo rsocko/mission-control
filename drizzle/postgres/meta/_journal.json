@@ -148,6 +148,13 @@
       "when": 1790826674054,
       "tag": "0020_paperclip_provider_config",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790907499904,
+      "tag": "0021_tough_arachne",
+      "breakpoints": true
     }
   ]
 }

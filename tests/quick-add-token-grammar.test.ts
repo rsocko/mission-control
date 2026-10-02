@@ -54,6 +54,19 @@ describe('Quick Add token grammar', () => {
     expect(result.title).toBe('Important task !');
   });
 
+  it('uses the last priority token and removes every priority token', () => {
+    const result = parseTaskInput('Task !low !high');
+    expect(result.priority).toBe('high');
+    expect(result.title).toBe('Task');
+  });
+
+  it('uses the last effort and duration tokens', () => {
+    const result = parseTaskInput('Task ^2 ^4 ~15m ~1h');
+    expect(result.effort).toBe(4);
+    expect(result.estimatedDuration).toBe(60);
+    expect(result.title).toBe('Task');
+  });
+
   it('keeps retired @ destination syntax as ordinary title text', () => {
     const result = parseTaskInput('File issue @github and email @work');
     expect(result.title).toBe('File issue @github and email @work');
@@ -98,5 +111,18 @@ describe('Quick Add token grammar', () => {
 
     expect(result.title).toBe(input);
     expect(result.addToMyDay).toBe(true);
+  });
+
+  it('leaves disabled metadata fields untouched in the title', () => {
+    const result = parseTaskInput('Child #ops daily ^3', {
+      metadata: {
+        tags: false,
+        recurrence: false,
+      },
+    });
+    expect(result.tags).toEqual([]);
+    expect(result.recurrence).toBeNull();
+    expect(result.effort).toBe(3);
+    expect(result.title).toBe('Child #ops daily');
   });
 });

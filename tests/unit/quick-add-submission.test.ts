@@ -112,6 +112,32 @@ describe('Quick Add submission planning', () => {
 });
 
 describe('Quick Add task creation', () => {
+  it('applies a recognized trailing date and removes it from the saved title', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T12:00:00'));
+    const fetcher = vi.fn<typeof fetch>(async () =>
+      jsonResponse({ id: 'task-1', editPolicy: editableTaskPolicy })
+    );
+
+    try {
+      await createQuickAddTask({ fetcher }, {
+        task: task('Fix Solar Panels tomorrow'),
+        destination: localDestination,
+        resolvedDestination: { requiresSelection: false },
+        addToMyDay: false,
+        contextProject: null,
+        contextProjectActive: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toMatchObject({
+      title: 'Fix Solar Panels',
+      dueDate: '2026-10-03',
+    });
+  });
+
   it('merges defaults into the task request and applies the contextual project', async () => {
     const fetcher = vi.fn<typeof fetch>(async () =>
       jsonResponse({ id: 'task-1', editPolicy: editableTaskPolicy })
@@ -242,6 +268,59 @@ describe('Quick Add task creation', () => {
 });
 
 describe('Quick Add orchestration', () => {
+  it('persists supported subtask metadata without stripping unsupported tokens', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-02T12:00:00'));
+    const fetcher = vi.fn<typeof fetch>(async (input) => {
+      if (String(input) === '/api/tasks') {
+        return jsonResponse({ id: 'parent-1', editPolicy: editableTaskPolicy });
+      }
+      if (String(input) === '/api/tasks/parent-1/subtasks') {
+        return jsonResponse({
+          subtask: { id: 'subtask-1' },
+          editPolicy: editableTaskPolicy,
+        });
+      }
+      if (String(input) === '/api/my-day') return jsonResponse({});
+      return jsonResponse({}, 404);
+    });
+    const plan = planQuickAddSubmission({
+      input: '',
+      pendingTasks: [
+        task('Parent'),
+        task('Child #ops daily tomorrow !high ~soon ^3 *', 0),
+      ],
+      destination: localDestination,
+      projectsLoadState: 'ready',
+    });
+
+    try {
+      await submitQuickAdd({ fetcher, getToday: () => '2026-10-02' }, {
+        plan,
+        destination: localDestination,
+        addToMyDay: false,
+        contextProject: null,
+        contextProjectActive: false,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const subtaskCall = fetcher.mock.calls.find(([input]) =>
+      String(input) === '/api/tasks/parent-1/subtasks'
+    );
+    expect(JSON.parse(String(subtaskCall?.[1]?.body))).toEqual({
+      title: 'Child #ops daily',
+      priority: 'high',
+      planningHorizon: 'soon',
+      dueDate: '2026-10-03',
+      effort: 3,
+    });
+    expect(fetcher).toHaveBeenCalledWith('/api/my-day', expect.objectContaining({
+      body: JSON.stringify({ taskId: 'subtask-1', date: '2026-10-02' }),
+    }));
+  });
+
   it('creates parents before their subtasks and returns notification metadata', async () => {
     const calls: string[] = [];
     const fetcher = vi.fn<typeof fetch>(async (input) => {

@@ -35,6 +35,22 @@ import {
 import { supportsNotificationDismissalWriteback } from '@/lib/connectors/notification-writeback-contract';
 
 const PARTICIPATING_REASONS = ['author', 'comment', 'manual', 'state_change', 'subscribed'];
+const RYMESSAGE_TEMPLATE_KEY = 'rymessage.companion-action';
+const RYMESSAGE_TYPE_SQL = `CASE
+  WHEN connector_type = 'rymessage' AND template_key = '${RYMESSAGE_TEMPLATE_KEY}'
+  THEN COALESCE(
+    NULLIF(
+      'rymessage.' || lower(replace(replace(COALESCE(
+        json_extract(metadata, '$.semanticType'),
+        json_extract(metadata, '$.category'),
+        json_extract(metadata, '$.actionType')
+      ), '_', '-'), ' ', '-')),
+      'rymessage.'
+    ),
+    template_key
+  )
+  ELSE template_key
+END`;
 
 const NOTIFICATION_SELECT_COLUMNS = `
   id,
@@ -182,7 +198,9 @@ function buildWhereClauses(
     params.push(query.sourceAccount);
   }
   if (query.notificationType) {
-    conditions.push(`template_key = ?`);
+    conditions.push(query.notificationType === RYMESSAGE_TEMPLATE_KEY
+      ? `template_key = ?`
+      : `${RYMESSAGE_TYPE_SQL} = ?`);
     params.push(query.notificationType);
   }
   if (query.level) {
@@ -616,7 +634,7 @@ export function createSqliteNotificationWebRepository(
       const typeFacetConditions = [
         inboxConditionSql(),
         `connector_instance_id NOT IN (SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL)`,
-        `template_key IS NOT NULL`,
+        `${RYMESSAGE_TYPE_SQL} IS NOT NULL`,
       ];
       if (query.source) {
         const sourceTypes = financeProviderFilterValues(query.source);
@@ -632,11 +650,11 @@ export function createSqliteNotificationWebRepository(
         typeFacetParams.push(query.sourceAccount);
       }
       const notificationTypeFacets = sqlite.prepare(`
-        SELECT template_key AS key, COUNT(*) AS count
+        SELECT ${RYMESSAGE_TYPE_SQL} AS key, COUNT(*) AS count
         FROM notifications
         WHERE ${typeFacetConditions.join(' AND ')}
-        GROUP BY template_key
-        ORDER BY COUNT(*) DESC, template_key ASC
+        GROUP BY ${RYMESSAGE_TYPE_SQL}
+        ORDER BY COUNT(*) DESC, key ASC
       `).all(...typeFacetParams) as Array<{ key: string; count: number }>;
       const stateFacets = sqlite.prepare(`
         SELECT state AS value, COUNT(*) AS count

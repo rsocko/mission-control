@@ -28,7 +28,10 @@ import {
   NOTIFICATION_SOURCE_ICONS,
   NOTIFICATION_SOURCE_LABELS,
 } from '@/types/dashboard';
-import { formatNotificationCategoryLabel } from '@/lib/notifications/categories';
+import {
+  formatNotificationCategoryLabel,
+  formatNotificationTypeLabel,
+} from '@/lib/notifications/categories';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
 import { AssistantMarkdown } from '@/components/ai/AssistantMarkdown';
 import { RyMessagePromotionDialog } from './RyMessagePromotionDialog';
@@ -528,11 +531,31 @@ function useNotificationDisplay(notification: NotificationItem) {
     || humanizeIdentifier(notification.connectorType)
     || 'Mission Control';
   const aiSummary = typeof metadata.aiSummary === 'string' ? metadata.aiSummary : null;
+  const messageExcerpt = typeof metadata.messageExcerpt === 'string'
+    && metadata.messageExcerpt.trim()
+    ? metadata.messageExcerpt.trim()
+    : null;
+  const semanticType = notification.connectorType === 'rymessage'
+    ? (
+      typeof metadata.semanticType === 'string' && metadata.semanticType.trim()
+        ? metadata.semanticType.trim()
+        : typeof metadata.category === 'string' && metadata.category.trim()
+          ? metadata.category.trim()
+          : typeof metadata.actionType === 'string' && metadata.actionType.trim()
+            ? metadata.actionType.trim()
+            : null
+    )
+    : null;
 
   return {
     presentation,
     sourceName,
-    displayBody: aiSummary || notification.body,
+    displayBody: notification.connectorType === 'rymessage'
+      ? messageExcerpt || notification.body
+      : aiSummary || notification.body,
+    classificationLabel: semanticType
+      ? formatNotificationTypeLabel(`rymessage.${semanticType}`)
+      : formatNotificationCategoryLabel(notification.category),
     metadataChips: getMetadataChips(presentation, metadata),
     richContent: presentation.richContent,
   };
@@ -568,6 +591,7 @@ export function NotificationCard({
     displayBody,
     metadataChips,
     richContent,
+    classificationLabel,
   } = useNotificationDisplay(notification);
   const presentationSubtitle = presentation.subtitle || null;
   const subjectIcon = presentation.subjectIcon?.trim() || undefined;
@@ -703,7 +727,7 @@ export function NotificationCard({
           )}
 
           {/* Rows stay compact; full content belongs in the detail surface. */}
-          {displayBody && !compact && !richContent && (
+          {displayBody && !compact && (!richContent || notification.connectorType === 'rymessage') && (
             <p className="text-xs text-[var(--text-tertiary)] mt-1 leading-relaxed line-clamp-2">
               {displayBody}
             </p>
@@ -736,7 +760,7 @@ export function NotificationCard({
             <span className="text-[var(--text-muted)]" aria-hidden="true">·</span>
             <span className="text-xs text-[var(--text-muted)] flex items-center gap-1">
               <CategoryIcon size={10} className="opacity-60" />
-              {formatNotificationCategoryLabel(notification.category)}
+              {classificationLabel}
             </span>
             <span className={`inline-flex items-center gap-1 text-xs px-1.5 py-0.5 rounded-md ${levelConfig.pillClass}`}>
               <LevelIcon size={10} />
@@ -999,6 +1023,7 @@ export function NotificationDetail({
     displayBody,
     metadataChips,
     richContent,
+    classificationLabel,
   } = useNotificationDisplay(notification);
   const subjectIcon = presentation.subjectIcon?.trim() || undefined;
   const subjectIconUrl = presentation.subjectIconUrl?.trim() || undefined;
@@ -1068,7 +1093,7 @@ export function NotificationDetail({
           <div className="min-w-0">
             <p className="truncate text-xs font-semibold text-[var(--text-secondary)]">{sourceName}</p>
             <p className="mt-0.5 text-xs text-[var(--text-muted)]">
-              {formatNotificationCategoryLabel(notification.category)} · {formatTimeAgo(notification.receivedAt)}
+              {classificationLabel} · {formatTimeAgo(notification.receivedAt)}
             </p>
           </div>
         </div>

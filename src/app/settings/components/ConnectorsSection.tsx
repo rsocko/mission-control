@@ -712,6 +712,13 @@ function RyMessageConnectorEditPanel({
       ? initial.trustedMissionControlOrigin
       : '',
   );
+  const [trustedTaskOrigins, setTrustedTaskOrigins] = useState(
+    Array.isArray(initial.trustedTaskOrigins)
+      ? initial.trustedTaskOrigins.filter(
+          (origin): origin is string => typeof origin === 'string',
+        ).join('\n')
+      : '',
+  );
   const [credentialEnv, setCredentialEnv] = useState(
     typeof initial.credentialEnv === 'string'
       ? initial.credentialEnv
@@ -728,11 +735,16 @@ function RyMessageConnectorEditPanel({
     mode: 'companion',
     companionBaseUrl: baseUrl.trim().replace(/\/+$/, ''),
     trustedMissionControlOrigin: trustedOrigin.trim().replace(/\/+$/, ''),
+    trustedTaskOrigins: trustedTaskOrigins
+      .split(/[\n,]/)
+      .map(origin => origin.trim())
+      .filter(Boolean),
     credentialEnv: credentialEnv.trim() || 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
   };
   const fingerprint = JSON.stringify({
     companionBaseUrl: settings.companionBaseUrl,
     trustedMissionControlOrigin: settings.trustedMissionControlOrigin,
+    trustedTaskOrigins: settings.trustedTaskOrigins,
     credentialEnv: settings.credentialEnv,
   });
   const initialFingerprint = JSON.stringify({
@@ -742,6 +754,11 @@ function RyMessageConnectorEditPanel({
     trustedMissionControlOrigin: typeof initial.trustedMissionControlOrigin === 'string'
       ? initial.trustedMissionControlOrigin.replace(/\/+$/, '')
       : '',
+    trustedTaskOrigins: Array.isArray(initial.trustedTaskOrigins)
+      ? initial.trustedTaskOrigins.filter(
+          (origin): origin is string => typeof origin === 'string',
+        )
+      : [],
     credentialEnv: typeof initial.credentialEnv === 'string'
       ? initial.credentialEnv
       : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
@@ -816,6 +833,17 @@ function RyMessageConnectorEditPanel({
           <input type="url" value={trustedOrigin} onChange={event => updateConnection(setTrustedOrigin, event.target.value)}
             className="input-glow mt-1 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none" />
           <span className="mt-1 block font-normal text-[var(--text-tertiary)]">Exact provisioned origin; no path, query, or fragment.</span>
+        </label>
+        <label className="text-xs font-medium text-[var(--text-secondary)]">
+          Trusted task-link origins
+          <textarea
+            value={trustedTaskOrigins}
+            onChange={event => updateConnection(setTrustedTaskOrigins, event.target.value)}
+            placeholder={'https://github.com\nhttps://tasks.example.com'}
+            rows={2}
+            className="input-glow mt-1 w-full resize-y rounded-lg border border-[var(--border)] bg-[var(--surface-1)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+          />
+          <span className="mt-1 block font-normal text-[var(--text-tertiary)]">Optional. One exact HTTP(S) origin per line.</span>
         </label>
         <label className="text-xs font-medium text-[var(--text-secondary)]">
           Bearer credential environment variable

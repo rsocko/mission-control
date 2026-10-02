@@ -174,7 +174,7 @@ export function createPostgresGitHubWorkerRepositories(
 
 /**
  * Builds the Layer 4 non-finance connector-state composition atomically.
- * RyMessage owns its durable ActionV1/ActionV2 reconciliation state here.
+ * RyMessage owns its durable canonical ActionV2 reconciliation state here.
  * OWL (`document-intelligence`) has no member because its durable state is
  * generic connector settings plus the Layer 2 list/task/tag/notification ports.
  */

@@ -1,7 +1,3 @@
-import type {
-  RyMessageActionPersistence,
-  RyMessageActionProjection,
-} from '@/db/persistence/rymessage-actions';
 import type { CreateNotificationInput } from '@/db/persistence/notification-delivery';
 import type { NotificationLevel, NotificationSourceState } from '@/types';
 import { createNotifications } from '@/lib/notifications/service';
@@ -9,21 +5,20 @@ import {
   companionActionV2Digest,
   type CompanionActionFeedPageV2,
 } from './action-contract-v2';
-import {
-  sanitizeCompanionAction,
-  type CompanionActionV1,
-  type PortableCompanionAction,
-} from './action-contract';
+import type { ActionV2 } from './action-contract';
 import {
   resolveRyMessageSemanticType,
   ryMessageNotificationCategory,
   ryMessageNotificationLevel,
 } from './notification-semantics';
 
-function portableAction(
-  action: CompanionActionV1 | PortableCompanionAction,
-): PortableCompanionAction {
-  return 'materializations' in action ? sanitizeCompanionAction(action) : action;
+interface NotificationProjection {
+  connectorId: string;
+  actionId: string;
+  sourceId: string;
+  revision: number;
+  action: ActionV2 | null;
+  tombstonedAt: string | null;
 }
 
 function notificationSourceId(connectorId: string, actionId: string): string {
@@ -31,7 +26,7 @@ function notificationSourceId(connectorId: string, actionId: string): string {
 }
 
 function notificationLevel(
-  projection: RyMessageActionProjection,
+  projection: NotificationProjection,
 ): NotificationLevel {
   const action = projection.action;
   return ryMessageNotificationLevel({
@@ -44,7 +39,7 @@ function notificationLevel(
   });
 }
 
-function sourceState(projection: RyMessageActionProjection): NotificationSourceState {
+function sourceState(projection: NotificationProjection): NotificationSourceState {
   if (projection.tombstonedAt || !projection.action) return 'deleted';
   return ['dismissed', 'handled', 'completed'].includes(projection.action.lifecycle.state)
     ? 'resolved'
@@ -53,7 +48,7 @@ function sourceState(projection: RyMessageActionProjection): NotificationSourceS
 
 function projectionInput(
   connectorId: string,
-  projection: RyMessageActionProjection,
+  projection: NotificationProjection,
 ): CreateNotificationInput {
   const action = projection.action;
   const lifecycle = action?.lifecycle.state ?? 'completed';
@@ -87,7 +82,7 @@ function projectionInput(
     relatedEntityId: projection.actionId,
     isActionable: Boolean(action && lifecycle !== 'completed'),
     metadata: {
-      contract: 'companion-action-v1',
+      contract: 'companion-action-v2',
       actionId: projection.actionId,
       revision: projection.revision,
       lifecycleRevision: action?.fieldRevisions.lifecycle ?? projection.revision,
@@ -118,26 +113,11 @@ function projectionInput(
       actionCreatedAt: action?.createdAt,
       actionUpdatedAt: action?.updatedAt,
       lastSeenAt: action?.lastSeenAt,
-      sourceKind: action?.sourceKind,
-      sourceFamily: action?.sourceFamily,
+      sourceKind: action?.source.sourceKind,
+      sourceFamily: action?.source.sourceFamily,
       tombstoned: Boolean(projection.tombstonedAt),
     },
     enrichmentRevision: `rymessage:${projection.revision}:${lifecycle}`,
-  };
-}
-
-export async function projectCompanionActionsToNotifications(
-  connectorId: string,
-  repository: RyMessageActionPersistence,
-): Promise<{ created: number; updated: number }> {
-  const projections = await repository.listProjections(connectorId);
-  if (projections.length === 0) return { created: 0, updated: 0 };
-  const results = await createNotifications(
-    projections.map((projection) => projectionInput(connectorId, projection)),
-  );
-  return {
-    created: results.filter((result) => result.created).length,
-    updated: results.filter((result) => !result.created).length,
   };
 }
 
@@ -171,7 +151,7 @@ export async function projectCompanionActionV2PageToNotifications(
       actionId: item.aggregateId,
       revision: item.aggregateVersion,
       sourceId: item.sourceId,
-      action: portableAction(projection.action),
+      action: projection.action,
       tombstonedAt: null,
     });
     const presentationDigest = companionActionV2Digest({

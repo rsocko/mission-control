@@ -180,6 +180,7 @@ function RyMessageSetup({ onBack, onClose, onAdded }: { onBack: () => void; onCl
   const [trustedOrigin, setTrustedOrigin] = useState(() => (
     typeof window === 'undefined' ? '' : window.location.origin
   ));
+  const [trustedTaskOrigins, setTrustedTaskOrigins] = useState('');
   const [credentialEnv, setCredentialEnv] = useState('RYMESSAGE_COMPANION_ACTION_FEED_TOKEN');
   const [status, setStatus] = useState<'idle' | 'testing' | 'creating' | 'success' | 'error'>('idle');
   const [error, setError] = useState('');
@@ -191,6 +192,10 @@ function RyMessageSetup({ onBack, onClose, onAdded }: { onBack: () => void; onCl
       mode: 'companion',
       companionBaseUrl: companionBaseUrl.trim(),
       trustedMissionControlOrigin: trustedOrigin.trim(),
+      trustedTaskOrigins: trustedTaskOrigins
+        .split(/[\n,]/)
+        .map(origin => origin.trim())
+        .filter(Boolean),
       credentialEnv: credentialEnv.trim() || 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN',
     };
     try {
@@ -282,6 +287,19 @@ function RyMessageSetup({ onBack, onClose, onAdded }: { onBack: () => void; onCl
             placeholder="https://mission-control.example.com"
             className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none" />
           <p className="mt-1 text-xs text-[var(--text-tertiary)]">Must exactly match an origin provisioned in Companion; paths, queries, and fragments are not allowed.</p>
+        </div>
+        <div>
+          <label htmlFor="rymessage-task-origins" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Trusted task-link origins</label>
+          <textarea
+            id="rymessage-task-origins"
+            value={trustedTaskOrigins}
+            onChange={event => setTrustedTaskOrigins(event.target.value)}
+            placeholder={'https://github.com\nhttps://tasks.example.com'}
+            rows={2}
+            aria-describedby="rymessage-task-origins-hint"
+            className="input-glow w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+          />
+          <p id="rymessage-task-origins-hint" className="mt-1 text-xs text-[var(--text-tertiary)]">Optional. One exact HTTP(S) origin per line for links included in task projections.</p>
         </div>
         <div>
           <label htmlFor="rymessage-credential-env" className="mb-1 block text-sm font-medium text-[var(--text-secondary)]">Bearer credential environment variable</label>

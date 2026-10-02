@@ -13,7 +13,10 @@ import {
   readHomeAssistantCredentials,
 } from '@/lib/connectors/home-assistant/settings';
 import { createCompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
-import { normalizeTrustedOrigin } from '@/lib/connectors/rymessage/action-contract-v2';
+import {
+  normalizeTrustedOrigin,
+  normalizeTrustedOrigins,
+} from '@/lib/connectors/rymessage/action-contract-v2';
 
 /**
  * POST /api/connectors/[id]/test
@@ -229,11 +232,12 @@ async function testConnector(
         const trustedMissionControlOrigin = normalizeTrustedOrigin(
           settings.trustedMissionControlOrigin,
         );
+        const trustedTaskOrigins = normalizeTrustedOrigins(settings.trustedTaskOrigins);
         const credentialEnv = typeof settings.credentialEnv === 'string'
           ? settings.credentialEnv
           : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
         const credential = process.env[credentialEnv];
-        if (!baseUrl || !trustedMissionControlOrigin || !credential) {
+        if (!baseUrl || !trustedMissionControlOrigin || !trustedTaskOrigins || !credential) {
           return {
             success: false,
             latencyMs: Date.now() - start,
@@ -245,6 +249,7 @@ async function testConnector(
           credential,
           maxRetries: 0,
           trustedMissionControlOrigin,
+          trustedTaskOrigins,
         }).fetchPageV2(null);
         return {
           success: true,

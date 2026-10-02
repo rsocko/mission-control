@@ -3,7 +3,10 @@ import { ApiErrors } from '@/lib/api-error';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { createCompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
 import { submitDurableRyMessageV2Mutation } from '@/lib/connectors/rymessage/durable-v2-mutations';
-import { normalizeTrustedOrigin } from '@/lib/connectors/rymessage/action-contract-v2';
+import {
+  normalizeTrustedOrigin,
+  normalizeTrustedOrigins,
+} from '@/lib/connectors/rymessage/action-contract-v2';
 
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -51,7 +54,8 @@ export async function POST(
   const trustedMissionControlOrigin = normalizeTrustedOrigin(
     settings.trustedMissionControlOrigin,
   );
-  if (!baseUrl || !credential || !trustedMissionControlOrigin) {
+  const trustedTaskOrigins = normalizeTrustedOrigins(settings.trustedTaskOrigins);
+  if (!baseUrl || !credential || !trustedMissionControlOrigin || !trustedTaskOrigins) {
     return ApiErrors.conflict(
       `RyMessage Companion requires ${credentialEnv} in the Mission Control web runtime`,
     );
@@ -62,6 +66,7 @@ export async function POST(
     credential,
     maxRetries: 0,
     trustedMissionControlOrigin,
+    trustedTaskOrigins,
   });
   const results = [];
   for (const item of items) {

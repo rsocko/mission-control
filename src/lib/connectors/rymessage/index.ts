@@ -17,15 +17,12 @@ import {
   createCompanionActionClient,
   type CompanionActionClient,
 } from './companion-action-client';
-import { CompanionActionReconciliationService } from './companion-action-service';
-import type {
-  CompanionActionMutation,
-} from './action-contract';
 import {
   COMPANION_ACTION_MAX_SYNC_PAGES,
-  stableCompanionOperationId,
-} from './action-contract';
-import { normalizeTrustedOrigin } from './action-contract-v2';
+  normalizeTrustedOrigin,
+  normalizeTrustedOrigins,
+} from './action-contract-v2';
+import { stableCompanionOperationId } from './operation-id';
 import { projectCompanionActionV2PageToNotifications } from './notification-projection';
 import {
   applyManagedRyMessageCommands,
@@ -49,6 +46,7 @@ interface RyMessageConfig {
   mode: 'companion';
   companionBaseUrl?: string;
   trustedMissionControlOrigin?: string;
+  trustedTaskOrigins?: string[];
   credentialEnv?: string;
 }
 
@@ -101,7 +99,6 @@ export class RyMessageConnector implements IConnector {
   private config: ConnectorConfig | null = null;
   private settings: RyMessageConfig = { mode: 'companion' };
   private companionClient: CompanionActionClient | null = null;
-  private companionService: CompanionActionReconciliationService | null = null;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
@@ -132,15 +129,17 @@ export class RyMessageConnector implements IConnector {
     if (!trustedMissionControlOrigin) {
       throw new Error('Companion ActionV2 requires an exact trusted Mission Control origin');
     }
+    const trustedTaskOrigins = normalizeTrustedOrigins(this.settings.trustedTaskOrigins);
+    if (!trustedTaskOrigins) {
+      throw new Error('Companion trusted task origins must be exact HTTP(S) origins');
+    }
+    this.settings.trustedTaskOrigins = trustedTaskOrigins;
     this.companionClient = createCompanionActionClient({
       baseUrl,
       credential,
       trustedMissionControlOrigin,
+      trustedTaskOrigins,
     });
-    this.companionService = new CompanionActionReconciliationService(
-      config.id,
-      this.companionClient,
-    );
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
@@ -155,7 +154,6 @@ export class RyMessageConnector implements IConnector {
   async dispose(): Promise<void> {
     this.config = null;
     this.companionClient = null;
-    this.companionService = null;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -190,7 +188,6 @@ export class RyMessageConnector implements IConnector {
     const persistence = (await getWorkerPersistenceRepositories())
       .connectorState.rymessageActions;
     const initialProjections = await persistence.listV2Projections(this.id);
-    await this.companionService!.flushMutationOutbox(context.signal);
     await flushRyMessageV2MutationOutbox(this.id, this.companionClient!, context.signal);
     let v2Cursor = (await persistence.readV2FeedState(this.id)).cursor;
     let recoveryAttempted = false;
@@ -206,7 +203,9 @@ export class RyMessageConnector implements IConnector {
         });
       } catch (error) {
         const recoverable = (
-          error instanceof CompanionActionHttpError && error.status === 410
+          error instanceof CompanionActionHttpError
+          && error.status === 410
+          && ['cursor_invalid', 'cursor_expired'].includes(error.code)
         ) || (
           error instanceof RyMessageActionPersistenceError
           && ['FEED_IDENTITY_CHANGED', 'REVISION_CONFLICT'].includes(error.code)
@@ -277,28 +276,12 @@ export class RyMessageConnector implements IConnector {
     };
   }
 
-  async queueActionMutation(input: {
-    actionId: string;
-    operationId: string;
-    baseRevision: number;
-    expectedFieldRevisions: Readonly<Record<string, number>>;
-    mutation: Exclude<CompanionActionMutation, { kind: 'materialization.observe' }>;
-  }): Promise<{ operationId: string; queued: boolean }> {
-    if (this.settings.mode !== 'companion' || !this.companionService) {
-      throw new Error('Companion action reconciliation is not enabled');
-    }
-    return this.companionService.queueMutation(input);
-  }
-
   async writeNotificationAction(
     sourceId: string,
     action: NotificationWritebackAction,
   ): Promise<void> {
     if (action !== 'mark_done') {
       throw new Error(`RyMessage does not support notification action ${action}`);
-    }
-    if (this.settings.mode !== 'companion' || !this.companionService) {
-      throw new Error('Companion action reconciliation is not enabled');
     }
     const match = /^companion:[^:]+:([0-9a-f-]+)$/i.exec(sourceId);
     const actionId = match?.[1];
@@ -309,20 +292,20 @@ export class RyMessageConnector implements IConnector {
     const v2Action = projection?.item?.kind === 'upsert'
       ? projection.item.projection.action
       : null;
-    const canonical = v2Action
-      ?? (await repository.getProjection(this.id, actionId))?.action
-      ?? null;
+    const canonical = v2Action;
     if (!canonical) throw new Error('RyMessage action is no longer available');
-    await this.companionService.queueMutation({
-      actionId,
+    await repository.enqueueV2Mutation({
+      connectorId: this.id,
+      now: new Date().toISOString(),
+      request: {
+        contractVersion: '2.0',
+        actionId,
       operationId: stableCompanionOperationId(
         `rymessage:dismiss:${this.id}:${actionId}:${canonical.revision}`,
       ),
       baseRevision: canonical.revision,
-      expectedFieldRevisions: {
-        lifecycle: canonical.fieldRevisions.lifecycle ?? canonical.revision,
-      },
       mutation: { kind: 'action.lifecycle', state: 'dismissed' },
+      },
     });
   }
 

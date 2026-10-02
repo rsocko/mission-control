@@ -63,7 +63,7 @@ describe('PostgreSQL schema', () => {
     const sqliteTables = exportedTables(sqliteSchema);
     const postgresTables = sharedTables(postgresSchema);
 
-    expect(Object.keys(postgresTables)).toHaveLength(175);
+    expect(Object.keys(postgresTables)).toHaveLength(170);
     expect(Object.keys(postgresTables).sort()).toEqual(Object.keys(sqliteTables).sort());
 
     for (const [exportName, sqliteTable] of Object.entries(sqliteTables)) {
@@ -277,8 +277,9 @@ describe('PostgreSQL schema', () => {
     const migrations = readdirSync(migrationDirectory)
       .filter((file) => file.endsWith('.sql'))
       .sort();
-    expect(migrations).toHaveLength(21);
+    expect(migrations).toHaveLength(22);
     expect(migrations).toContain('0020_paperclip_provider_config.sql');
+    expect(migrations).toContain('0021_tough_arachne.sql');
 
     const sql = readFileSync(resolve(migrationDirectory, migrations[0]), 'utf8');
     // 162 shared tables (parity with SQLite) + 2 PostgreSQL-only search-index tables.

@@ -81,8 +81,25 @@ describe('RyMessage Companion connector setup', () => {
       credential: 'secret-value',
       maxRetries: 0,
       trustedMissionControlOrigin: 'http://localhost:3099',
+      trustedTaskOrigins: [],
     });
     expect(fetchPageV2).toHaveBeenCalledWith(null);
+  });
+
+  it('rejects malformed task-origin allowlists before connecting', async () => {
+    process.env.RYMESSAGE_COMPANION_ACTION_FEED_TOKEN = 'secret-value';
+    const response = await POST(request({
+      mode: 'companion',
+      companionBaseUrl: 'http://companion:8080',
+      trustedMissionControlOrigin: 'http://localhost:3099',
+      trustedTaskOrigins: ['https://github.com/path'],
+    }));
+
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: expect.stringContaining('exact HTTP(S) trusted task origins'),
+    });
+    expect(createCompanionActionClient).not.toHaveBeenCalled();
   });
 
   it('uses only ActionV2 for configured connector connection checks', async () => {

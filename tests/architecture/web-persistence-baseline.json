@@ -40,13 +40,13 @@
     "note": "Zero normal production web/API SQLite evaluation under PostgreSQL, per plan.md's final target, with only a minimal, audited, fail-closed exception list (throwing before any SQLite import/effect) surviving."
   },
   "counts": {
-    "apiRoutes": 278,
+    "apiRoutes": 276,
     "tierARoutes": 0,
     "tierBRoutes": 7,
-    "cleanRoutes": 271,
+    "cleanRoutes": 269,
     "directTaintSourceRoutes": 0,
     "transitiveOnlyTaintSourceRoutes": 0,
-    "directDbNamespaceRoutes": 3,
+    "directDbNamespaceRoutes": 2,
     "taintedLibA": 1,
     "taintedApiHelpers": 0,
     "totalMigrationUnits": 1
@@ -108,7 +108,6 @@
     "src/app/api/connectors/[id]/lists/route.ts",
     "src/app/api/connectors/[id]/permissions/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
-    "src/app/api/connectors/[id]/rymessage-actions/route.ts",
     "src/app/api/connectors/[id]/test/route.ts",
     "src/app/api/connectors/[id]/validate-repo/route.ts",
     "src/app/api/connectors/[id]/work-todo/route.ts",
@@ -397,7 +396,6 @@
     "src/app/api/connectors/[id]/lists/route.ts",
     "src/app/api/connectors/[id]/permissions/route.ts",
     "src/app/api/connectors/[id]/retained-lists/[sourceListId]/route.ts",
-    "src/app/api/connectors/[id]/rymessage-actions/route.ts",
     "src/app/api/connectors/[id]/test/route.ts",
     "src/app/api/connectors/[id]/validate-repo/route.ts",
     "src/app/api/connectors/[id]/work-todo/route.ts",
@@ -629,7 +627,6 @@
   "directTaintSourceRoutes": [],
   "transitiveOnlyTaintSourceRoutes": [],
   "directDbNamespaceRoutes": [
-    "src/app/api/connectors/[id]/rymessage-actions/route.ts",
     "src/app/api/connectors/github-bulk-transfer/route.ts",
     "src/app/api/smart-score/settings/route.ts"
   ],

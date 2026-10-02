@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { ApiErrors } from '@/lib/api-error';
 import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 import { queueCompanionActionMutation } from '@/lib/connectors/rymessage/companion-action-service';
-import { stableCompanionOperationId } from '@/lib/connectors/rymessage/action-contract';
+import { stableCompanionOperationId } from '@/lib/connectors/rymessage/operation-id';
 
 function record(value: unknown): Record<string, unknown> {
   if (!value) return {};
@@ -69,7 +69,6 @@ export async function POST(
       const metadata = record(notification.metadata);
       const actionId = typeof metadata.actionId === 'string' ? metadata.actionId : '';
       const revision = Number(metadata.revision);
-      const lifecycleRevision = Number(metadata.lifecycleRevision);
       if (
         !actionId
         || !notification.connectorInstanceId
@@ -78,16 +77,12 @@ export async function POST(
         return ApiErrors.conflict('RyMessage action identity is incomplete');
       }
       await queueCompanionActionMutation(notification.connectorInstanceId, {
+        contractVersion: '2.0',
         operationId: stableCompanionOperationId(
           `rymessage:snoozed:${notification.connectorInstanceId}:${actionId}:${revision}:${snoozeAt}`,
         ),
         actionId,
         baseRevision: revision,
-        expectedFieldRevisions: {
-          lifecycle: Number.isSafeInteger(lifecycleRevision)
-            ? lifecycleRevision
-            : revision,
-        },
         mutation: {
           kind: 'action.lifecycle',
           state: 'snoozed',

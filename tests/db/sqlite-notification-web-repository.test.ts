@@ -90,15 +90,21 @@ describe('SQLite NotificationWebPersistence', () => {
     handle.prepare(`
       INSERT INTO notifications (
         id, source_id, connector_type, connector_instance_id, title,
-        template_key, received_at, sort_at
-      ) VALUES (?, ?, 'home-assistant', 'ha-home', ?, ?, ?, ?)
+        template_key, level, received_at, sort_at
+      ) VALUES (?, ?, 'home-assistant', 'ha-home', ?, ?, 'urgent', ?, ?)
     `).run('ha-update', 'update.core', 'Core update', 'ha_update_critical', now, now);
     handle.prepare(`
       INSERT INTO notifications (
         id, source_id, connector_type, connector_instance_id, title,
-        template_key, received_at, sort_at
-      ) VALUES (?, ?, 'home-assistant', 'ha-home', ?, ?, ?, ?)
+        template_key, level, received_at, sort_at
+      ) VALUES (?, ?, 'home-assistant', 'ha-home', ?, ?, 'heads_up', ?, ?)
     `).run('ha-device', 'sensor.office', 'Office alert', 'home_assistant_entity_alert', now, now);
+    handle.prepare(`
+      INSERT INTO notifications (
+        id, source_id, connector_type, connector_instance_id, title,
+        template_key, level, received_at, sort_at
+      ) VALUES (?, ?, 'github-issues', 'github-work', ?, ?, 'action_needed', ?, ?)
+    `).run('github-review', 'review.1', 'Review requested', 'github_review', now, now);
 
     const result = await repo.queryNotifications({
       query: {
@@ -124,6 +130,13 @@ describe('SQLite NotificationWebPersistence', () => {
       { key: 'ha_update_critical', label: 'ha_update_critical', count: 1 },
       { key: 'home_assistant_entity_alert', label: 'home_assistant_entity_alert', count: 1 },
     ]);
+    expect(result.facets.level).toEqual({ urgent: 1 });
+    expect(result.facets.source).toMatchObject({
+      'github-issues': 1,
+      'home-assistant': 2,
+    });
+    expect(result.facets.state).toMatchObject({ unread: 1, read: 0, dismissed: 0 });
+    expect(result.facets.dateRange).toEqual({ any: 1, today: 1, week: 1, month: 1 });
   });
 
   it('derives RyMessage semantic type facets without changing the connector template key', async () => {

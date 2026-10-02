@@ -12,6 +12,7 @@ export interface DailyPlanningTaskSeed {
   priority?: string;
   dueDate?: string | null;
   completedAt?: string | null;
+  deletedAt?: string | null;
   updatedAt?: string;
   createdAt?: string;
   parentId?: string | null;
@@ -414,6 +415,15 @@ export function describeDailyPlanningPersistenceContract(
         { id: 'high', status: 'todo', priority: 'high' },
         { id: 'pushed', status: 'todo', pushCount: 4 },
         { id: 'hidden', status: 'todo', localDisposition: 'handled' },
+        {
+          id: 'soft-deleted',
+          status: 'todo',
+          priority: 'high',
+          planningHorizon: 'next',
+          dueDate: '2026-09-01',
+          pushCount: 4,
+          deletedAt: PLANNING_NOW,
+        },
         { id: 'child', status: 'todo', parentId: 'planned', depth: 1 },
       ]);
       await persistence.myDay.add({
@@ -423,21 +433,37 @@ export function describeDailyPlanningPersistenceContract(
         addedAt: PLANNING_NOW,
         signal: SIGNAL,
       });
+      await persistence.myDay.add({
+        id: 'md-soft-deleted-yesterday',
+        taskId: 'soft-deleted',
+        date: '2026-09-04',
+        addedAt: PLANNING_NOW,
+        signal: SIGNAL,
+      });
+      await persistence.myDay.add({
+        id: 'md-soft-deleted-today',
+        taskId: 'soft-deleted',
+        date: PLANNING_DATE,
+        addedAt: PLANNING_NOW,
+        signal: SIGNAL,
+      });
 
       const view = await persistence.myDay.dayView(dayViewQuery());
       const ids = (group: keyof typeof view.suggestions) =>
         view.suggestions[group].map((task) => task.id).sort();
 
+      expect(view.items.map((item) => item.taskId)).not.toContain('soft-deleted');
       expect(ids('overdue')).toEqual(['overdue']);
       expect(ids('dueToday')).toEqual(['due-today']);
       expect(ids('dueThisWeek')).toEqual(['due-week']);
       expect(ids('planningNext')).toEqual(['next']);
       expect(ids('highPriority')).toEqual(['high']);
       expect(ids('repeatedlyRescheduled')).toEqual(['pushed']);
-      // Already-planned, hidden-disposition and subtask rows never surface.
+      // Already-planned, hidden, soft-deleted, and subtask rows never surface.
       for (const group of Object.keys(view.suggestions) as Array<keyof typeof view.suggestions>) {
         expect(ids(group)).not.toContain('planned');
         expect(ids(group)).not.toContain('hidden');
+        expect(ids(group)).not.toContain('soft-deleted');
         expect(ids(group)).not.toContain('child');
       }
     });

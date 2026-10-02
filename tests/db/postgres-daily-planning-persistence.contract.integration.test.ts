@@ -52,12 +52,12 @@ describe.skipIf(!connectionString)('PostgreSQL daily-planning adapter', () => {
             INSERT INTO tasks (
               id, source_id, connector_type, connector_instance_id, title, description,
               status, local_disposition, priority, planning_horizon, due_date, push_count,
-              created_at, updated_at, completed_at, parent_id, depth, is_checklist_item,
+              created_at, updated_at, completed_at, deleted_at, parent_id, depth, is_checklist_item,
               source_list_id, source_list_name, assignee, micro_status, status_reason,
               metadata, sync_status, last_synced_at
             ) VALUES (
-              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17,
-              FALSE, $18, $19, NULL, $20, NULL, '{}'::jsonb, 'synced', $14
+              $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,
+              FALSE, $19, $20, NULL, $21, NULL, '{}'::jsonb, 'synced', $14
             )
           `, [
             task.id,
@@ -75,6 +75,7 @@ describe.skipIf(!connectionString)('PostgreSQL daily-planning adapter', () => {
             task.createdAt ?? '2026-09-04T12:00:00.000Z',
             task.updatedAt ?? '2026-09-04T12:00:00.000Z',
             task.completedAt ?? null,
+            task.deletedAt ?? null,
             task.parentId ?? null,
             task.depth ?? 0,
             task.sourceListId ?? null,

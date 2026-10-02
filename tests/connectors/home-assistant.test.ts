@@ -324,6 +324,15 @@ describe('Home Assistant source transformers', () => {
           issue_domain: 'ntk_hass',
           issue_id: 'restart_required_123_v1.2.3',
           translation_key: 'restart_required',
+          translation_placeholders: { name: 'NTK-HASS' },
+          severity: 'warning',
+        },
+        {
+          domain: 'marketplace',
+          issue_domain: 'ntk_hass',
+          issue_id: 'restart_required_123_uninstall',
+          translation_key: 'restart_required_uninstall',
+          translation_placeholders: { name: 'NTK-HASS' },
           severity: 'warning',
         },
         {
@@ -340,9 +349,18 @@ describe('Home Assistant source transformers', () => {
       true,
       true,
       true,
+      true,
       false,
     ]);
-    for (const repair of repairs.slice(1, 3)) {
+    expect(repairs[2]).toMatchObject({
+      title: 'Restart to finish installing or updating NTK-HASS',
+      metadata: {
+        affectedDomain: 'ntk_hass',
+        affectedName: 'NTK-HASS',
+      },
+    });
+    expect(repairs[3].title).toBe('Restart to finish uninstalling NTK-HASS');
+    for (const repair of repairs.slice(1, 4)) {
       const presented = homeAssistantNotificationProvider.signatures[0].present(repair);
       expect(presented.actions?.map(action => action.actionType))
         .toContain('restart_home_assistant');
@@ -610,6 +628,34 @@ describe('Home Assistant notification presentation', () => {
       'ignore_repair',
       'create_task',
     ]);
+  });
+
+  it('shows affected integration and repair details supplied by Home Assistant', () => {
+    const repair = present({
+      ...notification,
+      title: 'Restart to finish installing or updating NTK-HASS',
+      metadata: {
+        schemaVersion: 2,
+        haSource: 'repairs',
+        domain: 'marketplace',
+        affectedDomain: 'ntk_hass',
+        breaksInHomeAssistantVersion: '2026.11.0',
+        learnMoreUrl: 'https://www.home-assistant.io/more-info',
+        actionsEnabled: true,
+        requiresRestart: true,
+        baseUrl: 'https://ha.example.test',
+      },
+    });
+
+    expect(repair.presentation?.metadataChips).toEqual([
+      { label: 'Affected integration', value: 'ntk_hass' },
+      { label: 'Requested by', value: 'Marketplace' },
+      { label: 'Breaks in Home Assistant', value: '2026.11.0' },
+    ]);
+    expect(repair.presentation?.richContent?.links).toEqual([{
+      label: 'Learn more',
+      url: 'https://www.home-assistant.io/more-info',
+    }]);
   });
 
   it('upgrades a persisted root action URL for an update notification', () => {

@@ -275,6 +275,7 @@ export const TASK_QUICK_SORT_QUEUE_MODES = [
   'no_effort',
   'no_tags',
   'no_planning_horizon',
+  'no_project',
 ] as const;
 
 export type TaskQuickSortQueueMode = typeof TASK_QUICK_SORT_QUEUE_MODES[number];
@@ -286,6 +287,7 @@ export function parseTaskQuickSortQueueMode(value: string): TaskQuickSortQueueMo
     case 'no_effort':
     case 'no_tags':
     case 'no_planning_horizon':
+    case 'no_project':
       return value;
     default:
       throw new Error(`Invalid persisted Quick Sort mode: ${value}`);
@@ -328,6 +330,7 @@ export interface TaskQuickSortCounts {
   readonly no_effort: number;
   readonly no_tags: number;
   readonly no_planning_horizon: number;
+  readonly no_project: number;
 }
 
 export interface TaskQuickSortQueueRow {
@@ -374,6 +377,7 @@ export interface TaskQuickSortSuggestionTask {
   readonly updatedAt: string;
   readonly connectorType: string;
   readonly connectorInstanceId: string;
+  readonly sourceListId: string | null;
   readonly sourceListName: string | null;
   readonly assignee: string | null;
   readonly snoozedUntil: string | null;
@@ -396,6 +400,14 @@ export interface TaskQuickSortSuggestionInputs {
   readonly taskTags: Array<{
     readonly taskId: string;
     readonly tagId: string;
+  }>;
+  readonly projectAffinities: Array<{
+    readonly taskId: string;
+    readonly connectorInstanceId: string;
+    readonly sourceListId: string | null;
+    readonly projectId: string | null;
+    readonly projectName: string | null;
+    readonly projectColor: string | null;
   }>;
 }
 

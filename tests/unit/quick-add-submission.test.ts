@@ -531,6 +531,7 @@ describe('Quick Add follow-up workflows', () => {
             { id: 'tag-1', name: 'Release', confidence: 0.9 },
             { id: 'tag-2', name: 'Maybe', confidence: 0.1 },
           ],
+          projects: [],
         },
       },
     }));
@@ -540,11 +541,13 @@ describe('Quick Add follow-up workflows', () => {
       priority: { value: 'high', confidence: 0.8, reason: 'urgent' },
       effort: null,
       tags: [{ id: 'tag-1', name: 'Release', confidence: 0.9 }],
+      projects: [],
     });
     expect(mergeQuickAddSuggestions({
       priority: null,
       effort: null,
       tags: [{ id: 'other-id', name: 'release', confidence: 0.7 }],
+      projects: [],
     }, fetched)).toEqual(fetched);
   });
 });

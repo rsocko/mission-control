@@ -616,7 +616,7 @@ export function filterQuickAddSuggestion(
     (tag) => tag.confidence >= SUGGESTION_CONFIDENCE_THRESHOLD,
   );
   if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags };
+  return { priority, effort, tags, projects: [] };
 }
 
 export function mergeQuickAddSuggestions(
@@ -642,7 +642,7 @@ export function mergeQuickAddSuggestions(
   const priority = override.priority ?? base.priority;
   const effort = override.effort ?? base.effort;
   if (!priority && !effort && tags.length === 0) return null;
-  return { priority, effort, tags };
+  return { priority, effort, tags, projects: [] };
 }
 
 export async function fetchQuickAddSuggestion(

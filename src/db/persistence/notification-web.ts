@@ -118,6 +118,7 @@ export interface NotificationFacets {
   notificationType: Array<{ key: string; label: string; count: number }>;
   state: Record<string, number>;
   merchant: Array<{ key: string; label: string; count: number }>;
+  dateRange?: Record<string, number>;
 }
 
 export interface NotificationQueryResult {

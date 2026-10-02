@@ -27,6 +27,7 @@ function SidebarItem({
   onClick,
   nested,
   expanded,
+  disabled,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -35,27 +36,29 @@ function SidebarItem({
   onClick?: () => void;
   nested?: boolean;
   expanded?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       aria-expanded={expanded}
       onClick={onClick}
+      disabled={disabled}
       className={`flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--accent)] ${
         active
           ? 'bg-[var(--accent)]/10 text-[var(--accent)]'
+          : disabled
+            ? 'cursor-not-allowed text-[var(--text-muted)] opacity-45'
           : 'hover:bg-[var(--surface-2)] text-[var(--text-secondary)]'
       } ${nested ? 'pl-7' : ''}`}
     >
       <span className="w-5 flex items-center justify-center flex-shrink-0">{icon}</span>
       <span className="text-sm font-medium flex-1 truncate">{label}</span>
-      {count > 0 && (
-        <span
-          className={`text-xs tabular-nums ${active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}
-        >
-          {count}
-        </span>
-      )}
+      <span
+        className={`text-xs tabular-nums ${active ? 'text-[var(--accent)]' : 'text-[var(--text-muted)]'}`}
+      >
+        {count}
+      </span>
       {expanded !== undefined && (
         <ChevronRight
           size={12}
@@ -185,8 +188,12 @@ export function NotificationsSidebar({
       return next;
     });
 
-  const totalCount = Object.values(facets.level).reduce((s, c) => s + c, 0);
+  const sourceTotal = Object.values(facets.source).reduce((sum, count) => sum + count, 0);
+  const levelTotal = Object.values(facets.level).reduce((sum, count) => sum + count, 0);
+  const stateTotal = (facets.state.unread || 0) + (facets.state.read || 0);
   const visibleTypes = filters.source ? facets.notificationType : [];
+  const typeTotal = visibleTypes.reduce((sum, type) => sum + type.count, 0);
+  const dateRangeCounts = facets.dateRange ?? {};
 
   // Collapsed mini rail
   if (collapsed) {
@@ -268,7 +275,7 @@ export function NotificationsSidebar({
               <SidebarItem
                 icon={<Globe size={14} className="text-blue-400" />}
                 label="All Sources"
-                count={totalCount}
+                count={sourceTotal}
                 active={!filters.source}
                 onClick={() => hook.setSourceFilter(null)}
               />
@@ -297,6 +304,7 @@ export function NotificationsSidebar({
                         }
                         label={formatNotificationSourceLabel(source)}
                         count={count}
+                        disabled={count === 0 && filters.source !== source}
                         active={
                           filters.source === source
                           && (!filters.sourceAccount || !hasMultipleInstances)
@@ -312,6 +320,7 @@ export function NotificationsSidebar({
                           icon={<Server size={13} />}
                           label={instance.label}
                           count={instance.count}
+                          disabled={instance.count === 0 && filters.sourceAccount !== instance.key}
                           nested
                           active={filters.sourceAccount === instance.key}
                           onClick={() => hook.setSourceAccountFilter(
@@ -353,7 +362,7 @@ export function NotificationsSidebar({
             <SidebarItem
               icon={<Inbox size={14} className="text-blue-400" />}
               label="All"
-              count={totalCount}
+              count={levelTotal}
               active={!filters.level}
               onClick={() => hook.setLevelFilter(null)}
             />
@@ -364,6 +373,7 @@ export function NotificationsSidebar({
                 label={label}
                 count={facets.level[value] || 0}
                 active={filters.level === value}
+                disabled={(facets.level[value] || 0) === 0 && filters.level !== value}
                 onClick={() => hook.setLevelFilter(filters.level === value ? null : value)}
               />
             ))}
@@ -385,7 +395,7 @@ export function NotificationsSidebar({
               <SidebarItem
                 icon={<Shapes size={14} className="text-blue-400" />}
                 label="All Types"
-                count={visibleTypes.reduce((sum, type) => sum + type.count, 0)}
+                count={typeTotal}
                 active={!filters.notificationType}
                 onClick={() => hook.setNotificationTypeFilter(null)}
               />
@@ -429,7 +439,7 @@ export function NotificationsSidebar({
             <SidebarItem
               icon={<Eye size={14} className="text-blue-400" />}
               label="All"
-              count={totalCount}
+              count={stateTotal}
               active={!filters.state}
               onClick={() => hook.setStateFilter(null)}
             />
@@ -440,6 +450,7 @@ export function NotificationsSidebar({
                 label={label}
                 count={facets.state[value] || 0}
                 active={filters.state === value}
+                disabled={(facets.state[value] || 0) === 0 && filters.state !== value}
                 onClick={() =>
                   hook.setStateFilter(filters.state === value ? null : value)
                 }
@@ -464,8 +475,12 @@ export function NotificationsSidebar({
                 key={value ?? 'all'}
                 icon={<Calendar size={14} />}
                 label={label}
-                count={0}
+                count={dateRangeCounts[value ?? 'any'] || 0}
                 active={filters.dateRange === value}
+                disabled={
+                  (dateRangeCounts[value ?? 'any'] || 0) === 0
+                  && filters.dateRange !== value
+                }
                 onClick={() =>
                   hook.setDateRangeFilter(filters.dateRange === value ? null : value)
                 }

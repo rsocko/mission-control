@@ -48,6 +48,7 @@ export interface NotificationFacets {
   notificationType: Array<{ key: string; label: string; count: number }>;
   state: Record<string, number>;
   merchant: Array<{ key: string; label: string; count: number }>;
+  dateRange?: Record<string, number>;
 }
 
 export type NotificationsFilters = NotificationQuery;
@@ -213,6 +214,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
     notificationType: [],
     state: {},
     merchant: [],
+    dateRange: {},
   });
   const [matchingCount, setMatchingCount] = useState(0);
   const [operationalStatus, setOperationalStatus] = useState<NotificationOperationalStatus>({
@@ -276,6 +278,7 @@ export function useNotifications(initialFilters: NotificationsFilters = DEFAULT_
         notificationType: [],
         state: {},
         merchant: [],
+        dateRange: {},
         ...(data.facets || {}),
       });
       setMatchingCount(Number(data.matchingCount ?? data.notifications?.length ?? 0));

@@ -63,7 +63,7 @@ test.beforeEach(async ({ page }) => {
     if (url.searchParams.get('counts') === 'true') {
       await route.fulfill({
         json: {
-          counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0 },
+          counts: { no_priority: 1, quadrant: 1, no_effort: 1, no_tags: 1, no_planning_horizon: 0, no_project: 1 },
         },
       });
       return;
@@ -91,7 +91,7 @@ test.beforeEach(async ({ page }) => {
       json: {
         thisWeek: {
           total: 4,
-          byMode: { no_priority: 4, quadrant: 0, no_effort: 0, no_tags: 0, no_planning_horizon: 0 },
+          byMode: { no_priority: 4, quadrant: 0, no_effort: 0, no_tags: 0, no_planning_horizon: 0, no_project: 0 },
         },
         streak: 2,
       },

@@ -164,6 +164,22 @@ describe('project phases (Plan) tab', () => {
     expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
   });
 
+  it('removes a completed task from its phase when completion starts in task detail', async () => {
+    await renderProjectTab('Plan');
+
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+    fireEvent.click(within(discovery).getByText('Alpha migration'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Complete task from detail' }));
+
+    await waitFor(() => {
+      expect(within(discovery).getByRole('button', { name: 'Completed' })).toBeInTheDocument();
+      expect(within(discovery).getByText('100%')).toBeInTheDocument();
+    }, { timeout: 2_000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide completed tasks' }));
+    expect(within(discovery).queryByText('Alpha migration')).not.toBeInTheDocument();
+    expect(harness.requestsFor('/api/tasks/task-alpha', 'PATCH')).toHaveLength(1);
+  });
+
   it('opens the expanded Notes dialog from a Plan list row', async () => {
     await renderProjectTab('Plan');
 

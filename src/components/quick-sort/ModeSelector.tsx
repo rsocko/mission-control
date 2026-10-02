@@ -1,6 +1,6 @@
 'use client';
 
-import { AlertCircle, FolderKanban, Grid2X2, Loader2, Sigma, Tag, Telescope, Zap } from 'lucide-react';
+import { AlertCircle, ChartNetwork, Grid2X2, Loader2, Sigma, Tag, Telescope, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 import type { QuickSortModeCounts, QuickSortQueueMode } from '@/lib/hooks/useQuickSortData';
@@ -47,9 +47,9 @@ const MODES: Array<{
   },
   {
     id: 'no_project',
-    label: 'Organize',
+    label: 'Add to Project',
     description: 'Assign tasks to a project and, optionally, a phase',
-    icon: FolderKanban,
+    icon: ChartNetwork,
     accentClass: 'border-cyan-700/60 bg-cyan-950/40 hover:bg-cyan-950/70',
     badgeClass: 'bg-cyan-900/60 text-cyan-300',
   },

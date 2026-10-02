@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Flame, Target, AlertCircle, FolderKanban, Telescope, Grid2X2, Sigma, Tag } from 'lucide-react';
+import { Flame, Target, AlertCircle, ChartNetwork, Telescope, Grid2X2, Sigma, Tag } from 'lucide-react';
 import { AnimatedCounter } from '@/components/ui/AnimatedCounter';
 
 interface TriageStats {
@@ -104,7 +104,7 @@ export default function ActivityBanner() {
           )}
           {no_project > 0 && (
             <span className="flex items-center gap-1">
-              <FolderKanban size={11} className="text-cyan-400" />
+              <ChartNetwork size={11} className="text-cyan-400" />
               <AnimatedCounter value={no_project} className="tabular-nums" /> organized
             </span>
           )}

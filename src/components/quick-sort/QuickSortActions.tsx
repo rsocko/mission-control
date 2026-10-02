@@ -5,7 +5,7 @@ import {
   Archive,
   CheckCircle2,
   Clock,
-  FolderKanban,
+  ChartNetwork,
   ExternalLink,
   Focus,
   Search,
@@ -219,7 +219,7 @@ function ProjectPicker({
                 style={{ backgroundColor: project.color }}
               />
               <span className="min-w-0 flex-1 truncate">{project.name}</span>
-              <FolderKanban size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
+              <ChartNetwork size={14} className="flex-shrink-0 text-[var(--text-muted)]" />
             </button>
           ))}
           </div>

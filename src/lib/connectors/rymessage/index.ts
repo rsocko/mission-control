@@ -11,10 +11,6 @@ import type {
 } from '@/types';
 import { randomUUID } from 'crypto';
 
-import { createRyMessageClient } from './rymessage-client';
-import type { RyMessageClient } from './rymessage-client';
-import { normalizeActionRecord, shouldImportAction, mapActionToAlert } from './message-transformer';
-import type { RyMessageAction } from './message-transformer';
 import { companionActionV2Digest } from './action-contract-v2';
 import {
   CompanionActionHttpError,
@@ -43,31 +39,18 @@ import {
   type RyMessageActionV2Projection,
 } from '@/db/persistence/rymessage-actions';
 
-export type { RyMessageAction } from './message-transformer';
-
 /**
  * RyMessage Action Center Connector
  *
  * Reads AI-extracted actions from RyMessage's Action Center.
- *
- * Integration modes:
- * - **webhook** (preferred): RyMessage pushes events to POST /api/integrations/rymessage.
- * - **rest** (dev/fallback): MC polls RyMessage's local REST API.
- * - **sqlite** (dev/fallback): MC reads RyMessage's SQLite database directly.
  */
 
 interface RyMessageConfig {
-  mode: 'companion' | 'webhook' | 'sqlite' | 'rest';
-  sqlitePath?: string;
-  restUrl?: string;
-  apiKey?: string;
+  mode: 'companion';
   companionBaseUrl?: string;
   trustedMissionControlOrigin?: string;
   credentialEnv?: string;
-  minConfidence: number;
 }
-
-const DEFAULT_MIN_CONFIDENCE = 0.7;
 
 function summarizeV2Changes(
   before: readonly RyMessageActionV2Projection[],
@@ -116,95 +99,54 @@ export class RyMessageConnector implements IConnector {
   };
 
   private config: ConnectorConfig | null = null;
-  private settings: RyMessageConfig = { mode: 'rest', minConfidence: DEFAULT_MIN_CONFIDENCE };
-  private client: RyMessageClient | null = null;
+  private settings: RyMessageConfig = { mode: 'companion' };
   private companionClient: CompanionActionClient | null = null;
   private companionService: CompanionActionReconciliationService | null = null;
-  private companionV2Enabled = false;
 
   async initialize(config: ConnectorConfig): Promise<void> {
     this.config = config;
     (this as { id: string }).id = config.id;
     this.settings = {
-      mode: 'webhook',
-      minConfidence: DEFAULT_MIN_CONFIDENCE,
+      mode: 'companion',
       ...(config.settings as unknown as Partial<RyMessageConfig>),
     };
-    if (this.settings.mode === 'companion') {
-      if (this.settings.apiKey) {
-        throw new Error(
-          'Companion credentials must be supplied through an environment variable, not connector settings',
-        );
-      }
-      const credentialEnv = this.settings.credentialEnv
-        ?? 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
-      if (!/^[A-Z][A-Z0-9_]{1,127}$/.test(credentialEnv)) {
-        throw new Error('Invalid Companion credential environment variable name');
-      }
-      const credential = process.env[credentialEnv];
-      if (!credential) {
-        throw new Error(`Companion credential environment variable ${credentialEnv} is not set`);
-      }
-      const baseUrl = this.settings.companionBaseUrl?.trim();
-      if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
-        throw new Error('Companion action feed URL must be an absolute HTTP(S) URL');
-      }
-      const trustedMissionControlOrigin = normalizeTrustedOrigin(
-        this.settings.trustedMissionControlOrigin,
-      );
-      this.companionV2Enabled = Boolean(trustedMissionControlOrigin);
-      this.companionClient = createCompanionActionClient({
-        baseUrl,
-        credential,
-        ...(trustedMissionControlOrigin
-          ? { trustedMissionControlOrigin }
-          : {}),
-      });
-      this.companionService = new CompanionActionReconciliationService(
-        config.id,
-        this.companionClient,
-      );
-      this.client = null;
-      return;
+    if (this.settings.mode !== 'companion') {
+      throw new Error('RyMessage only supports Companion ActionV2 mode');
     }
-    this.client = createRyMessageClient({
-      mode: this.settings.mode,
-      restUrl: this.settings.restUrl,
-      sqlitePath: this.settings.sqlitePath,
-      apiKey: this.settings.apiKey,
+    const credentialEnv = this.settings.credentialEnv
+      ?? 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
+    if (!/^[A-Z][A-Z0-9_]{1,127}$/.test(credentialEnv)) {
+      throw new Error('Invalid Companion credential environment variable name');
+    }
+    const credential = process.env[credentialEnv];
+    if (!credential) {
+      throw new Error(`Companion credential environment variable ${credentialEnv} is not set`);
+    }
+    const baseUrl = this.settings.companionBaseUrl?.trim();
+    if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
+      throw new Error('Companion action feed URL must be an absolute HTTP(S) URL');
+    }
+    const trustedMissionControlOrigin = normalizeTrustedOrigin(
+      this.settings.trustedMissionControlOrigin,
+    );
+    if (!trustedMissionControlOrigin) {
+      throw new Error('Companion ActionV2 requires an exact trusted Mission Control origin');
+    }
+    this.companionClient = createCompanionActionClient({
+      baseUrl,
+      credential,
+      trustedMissionControlOrigin,
     });
+    this.companionService = new CompanionActionReconciliationService(
+      config.id,
+      this.companionClient,
+    );
   }
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      if (this.settings.mode === 'companion') {
-        if (this.companionV2Enabled) {
-          await this.companionClient!.fetchPageV2(null);
-          return { success: true, message: 'Connected to Companion ActionV2 feed' };
-        }
-        await this.companionClient!.fetchPage(null);
-        return {
-          success: true,
-          message: 'Connected to Companion ActionV1 feed; configure a trusted Mission Control origin to enable ActionV2',
-        };
-      }
-      if (this.settings.mode === 'webhook') {
-        return { success: true, message: 'Webhook mode: awaiting pushes from RyMessage' };
-      }
-
-      if (this.settings.mode === 'rest') {
-        const result = await this.client!.testRest();
-        if (result.ok) {
-          return { success: true, message: 'Connected to RyMessage REST API' };
-        }
-        return { success: false, message: `HTTP ${result.status}` };
-      }
-
-      const result = await this.client!.testSqlite();
-      if (result.exists) {
-        return { success: true, message: `Database found at ${result.path}` };
-      }
-      return { success: false, message: 'Database file not found' };
+      await this.companionClient!.fetchPageV2(null);
+      return { success: true, message: 'Connected to Companion ActionV2 feed' };
     } catch (err) {
       return { success: false, message: `Connection failed: ${err}` };
     }
@@ -212,10 +154,8 @@ export class RyMessageConnector implements IConnector {
 
   async dispose(): Promise<void> {
     this.config = null;
-    this.client = null;
     this.companionClient = null;
     this.companionService = null;
-    this.companionV2Enabled = false;
   }
 
   async fetchSourceLists(): Promise<SourceList[]> {
@@ -236,50 +176,17 @@ export class RyMessageConnector implements IConnector {
   }
 
   async fetchNotifications(since?: Date): Promise<InboundNotification[]> {
-    if (this.settings.mode === 'webhook' || this.settings.mode === 'companion') return [];
-
-    const rawActions = await this.client!.fetchActions(since);
-    const actions = rawActions
-      .map((record) => normalizeActionRecord(record))
-      .filter((action): action is RyMessageAction => action !== null);
-
-    const filtered = since
-      ? actions.filter((action) => {
-          const actionTime = Date.parse(action.updatedAt ?? action.createdAt);
-          return Number.isFinite(actionTime) ? actionTime > since.getTime() : true;
-        })
-      : actions;
-
-    return filtered
-      .filter((action) => shouldImportAction(action, this.settings.minConfidence))
-      .map((action) => mapActionToAlert(action, this.type, this.id, randomUUID()));
+    void since;
+    return [];
   }
 
   async getLastSyncToken(): Promise<string | null> {
-    if (this.settings.mode === 'companion') {
-      const persistence = (await getWorkerPersistenceRepositories())
-        .connectorState.rymessageActions;
-      if (this.companionV2Enabled) {
-        return (await persistence.readV2FeedState(this.id)).cursor;
-      }
-      return (await persistence.readFeedState(this.id)).cursor;
-    }
-    return null;
+    const persistence = (await getWorkerPersistenceRepositories())
+      .connectorState.rymessageActions;
+    return (await persistence.readV2FeedState(this.id)).cursor;
   }
 
   async syncDomainData(context: DomainSyncContext): Promise<DomainSyncResult> {
-    if (this.settings.mode !== 'companion') {
-      return { itemsAdded: 0, itemsUpdated: 0, itemsRemoved: 0, status: 'fresh' };
-    }
-    if (!this.companionV2Enabled) {
-      const result = await this.companionService!.sync(context.signal);
-      return {
-        itemsAdded: result.itemsAdded,
-        itemsUpdated: result.itemsUpdated,
-        itemsRemoved: result.itemsRemoved,
-        status: result.status,
-      };
-    }
     const persistence = (await getWorkerPersistenceRepositories())
       .connectorState.rymessageActions;
     const initialProjections = await persistence.listV2Projections(this.id);
@@ -425,15 +332,8 @@ export class RyMessageConnector implements IConnector {
    * so their notifications get auto-resolved.
    */
   async getActiveAlertSourceIds(since?: Date): Promise<string[] | null> {
-    if (this.settings.mode === 'webhook' || this.settings.mode === 'companion') return null;
-
-    try {
-      const notifications = await this.fetchNotifications(since);
-      // fetchNotifications returns notifications with sourceId like "rymessage:{id}"
-      return notifications.map((notification) => notification.id);
-    } catch {
-      return null; // Fail-open
-    }
+    void since;
+    return null;
   }
 }
 

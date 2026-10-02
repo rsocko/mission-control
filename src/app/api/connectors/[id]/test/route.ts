@@ -12,6 +12,8 @@ import {
   normalizeHomeAssistantSettings,
   readHomeAssistantCredentials,
 } from '@/lib/connectors/home-assistant/settings';
+import { createCompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
+import { normalizeTrustedOrigin } from '@/lib/connectors/rymessage/action-contract-v2';
 
 /**
  * POST /api/connectors/[id]/test
@@ -214,43 +216,41 @@ async function testConnector(
       }
 
       case 'rymessage': {
-        const mode = settings.mode === 'sqlite' ? 'sqlite' : 'rest';
-
-        if (mode === 'sqlite') {
-          const sqlitePath = typeof settings.sqlitePath === 'string'
-            ? settings.sqlitePath
-            : (typeof settings.dbPath === 'string' ? settings.dbPath : '');
-          if (!sqlitePath) {
-            return { success: false, latencyMs: 0, error: 'No RyMessage SQLite path configured' };
-          }
-
-          const fs = await import('fs');
-          const latencyMs = Date.now() - start;
-          return fs.existsSync(sqlitePath)
-            ? { success: true, latencyMs, details: `RyMessage database found at ${sqlitePath}` }
-            : { success: false, latencyMs, error: 'RyMessage database file not found' };
+        if (settings.mode !== 'companion') {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'RyMessage only supports Companion ActionV2 mode',
+          };
         }
-
-        const baseUrl = typeof settings.restUrl === 'string'
-          ? settings.restUrl.replace(/\/+$/, '')
-          : (typeof settings.apiUrl === 'string'
-              ? settings.apiUrl.replace(/\/+$/, '')
-              : 'http://localhost:1234/api/v1');
-        const apiKey =
-          credentials.apiKey ||
-          credentials.api_key ||
-          (typeof settings.apiKey === 'string' ? settings.apiKey : '') ||
-          '';
-        const headers: HeadersInit = apiKey ? { 'X-API-Key': apiKey } : {};
-        const res = await fetch(`${baseUrl}/health`, {
-          headers,
-          signal: AbortSignal.timeout(10000),
-        });
-        const latencyMs = Date.now() - start;
-        if (res.ok) {
-          return { success: true, latencyMs, details: `RyMessage reachable at ${baseUrl}` };
+        const baseUrl = typeof settings.companionBaseUrl === 'string'
+          ? settings.companionBaseUrl.trim().replace(/\/+$/, '')
+          : '';
+        const trustedMissionControlOrigin = normalizeTrustedOrigin(
+          settings.trustedMissionControlOrigin,
+        );
+        const credentialEnv = typeof settings.credentialEnv === 'string'
+          ? settings.credentialEnv
+          : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
+        const credential = process.env[credentialEnv];
+        if (!baseUrl || !trustedMissionControlOrigin || !credential) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'RyMessage Companion ActionV2 configuration is incomplete',
+          };
         }
-        return { success: false, latencyMs, error: `HTTP ${res.status}: ${res.statusText}` };
+        await createCompanionActionClient({
+          baseUrl,
+          credential,
+          maxRetries: 0,
+          trustedMissionControlOrigin,
+        }).fetchPageV2(null);
+        return {
+          success: true,
+          latencyMs: Date.now() - start,
+          details: `RyMessage Companion ActionV2 reachable at ${baseUrl}`,
+        };
       }
 
       case 'home-assistant': {

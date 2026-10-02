@@ -168,6 +168,41 @@ describe('Companion ActionV2 canonical contract parity', () => {
     expect(tombstoneItem).not.toHaveProperty('action');
   });
 
+  it('accepts schema-16 feed actions containing Unicode private context', () => {
+    const wrapper = fixture('feed-page.json');
+    const page = hydrateFixture(wrapper.upsertPage as Record<string, unknown>);
+    const upsert = (page.items as Array<Record<string, unknown>>)[0]!;
+    const action = upsert.action as Record<string, unknown>;
+    const source = action.source as Record<string, unknown>;
+    const enrichedAction = {
+      ...action,
+      source: {
+        ...source,
+        senderDisplayName: 'Renée Example',
+        conversationTitle: 'Planificación de viaje ✈️',
+        messageExcerpt: 'I’ll send the café details shortly.',
+      },
+    };
+    const projection = upsert.projection as Record<string, unknown>;
+    const enrichedPage = {
+      ...page,
+      items: [{
+        ...upsert,
+        action: enrichedAction,
+        projection: {
+          ...projection,
+          action: enrichedAction,
+        },
+      }],
+    };
+
+    expect(isCompanionActionFeedPageV2(
+      enrichedPage,
+      isCompanionActionV1,
+      TRUSTED_ORIGINS,
+    )).toBe(true);
+  });
+
   it('pins RFC 4122 UUIDv5 identity without tuple normalization', () => {
     expect(companionTaskRelationIdV2({
       actionId: ACTION_ID,

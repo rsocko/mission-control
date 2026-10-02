@@ -1,6 +1,5 @@
 import db, { sqlite } from '@/db';
-import { notifications, tasks } from '@/db/schema';
-import { and, eq, isNull, notInArray, sql } from 'drizzle-orm';
+import { notifications } from '@/db/schema';
 import { NOTIFICATION_ONLY_CONNECTOR_TYPES } from '@/lib/connectors/task-source-profiles';
 import {
   mergeSearchFacetRows,
@@ -177,14 +176,21 @@ export async function rebuildSearchIndex() {
   sqlite.exec(CREATE_TASKS_FTS);
   sqlite.exec(CREATE_ALERTS_FTS);
 
-  const taskRows = await db.select().from(tasks).where(and(
-    isNull(tasks.deletedAt),
-    eq(tasks.localDisposition, 'active'),
-    sql`${tasks.connectorInstanceId} NOT IN (
-      SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
-    )`,
-    notInArray(tasks.connectorType, [...NOTIFICATION_ONLY_CONNECTOR_TYPES]),
-  ));
+  const taskRows = sqlite.prepare(`
+    SELECT
+      id,
+      title,
+      description,
+      source_list_name AS sourceListName,
+      connector_type AS connectorType
+    FROM tasks
+    WHERE deleted_at IS NULL
+      AND local_disposition = 'active'
+      AND connector_instance_id NOT IN (
+        SELECT id FROM connector_configs WHERE deleted_at IS NOT NULL
+      )
+      AND connector_type NOT IN (${NOTIFICATION_ONLY_CONNECTOR_TYPES.map(() => '?').join(', ')})
+  `).all(...NOTIFICATION_ONLY_CONNECTOR_TYPES) as SearchableTaskRecord[];
   const notificationRows = await db.select().from(notifications);
 
   const taskTx = sqlite.transaction((rows: SearchableTaskRecord[]) => {

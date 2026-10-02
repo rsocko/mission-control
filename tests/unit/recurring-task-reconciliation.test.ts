@@ -315,6 +315,17 @@ describe('recurring task reconciliation', () => {
     expect(findOrphanedRecurringTasks(openTasks, historyTasks)).toEqual([]);
   });
 
+  it('keeps an overdue successor when the prior occurrence was completed late', () => {
+    const openTasks = [
+      { id: 'august', sourceId: 'source-august', title: 'Avery Rent', sourceListId: 'school-kids', dueDate: '2026-08-28', updatedAt: '2026-09-02', metadata: recurringMetadata },
+    ];
+    const historyTasks = [
+      { title: 'Avery Rent', sourceListId: 'school-kids', status: 'done', dueDate: '2026-07-28', completedAt: '2026-09-02T04:00:00Z', metadata: recurringMetadata },
+    ];
+
+    expect(findOrphanedRecurringTasks(openTasks, historyTasks)).toEqual([]);
+  });
+
   it('does not flag an open recurrence against a later completion from a distinct recurrence pattern', () => {
     const openTasks = [
       { id: 'daily-open', sourceId: 'source-daily-open', title: 'Review', sourceListId: 'list', dueDate: '2026-08-02', updatedAt: '2026-08-01', metadata: recurringMetadata },

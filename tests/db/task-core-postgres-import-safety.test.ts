@@ -254,6 +254,7 @@ function fakePersistence(): TaskCorePersistence {
         no_effort: 0,
         no_tags: 0,
         no_planning_horizon: 0,
+        no_project: 0,
       }),
       listQuickSortTasks: () => record('listQuickSortTasks', []),
       getQuickSortSuggestionInputs: () => record('getQuickSortSuggestionInputs', {
@@ -261,6 +262,7 @@ function fakePersistence(): TaskCorePersistence {
         sourceRankings: [],
         tags: [],
         taskTags: [],
+        projectAffinities: [],
       }),
     },
     filterInputs: {

@@ -12,6 +12,7 @@ import {
   Loader2,
   RefreshCw,
   RotateCcw,
+  Send,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -144,85 +145,93 @@ export function TaskDelegationSection({
     <>
       <section
         className={cn(
-          'rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/45 p-3',
+          'overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45',
           (mode === 'panel' || mode === 'mobile') && 'order-2',
           (mode === 'dialog' || mode === 'workspace') && 'col-start-2 row-span-2',
         )}
         aria-labelledby={`delegation-heading-${taskId}`}
       >
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex min-h-11 items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3">
           <h3
             id={`delegation-heading-${taskId}`}
-            className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]"
+            className="flex items-center gap-2 text-sm font-semibold text-[var(--text-secondary)]"
           >
-            <GitMerge size={14} className="text-[var(--accent-400)]" />
+            <GitMerge
+              size={14}
+              className={current
+                ? STATE_PRESENTATION[current.displayState].className
+                : 'text-[var(--text-tertiary)]'}
+            />
             Delegation
           </h3>
           {!current && !loading && (
             <button
               type="button"
               onClick={() => openTaskDelegation([taskId])}
-              className="min-h-9 rounded-md border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
             >
+              <Send size={13} aria-hidden="true" />
               Delegate
             </button>
           )}
         </div>
 
-        {loading ? (
-          <div className="mt-3 space-y-2" aria-label="Loading delegation">
-            <div className="h-4 w-40 animate-pulse rounded bg-[var(--surface-2)]" />
-            <div className="h-10 animate-pulse rounded bg-[var(--surface-1)]" />
-          </div>
-        ) : error && !context ? (
-          <div className="mt-3 flex items-center justify-between gap-3 text-xs text-red-300" role="alert">
-            <span>{error}</span>
-            <button type="button" onClick={() => void load()} className="min-h-8 rounded px-2 hover:bg-red-500/10">
-              Retry
-            </button>
-          </div>
-        ) : current ? (
-          <div className="mt-3 space-y-2 text-xs">
-            <StateLine assignment={current} />
-            <p className="leading-relaxed text-[var(--text-secondary)]">
-              {current.blocker
-                ?? current.errorMessage
-                ?? current.latestProgress
-                ?? (current.pendingApproval
-                  ? 'Approval is waiting for your review.'
-                  : 'Provider state is current.')}
-            </p>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-muted)]">
-              <span>{current.locality.replaceAll('-', ' ')}</span>
-              {current.baseRef && <span>Base {current.baseRef}</span>}
-              <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
+        <div className="p-3">
+          {loading ? (
+            <div className="space-y-2" aria-label="Loading delegation">
+              <div className="h-4 w-40 animate-pulse rounded bg-[var(--surface-2)]" />
+              <div className="h-10 animate-pulse rounded bg-[var(--surface-1)]" />
             </div>
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-              {relevantOutput && OutputIcon ? (
-                <a
-                  href={relevantOutput.href}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[var(--accent-300)] hover:bg-[var(--surface-2)]"
-                >
-                  <OutputIcon size={12} />
-                  {relevantOutput.label}
-                </a>
-              ) : <span />}
-              <button
-                type="button"
-                onClick={() => setDetailsOpen(true)}
-                className="min-h-8 rounded-md border border-[var(--border)] px-2.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
-              >
-                More details
+          ) : error && !context ? (
+            <div className="flex items-center justify-between gap-3 text-xs text-red-300" role="alert">
+              <span>{error}</span>
+              <button type="button" onClick={() => void load()} className="min-h-8 rounded px-2 hover:bg-red-500/10">
+                Retry
               </button>
             </div>
-          </div>
-        ) : (
-          <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">
-            No destination is assigned. Delegation preserves this task as the canonical source of truth.
-          </p>
-        )}
+          ) : current ? (
+            <div className="space-y-2 text-xs">
+              <StateLine assignment={current} />
+              <p className="leading-relaxed text-[var(--text-secondary)]">
+                {current.blocker
+                  ?? current.errorMessage
+                  ?? current.latestProgress
+                  ?? (current.pendingApproval
+                    ? 'Approval is waiting for your review.'
+                    : 'Provider state is current.')}
+              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[var(--text-muted)]">
+                <span>{current.locality.replaceAll('-', ' ')}</span>
+                {current.baseRef && <span>Base {current.baseRef}</span>}
+                <span>Attempt {Math.max(current.attemptCount, 1)} of {current.maxAttempts}</span>
+              </div>
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                {relevantOutput && OutputIcon ? (
+                  <a
+                    href={relevantOutput.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex min-h-8 items-center gap-1.5 rounded-md px-2 text-[var(--accent-300)] hover:bg-[var(--surface-2)]"
+                  >
+                    <OutputIcon size={12} />
+                    {relevantOutput.label}
+                  </a>
+                ) : <span />}
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(true)}
+                  className="min-h-8 rounded-md border border-[var(--border)] px-2.5 font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                >
+                  More details
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p className="text-xs leading-relaxed text-[var(--text-muted)]">
+              No destination is assigned. Delegation preserves this task as the canonical source of truth.
+            </p>
+          )}
+        </div>
       </section>
 
       {current && (

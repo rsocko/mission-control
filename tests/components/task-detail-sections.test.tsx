@@ -20,7 +20,6 @@ function renderWithTooltips(ui: React.ReactElement) {
 
 const headerProps = {
   mode: 'panel' as const,
-  taskId: 'task-42',
   iconSrc: null,
   connectorType: 'github-issues',
   sourceListName: null,
@@ -47,6 +46,7 @@ describe('TaskDetailHeader', () => {
     expect(screen.getByText('GH-42')).toBeInTheDocument();
     expect(screen.getByText('Updated today')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Rewrite the importer' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Delegate task' })).not.toBeInTheDocument();
   });
 
   it('starts title editing from the heading and closes from the header', () => {
@@ -422,9 +422,19 @@ describe('TaskSourceActionsSection', () => {
 
     expect(onDelete).toHaveBeenCalledOnce();
     expect(onOpenMoveDialog).toHaveBeenCalledOnce();
-    expect(screen.getByRole('link', { name: /Open in GitHub/ })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Move source' })).toHaveClass(
+      'bg-[var(--accent-600)]',
+      'text-white',
+    );
+    const deepLink = screen.getByRole('link', { name: /Open in GitHub/ });
+    expect(deepLink).toHaveAttribute(
       'href',
       'https://github.com/acme/repo/issues/7',
+    );
+    expect(deepLink).toHaveClass('border-[var(--border)]', 'text-[var(--text-secondary)]');
+    expect(screen.getByRole('button', { name: 'Delete task' })).not.toHaveClass(
+      'border-red-500/20',
+      'bg-red-500/5',
     );
   });
 

@@ -107,7 +107,9 @@ describe('TaskDelegationSection', () => {
     render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="panel" />);
 
     expect(await screen.findByText(/No destination is assigned/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Delegate' }));
+    const delegateButton = screen.getByRole('button', { name: 'Delegate' });
+    expect(delegateButton.querySelector('svg')).toBeInTheDocument();
+    fireEvent.click(delegateButton);
     expect(opened).toHaveBeenCalledOnce();
     expect((opened.mock.calls[0][0] as CustomEvent).detail).toEqual({
       taskIds: ['task-1'],

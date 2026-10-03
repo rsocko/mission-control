@@ -16,6 +16,26 @@ afterEach(() => {
 });
 
 describe('AiBreakdownPanel', () => {
+  it('prioritizes direct subtask creation over AI suggestions', () => {
+    render(
+      <SubtaskSection
+        taskId="task-1"
+        subtasks={[]}
+        onSubtasksChange={vi.fn()}
+        canEdit
+        canCreateSubtasks
+      />,
+    );
+
+    expect(screen.getByPlaceholderText('Add subtask…').parentElement).toHaveClass(
+      'border-[var(--border)]',
+      'bg-[var(--surface-0)]',
+    );
+    expect(screen.getByRole('button', { name: 'Suggest subtasks with AI' })).toHaveClass(
+      'text-[var(--text-muted)]',
+    );
+  });
+
   it('hides creation controls when the connector does not support subtasks', () => {
     render(
       <SubtaskSection
@@ -28,7 +48,7 @@ describe('AiBreakdownPanel', () => {
     );
 
     expect(screen.queryByPlaceholderText('Add subtask…')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'AI breakdown' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Suggest subtasks with AI' })).not.toBeInTheDocument();
   });
 
   it('dismisses proposals without persistence and accepts one through the subtask route', async () => {

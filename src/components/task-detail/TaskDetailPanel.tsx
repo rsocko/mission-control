@@ -762,7 +762,6 @@ export function TaskDetailPanel({
       )}>
         <TaskDetailHeader
           mode={mode}
-          taskId={task.id}
           iconSrc={iconSrc ?? null}
           connectorType={task.connectorType}
           sourceListName={task.sourceListName}
@@ -1000,24 +999,31 @@ export function TaskDetailPanel({
         />
 
         <section ref={mode === 'panel' ? subtasksSectionRef : undefined} className={cn(
-          'rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3',
+          'overflow-hidden rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45',
           (mode === 'panel' || mode === 'mobile') && 'order-5',
           mode === 'dialog' && 'col-start-1 row-start-5',
           mode === 'workspace' && 'col-start-1 row-start-5',
         )}>
-          <div className="flex items-center gap-2 mb-2">
-            <ListChecks size={13} className="text-[var(--text-muted)]" />
+          <div className="flex min-h-11 items-center gap-2 border-b border-[var(--border-subtle)] px-3">
+            <ListChecks size={14} className="text-[var(--text-tertiary)]" />
             <h3
               ref={mode === 'panel' ? subtasksHeadingRef : undefined}
               tabIndex={mode === 'panel' ? -1 : undefined}
+              aria-label={task.subtasks?.length
+                ? `Subtasks (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`
+                : 'Subtasks'}
               className={cn(
-                'text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide',
+                'text-sm font-semibold text-[var(--text-secondary)]',
                 mode === 'panel' && 'rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--surface-1)]',
               )}
             >
               Subtasks
-              {task.subtasks && task.subtasks.length > 0 && ` (${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length})`}
             </h3>
+            <span className="ml-auto rounded-full border border-[var(--border)] px-2 py-0.5 text-[10px] font-medium tabular-nums text-[var(--text-muted)]">
+              {task.subtasks?.length
+                ? `${task.subtasks.filter((subtask) => subtask.status === 'done').length}/${task.subtasks.length}`
+                : '0 tasks'}
+            </span>
             {canManageSubtasks && !supportsSubtaskOrderWrite && (task.subtasks?.length ?? 0) > 1 && (
               <Tooltip content="Subtask order is saved in Mission Control only.">
                 <button
@@ -1030,16 +1036,18 @@ export function TaskDetailPanel({
               </Tooltip>
             )}
           </div>
-          <SubtaskSection
-            key={task.id}
-            taskId={task.id}
-            subtasks={task.subtasks || []}
-            onSubtasksChange={handleSubtasksChange}
-            onUpdate={onUpdate}
-            canEdit={canManageSubtasks}
-            canCreateSubtasks={canManageSubtasks}
-            orderRevision={task.subtaskOrderRevision ?? 0}
-          />
+          <div className="p-3">
+            <SubtaskSection
+              key={task.id}
+              taskId={task.id}
+              subtasks={task.subtasks || []}
+              onSubtasksChange={handleSubtasksChange}
+              onUpdate={onUpdate}
+              canEdit={canManageSubtasks}
+              canCreateSubtasks={canManageSubtasks}
+              orderRevision={task.subtaskOrderRevision ?? 0}
+            />
+          </div>
         </section>
 
         {/* Relationships and cross-connector provenance */}

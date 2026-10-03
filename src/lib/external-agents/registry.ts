@@ -48,6 +48,7 @@ export interface ExternalAgentInput {
 }
 
 const MANAGED_GITHUB_CREDENTIAL = 'mission-control:github-user';
+export const MAX_ALWAYS_INSTRUCTIONS_LENGTH = 16_000;
 
 const TYPE_DEFAULTS: Record<
   ExternalAgentType,
@@ -93,7 +94,22 @@ function validateProviderConfig(
   type: ExternalAgentType,
   value: ExternalAgentProviderConfig | undefined,
 ): ExternalAgentProviderConfig {
-  if (type !== 'paperclip') return {};
+  const alwaysInstructions = optionalText(
+    value?.alwaysInstructions,
+    'providerConfig.alwaysInstructions',
+  );
+  if (
+    alwaysInstructions
+    && alwaysInstructions.length > MAX_ALWAYS_INSTRUCTIONS_LENGTH
+  ) {
+    throw new ExternalAgentError(
+      `providerConfig.alwaysInstructions exceeds ${MAX_ALWAYS_INSTRUCTIONS_LENGTH} characters`,
+      'VALIDATION_ERROR',
+      422,
+    );
+  }
+  const common = alwaysInstructions ? { alwaysInstructions } : {};
+  if (type !== 'paperclip') return common;
   const paperclip = value?.paperclip;
   if (!paperclip || typeof paperclip !== 'object' || Array.isArray(paperclip)) {
     throw new ExternalAgentError(
@@ -107,6 +123,7 @@ function validateProviderConfig(
     'providerConfig.paperclip.requiredAdapterType',
   );
   return {
+    ...common,
     paperclip: {
       companyId: requiredUuid(
         paperclip.companyId,

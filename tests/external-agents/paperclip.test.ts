@@ -29,6 +29,7 @@ function paperclipAgent(
     authType: 'bearer',
     authCredentialRef: 'paperclip-key',
     providerConfig: {
+      alwaysInstructions: 'Follow the destination quality bar.',
       paperclip: {
         companyId,
         assigneeAgentId,
@@ -46,10 +47,28 @@ function paperclipAgent(
       allowedClassifications: ['standard'],
       fieldAllowlist: [
         'instruction',
+        'alwaysInstructions',
         'repository.fullName',
         'execution.locality',
         'execution.baseRef',
         'execution.createPullRequest',
+        'tasks.id',
+        'tasks.title',
+        'tasks.description',
+        'tasks.priority',
+        'tasks.status',
+        'tasks.tags',
+        'tasks.dueDate',
+        'tasks.effort',
+        'tasks.assignee',
+        'tasks.microStatus',
+        'tasks.planningHorizon',
+        'tasks.sourceListName',
+        'tasks.siblingOrder',
+        'tasks.depth',
+        'tasks.isChecklistItem',
+        'tasks.subtasks',
+        'tasks.sourceIssue',
         'dispatchId',
         'dataClassification',
         'allowedActions',
@@ -78,6 +97,32 @@ beforeEach(() => {
     DELETE FROM agent_dispatch_attempts;
     DELETE FROM agent_dispatches;
     DELETE FROM external_agents;
+    DELETE FROM tasks;
+    INSERT INTO tasks (
+      id, source_id, connector_type, connector_instance_id, title, description,
+      status, priority, created_at, updated_at, last_synced_at
+    ) VALUES (
+      'paperclip-task', 'octo/example:42', 'github-issues', 'github-source',
+      'Canonical parser task title that must not be truncated',
+      'Fix every escaped delimiter failure.',
+      'todo', 'high',
+      '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z',
+      '2026-10-01T00:00:00.000Z'
+    );
+    UPDATE tasks
+    SET metadata = '{"url":"https://github.com/octo/example/issues/42"}'
+    WHERE id = 'paperclip-task';
+    INSERT INTO tasks (
+      id, source_id, connector_type, connector_instance_id, title, description,
+      status, priority, parent_id, sibling_order, depth, is_checklist_item,
+      created_at, updated_at, last_synced_at
+    ) VALUES (
+      'paperclip-subtask', 'paperclip-subtask', 'local', 'local',
+      'Add regression coverage', 'Exercise nested escaped delimiters.',
+      'todo', 'medium', 'paperclip-task', 1, 1, 1,
+      '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z',
+      '2026-10-01T00:00:00.000Z'
+    );
   `);
   vi.unstubAllGlobals();
 });
@@ -268,6 +313,7 @@ describe('Paperclip external-agent provider', () => {
       agentId: agent.id,
       instruction: 'Implement the parser fix',
       scope: {
+        taskIds: ['paperclip-task'],
         repository: 'octo/example',
         baseRef: 'main',
         createPullRequest: true,
@@ -280,11 +326,24 @@ describe('Paperclip external-agent provider', () => {
     await service.confirmDispatch(preview.id, preview.previewHash);
     expect(createCount).toBe(1);
     expect(postedIssue).toMatchObject({
+      title: 'Canonical parser task title that must not be truncated',
       status: 'todo',
       assigneeAgentId,
       idempotencyKey: `mission-control:${preview.id}`,
       allowDuplicate: false,
     });
+    expect(postedIssue?.description).toEqual(expect.stringContaining(
+      '## Destination always instructions\n\nFollow the destination quality bar.',
+    ));
+    expect(postedIssue?.description).toEqual(expect.stringContaining(
+      '## Task 1: Canonical parser task title that must not be truncated',
+    ));
+    expect(postedIssue?.description).toEqual(expect.stringContaining(
+      '1. **Add regression coverage** (`paperclip-subtask`)',
+    ));
+    expect(postedIssue?.description).toEqual(expect.stringContaining(
+      '[octo/example#42](https://github.com/octo/example/issues/42)',
+    ));
     expect(JSON.stringify(postedIssue)).not.toContain('paperclip-secret');
     expect(await service.getDispatch(preview.id)).toMatchObject({
       status: 'queued',

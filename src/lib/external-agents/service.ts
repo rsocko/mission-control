@@ -6,18 +6,21 @@ import type {
   AgentDispatchRecord,
   AgentDispatchResult,
   AgentDispatchScope,
+  AgentPayloadSnapshot,
   AgentResultReference,
 } from './contracts';
 import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
   assertClassificationAllowed,
+  assertRichTaskContextAllowed,
   hashCanonical,
   hashSecret,
   redactForPersistence,
   resolveDispatchClassification,
   selectAllowedPayloadFields,
 } from './policy';
+import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
 import {
   getExternalAgent,
   resolveAgentCredential,
@@ -197,6 +200,55 @@ function assertAgentEnabled(agent: ExternalAgent | null): asserts agent is Exter
   }
 }
 
+function sourceIssue(
+  task: Pick<
+    AgentPayloadSnapshot['tasks'][number],
+    'connectorType' | 'sourceId' | 'sourceUrl'
+  >,
+  repository: string | undefined,
+) {
+  if (task.connectorType !== 'github-issues' || !task.sourceId) return undefined;
+  const parsed = parseSourceId(task.sourceId);
+  if (
+    !parsed.repo
+    || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(parsed.repo)
+    || !Number.isSafeInteger(parsed.issueNumber)
+    || parsed.issueNumber < 1
+  ) {
+    return undefined;
+  }
+  if (repository && parsed.repo.toLowerCase() !== repository.toLowerCase()) {
+    throw new ExternalAgentError(
+      `GitHub issue ${parsed.repo}#${parsed.issueNumber} cannot be dispatched to ${repository}`,
+      'REPOSITORY_SCOPE_MISMATCH',
+      409,
+    );
+  }
+  let url: string | undefined;
+  if (task.sourceUrl) {
+    try {
+      const candidate = new URL(task.sourceUrl);
+      if (
+        candidate.protocol === 'https:'
+        && !candidate.username
+        && !candidate.password
+        && candidate.pathname.toLowerCase()
+          === `/${parsed.repo}/issues/${parsed.issueNumber}`.toLowerCase()
+      ) {
+        url = candidate.toString();
+      }
+    } catch {
+      // Invalid connector URLs are omitted rather than repaired or invented.
+    }
+  }
+  return {
+    type: 'github-issue',
+    repository: parsed.repo,
+    issueNumber: parsed.issueNumber,
+    ...(url ? { url } : {}),
+  };
+}
+
 async function loadPayloadSource(
   dispatchId: string,
   agent: ExternalAgent,
@@ -223,6 +275,9 @@ async function loadPayloadSource(
       422,
     );
   }
+  if (agent.type === 'copilot-cloud' || agent.type === 'paperclip') {
+    assertRichTaskContextAllowed(agent.dataPolicy);
+  }
   const snapshot = await (await getExternalAgentControlPersistence()).payloads.snapshot(scope);
   if (scope.projectId && !snapshot.project) {
     throw new ExternalAgentError('Scoped project not found', 'NOT_FOUND', 404);
@@ -236,6 +291,7 @@ async function loadPayloadSource(
   return {
     source: {
       instruction,
+      alwaysInstructions: agent.providerConfig.alwaysInstructions ?? '',
       project: snapshot.project,
       repository: scope.repository
         ? {
@@ -250,10 +306,36 @@ async function loadPayloadSource(
         createPullRequest: scope.createPullRequest,
       },
       tasks: snapshot.tasks.map(({
-        connectorType: _connectorType,
+        connectorType,
         sourceId: _sourceId,
+        sourceUrl: _sourceUrl,
         ...task
-      }) => task),
+      }) => {
+        const taskSourceIssue = sourceIssue(
+          { connectorType, sourceId: _sourceId, sourceUrl: _sourceUrl },
+          agent.type === 'copilot-cloud' ? scope.repository : undefined,
+        );
+        return {
+          ...task,
+          subtasks: task.subtasks.map(({
+            connectorType: subtaskConnectorType,
+            sourceId: subtaskSourceId,
+            sourceUrl: subtaskSourceUrl,
+            ...subtask
+          }) => {
+            const subtaskSourceIssue = sourceIssue({
+              connectorType: subtaskConnectorType,
+              sourceId: subtaskSourceId,
+              sourceUrl: subtaskSourceUrl,
+            }, agent.type === 'copilot-cloud' ? scope.repository : undefined);
+            return {
+              ...subtask,
+              ...(subtaskSourceIssue ? { sourceIssue: subtaskSourceIssue } : {}),
+            };
+          }),
+          ...(taskSourceIssue ? { sourceIssue: taskSourceIssue } : {}),
+        };
+      }),
       phases: snapshot.phases,
       callbackUrl: callbackBaseUrl && agent.inboundWebhookId
         ? `${callbackBaseUrl.replace(/\/$/, '')}/api/inbound-webhooks/${encodeURIComponent(agent.inboundWebhookId)}/receive`

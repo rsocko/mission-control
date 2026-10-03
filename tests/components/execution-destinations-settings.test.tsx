@@ -72,6 +72,9 @@ describe('ExecutionDestinationsSection', () => {
     fireEvent.change(screen.getByLabelText('Personal access token'), {
       target: { value: 'github_pat_test-value' },
     });
+    fireEvent.change(screen.getByLabelText('Always instructions'), {
+      target: { value: 'Run the repository tests before handoff.' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Add destination' }));
 
     await waitFor(() => expect(requestBody).not.toBeNull());
@@ -81,6 +84,9 @@ describe('ExecutionDestinationsSection', () => {
       endpoint: 'https://api.github.com',
       authType: 'github-user',
       credential: 'github_pat_test-value',
+      providerConfig: {
+        alwaysInstructions: 'Run the repository tests before handoff.',
+      },
       dataPolicy: { allowedClassifications: ['standard'] },
     });
     expect(requestBody).not.toHaveProperty('authCredentialRef');
@@ -121,6 +127,9 @@ describe('ExecutionDestinationsSection', () => {
     fireEvent.change(screen.getByLabelText('Required adapter type'), {
       target: { value: 'claude-local' },
     });
+    fireEvent.change(screen.getByLabelText('Always instructions'), {
+      target: { value: 'Post concise progress updates.' },
+    });
     fireEvent.click(screen.getByRole('button', { name: 'Add destination' }));
 
     await waitFor(() => expect(requestBody).not.toBeNull());
@@ -130,6 +139,7 @@ describe('ExecutionDestinationsSection', () => {
       authType: 'none',
       authCredentialRef: null,
       providerConfig: {
+        alwaysInstructions: 'Post concise progress updates.',
         paperclip: {
           companyId: '11111111-1111-4111-8111-111111111111',
           projectId: '22222222-2222-4222-8222-222222222222',

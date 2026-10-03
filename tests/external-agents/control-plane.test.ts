@@ -149,6 +149,19 @@ async function seedTask(connectorType = 'github-issues') {
 }
 
 describe('external-agent registry boundaries', () => {
+  it('bounds server-owned always instructions', () => {
+    expect(() => registry.validateExternalAgentInput({
+      name: 'Oversized configuration',
+      type: 'manual',
+      providerConfig: {
+        alwaysInstructions: 'x'.repeat(16_001),
+      },
+    })).toThrow(expect.objectContaining({
+      code: 'VALIDATION_ERROR',
+      message: expect.stringContaining('16000 characters'),
+    }));
+  });
+
   it('keeps inference, MC-hosted, and GitHub-hosted execution explicit', async () => {
     await expect(registry.createExternalAgent({
       name: 'Unsafe inference',

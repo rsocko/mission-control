@@ -13,6 +13,7 @@ import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
   assertClassificationAllowed,
+  assertRichTaskContextAllowed,
   resolveDispatchClassification,
 } from './policy';
 import {
@@ -83,6 +84,7 @@ export interface TaskDelegationTarget {
   name: string;
   type: ExternalAgentType;
   description: string | null;
+  alwaysInstructions: string;
   executionLocality: ExternalAgentLocality;
   allowedActions: string[];
   hasCredential: boolean;
@@ -420,6 +422,15 @@ function eligibilityFor(
       blocker = error instanceof Error ? error.message : 'Task data policy blocks this destination';
     }
   }
+  if (!blocker && (target.type === 'copilot-cloud' || target.type === 'paperclip')) {
+    try {
+      assertRichTaskContextAllowed(target.dataPolicy);
+    } catch (error) {
+      blocker = error instanceof Error
+        ? error.message
+        : 'Destination disclosure policy is missing required task context';
+    }
+  }
   if (!blocker && target.type === 'copilot-cloud') {
     if (task.connectorType === 'github-issues' && !repository) {
       blocker = 'GitHub task does not have an exact source repository identity';
@@ -494,6 +505,7 @@ export async function getTaskDelegationContext(
       name: target.name,
       type: target.type,
       description: target.description,
+      alwaysInstructions: target.providerConfig.alwaysInstructions ?? '',
       executionLocality: target.executionLocality,
       allowedActions: allowedActions(target.capabilities),
       hasCredential: credentialError === null,

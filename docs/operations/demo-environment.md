@@ -135,5 +135,7 @@ non-secret repository variables:
 | `DEMO_CONTAINER_APP` | `ca-mission-control-demo` |
 
 The `demo` GitHub environment must exist because the managed identity accepts
-OIDC tokens only with the subject
-`repo:rsocko/mission-control:environment:demo`.
+OIDC tokens only with the repository's immutable-subject format:
+`repo:rsocko@16235839/mission-control@1331642920:environment:demo`. The numeric
+owner and repository IDs prevent a renamed or transferred repository from
+silently inheriting this Azure trust.

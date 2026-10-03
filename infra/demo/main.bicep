@@ -21,6 +21,12 @@ param revisionSuffix string
 @description('GitHub repository allowed to obtain an OIDC token for the demo environment.')
 param githubRepository string = 'rsocko/mission-control'
 
+@description('Immutable GitHub repository owner ID used by the repository OIDC subject.')
+param githubRepositoryOwnerId string = '16235839'
+
+@description('Immutable GitHub repository ID used by the repository OIDC subject.')
+param githubRepositoryId string = '1331642920'
+
 var tags = {
   application: 'mission-control'
   environment: 'demo'
@@ -46,7 +52,7 @@ resource githubEnvironmentCredential 'Microsoft.ManagedIdentity/userAssignedIden
       'api://AzureADTokenExchange'
     ]
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:environment:demo'
+    subject: 'repo:${split(githubRepository, '/')[0]}@${githubRepositoryOwnerId}/${split(githubRepository, '/')[1]}@${githubRepositoryId}:environment:demo'
   }
 }
 

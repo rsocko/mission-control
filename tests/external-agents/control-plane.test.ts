@@ -14,6 +14,7 @@ let db: typeof import('@/db').default;
 let sqlite: typeof import('@/db').sqlite;
 let schema: typeof import('@/db/schema');
 let registry: typeof import('@/lib/external-agents/registry');
+let policy: typeof import('@/lib/external-agents/policy');
 let service: typeof import('@/lib/external-agents/service');
 let transports: typeof import('@/lib/external-agents/transports');
 let receiveInboundResult: typeof import('@/app/api/inbound-webhooks/[id]/receive/route').POST;
@@ -33,6 +34,7 @@ beforeAll(async () => {
   const modules = await Promise.all([
     import('@/db/schema'),
     import('@/lib/external-agents/registry'),
+    import('@/lib/external-agents/policy'),
     import('@/lib/external-agents/service'),
     import('@/lib/external-agents/transports'),
     import('@/app/api/inbound-webhooks/[id]/receive/route'),
@@ -41,9 +43,10 @@ beforeAll(async () => {
   sqlite = databaseModule.sqlite;
   schema = modules[0];
   registry = modules[1];
-  service = modules[2];
-  transports = modules[3];
-  receiveInboundResult = modules[4].POST;
+  policy = modules[2];
+  service = modules[3];
+  transports = modules[4];
+  receiveInboundResult = modules[5].POST;
   sqlite.prepare('SELECT 1').get();
 }, 30_000);
 
@@ -149,6 +152,100 @@ async function seedTask(connectorType = 'github-issues') {
 }
 
 describe('external-agent registry boundaries', () => {
+  it('bounds server-owned always instructions', () => {
+    expect(() => registry.validateExternalAgentInput({
+      name: 'Oversized configuration',
+      type: 'manual',
+      providerConfig: {
+        alwaysInstructions: 'x'.repeat(16_001),
+      },
+    })).toThrow(expect.objectContaining({
+      code: 'VALIDATION_ERROR',
+      message: expect.stringContaining('16000 characters'),
+    }));
+  });
+
+  it('persists deterministic rich-context upgrades for legacy destinations', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'legacy-hosted',
+      name: 'Legacy hosted coding',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+    });
+    const legacyFields = [
+      'instruction',
+      'execution.locality',
+      'dispatchId',
+      'dataClassification',
+      'allowedActions',
+      'project.description',
+    ];
+    sqlite.prepare('UPDATE external_agents SET provider_config = ?, data_policy = ? WHERE id = ?')
+      .run(
+        JSON.stringify({}),
+        JSON.stringify({
+          allowedClassifications: ['standard', 'restricted'],
+          fieldAllowlist: legacyFields,
+          retentionDays: 91,
+          maxRequestsPerMinute: 7,
+        }),
+        hosted.id,
+      );
+
+    const upgraded = await registry.getExternalAgent(hosted.id);
+    expect(upgraded).toMatchObject({
+      providerConfig: {},
+      dataPolicy: {
+        allowedClassifications: ['standard', 'restricted'],
+        retentionDays: 91,
+        maxRequestsPerMinute: 7,
+      },
+    });
+    expect(upgraded?.dataPolicy.fieldAllowlist).toEqual([
+      ...legacyFields,
+      ...policy.REQUIRED_RICH_TASK_FIELDS.filter((field) => !legacyFields.includes(field)),
+    ]);
+    const persisted = JSON.parse((sqlite.prepare(
+      'SELECT data_policy AS dataPolicy FROM external_agents WHERE id = ?',
+    ).get(hosted.id) as { dataPolicy: string }).dataPolicy);
+    expect(persisted).toEqual(upgraded?.dataPolicy);
+
+    const paperclip = registry.validateExternalAgentInput({
+      name: 'Legacy Paperclip',
+      type: 'paperclip',
+      endpoint: 'http://localhost:3100',
+      providerConfig: {
+        paperclip: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: legacyFields,
+        retentionDays: 12,
+        maxRequestsPerMinute: 4,
+      },
+    });
+    expect(paperclip.providerConfig).toEqual({
+      paperclip: {
+        companyId: '11111111-1111-4111-8111-111111111111',
+        assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+    expect(paperclip.dataPolicy).toMatchObject({
+      allowedClassifications: ['standard'],
+      retentionDays: 12,
+      maxRequestsPerMinute: 4,
+    });
+    expect(paperclip.dataPolicy.fieldAllowlist).toEqual([
+      ...legacyFields,
+      ...policy.REQUIRED_RICH_TASK_FIELDS.filter((field) => !legacyFields.includes(field)),
+    ]);
+  });
+
   it('keeps inference, MC-hosted, and GitHub-hosted execution explicit', async () => {
     await expect(registry.createExternalAgent({
       name: 'Unsafe inference',

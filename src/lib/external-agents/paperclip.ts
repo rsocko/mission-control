@@ -267,10 +267,19 @@ export async function validatePaperclipConnection(connection: PaperclipConnectio
 }
 
 function titleFromPayload(payload: Record<string, unknown>) {
+  const tasks = Array.isArray(payload.tasks) ? payload.tasks : [];
+  const canonicalTitle = tasks.length === 1
+    && tasks[0]
+    && typeof tasks[0] === 'object'
+    && !Array.isArray(tasks[0])
+    && typeof (tasks[0] as Record<string, unknown>).title === 'string'
+    ? (tasks[0] as Record<string, unknown>).title as string
+    : '';
+  if (canonicalTitle.trim()) return canonicalTitle;
   const instruction = typeof payload.instruction === 'string'
     ? payload.instruction.trim()
     : 'Mission Control dispatch';
-  return instruction.split(/\r?\n/, 1)[0].slice(0, 240) || 'Mission Control dispatch';
+  return instruction.split(/\r?\n/, 1)[0] || 'Mission Control dispatch';
 }
 
 function priorityFromPayload(payload: Record<string, unknown>) {
@@ -288,10 +297,80 @@ function priorityFromPayload(payload: Record<string, unknown>) {
 }
 
 function issueDescription(input: PaperclipDispatchInput) {
+  const instruction = typeof input.payload.instruction === 'string'
+    ? input.payload.instruction
+    : '';
+  const alwaysInstructions = typeof input.payload.alwaysInstructions === 'string'
+    ? input.payload.alwaysInstructions
+    : '';
+  const tasks = Array.isArray(input.payload.tasks)
+    ? input.payload.tasks.filter(
+      (task): task is Record<string, unknown> =>
+        Boolean(task) && typeof task === 'object' && !Array.isArray(task),
+    )
+    : [];
+  const text = (value: unknown, fallback = 'Not set') =>
+    typeof value === 'string' && value ? value : fallback;
+  const taskSections = tasks.flatMap((task, index) => {
+    const sourceIssue = task.sourceIssue
+      && typeof task.sourceIssue === 'object'
+      && !Array.isArray(task.sourceIssue)
+      ? task.sourceIssue as Record<string, unknown>
+      : null;
+    const subtasks = Array.isArray(task.subtasks)
+      ? task.subtasks.filter(
+        (subtask): subtask is Record<string, unknown> =>
+          Boolean(subtask) && typeof subtask === 'object' && !Array.isArray(subtask),
+      )
+      : [];
+    const sourceIssueLabel = sourceIssue
+      ? `${text(sourceIssue.repository)}#${String(sourceIssue.issueNumber)}`
+      : '';
+    const sourceIssueLine = sourceIssue
+      ? typeof sourceIssue.url === 'string' && sourceIssue.url
+        ? `- **Authoritative source issue:** [${sourceIssueLabel}](${sourceIssue.url})`
+        : `- **Authoritative source issue:** \`${sourceIssueLabel}\``
+      : null;
+    return [
+      `## Task ${index + 1}: ${text(task.title, 'Untitled task')}`,
+      '',
+      `- **Mission Control ID:** \`${text(task.id)}\``,
+      `- **Status:** ${text(task.status)}`,
+      `- **Priority:** ${text(task.priority)}`,
+      `- **Tags:** ${Array.isArray(task.tags) && task.tags.length ? task.tags.join(', ') : 'None'}`,
+      ...(sourceIssueLine ? [sourceIssueLine] : []),
+      '',
+      '### Description',
+      '',
+      text(task.description, 'No description provided.'),
+      '',
+      '### Subtasks and checklist items',
+      '',
+      ...(subtasks.length
+        ? subtasks.flatMap((subtask, subtaskIndex) => [
+          `${subtaskIndex + 1}. **${text(subtask.title, 'Untitled subtask')}** (\`${text(subtask.id)}\`)`,
+          `   - Status: ${text(subtask.status)}; priority: ${text(subtask.priority)}; order: ${String(subtask.siblingOrder ?? 'not set')}; checklist item: ${subtask.isChecklistItem === true ? 'yes' : 'no'}`,
+          `   - ${text(subtask.description, 'No description provided.')}`,
+        ])
+        : ['No subtasks or checklist items.']),
+      '',
+    ];
+  });
   return [
-    'Mission Control delegated outcome.',
+    '# Mission Control delegation',
     '',
-    `Correlation: \`${input.dispatchId}\``,
+    `**Correlation:** \`${input.dispatchId}\``,
+    '',
+    '## Per-dispatch instructions',
+    '',
+    instruction || 'No per-dispatch instructions provided.',
+    '',
+    '## Destination always instructions',
+    '',
+    alwaysInstructions || 'No destination always instructions configured.',
+    '',
+    ...taskSections,
+    '## Reviewed canonical context',
     '',
     '```json',
     canonicalJson(input.payload),

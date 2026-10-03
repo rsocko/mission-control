@@ -77,6 +77,7 @@ export interface PaperclipProviderConfig {
 }
 
 export interface ExternalAgentProviderConfig {
+  alwaysInstructions?: string;
   paperclip?: PaperclipProviderConfig;
 }
 
@@ -213,12 +214,42 @@ export interface AgentPayloadSnapshot {
   tasks: Array<{
     id: string;
     sourceId: string | null;
+    sourceUrl: string | null;
     title: string;
     description: string | null;
     priority: string;
     status: string;
     connectorType: string;
     tags: string[];
+    dueDate: string | null;
+    effort: number | null;
+    assignee: string | null;
+    microStatus: string | null;
+    planningHorizon: string | null;
+    sourceListName: string | null;
+    siblingOrder: number | null;
+    depth: number;
+    isChecklistItem: boolean;
+    subtasks: Array<{
+      id: string;
+      sourceId: string | null;
+      sourceUrl: string | null;
+      connectorType: string;
+      title: string;
+      description: string | null;
+      priority: string;
+      status: string;
+      tags: string[];
+      dueDate: string | null;
+      effort: number | null;
+      assignee: string | null;
+      microStatus: string | null;
+      planningHorizon: string | null;
+      sourceListName: string | null;
+      siblingOrder: number | null;
+      depth: number;
+      isChecklistItem: boolean;
+    }>;
   }>;
   phases: Array<{
     name: string;

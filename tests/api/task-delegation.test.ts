@@ -18,6 +18,7 @@ const projectId = '22222222-2222-4222-8222-222222222222';
 const assigneeAgentId = '33333333-3333-4333-8333-333333333333';
 const policyFields = [
   'instruction',
+  'alwaysInstructions',
   'repository.fullName',
   'repository.defaultBranch',
   'execution.locality',
@@ -26,7 +27,21 @@ const policyFields = [
   'execution.createPullRequest',
   'tasks.id',
   'tasks.title',
+  'tasks.description',
+  'tasks.priority',
   'tasks.status',
+  'tasks.tags',
+  'tasks.dueDate',
+  'tasks.effort',
+  'tasks.assignee',
+  'tasks.microStatus',
+  'tasks.planningHorizon',
+  'tasks.sourceListName',
+  'tasks.siblingOrder',
+  'tasks.depth',
+  'tasks.isChecklistItem',
+  'tasks.subtasks',
+  'tasks.sourceIssue',
   'dispatchId',
   'dataClassification',
   'allowedActions',
@@ -53,6 +68,9 @@ async function createCloudAgent(overrides: Partial<
     endpoint: 'https://api.github.com',
     authType: 'github-user',
     authCredentialRef: 'github-user-test',
+    providerConfig: {
+      alwaysInstructions: 'Run focused tests and report exact results.',
+    },
     capabilities: {
       canAnalyzeCode: true,
       canWriteCode: true,
@@ -90,6 +108,7 @@ async function createPaperclipAgent() {
       authType: 'bearer',
       authCredentialRef: 'paperclip-test',
       providerConfig: {
+        alwaysInstructions: 'Keep Paperclip progress concise.',
         paperclip: {
           companyId,
           projectId,
@@ -200,6 +219,27 @@ beforeEach(() => {
         '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z',
         '2026-10-01T00:00:00.000Z'
       );
+    UPDATE tasks
+    SET description = 'Parser fails on escaped delimiters.',
+        metadata = '{"url":"https://github.com/octo/source/issues/17"}',
+        due_date = '2026-10-15',
+        effort = 3,
+        assignee = 'octocat',
+        micro_status = 'ready',
+        planning_horizon = 'next',
+        source_list_name = 'octo/source'
+    WHERE id = 'task-github';
+    INSERT INTO tasks (
+      id, source_id, connector_type, connector_instance_id, title, description,
+      status, priority, parent_id, sibling_order, depth, is_checklist_item,
+      created_at, updated_at, last_synced_at
+    ) VALUES (
+      'subtask-parser-test', 'octo/source:19', 'github-issues', 'github-source',
+      'Add escaped delimiter coverage', 'Cover opening and closing delimiters.',
+      'in_progress', 'medium', 'task-github', 2, 1, 1,
+      '2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z',
+      '2026-10-01T00:00:00.000Z'
+    );
   `);
 });
 
@@ -359,9 +399,37 @@ describe('provider-neutral task delegation API', () => {
     expect(replay.status).toBe(201);
     expect(replayPreview.dispatchId).toBe(firstPreview.dispatchId);
     expect(firstPreview.payloadPreview).toMatchObject({
+      instruction: 'Fix the parser',
+      alwaysInstructions: 'Run focused tests and report exact results.',
       repository: { fullName: 'octo/source', defaultBranch: 'main' },
       execution: { model: 'auto', createPullRequest: true },
-      tasks: [{ id: 'task-github', title: 'Fix the parser' }],
+      tasks: [{
+        id: 'task-github',
+        title: 'Fix the parser',
+        description: 'Parser fails on escaped delimiters.',
+        priority: 'high',
+        status: 'todo',
+        dueDate: '2026-10-15',
+        effort: 3,
+        assignee: 'octocat',
+        microStatus: 'ready',
+        planningHorizon: 'next',
+        sourceListName: 'octo/source',
+        sourceIssue: {
+          type: 'github-issue',
+          repository: 'octo/source',
+          issueNumber: 17,
+          url: 'https://github.com/octo/source/issues/17',
+        },
+        subtasks: [{
+          id: 'subtask-parser-test',
+          title: 'Add escaped delimiter coverage',
+          description: 'Cover opening and closing delimiters.',
+          status: 'in_progress',
+          siblingOrder: 2,
+          isChecklistItem: true,
+        }],
+      }],
     });
     expect(firstPreview.payloadPreview.tasks[0]).not.toHaveProperty('sourceId');
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
@@ -379,6 +447,41 @@ describe('provider-neutral task delegation API', () => {
         cancellationLimitation: null,
       }],
     });
+  });
+
+  it('changes the preview contract when always instructions change', async () => {
+    await createCloudAgent();
+    const first = await delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'always-instructions-first',
+      repository: 'octo/source',
+      instruction: 'Fix the parser',
+      allowedActions: ['write_code'],
+    });
+
+    await registry.updateExternalAgent('github-cloud', {
+      providerConfig: {
+        alwaysInstructions: 'Run the full parser suite before handing off.',
+      },
+    });
+    const second = await delegation.previewTaskDelegation({
+      taskId: 'task-local',
+      agentId: 'github-cloud',
+      operationId: 'always-instructions-second',
+      repository: 'octo/validated',
+      instruction: 'Write release notes',
+      allowedActions: ['write_code'],
+    });
+
+    expect(first.previewHash).not.toBe(second.previewHash);
+    expect(second.payloadPreview).toMatchObject({
+      alwaysInstructions: 'Run the full parser suite before handing off.',
+    });
+    await expect(
+      (await import('@/lib/external-agents/service'))
+        .confirmDispatch(first.id, first.previewHash),
+    ).rejects.toMatchObject({ code: 'PREVIEW_MISMATCH' });
   });
 
   it('atomically prevents concurrent operations from reserving the same task', async () => {
@@ -529,6 +632,24 @@ describe('provider-neutral task delegation API', () => {
     });
     expect(firstBatch.previews.map(({ taskId }: { taskId: string }) => taskId).sort())
       .toEqual(['task-github', 'task-local']);
+    expect(firstBatch.previews).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        taskId: 'task-github',
+        payloadPreview: expect.objectContaining({
+          tasks: [expect.objectContaining({
+            title: 'Fix the parser',
+            description: 'Parser fails on escaped delimiters.',
+            subtasks: [expect.objectContaining({ id: 'subtask-parser-test' })],
+          })],
+        }),
+      }),
+      expect.objectContaining({
+        taskId: 'task-local',
+        payloadPreview: expect.objectContaining({
+          tasks: [expect.objectContaining({ title: 'Write release notes' })],
+        }),
+      }),
+    ]));
     expect(new Set(firstBatch.previews.map(
       ({ dispatchId }: { dispatchId: string }) => dispatchId,
     )).size).toBe(2);
@@ -536,6 +657,163 @@ describe('provider-neutral task delegation API', () => {
     expect(replayBatch.blocked).toEqual(firstBatch.blocked);
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
       .toEqual({ count: 2 });
+  });
+
+  it('isolates oversized bulk tasks while preserving visible idempotent previews', async () => {
+    await createCloudAgent();
+    sqlite.prepare('UPDATE tasks SET description = ? WHERE id = ?')
+      .run('x'.repeat(64 * 1024 + 1), 'task-local');
+    const body = {
+      taskIds: ['task-github', 'task-local'],
+      agentId: 'github-cloud',
+      operationId: 'bulk-oversized',
+      repository: 'octo/validated',
+      instruction: 'Implement each task independently',
+      allowedActions: ['write_code'],
+    };
+
+    const first = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      body,
+    ));
+    const firstBatch = await first.json();
+    const replay = await bulkRoute.POST(mutationRequest(
+      'http://localhost/api/tasks/delegation',
+      body,
+    ));
+    const replayBatch = await replay.json();
+
+    expect(first.status).toBe(201);
+    expect(firstBatch).toMatchObject({
+      readyCount: 1,
+      blockedCount: 1,
+      previews: [expect.objectContaining({ taskId: 'task-github' })],
+      blocked: [expect.objectContaining({
+        taskId: 'task-local',
+        ready: false,
+        errorCode: 'PAYLOAD_TOO_LARGE',
+        statusCode: 413,
+        blocker: expect.stringContaining('65536 character context limit'),
+      })],
+    });
+    expect(replayBatch.previews).toEqual(firstBatch.previews);
+    expect(replayBatch.blocked).toEqual(firstBatch.blocked);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 1 });
+  });
+
+  it('upgrades legacy rich-context allowlists before eligibility review', async () => {
+    await createCloudAgent({
+      id: 'legacy-policy',
+    });
+    const legacyFields = [
+      'instruction',
+      'execution.locality',
+      'dispatchId',
+      'dataClassification',
+      'allowedActions',
+      'tasks.id',
+      'tasks.title',
+      'project.description',
+    ];
+    sqlite.prepare('UPDATE external_agents SET data_policy = ? WHERE id = ?').run(
+      JSON.stringify({
+        allowedClassifications: ['standard'],
+        fieldAllowlist: legacyFields,
+        retentionDays: 47,
+        maxRequestsPerMinute: 9,
+      }),
+      'legacy-policy',
+    );
+
+    const response = await singleRoute.GET(
+      new Request('http://localhost/api/tasks/task-github/delegation'),
+      { params: Promise.resolve({ id: 'task-github' }) },
+    );
+    expect(await response.json()).toMatchObject({
+      targets: [expect.objectContaining({
+        id: 'legacy-policy',
+        eligibility: [expect.objectContaining({
+          ready: true,
+          blocker: null,
+        })],
+      })],
+    });
+    const persisted = JSON.parse((sqlite.prepare(
+      'SELECT data_policy AS dataPolicy FROM external_agents WHERE id = ?',
+    ).get('legacy-policy') as { dataPolicy: string }).dataPolicy);
+    expect(persisted).toMatchObject({
+      allowedClassifications: ['standard'],
+      retentionDays: 47,
+      maxRequestsPerMinute: 9,
+    });
+    expect(persisted.fieldAllowlist).toEqual(expect.arrayContaining([
+      ...legacyFields,
+      'alwaysInstructions',
+      'tasks.description',
+      'tasks.subtasks',
+      'tasks.sourceIssue',
+    ]));
+  });
+
+  it('classifies the complete disclosed descendant hierarchy before transmission', async () => {
+    await createCloudAgent();
+    sqlite.prepare(`
+      UPDATE tasks
+      SET connector_type = 'custom-rest', connector_instance_id = 'restricted-source'
+      WHERE id = 'subtask-parser-test'
+    `).run();
+
+    await expect(delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'restricted-descendant-blocked',
+      repository: 'octo/source',
+      instruction: 'Fix the parser',
+      allowedActions: ['write_code'],
+    })).rejects.toMatchObject({
+      code: 'DISCLOSURE_BLOCKED',
+      status: 403,
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 0 });
+
+    await registry.updateExternalAgent('github-cloud', {
+      dataPolicy: {
+        allowedClassifications: ['standard', 'restricted'],
+      },
+    });
+    await expect(delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'restricted-descendant-allowed',
+      repository: 'octo/source',
+      instruction: 'Fix the parser',
+      allowedActions: ['write_code'],
+    })).resolves.toMatchObject({
+      dataClassification: 'restricted',
+      status: 'needs_confirmation',
+    });
+  });
+
+  it('rejects oversized canonical content instead of truncating it', async () => {
+    await createCloudAgent();
+    sqlite.prepare('UPDATE tasks SET description = ? WHERE id = ?')
+      .run('x'.repeat(64 * 1024 + 1), 'task-github');
+
+    await expect(delegation.previewTaskDelegation({
+      taskId: 'task-github',
+      agentId: 'github-cloud',
+      operationId: 'oversized-context',
+      repository: 'octo/source',
+      instruction: 'Fix the parser',
+      allowedActions: ['write_code'],
+    })).rejects.toMatchObject({
+      code: 'PAYLOAD_TOO_LARGE',
+      status: 413,
+    });
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
+      .toEqual({ count: 0 });
   });
 
   it('returns the latest assignment for every requested task despite skewed history', async () => {

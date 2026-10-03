@@ -133,6 +133,27 @@ async function createPaperclipAgent() {
   }
 }
 
+async function createScoutPullAgent() {
+  return registry.createExternalAgent({
+    id: 'scout-pull-worker-scout-primary',
+    name: 'Microsoft Scout work pickup',
+    type: 'pull-queue',
+    authType: 'bearer',
+    credential: 'managed-scout-worker-secret',
+    capabilities: {
+      canProposeTasks: true,
+      canProposePhases: true,
+      canPerformM365Actions: true,
+    },
+    dataPolicy: {
+      allowedClassifications: ['standard', 'restricted'],
+      fieldAllowlist: policyFields,
+      retentionDays: 30,
+      maxRequestsPerMinute: 30,
+    },
+  });
+}
+
 beforeAll(async () => {
   const databaseModule = await import('@/db');
   await (await import('@/db/runtime')).initializeRuntimeDatabase();
@@ -271,7 +292,11 @@ describe('provider-neutral task delegation API', () => {
   });
 
   it('returns configured typed destinations with exact repository and route bindings', async () => {
-    await Promise.all([createCloudAgent(), createPaperclipAgent()]);
+    await Promise.all([
+      createCloudAgent(),
+      createPaperclipAgent(),
+      createScoutPullAgent(),
+    ]);
 
     const response = await bulkRoute.GET(new Request(
       'http://localhost/api/tasks/delegation?taskId=task-github&taskId=task-local',
@@ -279,7 +304,7 @@ describe('provider-neutral task delegation API', () => {
     expect(response.status).toBe(200);
     const context = await response.json();
 
-    expect(context.targets).toHaveLength(2);
+    expect(context.targets).toHaveLength(3);
     expect(context.targets).toEqual(expect.arrayContaining([
       expect.objectContaining({
         id: 'github-cloud',
@@ -312,6 +337,23 @@ describe('provider-neutral task delegation API', () => {
           assigneeAgentId,
           requiredAdapterType: 'github-copilot-web',
         },
+      }),
+      expect.objectContaining({
+        id: 'scout-pull-worker-scout-primary',
+        type: 'pull-queue',
+        executionLocality: 'external',
+        allowedActions: expect.arrayContaining([
+          'propose_tasks',
+          'propose_phases',
+          'm365_actions',
+        ]),
+        eligibility: expect.arrayContaining([
+          expect.objectContaining({
+            taskId: 'task-local',
+            ready: true,
+            repositoryLocked: false,
+          }),
+        ]),
       }),
     ]));
   });

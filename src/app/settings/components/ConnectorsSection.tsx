@@ -7,7 +7,7 @@ import {
   Plug, RefreshCw, ChevronRight, Trash2, Loader2, Shield, Circle,
   Plus, AlertTriangle, FolderOpen, Zap, Save, Activity,
   Clock, Check, CheckCircle2, X, XCircle, RotateCcw,
-  Eye, EyeOff, History,
+  Eye, EyeOff, History, Bot, Copy, Power,
 } from 'lucide-react';
 import {
   Select,
@@ -374,6 +374,16 @@ function ScoutEditPanel({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [saveError, setSaveError] = useState('');
+  const [worker, setWorker] = useState<{
+    id: string;
+    name: string;
+    enabled: boolean;
+  } | null>(null);
+  const [workerLoading, setWorkerLoading] = useState(true);
+  const [workerBusy, setWorkerBusy] = useState(false);
+  const [workerError, setWorkerError] = useState('');
+  const [setupPrompt, setSetupPrompt] = useState('');
+  const [promptCopied, setPromptCopied] = useState(false);
 
   const mcpSnippet = JSON.stringify({
     'mission-control': {
@@ -407,6 +417,28 @@ function ScoutEditPanel({
     return () => { cancelled = true; };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/scout/worker?connectorId=${encodeURIComponent(connector.id)}`)
+      .then(async response => {
+        const body = await response.json() as {
+          worker?: { id: string; name: string; enabled: boolean } | null;
+          error?: string;
+        };
+        if (!response.ok) throw new Error(body.error || 'Failed to load Scout work pickup');
+        if (!cancelled) setWorker(body.worker ?? null);
+      })
+      .catch(error => {
+        if (!cancelled) {
+          setWorkerError(error instanceof Error ? error.message : 'Failed to load Scout work pickup');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setWorkerLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [connector.id]);
+
   function updateDraft(updates: Partial<ScoutConnectorSettings>) {
     setDraft(current => ({ ...current, ...updates }));
     setDirty(true);
@@ -439,6 +471,72 @@ function ScoutEditPanel({
       setSaveError(error instanceof Error ? error.message : 'Failed to save Scout settings');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function configureWorker(action: 'generate-setup' | 'show-setup') {
+    setWorkerBusy(true);
+    setWorkerError('');
+    setSetupPrompt('');
+    try {
+      const response = await fetch('/api/scout/worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connectorId: connector.id,
+          action,
+        }),
+      });
+      const body = await response.json() as {
+        worker?: { id: string; name: string; enabled: boolean };
+        setupPrompt?: string;
+        error?: string;
+      };
+      if (!response.ok || !body.worker || !body.setupPrompt) {
+        throw new Error(body.error || 'Failed to load the Scout setup prompt');
+      }
+      setWorker(body.worker);
+      setSetupPrompt(body.setupPrompt);
+    } catch (error) {
+      setWorkerError(error instanceof Error ? error.message : 'Failed to load the Scout setup prompt');
+    } finally {
+      setWorkerBusy(false);
+    }
+  }
+
+  async function disableWorker() {
+    setWorkerBusy(true);
+    setWorkerError('');
+    try {
+      const response = await fetch('/api/scout/worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connectorId: connector.id,
+          action: 'disable',
+        }),
+      });
+      const body = await response.json() as {
+        worker?: { id: string; name: string; enabled: boolean } | null;
+        error?: string;
+      };
+      if (!response.ok) throw new Error(body.error || 'Failed to disable Scout work pickup');
+      setWorker(body.worker ?? null);
+      setSetupPrompt('');
+    } catch (error) {
+      setWorkerError(error instanceof Error ? error.message : 'Failed to disable Scout work pickup');
+    } finally {
+      setWorkerBusy(false);
+    }
+  }
+
+  async function copySetupPrompt() {
+    try {
+      await navigator.clipboard.writeText(setupPrompt);
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 2000);
+    } catch {
+      setWorkerError('The setup prompt could not be copied. Select the prompt and copy it manually.');
     }
   }
 
@@ -626,6 +724,125 @@ function ScoutEditPanel({
           </div>
         </div>
       </div>
+
+      <section className="mt-6 border-t border-[var(--border-subtle)] pt-5" aria-labelledby="scout-work-pickup-heading">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <div className="flex items-center gap-2">
+              <span className="grid h-8 w-8 place-items-center rounded-lg bg-[var(--surface-2)] text-[var(--text-secondary)]">
+                <Bot size={15} />
+              </span>
+              <div>
+                <h4 id="scout-work-pickup-heading" className="text-sm font-semibold text-[var(--text-primary)]">
+                  Delegated work pickup
+                </h4>
+                <p className="mt-0.5 text-xs leading-5 text-[var(--text-muted)]">
+                  Let a scheduled Scout automation claim confirmed work from Mission Control.
+                  Pickup happens on Scout&apos;s schedule, not immediately.
+                </p>
+              </div>
+            </div>
+          </div>
+          {workerLoading ? (
+            <span className="inline-flex min-h-9 items-center gap-2 text-xs text-[var(--text-muted)]">
+              <Loader2 size={13} className="animate-spin" />
+              Checking worker
+            </span>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {worker?.enabled && (
+                <button
+                  type="button"
+                  disabled={workerBusy}
+                  onClick={() => void configureWorker('show-setup')}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-3 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:opacity-50"
+                >
+                  {workerBusy ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
+                  Show setup prompt
+                </button>
+              )}
+              {worker?.enabled && (
+                <button
+                  type="button"
+                  disabled={workerBusy}
+                  onClick={() => void disableWorker()}
+                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+                >
+                  <Power size={13} />
+                  Disable pickup
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={workerBusy}
+                onClick={() => void configureWorker('generate-setup')}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)] disabled:opacity-50"
+              >
+                {workerBusy ? <Loader2 size={13} className="animate-spin" /> : <Bot size={13} />}
+                {worker?.enabled ? 'Rotate credential' : 'Generate setup prompt'}
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-1 font-medium ${
+            worker?.enabled
+              ? 'border-emerald-800/50 bg-emerald-900/20 text-emerald-300'
+              : 'border-[var(--border)] bg-[var(--surface-1)] text-[var(--text-muted)]'
+          }`}>
+            <Circle size={7} fill="currentColor" />
+            {worker?.enabled ? 'Available for delegation' : 'Not configured'}
+          </span>
+          {worker?.enabled && (
+            <span className="text-[var(--text-muted)]">
+              Expected pickup: within 15 minutes after Scout setup. Mission Control
+              cannot verify the automation until it claims work.
+            </span>
+          )}
+        </div>
+
+        {setupPrompt && (
+          <div className="mt-4 rounded-xl border border-[var(--border)] bg-[var(--surface-1)] p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold text-[var(--text-secondary)]">Scout automation setup prompt</p>
+                <p className="mt-0.5 text-[11px] text-amber-300">
+                  Contains a private worker credential. Hide it when you are finished.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSetupPrompt('')}
+                  className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                >
+                  <EyeOff size={13} />
+                  Hide
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void copySetupPrompt()}
+                  className="inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-lg border border-[var(--border)] px-3 text-xs font-medium text-[var(--text-secondary)] hover:bg-[var(--surface-2)]"
+                >
+                  {promptCopied ? <Check size={13} /> : <Copy size={13} />}
+                  {promptCopied ? 'Copied' : 'Copy prompt'}
+                </button>
+              </div>
+            </div>
+            <textarea
+              readOnly
+              value={setupPrompt}
+              aria-label="Scout automation setup prompt"
+              className="mt-3 min-h-64 w-full resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3 font-mono text-xs leading-5 text-[var(--text-secondary)] outline-none selection:bg-[var(--accent-500)]/30"
+            />
+          </div>
+        )}
+
+        {workerError && (
+          <p role="alert" className="mt-3 text-xs text-red-400">{workerError}</p>
+        )}
+      </section>
 
       {/* Footer */}
       <div className="mt-4 pt-3 border-t border-[var(--border-subtle)] flex items-center justify-between">

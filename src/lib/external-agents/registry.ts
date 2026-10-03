@@ -48,6 +48,7 @@ export interface ExternalAgentInput {
 }
 
 const MANAGED_GITHUB_CREDENTIAL = 'mission-control:github-user';
+const MANAGED_AGENT_CREDENTIAL = 'mission-control:external-agent';
 
 const TYPE_DEFAULTS: Record<
   ExternalAgentType,
@@ -321,7 +322,10 @@ export function publicExternalAgent(agent: ExternalAgent) {
   return {
     ...safe,
     hasCredentialReference: Boolean(agent.authCredentialRef),
-    credentialSource: agent.authCredentialRef === MANAGED_GITHUB_CREDENTIAL
+    credentialSource: (
+      agent.authCredentialRef === MANAGED_GITHUB_CREDENTIAL
+      || agent.authCredentialRef === MANAGED_AGENT_CREDENTIAL
+    )
       ? 'mission-control'
       : 'deployment-secret',
   };
@@ -342,7 +346,7 @@ export async function createExternalAgent(input: ExternalAgentInput) {
   const credential = managedCredential(input, input.type);
   const values = validateExternalAgentInput({
     ...input,
-    ...(credential ? { authCredentialRef: MANAGED_GITHUB_CREDENTIAL } : {}),
+    ...(credential ? { authCredentialRef: managedCredentialReference(input.type) } : {}),
   });
   await validateProviderConnection(values, credential);
   return (await getExternalAgentControlPersistence()).registry.create({
@@ -357,10 +361,11 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
   const existing = await getExternalAgent(id);
   if (!existing) throw new ExternalAgentError('External agent not found', 'NOT_FOUND', 404);
   const credential = managedCredential(patch, patch.type ?? existing.type);
+  const type = patch.type ?? existing.type;
   const values = validateExternalAgentInput({
     ...existing,
     ...patch,
-    ...(credential ? { authCredentialRef: MANAGED_GITHUB_CREDENTIAL } : {}),
+    ...(credential ? { authCredentialRef: managedCredentialReference(type) } : {}),
     id,
     dataPolicy: patch.dataPolicy
       ? { ...existing.dataPolicy, ...patch.dataPolicy }
@@ -380,8 +385,8 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
   }
   const credentialUpdate = credential
     ?? (
-      existing.authCredentialRef === MANAGED_GITHUB_CREDENTIAL
-      && values.authCredentialRef !== MANAGED_GITHUB_CREDENTIAL
+      isManagedCredentialReference(existing.authCredentialRef)
+      && !isManagedCredentialReference(values.authCredentialRef)
         ? null
         : undefined
     );
@@ -433,6 +438,15 @@ export function resolveAgentCredential(reference: string | null): string | null 
   return value;
 }
 
+export async function resolveExternalAgentCredential(
+  agent: ExternalAgent,
+): Promise<string | null> {
+  if (isManagedCredentialReference(agent.authCredentialRef)) {
+    return (await getExternalAgentControlPersistence()).registry.getCredential(agent.id);
+  }
+  return resolveAgentCredential(agent.authCredentialRef);
+}
+
 export async function resolveGitHubAgentCredential(agent: ExternalAgent): Promise<string> {
   if (agent.type !== 'copilot-cloud') {
     throw new ExternalAgentError(
@@ -470,14 +484,25 @@ function managedCredential(
   type: ExternalAgentType,
 ): string | null {
   const credential = optionalText(input.credential, 'credential');
-  if (credential && type !== 'copilot-cloud') {
+  if (credential && type !== 'copilot-cloud' && type !== 'pull-queue') {
     throw new ExternalAgentError(
-      'Direct credentials are only supported for GitHub Copilot Cloud destinations',
+      'Direct credentials are only supported for GitHub Copilot Cloud and pull-queue destinations',
       'EXECUTION_BOUNDARY_MISMATCH',
       422,
     );
   }
   return credential;
+}
+
+function managedCredentialReference(type: ExternalAgentType) {
+  return type === 'copilot-cloud'
+    ? MANAGED_GITHUB_CREDENTIAL
+    : MANAGED_AGENT_CREDENTIAL;
+}
+
+function isManagedCredentialReference(reference: string | null) {
+  return reference === MANAGED_GITHUB_CREDENTIAL
+    || reference === MANAGED_AGENT_CREDENTIAL;
 }
 
 async function validateProviderConnection(

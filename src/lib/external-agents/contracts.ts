@@ -59,6 +59,7 @@ export interface ExternalAgentCapabilities {
   canCreatePullRequest?: boolean;
   canProposeTasks?: boolean;
   canProposePhases?: boolean;
+  canPerformM365Actions?: boolean;
 }
 
 export interface ExternalAgentDataPolicy {

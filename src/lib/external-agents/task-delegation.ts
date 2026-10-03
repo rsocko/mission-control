@@ -18,7 +18,7 @@ import {
 import {
   getExternalAgent,
   listExternalAgents,
-  resolveAgentCredential,
+  resolveExternalAgentCredential,
   resolveGitHubAgentCredential,
 } from './registry';
 import {
@@ -37,6 +37,7 @@ const CAPABILITY_ACTIONS: Array<[keyof ExternalAgentCapabilities, string]> = [
   ['canCreatePullRequest', 'create_pull_request'],
   ['canProposeTasks', 'propose_tasks'],
   ['canProposePhases', 'propose_phases'],
+  ['canPerformM365Actions', 'm365_actions'],
 ];
 
 const ACTIVE_STATUSES: AgentDispatchStatus[] = [
@@ -57,6 +58,7 @@ const RETRYABLE_STATUSES: AgentDispatchStatus[] = [
 const SUPPORTED_TARGET_TYPES = new Set<ExternalAgentType>([
   'copilot-cloud',
   'paperclip',
+  'pull-queue',
 ]);
 
 type SnapshotTask = AgentPayloadSnapshot['tasks'][number];
@@ -385,7 +387,8 @@ async function credentialBlocker(agent: Awaited<ReturnType<typeof getExternalAge
     if (agent.type === 'copilot-cloud') {
       await resolveGitHubAgentCredential(agent);
     } else {
-      resolveAgentCredential(agent.authCredentialRef);
+      const credential = await resolveExternalAgentCredential(agent);
+      if (!credential) return 'Execution credential is unavailable';
     }
     return null;
   } catch (error) {

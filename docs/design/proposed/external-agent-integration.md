@@ -344,6 +344,17 @@ Or open VS Code with a pre-filled Copilot prompt via `vscode://` URI.
 This transport is preferred over a GitHub issue bridge for Scout because
 business M365 payloads should not be copied into a code-hosting work item.
 
+Scout setup provisions this as a second role linked to the existing Scout
+connector. The connector remains the inbound task source; the worker is an
+independently enabled execution destination with its own managed credential,
+disclosure policy, and audit history. Its dedicated MCP endpoint exposes only
+claim, progress, complete, and fail tools. Mission Control generates a setup
+prompt that instructs Scout to create the scheduled pickup automation and
+connect that endpoint without granting access to the general MC MCP tool
+surface. The user can explicitly reveal the prompt again from Scout settings;
+ordinary status reads never return its credential. Credential rotation remains
+a separate action because it invalidates an existing automation.
+
 ##### GitHub Copilot app pull-worker profile
 
 Issue #1519 tracks a developer-workstation coding profile that reuses this

@@ -10,6 +10,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CloudCog,
+  Clock,
   Loader2,
   Lock,
   Paperclip,
@@ -75,11 +76,14 @@ async function responseError(response: Response) {
 }
 
 function destinationIcon(type: TaskDelegationTarget['type']) {
-  return type === 'copilot-cloud' ? <CloudCog size={18} /> : <Paperclip size={18} />;
+  if (type === 'copilot-cloud') return <CloudCog size={18} />;
+  if (type === 'pull-queue') return <Bot size={18} />;
+  return <Paperclip size={18} />;
 }
 
 function targetSubtitle(target: TaskDelegationTarget) {
   if (target.type === 'copilot-cloud') return 'Direct GitHub-hosted Agent Task';
+  if (target.type === 'pull-queue') return 'Scheduled pickup from Mission Control';
   return 'Configured Paperclip execution route';
 }
 
@@ -489,7 +493,7 @@ function DestinationStep({
           No execution destinations configured
         </p>
         <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Add GitHub Copilot Cloud or a Paperclip route before delegating work.
+          Add GitHub Copilot Cloud, a Paperclip route, or enable Scout work pickup before delegating work.
         </p>
         <Link
           href="/settings/ai-provider?setting=Execution%20Destinations"
@@ -643,6 +647,7 @@ function ConfigureStep({
                 ].join(', ')}
               </div>
             )}
+
             <p className="mt-1.5 flex gap-1.5 text-[11px] leading-relaxed text-[var(--text-muted)]">
               <Lock size={12} className="mt-0.5 shrink-0" />
               GitHub-origin tasks stay locked to their source repository.
@@ -686,6 +691,13 @@ function ConfigureStep({
             />
           </label>
         </section>
+      )}
+
+      {target.type === 'pull-queue' && (
+        <div className="flex gap-2 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+          <Clock size={14} className="mt-0.5 shrink-0 text-[var(--text-muted)]" />
+          This work stays queued until the destination&apos;s scheduled automation checks Mission Control.
+        </div>
       )}
 
       <label className="block text-xs font-medium text-[var(--text-secondary)]">
@@ -883,7 +895,7 @@ function ReviewStep({
       )}
       <div className="flex gap-2 rounded-lg border border-[var(--accent-500)]/25 bg-[var(--accent-500)]/8 px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)]">
         <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
-        Nothing has been sent to the destination. Confirming creates one provider task per ready Mission Control task.
+        Nothing has been sent to the destination. Confirming creates one durable assignment per ready Mission Control task.
       </div>
     </div>
   );

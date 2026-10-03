@@ -13,6 +13,7 @@ import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
   assertClassificationAllowed,
+  assertRichTaskContextAllowed,
   resolveDispatchClassification,
 } from './policy';
 import {
@@ -76,6 +77,8 @@ export interface TaskDelegationEligibility {
   blocker: string | null;
   repository: string | null;
   repositoryLocked: boolean;
+  errorCode?: string;
+  statusCode?: number;
 }
 
 export interface TaskDelegationTarget {
@@ -83,6 +86,7 @@ export interface TaskDelegationTarget {
   name: string;
   type: ExternalAgentType;
   description: string | null;
+  alwaysInstructions: string;
   executionLocality: ExternalAgentLocality;
   allowedActions: string[];
   hasCredential: boolean;
@@ -395,6 +399,7 @@ async function credentialBlocker(agent: Awaited<ReturnType<typeof getExternalAge
 
 function eligibilityFor(
   task: SnapshotTask,
+  disclosedConnectorTypes: string[],
   target: Awaited<ReturnType<typeof listExternalAgents>>[number],
   activeTaskIds: Set<string>,
   credentialError: string | null,
@@ -409,7 +414,7 @@ function eligibilityFor(
   } else if (credentialError) {
     blocker = credentialError;
   } else {
-    const classification = resolveDispatchClassification([task.connectorType]);
+    const classification = resolveDispatchClassification(disclosedConnectorTypes);
     try {
       assertClassificationAllowed(
         classification,
@@ -418,6 +423,15 @@ function eligibilityFor(
       );
     } catch (error) {
       blocker = error instanceof Error ? error.message : 'Task data policy blocks this destination';
+    }
+  }
+  if (!blocker && (target.type === 'copilot-cloud' || target.type === 'paperclip')) {
+    try {
+      assertRichTaskContextAllowed(target.dataPolicy);
+    } catch (error) {
+      blocker = error instanceof Error
+        ? error.message
+        : 'Destination disclosure policy is missing required task context';
     }
   }
   if (!blocker && target.type === 'copilot-cloud') {
@@ -442,9 +456,19 @@ export async function getTaskDelegationContext(
   taskIdsInput: string | string[],
 ): Promise<TaskDelegationContext> {
   const taskIds = typeof taskIdsInput === 'string' ? [taskIdsInput] : taskIdsInput;
-  const snapshot = await taskSnapshot(taskIds);
-  await expireDispatches();
   const persistence = await getExternalAgentControlPersistence();
+  const [snapshot, payloadSnapshot] = await Promise.all([
+    taskSnapshot(taskIds),
+    persistence.payloads.snapshot({ taskIds }),
+  ]);
+  const connectorTypesByTask = new Map(payloadSnapshot.tasks.map((task) => [
+    task.id,
+    [
+      task.connectorType,
+      ...task.subtasks.map((subtask) => subtask.connectorType),
+    ],
+  ]));
+  await expireDispatches();
   let dispatches = await persistence.dispatches.list({
     taskIds,
     limit: Math.min(taskIds.length * 10, 500),
@@ -494,6 +518,7 @@ export async function getTaskDelegationContext(
       name: target.name,
       type: target.type,
       description: target.description,
+      alwaysInstructions: target.providerConfig.alwaysInstructions ?? '',
       executionLocality: target.executionLocality,
       allowedActions: allowedActions(target.capabilities),
       hasCredential: credentialError === null,
@@ -508,6 +533,7 @@ export async function getTaskDelegationContext(
       repositories: target.type === 'copilot-cloud' ? repositories : [],
       eligibility: snapshot.tasks.map((task) => eligibilityFor(
         task,
+        connectorTypesByTask.get(task.id) ?? [task.connectorType],
         target,
         activeTaskIds,
         credentialError,
@@ -673,9 +699,6 @@ export async function previewTaskDelegation(input: TaskDelegationPreviewInput) {
         createPullRequest,
       }
       : { taskIds: [input.taskId] },
-    dataClassification: resolveDispatchClassification([
-      context.tasks.find(({ id }) => id === input.taskId)!.connectorType,
-    ]),
     allowedActions: requested,
     idempotencyKey,
     callbackBaseUrl: input.callbackBaseUrl,

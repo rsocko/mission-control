@@ -378,6 +378,7 @@ describe('TaskDelegationDialog', () => {
               previewHash: 'preview-1',
               disclosedFields: ['tasks.title'],
               allowedActions: ['write_code'],
+              payloadPreview: { tasks: [{ id: 'task-1', title: 'First task' }] },
             },
             {
               taskId: 'task-2',
@@ -385,6 +386,7 @@ describe('TaskDelegationDialog', () => {
               previewHash: 'preview-2',
               disclosedFields: ['tasks.title'],
               allowedActions: ['write_code'],
+              payloadPreview: { tasks: [{ id: 'task-2', title: 'Second task' }] },
             },
           ],
           blocked: [],
@@ -408,7 +410,7 @@ describe('TaskDelegationDialog', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Delegate 2 tasks' });
     await within(dialog).findByRole('radio', { name: /GitHub Copilot Cloud/ });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
-    fireEvent.change(within(dialog).getByLabelText('Instruction'), {
+    fireEvent.change(within(dialog).getByLabelText('Per-dispatch instructions'), {
       target: { value: 'Implement both tasks' },
     });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Review 2 delegations' }));
@@ -490,7 +492,7 @@ describe('TaskDelegationDialog', () => {
     expect(within(dialog).getByRole('radio', { name: /GitHub Copilot Cloud/ })).toBeChecked();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
 
-    fireEvent.change(within(dialog).getByLabelText('Instruction'), {
+    fireEvent.change(within(dialog).getByLabelText('Per-dispatch instructions'), {
       target: { value: 'Implement and test the parser fix' },
     });
     expect(fetcher).not.toHaveBeenCalledWith(

@@ -54,6 +54,7 @@ function dispatch() {
     attempt: 1,
     payload: {
       instruction: 'Fix the failing parser',
+      alwaysInstructions: 'Run focused tests before handoff.',
       repository: {
         fullName: 'octo/example',
         defaultBranch: 'main',
@@ -67,6 +68,16 @@ function dispatch() {
       dispatchId: 'dispatch-123',
       dataClassification: 'standard',
       allowedActions: ['write_code', 'create_pull_request'],
+      tasks: [{
+        id: 'task-1',
+        title: 'Fix the parser',
+        sourceIssue: {
+          type: 'github-issue',
+          repository: 'octo/example',
+          issueNumber: 42,
+          url: 'https://github.com/octo/example/issues/42',
+        },
+      }],
     },
   };
 }
@@ -141,6 +152,9 @@ describe('GitHub Copilot cloud agent adapter', () => {
       String(input).endsWith('/tasks') && init?.method === 'POST')).toHaveLength(1);
     expect(storedPrompt).toContain('Mission Control dispatch dispatch-123');
     expect(storedPrompt).toContain('"fullName":"octo/example"');
+    expect(storedPrompt).toContain('"alwaysInstructions":"Run focused tests before handoff."');
+    expect(storedPrompt).toContain('"sourceIssue":{"issueNumber":42');
+    expect(storedPrompt).not.toContain('user-token');
     expect(storedBody).toMatchObject({
       base_ref: 'main',
       model: 'gpt-5.4',

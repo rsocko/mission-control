@@ -69,6 +69,7 @@ interface DestinationForm {
   projectId: string;
   assigneeAgentId: string;
   requiredAdapterType: string;
+  alwaysInstructions: string;
   capabilities: ExternalAgentCapabilities;
   allowedClassifications: AgentDataClassification[];
   enabled: boolean;
@@ -153,6 +154,7 @@ function emptyForm(type: DestinationType): DestinationForm {
     projectId: '',
     assigneeAgentId: '',
     requiredAdapterType: '',
+    alwaysInstructions: '',
     capabilities: DEFAULT_CAPABILITIES[type],
     allowedClassifications: ['standard'],
     enabled: true,
@@ -174,6 +176,7 @@ function editForm(destination: ExecutionDestination): DestinationForm {
     projectId: paperclip?.projectId ?? '',
     assigneeAgentId: paperclip?.assigneeAgentId ?? '',
     requiredAdapterType: paperclip?.requiredAdapterType ?? '',
+    alwaysInstructions: destination.providerConfig.alwaysInstructions ?? '',
     capabilities: destination.capabilities,
     allowedClassifications: destination.dataPolicy.allowedClassifications,
     enabled: destination.enabled,
@@ -308,6 +311,9 @@ export function ExecutionDestinationsSection() {
         : {}),
       providerConfig: form.type === 'paperclip'
         ? {
+          ...(form.alwaysInstructions.trim()
+            ? { alwaysInstructions: form.alwaysInstructions.trim() }
+            : {}),
           paperclip: {
             companyId: form.companyId.trim(),
             assigneeAgentId: form.assigneeAgentId.trim(),
@@ -317,7 +323,11 @@ export function ExecutionDestinationsSection() {
               : {}),
           },
         }
-        : {},
+        : {
+          ...(form.alwaysInstructions.trim()
+            ? { alwaysInstructions: form.alwaysInstructions.trim() }
+            : {}),
+        },
       capabilities: form.capabilities,
       dataPolicy: {
         allowedClassifications: form.allowedClassifications,
@@ -692,6 +702,22 @@ export function ExecutionDestinationsSection() {
               value={form.description}
               onChange={(event) => updateForm({ description: event.target.value })}
               placeholder="When should this destination be used?"
+              className="input-glow w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+            />
+          </Field>
+
+          <Field
+            label="Always instructions"
+            htmlFor="destination-always-instructions"
+            hint="Server-owned instructions applied to every eligible dispatch. They are shown again in disclosure review before confirmation."
+          >
+            <textarea
+              id="destination-always-instructions"
+              rows={5}
+              maxLength={16_000}
+              value={form.alwaysInstructions}
+              onChange={(event) => updateForm({ alwaysInstructions: event.target.value })}
+              placeholder="Standards, validation, or handoff requirements for every dispatch to this destination."
               className="input-glow w-full resize-y rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
             />
           </Field>

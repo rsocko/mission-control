@@ -157,7 +157,11 @@ function KanbanPageInner() {
 
       {bulk.bulkMode && (
         <div className="mb-3">
-          <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+          <BulkActionBar
+            selectedCount={bulk.bulkSelected.size}
+            taskIds={Array.from(bulk.bulkSelected)}
+            onCancel={bulk.clearSelection}
+          >
             {columnsState.columns.length > 0 && (
               <Select
                 value=""

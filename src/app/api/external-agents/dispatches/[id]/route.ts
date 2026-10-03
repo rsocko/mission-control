@@ -5,6 +5,7 @@ import {
   markDispatchWaiting,
   reconcileDispatch,
   retryDispatch,
+  stopTrackingDispatch,
   reviewDispatchResult,
 } from '@/lib/external-agents/service';
 import {
@@ -37,13 +38,23 @@ export async function PATCH(request: Request, { params }: Context) {
     requireTrustedMutation(request);
     const id = (await params).id;
     const body = await request.json() as {
-      action: 'cancel' | 'retry' | 'waiting_for_user' | 'accept' | 'reject' | 'partial';
+      action:
+        | 'cancel'
+        | 'stop_tracking'
+        | 'retry'
+        | 'waiting_for_user'
+        | 'accept'
+        | 'reject'
+        | 'partial';
       detail?: Record<string, unknown>;
     };
     let manualUrl: string | undefined;
     switch (body.action) {
       case 'cancel':
         await cancelDispatch(id);
+        break;
+      case 'stop_tracking':
+        await stopTrackingDispatch(id);
         break;
       case 'retry':
         ({ manualUrl } = await retryDispatch(id));

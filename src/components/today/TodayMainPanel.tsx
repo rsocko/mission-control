@@ -775,7 +775,11 @@ export function TodayMainPanel({
                 </div>
               )}
               {bulk.bulkMode && (
-                <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+                <BulkActionBar
+                  selectedCount={bulk.bulkSelected.size}
+                  taskIds={Array.from(bulk.bulkSelected)}
+                  onCancel={bulk.clearSelection}
+                >
                   <button
                     disabled={Boolean(bulkStatusBlockedReason)}
                     title={bulkStatusBlockedReason}

@@ -10,6 +10,7 @@ import type {
   TaskItem,
   TaskSourceModel,
 } from '@/types';
+import type { TaskDelegationSummary } from '@/lib/external-agents/task-delegation';
 
 export type TaskTagDto = Pick<Tag, 'id' | 'name' | 'slug'> & {
   type: string;
@@ -76,6 +77,7 @@ export type TaskListItemDto = TaskListDomainFields & {
   editPolicy: TaskEditPolicy;
   syncStatus?: string;
   pushRetryCount?: number;
+  delegation?: TaskDelegationSummary | null;
 };
 
 export interface TaskListStatsDto {

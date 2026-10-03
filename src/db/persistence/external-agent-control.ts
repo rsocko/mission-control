@@ -78,6 +78,7 @@ export interface ExternalAgentControlPersistence {
     list(options?: {
       status?: AgentDispatchStatus;
       agentId?: string;
+      taskIds?: string[];
       limit?: number;
     }): Promise<AgentDispatchRecord[]>;
     findPreview(agentId: string, idempotencyKey: string): Promise<{

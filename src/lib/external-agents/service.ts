@@ -249,7 +249,11 @@ async function loadPayloadSource(
         model: scope.model,
         createPullRequest: scope.createPullRequest,
       },
-      tasks: snapshot.tasks.map(({ connectorType: _connectorType, ...task }) => task),
+      tasks: snapshot.tasks.map(({
+        connectorType: _connectorType,
+        sourceId: _sourceId,
+        ...task
+      }) => task),
       phases: snapshot.phases,
       callbackUrl: callbackBaseUrl && agent.inboundWebhookId
         ? `${callbackBaseUrl.replace(/\/$/, '')}/api/inbound-webhooks/${encodeURIComponent(agent.inboundWebhookId)}/receive`
@@ -785,10 +789,28 @@ export async function cancelDispatch(id: string) {
     );
     return provider.status === 'cancelled';
   }
+
   if (agent?.type === 'copilot-cloud' && dispatch.providerTaskId) {
     throw new ExternalAgentError(
       'GitHub Agent Tasks does not currently expose task cancellation; the provider task remains active',
       'CANCELLATION_UNSUPPORTED',
+      409,
+    );
+  }
+  return (await getExternalAgentControlPersistence()).dispatches.cancel(
+    id,
+    new Date().toISOString(),
+  );
+}
+
+export async function stopTrackingDispatch(id: string) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  if (agent?.type !== 'copilot-cloud' || !dispatch.providerTaskId) {
+    throw new ExternalAgentError(
+      'Stop tracking is only available for active GitHub Agent Tasks',
+      'INVALID_TRANSITION',
       409,
     );
   }

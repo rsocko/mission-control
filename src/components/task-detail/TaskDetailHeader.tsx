@@ -1,13 +1,15 @@
 'use client';
 
 import Image from 'next/image';
-import { Columns3, Maximize2, Minimize2, X } from 'lucide-react';
+import { Columns3, Maximize2, Minimize2, Send, X } from 'lucide-react';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { openTaskDelegation } from '@/components/task-delegation/events';
 import { cn } from '@/lib/utils';
 import type { TaskDetailMode } from './task-detail-types';
 
 export interface TaskDetailHeaderProps {
   mode: TaskDetailMode;
+  taskId: string;
   /** Connector icon path, or null when the connector has no icon. */
   iconSrc: string | null;
   connectorType: string;
@@ -36,6 +38,7 @@ export interface TaskDetailHeaderProps {
 /** Task identity, mode affordances, and inline title editing. */
 export function TaskDetailHeader({
   mode,
+  taskId,
   iconSrc,
   connectorType,
   sourceListName,
@@ -71,6 +74,17 @@ export function TaskDetailHeader({
           </span>
         </div>
         <div className="flex items-center gap-1 flex-shrink-0">
+          <Tooltip content="Delegate task">
+            <button
+              type="button"
+              onClick={() => openTaskDelegation([taskId])}
+              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
+              aria-label="Delegate task"
+            >
+              <Send size={14} />
+              <span className="hidden sm:inline">Delegate</span>
+            </button>
+          </Tooltip>
           {onModeChange && mode !== 'mobile' && mode !== 'panel' && (
             <Tooltip content="Pin to side panel">
               <button

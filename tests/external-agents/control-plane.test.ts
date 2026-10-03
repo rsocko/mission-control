@@ -303,6 +303,8 @@ describe('external-agent registry boundaries', () => {
       status: 409,
     });
     expect((await service.getDispatch(preview.id))?.status).toBe('in_progress');
+    await expect(service.stopTrackingDispatch(preview.id)).resolves.toBe(true);
+    expect((await service.getDispatch(preview.id))?.status).toBe('cancelled');
   });
 });
 

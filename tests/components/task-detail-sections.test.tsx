@@ -20,6 +20,7 @@ function renderWithTooltips(ui: React.ReactElement) {
 
 const headerProps = {
   mode: 'panel' as const,
+  taskId: 'task-42',
   iconSrc: null,
   connectorType: 'github-issues',
   sourceListName: null,

@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { listTaskDelegationSummaries } from '@/lib/external-agents/task-delegation';
 import { getOrInitializeConnector } from '@/lib/connectors/runtime';
 import { logWriteThrough } from '@/lib/sync/write-through-log';
 import { CAPABILITY_DEFAULTS } from '@/lib/connectors/capabilities';
@@ -245,7 +246,10 @@ export async function GET(request: Request) {
       for (const score of scoredRows) scoredById.set(score.taskId, score);
     }
 
-    const editPolicies = await resolveTaskEditPolicies(result, connectorEditPolicyContexts);
+    const [editPolicies, delegationSummaries] = await Promise.all([
+      resolveTaskEditPolicies(result, connectorEditPolicyContexts),
+      listTaskDelegationSummaries(result.map(({ id }) => id)),
+    ]);
     const smartScoreBudgetReached = sortBy === 'smartScore'
       && collection.total > SMART_SCORE_CANDIDATE_LIMIT;
     if (smartScoreBudgetReached) {
@@ -287,6 +291,7 @@ export async function GET(request: Request) {
           projectPhaseMemberships: task.projectPhaseMemberships,
           linkedSourceCount: task.linkedSourceCount || 0,
           editPolicy: requireTaskEditPolicy(editPolicies, task.id),
+          delegation: delegationSummaries.get(task.id) ?? null,
           ...(scored ? {
             smartScore: Number.isFinite(scored.score.total) ? scored.score.total : 0,
             scoreBreakdown: scored.score,

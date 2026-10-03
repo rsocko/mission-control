@@ -211,6 +211,7 @@ export interface AgentPayloadSnapshot {
   project?: { id: string; name: string; description: string | null };
   tasks: Array<{
     id: string;
+    sourceId: string | null;
     title: string;
     description: string | null;
     priority: string;

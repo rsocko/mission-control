@@ -25,6 +25,7 @@ import {
 import { createTaskRowInteractionHandlers } from '@/lib/tasks/task-row-interactions';
 import { extractRecurrenceFromMetadata } from '@/lib/utils/recurrence';
 import { cn } from '@/lib/utils';
+import { TaskDelegationBadge } from '@/components/task-list/TaskDelegationBadge';
 
 /**
  * Responsive visibility priority for task row attribute badges.
@@ -306,13 +307,18 @@ export function TaskRow({
         isDone={isDone}
         wrapTitle={wrapTitle}
         showSubtasks={false}
-        afterConnector={(task.linkedSourceCount ?? 0) > 0 ? (
-          <Tooltip content="Also tracked in another source">
-            <span className="flex shrink-0 items-center gap-0.5 rounded border border-cyan-800/30 bg-cyan-900/20 px-1 py-0.5 text-[10px] font-medium text-cyan-400">
-              <ArrowLeftRight size={9} />
-              <span className="hidden @lg:inline">linked</span>
-            </span>
-          </Tooltip>
+        afterConnector={(task.linkedSourceCount ?? 0) > 0 || task.delegation ? (
+          <span className="inline-flex min-w-0 items-center gap-1">
+            {(task.linkedSourceCount ?? 0) > 0 && (
+              <Tooltip content="Also tracked in another source">
+                <span className="flex shrink-0 items-center gap-0.5 rounded border border-cyan-800/30 bg-cyan-900/20 px-1 py-0.5 text-xs font-medium text-cyan-400">
+                  <ArrowLeftRight size={9} />
+                  <span className="hidden @lg:inline">linked</span>
+                </span>
+              </Tooltip>
+            )}
+            {task.delegation && <TaskDelegationBadge delegation={task.delegation} />}
+          </span>
         ) : null}
         secondary={!compact ? (
           <div className="mt-0.5 flex min-w-0 items-center gap-2 overflow-hidden">

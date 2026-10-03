@@ -532,44 +532,42 @@ Add an "External Agents" section to the AI page:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Dispatch Modal
+### Provider-neutral task delegation
 
-When the user clicks "Dispatch", a modal opens:
+**Delegate** is the stable task action. Configured GitHub Cloud and Paperclip
+routes are typed execution destinations; source connectors remain separate.
+The same centered wizard opens from the task-detail header, task-row context
+menu, and task bulk-action bars:
 
-```
-┌───────────────────────────────────────────────┐
-│  Dispatch to GitHub Copilot Coding Agent       │
-│                                                │
-│  Execution:                                    │
-│  ● GitHub-hosted cloud agent                   │
-│  ○ MC-hosted isolated workspace                │
-│  ○ Copilot app worker: Developer workstation   │
-│                                                │
-│  Instruction:                                  │
-│  ┌──────────────────────────────────────────┐  │
-│  │ Analyze the codebase and break down the  │  │
-│  │ auth migration into implementable tasks  │  │
-│  └──────────────────────────────────────────┘  │
-│                                                │
-│  Scope:                                        │
-│  ○ Project: Mission Control (23 tasks)         │
-│  ○ Selected tasks (4 selected)                 │
-│  ○ Repository: your-org/mission-control          │
-│                                                │
-│  Include:                                      │
-│  ☑ Current task list                           │
-│  ☑ Phase plan (if exists)                      │
-│  ☑ Repository context                          │
-│                                                │
-│  [Preview Payload]   [Cancel]   [Dispatch ▸]   │
-└───────────────────────────────────────────────┘
-```
+1. **Destination** selects one configured execution route.
+2. **Configure and eligibility** displays destination-specific inputs plus exact
+   ready and blocked tasks.
+3. **Review** materializes durable disclosure previews. No provider receives
+   task context until the user explicitly confirms those previews.
 
-### Context Actions (right-click / ⌘K)
+GitHub-origin tasks stay locked to their exact source repository. Other tasks
+may select only repositories discovered from enabled GitHub connectors.
+Paperclip company, project, assignee, and adapter fields are bound during route
+setup and remain read-only during delegation. Bulk delegation fans out to one
+durable assignment per eligible task and reports every blocked task instead of
+silently skipping it.
 
-From any task list, project view, or phase plan:
-- **"Send to agent…"** — opens dispatch modal with the current scope pre-filled
-- **"Copy as agent context"** — serializes to clipboard for manual paste into Copilot Chat, Claude, etc.
+After delegation, task rows show one compact state badge. Task details show the
+destination, locality, canonical state, latest progress or blocker, base ref,
+attempt, and best output link. **More details** opens a focused run dialog with
+timeline, execution facts, provider IDs, outputs, disclosure, attempts, errors,
+refresh, retry, and cancellation controls. GitHub Agent Tasks has no true
+cancellation API: Mission Control can stop tracking while provider work may
+continue.
+
+The approved interaction study is preserved as a behavioral reference in
+[Task delegation UX study](task-delegation.html). It is not runtime code or a
+pixel-exact specification.
+
+### Context actions (right-click / command palette)
+
+From a task row, **Delegate** opens the same protected wizard with the task
+already bound. Manual context export remains a separate workflow.
 
 ### Result Import (manual flow)
 

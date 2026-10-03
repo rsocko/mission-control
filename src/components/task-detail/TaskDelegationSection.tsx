@@ -3,20 +3,15 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import {
   AlertTriangle,
-  Ban,
-  Bot,
   CheckCircle2,
-  CirclePause,
-  Clock3,
   ExternalLink,
   GitBranch,
   GitCommit,
+  GitMerge,
   GitPullRequest,
   Loader2,
-  Play,
   RefreshCw,
   RotateCcw,
-  ShieldCheck,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
@@ -36,17 +31,17 @@ import type { TaskDetailMode } from './task-detail-types';
 const STATE_PRESENTATION: Record<TaskDelegationDisplayState, {
   label: string;
   className: string;
-  icon: typeof Clock3;
+  icon: typeof CheckCircle2;
 }> = {
-  preview: { label: 'Review', className: 'text-amber-300', icon: ShieldCheck },
-  queued: { label: 'Queued', className: 'text-slate-300', icon: Clock3 },
-  running: { label: 'Running', className: 'text-blue-300', icon: Play },
-  idle: { label: 'Idle', className: 'text-slate-300', icon: CirclePause },
-  waiting_for_user: { label: 'Waiting for you', className: 'text-amber-300', icon: CirclePause },
+  preview: { label: 'Review', className: 'text-amber-300', icon: CheckCircle2 },
+  queued: { label: 'Queued', className: 'text-slate-300', icon: Loader2 },
+  running: { label: 'Running', className: 'text-blue-300', icon: RefreshCw },
+  idle: { label: 'Idle', className: 'text-slate-300', icon: Loader2 },
+  waiting_for_user: { label: 'Waiting for you', className: 'text-amber-300', icon: Loader2 },
   blocked: { label: 'Blocked', className: 'text-orange-300', icon: AlertTriangle },
   failed: { label: 'Failed', className: 'text-red-300', icon: AlertTriangle },
-  timed_out: { label: 'Timed out', className: 'text-red-300', icon: Clock3 },
-  cancelled: { label: 'Cancelled', className: 'text-slate-300', icon: Ban },
+  timed_out: { label: 'Timed out', className: 'text-red-300', icon: AlertTriangle },
+  cancelled: { label: 'Cancelled', className: 'text-slate-300', icon: AlertTriangle },
   completed: { label: 'Completed', className: 'text-emerald-300', icon: CheckCircle2 },
 };
 
@@ -141,7 +136,7 @@ export function TaskDelegationSection({
     return () => window.removeEventListener(TASK_DELEGATION_UPDATED_EVENT, refresh);
   }, [load, taskId]);
 
-  const current = context?.assignments[0] ?? null;
+  const current = context?.assignments?.[0] ?? null;
   const relevantOutput = current ? outputLink(current) : null;
   const OutputIcon = relevantOutput?.icon;
 
@@ -160,7 +155,7 @@ export function TaskDelegationSection({
             id={`delegation-heading-${taskId}`}
             className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[var(--text-muted)]"
           >
-            <Bot size={14} className="text-[var(--accent-400)]" />
+            <GitMerge size={14} className="text-[var(--accent-400)]" />
             Delegation
           </h3>
           {!current && !loading && (
@@ -482,7 +477,7 @@ function TaskDelegationRunDialog({
                         onClick={() => void act('cancel')}
                         className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-red-500/30 px-3 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
                       >
-                        <Ban size={13} />
+                        <AlertTriangle size={13} />
                         Cancel
                       </button>
                     )}
@@ -493,7 +488,7 @@ function TaskDelegationRunDialog({
                         onClick={() => void act('stop_tracking')}
                         className="inline-flex min-h-9 items-center gap-1.5 rounded-md border border-amber-500/30 px-3 text-xs text-amber-200 hover:bg-amber-500/10 disabled:opacity-50"
                       >
-                        <Ban size={13} />
+                        <AlertTriangle size={13} />
                         Stop tracking
                       </button>
                     )}

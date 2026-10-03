@@ -13,10 +13,16 @@ import {
   Lock,
   Paperclip,
   Send,
-  ShieldCheck,
   X,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import type {
@@ -442,7 +448,7 @@ export function TaskDelegationDialog() {
                   onClick={() => void createPreviews()}
                   className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-[var(--accent-600)] px-4 text-xs font-medium text-white hover:bg-[var(--accent-500)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <ShieldCheck size={13} />}
+                  {submitting ? <Loader2 size={13} className="animate-spin" /> : <CheckCircle2 size={13} />}
                   Review {ready.length} delegation{ready.length === 1 ? '' : 's'}
                 </button>
               )}
@@ -608,19 +614,21 @@ function ConfigureStep({
               Repository
             </label>
             {needsRepository ? (
-              <select
-                id="delegation-repository"
+              <Select
                 value={repository}
-                onChange={(event) => onRepositoryChange(event.target.value)}
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 text-sm text-[var(--text-primary)]"
+                onValueChange={onRepositoryChange}
               >
-                <option value="">Choose a configured repository</option>
-                {target.repositories.map((option) => (
-                  <option key={option.repository} value={option.repository}>
-                    {option.repository} · {option.connectorName}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="delegation-repository" className="mt-1.5 w-full">
+                  <SelectValue placeholder="Choose a configured repository" />
+                </SelectTrigger>
+                <SelectContent>
+                  {target.repositories.map((option) => (
+                    <SelectItem key={option.repository} value={option.repository}>
+                      {option.repository} · {option.connectorName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             ) : (
               <div id="delegation-repository" className="mt-1.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] px-3 py-2 text-xs text-[var(--text-secondary)]">
                 {[
@@ -636,24 +644,30 @@ function ConfigureStep({
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="text-xs font-medium text-[var(--text-secondary)]">
               Base ref
-              <input
-                value={baseRef}
-                onChange={(event) => onBaseRefChange(event.target.value)}
-                maxLength={255}
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 text-sm text-[var(--text-primary)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-              />
+              <span className="input-glow mt-1.5 block rounded-lg border border-[var(--border)] bg-[var(--surface-0)]">
+                <input
+                  value={baseRef}
+                  onChange={(event) => onBaseRefChange(event.target.value)}
+                  maxLength={255}
+                  className="min-h-10 w-full bg-transparent px-3 text-sm text-[var(--text-primary)] outline-none"
+                />
+              </span>
             </label>
-            <label className="text-xs font-medium text-[var(--text-secondary)]">
+            <div className="text-xs font-medium text-[var(--text-secondary)]">
               Model
-              <select
-                value={model}
-                onChange={(event) => onModelChange(event.target.value)}
-                className="mt-1.5 min-h-10 w-full rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 text-sm text-[var(--text-primary)]"
+              <Select
+                value={model || '__auto__'}
+                onValueChange={(value) => onModelChange(value === '__auto__' ? '' : value)}
               >
-                <option value="">Auto</option>
-                <option value="gpt-5.3-codex">GPT-5.3-Codex</option>
-              </select>
-            </label>
+                <SelectTrigger aria-label="Model" className="mt-1.5 w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__auto__">Auto</SelectItem>
+                  <SelectItem value="gpt-5.3-codex">GPT-5.3-Codex</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <label className="flex min-h-10 items-center justify-between gap-3 rounded-lg border border-[var(--border)] bg-[var(--surface-0)] px-3 text-xs text-[var(--text-secondary)]">
             Create a pull request when work completes
@@ -861,7 +875,7 @@ function ReviewStep({
         <EligibilityList ready={[]} blocked={batch.blocked} />
       )}
       <div className="flex gap-2 rounded-lg border border-[var(--accent-500)]/25 bg-[var(--accent-500)]/8 px-3 py-2 text-xs leading-relaxed text-[var(--text-secondary)]">
-        <ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
+        <CheckCircle2 size={14} className="mt-0.5 shrink-0 text-[var(--accent-300)]" />
         Nothing has been sent to the destination. Confirming creates one provider task per ready Mission Control task.
       </div>
     </div>

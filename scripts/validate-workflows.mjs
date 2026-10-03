@@ -887,7 +887,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     const action = uses.slice(0, uses.indexOf('@'));
     assert.ok(
-      allowedActions.has(action) || (controlsDemoEnvironment && action === 'azure/login'),
+      allowedActions.has(action),
       `${file} uses action ${action}, which is not allowlisted`,
     );
   }

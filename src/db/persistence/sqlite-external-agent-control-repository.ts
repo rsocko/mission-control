@@ -371,7 +371,7 @@ export function createSqliteExternalAgentControlRepository(
       }
       const taskRows = ids.size
         ? sqlite.prepare(`
-            SELECT id, title, description, priority, status,
+            SELECT id, source_id AS sourceId, title, description, priority, status,
                    connector_type AS connectorType
             FROM tasks WHERE id IN (${[...ids].map(() => '?').join(', ')})
             ORDER BY id
@@ -462,12 +462,46 @@ export function createSqliteExternalAgentControlRepository(
         predicates.push('external_agent_id = ?');
         values.push(options.agentId);
       }
+      if (options.taskIds?.length) {
+        predicates.push(`
+          EXISTS (
+            SELECT 1 FROM json_each(agent_dispatches.scope, '$.taskIds')
+            WHERE json_each.value IN (${options.taskIds.map(() => '?').join(', ')})
+          )
+        `);
+        values.push(...options.taskIds);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       const rows = sqlite.prepare(`
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches
         ${predicates.length ? `WHERE ${predicates.join(' AND ')}` : ''}
         ORDER BY created_at DESC LIMIT ?
       `).all(...values) as Row[];
+      return rows.map(dispatchFromRow);
+    },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      const values = unique.map(() => '(?)').join(', ');
+      const rows = sqlite.prepare(`
+        WITH requested(task_id) AS (VALUES ${values}),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          CROSS JOIN agent_dispatches ad
+          INNER JOIN json_each(ad.scope, '$.taskIds') scoped_task
+            ON scoped_task.value = requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY created_at DESC, id DESC
+      `).all(...unique) as Row[];
       return rows.map(dispatchFromRow);
     },
     async findPreview(agentId, idempotencyKey) {
@@ -485,6 +519,28 @@ export function createSqliteExternalAgentControlRepository(
           { id: string; previewHash: string } | undefined;
         if (duplicate) {
           return { ...duplicate, created: false };
+        }
+        if (record.idempotencyKey.startsWith('task-delegation:')) {
+          const taskIds = record.scope.taskIds ?? [];
+          const active = taskIds.length
+            ? sqlite.prepare(`
+              SELECT ad.id
+              FROM agent_dispatches ad, json_each(ad.scope, '$.taskIds') task
+              WHERE ad.status IN (
+                'needs_confirmation', 'queued', 'claimed', 'in_progress',
+                'waiting_for_user'
+              )
+                AND task.value IN (${taskIds.map(() => '?').join(', ')})
+              LIMIT 1
+            `).get(...taskIds) as { id: string } | undefined
+            : undefined;
+          if (active) {
+            throw new ExternalAgentError(
+              'Task already has an active delegation',
+              'CONFLICT',
+              409,
+            );
+          }
         }
         sqlite.prepare(`
           INSERT INTO agent_dispatches (

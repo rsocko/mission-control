@@ -387,7 +387,7 @@ export function createPostgresExternalAgentControlRepository(
       }
       const taskRows = ids.size
         ? await query<AgentPayloadSnapshot['tasks'][number] & QueryResultRow>(client, `
-            SELECT id, title, description, priority, status,
+            SELECT id, source_id AS "sourceId", title, description, priority, status,
                    connector_type AS "connectorType"
             FROM tasks WHERE id = ANY($1::text[]) ORDER BY id
           `, [[...ids]])
@@ -474,12 +474,40 @@ export function createPostgresExternalAgentControlRepository(
         values.push(options.agentId);
         predicates.push(`external_agent_id = $${values.length}`);
       }
+      if (options.taskIds?.length) {
+        values.push(options.taskIds);
+        predicates.push(`scope->'taskIds' ?| $${values.length}::text[]`);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       return query<AgentDispatchRecord & QueryResultRow>(pool, `
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches
         ${predicates.length ? `WHERE ${predicates.join(' AND ')}` : ''}
         ORDER BY created_at DESC LIMIT $${values.length}
       `, values);
+    },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      return query<AgentDispatchRecord & QueryResultRow>(pool, `
+        WITH requested(task_id) AS (
+          SELECT unnest($1::text[])
+        ),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          INNER JOIN agent_dispatches ad
+            ON ad.scope->'taskIds' ? requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY "createdAt" DESC, id DESC
+      `, [unique]);
     },
     async findPreview(agentId, idempotencyKey) {
       const [row] = await query<{ id: string; previewHash: string }>(pool, `
@@ -491,6 +519,15 @@ export function createPostgresExternalAgentControlRepository(
     async createPreview(record, createdEvent) {
       try {
         return await transaction(pool, async (client) => {
+          const taskIds = record.idempotencyKey.startsWith('task-delegation:')
+            ? [...new Set(record.scope.taskIds ?? [])].sort()
+            : [];
+          for (const taskId of taskIds) {
+            await client.query(
+              'SELECT pg_advisory_xact_lock(hashtext($1))',
+              [`task-delegation:${taskId}`],
+            );
+          }
           await client.query(
             'SELECT pg_advisory_xact_lock(hashtext($1))',
             [`external-agent-preview:${record.externalAgentId}:${record.idempotencyKey}`],
@@ -501,6 +538,25 @@ export function createPostgresExternalAgentControlRepository(
           `, [record.externalAgentId, record.idempotencyKey]);
           if (duplicate) {
             return { ...duplicate, created: false };
+          }
+          if (taskIds.length) {
+            const [active] = await query<{ id: string }>(client, `
+              SELECT id
+              FROM agent_dispatches
+              WHERE status IN (
+                'needs_confirmation', 'queued', 'claimed', 'in_progress',
+                'waiting_for_user'
+              )
+                AND scope->'taskIds' ?| $1::text[]
+              LIMIT 1
+            `, [taskIds]);
+            if (active) {
+              throw new ExternalAgentError(
+                'Task already has an active delegation',
+                'CONFLICT',
+                409,
+              );
+            }
           }
           await client.query(`
             INSERT INTO agent_dispatches (

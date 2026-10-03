@@ -78,8 +78,10 @@ export interface ExternalAgentControlPersistence {
     list(options?: {
       status?: AgentDispatchStatus;
       agentId?: string;
+      taskIds?: string[];
       limit?: number;
     }): Promise<AgentDispatchRecord[]>;
+    listLatestByTaskIds(taskIds: string[]): Promise<AgentDispatchRecord[]>;
     findPreview(agentId: string, idempotencyKey: string): Promise<{
       id: string;
       previewHash: string;

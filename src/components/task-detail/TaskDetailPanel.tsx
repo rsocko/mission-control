@@ -46,6 +46,7 @@ import { TaskDocumentPreviewSection } from './TaskDocumentPreviewSection';
 import { TaskAttachmentCard } from './TaskAttachmentCard';
 import { OwlTaskActions } from './OwlTaskActions';
 import { TaskDetailFooter, TaskMobileActionBar } from './TaskDetailFooter';
+import { TaskDelegationSection } from './TaskDelegationSection';
 import { toggleMarkdownCheckbox } from './TaskDetailMarkdown';
 import { useTaskDetailData } from './useTaskDetailData';
 import { useTaskDetailMutations, type TaskConfirmRequest } from './useTaskDetailMutations';
@@ -761,6 +762,7 @@ export function TaskDetailPanel({
       )}>
         <TaskDetailHeader
           mode={mode}
+          taskId={task.id}
           iconSrc={iconSrc ?? null}
           connectorType={task.connectorType}
           sourceListName={task.sourceListName}
@@ -793,6 +795,13 @@ export function TaskDetailPanel({
           connectorInstanceId={task.connectorInstanceId}
           pushRetryCount={task.pushRetryCount}
           onRetryComplete={() => onUpdate?.()}
+        />
+
+        <TaskDelegationSection
+          key={`delegation-${task.id}`}
+          taskId={task.id}
+          taskTitle={task.title}
+          mode={mode}
         />
 
         {mode === 'panel' && task.subtasks && task.subtasks.length > 0 && (() => {

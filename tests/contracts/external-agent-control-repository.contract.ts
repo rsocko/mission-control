@@ -137,6 +137,45 @@ export function externalAgentControlRepositoryContract(
       expect((await repository().dispatches.get(results[0].id))?.events).toHaveLength(1);
     });
 
+    it('lists the latest dispatch independently for every requested task', async () => {
+      await repository().registry.create(agent('history-agent'));
+      const createdEvent = {
+        eventType: 'preview_created',
+        fromStatus: null,
+        toStatus: 'needs_confirmation' as const,
+        detail: {},
+        createdAt: now,
+      };
+      const taskB = {
+        ...dispatch('task-b-history', 'history-agent'),
+        scope: { taskIds: ['task-b'] },
+        createdAt: '2025-12-31T23:59:59.000Z',
+        updatedAt: '2025-12-31T23:59:59.000Z',
+      };
+      await repository().dispatches.createPreview(taskB, createdEvent);
+
+      for (let index = 0; index < 7; index += 1) {
+        const timestamp = `2026-01-01T00:00:0${index}.000Z`;
+        await repository().dispatches.createPreview({
+          ...dispatch(`task-a-history-${index}`, 'history-agent'),
+          scope: { taskIds: ['task-a'] },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }, createdEvent);
+      }
+
+      const latest = await repository().dispatches.listLatestByTaskIds([
+        'task-a',
+        'task-b',
+        'task-a',
+        'missing-task',
+      ]);
+      expect(latest.map(({ id }) => id)).toEqual([
+        'task-a-history-6',
+        'task-b-history',
+      ]);
+    });
+
     it('claims oldest work once, stores only a token hash, and deduplicates results', async () => {
       await repository().registry.create(agent('pull-agent'));
       const record = dispatch('claim-dispatch', 'pull-agent');

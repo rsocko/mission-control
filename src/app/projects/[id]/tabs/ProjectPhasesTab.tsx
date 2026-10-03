@@ -1013,7 +1013,11 @@ export function ProjectPhasesTab({
           {/* Bulk action bar inside sticky header so it stays visible when scrolled */}
           {bulk.bulkMode && visiblePhaseViewMode === 'list' && (
             <div className="border-t border-[var(--border-subtle)]">
-              <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+              <BulkActionBar
+                selectedCount={bulk.bulkSelected.size}
+                taskIds={Array.from(bulk.bulkSelected)}
+                onCancel={bulk.clearSelection}
+              >
                 <button
                   disabled={Boolean(bulkStatusBlockedReason)}
                   title={bulkStatusBlockedReason}

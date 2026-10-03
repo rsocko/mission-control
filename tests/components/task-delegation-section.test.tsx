@@ -6,6 +6,7 @@ import {
   openTaskDelegation,
   TASK_DELEGATION_OPEN_EVENT,
 } from '@/components/task-delegation/events';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 import { toast } from '@/lib/toast';
 import type {
   TaskDelegationContext,
@@ -25,6 +26,14 @@ function response(data: unknown, status = 200) {
     status,
     json: async () => data,
   });
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
+  });
+  return { promise, resolve };
 }
 
 function assignment(
@@ -231,6 +240,177 @@ describe('TaskDelegationSection', () => {
 });
 
 describe('TaskDelegationDialog', () => {
+  it('ignores a stale context response after the selected tasks change', async () => {
+    const first = deferred<Awaited<ReturnType<typeof response>>>();
+    const second = deferred<Awaited<ReturnType<typeof response>>>();
+    let firstSignal: AbortSignal | null = null;
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes('taskId=task-1')) {
+        firstSignal = init?.signal ?? null;
+        return first.promise;
+      }
+      if (url.includes('taskId=task-2')) return second.promise;
+      throw new Error(`Unexpected request: ${url}`);
+    }));
+    render(<TaskDelegationDialog />);
+
+    act(() => openTaskDelegation(['task-1']));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+    act(() => openTaskDelegation(['task-2']));
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+    expect(firstSignal).toHaveProperty('aborted', true);
+
+    second.resolve(await response({
+      taskIds: ['task-2'],
+      tasks: [{ id: 'task-2', title: 'Current task', connectorType: 'github-issues' }],
+      assignments: [],
+      syncErrors: [],
+      targets: [{
+        id: 'current-target',
+        name: 'Current destination',
+        type: 'copilot-cloud',
+        description: null,
+        executionLocality: 'github-hosted',
+        allowedActions: ['write_code'],
+        hasCredential: true,
+        paperclipBinding: null,
+        repositories: [],
+        eligibility: [],
+      }],
+    }));
+    expect(await screen.findByText('Current destination')).toBeInTheDocument();
+
+    first.resolve(await response({
+      taskIds: ['task-1'],
+      tasks: [{ id: 'task-1', title: 'Stale task', connectorType: 'github-issues' }],
+      assignments: [],
+      syncErrors: [],
+      targets: [{
+        id: 'stale-target',
+        name: 'Stale destination',
+        type: 'copilot-cloud',
+        description: null,
+        executionLocality: 'github-hosted',
+        allowedActions: ['analyze_code'],
+        hasCredential: true,
+        paperclipBinding: null,
+        repositories: [],
+        eligibility: [],
+      }],
+    }));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(screen.getByText('Current destination')).toBeInTheDocument();
+    expect(screen.queryByText('Stale destination')).not.toBeInTheDocument();
+  });
+
+  it('refreshes accepted tasks when bulk confirmation partially succeeds', async () => {
+    const refreshed = vi.fn();
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, refreshed);
+    const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/tasks/delegation?')) {
+        return response({
+          taskIds: ['task-1', 'task-2'],
+          tasks: [
+            { id: 'task-1', title: 'First task', connectorType: 'github-issues' },
+            { id: 'task-2', title: 'Second task', connectorType: 'github-issues' },
+          ],
+          assignments: [],
+          syncErrors: [],
+          targets: [{
+            id: 'github-cloud',
+            name: 'GitHub Cloud',
+            type: 'copilot-cloud',
+            description: null,
+            executionLocality: 'github-hosted',
+            allowedActions: ['write_code'],
+            hasCredential: true,
+            paperclipBinding: null,
+            repositories: [],
+            eligibility: [
+              {
+                taskId: 'task-1',
+                title: 'First task',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/repo',
+                repositoryLocked: true,
+              },
+              {
+                taskId: 'task-2',
+                title: 'Second task',
+                connectorType: 'github-issues',
+                ready: true,
+                blocker: null,
+                repository: 'octo/repo',
+                repositoryLocked: true,
+              },
+            ],
+          }],
+        });
+      }
+      if (url === '/api/tasks/delegation' && init?.method === 'POST') {
+        return response({
+          previews: [
+            {
+              taskId: 'task-1',
+              dispatchId: 'dispatch-1',
+              previewHash: 'preview-1',
+              disclosedFields: ['tasks.title'],
+              allowedActions: ['write_code'],
+            },
+            {
+              taskId: 'task-2',
+              dispatchId: 'dispatch-2',
+              previewHash: 'preview-2',
+              disclosedFields: ['tasks.title'],
+              allowedActions: ['write_code'],
+            },
+          ],
+          blocked: [],
+          readyCount: 2,
+          blockedCount: 0,
+          requiresConfirmation: true,
+        }, 201);
+      }
+      if (url === '/api/external-agents/dispatch' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { dispatchId: string };
+        return body.dispatchId === 'dispatch-1'
+          ? response({ dispatch: { status: 'queued' } })
+          : response({ error: 'Provider rejected the task' }, 502);
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<TaskDelegationDialog />);
+
+    act(() => openTaskDelegation(['task-1', 'task-2']));
+    const dialog = await screen.findByRole('dialog', { name: 'Delegate 2 tasks' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
+    fireEvent.change(within(dialog).getByLabelText('Instruction'), {
+      target: { value: 'Implement both tasks' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Review 2 delegations' }));
+    const confirm = await within(dialog).findByRole('button', {
+      name: 'Confirm and delegate 2',
+    });
+    fireEvent.click(confirm);
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+      '1 delegation confirmed. 1 failed',
+    );
+    expect(refreshed).toHaveBeenCalledOnce();
+    expect((refreshed.mock.calls[0][0] as CustomEvent).detail).toEqual({
+      taskIds: ['task-1'],
+    });
+    window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, refreshed);
+  });
+
   it('does not materialize a preview before Review and confirms each durable assignment', async () => {
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);

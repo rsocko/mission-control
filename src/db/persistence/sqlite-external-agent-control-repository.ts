@@ -479,6 +479,31 @@ export function createSqliteExternalAgentControlRepository(
       `).all(...values) as Row[];
       return rows.map(dispatchFromRow);
     },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      const values = unique.map(() => '(?)').join(', ');
+      const rows = sqlite.prepare(`
+        WITH requested(task_id) AS (VALUES ${values}),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          CROSS JOIN agent_dispatches ad
+          INNER JOIN json_each(ad.scope, '$.taskIds') scoped_task
+            ON scoped_task.value = requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY created_at DESC, id DESC
+      `).all(...unique) as Row[];
+      return rows.map(dispatchFromRow);
+    },
     async findPreview(agentId, idempotencyKey) {
       return (sqlite.prepare(`
         SELECT id, preview_hash AS previewHash FROM agent_dispatches

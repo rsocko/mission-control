@@ -16,14 +16,17 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import type {
   TaskDelegationContext,
   TaskDelegationTarget,
 } from '@/lib/external-agents/task-delegation';
-import { TASK_DELEGATION_OPEN_EVENT } from './events';
+import {
+  notifyTaskDelegationUpdated,
+  TASK_DELEGATION_OPEN_EVENT,
+} from './events';
 
 type WizardStep = 'destination' | 'configure' | 'review';
 
@@ -92,6 +95,7 @@ export function TaskDelegationDialog() {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const contextRequestRef = useRef(0);
 
   const reset = useCallback((ids: string[]) => {
     setTaskIds(ids);
@@ -126,15 +130,23 @@ export function TaskDelegationDialog() {
     return () => window.removeEventListener(TASK_DELEGATION_OPEN_EVENT, handleOpen);
   }, [reset]);
 
-  const loadContext = useCallback(async (ids: string[]) => {
+  const loadContext = useCallback(async (
+    ids: string[],
+    requestId: number,
+    signal: AbortSignal,
+  ) => {
     setLoading(true);
     setError(null);
     try {
       const query = new URLSearchParams();
       ids.forEach((taskId) => query.append('taskId', taskId));
-      const response = await fetch(`/api/tasks/delegation?${query.toString()}`);
+      const response = await fetch(
+        `/api/tasks/delegation?${query.toString()}`,
+        { signal },
+      );
       if (!response.ok) throw new Error(await responseError(response));
       const next = await response.json() as TaskDelegationContext;
+      if (requestId !== contextRequestRef.current || signal.aborted) return;
       setContext(next);
       const initial = next.targets.length === 1 ? next.targets[0] : null;
       if (initial) {
@@ -142,15 +154,21 @@ export function TaskDelegationDialog() {
         setAllowedActions(initial.allowedActions);
       }
     } catch (loadError) {
+      if (requestId !== contextRequestRef.current || signal.aborted) return;
       setError(errorMessage(loadError));
     } finally {
-      setLoading(false);
+      if (requestId === contextRequestRef.current && !signal.aborted) {
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
+    const requestId = ++contextRequestRef.current;
     if (!open || !taskIds.length) return;
-    void loadContext(taskIds);
+    const controller = new AbortController();
+    void loadContext(taskIds, requestId, controller.signal);
+    return () => controller.abort();
   }, [loadContext, open, taskIds]);
 
   const selectedTarget = useMemo(
@@ -216,6 +234,7 @@ export function TaskDelegationDialog() {
     setSubmitting(true);
     setError(null);
     const failures: string[] = [];
+    const confirmedTaskIds: string[] = [];
     let confirmed = 0;
     for (const preview of previewBatch.previews) {
       try {
@@ -241,11 +260,15 @@ export function TaskDelegationDialog() {
           throw new Error(`Delegation ended in ${status ?? 'an unknown state'}`);
         }
         confirmed += 1;
+        confirmedTaskIds.push(preview.taskId);
       } catch (confirmError) {
         failures.push(`${preview.taskId}: ${errorMessage(confirmError)}`);
       }
     }
     setSubmitting(false);
+    if (confirmedTaskIds.length) {
+      notifyTaskDelegationUpdated(confirmedTaskIds);
+    }
     if (failures.length) {
       setError(
         `${confirmed} delegation${confirmed === 1 ? '' : 's'} confirmed. `
@@ -256,9 +279,6 @@ export function TaskDelegationDialog() {
     toast.success(
       `${confirmed} task${confirmed === 1 ? '' : 's'} delegated to ${selectedTarget?.name}`,
     );
-    window.dispatchEvent(new CustomEvent('mission-control:delegation-updated', {
-      detail: { taskIds },
-    }));
     setOpen(false);
   };
 

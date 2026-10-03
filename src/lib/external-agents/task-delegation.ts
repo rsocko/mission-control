@@ -539,10 +539,7 @@ export async function listEligibleTaskDelegationTargets(taskId: string) {
 export async function listTaskDelegationSummaries(taskIds: string[]) {
   if (!taskIds.length) return new Map<string, TaskDelegationSummary>();
   const [dispatches, targets] = await Promise.all([
-    (await getExternalAgentControlPersistence()).dispatches.list({
-      taskIds,
-      limit: Math.min(taskIds.length * 5, 500),
-    }),
+    (await getExternalAgentControlPersistence()).dispatches.listLatestByTaskIds(taskIds),
     listExternalAgents({ includeDeleted: true }),
   ]);
   const targetById = new Map(targets.map((target) => [target.id, target]));

@@ -495,4 +495,55 @@ describe('provider-neutral task delegation API', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM agent_dispatches').get())
       .toEqual({ count: 2 });
   });
+
+  it('returns the latest assignment for every requested task despite skewed history', async () => {
+    await createCloudAgent();
+    const local = await delegation.previewTaskDelegation({
+      taskId: 'task-local',
+      agentId: 'github-cloud',
+      operationId: 'local-history',
+      repository: 'octo/validated',
+      instruction: 'Write release notes',
+      allowedActions: ['write_code'],
+    });
+    sqlite.prepare(`
+      UPDATE agent_dispatches
+      SET status = 'completed',
+          created_at = '2026-10-01T00:00:00.000Z',
+          updated_at = '2026-10-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(local.id);
+
+    let latestGithubId = '';
+    for (let index = 0; index < 7; index += 1) {
+      const preview = await delegation.previewTaskDelegation({
+        taskId: 'task-github',
+        agentId: 'github-cloud',
+        operationId: `github-history-${index}`,
+        repository: 'octo/source',
+        instruction: `Fix parser revision ${index}`,
+        allowedActions: ['write_code'],
+      });
+      latestGithubId = preview.id;
+      sqlite.prepare(`
+        UPDATE agent_dispatches
+        SET status = 'completed',
+            created_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        `2026-10-02T00:00:0${index}.000Z`,
+        `2026-10-02T00:00:0${index}.000Z`,
+        preview.id,
+      );
+    }
+
+    const summaries = await delegation.listTaskDelegationSummaries([
+      'task-github',
+      'task-local',
+    ]);
+    expect(summaries.size).toBe(2);
+    expect(summaries.get('task-github')?.dispatchId).toBe(latestGithubId);
+    expect(summaries.get('task-local')?.dispatchId).toBe(local.id);
+  });
 });

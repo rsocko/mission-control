@@ -22,7 +22,10 @@ import {
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
-import { openTaskDelegation } from '@/components/task-delegation/events';
+import {
+  openTaskDelegation,
+  TASK_DELEGATION_UPDATED_EVENT,
+} from '@/components/task-delegation/events';
 import type {
   TaskDelegationContext,
   TaskDelegationDisplayState,
@@ -134,8 +137,8 @@ export function TaskDelegationSection({
       const ids = (event as CustomEvent<{ taskIds?: string[] }>).detail?.taskIds ?? [];
       if (ids.includes(taskId)) void load();
     };
-    window.addEventListener('mission-control:delegation-updated', refresh);
-    return () => window.removeEventListener('mission-control:delegation-updated', refresh);
+    window.addEventListener(TASK_DELEGATION_UPDATED_EVENT, refresh);
+    return () => window.removeEventListener(TASK_DELEGATION_UPDATED_EVENT, refresh);
   }, [load, taskId]);
 
   const current = context?.assignments[0] ?? null;

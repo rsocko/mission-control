@@ -485,6 +485,30 @@ export function createPostgresExternalAgentControlRepository(
         ORDER BY created_at DESC LIMIT $${values.length}
       `, values);
     },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      return query<AgentDispatchRecord & QueryResultRow>(pool, `
+        WITH requested(task_id) AS (
+          SELECT unnest($1::text[])
+        ),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          INNER JOIN agent_dispatches ad
+            ON ad.scope->'taskIds' ? requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY "createdAt" DESC, id DESC
+      `, [unique]);
+    },
     async findPreview(agentId, idempotencyKey) {
       const [row] = await query<{ id: string; previewHash: string }>(pool, `
         SELECT id, preview_hash AS "previewHash" FROM agent_dispatches

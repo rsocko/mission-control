@@ -156,7 +156,6 @@ for (const file of workflowFiles) {
   validatePermissions(workflow.permissions, file);
 
   const handlesPullRequests = 'pull_request' in workflow.on;
-  const controlsDemoEnvironment = file === 'control-demo-environment.yml';
   hasPullRequestWorkflow ||= handlesPullRequests;
   const hasWritePermissions = Object.values(workflow.jobs ?? {}).some((job) =>
     Object.values(job.permissions ?? {}).includes('write'),
@@ -887,7 +886,7 @@ npm test -- --run --no-file-parallelism "\${test_files[@]}"
     );
     const action = uses.slice(0, uses.indexOf('@'));
     assert.ok(
-      allowedActions.has(action) || (controlsDemoEnvironment && action === 'azure/login'),
+      allowedActions.has(action),
       `${file} uses action ${action}, which is not allowlisted`,
     );
   }

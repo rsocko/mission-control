@@ -54,7 +54,7 @@ export const MICROSOFT_TODO_RECURRENCE_CONTRACT = {
   writes: {
     'create-series': ['mission-control'],
     'update-series': ['mission-control'],
-    'delete-series': ['mission-control'],
+    'delete-series': ['mission-control', 'provider'],
   },
 } as const satisfies ConnectorRecurrenceContract;
 

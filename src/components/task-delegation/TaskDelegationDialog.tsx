@@ -1,6 +1,7 @@
 'use client';
 
 import * as Dialog from '@radix-ui/react-dialog';
+import Link from 'next/link';
 import {
   AlertTriangle,
   Bot,
@@ -488,8 +489,14 @@ function DestinationStep({
           No execution destinations configured
         </p>
         <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Configure GitHub Cloud or a Paperclip route in External Agents settings.
+          Add GitHub Cloud or a Paperclip route before delegating work.
         </p>
+        <Link
+          href="/settings/ai-provider?setting=Execution%20Destinations"
+          className="mt-4 inline-flex min-h-9 items-center justify-center rounded-lg bg-[var(--accent-600)] px-3 text-xs font-medium text-white transition-colors hover:bg-[var(--accent-500)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-500)]"
+        >
+          Configure AI &amp; Agents
+        </Link>
       </div>
     );
   }

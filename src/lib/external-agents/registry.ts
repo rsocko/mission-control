@@ -42,7 +42,7 @@ export interface ExternalAgentInput {
   inputFormat?: string;
   outputFormat?: string;
   inboundWebhookId?: string | null;
-  dataPolicy?: ExternalAgentDataPolicy;
+  dataPolicy?: Partial<ExternalAgentDataPolicy>;
   enabled?: boolean;
 }
 
@@ -303,7 +303,10 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
     inputFormat: optionalText(input.inputFormat, 'inputFormat') ?? 'mc-tasks',
     outputFormat: optionalText(input.outputFormat, 'outputFormat') ?? 'mc-tasks',
     inboundWebhookId: optionalText(input.inboundWebhookId, 'inboundWebhookId'),
-    dataPolicy: validateDataPolicy(input.dataPolicy ?? DEFAULT_EXTERNAL_AGENT_DATA_POLICY),
+    dataPolicy: validateDataPolicy({
+      ...DEFAULT_EXTERNAL_AGENT_DATA_POLICY,
+      ...input.dataPolicy,
+    }),
     enabled: input.enabled ?? true,
     deletedAt: null,
   };
@@ -347,10 +350,21 @@ export async function updateExternalAgent(id: string, patch: Partial<ExternalAge
     ...existing,
     ...patch,
     id,
-    dataPolicy: patch.dataPolicy ?? existing.dataPolicy,
+    dataPolicy: patch.dataPolicy
+      ? { ...existing.dataPolicy, ...patch.dataPolicy }
+      : existing.dataPolicy,
     capabilities: patch.capabilities ?? existing.capabilities,
   });
-  await validateProviderConnection(values);
+  const connectionChanged = (
+    'type' in patch
+    || 'endpoint' in patch
+    || 'authType' in patch
+    || 'authCredentialRef' in patch
+    || 'providerConfig' in patch
+  );
+  if (values.enabled || connectionChanged) {
+    await validateProviderConnection(values);
+  }
   const updated = await (await getExternalAgentControlPersistence()).registry.update(id, {
     ...values,
     updatedAt: new Date().toISOString(),

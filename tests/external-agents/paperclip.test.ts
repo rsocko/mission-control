@@ -127,6 +127,31 @@ describe('Paperclip external-agent provider', () => {
     expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
+  it('can disable an unavailable Paperclip route without contacting the provider', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/health') return response({ status: 'ok' });
+      if (path === `/api/agents/${assigneeAgentId}`) {
+        return response({
+          id: assigneeAgentId,
+          companyId,
+          adapterType: 'github-copilot-web',
+        });
+      }
+      throw new Error(`Unexpected Paperclip request: ${path}`);
+    }));
+    await paperclipAgent();
+
+    const unavailable = vi.fn().mockRejectedValue(new Error('Provider offline'));
+    vi.stubGlobal('fetch', unavailable);
+    const updated = await registry.updateExternalAgent('paperclip-provider', {
+      enabled: false,
+    });
+
+    expect(updated.enabled).toBe(false);
+    expect(unavailable).not.toHaveBeenCalled();
+  });
+
   it('allows unauthenticated Paperclip access only for local endpoints', () => {
     expect(() => registry.validateExternalAgentInput({
       name: 'Remote Paperclip',

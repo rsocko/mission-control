@@ -398,19 +398,71 @@ export function createPostgresExternalAgentControlRepository(
       }
       const taskRows = ids.size
         ? await query<AgentPayloadSnapshot['tasks'][number] & QueryResultRow>(client, `
-            SELECT id, source_id AS "sourceId", title, description, priority, status,
-                   connector_type AS "connectorType"
+            SELECT id, source_id AS "sourceId", metadata->>'url' AS "sourceUrl",
+                   title, description, priority, status,
+                   connector_type AS "connectorType", due_date AS "dueDate", effort,
+                   assignee, micro_status AS "microStatus",
+                   planning_horizon AS "planningHorizon",
+                   source_list_name AS "sourceListName",
+                   sibling_order AS "siblingOrder", depth,
+                   is_checklist_item AS "isChecklistItem"
             FROM tasks WHERE id = ANY($1::text[]) ORDER BY id
           `, [[...ids]])
         : [];
+      const subtaskRows = ids.size
+        ? await query<
+            AgentPayloadSnapshot['tasks'][number]['subtasks'][number]
+            & { rootId: string }
+            & QueryResultRow
+          >(client, `
+            WITH RECURSIVE hierarchy (
+              "rootId", id, "sourceId", "sourceUrl", "connectorType", title,
+              description, priority, status, "dueDate", effort, assignee,
+              "microStatus", "planningHorizon", "sourceListName", "siblingOrder",
+              depth, "isChecklistItem", "treeOrder"
+            ) AS (
+              SELECT id, id, source_id, metadata->>'url', connector_type, title,
+                     description, priority, status, due_date, effort, assignee,
+                     micro_status, planning_horizon, source_list_name, sibling_order,
+                     depth, is_checklist_item, ''::text
+              FROM tasks
+              WHERE id = ANY($1::text[])
+              UNION ALL
+              SELECT h."rootId", t.id, t.source_id, t.metadata->>'url',
+                     t.connector_type, t.title, t.description, t.priority, t.status,
+                     t.due_date, t.effort, t.assignee, t.micro_status,
+                     t.planning_horizon, t.source_list_name, t.sibling_order, t.depth,
+                     t.is_checklist_item,
+                     h."treeOrder" || '/' || LPAD(
+                       COALESCE(t.sibling_order, 2147483647)::text,
+                       20,
+                       '0'
+                     ) || ':' || t.id
+              FROM tasks t
+              INNER JOIN hierarchy h ON t.parent_id = h.id
+              WHERE t.deleted_at IS NULL
+            )
+            SELECT "rootId", id, "sourceId", "sourceUrl", "connectorType", title,
+                   description, priority, status, "dueDate", effort, assignee,
+                   "microStatus", "planningHorizon", "sourceListName",
+                   "siblingOrder", depth, "isChecklistItem"
+            FROM hierarchy
+            WHERE id != "rootId"
+            ORDER BY "rootId", "treeOrder"
+          `, [[...ids]])
+        : [];
       const tagsByTask = new Map<string, string[]>();
-      if (taskRows.length) {
+      const contentIds = [
+        ...taskRows.map(({ id }) => id),
+        ...subtaskRows.map(({ id }) => id),
+      ];
+      if (contentIds.length) {
         const tagRows = await query<{ taskId: string; name: string }>(client, `
           SELECT tt.task_id AS "taskId", t.name
           FROM task_tags tt INNER JOIN tags t ON t.id = tt.tag_id
           WHERE tt.task_id = ANY($1::text[])
           ORDER BY tt.task_id, t.name
-        `, [taskRows.map(({ id }) => id)]);
+        `, [contentIds]);
         for (const row of tagRows) {
           tagsByTask.set(row.taskId, [...(tagsByTask.get(row.taskId) ?? []), row.name]);
         }
@@ -441,7 +493,19 @@ export function createPostgresExternalAgentControlRepository(
       }
         return {
           project,
-          tasks: taskRows.map((task) => ({ ...task, tags: tagsByTask.get(task.id) ?? [] })),
+          tasks: taskRows.map((task) => ({
+            ...task,
+            tags: tagsByTask.get(task.id) ?? [],
+            subtasks: subtaskRows
+              .filter(({ rootId }) => rootId === task.id)
+              .map(({ rootId, ...subtask }) => {
+                void rootId;
+                return {
+                  ...subtask,
+                  tags: tagsByTask.get(subtask.id) ?? [],
+                };
+              }),
+          })),
           phases: phaseRows.map(({ id, ...phase }) => ({
             ...phase,
             taskIds: itemsByPhase.get(id) ?? [],

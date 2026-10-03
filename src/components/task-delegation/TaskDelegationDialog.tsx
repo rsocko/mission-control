@@ -689,7 +689,7 @@ function ConfigureStep({
       )}
 
       <label className="block text-xs font-medium text-[var(--text-secondary)]">
-        Instruction
+        Per-dispatch instructions
         <div className="input-glow mt-1.5 rounded-lg border border-[var(--border)] bg-[var(--surface-0)]">
           <textarea
             value={instruction}
@@ -701,6 +701,18 @@ function ConfigureStep({
           />
         </div>
       </label>
+
+      <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)] p-3">
+        <h3 className="text-xs font-medium text-[var(--text-secondary)]">
+          Destination always instructions
+        </h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+          Configured in Settings and applied to every eligible dispatch to this destination.
+        </p>
+        <pre className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-md bg-[var(--surface-1)] p-2 text-xs leading-relaxed text-[var(--text-secondary)]">
+          {target.alwaysInstructions || 'No always instructions configured.'}
+        </pre>
+      </section>
 
       <details className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]">
         <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
@@ -875,6 +887,38 @@ function ReviewStep({
               ))}
             </div>
           </div>
+        </div>
+      </section>
+
+      <section>
+        <h3 className="text-xs font-semibold text-[var(--text-primary)]">
+          Effective reviewed context
+        </h3>
+        <p className="mt-1 text-[11px] leading-relaxed text-[var(--text-muted)]">
+          This is the exact redacted payload sent for each ready task, including destination
+          always instructions and separate per-dispatch instructions.
+        </p>
+        <div className="mt-2 space-y-2">
+          {batch.previews.map((preview) => (
+            <details
+              key={preview.dispatchId}
+              className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-0)]"
+            >
+              <summary className="cursor-pointer px-3 py-2 text-xs font-medium text-[var(--text-secondary)]">
+                {String(
+                  Array.isArray(preview.payloadPreview.tasks)
+                  && preview.payloadPreview.tasks[0]
+                  && typeof preview.payloadPreview.tasks[0] === 'object'
+                  && !Array.isArray(preview.payloadPreview.tasks[0])
+                    ? (preview.payloadPreview.tasks[0] as Record<string, unknown>).title
+                    : preview.taskId,
+                )}
+              </summary>
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words border-t border-[var(--border-subtle)] p-3 text-[11px] leading-relaxed text-[var(--text-secondary)]">
+                {JSON.stringify(preview.payloadPreview, null, 2)}
+              </pre>
+            </details>
+          ))}
         </div>
       </section>
 

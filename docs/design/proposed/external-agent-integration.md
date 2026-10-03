@@ -46,7 +46,7 @@ Today, these hand-offs require manual copy-paste between tools. There is no prog
 3. **Human-in-the-loop by default** — Outbound dispatches require confirmation. Inbound results land in a review queue before being committed.
 4. **Leverage what exists** — Build on top of the existing inbound webhook system, the agent dispatch framework, and the phase proposal review UI.
 5. **Transport follows agent capability** — Some agents accept pushes; others, including Scout and a GitHub Copilot app local automation, must poll and claim queued work. The dispatch lifecycle is transport-independent.
-6. **Minimize disclosed context** — Preview and classify every payload. Sensitive content should remain in its tenant-managed execution environment whenever possible.
+6. **Deliberate disclosed context** — Preview and classify every payload. Eligible GitHub Cloud and Paperclip delegations require the complete canonical work contract described below; raw connector metadata and unrelated records remain excluded. Sensitive content should remain in its tenant-managed execution environment whenever possible.
 7. **Inference is not execution** — Copilot model access through Bifrost cannot read a repository, run commands, or open a PR. Coding execution requires an explicit execution adapter with repository and tool authority.
 8. **Execution locality is user-visible** — Never silently move work among MC-hosted, developer-workstation, and GitHub-hosted execution. The preview identifies where code and task context will be processed.
 
@@ -171,12 +171,43 @@ CREATE TABLE external_agents (
 
 ### Context Serialization
 
-When dispatching work to an external agent, MC serializes relevant context:
+When dispatching work to an external agent, MC serializes a provider-neutral,
+reviewed context contract. GitHub Cloud and Paperclip require the full canonical
+task contract: task ID, title, full description, status, priority, tags, due
+date, effort, assignee, micro-status, planning horizon, source-list display
+name, hierarchy fields, and every descendant subtask/checklist item with its
+identity, full description, state, and sibling order. Project and phase context
+is included when the dispatch scope provides it.
+
+GitHub issue provenance is represented as a structured `sourceIssue` object
+containing the authoritative repository and issue number. The issue URL is
+included only when the connector's authoritative URL matches that exact
+repository/number identity; Mission Control does not invent a host.
+For GitHub Cloud this object is accepted only when the source repository exactly
+matches the dispatch repository (case-insensitive owner/name comparison).
+Cross-repository issue identity blocks the dispatch rather than being rewritten
+or inferred from title text.
+
+The contract deliberately excludes credentials, connector configuration and
+metadata blobs, activity logs, binary attachment content, and unrelated task
+records. Mission Control currently has no separate canonical task notes field;
+task descriptions and subtask/checklist descriptions are therefore the complete
+canonical work-content fields. Attachment metadata is also excluded until a
+source-authority and disclosure policy contract is defined for it.
+
+Each selected text value is limited to 65,536 characters and the reviewed
+payload is limited to 256 KiB. Per-dispatch instructions are limited to 32,000
+characters and destination always instructions to 16,000 characters. Exceeding
+a limit fails preview with an explicit error; required work content is never
+silently truncated.
 
 ```typescript
 interface AgentDispatchPayload {
-  // What MC wants the agent to do
+  // User-entered instructions for this dispatch
   instruction: string;
+
+  // Server-owned destination configuration, applied on every dispatch
+  alwaysInstructions: string;
 
   // Scope
   project?: { id: string; name: string; description: string };
@@ -195,7 +226,32 @@ interface AgentDispatchPayload {
     priority: string;
     status: string;
     tags: string[];
-    phase?: string;
+    dueDate?: string | null;
+    effort?: number | null;
+    assignee?: string | null;
+    microStatus?: string | null;
+    planningHorizon?: string | null;
+    sourceListName?: string | null;
+    siblingOrder?: number | null;
+    depth: number;
+    isChecklistItem: boolean;
+    sourceIssue?: {
+      type: 'github-issue';
+      repository: string;
+      issueNumber: number;
+      url: string;
+    };
+    subtasks: Array<{
+      id: string;
+      title: string;
+      description: string | null;
+      priority: string;
+      status: string;
+      tags: string[];
+      siblingOrder: number | null;
+      depth: number;
+      isChecklistItem: boolean;
+    }>;
   }>;
 
   // Optional: existing phase plan for context
@@ -238,6 +294,44 @@ responses or persists it in payload/result logs. Existing installations may
 instead select the advanced deployment-secret-reference mode, which resolves
 `auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. Paperclip
 bearer credentials continue to use deployment-secret references.
+
+Each GitHub Cloud or Paperclip destination may also define **Always
+instructions** in Settings. These are ordinary server-owned configuration, not
+credentials. They are length-validated, included in destination persistence,
+the payload and preview hash, and displayed separately from per-dispatch
+instructions in both configuration and review. Changing them invalidates any
+unconfirmed preview. They never bypass classification, field policy, locality,
+or confirmation.
+
+The review step displays the exact redacted payload for every fan-out item, in
+addition to the disclosed-field list. A destination whose configured allowlist
+cannot disclose the required rich task fields is shown as blocked with the
+missing fields named; Mission Control does not omit descriptions or subtasks and
+continue.
+
+Existing GitHub Cloud and Paperclip destinations are upgraded on registry read:
+required rich-context fields are appended deterministically to their existing
+allowlists and persisted through the same registry repository. Classification,
+retention, rate limits, provider configuration, and existing allowlist entries
+are preserved, so deployment does not require manual database repair.
+
+Classification is resolved across each root task and every disclosed descendant
+before preview persistence or transmission. A restricted descendant therefore
+blocks a standard-only destination even when its root is standard. Bulk preview
+isolates typed per-task disclosure failures: successful durable previews remain
+visible, while failed tasks return blocked entries with the actionable error
+code, HTTP status, and reason. Retrying the same operation reuses successful
+previews and does not create duplicates.
+
+Paperclip creates one parent issue per delegated canonical task. Its title is
+the canonical task title verbatim; Paperclip's current create-issue validator
+and PostgreSQL text column impose no title maximum, so Mission Control does not
+truncate it or derive it from the first instruction line. The issue description
+uses readable Markdown sections for per-dispatch instructions, destination
+always instructions, authoritative source provenance, full task content, and
+ordered subtasks/checklist items, followed by the reviewed canonical JSON for
+audit. Canonical subtasks remain context in the parent issue and are not
+expanded into child Paperclip issues.
 
 ```typescript
 // Request

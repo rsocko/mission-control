@@ -1,5 +1,8 @@
 import { NextResponse } from 'next/server';
-import { ExternalAgentError } from '@/lib/external-agents/errors';
+import {
+  ExternalAgentError,
+  isExternalAgentError,
+} from '@/lib/external-agents/errors';
 import {
   getTaskDelegationContext,
   hasTaskDelegationOperation,
@@ -68,27 +71,38 @@ export async function POST(request: Request) {
     const eligible = target.eligibility.filter(
       ({ taskId, ready }) => ready || replayable.has(taskId),
     );
-    const blocked = target.eligibility.filter(
+    const blocked: typeof target.eligibility = target.eligibility.filter(
       ({ taskId, ready }) => !ready && !replayable.has(taskId),
     );
     const previews = [];
     for (const task of eligible) {
-      const dispatch = await previewTaskDelegation({
-        ...body,
-        taskId: task.taskId,
-        repository: task.repositoryLocked ? task.repository ?? undefined : body.repository,
-        callbackBaseUrl: new URL(request.url).origin,
-      });
-      previews.push({
-        taskId: task.taskId,
-        dispatchId: dispatch.id,
-        previewHash: dispatch.previewHash,
-        processingLocation: dispatch.executionLocality,
-        dataClassification: dispatch.dataClassification,
-        disclosedFields: dispatch.disclosedFields,
-        allowedActions: dispatch.allowedActions,
-        payloadPreview: dispatch.payloadPreview,
-      });
+      try {
+        const dispatch = await previewTaskDelegation({
+          ...body,
+          taskId: task.taskId,
+          repository: task.repositoryLocked ? task.repository ?? undefined : body.repository,
+          callbackBaseUrl: new URL(request.url).origin,
+        });
+        previews.push({
+          taskId: task.taskId,
+          dispatchId: dispatch.id,
+          previewHash: dispatch.previewHash,
+          processingLocation: dispatch.executionLocality,
+          dataClassification: dispatch.dataClassification,
+          disclosedFields: dispatch.disclosedFields,
+          allowedActions: dispatch.allowedActions,
+          payloadPreview: dispatch.payloadPreview,
+        });
+      } catch (error) {
+        if (!isExternalAgentError(error)) throw error;
+        blocked.push({
+          ...task,
+          ready: false,
+          blocker: error.message,
+          errorCode: error.code,
+          statusCode: error.status,
+        });
+      }
     }
     return NextResponse.json({
       previews,

@@ -489,7 +489,7 @@ function DestinationStep({
           No execution destinations configured
         </p>
         <p className="mt-1 text-xs text-[var(--text-muted)]">
-          Add GitHub Cloud or a Paperclip route before delegating work.
+          Add GitHub Copilot Cloud or a Paperclip route before delegating work.
         </p>
         <Link
           href="/settings/ai-provider?setting=Execution%20Destinations"

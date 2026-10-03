@@ -95,7 +95,7 @@ export const SETTINGS_SEARCH_ITEMS: SettingsSearchItem[] = [
 
   { title: 'AI & Agents', section: 'ai', sectionLabel: 'System', keywords: ['openai', 'ollama', 'azure', 'external agents'] },
   { title: 'Execution Destinations', section: 'ai', sectionLabel: 'System', keywords: ['delegate', 'delegation', 'agents', 'github cloud', 'paperclip', 'routes'] },
-  { title: 'GitHub Cloud', section: 'ai', sectionLabel: 'System', target: 'Execution Destinations', keywords: ['copilot', 'agent tasks', 'delegate'] },
+  { title: 'GitHub Copilot Cloud', section: 'ai', sectionLabel: 'System', target: 'Execution Destinations', keywords: ['github cloud', 'copilot', 'agent tasks', 'delegate'] },
   { title: 'Paperclip routes', section: 'ai', sectionLabel: 'System', target: 'Execution Destinations', keywords: ['agent', 'delegate', 'company', 'assignee'] },
   { title: 'AI Model', section: 'ai', sectionLabel: 'System', target: 'Model', keywords: ['llm'] },
   { title: 'AI Base URL', section: 'ai', sectionLabel: 'System', target: 'Base URL', keywords: ['endpoint', 'host'] },

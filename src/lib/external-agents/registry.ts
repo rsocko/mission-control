@@ -436,7 +436,7 @@ export function resolveAgentCredential(reference: string | null): string | null 
 export async function resolveGitHubAgentCredential(agent: ExternalAgent): Promise<string> {
   if (agent.type !== 'copilot-cloud') {
     throw new ExternalAgentError(
-      'Managed GitHub credentials are only available to GitHub Cloud destinations',
+      'Managed GitHub credentials are only available to GitHub Copilot Cloud destinations',
       'EXECUTION_BOUNDARY_MISMATCH',
       422,
     );
@@ -447,7 +447,7 @@ export async function resolveGitHubAgentCredential(agent: ExternalAgent): Promis
     ).registry.getCredential(agent.id);
     if (!credential) {
       throw new ExternalAgentError(
-        'GitHub Cloud token is unavailable. Add it again in AI & Agents settings.',
+        'GitHub Copilot Cloud token is unavailable. Add it again in AI & Agents settings.',
         'CREDENTIAL_UNAVAILABLE',
         503,
       );
@@ -472,7 +472,7 @@ function managedCredential(
   const credential = optionalText(input.credential, 'credential');
   if (credential && type !== 'copilot-cloud') {
     throw new ExternalAgentError(
-      'Direct credentials are only supported for GitHub Cloud destinations',
+      'Direct credentials are only supported for GitHub Copilot Cloud destinations',
       'EXECUTION_BOUNDARY_MISMATCH',
       422,
     );

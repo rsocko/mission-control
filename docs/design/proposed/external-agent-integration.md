@@ -231,7 +231,7 @@ The implemented API uses a durable two-step boundary:
    the reviewed preview. Retries reuse the selected locality and provider
    idempotency identity; they never fall back to another execution mode.
 
-GitHub Cloud personal access tokens are entered directly in **Settings → AI &
+GitHub Copilot Cloud personal access tokens are entered directly in **Settings → AI &
 Agents**. Mission Control validates the token with GitHub, persists it in the
 destination's server-side credential field, and never returns it in API
 responses or persists it in payload/result logs. Existing installations may
@@ -537,13 +537,13 @@ Add an "External Agents" section to the AI page:
 
 ### Provider-neutral task delegation
 
-**Delegate** is the stable task action. Configured GitHub Cloud and Paperclip
+**Delegate** is the stable task action. Configured GitHub Copilot Cloud and Paperclip
 routes are typed execution destinations; source connectors remain separate.
 Operators manage those destinations in **Settings → AI & Agents → Execution
-Destinations**. GitHub Cloud setup accepts and validates a personal access
+Destinations**. GitHub Copilot Cloud setup accepts and validates a personal access
 token directly; deployment-secret references remain available as an advanced
 and backward-compatible option. Paperclip references remain server-side in
-`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Cloud and Paperclip setup,
+`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Copilot Cloud and Paperclip setup,
 validation, enablement, capability policy, and data
 classification policy are managed there. Paperclip route bindings are validated
 when saved and remain read-only during individual delegations.

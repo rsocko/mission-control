@@ -48,7 +48,7 @@ async function createCloudAgent(overrides: Partial<
 > = {}) {
   return registry.createExternalAgent({
     id: 'github-cloud',
-    name: 'GitHub Cloud',
+    name: 'GitHub Copilot Cloud',
     type: 'copilot-cloud',
     endpoint: 'https://api.github.com',
     authType: 'github-user',

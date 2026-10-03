@@ -240,7 +240,7 @@ describe('Microsoft To Do list moves', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('denies unowned recurrence create, update, and delete writes', async () => {
+  it('denies provider-owned recurrence create and update writes but allows deletion', async () => {
     const providerTask = {
       id: 'provider-task',
       title: 'Provider series',
@@ -256,6 +256,9 @@ describe('Microsoft To Do list moves', () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       calls.push({ url: input.toString(), init });
+      if (init?.method === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
       return Response.json(providerTask);
     }));
     const { mapGraphTask } = await import(
@@ -280,10 +283,13 @@ describe('Microsoft To Do list moves', () => {
     await expect(connector.updateTask('list-1:provider-task', {
       metadata,
     })).rejects.toThrow('denied for provider-owned series');
-    await expect(connector.deleteTask('list-1:provider-task'))
-      .rejects.toThrow('denied for provider-owned series');
+    await expect(connector.deleteTask('list-1:provider-task')).resolves.toBeUndefined();
 
-    expect(calls).toHaveLength(1);
+    expect(calls).toHaveLength(2);
     expect(calls[0].init?.method).toBeUndefined();
+    expect(calls[1]).toEqual({
+      url: 'https://graph.microsoft.com/v1.0/me/todo/lists/list-1/tasks/provider-task',
+      init: expect.objectContaining({ method: 'DELETE' }),
+    });
   });
 });

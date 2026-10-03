@@ -82,6 +82,50 @@ test("loadConfig rejects unsafe or incomplete limits", () => {
   assert.throws(() => loadConfig(configPath), /cannot exceed 100/);
 });
 
+function writeRetentionConfig(retentionDays) {
+  const root = mkdtempSync(join(os.tmpdir(), "mc-dev-service-retention-"));
+  const configPath = join(root, "services.json");
+  const config = {
+    services: {
+      fixture: {
+        command: [process.execPath, "-e", "setTimeout(() => {}, 1000)"],
+        memoryMb: 128,
+        cpuPercent: 75,
+        ttlMinutes: 1,
+        uncappedTtlMinutes: 1,
+      },
+    },
+  };
+  if (retentionDays !== undefined) config.retentionDays = retentionDays;
+  writeFileSync(configPath, JSON.stringify(config));
+  return configPath;
+}
+
+test("loadConfig falls back to the default retention when retentionDays is omitted", () => {
+  const configPath = writeRetentionConfig(undefined);
+  assert.doesNotThrow(() => loadConfig(configPath));
+});
+
+test("loadConfig accepts a positive retentionDays value", () => {
+  const configPath = writeRetentionConfig(14);
+  assert.doesNotThrow(() => loadConfig(configPath));
+});
+
+test("loadConfig rejects a zero retentionDays value", () => {
+  const configPath = writeRetentionConfig(0);
+  assert.throws(() => loadConfig(configPath), /retentionDays/);
+});
+
+test("loadConfig rejects a negative retentionDays value", () => {
+  const configPath = writeRetentionConfig(-3);
+  assert.throws(() => loadConfig(configPath), /retentionDays/);
+});
+
+test("loadConfig rejects a non-numeric retentionDays value", () => {
+  const configPath = writeRetentionConfig("7");
+  assert.throws(() => loadConfig(configPath), /retentionDays/);
+});
+
 test("path ownership comparison follows Windows case semantics", () => {
   assert.equal(pathsEqual("C:\\Dev\\Repo", "c:\\dev\\repo", "win32"), true);
   assert.equal(pathsEqual("/Dev/Repo", "/dev/repo", "linux"), false);

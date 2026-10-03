@@ -71,12 +71,12 @@ export function TaskSourceActionsSection({
 
   return (
     <section className={cn(
-      'overflow-visible rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35',
+      'overflow-visible rounded-xl border border-[var(--border)] bg-[var(--surface-0)]/45',
       (mode === 'panel' || mode === 'mobile') && 'order-7',
       mode === 'dialog' && 'col-start-2 row-start-4',
       mode === 'workspace' && 'col-start-2 row-start-4',
     )}>
-      <h3 className="border-b border-[var(--border-subtle)] px-3 py-2.5 text-xs font-semibold text-[var(--text-secondary)]">Source &amp; actions</h3>
+      <h3 className="flex min-h-11 items-center border-b border-[var(--border-subtle)] px-3 text-sm font-semibold text-[var(--text-secondary)]">Source &amp; actions</h3>
       <div className="flex flex-wrap items-center gap-2 p-3">
         {sourceSpecificActions}
         {dispositionOptions.length > 0 && (
@@ -123,7 +123,7 @@ export function TaskSourceActionsSection({
           <div className="flex items-center">
             <button
               onClick={onOpenMoveDialog}
-              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 text-xs text-[var(--text-muted)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-secondary)]"
+              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--accent-600)] bg-[var(--accent-600)] px-2.5 text-xs font-medium text-white transition-colors hover:border-[var(--accent-500)] hover:bg-[var(--accent-500)]"
             >
               <ArrowLeftRight size={13} />
               Move source
@@ -139,7 +139,7 @@ export function TaskSourceActionsSection({
                 href={deepLink.url}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-blue-500/10 px-2.5 text-xs font-medium text-blue-400 transition-colors hover:bg-blue-500/20 hover:text-blue-300"
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--border)] px-2.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-2)] hover:text-[var(--text-primary)]"
               >
                 {deepLink.icon
                   ? <Image src={deepLink.icon} alt="" width={14} height={14} className="flex-shrink-0" />
@@ -155,7 +155,7 @@ export function TaskSourceActionsSection({
           <button
             type="button"
             onClick={onDelete}
-            className="flex min-h-9 items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 text-xs text-red-400 transition-colors hover:bg-red-500/10"
+            className="flex min-h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs text-red-400 transition-colors hover:bg-red-500/10"
           >
             <Trash2 size={13} />
             {deleteLabel}

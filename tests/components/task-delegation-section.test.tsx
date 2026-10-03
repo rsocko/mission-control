@@ -240,6 +240,19 @@ describe('TaskDelegationSection', () => {
 });
 
 describe('TaskDelegationDialog', () => {
+  it('links the empty state directly to AI & Agents destination setup', async () => {
+    vi.stubGlobal('fetch', vi.fn(() => response(context([]))));
+    render(<TaskDelegationDialog />);
+
+    act(() => openTaskDelegation(['task-1']));
+    const dialog = await screen.findByRole('dialog', { name: 'Delegate task' });
+    expect(within(dialog).getByText('No execution destinations configured')).toBeInTheDocument();
+    expect(within(dialog).getByRole('link', { name: 'Configure AI & Agents' })).toHaveAttribute(
+      'href',
+      '/settings/ai-provider?setting=Execution%20Destinations',
+    );
+  });
+
   it('ignores a stale context response after the selected tasks change', async () => {
     const first = deferred<Awaited<ReturnType<typeof response>>>();
     const second = deferred<Awaited<ReturnType<typeof response>>>();
@@ -391,6 +404,7 @@ describe('TaskDelegationDialog', () => {
 
     act(() => openTaskDelegation(['task-1', 'task-2']));
     const dialog = await screen.findByRole('dialog', { name: 'Delegate 2 tasks' });
+    await within(dialog).findByRole('radio', { name: /GitHub Cloud/ });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
     fireEvent.change(within(dialog).getByLabelText('Instruction'), {
       target: { value: 'Implement both tasks' },

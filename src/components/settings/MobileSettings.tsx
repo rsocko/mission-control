@@ -393,7 +393,7 @@ export function MobileSettings({ onAddConnector }: { onAddConnector: () => void 
           onClick={() => router.push('/settings/storage')}
         />
         <SettingsRow
-          label="AI Provider"
+          label="AI & Agents"
           onClick={() => router.push('/settings/ai-provider')}
           isLast
         />

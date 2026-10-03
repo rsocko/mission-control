@@ -18,6 +18,7 @@ import {
 } from '@/lib/motion';
 import { settingsLogger } from '@/lib/client-logger';
 import { AIRunHistorySection } from './AIRunHistorySection';
+import { ExecutionDestinationsSection } from './ExecutionDestinationsSection';
 
 // --- AI Provider Section ---------------------------------------------------
 
@@ -368,15 +369,24 @@ function AIProviderSection() {
 
   return (
     <motion.div variants={staggerContainer} initial="hidden" animate="show" className="space-y-6">
-      {/* Header */}
       <div>
-        <h2 className="text-xl font-semibold text-[var(--text-primary)]">AI Provider</h2>
+        <h2 className="text-xl font-semibold text-[var(--text-primary)]">AI &amp; Agents</h2>
         <p className="text-sm text-[var(--text-tertiary)] mt-1">
-          Configure the AI model used for smart priority, daily digest, task triage, and other AI features.
+          Configure Mission Control intelligence and the destinations that can execute delegated work.
         </p>
       </div>
 
-      {/* Status Banner */}
+      <motion.div variants={fadeSlideUp}>
+        <ExecutionDestinationsSection />
+      </motion.div>
+
+      <motion.div variants={fadeSlideUp} className="border-t border-[var(--border)] pt-6">
+        <h3 className="text-base font-semibold text-[var(--text-primary)]">AI Provider</h3>
+        <p className="mt-1 text-sm text-[var(--text-tertiary)]">
+          Configure the model used for smart priority, daily digest, task triage, and other AI features.
+        </p>
+      </motion.div>
+
       <motion.div variants={fadeSlideUp}
         className={`rounded-xl border p-4 flex items-center gap-3 ${
           configured

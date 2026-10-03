@@ -21,6 +21,8 @@ describe('searchSettings', () => {
 
   it('finds settings by aliases and keywords', () => {
     expect(searchSettings('llm')[0]?.title).toBe('AI Model');
+    expect(searchSettings('delegate')[0]?.title).toBe('Execution Destinations');
+    expect(searchSettings('paperclip')[0]?.title).toBe('Paperclip routes');
     expect(searchSettings('mute')[0]?.title).toBe('Do Not Disturb');
     expect(searchSettings('paperless')[0]?.title).toBe('OWL');
     expect(searchSettings('document intelligence')[0]?.title).toBe('OWL');
@@ -47,25 +49,25 @@ describe('searchSettings', () => {
   it('resolves exact, partial, and section fallback targets', () => {
     const root = document.createElement('main');
     root.innerHTML = `
-      <h2>AI Provider</h2>
+      <h2>AI &amp; Agents</h2>
       <label>Base URL (default: local)</label>
       <button aria-label="Test connection">Test</button>
     `;
 
-    expect(findSettingsTarget(root, 'Base URL', 'AI Provider').target?.tagName).toBe('LABEL');
-    expect(findSettingsTarget(root, 'Test connection', 'AI Provider').target?.tagName).toBe('BUTTON');
-    expect(findSettingsTarget(root, 'API Key', 'AI Provider').sectionHeading?.textContent).toBe('AI Provider');
+    expect(findSettingsTarget(root, 'Base URL', 'AI & Agents').target?.tagName).toBe('LABEL');
+    expect(findSettingsTarget(root, 'Test connection', 'AI & Agents').target?.tagName).toBe('BUTTON');
+    expect(findSettingsTarget(root, 'API Key', 'AI & Agents').sectionHeading?.textContent).toBe('AI & Agents');
   });
 
   it('focuses and makes a non-interactive search result keyboard addressable', () => {
     const root = document.createElement('main');
-    root.innerHTML = '<h2>AI Provider</h2><label>Base URL</label>';
+    root.innerHTML = '<h2>AI &amp; Agents</h2><label>Base URL</label>';
     const target = root.querySelector('label') as HTMLElement;
     target.scrollIntoView = vi.fn();
     window.matchMedia = vi.fn().mockReturnValue({ matches: true });
     document.body.append(root);
 
-    expect(focusSettingsTarget(root, 'Base URL', 'AI Provider')).toBe(true);
+    expect(focusSettingsTarget(root, 'Base URL', 'AI & Agents')).toBe(true);
     expect(document.activeElement).toBe(target);
     expect(target.tabIndex).toBe(-1);
     expect(target.scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'center' });

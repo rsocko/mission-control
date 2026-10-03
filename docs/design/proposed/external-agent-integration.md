@@ -536,6 +536,12 @@ Add an "External Agents" section to the AI page:
 
 **Delegate** is the stable task action. Configured GitHub Cloud and Paperclip
 routes are typed execution destinations; source connectors remain separate.
+Operators manage those destinations in **Settings → AI & Agents → Execution
+Destinations**. The settings surface stores credential references only; values
+remain server-side in `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Cloud and
+Paperclip setup, validation, enablement, capability policy, and data
+classification policy are managed there. Paperclip route bindings are validated
+when saved and remain read-only during individual delegations.
 The same centered wizard opens from the task-detail header, task-row context
 menu, and task bulk-action bars:
 

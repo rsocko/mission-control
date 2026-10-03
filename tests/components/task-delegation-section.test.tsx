@@ -42,7 +42,7 @@ function assignment(
   return {
     dispatchId: 'dispatch-1',
     targetId: 'github-cloud',
-    targetName: 'GitHub Cloud',
+    targetName: 'GitHub Copilot Cloud',
     targetType: 'copilot-cloud',
     companyId: null,
     responsibleAgent: null,
@@ -157,12 +157,12 @@ describe('TaskDelegationSection', () => {
     render(<TaskDelegationSection taskId="task-1" taskTitle="Fix parser" mode="dialog" />);
 
     expect(await screen.findByText('Running')).toBeInTheDocument();
-    expect(screen.getByText('· GitHub Cloud')).toBeInTheDocument();
+    expect(screen.getByText('· GitHub Copilot Cloud')).toBeInTheDocument();
     expect(screen.getByText('Running focused reconciliation tests.')).toBeInTheDocument();
     expect(screen.getByText('Base main')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'More details' }));
-    const dialog = await screen.findByRole('dialog', { name: 'GitHub Cloud run' });
+    const dialog = await screen.findByRole('dialog', { name: 'GitHub Copilot Cloud run' });
     expect(await within(dialog).findByText('provider started')).toBeInTheDocument();
     expect(within(dialog).getByText(/provider work may continue/i)).toBeInTheDocument();
     expect(within(dialog).queryByRole('button', { name: 'Cancel' })).not.toBeInTheDocument();
@@ -336,7 +336,7 @@ describe('TaskDelegationDialog', () => {
           syncErrors: [],
           targets: [{
             id: 'github-cloud',
-            name: 'GitHub Cloud',
+            name: 'GitHub Copilot Cloud',
             type: 'copilot-cloud',
             description: null,
             executionLocality: 'github-hosted',
@@ -404,7 +404,7 @@ describe('TaskDelegationDialog', () => {
 
     act(() => openTaskDelegation(['task-1', 'task-2']));
     const dialog = await screen.findByRole('dialog', { name: 'Delegate 2 tasks' });
-    await within(dialog).findByRole('radio', { name: /GitHub Cloud/ });
+    await within(dialog).findByRole('radio', { name: /GitHub Copilot Cloud/ });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
     fireEvent.change(within(dialog).getByLabelText('Instruction'), {
       target: { value: 'Implement both tasks' },
@@ -436,7 +436,7 @@ describe('TaskDelegationDialog', () => {
           syncErrors: [],
           targets: [{
             id: 'github-cloud',
-            name: 'GitHub Cloud',
+            name: 'GitHub Copilot Cloud',
             type: 'copilot-cloud',
             description: null,
             executionLocality: 'github-hosted',
@@ -485,7 +485,7 @@ describe('TaskDelegationDialog', () => {
     act(() => openTaskDelegation(['task-1']));
     const dialog = await screen.findByRole('dialog', { name: 'Delegate task' });
     expect(within(dialog).getByText('Destination')).toBeInTheDocument();
-    expect(within(dialog).getByRole('radio', { name: /GitHub Cloud/ })).toBeChecked();
+    expect(within(dialog).getByRole('radio', { name: /GitHub Copilot Cloud/ })).toBeChecked();
     fireEvent.click(within(dialog).getByRole('button', { name: 'Configure' }));
 
     fireEvent.change(within(dialog).getByLabelText('Instruction'), {
@@ -519,6 +519,6 @@ describe('TaskDelegationDialog', () => {
         }),
       );
     });
-    expect(toast.success).toHaveBeenCalledWith('1 task delegated to GitHub Cloud');
+    expect(toast.success).toHaveBeenCalledWith('1 task delegated to GitHub Copilot Cloud');
   });
 });

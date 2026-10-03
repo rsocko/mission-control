@@ -41,7 +41,7 @@ describe('ExecutionDestinationsSection', () => {
       if (url === '/api/external-agents' && !init?.method) {
         return response({ agents: created ? [{
           id: 'github-cloud',
-          name: 'GitHub Cloud',
+          name: 'GitHub Copilot Cloud',
           type: 'copilot-cloud',
           description: null,
           endpoint: 'https://api.github.com/',
@@ -68,7 +68,7 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
 
     expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'GitHub Cloud' }));
+    fireEvent.click(screen.getByRole('button', { name: 'GitHub Copilot Cloud' }));
     fireEvent.change(screen.getByLabelText('Personal access token'), {
       target: { value: 'github_pat_test-value' },
     });
@@ -76,7 +76,7 @@ describe('ExecutionDestinationsSection', () => {
 
     await waitFor(() => expect(requestBody).not.toBeNull());
     expect(requestBody).toMatchObject({
-      name: 'GitHub Cloud',
+      name: 'GitHub Copilot Cloud',
       type: 'copilot-cloud',
       endpoint: 'https://api.github.com',
       authType: 'github-user',
@@ -145,7 +145,7 @@ describe('ExecutionDestinationsSection', () => {
     let getCount = 0;
     const destination = {
       id: 'github-cloud',
-      name: 'GitHub Cloud',
+      name: 'GitHub Copilot Cloud',
       type: 'copilot-cloud',
       description: null,
       endpoint: 'https://api.github.com/',
@@ -181,7 +181,7 @@ describe('ExecutionDestinationsSection', () => {
     render(<ExecutionDestinationsSection />);
     expect(await screen.findByText(/Personal access token stored in Mission Control/))
       .toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Edit GitHub Cloud' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Edit GitHub Copilot Cloud' }));
     expect(screen.getByLabelText('Personal access token')).toHaveAttribute(
       'placeholder',
       'Current token is hidden',

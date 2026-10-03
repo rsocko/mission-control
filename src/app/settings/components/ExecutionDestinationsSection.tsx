@@ -143,7 +143,7 @@ function emptyForm(type: DestinationType): DestinationForm {
   return {
     id: null,
     type,
-    name: type === 'copilot-cloud' ? 'GitHub Cloud' : 'Paperclip',
+    name: type === 'copilot-cloud' ? 'GitHub Copilot Cloud' : 'Paperclip',
     description: '',
     endpoint: type === 'copilot-cloud' ? 'https://api.github.com' : '',
     credential: '',
@@ -188,7 +188,7 @@ function responseError(body: unknown, status: number) {
 }
 
 function destinationLabel(type: DestinationType) {
-  return type === 'copilot-cloud' ? 'GitHub Cloud' : 'Paperclip route';
+  return type === 'copilot-cloud' ? 'GitHub Copilot Cloud' : 'Paperclip route';
 }
 
 function DestinationIcon({ type, size = 18 }: { type: DestinationType; size?: number }) {
@@ -423,7 +423,7 @@ export function ExecutionDestinationsSection() {
               onClick={() => setForm(emptyForm('copilot-cloud'))}
             >
               <Plus size={14} />
-              GitHub Cloud
+              GitHub Copilot Cloud
             </Button>
           </div>
         )}
@@ -458,8 +458,8 @@ export function ExecutionDestinationsSection() {
             No execution destinations yet
           </p>
           <p className="mx-auto mt-1 max-w-lg text-xs leading-5 text-[var(--text-muted)]">
-            Add GitHub Cloud for GitHub-hosted Agent Tasks or bind a validated Paperclip route.
-            Nothing is transmitted until a delegation preview is reviewed and confirmed.
+            Add GitHub Copilot Cloud for GitHub-hosted Agent Tasks or bind a validated Paperclip
+            route. Nothing is transmitted until a delegation preview is reviewed and confirmed.
           </p>
         </div>
       ) : destinations.length > 0 ? (

@@ -199,7 +199,7 @@ describe('external-agent registry boundaries', () => {
     expect(registry.publicExternalAgent(agent)).not.toHaveProperty('authCredentialRef');
   });
 
-  it('validates and stores a GitHub Cloud token without returning it to clients', async () => {
+  it('validates and stores a GitHub Copilot Cloud token without returning it to clients', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       Response.json({ login: 'octocat' }),
     );
@@ -256,7 +256,7 @@ describe('external-agent registry boundaries', () => {
     }
   });
 
-  it('rejects an invalid GitHub Cloud token before storing the destination', async () => {
+  it('rejects an invalid GitHub Copilot Cloud token before storing the destination', async () => {
     const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
       Response.json({ message: 'Bad credentials' }, { status: 401 }),
     );

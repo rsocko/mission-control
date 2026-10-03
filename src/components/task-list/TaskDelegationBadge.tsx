@@ -26,7 +26,7 @@ export function TaskDelegationBadge({ delegation }: { delegation: TaskDelegation
   const destinationLabel = delegation.pullRequestUrl
     ? 'PR ready'
     : delegation.targetType === 'copilot-cloud'
-      ? 'GitHub Cloud'
+      ? 'GitHub Copilot Cloud'
       : delegation.targetType === 'paperclip'
         ? 'Paperclip'
         : delegation.targetName;

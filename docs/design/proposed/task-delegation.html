@@ -350,7 +350,7 @@
                     <div class="section-title"><span>Available for this task</span><span>2 configured</span></div>
                     <div class="destination-tabs" role="tablist">
                       <button data-dest="paperclip" aria-selected="true"><span class="dest-icon paperclip-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-paperclip"/></svg></span><span><strong>Paperclip</strong><small>Orchestrated work</small></span></button>
-                      <button data-dest="github" aria-selected="false"><span class="dest-icon github-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg></span><span><strong>GitHub Cloud</strong><small>Direct hosted agent</small></span></button>
+                      <button data-dest="github" aria-selected="false"><span class="dest-icon github-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg></span><span><strong>GitHub Copilot Cloud</strong><small>Direct hosted agent</small></span></button>
                     </div>
                     <div class="provider-form" data-provider="paperclip">
                       <div class="field"><label>Configured route <em>company, project, and agent are policy-bound</em></label><select class="input"><option>Northstar · Mission Control · Build Engineer</option><option>Northstar · Agent Infrastructure · Platform Engineer</option></select></div>
@@ -422,7 +422,7 @@
                 <div class="drawer-body">
                   <div class="destination-tabs">
                     <button data-dest="paperclip" aria-selected="true"><span class="dest-icon paperclip-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-paperclip"/></svg></span><span><strong>Paperclip</strong><small>3 of 4 eligible</small></span></button>
-                    <button data-dest="github" aria-selected="false"><span class="dest-icon github-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg></span><span><strong>GitHub Cloud</strong><small>3 of 4 eligible</small></span></button>
+                    <button data-dest="github" aria-selected="false"><span class="dest-icon github-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg></span><span><strong>GitHub Copilot Cloud</strong><small>3 of 4 eligible</small></span></button>
                   </div>
                   <div class="provider-form" data-provider="paperclip">
                     <div class="field"><label>Configured route <em>bound and validated at setup</em></label><select class="input"><option>Northstar · Mission Control · Build Engineer</option></select></div>
@@ -436,7 +436,7 @@
                     <div class="field-grid"><div class="field"><label>Base ref</label><select class="input"><option>Use each task's confirmed base ref</option><option>main for all compatible tasks</option></select></div><div class="field"><label>Model</label><select class="input"><option>Auto for all tasks</option><option>GPT-5.3-Codex for all</option></select></div></div>
                     <div class="toggle-row"><span>Create a pull request for each completed task</span><span class="toggle"></span></div>
                     <details class="advanced"><summary>Advanced controls · actions, retries, timeout</summary><div class="advanced-body"><div class="action-list"><span class="on">Analyze code</span><span class="on">Write code</span><span class="on">Run commands</span><span class="on">Push</span><span class="on">Create PR</span></div><div class="field-grid"><div class="field"><label>Retry limit</label><select class="input"><option>3 attempts each</option></select></div><div class="field"><label>Timeout</label><select class="input"><option>24 hours each</option></select></div></div></div></details>
-                    <div class="notice"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-alert"/></svg><span>GitHub Cloud cannot receive a multi-task project. Mission Control will create one hosted task per eligible item.</span></div>
+                    <div class="notice"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-alert"/></svg><span>GitHub Copilot Cloud cannot receive a multi-task project. Mission Control will create one hosted task per eligible item.</span></div>
                   </div>
                   <div class="eligibility">
                     <div class="eligibility-head"><b>Eligibility</b><span>Never silently skip</span></div>
@@ -464,7 +464,7 @@
             <section class="task-list">
               <div class="list-head"><h2>Today</h2><div class="list-meta">2 delegated · 1 waiting for review</div></div>
               <div class="tasks">
-                <div class="task selected"><span class="check"></span><div><strong>Add durable restart reconciliation</strong><small><i class="source-dot"></i>GitHub · mission-control <span class="row-assignment">Running · GitHub Cloud</span></small></div><i class="priority"></i></div>
+                <div class="task selected"><span class="check"></span><div><strong>Add durable restart reconciliation</strong><small><i class="source-dot"></i>GitHub · mission-control <span class="row-assignment">Running · GitHub Copilot Cloud</span></small></div><i class="priority"></i></div>
                 <div class="task"><span class="check"></span><div><strong>Add delegation status badges</strong><small><i class="source-dot"></i>GitHub · mission-control <span class="row-assignment" style="color:var(--success)">Review · PR ready</span></small></div></div>
                 <div class="task"><span class="check"></span><div><strong>Review connector permission model</strong><small><i class="source-dot"></i>Local · Security</small></div></div>
               </div>
@@ -491,7 +491,7 @@
                     <div class="delegation-summary-body">
                     <div class="status-line"><i class="pulse"></i><b>Running</b><span>updated 24s ago</span></div>
                     <p class="progress-copy">Running focused reconciliation tests after updating durable provider state mapping.</p>
-                    <div class="summary-meta"><span><b>GitHub Cloud</b></span><span>main</span><span>Attempt 1 of 3</span></div>
+                    <div class="summary-meta"><span><b>GitHub Copilot Cloud</b></span><span>main</span><span>Attempt 1 of 3</span></div>
                     <div class="summary-actions"><a href="#">copilot/restart-reconciliation</a><button class="btn" data-open-run>More details</button></div>
                     </div>
                   </section>
@@ -518,7 +518,7 @@
                   <aside>
                     <h5>Execution</h5>
                     <div class="status-facts">
-                    <div><span>Destination</span><b>GitHub Cloud</b></div>
+                    <div><span>Destination</span><b>GitHub Copilot Cloud</b></div>
                     <div><span>Locality</span><b>GitHub-hosted</b></div>
                     <div><span>Repository</span><b>rsocko/mission-control</b></div>
                     <div><span>Base ref</span><b>main</b></div>

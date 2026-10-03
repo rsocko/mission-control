@@ -199,6 +199,86 @@ describe('external-agent registry boundaries', () => {
     expect(registry.publicExternalAgent(agent)).not.toHaveProperty('authCredentialRef');
   });
 
+  it('validates and stores a GitHub Cloud token without returning it to clients', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ login: 'octocat' }),
+    );
+    try {
+      const hosted = await registry.createExternalAgent({
+        id: 'managed-github-token',
+        name: 'Managed GitHub credential',
+        type: 'copilot-cloud',
+        authType: 'github-user',
+        credential: 'github_pat_managed-test',
+        endpoint: 'https://api.github.com',
+      });
+
+      expect(fetcher).toHaveBeenCalledWith(
+        new URL('https://api.github.com/user'),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: expect.stringMatching(/^Bearer /),
+          }),
+        }),
+      );
+      await expect(registry.resolveGitHubAgentCredential(hosted))
+        .resolves.toBe('github_pat_managed-test');
+      expect(registry.publicExternalAgent(hosted)).toMatchObject({
+        hasCredentialReference: true,
+        credentialSource: 'mission-control',
+      });
+      expect(JSON.stringify(registry.publicExternalAgent(hosted)))
+        .not.toContain('github_pat_managed-test');
+
+      const previousCredentialStore = process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON;
+      try {
+        sqlite.prepare(
+          'UPDATE external_agents SET auth_credential = NULL WHERE id = ?',
+        ).run(hosted.id);
+        process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+          'mission-control:github-user': 'must-not-fallback',
+        });
+        await expect(registry.resolveGitHubAgentCredential(hosted)).rejects.toMatchObject({
+          code: 'CREDENTIAL_UNAVAILABLE',
+        });
+      } finally {
+        process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = previousCredentialStore;
+      }
+
+      await registry.updateExternalAgent(hosted.id, {
+        authCredentialRef: 'push-agent-key',
+      });
+      expect(sqlite.prepare(
+        'SELECT auth_credential FROM external_agents WHERE id = ?',
+      ).pluck().get(hosted.id)).toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
+  it('rejects an invalid GitHub Cloud token before storing the destination', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ message: 'Bad credentials' }, { status: 401 }),
+    );
+    try {
+      await expect(registry.createExternalAgent({
+        id: 'invalid-managed-github-token',
+        name: 'Invalid managed GitHub credential',
+        type: 'copilot-cloud',
+        authType: 'github-user',
+        credential: 'invalid-token',
+        endpoint: 'https://api.github.com',
+      })).rejects.toMatchObject({
+        code: 'CREDENTIAL_INVALID',
+        status: 401,
+      });
+      await expect(registry.getExternalAgent('invalid-managed-github-token'))
+        .resolves.toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
   it('rejects endpoints with embedded credentials', async () => {
     await expect(registry.createExternalAgent({
       name: 'Embedded secret',

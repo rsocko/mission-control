@@ -1,7 +1,6 @@
 import 'server-only';
 
 import type {
-  AgentDataClassification,
   AgentDispatchRecord,
   AgentDispatchStatus,
   AgentPayloadSnapshot,
@@ -20,6 +19,7 @@ import {
   getExternalAgent,
   listExternalAgents,
   resolveAgentCredential,
+  resolveGitHubAgentCredential,
 } from './registry';
 import {
   createDispatchPreview,
@@ -379,10 +379,14 @@ function allowedActions(capabilities: ExternalAgentCapabilities) {
   ));
 }
 
-function credentialBlocker(agent: Awaited<ReturnType<typeof getExternalAgent>>) {
+async function credentialBlocker(agent: Awaited<ReturnType<typeof getExternalAgent>>) {
   if (!agent || agent.authType === 'none') return null;
   try {
-    resolveAgentCredential(agent.authCredentialRef);
+    if (agent.type === 'copilot-cloud') {
+      await resolveGitHubAgentCredential(agent);
+    } else {
+      resolveAgentCredential(agent.authCredentialRef);
+    }
     return null;
   } catch (error) {
     return error instanceof Error ? error.message : 'Execution credential is unavailable';
@@ -483,7 +487,7 @@ export async function getTaskDelegationContext(
       continue;
     }
     const internal = await getExternalAgent(target.id);
-    const credentialError = credentialBlocker(internal);
+    const credentialError = await credentialBlocker(internal);
     const paperclip = target.providerConfig.paperclip;
     configuredTargets.push({
       id: target.id,

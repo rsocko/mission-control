@@ -6,6 +6,9 @@ import {
   Bot,
   CheckCircle2,
   CloudCog,
+  Eye,
+  EyeOff,
+  ExternalLink,
   Loader2,
   Pencil,
   Plus,
@@ -15,6 +18,13 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Toggle } from '@/components/settings/SettingsPrimitives';
 import { settingsLogger } from '@/lib/client-logger';
 import { cn } from '@/lib/utils';
@@ -42,6 +52,7 @@ interface ExecutionDestination {
   enabled: boolean;
   executionLocality: 'github-hosted' | 'external';
   hasCredentialReference: boolean;
+  credentialSource: 'mission-control' | 'deployment-secret';
   updatedAt: string;
 }
 
@@ -51,7 +62,9 @@ interface DestinationForm {
   name: string;
   description: string;
   endpoint: string;
+  credential: string;
   credentialRef: string;
+  credentialSource: 'mission-control' | 'deployment-secret';
   companyId: string;
   projectId: string;
   assigneeAgentId: string;
@@ -133,7 +146,9 @@ function emptyForm(type: DestinationType): DestinationForm {
     name: type === 'copilot-cloud' ? 'GitHub Cloud' : 'Paperclip',
     description: '',
     endpoint: type === 'copilot-cloud' ? 'https://api.github.com' : '',
+    credential: '',
     credentialRef: '',
+    credentialSource: 'mission-control',
     companyId: '',
     projectId: '',
     assigneeAgentId: '',
@@ -152,7 +167,9 @@ function editForm(destination: ExecutionDestination): DestinationForm {
     name: destination.name,
     description: destination.description ?? '',
     endpoint: destination.endpoint ?? '',
+    credential: '',
     credentialRef: '',
+    credentialSource: destination.credentialSource ?? 'deployment-secret',
     companyId: paperclip?.companyId ?? '',
     projectId: paperclip?.projectId ?? '',
     assigneeAgentId: paperclip?.assigneeAgentId ?? '',
@@ -187,6 +204,7 @@ export function ExecutionDestinationsSection() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ExecutionDestination | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [showCredential, setShowCredential] = useState(false);
 
   const loadDestinations = useCallback(async () => {
     setLoadError(null);
@@ -216,6 +234,15 @@ export function ExecutionDestinationsSection() {
       void loadDestinations();
     });
   }, [loadDestinations]);
+
+  const formDestination = form?.id
+    ? destinations.find((destination) => destination.id === form.id)
+    : undefined;
+  const switchingGitHubCredentialSource = Boolean(
+    form?.type === 'copilot-cloud'
+    && form.id
+    && formDestination?.credentialSource !== form.credentialSource,
+  );
 
   function updateForm(patch: Partial<DestinationForm>) {
     setForm((current) => current ? { ...current, ...patch } : current);
@@ -257,6 +284,9 @@ export function ExecutionDestinationsSection() {
       ? destinations.find((destination) => destination.id === form.id)
       : undefined;
     const credentialRef = form.credentialRef.trim();
+    const credential = form.credential.trim();
+    const usesManagedGitHubCredential = form.type === 'copilot-cloud'
+      && form.credentialSource === 'mission-control';
     const paperclipUsesCredential = form.type === 'paperclip'
       && Boolean(credentialRef || existing?.hasCredentialReference);
     const body = {
@@ -269,7 +299,10 @@ export function ExecutionDestinationsSection() {
       authType: form.type === 'copilot-cloud'
         ? 'github-user'
         : paperclipUsesCredential ? 'bearer' : 'none',
-      ...(credentialRef ? { authCredentialRef: credentialRef } : {}),
+      ...(usesManagedGitHubCredential && credential ? { credential } : {}),
+      ...(!usesManagedGitHubCredential && credentialRef
+        ? { authCredentialRef: credentialRef }
+        : {}),
       ...(form.type === 'paperclip' && !paperclipUsesCredential
         ? { authCredentialRef: null }
         : {}),
@@ -456,7 +489,9 @@ export function ExecutionDestinationsSection() {
                   </p>
                   <p className="mt-1 text-[11px] text-[var(--text-tertiary)]">
                     {destination.hasCredentialReference
-                      ? 'Server-side credential reference configured'
+                      ? destination.credentialSource === 'mission-control'
+                        ? 'Personal access token stored in Mission Control'
+                        : 'Deployment secret reference configured'
                       : destination.authType === 'none'
                         ? 'Trusted local access; no credential stored'
                         : 'Credential reference required'}
@@ -510,7 +545,7 @@ export function ExecutionDestinationsSection() {
               </h4>
               <p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">
                 {form.type === 'copilot-cloud'
-                  ? 'Authorization values stay in the deployment secret store. Mission Control saves only the reference name.'
+                  ? 'Use a GitHub personal access token here, just like a GitHub Issues connector. Mission Control validates it with GitHub and never returns it to the browser.'
                   : 'The company, project, assignee, and adapter binding is validated now and cannot be changed during delegation.'}
               </p>
             </div>
@@ -531,27 +566,123 @@ export function ExecutionDestinationsSection() {
                 className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
             </Field>
-            <Field
-              label="Credential reference"
-              htmlFor="destination-credential"
-              hint={form.id
-                ? 'Leave blank to keep the current server-side reference.'
-                : form.type === 'copilot-cloud'
-                  ? 'Required. Key in MC_EXTERNAL_AGENT_CREDENTIALS_JSON.'
+            {form.type === 'copilot-cloud' ? (
+              <Field label="Credential source" htmlFor="destination-credential-source">
+                <Select
+                  value={form.credentialSource}
+                  onValueChange={(value) => updateForm({
+                    credentialSource: value as DestinationForm['credentialSource'],
+                    credential: '',
+                    credentialRef: '',
+                  })}
+                >
+                  <SelectTrigger id="destination-credential-source" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="mission-control">
+                      Personal access token
+                    </SelectItem>
+                    <SelectItem value="deployment-secret">
+                      Deployment secret reference
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            ) : (
+              <Field
+                label="Credential reference"
+                htmlFor="destination-credential"
+                hint={form.id
+                  ? 'Leave blank to keep the current server-side reference.'
                   : 'Optional only for a trusted local Paperclip endpoint.'}
+              >
+                <input
+                  id="destination-credential"
+                  maxLength={200}
+                  autoComplete="off"
+                  value={form.credentialRef}
+                  onChange={(event) => updateForm({ credentialRef: event.target.value })}
+                  placeholder={form.id ? 'Current reference is hidden' : 'paperclip-token'}
+                  className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                />
+              </Field>
+            )}
+          </div>
+
+          {form.type === 'copilot-cloud' && form.credentialSource === 'mission-control' && (
+            <Field
+              label="Personal access token"
+              htmlFor="github-cloud-token"
+              hint={form.id && !switchingGitHubCredentialSource
+                ? 'Leave blank to keep the currently stored token.'
+                : 'Required. Use a GitHub user token authorized for Copilot Agent Tasks.'}
+            >
+              <div className="relative">
+                <input
+                  id="github-cloud-token"
+                  type={showCredential ? 'text' : 'password'}
+                  required={!form.id || switchingGitHubCredentialSource}
+                  autoComplete="new-password"
+                  value={form.credential}
+                  onChange={(event) => updateForm({ credential: event.target.value })}
+                  placeholder={form.id && !switchingGitHubCredentialSource
+                    ? 'Current token is hidden'
+                    : 'github_pat_...'}
+                  className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 pr-10 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowCredential((current) => !current)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-[var(--text-muted)] hover:text-[var(--text-secondary)]"
+                  aria-label={`${showCredential ? 'Hide' : 'Show'} personal access token`}
+                >
+                  {showCredential ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                <a
+                  href="https://github.com/settings/personal-access-tokens/new"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
+                >
+                  Create fine-grained token <ExternalLink size={11} />
+                </a>
+                <a
+                  href="https://github.com/settings/tokens/new"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 text-[var(--accent)] hover:underline"
+                >
+                  Create classic token <ExternalLink size={11} />
+                </a>
+              </div>
+            </Field>
+          )}
+
+          {form.type === 'copilot-cloud' && form.credentialSource === 'deployment-secret' && (
+            <Field
+              label="Deployment secret reference"
+              htmlFor="destination-credential"
+              hint={form.id && !switchingGitHubCredentialSource
+                ? 'Leave blank to keep the current reference.'
+                : 'Required. Key in MC_EXTERNAL_AGENT_CREDENTIALS_JSON.'}
             >
               <input
                 id="destination-credential"
-                required={!form.id && form.type === 'copilot-cloud'}
+                required={!form.id || switchingGitHubCredentialSource}
                 maxLength={200}
                 autoComplete="off"
                 value={form.credentialRef}
                 onChange={(event) => updateForm({ credentialRef: event.target.value })}
-                placeholder={form.id ? 'Current reference is hidden' : 'github-agent-user'}
+                placeholder={form.id && !switchingGitHubCredentialSource
+                  ? 'Current reference is hidden'
+                  : 'github-agent-user'}
                 className="input-glow w-full rounded-lg border border-[var(--border-strong)] bg-[var(--surface-0)] px-3 py-2 font-mono text-sm text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none"
               />
             </Field>
-          </div>
+          )}
 
           <Field label="Description" htmlFor="destination-description">
             <textarea

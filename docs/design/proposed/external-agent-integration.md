@@ -142,6 +142,7 @@ CREATE TABLE external_agents (
   endpoint        TEXT,                    -- URL to invoke (null for manual)
   auth_type       TEXT DEFAULT 'none',     -- 'none' | 'bearer' | 'hmac' | 'github-user' | 'github-app'
   auth_credential_ref TEXT,                -- reference to a secret manager entry; never the token itself
+  auth_credential TEXT,                    -- optional UI-managed credential; never serialized to clients
   capabilities    TEXT DEFAULT '{}',       -- JSON: { executionLocality, canAnalyzeCode, canWriteCode, canRunCommands, canPush, canCreatePR }
   input_format    TEXT DEFAULT 'mc-tasks', -- 'mc-tasks' | 'markdown' | 'custom-json'
   output_format   TEXT DEFAULT 'mc-tasks', -- 'mc-tasks' | 'mc-phases' | 'github-issues' | 'raw'
@@ -230,11 +231,13 @@ The implemented API uses a durable two-step boundary:
    the reviewed preview. Retries reuse the selected locality and provider
    idempotency identity; they never fall back to another execution mode.
 
-Credential values are supplied server-side from
-`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`, keyed by `auth_credential_ref`. Only the
-reference is stored in the registry, and neither the reference nor the
-credential value is returned in API responses or persisted payload/result
-logs.
+GitHub Cloud personal access tokens are entered directly in **Settings → AI &
+Agents**. Mission Control validates the token with GitHub, persists it in the
+destination's server-side credential field, and never returns it in API
+responses or persists it in payload/result logs. Existing installations may
+instead select the advanced deployment-secret-reference mode, which resolves
+`auth_credential_ref` from `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. Paperclip
+bearer credentials continue to use deployment-secret references.
 
 ```typescript
 // Request
@@ -273,11 +276,11 @@ logs.
 The Agent Tasks API is public preview and currently accepts only user-to-server
 credentials, such as a PAT, OAuth user token, or GitHub App user token. GitHub
 App installation access tokens are not supported for this cloud-dispatch API.
-Tokens remain server-side behind `auth_credential_ref`; they are never included
-in previews, provider details, events, or API responses. MC reports credential,
-entitlement, repository-policy, token-scope, validation, and rate-limit failures
-with actionable errors and never falls back to another execution mode or
-repository.
+Tokens remain server-side either in the destination credential field or behind
+`auth_credential_ref`; they are never included in previews, provider details,
+events, or API responses. MC reports credential, entitlement,
+repository-policy, token-scope, validation, and rate-limit failures with
+actionable errors and never falls back to another execution mode or repository.
 
 `POST /api/external-agents/reconcile` performs bounded reconciliation of all
 persisted active GitHub-hosted dispatches and is safe to run after process
@@ -537,9 +540,11 @@ Add an "External Agents" section to the AI page:
 **Delegate** is the stable task action. Configured GitHub Cloud and Paperclip
 routes are typed execution destinations; source connectors remain separate.
 Operators manage those destinations in **Settings → AI & Agents → Execution
-Destinations**. The settings surface stores credential references only; values
-remain server-side in `MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Cloud and
-Paperclip setup, validation, enablement, capability policy, and data
+Destinations**. GitHub Cloud setup accepts and validates a personal access
+token directly; deployment-secret references remain available as an advanced
+and backward-compatible option. Paperclip references remain server-side in
+`MC_EXTERNAL_AGENT_CREDENTIALS_JSON`. GitHub Cloud and Paperclip setup,
+validation, enablement, capability policy, and data
 classification policy are managed there. Paperclip route bindings are validated
 when saved and remain read-only during individual delegations.
 The same centered wizard opens from the task-detail header, task-row context

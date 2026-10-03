@@ -58,6 +58,7 @@ export const externalAgents = pgTable('external_agents', {
   endpoint: text('endpoint'),
   authType: text('auth_type').$type<ExternalAgentAuthType>().notNull().default('none'),
   authCredentialRef: text('auth_credential_ref'),
+  authCredential: text('auth_credential'),
   providerConfig: jsonb('provider_config')
     .$type<ExternalAgentProviderConfig>()
     .notNull()

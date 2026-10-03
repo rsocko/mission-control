@@ -1,5 +1,4 @@
 import type {
-  AgentDataClassification,
   AgentDispatchDetail,
   AgentDispatchRecord,
   AgentDispatchResult,
@@ -66,8 +65,16 @@ export interface ExternalAgentControlPersistence {
   registry: {
     list(options?: { includeDeleted?: boolean }): Promise<ExternalAgentRecord[]>;
     get(id: string, includeDeleted?: boolean): Promise<ExternalAgentRecord | null>;
-    create(record: ExternalAgentCreateRecord): Promise<ExternalAgentRecord>;
-    update(id: string, record: ExternalAgentUpdateRecord): Promise<ExternalAgentRecord | null>;
+    getCredential(id: string): Promise<string | null>;
+    create(
+      record: ExternalAgentCreateRecord,
+      credential?: string | null,
+    ): Promise<ExternalAgentRecord>;
+    update(
+      id: string,
+      record: ExternalAgentUpdateRecord,
+      credential?: string | null,
+    ): Promise<ExternalAgentRecord | null>;
     softDelete(id: string, now: string): Promise<boolean>;
   };
   payloads: {

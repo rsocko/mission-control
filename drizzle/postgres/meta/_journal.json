@@ -155,6 +155,13 @@
       "when": 1790907499904,
       "tag": "0021_tough_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791044042376,
+      "tag": "0022_exotic_ben_urich",
+      "breakpoints": true
     }
   ]
 }

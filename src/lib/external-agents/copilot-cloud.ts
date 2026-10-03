@@ -7,7 +7,7 @@ import {
 } from '@/lib/connectors/github-issues/github-client';
 import { canonicalJson, redactForPersistence } from './policy';
 import { ExternalAgentError } from './errors';
-import { resolveAgentCredential, type ExternalAgent } from './registry';
+import { resolveGitHubAgentCredential, type ExternalAgent } from './registry';
 import type {
   AgentDispatchResult,
   AgentDispatchStatus,
@@ -597,7 +597,7 @@ async function transportResult(
   };
 }
 
-function createClient(agent: ExternalAgent, fetcher: typeof fetch) {
+async function createClient(agent: ExternalAgent, fetcher: typeof fetch) {
   if (!agent.endpoint) {
     throw new ExternalAgentError(
       'Copilot cloud agent API origin is missing',
@@ -605,14 +605,7 @@ function createClient(agent: ExternalAgent, fetcher: typeof fetch) {
       500,
     );
   }
-  const credential = resolveAgentCredential(agent.authCredentialRef);
-  if (!credential) {
-    throw new ExternalAgentError(
-      'GitHub user credential is unavailable',
-      'CREDENTIAL_UNAVAILABLE',
-      503,
-    );
-  }
+  const credential = await resolveGitHubAgentCredential(agent);
   return createGitHubClient(credential, agent.endpoint, fetcher);
 }
 
@@ -624,7 +617,7 @@ export async function getCopilotCloudTask(
   fetcher: typeof fetch = fetch,
 ): Promise<TransportDispatchResult> {
   return withProviderErrors(async () => {
-    const client = createClient(agent, fetcher);
+    const client = await createClient(agent, fetcher);
     const target = targetFromPayload({
       repository: { fullName: repository, defaultBranch: baseRef },
       execution: { baseRef, createPullRequest: false },
@@ -647,7 +640,7 @@ export function createCopilotCloudTransport(
     kind: 'push',
     async dispatch(agent, dispatch) {
       return withProviderErrors(async () => {
-        const client = createClient(agent, fetcher);
+        const client = await createClient(agent, fetcher);
         const target = targetFromPayload(dispatch.payload);
         const prompt = taskPrompt(dispatch);
         const listedTasks = await preflight(client, target);

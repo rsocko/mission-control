@@ -313,33 +313,49 @@ export function createSqliteExternalAgentControlRepository(
       `).get(id) as Row | undefined;
       return row ? agentFromRow(row) : null;
     },
-    async create(record) {
+    async getCredential(id) {
+      const row = sqlite.prepare(`
+        SELECT auth_credential AS credential
+        FROM external_agents
+        WHERE id = ? AND deleted_at IS NULL
+      `).get(id) as { credential: string | null } | undefined;
+      return row?.credential ?? null;
+    },
+    async create(record, credential = null) {
       sqlite.transaction(() => {
         assertProtectedInboundWebhook(sqlite, record.inboundWebhookId);
         sqlite.prepare(`
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, provider_config, capabilities,
+            auth_type, auth_credential_ref, auth_credential, provider_config, capabilities,
             input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(record.id, ...agentValues(record).slice(0, 15), record.createdAt,
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(record.id, ...agentValues(record).slice(0, 8), credential,
+          ...agentValues(record).slice(8, 15), record.createdAt,
           record.updatedAt, record.deletedAt);
       }).immediate();
       return (await registry.get(record.id, true))!;
     },
-    async update(id, record) {
+    async update(id, record, credential) {
       sqlite.transaction(() => {
         assertProtectedInboundWebhook(sqlite, record.inboundWebhookId);
         sqlite.prepare(`
           UPDATE external_agents SET
             name = ?, type = ?, transport = ?, execution_locality = ?,
             description = ?, endpoint = ?, auth_type = ?, auth_credential_ref = ?,
+            auth_credential = CASE WHEN ? THEN ? ELSE auth_credential END,
             provider_config = ?, capabilities = ?, input_format = ?, output_format = ?,
             inbound_webhook_id = ?, data_policy = ?, enabled = ?,
             updated_at = ?, deleted_at = ?
           WHERE id = ? AND deleted_at IS NULL
-        `).run(...agentValues(record), id);
+        `).run(
+          ...agentValues(record).slice(0, 8),
+          credential !== undefined ? 1 : 0,
+          credential ?? null,
+          ...agentValues(record).slice(8),
+          id,
+        );
       }).immediate();
       return registry.get(id);
     },

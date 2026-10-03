@@ -310,24 +310,32 @@ export function createPostgresExternalAgentControlRepository(
       `, [id]);
       return agent ?? null;
     },
-    async create(record: ExternalAgentCreateRecord) {
+    async getCredential(id) {
+      const [row] = await query<{ credential: string | null } & QueryResultRow>(pool, `
+        SELECT auth_credential AS credential
+        FROM external_agents
+        WHERE id = $1 AND deleted_at IS NULL
+      `, [id]);
+      return row?.credential ?? null;
+    },
+    async create(record: ExternalAgentCreateRecord, credential = null) {
       return transaction(pool, async (client) => {
         await assertProtectedInboundWebhook(client, record.inboundWebhookId);
         const [created] = await query<ExternalAgentRecord & QueryResultRow>(client, `
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, provider_config, capabilities,
+            auth_type, auth_credential_ref, auth_credential, provider_config, capabilities,
             input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11::jsonb, $12,
-            $13, $14, $15::jsonb, $16, $17, $18, $19
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
+            $13, $14, $15, $16::jsonb, $17, $18, $19, $20
           )
           RETURNING ${AGENT_COLUMNS}
         `, [
           record.id, record.name, record.type, record.transport,
           record.executionLocality, record.description, record.endpoint,
-          record.authType, record.authCredentialRef, JSON.stringify(record.providerConfig),
+          record.authType, record.authCredentialRef, credential, JSON.stringify(record.providerConfig),
           JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
           record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.createdAt,
           record.updatedAt, record.deletedAt,
@@ -335,23 +343,26 @@ export function createPostgresExternalAgentControlRepository(
         return created;
       });
     },
-    async update(id, record: ExternalAgentUpdateRecord) {
+    async update(id, record: ExternalAgentUpdateRecord, credential) {
       return transaction(pool, async (client) => {
         await assertProtectedInboundWebhook(client, record.inboundWebhookId);
         const [updated] = await query<ExternalAgentRecord & QueryResultRow>(client, `
           UPDATE external_agents SET
             name = $2, type = $3, transport = $4, execution_locality = $5,
             description = $6, endpoint = $7, auth_type = $8,
-            auth_credential_ref = $9, provider_config = $10::jsonb,
-            capabilities = $11::jsonb, input_format = $12, output_format = $13,
-            inbound_webhook_id = $14, data_policy = $15::jsonb, enabled = $16,
-            updated_at = $17, deleted_at = $18
+            auth_credential_ref = $9,
+            auth_credential = CASE WHEN $10::boolean THEN $11 ELSE auth_credential END,
+            provider_config = $12::jsonb,
+            capabilities = $13::jsonb, input_format = $14, output_format = $15,
+            inbound_webhook_id = $16, data_policy = $17::jsonb, enabled = $18,
+            updated_at = $19, deleted_at = $20
           WHERE id = $1 AND deleted_at IS NULL
           RETURNING ${AGENT_COLUMNS}
         `, [
           id, record.name, record.type, record.transport, record.executionLocality,
           record.description, record.endpoint, record.authType,
-          record.authCredentialRef, JSON.stringify(record.providerConfig),
+          record.authCredentialRef, credential !== undefined, credential ?? null,
+          JSON.stringify(record.providerConfig),
           JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
           record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.updatedAt,
           record.deletedAt,

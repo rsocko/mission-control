@@ -57,6 +57,7 @@ export const externalAgents = sqliteTable('external_agents', {
   endpoint: text('endpoint'),
   authType: text('auth_type').$type<ExternalAgentAuthType>().notNull().default('none'),
   authCredentialRef: text('auth_credential_ref'),
+  authCredential: text('auth_credential'),
   providerConfig: text('provider_config', { mode: 'json' })
     .$type<ExternalAgentProviderConfig>()
     .notNull()

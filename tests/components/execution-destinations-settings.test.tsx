@@ -28,7 +28,7 @@ describe('ExecutionDestinationsSection', () => {
     })).toBeInTheDocument();
   });
 
-  it('creates a GitHub Cloud destination without accepting or echoing a secret', async () => {
+  it('accepts a GitHub token directly and reports server-side storage', async () => {
     let requestBody: Record<string, unknown> | null = null;
     let created = false;
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
@@ -57,6 +57,7 @@ describe('ExecutionDestinationsSection', () => {
           enabled: true,
           executionLocality: 'github-hosted',
           hasCredentialReference: true,
+          credentialSource: 'mission-control',
           updatedAt: '2026-10-03T00:00:00.000Z',
         }] : [] });
       }
@@ -68,9 +69,8 @@ describe('ExecutionDestinationsSection', () => {
 
     expect(await screen.findByText('No execution destinations yet')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'GitHub Cloud' }));
-    expect(screen.queryByLabelText(/token|secret/i)).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Credential reference'), {
-      target: { value: 'github-agent-user' },
+    fireEvent.change(screen.getByLabelText('Personal access token'), {
+      target: { value: 'github_pat_test-value' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Add destination' }));
 
@@ -80,11 +80,12 @@ describe('ExecutionDestinationsSection', () => {
       type: 'copilot-cloud',
       endpoint: 'https://api.github.com',
       authType: 'github-user',
-      authCredentialRef: 'github-agent-user',
+      credential: 'github_pat_test-value',
       dataPolicy: { allowedClassifications: ['standard'] },
     });
-    expect(JSON.stringify(requestBody)).not.toContain('ghu_');
-    expect(await screen.findByText(/Server-side credential reference configured/)).toBeInTheDocument();
+    expect(requestBody).not.toHaveProperty('authCredentialRef');
+    expect(await screen.findByText(/Personal access token stored in Mission Control/))
+      .toBeInTheDocument();
   });
 
   it('submits setup-bound Paperclip route fields for validation', async () => {
@@ -160,6 +161,7 @@ describe('ExecutionDestinationsSection', () => {
       enabled: true,
       executionLocality: 'github-hosted',
       hasCredentialReference: true,
+      credentialSource: 'mission-control',
       updatedAt: '2026-10-03T00:00:00.000Z',
     };
     const fetcher = vi.fn((input: string | URL | Request, init?: RequestInit) => {
@@ -177,11 +179,12 @@ describe('ExecutionDestinationsSection', () => {
     vi.stubGlobal('fetch', fetcher);
 
     render(<ExecutionDestinationsSection />);
-    expect(await screen.findByText(/Server-side credential reference configured/)).toBeInTheDocument();
+    expect(await screen.findByText(/Personal access token stored in Mission Control/))
+      .toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Edit GitHub Cloud' }));
-    expect(screen.getByLabelText('Credential reference')).toHaveAttribute(
+    expect(screen.getByLabelText('Personal access token')).toHaveAttribute(
       'placeholder',
-      'Current reference is hidden',
+      'Current token is hidden',
     );
     fireEvent.change(screen.getByLabelText('Description'), {
       target: { value: 'Primary coding route' },
@@ -190,6 +193,7 @@ describe('ExecutionDestinationsSection', () => {
 
     await waitFor(() => expect(patchBody).not.toBeNull());
     expect(patchBody).not.toHaveProperty('authCredentialRef');
+    expect(patchBody).not.toHaveProperty('credential');
     expect(getCount).toBeGreaterThanOrEqual(2);
   });
 });

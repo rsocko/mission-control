@@ -5,6 +5,7 @@ import type {
   AgentDataClassification,
   ExternalAgentDataPolicy,
   ExternalAgentLocality,
+  ExternalAgentType,
 } from './contracts';
 import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 import { redactPushText } from '@/lib/notifications/push-text';
@@ -100,6 +101,7 @@ export function validateDataPolicy(value: unknown): ExternalAgentDataPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ExternalAgentError('dataPolicy must be an object', 'VALIDATION_ERROR', 422);
   }
+
   const policy = value as Partial<ExternalAgentDataPolicy>;
   const classifications = policy.allowedClassifications;
   if (
@@ -161,6 +163,20 @@ export function validateDataPolicy(value: unknown): ExternalAgentDataPolicy {
     retentionDays: retentionDays!,
     maxRequestsPerMinute: maxRequestsPerMinute!,
   };
+}
+
+export function normalizeExternalAgentDataPolicy(
+  type: ExternalAgentType,
+  policy: ExternalAgentDataPolicy,
+): ExternalAgentDataPolicy {
+  if (type !== 'copilot-cloud' && type !== 'paperclip') return policy;
+  const fieldAllowlist = [...policy.fieldAllowlist];
+  for (const field of REQUIRED_RICH_TASK_FIELDS) {
+    if (!fieldAllowlist.includes(field)) fieldAllowlist.push(field);
+  }
+  return fieldAllowlist.length === policy.fieldAllowlist.length
+    ? policy
+    : { ...policy, fieldAllowlist };
 }
 
 export function resolveDispatchClassification(

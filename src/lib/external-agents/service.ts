@@ -344,7 +344,10 @@ async function loadPayloadSource(
       dataClassification: classification,
       allowedActions,
     },
-    connectorTypes: snapshot.tasks.map(({ connectorType }) => connectorType),
+    connectorTypes: snapshot.tasks.flatMap(({ connectorType, subtasks }) => [
+      connectorType,
+      ...subtasks.map((subtask) => subtask.connectorType),
+    ]),
   };
 }
 

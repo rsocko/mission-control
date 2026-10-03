@@ -309,6 +309,20 @@ cannot disclose the required rich task fields is shown as blocked with the
 missing fields named; Mission Control does not omit descriptions or subtasks and
 continue.
 
+Existing GitHub Cloud and Paperclip destinations are upgraded on registry read:
+required rich-context fields are appended deterministically to their existing
+allowlists and persisted through the same registry repository. Classification,
+retention, rate limits, provider configuration, and existing allowlist entries
+are preserved, so deployment does not require manual database repair.
+
+Classification is resolved across each root task and every disclosed descendant
+before preview persistence or transmission. A restricted descendant therefore
+blocks a standard-only destination even when its root is standard. Bulk preview
+isolates typed per-task disclosure failures: successful durable previews remain
+visible, while failed tasks return blocked entries with the actionable error
+code, HTTP status, and reason. Retrying the same operation reuses successful
+previews and does not create duplicates.
+
 Paperclip creates one parent issue per delegated canonical task. Its title is
 the canonical task title verbatim; Paperclip's current create-issue validator
 and PostgreSQL text column impose no title maximum, so Mission Control does not

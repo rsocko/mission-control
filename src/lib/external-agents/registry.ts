@@ -18,6 +18,7 @@ import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
   DEFAULT_EXTERNAL_AGENT_DATA_POLICY,
+  normalizeExternalAgentDataPolicy,
   validateDataPolicy,
 } from './policy';
 import {
@@ -323,10 +324,13 @@ export function validateExternalAgentInput(input: ExternalAgentInput): Omit<
     inputFormat: optionalText(input.inputFormat, 'inputFormat') ?? 'mc-tasks',
     outputFormat: optionalText(input.outputFormat, 'outputFormat') ?? 'mc-tasks',
     inboundWebhookId: optionalText(input.inboundWebhookId, 'inboundWebhookId'),
-    dataPolicy: validateDataPolicy({
-      ...DEFAULT_EXTERNAL_AGENT_DATA_POLICY,
-      ...input.dataPolicy,
-    }),
+    dataPolicy: normalizeExternalAgentDataPolicy(
+      input.type,
+      validateDataPolicy({
+        ...DEFAULT_EXTERNAL_AGENT_DATA_POLICY,
+        ...input.dataPolicy,
+      }),
+    ),
     enabled: input.enabled ?? true,
     deletedAt: null,
   };
@@ -344,13 +348,30 @@ export function publicExternalAgent(agent: ExternalAgent) {
   };
 }
 
+async function upgradePersistedDataPolicy(
+  agent: ExternalAgent | null,
+): Promise<ExternalAgent | null> {
+  if (!agent || agent.deletedAt) return agent;
+  const dataPolicy = normalizeExternalAgentDataPolicy(agent.type, agent.dataPolicy);
+  if (dataPolicy === agent.dataPolicy) return agent;
+  return (await getExternalAgentControlPersistence()).registry.update(agent.id, {
+    ...agent,
+    dataPolicy,
+    updatedAt: new Date().toISOString(),
+  });
+}
+
 export async function listExternalAgents(options: { includeDeleted?: boolean } = {}) {
-  const rows = await (await getExternalAgentControlPersistence()).registry.list(options);
-  return rows.map(publicExternalAgent);
+  const persistence = await getExternalAgentControlPersistence();
+  const rows = await persistence.registry.list(options);
+  const upgraded = await Promise.all(rows.map(upgradePersistedDataPolicy));
+  return upgraded.filter((agent): agent is ExternalAgent => Boolean(agent)).map(publicExternalAgent);
 }
 
 export async function getExternalAgent(id: string, includeDeleted = false) {
-  return (await getExternalAgentControlPersistence()).registry.get(id, includeDeleted);
+  return upgradePersistedDataPolicy(
+    await (await getExternalAgentControlPersistence()).registry.get(id, includeDeleted),
+  );
 }
 
 export async function createExternalAgent(input: ExternalAgentInput) {

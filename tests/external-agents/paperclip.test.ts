@@ -44,7 +44,7 @@ function paperclipAgent(
       canCreatePullRequest: true,
     },
     dataPolicy: {
-      allowedClassifications: ['standard'],
+      allowedClassifications: ['standard', 'restricted'],
       fieldAllowlist: [
         'instruction',
         'alwaysInstructions',

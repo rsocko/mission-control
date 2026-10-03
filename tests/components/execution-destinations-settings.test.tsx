@@ -160,11 +160,21 @@ describe('ExecutionDestinationsSection', () => {
       description: null,
       endpoint: 'https://api.github.com/',
       authType: 'github-user',
-      providerConfig: {},
+      providerConfig: {
+        alwaysInstructions: 'Preserve this server-owned policy.',
+      },
       capabilities: { canAnalyzeCode: true },
       dataPolicy: {
         allowedClassifications: ['standard'],
-        fieldAllowlist: ['instruction'],
+        fieldAllowlist: [
+          'instruction',
+          'alwaysInstructions',
+          'tasks.id',
+          'tasks.title',
+          'tasks.description',
+          'tasks.subtasks',
+          'tasks.sourceIssue',
+        ],
         retentionDays: 30,
         maxRequestsPerMinute: 30,
       },
@@ -204,6 +214,14 @@ describe('ExecutionDestinationsSection', () => {
     await waitFor(() => expect(patchBody).not.toBeNull());
     expect(patchBody).not.toHaveProperty('authCredentialRef');
     expect(patchBody).not.toHaveProperty('credential');
+    expect(patchBody).toMatchObject({
+      providerConfig: {
+        alwaysInstructions: 'Preserve this server-owned policy.',
+      },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+      },
+    });
     expect(getCount).toBeGreaterThanOrEqual(2);
   });
 });

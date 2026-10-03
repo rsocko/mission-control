@@ -433,7 +433,22 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async updateTask(sourceId: string, updates: Partial<TaskItem>): Promise<TaskItem> {
-    const { listId, taskId } = parseParentTaskSourceId(sourceId);
+    const { listId, taskId, checklistItemId } = parseSourceId(sourceId);
+    if (checklistItemId) {
+      const updated = await this.patchChecklistItem(listId, taskId, checklistItemId, updates);
+      return mapChecklistItem(
+        updated ?? {
+          id: checklistItemId,
+          displayName: updates.title ?? '',
+          isChecked: updates.status === 'done',
+        },
+        listId,
+        taskId,
+        '',
+        this.type,
+        this.id,
+      );
+    }
     const body: Record<string, unknown> = {};
 
     if (updates.title) body.title = updates.title;
@@ -473,7 +488,11 @@ export class MicrosoftTodoConnector implements IConnector {
   }
 
   async completeTask(sourceId: string): Promise<void> {
-    const { listId, taskId } = parseParentTaskSourceId(sourceId);
+    const { listId, taskId, checklistItemId } = parseSourceId(sourceId);
+    if (checklistItemId) {
+      await this.patchChecklistItem(listId, taskId, checklistItemId, { status: 'done' });
+      return;
+    }
     const categories = await this.getCategoriesWithMicroStatus(listId, taskId, null);
     const res = await this.client.graphFetch(graphTodoTaskPath(listId, taskId), {
       method: 'PATCH',
@@ -524,12 +543,23 @@ export class MicrosoftTodoConnector implements IConnector {
   async updateSubTask(parentSourceId: string, subTaskSourceId: string, updates: Partial<TaskItem>): Promise<void> {
     const { listId, taskId } = parseParentTaskSourceId(parentSourceId);
     const checklistItemId = resolveChecklistItemId(subTaskSourceId);
+    await this.patchChecklistItem(listId, taskId, checklistItemId, updates);
+  }
+
+  private async patchChecklistItem(
+    listId: string,
+    taskId: string,
+    checklistItemId: string,
+    updates: Partial<TaskItem>,
+  ): Promise<GraphChecklistItem | null> {
     const body: Record<string, unknown> = {};
     if (updates.title !== undefined) body.displayName = updates.title;
     if (updates.status !== undefined) body.isChecked = updates.status === 'done';
     const res = await this.client.graphFetch(graphTodoChecklistItemPath(listId, taskId, checklistItemId), { method: 'PATCH', body: JSON.stringify(body) });
-    if (res.status === 404) return; // Task or checklist item already deleted remotely — treat as success
+    if (res.status === 404) return null; // Task or checklist item already deleted remotely — treat as success
     if (!res.ok) throw new Error(`Failed to update checklist item: ${res.status}`);
+    if (res.status === 204) return null;
+    return res.json();
   }
 
   async deleteTask(sourceId: string): Promise<void> {

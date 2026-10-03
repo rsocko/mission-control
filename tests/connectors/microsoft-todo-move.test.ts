@@ -166,9 +166,16 @@ describe('Microsoft To Do list moves', () => {
     }]);
   });
 
-  it('rejects checklist identities in parent task operations', async () => {
-    const fetchMock = vi.fn();
-    vi.stubGlobal('fetch', fetchMock);
+  it('routes promoted checklist updates through the checklist endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: input.toString(), init });
+      return Response.json({
+        id: 'check/item+=',
+        displayName: 'Promoted item',
+        isChecked: false,
+      });
+    }));
 
     const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
     const connector = new MicrosoftTodoConnector();
@@ -176,7 +183,57 @@ describe('Microsoft To Do list moves', () => {
 
     await expect(connector.updateTask(
       'AQMk/source+=:AAMk/task+=:check/item+=',
-      { title: 'Do not update the parent' },
+      { title: 'Promoted item', status: 'todo', priority: 'high' },
+    )).resolves.toMatchObject({
+      sourceId: 'AQMk/source+=:AAMk/task+=:check/item+=',
+      title: 'Promoted item',
+      isChecklistItem: true,
+    });
+    expect(calls).toEqual([{
+      url: 'https://graph.microsoft.com/v1.0/me/todo/lists/AQMk%2Fsource%2B%3D/tasks/AAMk%2Ftask%2B%3D/checklistItems/check%2Fitem%2B%3D',
+      init: expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ displayName: 'Promoted item', isChecked: false }),
+      }),
+    }]);
+  });
+
+  it('routes promoted checklist completion through the checklist endpoint', async () => {
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: input.toString(), init });
+      return Response.json({
+        id: 'check/item+=',
+        displayName: 'Promoted item',
+        isChecked: true,
+      });
+    }));
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config);
+
+    await connector.completeTask('AQMk/source+=:AAMk/task+=:check/item+=');
+
+    expect(calls).toEqual([{
+      url: 'https://graph.microsoft.com/v1.0/me/todo/lists/AQMk%2Fsource%2B%3D/tasks/AAMk%2Ftask%2B%3D/checklistItems/check%2Fitem%2B%3D',
+      init: expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ isChecked: true }),
+      }),
+    }]);
+  });
+
+  it('rejects checklist identities in parent-only operations', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { MicrosoftTodoConnector } = await import('@/lib/connectors/microsoft-todo');
+    const connector = new MicrosoftTodoConnector();
+    await connector.initialize(config);
+
+    await expect(connector.listAttachments(
+      'AQMk/source+=:AAMk/task+=:check/item+=',
     )).rejects.toThrow(
       'Microsoft To Do checklist item ID cannot be used as a parent task ID',
     );

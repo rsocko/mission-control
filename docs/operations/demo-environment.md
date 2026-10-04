@@ -12,13 +12,21 @@ The deployment in `infra/demo/main.bicep` intentionally:
   Registry;
 - allows the Consumption-plan app to scale from zero to one replica;
 - does not retain container logs in Log Analytics; and
-- grants the GitHub control identity the built-in Container Apps Operator role
-  on only the demo app.
+- grants the GitHub control identity the built-in Container Apps Contributor
+  role on only the demo app, allowing replica configuration without broader
+  resource-group access.
 
 With `minReplicas` set to `0`, Azure can remove the final replica when there are
 no HTTP requests. Compute charges stop while the revision has zero replicas.
 The first request after scale-down has a cold start. A stopped app is different:
-it cannot be awakened by HTTP traffic until the Start action runs.
+it cannot be awakened by HTTP traffic until the Sustain action runs.
+
+The image is intentionally public. The source repository is already public,
+the image contains no credentials or private deployment data, and Azure can
+pull it anonymously without storing a long-lived registry token. The deployment
+still pins the image digest, so a tag cannot silently change the deployed
+artifact. Making the package private would add token storage, rotation, and
+revocation work without protecting source that is otherwise public.
 
 Real-time logs remain available through the Container Apps log stream even
 though historical logs are not saved.
@@ -75,15 +83,48 @@ az monitor log-analytics workspace delete `
 When publishing a new demo revision, update both the immutable `image` digest
 and the unique `revisionSuffix` in `infra/demo/main.bicepparam`.
 
-## Start, stop, and status controls
+## Suspend, sustain, and status controls
 
 The **Control demo environment** GitHub Actions workflow provides manual
-`start`, `stop`, and `status` actions. Its scheduled run stops the app daily at
-03:00 UTC. Starting enables the app again; because the minimum replica count is
-zero, a replica starts when the next HTTP request arrives.
+`suspend`, `sustain`, and `status` actions. Its scheduled run suspends the app
+daily at 03:00 UTC.
 
-The workflow authenticates through GitHub OIDC and stores no Azure credential.
-Configure these non-secret repository variables:
+- **Suspend** configures zero-to-one scaling and stops the app. HTTP traffic
+  cannot wake a stopped app.
+- **Sustain** configures one-to-one scaling, starts the app, waits for the exact
+  latest revision to become healthy with one replica, and verifies that
+  revision's `/api/health/ready` endpoint.
+- **Status** reports the running state, replica range, current replica count,
+  exact revision and health, image digest, and public origin.
+
+The same idempotent operations are available to an authenticated local
+operator:
+
+```powershell
+.\scripts\azure-demo-availability.ps1 `
+  -Action suspend `
+  -ResourceGroup rg-mission-control-demo `
+  -AppName ca-mission-control-demo
+
+.\scripts\azure-demo-availability.ps1 `
+  -Action sustain `
+  -ResourceGroup rg-mission-control-demo `
+  -AppName ca-mission-control-demo
+
+.\scripts\azure-demo-availability.ps1 `
+  -Action status `
+  -ResourceGroup rg-mission-control-demo `
+  -AppName ca-mission-control-demo
+```
+
+Repeated calls are safe. Azure CLI failures stop the command, and a sustain
+failure identifies whether the app state, revision health, replica count, or
+readiness endpoint failed to reach the expected state.
+
+The workflow exchanges GitHub's short-lived OIDC token directly with Azure and
+stores no Azure credential. This also keeps the workflow compatible with the
+repository policy that permits only GitHub-owned actions. Configure these
+non-secret repository variables:
 
 | Variable | Value |
 | --- | --- |
@@ -94,21 +135,7 @@ Configure these non-secret repository variables:
 | `DEMO_CONTAINER_APP` | `ca-mission-control-demo` |
 
 The `demo` GitHub environment must exist because the managed identity accepts
-OIDC tokens only with the subject
-`repo:rsocko/mission-control:environment:demo`.
-
-The underlying REST actions are also available to authenticated operators:
-
-```powershell
-$appId = az containerapp show `
-  --resource-group rg-mission-control-demo `
-  --name ca-mission-control-demo `
-  --query id `
-  --output tsv
-
-az rest --method post `
-  --url "https://management.azure.com$appId/stop?api-version=2026-07-01"
-
-az rest --method post `
-  --url "https://management.azure.com$appId/start?api-version=2026-07-01"
-```
+OIDC tokens only with the repository's immutable-subject format:
+`repo:rsocko@16235839/mission-control@1331642920:environment:demo`. The numeric
+owner and repository IDs prevent a renamed or transferred repository from
+silently inheriting this Azure trust.

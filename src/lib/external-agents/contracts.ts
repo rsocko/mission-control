@@ -1,6 +1,7 @@
 export const EXTERNAL_AGENT_TYPES = [
   'copilot-cloud',
   'copilot-sdk-workspace',
+  'paperclip',
   'webhook-roundtrip',
   'mcp',
   'pull-queue',
@@ -58,6 +59,7 @@ export interface ExternalAgentCapabilities {
   canCreatePullRequest?: boolean;
   canProposeTasks?: boolean;
   canProposePhases?: boolean;
+  canPerformM365Actions?: boolean;
 }
 
 export interface ExternalAgentDataPolicy {
@@ -67,12 +69,25 @@ export interface ExternalAgentDataPolicy {
   maxRequestsPerMinute: number;
 }
 
+export interface PaperclipProviderConfig {
+  companyId: string;
+  assigneeAgentId: string;
+  projectId?: string;
+  requiredAdapterType?: string;
+}
+
+export interface ExternalAgentProviderConfig {
+  alwaysInstructions?: string;
+  paperclip?: PaperclipProviderConfig;
+}
+
 export interface AgentDispatchScope {
   projectId?: string;
   taskIds?: string[];
   repository?: string;
   defaultBranch?: string;
   baseRef?: string;
+  model?: string;
   createPullRequest?: boolean;
 }
 
@@ -111,6 +126,7 @@ export interface ExternalAgentRecord {
   endpoint: string | null;
   authType: ExternalAgentAuthType;
   authCredentialRef: string | null;
+  providerConfig: ExternalAgentProviderConfig;
   capabilities: ExternalAgentCapabilities;
   inputFormat: string;
   outputFormat: string;
@@ -197,12 +213,43 @@ export interface AgentPayloadSnapshot {
   project?: { id: string; name: string; description: string | null };
   tasks: Array<{
     id: string;
+    sourceId: string | null;
+    sourceUrl: string | null;
     title: string;
     description: string | null;
     priority: string;
     status: string;
     connectorType: string;
     tags: string[];
+    dueDate: string | null;
+    effort: number | null;
+    assignee: string | null;
+    microStatus: string | null;
+    planningHorizon: string | null;
+    sourceListName: string | null;
+    siblingOrder: number | null;
+    depth: number;
+    isChecklistItem: boolean;
+    subtasks: Array<{
+      id: string;
+      sourceId: string | null;
+      sourceUrl: string | null;
+      connectorType: string;
+      title: string;
+      description: string | null;
+      priority: string;
+      status: string;
+      tags: string[];
+      dueDate: string | null;
+      effort: number | null;
+      assignee: string | null;
+      microStatus: string | null;
+      planningHorizon: string | null;
+      sourceListName: string | null;
+      siblingOrder: number | null;
+      depth: number;
+      isChecklistItem: boolean;
+    }>;
   }>;
   phases: Array<{
     name: string;

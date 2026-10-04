@@ -436,6 +436,10 @@ export function describeAnalyticsRepositoriesContract(
         status: 'done', completed_at: completedAt, connector_type: 'github',
         source_list_id: 'remote-work', source_list_name: 'Stale Work',
       }));
+      await insert('tasks', task('deleted-closed', {
+        status: 'done', completed_at: completedAt, deleted_at: NOW, connector_type: 'github',
+        source_list_id: 'remote-work', source_list_name: 'Stale Work',
+      }));
       await insert('tasks', task('second-list', {
         status: 'todo', connector_type: 'local', connector_instance_id: 'connector-two',
         source_list_id: 'remote-work', source_list_name: 'Work',
@@ -450,8 +454,10 @@ export function describeAnalyticsRepositoriesContract(
       }));
       await insert('task_tags', { task_id: 'active-1', tag_id: 'tag-alias' });
       await insert('task_tags', { task_id: 'closed-1', tag_id: 'tag-1' });
+      await insert('task_tags', { task_id: 'deleted-closed', tag_id: 'tag-1' });
       await insert('task_projects', { task_id: 'active-1', project_id: 'p-1' });
       await insert('task_projects', { task_id: 'closed-1', project_id: 'p-1' });
+      await insert('task_projects', { task_id: 'deleted-closed', project_id: 'p-1' });
 
       const rows = await harness.repository.insights.workActivityIn({
         startInclusive: '2026-03-10T00:00:00.000Z',
@@ -459,19 +465,24 @@ export function describeAnalyticsRepositoriesContract(
       });
 
       expect([...rows.lists].sort((a, b) => a.key.localeCompare(b.key))).toEqual([
-        { key: 'connector-live:remote-work', label: 'Work', active: 1, closed: 1 },
+        { key: 'connector-live:remote-work', label: 'Work', active: 1, closed: 2 },
         { key: 'connector-two:remote-work', label: 'Work', active: 1, closed: 0 },
       ]);
-      expect(rows.tags).toEqual([{ key: 'tag-1', label: 'Planning', active: 1, closed: 1 }]);
-      expect(rows.projects).toEqual([{ key: 'p-1', label: 'Launch', active: 1, closed: 1 }]);
+      expect(rows.tags).toEqual([{ key: 'tag-1', label: 'Planning', active: 1, closed: 2 }]);
+      expect(rows.projects).toEqual([{ key: 'p-1', label: 'Launch', active: 1, closed: 2 }]);
       expect([...rows.sources].sort((a, b) => a.key.localeCompare(b.key))).toEqual([
-        { key: 'github', label: 'github', active: 1, closed: 1 },
+        { key: 'github', label: 'github', active: 1, closed: 2 },
         { key: 'local', label: 'local', active: 1, closed: 0 },
       ]);
     });
 
     it('joins planning-friction signals to their top-level task', async () => {
-      await insert('tasks', task('task-1', { title: 'Plan launch', due_date: '2026-03-20', source_list_name: 'Work' }));
+      await insert('tasks', task('task-1', {
+        title: 'Plan launch',
+        due_date: '2026-03-20',
+        source_list_name: 'Work',
+        deleted_at: '2026-03-11T00:00:00.000Z',
+      }));
       await insert('tasks', task('task-sub', { depth: 1 }));
       await insert('task_history_events', historyEvent({
         task_id: 'task-1',
@@ -518,8 +529,16 @@ export function describeAnalyticsRepositoriesContract(
       await insert('hub_projects', project('p-z', 'Archived', { status: 'archived' }));
       await insert('tasks', task('done-1', { status: 'done', completed_at: '2026-03-10T01:00:00.000Z' }));
       await insert('tasks', task('open-1', { status: 'todo' }));
+      await insert('tasks', task('deleted-done', {
+        status: 'done',
+        completed_at: '2026-03-10T02:00:00.000Z',
+        deleted_at: NOW,
+      }));
+      await insert('tasks', task('deleted-open', { status: 'todo', deleted_at: NOW }));
       await insert('task_projects', { task_id: 'done-1', project_id: 'p-a' });
       await insert('task_projects', { task_id: 'open-1', project_id: 'p-a' });
+      await insert('task_projects', { task_id: 'deleted-done', project_id: 'p-a' });
+      await insert('task_projects', { task_id: 'deleted-open', project_id: 'p-a' });
 
       const insights = harness.repository.insights;
       expect((await insights.listActiveProjects()).map((row) => row.id)).toEqual(['p-a', 'p-b']);
@@ -527,10 +546,10 @@ export function describeAnalyticsRepositoriesContract(
         startInclusive: '2026-03-10T00:00:00.000Z',
         endExclusive: '2026-03-11T00:00:00.000Z',
       };
-      expect(await insights.countProjectTasksCompletedIn('p-a', range)).toBe(1);
+      expect(await insights.countProjectTasksCompletedIn('p-a', range)).toBe(2);
       expect(await insights.countProjectOpenTasks('p-a')).toBe(1);
-      // Both tasks were created inside the range and are top-level.
-      expect(await insights.countProjectTopLevelTasksCreatedIn('p-a', range)).toBe(2);
+      // Historical completion and creation metrics retain tasks deleted later.
+      expect(await insights.countProjectTopLevelTasksCreatedIn('p-a', range)).toBe(4);
     });
 
     it('normalizes routine cadence config and orders routines and completions', async () => {

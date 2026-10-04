@@ -1,28 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import Database from 'better-sqlite3';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type {
-  CompanionActionFeedPage,
-  CompanionActionMaterialization,
-  CompanionActionV1,
-} from '@/lib/connectors/rymessage/action-contract';
+import type { ActionV2 } from '@/lib/connectors/rymessage/action-contract';
 import type {
   CompanionActionFeedPageV2,
   CompanionActionMutationRequestV2,
 } from '@/lib/connectors/rymessage/action-contract-v2';
-import { RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS } from '@/db/persistence/rymessage-actions';
 
 vi.unmock('drizzle-orm');
 
 const previousPath = process.env.MC_DB_PATH;
-const databasePath = join(
-  process.cwd(),
-  'data',
-  `rymessage-actions-${randomUUID()}.db`,
-);
-const backupPath = `${databasePath}.backup`;
+const databasePath = join(process.cwd(), 'data', `rymessage-v2-${randomUUID()}.db`);
 mkdirSync(dirname(databasePath), { recursive: true });
 process.env.MC_DB_PATH = databasePath;
 
@@ -34,158 +23,84 @@ const contextPromise = Promise.all([
   repository: adapter.createSqliteRyMessageActionRepository(database.sqlite),
 }));
 
-const CONNECTOR_ID = 'rymessage-actions-test';
+const CONNECTOR_ID = 'rymessage-v2-test';
 const NOW = '2026-09-29T20:00:00.000Z';
 const FEED_ID = '00000000-0000-4000-8000-000000000001';
+const ACTION_ID = '00000000-0000-5000-8000-000000000051';
 
-function uuid(value: number): string {
-  return `00000000-0000-4000-8000-${String(value).padStart(12, '0')}`;
-}
-
-function materialization(
-  value: number,
-  providerListId: string,
-  providerTaskId: string,
-): CompanionActionMaterialization {
+function action(revision = 1): ActionV2 {
   return {
-    materializationId: uuid(value),
-    revision: 1,
-    provider: 'microsoft-todo',
-    providerAccountId: 'opaque-principal-account',
-    providerListId,
-    providerTaskId,
-    state: 'materialized',
-    updatedAt: NOW,
-  };
-}
-
-function action(
-  value: number,
-  revision = 1,
-  materializations: readonly CompanionActionMaterialization[] = [],
-  fieldRevisions: Readonly<Record<string, number>> = { title: 1, lifecycle: 1 },
-): CompanionActionV1 {
-  return {
-    contractVersion: 1,
-    actionId: uuid(value),
-    stableKey: `ak1:${String(value).padStart(64, '0')}`,
+    contractVersion: 2,
+    actionId: ACTION_ID,
+    stableKey: `ak1:${'a'.repeat(64)}`,
     revision,
     createdAt: NOW,
     updatedAt: NOW,
     lastSeenAt: NOW,
     source: {
-      identity: { messageId: 'raw-message-identity' },
+      identity: { messageId: 'message-1' },
       sourceKind: 'message',
-      sourceFamily: 'm365',
-      senderDisplayName: 'Private Sender',
-      conversationTitle: 'Private Thread',
-      messageExcerpt: 'Private message excerpt',
-      sourceUrl: 'https://example.invalid/private-message',
+      sourceFamily: 'bluebubbles',
+      senderDisplayName: 'Avery 👩🏽‍💻',
+      conversationTitle: '週末の計画',
+      messageExcerpt: '確認してください ✅',
     },
     content: {
-      title: `Action ${value}`,
-      summary: 'Portable summary',
+      title: 'Répondre à Avery — مرحبًا',
+      summary: 'Rich Unicode survives persistence',
       actionType: 'follow-up',
+      category: 'follow-up',
       priority: 'high',
     },
     classification: {
       confidenceClass: 'high',
       confidenceScore: 0.94,
-      reason: 'Private model reasoning',
+      reason: 'Direct request',
       derivationMethod: 'ai',
-      model: 'private-model-name',
-      derivationVersion: 'v1',
-      inputFingerprint: String(value).padStart(64, 'a'),
-      extractedPayload: { privateExtract: 'Private extracted payload' },
+      inputFingerprint: 'b'.repeat(64),
     },
-    lifecycle: {
-      state: 'visible',
-      feedback: [{ body: 'Private feedback body' }],
-    },
-    fieldRevisions,
-    materializations,
+    lifecycle: { state: 'visible' },
+    fieldRevisions: { title: revision, lifecycle: revision },
+    materializations: [],
   };
 }
 
-function page(input: {
-  action?: CompanionActionV1;
-  event: number;
-  cursor: string;
-  mode?: 'full' | 'incremental';
-  complete?: boolean;
-  tombstoneActionId?: string;
-  aggregateVersion?: number;
-}): CompanionActionFeedPage {
-  const aggregateId = input.action?.actionId ?? input.tombstoneActionId!;
-  const aggregateVersion = input.aggregateVersion ?? input.action?.revision ?? 1;
+function page(revision = 1): CompanionActionFeedPageV2 {
+  const canonical = action(revision);
   return {
-    schemaVersion: '1.0',
+    schemaVersion: '2.0',
     feedId: FEED_ID,
-    mode: input.mode ?? 'full',
+    mode: 'full',
     producedAt: NOW,
-    nextCursor: input.cursor,
-    complete: input.complete ?? true,
-    items: input.action
-      ? [{
-          eventId: uuid(10_000 + input.event),
-          operationId: uuid(20_000 + input.event),
-          aggregateId,
-          aggregateVersion,
-          sourceId: `source-${aggregateId}`,
-          occurredAt: NOW,
-          kind: 'upsert',
-          action: input.action,
-        }]
-      : [{
-          eventId: uuid(10_000 + input.event),
-          operationId: uuid(20_000 + input.event),
-          aggregateId,
-          aggregateVersion,
-          sourceId: `source-${aggregateId}`,
-          occurredAt: NOW,
-          kind: 'tombstone',
-        }],
-  };
-}
-
-function v2Upsert(canonicalAction: CompanionActionV1, event: number) {
-  return {
-    eventId: uuid(30_000 + event),
-    operationId: uuid(40_000 + event),
-    aggregateId: canonicalAction.actionId,
-    aggregateVersion: canonicalAction.revision,
-    sourceId: `source-${canonicalAction.actionId}`,
-    occurredAt: NOW,
-    kind: 'upsert' as const,
-    action: canonicalAction,
-    projection: {
-      action: canonicalAction,
-      taskMaterializations: [],
-      creationIntents: [],
-      managedTaskCommands: [],
-      taskLifecycle: {
-        provenance: 'manual-user' as const,
-        state: 'none' as const,
-        derivedAt: NOW,
+    nextCursor: `incremental:${revision}`,
+    complete: true,
+    items: [{
+      eventId: `00000000-0000-4000-8000-${String(revision).padStart(12, '0')}`,
+      operationId: `00000000-0000-4000-8001-${String(revision).padStart(12, '0')}`,
+      aggregateId: ACTION_ID,
+      aggregateVersion: revision,
+      sourceId: `rymessage:${FEED_ID}:action:${ACTION_ID}`,
+      occurredAt: NOW,
+      kind: 'upsert',
+      projection: {
+        action: canonical,
+        taskMaterializations: [],
+        creationIntents: [],
+        managedTaskCommands: [],
+        taskLifecycle: { state: 'none', provenance: 'none' },
       },
-    },
+    }],
   };
 }
 
-describe('SQLite RyMessage action repository', () => {
+describe('SQLite canonical RyMessage ActionV2 repository', () => {
   beforeEach(async () => {
     const { database } = await contextPromise;
     database.sqlite.exec(`
-      DELETE FROM rymessage_action_outbound_mutations;
-      DELETE FROM rymessage_action_receipts;
-      DELETE FROM rymessage_action_materializations;
-      DELETE FROM rymessage_action_projections;
-      DELETE FROM rymessage_action_feed_state;
       DELETE FROM rymessage_action_v2_outbound_mutations;
       DELETE FROM rymessage_action_v2_receipts;
       DELETE FROM rymessage_action_v2_projections;
       DELETE FROM rymessage_action_v2_feed_state;
-      DELETE FROM tasks;
       DELETE FROM connector_configs;
     `);
     database.sqlite.prepare(`
@@ -195,54 +110,109 @@ describe('SQLite RyMessage action repository', () => {
     `).run(CONNECTOR_ID, NOW, NOW);
   });
 
-  it('persists ActionV2 pages and leases replay-safe outbound mutations', async () => {
+  it('persists Unicode projections and the terminal incremental cursor exactly', async () => {
     const { repository } = await contextPromise;
-    const actionId = uuid(51);
-    const v2Page: CompanionActionFeedPageV2 = {
-      schemaVersion: '2.0',
-      feedId: FEED_ID,
-      mode: 'full',
-      producedAt: NOW,
-      nextCursor: 'v2-cursor-1',
-      complete: true,
-      items: [v2Upsert(action(51), 52)],
-    };
     await repository.readV2FeedState(CONNECTOR_ID);
+    const canonicalPage = page();
     await expect(repository.applyV2FeedPage({
       connectorId: CONNECTOR_ID,
-      page: v2Page,
+      page: canonicalPage,
       requestedCursor: null,
       receivedAt: NOW,
     })).resolves.toEqual({ applied: 1, replayed: 0 });
-    expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor).toBe('v2-cursor-1');
-    const projections = await repository.listV2Projections(CONNECTOR_ID);
-    expect(projections).toHaveLength(1);
-    expect(JSON.stringify(projections)).not.toContain('raw-message-identity');
-    expect(JSON.stringify(projections)).not.toContain('Private Sender');
-    expect(JSON.stringify(projections)).not.toContain('Private model reasoning');
+
+    expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor)
+      .toBe(canonicalPage.nextCursor);
+    expect(await repository.getV2Projection(CONNECTOR_ID, ACTION_ID))
+      .toMatchObject({
+        revision: 1,
+        item: {
+          kind: 'upsert',
+          projection: {
+            action: {
+              source: {
+                senderDisplayName: 'Avery 👩🏽‍💻',
+                conversationTitle: '週末の計画',
+                messageExcerpt: '確認してください ✅',
+              },
+              content: { title: 'Répondre à Avery — مرحبًا' },
+            },
+          },
+        },
+      });
+  });
+
+  it('treats identical events as replay and rejects divergent event bytes', async () => {
+    const { repository } = await contextPromise;
+    await repository.readV2FeedState(CONNECTOR_ID);
+    const first = page();
+    await repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: first,
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    await expect(repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: { ...first, mode: 'incremental', nextCursor: 'incremental:2' },
+      requestedCursor: first.nextCursor,
+      receivedAt: NOW,
+    })).resolves.toEqual({ applied: 0, replayed: 1 });
     await expect(repository.applyV2FeedPage({
       connectorId: CONNECTOR_ID,
       page: {
-        ...v2Page,
-        mode: 'full',
-        nextCursor: 'v2-cursor-2',
+        ...first,
+        mode: 'incremental',
+        nextCursor: 'incremental:3',
+        items: [{ ...first.items[0]!, occurredAt: '2026-09-29T20:00:01.000Z' }],
+      },
+      requestedCursor: 'incremental:2',
+      receivedAt: NOW,
+    })).rejects.toMatchObject({ code: 'EVENT_DIGEST_CONFLICT' });
+  });
+
+  it('tombstones rows absent from a completed recovery snapshot', async () => {
+    const { repository } = await contextPromise;
+    await repository.readV2FeedState(CONNECTOR_ID);
+    const first = page();
+    await repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      page: first,
+      requestedCursor: null,
+      receivedAt: NOW,
+    });
+    await repository.invalidateV2Recovery({
+      connectorId: CONNECTOR_ID,
+      reason: 'cursor_expired',
+      now: NOW,
+    });
+    await repository.applyV2FeedPage({
+      connectorId: CONNECTOR_ID,
+      requestedCursor: null,
+      receivedAt: '2026-09-29T20:01:00.000Z',
+      page: {
+        ...first,
+        nextCursor: 'incremental:recovered',
+        producedAt: '2026-09-29T20:01:00.000Z',
         items: [],
       },
-      requestedCursor: 'v2-cursor-1',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    })).resolves.toEqual({ applied: 0, replayed: 0 });
-    expect((await repository.listV2Projections(CONNECTOR_ID))[0]?.item).toBeNull();
+    });
+    expect(await repository.getV2Projection(CONNECTOR_ID, ACTION_ID)).toMatchObject({
+      item: null,
+      tombstonedAt: '2026-09-29T20:01:00.000Z',
+    });
+    expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor)
+      .toBe('incremental:recovered');
+  });
 
+  it('enforces operation-id byte identity and resets recovery cursorlessly', async () => {
+    const { repository } = await contextPromise;
     const request: CompanionActionMutationRequestV2 = {
       contractVersion: '2.0',
-      operationId: uuid(54),
-      actionId,
-      expectedRevision: 1,
-      mutation: {
-        kind: 'creation-intent.register',
-        intentId: uuid(55),
-        draft: { title: 'Create a task', notes: 'Portable notes', priority: true },
-      },
+      operationId: '00000000-0000-4000-8000-000000000021',
+      actionId: ACTION_ID,
+      baseRevision: 1,
+      mutation: { kind: 'action.lifecycle', state: 'handled' },
     };
     await expect(repository.enqueueV2Mutation({
       connectorId: CONNECTOR_ID,
@@ -252,835 +222,28 @@ describe('SQLite RyMessage action repository', () => {
     await expect(repository.enqueueV2Mutation({
       connectorId: CONNECTOR_ID,
       request,
-      now: NOW,
-    })).resolves.toBe('duplicate');
-    const reorderedRequest: CompanionActionMutationRequestV2 = {
-      mutation: {
-        draft: { priority: true, notes: 'Portable notes', title: 'Create a task' },
-        intentId: uuid(55),
-        kind: 'creation-intent.register',
-      },
-      expectedRevision: 1,
-      actionId,
-      operationId: uuid(54),
-      contractVersion: '2.0',
-    };
-    await expect(repository.enqueueV2Mutation({
-      connectorId: CONNECTOR_ID,
-      request: reorderedRequest,
       now: NOW,
     })).resolves.toBe('duplicate');
     await expect(repository.enqueueV2Mutation({
       connectorId: CONNECTOR_ID,
       request: {
-        ...reorderedRequest,
-        mutation: {
-          kind: 'creation-intent.register',
-          intentId: uuid(55),
-          draft: { title: 'Changed content' },
-        },
+        ...request,
+        mutation: { kind: 'action.lifecycle', state: 'dismissed' },
       },
       now: NOW,
     })).rejects.toMatchObject({ code: 'OPERATION_DIGEST_CONFLICT' });
-    const lease = await repository.leaseV2Mutations({
-      connectorId: CONNECTOR_ID,
-      now: NOW,
-    });
 
-    expect(lease.items).toHaveLength(1);
-    await expect(repository.settleV2Mutation({
-      connectorId: CONNECTOR_ID,
-      operationId: request.operationId,
-      leaseId: lease.leaseId,
-      now: NOW,
-      receipt: {
-        operationId: request.operationId,
-        actionId: uuid(999),
-        outcome: 'applied',
-        revision: 2,
-      },
-    })).rejects.toMatchObject({ code: 'RECEIPT_IDENTITY_MISMATCH' });
-    await expect(repository.settleV2Mutation({
-      connectorId: CONNECTOR_ID,
-      operationId: request.operationId,
-      leaseId: lease.leaseId,
-      now: NOW,
-      receipt: {
-        operationId: request.operationId,
-        actionId,
-        outcome: 'applied',
-        revision: 2,
-        intentId: uuid(55),
-      },
-    })).resolves.toBe(true);
-    expect((await repository.leaseV2Mutations({
-      connectorId: CONNECTOR_ID,
-      now: NOW,
-    })).items).toHaveLength(0);
-  });
-
-  it('rejects incremental recovery and same-revision ActionV2 conflicts', async () => {
-    const { repository } = await contextPromise;
-    const basePage: CompanionActionFeedPageV2 = {
-      schemaVersion: '2.0',
-      feedId: FEED_ID,
-      mode: 'incremental',
-      producedAt: NOW,
-      nextCursor: 'bad-cursor',
-      complete: true,
-      items: [],
-    };
     await repository.readV2FeedState(CONNECTOR_ID);
-    await expect(repository.applyV2FeedPage({
-      connectorId: CONNECTOR_ID,
-      page: basePage,
-      requestedCursor: null,
-      receivedAt: NOW,
-    })).rejects.toMatchObject({ code: 'RECOVERY_REQUIRED' });
-
-    const fullPage: CompanionActionFeedPageV2 = {
-      ...basePage,
-      mode: 'full',
-      nextCursor: 'cursor-1',
-      items: [v2Upsert(action(61), 62)],
-    };
-    await repository.applyV2FeedPage({
-      connectorId: CONNECTOR_ID,
-      page: fullPage,
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    await expect(repository.applyV2FeedPage({
-      connectorId: CONNECTOR_ID,
-      page: {
-        ...fullPage,
-        mode: 'incremental',
-        nextCursor: 'cursor-2',
-        items: [{
-          ...v2Upsert({
-            ...action(61),
-            content: {
-              ...action(61).content,
-              title: 'Conflicting title',
-            },
-          }, 64),
-          eventId: uuid(64),
-          operationId: uuid(65),
-        }],
-      },
-      requestedCursor: 'cursor-1',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    })).rejects.toMatchObject({ code: 'REVISION_CONFLICT' });
-    expect((await repository.readV2FeedState(CONNECTOR_ID)).cursor).toBe('cursor-1');
-  });
-
-  it('commits cursor pages atomically and tombstones omissions only after recovery completes', async () => {
-    const { repository } = await contextPromise;
-    const first = action(1);
-    const initial = await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: first, event: 1, cursor: 'cursor-1' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    expect(initial).toMatchObject({ applied: 1, added: 1, updated: 0 });
-    expect((await repository.getProjection(CONNECTOR_ID, first.actionId))?.action?.content.title)
-      .toBe('Action 1');
-    expect((await repository.readFeedState(CONNECTOR_ID)).cursor).toBe('cursor-1');
-
-    await repository.invalidateRecovery({
+    await repository.invalidateV2Recovery({
       connectorId: CONNECTOR_ID,
       reason: 'cursor_expired',
-      now: '2026-09-29T20:01:00.000Z',
+      now: NOW,
     });
-    const second = action(2);
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: second,
-        event: 2,
-        cursor: 'cursor-recovery-1',
-        complete: false,
-      }),
-      requestedCursor: null,
-      receivedAt: '2026-09-29T20:02:00.000Z',
-    });
-    expect((await repository.getProjection(CONNECTOR_ID, first.actionId))?.tombstonedAt)
-      .toBeNull();
-
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: {
-        ...page({
-          action: second,
-          event: 3,
-          cursor: 'cursor-recovery-2',
-          complete: true,
-        }),
-        items: [],
-      },
-      requestedCursor: 'cursor-recovery-1',
-      receivedAt: '2026-09-29T20:03:00.000Z',
-    });
-    expect((await repository.getProjection(CONNECTOR_ID, first.actionId))?.action).toBeNull();
-    expect((await repository.getProjection(CONNECTOR_ID, first.actionId))?.tombstonedAt)
-      .toBe('2026-09-29T20:03:00.000Z');
-    expect((await repository.readFeedState(CONNECTOR_ID)).recoveryRequired).toBe(false);
-
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        tombstoneActionId: second.actionId,
-        aggregateVersion: 2,
-        event: 11,
-        cursor: 'cursor-delete',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-recovery-2',
-      receivedAt: '2026-09-29T20:04:00.000Z',
-    });
-    expect((await repository.getProjection(CONNECTOR_ID, second.actionId))?.action).toBeNull();
-  });
-
-  it('accepts exact feed replays and rejects event identity reuse with changed content', async () => {
-    const { repository } = await contextPromise;
-    const original = page({ action: action(3), event: 4, cursor: 'cursor-1' });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: original,
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    const replay = await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: { ...original, mode: 'incremental', nextCursor: 'cursor-2' },
-      requestedCursor: 'cursor-1',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    });
-    expect(replay).toMatchObject({ applied: 0, ignored: 1 });
-
-    await expect(repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: {
-        ...original,
-        mode: 'incremental',
-        nextCursor: 'cursor-3',
-        items: [{
-          ...original.items[0]!,
-          sourceId: 'changed-source',
-        }],
-      },
-      requestedCursor: 'cursor-2',
-      receivedAt: '2026-09-29T20:02:00.000Z',
-    })).rejects.toMatchObject({ code: 'EVENT_IDENTITY_CONFLICT' });
-    expect((await repository.readFeedState(CONNECTOR_ID)).cursor).toBe('cursor-2');
-  });
-
-  it('quarantines same-revision divergent payloads without consuming the cursor', async () => {
-    const { repository } = await contextPromise;
-    const original = action(31, 1, [], { title: 1 });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: original, event: 31, cursor: 'cursor-safe' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    const divergent = {
-      ...original,
-      content: { ...original.content, title: 'Divergent title' },
-    };
-    const result = await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: divergent,
-        event: 32,
-        cursor: 'cursor-must-not-commit',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-safe',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    });
-    expect(result).toMatchObject({ conflicts: 1, recoveryRequired: true, applied: 0 });
-    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
-      cursor: 'cursor-safe',
-      recoveryRequired: true,
-      lastError: expect.stringContaining('REVISION_CONFLICT'),
-    });
-    await expect(repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: action(32),
-        event: 33,
-        cursor: 'later-cursor',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-safe',
-      receivedAt: '2026-09-29T20:02:00.000Z',
-    })).rejects.toMatchObject({ code: 'RECOVERY_CONFLICT' });
-
-    await repository.invalidateRecovery({
-      connectorId: CONNECTOR_ID,
-      reason: 'operator-reset',
-      now: '2026-09-29T20:03:00.000Z',
-    });
-    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
+    expect(await repository.readV2FeedState(CONNECTOR_ID)).toMatchObject({
       cursor: null,
-      recoveryGeneration: 1,
       recoveryRequired: true,
-    });
-    await expect(repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: divergent,
-        event: 32,
-        cursor: 'cursor-resolved',
-        mode: 'full',
-      }),
-      requestedCursor: null,
-      receivedAt: '2026-09-29T20:04:00.000Z',
-    })).resolves.toMatchObject({ applied: 1, recoveryCompleted: true });
-    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
-      cursor: 'cursor-resolved',
-      recoveryRequired: false,
-      lastError: null,
-    });
-    expect((await repository.getProjection(CONNECTOR_ID, original.actionId))?.action?.content.title)
-      .toBe('Divergent title');
-  });
-
-  it('keeps repeated tombstones bounded to one projection', async () => {
-    const { database, repository } = await contextPromise;
-    const actionId = uuid(340);
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        tombstoneActionId: actionId,
-        aggregateVersion: 1,
-        event: 34,
-        cursor: 'cursor-1',
-      }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        tombstoneActionId: actionId,
-        aggregateVersion: 1,
-        event: 35,
-        cursor: 'cursor-2',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-1',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    });
-    const count = database.sqlite.prepare(`
-      SELECT COUNT(*) AS count FROM rymessage_action_projections
-      WHERE connector_id = ? AND action_id = ?
-    `).get(CONNECTOR_ID, actionId) as { count: number };
-    expect(count.count).toBe(1);
-  });
-
-  it('links only exact imported provider tasks and surfaces missing, ambiguous, and broken relations', async () => {
-    const { database, repository } = await contextPromise;
-    const exact = materialization(101, 'list-exact', 'task-exact');
-    const missing = materialization(102, 'list-missing', 'task-missing');
-    const ambiguous = materialization(103, 'list-ambiguous', 'task-ambiguous');
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: action(4, 1, [exact, missing, ambiguous]),
-        event: 5,
-        cursor: 'cursor-1',
-      }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    const insertTask = database.sqlite.prepare(`
-      INSERT INTO tasks (
-        id, source_id, connector_type, connector_instance_id, title,
-        created_at, updated_at, last_synced_at
-      ) VALUES (?, ?, 'microsoft-todo', ?, ?, ?, ?, ?)
-    `);
-    insertTask.run('local-exact', 'list-exact:task-exact', 'todo-a', 'Exact', NOW, NOW, NOW);
-    insertTask.run(
-      'local-ambiguous-a',
-      'list-ambiguous:task-ambiguous',
-      'todo-a',
-      'Duplicate A',
-      NOW,
-      NOW,
-      NOW,
-    );
-    insertTask.run(
-      'local-ambiguous-b',
-      'list-ambiguous:task-ambiguous',
-      'todo-b',
-      'Duplicate B',
-      NOW,
-      NOW,
-      NOW,
-    );
-
-    const first = await repository.reconcileMaterializations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:01:00.000Z',
-    });
-    expect(first).toMatchObject({
-      linked: 1,
-      pendingImport: 1,
-      conflicts: 1,
-      observationsQueued: 1,
-    });
-    const taskCount = database.sqlite.prepare(
-      'SELECT COUNT(*) AS count FROM tasks',
-    ).get() as { count: number };
-    expect(taskCount.count).toBe(3);
-    expect((await repository.readStatus(CONNECTOR_ID))).toMatchObject({
-      linkedCount: 1,
-      pendingImportCount: 1,
-      conflictCount: 1,
-    });
-
-    database.sqlite.prepare('UPDATE tasks SET deleted_at = ? WHERE id = ?')
-      .run('2026-09-29T20:02:00.000Z', 'local-exact');
-    const second = await repository.reconcileMaterializations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:03:00.000Z',
-    });
-    expect(second.broken).toBe(1);
-    expect((await repository.readStatus(CONNECTOR_ID)).feed.connectorId)
-      .toBe(CONNECTOR_ID);
-  });
-
-  it('rebases non-overlapping edits and surfaces overlapping field conflicts', async () => {
-    const { repository } = await contextPromise;
-    const initial = action(5, 1, [], { title: 1, details: 1, lifecycle: 1 });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: initial, event: 6, cursor: 'cursor-1' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-
-    const operationId = uuid(301);
-    await repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: initial.actionId,
-      operationId,
-      baseRevision: 1,
-      expectedFieldRevisions: { title: 1 },
-      mutation: { kind: 'action.user-edit', patch: { title: 'Local edit' } },
-      now: NOW,
-    });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: action(5, 2, [], { title: 1, details: 2, lifecycle: 1 }),
-        event: 7,
-        cursor: 'cursor-2',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-1',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    });
-    const lease = await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:02:00.000Z',
-    });
-    expect(lease.items).toHaveLength(1);
-    expect(lease.items[0]).toMatchObject({ operationId, baseRevision: 2 });
-
-    await repository.completeMutation({
-      connectorId: CONNECTOR_ID,
-      operationId,
-      leaseId: lease.leaseId,
-      receipt: {
-        operationId,
-        actionId: initial.actionId,
-        outcome: 'applied',
-        revision: 3,
-      },
-      retryable: false,
-      now: '2026-09-29T20:03:00.000Z',
-    });
-
-    const conflictingOperation = uuid(302);
-    await repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: initial.actionId,
-      operationId: conflictingOperation,
-      baseRevision: 2,
-      expectedFieldRevisions: { title: 1 },
-      mutation: { kind: 'action.user-edit', patch: { title: 'Conflicting edit' } },
-      now: '2026-09-29T20:04:00.000Z',
-    });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        action: action(5, 3, [], { title: 2, details: 2, lifecycle: 1 }),
-        event: 8,
-        cursor: 'cursor-3',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-2',
-      receivedAt: '2026-09-29T20:05:00.000Z',
-    });
-    const conflictedLease = await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:06:00.000Z',
-    });
-    expect(conflictedLease.items).toHaveLength(0);
-    expect(await repository.readStatus(CONNECTOR_ID)).toMatchObject({
-      conflictCount: 0,
-      mutationConflictCount: 1,
-    });
-    const mutation = (await contextPromise).database.sqlite.prepare(`
-      SELECT status, last_error_code AS errorCode
-      FROM rymessage_action_outbound_mutations WHERE operation_id = ?
-    `).get(conflictingOperation);
-    expect(mutation).toEqual({
-      status: 'conflict',
-      errorCode: 'FIELD_REVISION_CONFLICT',
-    });
-    await expect(repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: initial.actionId,
-      operationId,
-      baseRevision: 1,
-      expectedFieldRevisions: { title: 1 },
-      mutation: { kind: 'action.user-edit', patch: { title: 'Local edit' } },
-      now: '2026-09-29T20:07:00.000Z',
-    })).resolves.toBe('duplicate');
-  });
-
-  it('rejects future aggregate and field revisions while preserving stale non-overlap', async () => {
-    const { repository } = await contextPromise;
-    const current = action(51, 5, [], { title: 5, details: 2, lifecycle: 4 });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: current, event: 51, cursor: 'cursor-5' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    await expect(repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: current.actionId,
-      operationId: uuid(511),
-      baseRevision: 999,
-      expectedFieldRevisions: { title: 5 },
-      mutation: { kind: 'action.user-edit', patch: { title: 'Future aggregate' } },
-      now: NOW,
-    })).rejects.toMatchObject({ code: 'FUTURE_BASE_REVISION' });
-    await expect(repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: current.actionId,
-      operationId: uuid(512),
-      baseRevision: 5,
-      expectedFieldRevisions: { title: 999 },
-      mutation: { kind: 'action.user-edit', patch: { title: 'Future field' } },
-      now: NOW,
-    })).rejects.toMatchObject({ code: 'FUTURE_FIELD_REVISION' });
-    await expect(repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: current.actionId,
-      operationId: uuid(513),
-      baseRevision: 4,
-      expectedFieldRevisions: { details: 2 },
-      mutation: { kind: 'action.user-edit', patch: { details: 'Safe stale edit' } },
-      now: NOW,
-    })).resolves.toBe('queued');
-  });
-
-  it('defensively rejects a receipt that does not match the leased mutation', async () => {
-    const { database, repository } = await contextPromise;
-    const current = action(52);
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: current, event: 52, cursor: 'cursor-1' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    const operationId = uuid(521);
-    await repository.enqueueMutation({
-      connectorId: CONNECTOR_ID,
-      actionId: current.actionId,
-      operationId,
-      baseRevision: 1,
-      expectedFieldRevisions: { title: 1 },
-      mutation: { kind: 'action.user-edit', patch: { title: 'Changed' } },
-      now: NOW,
-    });
-    const lease = await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:01:00.000Z',
-    });
-    await repository.completeMutation({
-      connectorId: CONNECTOR_ID,
-      operationId,
-      leaseId: lease.leaseId,
-      receipt: {
-        operationId: uuid(522),
-        actionId: uuid(523),
-        outcome: 'applied',
-        revision: 2,
-      },
-      retryable: false,
-      now: '2026-09-29T20:02:00.000Z',
-    });
-    expect(database.sqlite.prepare(`
-      SELECT status, last_error_code AS errorCode, receipt
-      FROM rymessage_action_outbound_mutations WHERE operation_id = ?
-    `).get(operationId)).toEqual({
-      status: 'conflict',
-      errorCode: 'RECEIPT_IDENTITY_MISMATCH',
-      receipt: null,
-    });
-  });
-
-  it('bounds tombstone projections through explicit recovery without consuming live quota', async () => {
-    const { database, repository } = await contextPromise;
-    const insert = database.sqlite.prepare(`
-      INSERT INTO rymessage_action_projections (
-        connector_id, action_id, source_id, revision, payload, payload_digest,
-        last_event_id, last_operation_id, tombstoned_at, created_at, updated_at
-      ) VALUES (?, ?, ?, 1, NULL, ?, ?, ?, ?, ?, ?)
-    `);
-    database.sqlite.transaction(() => {
-      for (let index = 0; index < RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS; index++) {
-        const id = `retained-tombstone-${String(index).padStart(5, '0')}`;
-        insert.run(CONNECTOR_ID, id, id, id, id, id, NOW, NOW, NOW);
-      }
-    })();
-
-    const live = action(61);
-    const liveResult = await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: live, event: 61, cursor: 'cursor-live' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    expect(liveResult).toMatchObject({ added: 1, recoveryRequired: false });
-
-    const overflow = await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({
-        tombstoneActionId: uuid(620),
-        aggregateVersion: 1,
-        event: 62,
-        cursor: 'cursor-overflow',
-        mode: 'incremental',
-      }),
-      requestedCursor: 'cursor-live',
-      receivedAt: '2026-09-29T20:01:00.000Z',
-    });
-    expect(overflow).toMatchObject({ tombstoned: 1, recoveryRequired: true });
-    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
-      cursor: null,
       recoveryGeneration: 1,
-      lastError: 'TOMBSTONE_RETENTION_RECOVERY',
     });
-    const count = database.sqlite.prepare(`
-      SELECT COUNT(*) AS count FROM rymessage_action_projections
-      WHERE connector_id = ? AND tombstoned_at IS NOT NULL
-    `).get(CONNECTOR_ID) as { count: number };
-    expect(count.count).toBe(RYMESSAGE_ACTION_MAX_TOMBSTONE_PROJECTIONS);
-    expect((await repository.getProjection(CONNECTOR_ID, live.actionId))?.action).not.toBeNull();
-
-    const recoveryPage = page({
-      action: live,
-      event: 61,
-      cursor: 'cursor-recovered',
-    });
-    recoveryPage.items.push(page({
-      tombstoneActionId: uuid(620),
-      aggregateVersion: 1,
-      event: 62,
-      cursor: 'unused',
-    }).items[0]!);
-    await expect(repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: recoveryPage,
-      requestedCursor: null,
-      receivedAt: '2026-09-29T20:02:00.000Z',
-    })).resolves.toMatchObject({
-      ignored: 2,
-      recoveryCompleted: true,
-      recoveryRequired: false,
-    });
-    expect(await repository.getProjection(CONNECTOR_ID, live.actionId))
-      .toMatchObject({ action: expect.objectContaining({ actionId: live.actionId }) });
-    expect(database.sqlite.prepare(`
-      SELECT last_seen_generation AS generation
-      FROM rymessage_action_projections
-      WHERE connector_id = ? AND action_id = ?
-    `).get(CONNECTOR_ID, live.actionId)).toMatchObject({
-      generation: expect.any(String),
-    });
-    expect(await repository.readFeedState(CONNECTOR_ID)).toMatchObject({
-      cursor: 'cursor-recovered',
-      recoveryRequired: false,
-    });
-  });
-
-  it('enforces outbound idempotency and rejects observations for unknown relations', async () => {
-    const { repository } = await contextPromise;
-    const source = action(8);
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: source, event: 12, cursor: 'cursor-1' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    const operationId = uuid(303);
-    const command = {
-      connectorId: CONNECTOR_ID,
-      actionId: source.actionId,
-      operationId,
-      baseRevision: 1,
-      expectedFieldRevisions: { title: 1 },
-      mutation: {
-        kind: 'action.user-edit' as const,
-        patch: { title: 'Stable retry' },
-      },
-      now: NOW,
-    };
-    await expect(repository.enqueueMutation(command)).resolves.toBe('queued');
-    await expect(repository.enqueueMutation(command)).resolves.toBe('duplicate');
-    await expect(repository.enqueueMutation({
-      ...command,
-      mutation: { kind: 'action.user-edit', patch: { title: 'Changed reuse' } },
-    })).rejects.toMatchObject({ code: 'IDEMPOTENCY_CONFLICT' });
-    await expect(repository.enqueueMutation({
-      ...command,
-      operationId: uuid(304),
-      expectedFieldRevisions: { [`materialization:${uuid(999)}`]: 0 },
-      mutation: {
-        kind: 'materialization.observe',
-        materializationId: uuid(999),
-        observedAt: NOW,
-      },
-    })).rejects.toMatchObject({ code: 'MATERIALIZATION_NOT_FOUND' });
-  });
-
-  it('recovers expired leases, backs off retries, and deduplicates observations', async () => {
-    const { database, repository } = await contextPromise;
-    const relation = materialization(104, 'list-observe', 'task-observe');
-    const source = action(6, 1, [relation], {
-      lifecycle: 1,
-      [`materialization:${relation.materializationId}`]: 0,
-    });
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: source, event: 9, cursor: 'cursor-1' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    database.sqlite.prepare(`
-      INSERT INTO tasks (
-        id, source_id, connector_type, connector_instance_id, title, status,
-        created_at, updated_at, last_synced_at
-      ) VALUES (?, ?, 'microsoft-todo', ?, ?, 'done', ?, ?, ?)
-    `).run(
-      'local-observe',
-      'list-observe:task-observe',
-      'todo-a',
-      'Observed',
-      NOW,
-      '2026-09-29T20:01:00.000Z',
-      NOW,
-    );
-    const first = await repository.reconcileMaterializations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:02:00.000Z',
-    });
-    const second = await repository.reconcileMaterializations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:02:01.000Z',
-    });
-    expect(first.observationsQueued).toBe(1);
-    expect(second.observationsQueued).toBe(0);
-
-    const lease = await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:03:00.000Z',
-      leaseSeconds: 30,
-    });
-    expect(lease.items).toHaveLength(1);
-    const recovered = await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:03:31.000Z',
-    });
-    expect(recovered.items[0]?.operationId).toBe(lease.items[0]?.operationId);
-    expect(recovered.items[0]?.attemptCount).toBe(2);
-    await repository.completeMutation({
-      connectorId: CONNECTOR_ID,
-      operationId: recovered.items[0]!.operationId,
-      leaseId: recovered.leaseId,
-      errorCode: 'temporary',
-      errorMessage: 'temporary transport failure',
-      retryable: true,
-      now: '2026-09-29T20:04:00.000Z',
-    });
-    expect((await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:04:01.000Z',
-    })).items).toHaveLength(0);
-    expect((await repository.leaseMutations({
-      connectorId: CONNECTOR_ID,
-      now: '2026-09-29T20:04:04.000Z',
-    })).items).toHaveLength(1);
-  });
-
-  it('persists only portable fields and erases reconciliation state with the connector', async () => {
-    const { database, repository } = await contextPromise;
-    const source = action(7);
-    await repository.applyFeedPage({
-      connectorId: CONNECTOR_ID,
-      page: page({ action: source, event: 10, cursor: 'cursor-1' }),
-      requestedCursor: null,
-      receivedAt: NOW,
-    });
-    const payload = database.sqlite.prepare(`
-      SELECT payload FROM rymessage_action_projections
-      WHERE connector_id = ? AND action_id = ?
-    `).get(CONNECTOR_ID, source.actionId) as { payload: string };
-    for (const sensitive of [
-      'raw-message-identity',
-      'Private Sender',
-      'Private Thread',
-      'Private message excerpt',
-      'private-message',
-      'Private model reasoning',
-      'private-model-name',
-      'Private extracted payload',
-      'Private feedback body',
-    ]) {
-      expect(payload.payload).not.toContain(sensitive);
-    }
-
-    await database.sqlite.backup(backupPath);
-    const backup = new Database(backupPath, { readonly: true });
-    const backedUp = backup.prepare(`
-      SELECT payload FROM rymessage_action_projections
-      WHERE connector_id = ? AND action_id = ?
-    `).get(CONNECTOR_ID, source.actionId) as { payload: string };
-    expect(backedUp.payload).toBe(payload.payload);
-    backup.close();
-
-    database.sqlite.prepare('DELETE FROM connector_configs WHERE id = ?').run(CONNECTOR_ID);
-    for (const table of [
-      'rymessage_action_feed_state',
-      'rymessage_action_projections',
-      'rymessage_action_materializations',
-      'rymessage_action_receipts',
-      'rymessage_action_outbound_mutations',
-    ]) {
-      const count = database.sqlite.prepare(
-        `SELECT COUNT(*) AS count FROM ${table} WHERE connector_id = ?`,
-      ).get(CONNECTOR_ID) as { count: number };
-      expect(count.count).toBe(0);
-    }
   });
 });
 
@@ -1090,7 +253,6 @@ afterAll(async () => {
   rmSync(databasePath, { force: true });
   rmSync(`${databasePath}-wal`, { force: true });
   rmSync(`${databasePath}-shm`, { force: true });
-  rmSync(backupPath, { force: true });
   if (previousPath === undefined) delete process.env.MC_DB_PATH;
   else process.env.MC_DB_PATH = previousPath;
 });

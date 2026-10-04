@@ -15,7 +15,6 @@ const POSTGRES_GUARDED_DYNAMIC_IMPORTERS = new Set([
   'src/lib/semantic-index/embedding-provider.ts',
   'src/lib/connectors/github-issues/backup-verifier.ts',
   'src/lib/connectors/monarch-money/index.ts',
-  'src/lib/connectors/rymessage/rymessage-client.ts',
   'src/lib/search/fts.ts',
   'src/lib/semantic-index/publication.ts',
   'src/lib/semantic-index/repository-facade.ts',

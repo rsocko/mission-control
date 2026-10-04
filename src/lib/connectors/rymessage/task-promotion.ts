@@ -1,13 +1,14 @@
 import type { TaskItem } from '@/types';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
-import { stableCompanionOperationId } from './action-contract';
+import { stableCompanionOperationId } from './operation-id';
 import {
   companionTaskRelationIdV2,
   normalizeTrustedOrigin,
+  normalizeTrustedOrigins,
   type CompanionTaskMaterializationV2,
   type CompanionActionFeedPageV2,
   type CompanionActionMutationRequestV2,
-  type ManagedTaskCommandV1,
+  type ManagedTaskCommandV2,
 } from './action-contract-v2';
 import {
   createCompanionActionClient,
@@ -53,7 +54,8 @@ async function promotionClient(connectorId: string) {
     : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
   const credential = process.env[credentialEnv];
   const trustedOrigin = normalizeTrustedOrigin(settings.trustedMissionControlOrigin);
-  if (!baseUrl || !credential || !trustedOrigin) {
+  const trustedTaskOrigins = normalizeTrustedOrigins(settings.trustedTaskOrigins);
+  if (!baseUrl || !credential || !trustedOrigin || !trustedTaskOrigins) {
     throw new Error('RyMessage Companion promotion runtime is not configured');
   }
   return {
@@ -62,6 +64,7 @@ async function promotionClient(connectorId: string) {
       credential,
       maxRetries: 0,
       trustedMissionControlOrigin: trustedOrigin,
+      trustedTaskOrigins,
     }),
     trustedOrigin,
   };
@@ -332,7 +335,7 @@ export async function attachImportedRyMessageManagers(
 }
 
 function managedTaskStatus(
-    status: ManagedTaskCommandV1['patch']['status'],
+    status: ManagedTaskCommandV2['patch']['status'],
   ): TaskItem['status'] | undefined {
     if (status === 'not-started') return 'todo';
     if (status === 'in-progress' || status === 'blocked') return 'in_progress';
@@ -343,7 +346,7 @@ function managedTaskStatus(
 
 function assertManagedPatchSupported(
   connectorType: string,
-  patch: ManagedTaskCommandV1['patch'],
+  patch: ManagedTaskCommandV2['patch'],
 ): void {
   if (patch.reminderAt !== undefined) throw new Error('provider_field_unsupported');
   if (connectorType !== 'local' && patch.dueAt === null) {
@@ -376,7 +379,7 @@ function assertManagedPatchSupported(
 }
 
 function assertManagedPatchApplied(
-  patch: ManagedTaskCommandV1['patch'],
+  patch: ManagedTaskCommandV2['patch'],
   task: TaskItem,
 ): void {
   if (patch.title !== undefined && task.title !== patch.title) {

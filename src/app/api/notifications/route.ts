@@ -9,6 +9,7 @@ import { legacyStateFromLifecycle } from '@/lib/notifications/lifecycle';
 import { getNotificationWebPersistence } from '@/lib/notifications/notification-web-service';
 import type { NotificationState } from '@/types';
 import type { NotificationRow, RestoreSnapshot } from '@/db/persistence/notification-web';
+import { isUnavailableTaskAction } from '@/lib/notifications/task-association';
 
 function hydratePresentation(item: NotificationRow): unknown {
   if (!item.presentation || typeof item.presentation !== 'object' || Array.isArray(item.presentation)) {
@@ -57,12 +58,30 @@ export async function GET(request: Request) {
       actionsByNotification.set(action.notificationId, existing);
     }
 
-    const hydratedItems = result.items.map(item => ({
-      ...item,
-      state: legacyStateFromLifecycle(item),
-      presentation: hydratePresentation(item),
-      actions: actionsByNotification.get(item.id) || [],
-    }));
+    const hydratedItems = result.items.map(item => {
+      const sourceActions = actionsByNotification.get(item.id) || [];
+      const actions = sourceActions
+        .filter(action => !isUnavailableTaskAction(item, action));
+      const removedTaskAction = actions.length !== sourceActions.length;
+      const actionIds = new Set(actions.map(action => action.id));
+      return {
+        ...item,
+        state: legacyStateFromLifecycle(item),
+        presentation: hydratePresentation(item),
+        actions,
+        isActionable: removedTaskAction ? actions.length > 0 : item.isActionable,
+        primaryActionId: item.primaryActionId && (
+          !removedTaskAction || actionIds.has(item.primaryActionId)
+        )
+          ? item.primaryActionId
+          : null,
+        aiSuggestedActionId: item.aiSuggestedActionId && (
+          !removedTaskAction || actionIds.has(item.aiSuggestedActionId)
+        )
+          ? item.aiSuggestedActionId
+          : null,
+      };
+    });
 
     return NextResponse.json({
       notifications: hydratedItems,

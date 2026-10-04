@@ -12,7 +12,8 @@ describeNotificationEntityLinkingContract('SQLite', () => {
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
       connector_instance_id TEXT NOT NULL,
-      source_id TEXT NOT NULL
+      source_id TEXT NOT NULL,
+      deleted_at TEXT
     );
     CREATE TABLE hub_projects (
       id TEXT PRIMARY KEY,
@@ -24,8 +25,8 @@ describeNotificationEntityLinkingContract('SQLite', () => {
     repository: createSqliteNotificationEntityLinkingRepository(sqlite),
     seedTask: (input) => {
       sqlite.prepare(
-        'INSERT INTO tasks (id, connector_instance_id, source_id) VALUES (?, ?, ?)',
-      ).run(input.id, input.connectorInstanceId, input.sourceId);
+        'INSERT INTO tasks (id, connector_instance_id, source_id, deleted_at) VALUES (?, ?, ?, ?)',
+      ).run(input.id, input.connectorInstanceId, input.sourceId, input.deletedAt ?? null);
     },
     seedProject: (input) => {
       const metadata = input.repositoryJsonValue === undefined

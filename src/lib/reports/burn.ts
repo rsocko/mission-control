@@ -340,6 +340,9 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
   const today = input.today ?? new Date().toISOString().slice(0, 10);
   const dates = enumerateDates(input.startDate, input.endDate);
   const states = new Map<string, MutableTaskState>();
+  const deletedAtByTask = new Map(
+    input.tasks.map((task) => [task.id, eventInstant(task.deletedAt)]),
+  );
   const events = reconstructTaskLifecycles(
     input.events,
     input.tasks,
@@ -361,8 +364,12 @@ export function buildBurnReport(input: BuildBurnReportInput): BurnReport {
     }
 
     const isFuture = date > today;
-    const membershipStates = [...states.entries()].filter(([, state]) => (
+    const membershipStates = [...states.entries()].filter(([taskId, state]) => (
       state.localDisposition === 'active'
+      && (
+        !deletedAtByTask.get(taskId)
+        || deletedAtByTask.get(taskId)! >= snapshotAt
+      )
       && (
         input.scope === 'project'
           ? state.projectIds.has(input.scopeId)

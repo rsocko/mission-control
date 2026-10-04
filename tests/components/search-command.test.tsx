@@ -147,7 +147,7 @@ describe('SearchCommand', () => {
     });
 
     render(<SearchCommand />);
-    fireEvent.change(openSearch(), { target: { value: 'Plan the day *' } });
+    fireEvent.change(openSearch(), { target: { value: 'Plan the day ~soon *' } });
     fireEvent.click(await screen.findByRole('button', { name: /create task.*plan the day/i }));
 
     await waitFor(() => {
@@ -156,7 +156,10 @@ describe('SearchCommand', () => {
       }));
     });
     const taskRequest = fetchSpy.mock.calls.find(([url]) => String(url) === '/api/tasks');
-    expect(JSON.parse(String(taskRequest?.[1]?.body))).toMatchObject({ title: 'Plan the day' });
+    expect(JSON.parse(String(taskRequest?.[1]?.body))).toMatchObject({
+      title: 'Plan the day',
+      planningHorizon: 'soon',
+    });
     const myDayRequest = fetchSpy.mock.calls.find(([url]) => String(url) === '/api/my-day');
     expect(JSON.parse(String(myDayRequest?.[1]?.body))).toMatchObject({ taskId: 'task-starred' });
     expect(toast.success).toHaveBeenCalledWith('Created “Plan the day” · My Day');

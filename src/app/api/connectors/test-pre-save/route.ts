@@ -16,7 +16,10 @@ import {
 } from '@/lib/connectors/home-assistant/settings';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
 import { createCompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
-import { normalizeTrustedOrigin } from '@/lib/connectors/rymessage/action-contract-v2';
+import {
+  normalizeTrustedOrigin,
+  normalizeTrustedOrigins,
+} from '@/lib/connectors/rymessage/action-contract-v2';
 
 /**
  * POST /api/connectors/test-pre-save
@@ -177,6 +180,14 @@ async function testUnsavedConnector(
             error: 'Enter the exact Mission Control HTTP(S) origin provisioned in Companion',
           };
         }
+        const trustedTaskOrigins = normalizeTrustedOrigins(settings.trustedTaskOrigins);
+        if (!trustedTaskOrigins) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'Enter only exact HTTP(S) trusted task origins',
+          };
+        }
         const credentialEnv = typeof settings.credentialEnv === 'string'
           ? settings.credentialEnv
           : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
@@ -200,6 +211,7 @@ async function testUnsavedConnector(
           credential,
           maxRetries: 0,
           trustedMissionControlOrigin,
+          trustedTaskOrigins,
         }).fetchPageV2(null);
         return {
           success: true,

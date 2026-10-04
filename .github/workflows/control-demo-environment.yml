@@ -10,8 +10,8 @@ on:
         default: status
         options:
           - status
-          - start
-          - stop
+          - suspend
+          - sustain
   schedule:
     - cron: "0 3 * * *"
 
@@ -27,87 +27,54 @@ concurrency:
 
 jobs:
   control:
-    name: ${{ github.event_name == 'schedule' && 'Nightly stop' || format('Demo {0}', inputs.action) }}
+    name: ${{ github.event_name == 'schedule' && 'Nightly suspend' || format('Demo {0}', inputs.action) }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
     environment: demo
     env:
-      API_VERSION: "2026-07-01"
-      RESOURCE_ID: /subscriptions/${{ vars.AZURE_SUBSCRIPTION_ID }}/resourceGroups/${{ vars.DEMO_RESOURCE_GROUP }}/providers/Microsoft.App/containerApps/${{ vars.DEMO_CONTAINER_APP }}
+      AZURE_CORE_ONLY_SHOW_ERRORS: "true"
     steps:
-      - name: Sign in to Azure
-        uses: azure/login@7184910d9eb2b1c5e48f7073824a90609bb9b6d6 # v2
+      - name: Check out availability command
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          persist-credentials: false
 
-      - name: Control demo Container App
+      - name: Sign in to Azure with GitHub OIDC
         env:
-          REQUESTED_ACTION: ${{ github.event_name == 'schedule' && 'stop' || inputs.action }}
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
         shell: bash
         run: |
           set -euo pipefail
 
-          resource_url="https://management.azure.com${RESOURCE_ID}"
-          read_status() {
-            az rest \
-              --method get \
-              --url "${resource_url}?api-version=${API_VERSION}" \
-              --query properties.runningStatus \
-              --output tsv
-          }
+          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange"
+          oidc_token="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${oidc_url}" |
+              jq --exit-status --raw-output '.value'
+          )"
 
-          current_status="$(read_status)"
-          if [[ "${REQUESTED_ACTION}" == "status" ]]; then
-            {
-              echo "## Demo environment"
-              echo
-              echo "Status: \`${current_status}\`"
-            } >> "${GITHUB_STEP_SUMMARY}"
-            exit 0
-          fi
+          az login \
+            --service-principal \
+            --username "${AZURE_CLIENT_ID}" \
+            --tenant "${AZURE_TENANT_ID}" \
+            --federated-token "${oidc_token}" \
+            --output none
+          az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
 
-          case "${REQUESTED_ACTION}" in
-            start)
-              target_status="Running"
-              ;;
-            stop)
-              target_status="Stopped"
-              ;;
-            *)
-              echo "::error::Unsupported action: ${REQUESTED_ACTION}"
-              exit 1
-              ;;
-          esac
-
-          if [[ "${current_status}" != "${target_status}" ]]; then
-            az rest \
-              --method post \
-              --url "${resource_url}/${REQUESTED_ACTION}?api-version=${API_VERSION}" \
-              --output none
-
-            for attempt in {1..40}; do
-              current_status="$(read_status)"
-              if [[ "${current_status}" == "${target_status}" ]]; then
-                break
-              fi
-              sleep 10
-            done
-          fi
-
-          if [[ "${current_status}" != "${target_status}" ]]; then
-            echo "::error::Demo remained ${current_status}; expected ${target_status}"
-            exit 1
-          fi
-
-          {
-            echo "## Demo environment"
-            echo
-            echo "Action: \`${REQUESTED_ACTION}\`"
-            echo
-            echo "Status: \`${current_status}\`"
-          } >> "${GITHUB_STEP_SUMMARY}"
+      - name: Control demo Container App
+        env:
+          APP_NAME: ${{ vars.DEMO_CONTAINER_APP }}
+          REQUESTED_ACTION: ${{ github.event_name == 'schedule' && 'suspend' || inputs.action }}
+          RESOURCE_GROUP: ${{ vars.DEMO_RESOURCE_GROUP }}
+        shell: pwsh
+        run: |
+          ./scripts/azure-demo-availability.ps1 `
+            -Action "${env:REQUESTED_ACTION}" `
+            -ResourceGroup "${env:RESOURCE_GROUP}" `
+            -AppName "${env:APP_NAME}"

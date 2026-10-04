@@ -1,21 +1,24 @@
-import type {
-  RyMessageActionPersistence,
-  RyMessageActionProjection,
-} from '@/db/persistence/rymessage-actions';
 import type { CreateNotificationInput } from '@/db/persistence/notification-delivery';
 import type { NotificationLevel, NotificationSourceState } from '@/types';
 import { createNotifications } from '@/lib/notifications/service';
-import type { CompanionActionFeedPageV2 } from './action-contract-v2';
 import {
-  sanitizeCompanionAction,
-  type CompanionActionV1,
-  type PortableCompanionAction,
-} from './action-contract';
+  companionActionV2Digest,
+  type CompanionActionFeedPageV2,
+} from './action-contract-v2';
+import type { ActionV2 } from './action-contract';
+import {
+  resolveRyMessageSemanticType,
+  ryMessageNotificationCategory,
+  ryMessageNotificationLevel,
+} from './notification-semantics';
 
-function portableAction(
-  action: CompanionActionV1 | PortableCompanionAction,
-): PortableCompanionAction {
-  return 'source' in action ? sanitizeCompanionAction(action) : action;
+interface NotificationProjection {
+  connectorId: string;
+  actionId: string;
+  sourceId: string;
+  revision: number;
+  action: ActionV2 | null;
+  tombstonedAt: string | null;
 }
 
 function notificationSourceId(connectorId: string, actionId: string): string {
@@ -23,26 +26,20 @@ function notificationSourceId(connectorId: string, actionId: string): string {
 }
 
 function notificationLevel(
-  projection: RyMessageActionProjection,
+  projection: NotificationProjection,
 ): NotificationLevel {
   const action = projection.action;
-  const priority = action?.content.priority ?? 'none';
-  const confidence = action?.classification.confidenceClass;
-  if (priority === 'critical') return 'urgent';
-  if (priority === 'high') return confidence === 'low' ? 'heads_up' : 'action_needed';
-  if (priority === 'medium') return confidence === 'high' ? 'action_needed' : 'heads_up';
-  return confidence === 'high' ? 'heads_up' : 'fyi';
+  return ryMessageNotificationLevel({
+    priority: action?.content.priority,
+    semanticType: resolveRyMessageSemanticType(
+      action?.content.category,
+      action?.content.actionType,
+    ),
+    confidenceClass: action?.classification.confidenceClass,
+  });
 }
 
-function notificationCategory(category: string | undefined): string {
-  if (!category) return 'social';
-  if (category === 'security') return 'security';
-  if (category === 'automation') return 'automation';
-  if (category === 'development') return 'development';
-  return 'social';
-}
-
-function sourceState(projection: RyMessageActionProjection): NotificationSourceState {
+function sourceState(projection: NotificationProjection): NotificationSourceState {
   if (projection.tombstonedAt || !projection.action) return 'deleted';
   return ['dismissed', 'handled', 'completed'].includes(projection.action.lifecycle.state)
     ? 'resolved'
@@ -51,13 +48,21 @@ function sourceState(projection: RyMessageActionProjection): NotificationSourceS
 
 function projectionInput(
   connectorId: string,
-  projection: RyMessageActionProjection,
+  projection: NotificationProjection,
 ): CreateNotificationInput {
   const action = projection.action;
   const lifecycle = action?.lifecycle.state ?? 'completed';
   const receivedAt = action?.createdAt ?? projection.tombstonedAt ?? new Date().toISOString();
   const updatedAt = action?.updatedAt ?? projection.tombstonedAt ?? receivedAt;
-  const body = action?.content.summary ?? action?.content.details ?? null;
+  const semanticType = resolveRyMessageSemanticType(
+    action?.content.category,
+    action?.content.actionType,
+  );
+  const body = action?.source?.messageExcerpt
+    ?? action?.content.summary
+    ?? action?.content.details
+    ?? action?.classification.reason
+    ?? null;
   return {
     sourceId: notificationSourceId(connectorId, projection.actionId),
     connectorType: 'rymessage',
@@ -65,7 +70,7 @@ function projectionInput(
     title: action?.content.title ?? 'RyMessage action removed',
     body,
     level: notificationLevel(projection),
-    category: notificationCategory(action?.content.category),
+    category: ryMessageNotificationCategory(semanticType),
     templateKey: 'rymessage.companion-action',
     sourceState: sourceState(projection),
     sourceActivityAt: updatedAt,
@@ -77,36 +82,42 @@ function projectionInput(
     relatedEntityId: projection.actionId,
     isActionable: Boolean(action && lifecycle !== 'completed'),
     metadata: {
-      contract: 'companion-action-v1',
+      contract: 'companion-action-v2',
       actionId: projection.actionId,
       revision: projection.revision,
       lifecycleRevision: action?.fieldRevisions.lifecycle ?? projection.revision,
       actionType: action?.content.actionType,
       category: action?.content.category,
+      semanticType,
+      direction: action?.content.direction,
+      recommendation: action?.content.recommendation,
       priority: action?.content.priority ?? 'none',
+      details: action?.content.details,
+      senderDisplayName: action?.source?.senderDisplayName,
+      conversationTitle: action?.source?.conversationTitle,
+      messageExcerpt: action?.source?.messageExcerpt,
+      sourceUrl: action?.source?.sourceUrl,
+      sourceCreatedAt: action?.source?.sourceCreatedAt,
       confidenceClass: action?.classification.confidenceClass,
       confidenceScore: action?.classification.confidenceScore,
+      classificationReason: action?.classification.reason,
       derivationMethod: action?.classification.derivationMethod,
+      classificationModel: action?.classification.model,
+      derivationVersion: action?.classification.derivationVersion,
       lifecycle,
-      sourceKind: action?.sourceKind,
+      snoozedUntil: action?.lifecycle.snoozedUntil,
+      dismissedAt: action?.lifecycle.dismissedAt,
+      dismissedReason: action?.lifecycle.dismissedReason,
+      handledAt: action?.lifecycle.handledAt,
+      correction: action?.lifecycle.correction,
+      actionCreatedAt: action?.createdAt,
+      actionUpdatedAt: action?.updatedAt,
+      lastSeenAt: action?.lastSeenAt,
+      sourceKind: action?.source.sourceKind,
+      sourceFamily: action?.source.sourceFamily,
       tombstoned: Boolean(projection.tombstonedAt),
     },
     enrichmentRevision: `rymessage:${projection.revision}:${lifecycle}`,
-  };
-}
-
-export async function projectCompanionActionsToNotifications(
-  connectorId: string,
-  repository: RyMessageActionPersistence,
-): Promise<{ created: number; updated: number }> {
-  const projections = await repository.listProjections(connectorId);
-  if (projections.length === 0) return { created: 0, updated: 0 };
-  const results = await createNotifications(
-    projections.map((projection) => projectionInput(connectorId, projection)),
-  );
-  return {
-    created: results.filter((result) => result.created).length,
-    updated: results.filter((result) => !result.created).length,
   };
 }
 
@@ -140,13 +151,19 @@ export async function projectCompanionActionV2PageToNotifications(
       actionId: item.aggregateId,
       revision: item.aggregateVersion,
       sourceId: item.sourceId,
-      action: portableAction(projection.action),
+      action: projection.action,
       tombstonedAt: null,
+    });
+    const presentationDigest = companionActionV2Digest({
+      action: projection.action,
+      taskMaterializations: relations,
+      taskLifecycle: projection.taskLifecycle,
     });
     return {
       ...base,
       sourceActivityKey: [
         base.sourceActivityKey,
+        presentationDigest,
         projection.taskLifecycle.provenance,
         projection.taskLifecycle.state,
         ...relations.map(relation => `${relation.relationId}:${relation.revision}`),
@@ -160,10 +177,22 @@ export async function projectCompanionActionV2PageToNotifications(
         terminalLinkedTaskCount: relations.length - activeRelations.length,
         taskLifecycleSource: projection.taskLifecycle.provenance,
         taskLifecycleState: projection.taskLifecycle.state,
+        taskMaterializations: relations.map(relation => ({
+          relationId: relation.relationId,
+          revision: relation.revision,
+          state: relation.state,
+          providerLabel: relation.snapshot.providerLabel,
+          providerIconKey: relation.snapshot.providerIconKey,
+          title: relation.snapshot.title,
+          status: relation.snapshot.status,
+          availability: relation.snapshot.availability,
+          observedAt: relation.snapshot.observedAt,
+          openUrl: relation.snapshot.openUrl,
+          managedByMissionControl: relation.management?.manager === 'mission-control',
+          managerTaskId: relation.management?.managerTaskId,
+        })),
       },
-      enrichmentRevision: `rymessage-v2:${item.aggregateVersion}:${
-        projection.taskLifecycle.derivedAt ?? projection.action.updatedAt
-      }`,
+      enrichmentRevision: `rymessage-v2:${item.aggregateVersion}:${presentationDigest}`,
     };
   });
   const results = await createNotifications(inputs);

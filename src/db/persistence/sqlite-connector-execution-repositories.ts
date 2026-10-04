@@ -1145,13 +1145,89 @@ export function createSqliteConnectorExecutionRepositories(
               : command.input.primaryActionId,
             } as CreateNotificationInput],
             );
-            if (result.created && command.actions.length > 0) {
-            transaction.insert(notificationActions)
-              .values(command.actions.map((action) => ({
-                ...action,
-                icon: action.icon ?? null,
-              })))
-              .run();
+            if (result.created) {
+              if (command.actions.length > 0) {
+                transaction.insert(notificationActions)
+                  .values(command.actions.map((action) => ({
+                    ...action,
+                    icon: action.icon ?? null,
+                  })))
+                  .run();
+              }
+            } else if (result.notification.disposition === 'inbox') {
+              const pending = database.prepare(`
+                SELECT id, action_type AS actionType, created_by AS createdBy
+                FROM notification_actions
+                WHERE notification_id = ? AND execution_state = 'pending'
+                ORDER BY sort_order, id
+              `).all(result.notification.id) as Array<{
+                id: string;
+                actionType: string;
+                createdBy: string;
+              }>;
+              const consumed = new Set<string>();
+              let primaryActionId: string | null = null;
+
+              for (const action of command.actions) {
+                const match = pending.find(candidate => (
+                  !consumed.has(candidate.id)
+                  && candidate.actionType === action.actionType
+                  && candidate.createdBy === action.createdBy
+                ));
+                const actionId = match?.id ?? action.id;
+                consumed.add(actionId);
+                database.prepare(`
+                  INSERT INTO notification_actions (
+                    id, notification_id, action_type, label, icon, variant,
+                    is_primary, sort_order, payload, opens_external,
+                    requires_confirmation, created_by
+                  ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  ON CONFLICT(id) DO UPDATE SET
+                    action_type = excluded.action_type,
+                    label = excluded.label,
+                    icon = excluded.icon,
+                    variant = excluded.variant,
+                    is_primary = excluded.is_primary,
+                    sort_order = excluded.sort_order,
+                    payload = excluded.payload,
+                    opens_external = excluded.opens_external,
+                    requires_confirmation = excluded.requires_confirmation,
+                    created_by = excluded.created_by
+                  WHERE notification_actions.notification_id = excluded.notification_id
+                    AND notification_actions.execution_state = 'pending'
+                `).run(
+                  actionId,
+                  result.notification.id,
+                  action.actionType,
+                  action.label,
+                  action.icon ?? null,
+                  action.variant,
+                  action.isPrimary ? 1 : 0,
+                  action.sortOrder,
+                  JSON.stringify(action.payload),
+                  action.opensExternal ? 1 : 0,
+                  action.requiresConfirmation ? 1 : 0,
+                  action.createdBy,
+                );
+                if (action.isPrimary) primaryActionId = actionId;
+              }
+
+              for (const stale of pending) {
+                if (
+                  consumed.has(stale.id)
+                  || (
+                    stale.createdBy !== 'connector'
+                    && !command.actions.some(action => action.createdBy === stale.createdBy)
+                  )
+                ) continue;
+                database.prepare(`
+                  DELETE FROM notification_actions
+                  WHERE id = ? AND execution_state = 'pending'
+                `).run(stale.id);
+              }
+              database.prepare(`
+                UPDATE notifications SET primary_action_id = ? WHERE id = ?
+              `).run(primaryActionId, result.notification.id);
             }
             if (command.enrichment) {
               const now = new Date().toISOString();

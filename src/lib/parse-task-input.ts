@@ -26,7 +26,26 @@ export interface ParseTaskInputOptions {
   naturalLanguageDates?: boolean;
   preserveText?: boolean;
   projects?: QuickAddProject[];
+  metadata?: Partial<Record<QuickAddMetadataField, boolean>>;
 }
+
+export type QuickAddMetadataField =
+  | 'recurrence'
+  | 'planningHorizon'
+  | 'estimatedDuration'
+  | 'priority'
+  | 'effort'
+  | 'myDay'
+  | 'tags'
+  | 'project'
+  | 'dueDate';
+
+export const SUBTASK_QUICK_ADD_METADATA: ParseTaskInputOptions['metadata'] = {
+  recurrence: false,
+  estimatedDuration: false,
+  tags: false,
+  project: false,
+};
 
 export interface ParsedTask {
   title: string;           // Clean title with tokens removed
@@ -258,6 +277,7 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
 
   const naturalLanguageDates = options.naturalLanguageDates ?? true;
   const preserveText = options.preserveText ?? false;
+  const metadataEnabled = (field: QuickAddMetadataField) => options.metadata?.[field] ?? true;
   let remaining = input;
   let title = input;
   let dueDate: string | null = null;
@@ -274,17 +294,10 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
   let recurrence: string | null = null;
   let recurrenceLabel: string | null = null;
 
-  // Extract recurrence patterns (before date parsing to avoid conflicts with day names)
-  const recurrenceResult = parseRecurrence(remaining);
-  if (recurrenceResult) {
-    recurrence = recurrenceResult.result.value;
-    recurrenceLabel = recurrenceResult.result.label;
-    remaining = removeMatchedText(remaining, recurrenceResult.matchedText);
-    if (!preserveText) title = removeMatchedText(title, recurrenceResult.matchedText);
-  }
-
   // Extract planning horizon. All recognized tokens are consumed; the last one wins.
-  const horizonMatches = [...remaining.matchAll(/(?<!\\)~(next|soon|later|someday)\b/gi)];
+  const horizonMatches = metadataEnabled('planningHorizon')
+    ? [...remaining.matchAll(/(?<!\\)~(next|soon|later|someday)\b/gi)]
+    : [];
   if (horizonMatches.length > 0) {
     planningHorizon = horizonMatches[horizonMatches.length - 1][1].toLowerCase() as PlanningHorizon;
     remaining = remaining.replace(/(?<!\\)~(?:next|soon|later|someday)\b/gi, '').trim();
@@ -294,8 +307,11 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
   }
 
   // Extract estimated duration: ~30m, ~1h, ~1.5h, ~90m, ~2h (not escaped with \)
-  const durationMatch = remaining.match(/(?<!\\)~(\d+(?:\.\d+)?)\s*(m|min|mins|h|hr|hrs|hour|hours)\b/i);
-  if (durationMatch) {
+  const durationMatches = metadataEnabled('estimatedDuration')
+    ? [...remaining.matchAll(/(?<!\\)~(\d+(?:\.\d+)?)\s*(m|min|mins|h|hr|hrs|hour|hours)\b/gi)]
+    : [];
+  if (durationMatches.length > 0) {
+    const durationMatch = durationMatches[durationMatches.length - 1];
     const value = parseFloat(durationMatch[1]);
     const unit = durationMatch[2].toLowerCase();
     if (unit.startsWith('h')) {
@@ -303,13 +319,18 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     } else {
       estimatedDuration = Math.round(value);
     }
-    remaining = removeMatchedText(remaining, durationMatch[0]);
-    if (!preserveText) title = removeMatchedText(title, durationMatch[0]);
+    remaining = remaining.replace(/(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi, '').trim();
+    if (!preserveText) {
+      title = title.replace(/(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi, '').trim();
+    }
   }
 
   // Extract priority: !critical, !high, !medium, !low, !0, !1, !2, !3 (not escaped with \)
-  const priorityMatch = remaining.match(/(?<!\\)!(critical|high|medium|low|[0-3])\b/i);
-  if (priorityMatch) {
+  const priorityMatches = metadataEnabled('priority')
+    ? [...remaining.matchAll(/(?<!\\)!(critical|high|medium|low|[0-3])\b/gi)]
+    : [];
+  if (priorityMatches.length > 0) {
+    const priorityMatch = priorityMatches[priorityMatches.length - 1];
     const numericPriorityMap: Record<string, string> = {
       '0': 'critical',
       '1': 'high',
@@ -318,21 +339,26 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     };
     const matched = priorityMatch[1].toLowerCase();
     priority = numericPriorityMap[matched] || matched;
-    remaining = removeMatchedText(remaining, priorityMatch[0]);
-    if (!preserveText) title = removeMatchedText(title, priorityMatch[0]);
+    remaining = remaining.replace(/(?<!\\)!(?:critical|high|medium|low|[0-3])\b/gi, '').trim();
+    if (!preserveText) {
+      title = title.replace(/(?<!\\)!(?:critical|high|medium|low|[0-3])\b/gi, '').trim();
+    }
   }
 
   // Extract effort: ^1, ^2, ^3, ^4, ^5 (not escaped with \)
-  const effortMatch = remaining.match(/(?<!\\)\^([1-5])\b/);
-  if (effortMatch) {
+  const effortMatches = metadataEnabled('effort')
+    ? [...remaining.matchAll(/(?<!\\)\^([1-5])\b/g)]
+    : [];
+  if (effortMatches.length > 0) {
+    const effortMatch = effortMatches[effortMatches.length - 1];
     effort = parseInt(effortMatch[1], 10);
-    remaining = removeMatchedText(remaining, effortMatch[0]);
-    if (!preserveText) title = removeMatchedText(title, effortMatch[0]);
+    remaining = remaining.replace(/(?<!\\)\^[1-5]\b/g, '').trim();
+    if (!preserveText) title = title.replace(/(?<!\\)\^[1-5]\b/g, '').trim();
   }
 
   // Extract the standalone My Day marker. A backslash keeps a literal asterisk.
   const myDayTokenRegex = /(?<!\\)(^|\s)\*(?=\s|$)/g;
-  addToMyDay = /(?<!\\)(^|\s)\*(?=\s|$)/.test(remaining);
+  addToMyDay = metadataEnabled('myDay') && /(?<!\\)(^|\s)\*(?=\s|$)/.test(remaining);
   if (addToMyDay) {
     remaining = remaining.replace(myDayTokenRegex, '$1').trim();
     if (!preserveText) title = title.replace(myDayTokenRegex, '$1').trim();
@@ -340,15 +366,19 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
 
   // Extract tags: #tagname (not escaped with \)
   // Colons and dots are allowed so namespaced tags like "area:projects" or "v2.0" work
-  const tagMatches = remaining.matchAll(/(?<!\\)#([a-zA-Z0-9_:./-]+)/g);
-  for (const match of tagMatches) {
-    foundTags.push(match[1]);
+  if (metadataEnabled('tags')) {
+    const tagMatches = remaining.matchAll(/(?<!\\)#([a-zA-Z0-9_:./-]+)/g);
+    for (const match of tagMatches) {
+      foundTags.push(match[1]);
+    }
+    remaining = remaining.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
+    if (!preserveText) title = title.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
   }
-  remaining = remaining.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
-  if (!preserveText) title = title.replace(/(?<!\\)#[a-zA-Z0-9_:./-]+/g, '').trim();
 
   // Extract project: +Project or +"Project with spaces"
-  const projectMatch = findProjectToken(remaining, options.projects ?? []);
+  const projectMatch = metadataEnabled('project')
+    ? findProjectToken(remaining, options.projects ?? [])
+    : null;
   if (projectMatch) {
     project = projectMatch.project.name;
     projectId = projectMatch.project.id || null;
@@ -356,9 +386,26 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
     if (!preserveText) title = removeMatchedText(title, projectMatch.matchedText);
   }
 
+  // Recurrence is inferred only from a trailing phrase. This keeps descriptive
+  // uses such as "Review daily active users" as ordinary title text.
+  const recurrenceResult = metadataEnabled('recurrence')
+    ? parseRecurrence(remaining)
+    : null;
+  if (
+    recurrenceResult
+    && remaining.toLowerCase().endsWith(recurrenceResult.matchedText.toLowerCase())
+  ) {
+    recurrence = recurrenceResult.result.value;
+    recurrenceLabel = recurrenceResult.result.label;
+    remaining = removeMatchedText(remaining, recurrenceResult.matchedText);
+    if (!preserveText) title = removeMatchedText(title, recurrenceResult.matchedText);
+  }
+
   // Explicit date commands are applied immediately. Free-form trailing dates stay
-  // suggestions until the user converts one to /due: through the suggestion UI.
-  const explicitDueMatch = remaining.match(/(?:^|\s)\/due:\s*(.+?)(?=\s+(?:[#@!~^+]|\w+\/)|$)/i);
+  // suggestions while typing and are promoted by parseTaskInputForSubmission.
+  const explicitDueMatch = metadataEnabled('dueDate')
+    ? remaining.match(/(?:^|\s)\/due:\s*(.+?)(?=\s+(?:[#@!~^+]|\w+\/)|$)/i)
+    : null;
   if (explicitDueMatch) {
     const explicitDate = parseNLPDate(explicitDueMatch[1], today);
     if (explicitDate) {
@@ -375,7 +422,7 @@ export function parseTaskInput(input: string, options: ParseTaskInputOptions = {
         if (titleWithoutDate) title = titleWithoutDate;
       }
     }
-  } else if (naturalLanguageDates) {
+  } else if (naturalLanguageDates && metadataEnabled('dueDate')) {
     const dateInput = maskEscapedDateExpressions(remaining, today);
     const trailingDate = findTrailingDate(dateInput, today);
     if (trailingDate) {
@@ -415,7 +462,26 @@ export function parseTaskInputForSubmission(
   input: string,
   options: ParseTaskInputOptions = {},
 ): ParsedTask {
-  return parseTaskInput(input, options);
+  const parsed = parseTaskInput(input, options);
+  if (!parsed.dateSuggestion) return parsed;
+
+  let title = parsed.title;
+  if (!(options.preserveText ?? false)) {
+    const matchedText = parsed.dateSuggestion.matchedText;
+    const matchIndex = title.toLowerCase().lastIndexOf(matchedText.toLowerCase());
+    if (matchIndex >= 0 && matchIndex + matchedText.length === title.length) {
+      const titleWithoutDate = title.slice(0, matchIndex).trim();
+      if (titleWithoutDate) title = titleWithoutDate;
+    }
+  }
+
+  return {
+    ...parsed,
+    title,
+    dueDate: parsed.dateSuggestion.date,
+    dueDateLabel: parsed.dateSuggestion.label,
+    dateSuggestion: null,
+  };
 }
 
 /**

@@ -94,21 +94,25 @@ runConnectorManagementRepositoryContract(
         UPDATE work_todo_bridge_state SET last_ingest_at = ? WHERE connector_id = ?
       `).run('2026-09-04T04:02:00.000Z', connectorId);
     },
-    async seedTask(connectorId, sourceListId) {
+    async seedTask(connectorId, sourceListId, options = {}) {
       const { database } = await contextPromise;
       database.sqlite.prepare(`
         INSERT INTO tasks (
           id, source_id, connector_type, connector_instance_id, title,
-          created_at, updated_at, last_synced_at, source_list_id, source_list_name
-        ) VALUES (?, ?, 'test', ?, 'Contract task', ?, ?, ?, ?, 'Old name')
+          created_at, updated_at, last_synced_at, source_list_id, source_list_name,
+          local_disposition, deleted_at
+        ) VALUES (?, ?, ?, ?, 'Contract task', ?, ?, ?, ?, 'Old name', ?, ?)
       `).run(
-        `${connectorId}-task`,
-        `${connectorId}-remote-task`,
+        `${connectorId}-${options.idSuffix ?? 'task'}`,
+        `${connectorId}-remote-${options.idSuffix ?? 'task'}`,
+        options.connectorType ?? 'test',
         connectorId,
         '2026-09-04T04:00:00.000Z',
         '2026-09-04T04:00:00.000Z',
         '2026-09-04T04:00:00.000Z',
         sourceListId,
+        options.localDisposition ?? 'active',
+        options.deletedAt ?? null,
       );
     },
     async taskSourceListName(connectorId) {

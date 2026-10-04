@@ -56,6 +56,7 @@ import { parseFilterQuery } from '@/lib/utils/parseFilterQuery';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { ContextThemeSurface } from '@/components/context-theme/ContextThemeSurface';
+import { TaskDelegationButton } from '@/components/task-delegation/TaskDelegationButton';
 
 const MobileDashboard = dynamic(
   () => import('@/components/dashboard/mobile/MobileDashboard').then(mod => mod.MobileDashboard),
@@ -903,6 +904,7 @@ function BulkActionBarSection({ state, actions }: { state: ReturnType<typeof use
   return (
     <div className="px-4 py-2 border-b border-[var(--border-subtle)] bg-blue-900/20 flex items-center gap-2 flex-wrap">
       <span className="text-xs font-medium text-blue-300">{state.bulkSelected.size} selected</span>
+      <TaskDelegationButton taskIds={Array.from(state.bulkSelected)} compact />
       <button
         onClick={() => {
           const count = state.bulkSelected.size;

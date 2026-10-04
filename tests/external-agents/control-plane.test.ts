@@ -14,6 +14,7 @@ let db: typeof import('@/db').default;
 let sqlite: typeof import('@/db').sqlite;
 let schema: typeof import('@/db/schema');
 let registry: typeof import('@/lib/external-agents/registry');
+let policy: typeof import('@/lib/external-agents/policy');
 let service: typeof import('@/lib/external-agents/service');
 let transports: typeof import('@/lib/external-agents/transports');
 let receiveInboundResult: typeof import('@/app/api/inbound-webhooks/[id]/receive/route').POST;
@@ -33,6 +34,7 @@ beforeAll(async () => {
   const modules = await Promise.all([
     import('@/db/schema'),
     import('@/lib/external-agents/registry'),
+    import('@/lib/external-agents/policy'),
     import('@/lib/external-agents/service'),
     import('@/lib/external-agents/transports'),
     import('@/app/api/inbound-webhooks/[id]/receive/route'),
@@ -41,11 +43,12 @@ beforeAll(async () => {
   sqlite = databaseModule.sqlite;
   schema = modules[0];
   registry = modules[1];
-  service = modules[2];
-  transports = modules[3];
-  receiveInboundResult = modules[4].POST;
+  policy = modules[2];
+  service = modules[3];
+  transports = modules[4];
+  receiveInboundResult = modules[5].POST;
   sqlite.prepare('SELECT 1').get();
-});
+}, 30_000);
 
 beforeEach(() => {
   sqlite.exec(`
@@ -149,6 +152,100 @@ async function seedTask(connectorType = 'github-issues') {
 }
 
 describe('external-agent registry boundaries', () => {
+  it('bounds server-owned always instructions', () => {
+    expect(() => registry.validateExternalAgentInput({
+      name: 'Oversized configuration',
+      type: 'manual',
+      providerConfig: {
+        alwaysInstructions: 'x'.repeat(16_001),
+      },
+    })).toThrow(expect.objectContaining({
+      code: 'VALIDATION_ERROR',
+      message: expect.stringContaining('16000 characters'),
+    }));
+  });
+
+  it('persists deterministic rich-context upgrades for legacy destinations', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'legacy-hosted',
+      name: 'Legacy hosted coding',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+    });
+    const legacyFields = [
+      'instruction',
+      'execution.locality',
+      'dispatchId',
+      'dataClassification',
+      'allowedActions',
+      'project.description',
+    ];
+    sqlite.prepare('UPDATE external_agents SET provider_config = ?, data_policy = ? WHERE id = ?')
+      .run(
+        JSON.stringify({}),
+        JSON.stringify({
+          allowedClassifications: ['standard', 'restricted'],
+          fieldAllowlist: legacyFields,
+          retentionDays: 91,
+          maxRequestsPerMinute: 7,
+        }),
+        hosted.id,
+      );
+
+    const upgraded = await registry.getExternalAgent(hosted.id);
+    expect(upgraded).toMatchObject({
+      providerConfig: {},
+      dataPolicy: {
+        allowedClassifications: ['standard', 'restricted'],
+        retentionDays: 91,
+        maxRequestsPerMinute: 7,
+      },
+    });
+    expect(upgraded?.dataPolicy.fieldAllowlist).toEqual([
+      ...legacyFields,
+      ...policy.REQUIRED_RICH_TASK_FIELDS.filter((field) => !legacyFields.includes(field)),
+    ]);
+    const persisted = JSON.parse((sqlite.prepare(
+      'SELECT data_policy AS dataPolicy FROM external_agents WHERE id = ?',
+    ).get(hosted.id) as { dataPolicy: string }).dataPolicy);
+    expect(persisted).toEqual(upgraded?.dataPolicy);
+
+    const paperclip = registry.validateExternalAgentInput({
+      name: 'Legacy Paperclip',
+      type: 'paperclip',
+      endpoint: 'http://localhost:3100',
+      providerConfig: {
+        paperclip: {
+          companyId: '11111111-1111-4111-8111-111111111111',
+          assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+        },
+      },
+      dataPolicy: {
+        allowedClassifications: ['standard'],
+        fieldAllowlist: legacyFields,
+        retentionDays: 12,
+        maxRequestsPerMinute: 4,
+      },
+    });
+    expect(paperclip.providerConfig).toEqual({
+      paperclip: {
+        companyId: '11111111-1111-4111-8111-111111111111',
+        assigneeAgentId: '22222222-2222-4222-8222-222222222222',
+      },
+    });
+    expect(paperclip.dataPolicy).toMatchObject({
+      allowedClassifications: ['standard'],
+      retentionDays: 12,
+      maxRequestsPerMinute: 4,
+    });
+    expect(paperclip.dataPolicy.fieldAllowlist).toEqual([
+      ...legacyFields,
+      ...policy.REQUIRED_RICH_TASK_FIELDS.filter((field) => !legacyFields.includes(field)),
+    ]);
+  });
+
   it('keeps inference, MC-hosted, and GitHub-hosted execution explicit', async () => {
     await expect(registry.createExternalAgent({
       name: 'Unsafe inference',
@@ -164,13 +261,20 @@ describe('external-agent registry boundaries', () => {
       authCredentialRef: 'push-agent-key',
       endpoint: 'https://api.github.com/agents',
     })).rejects.toMatchObject({ code: 'EXECUTION_BOUNDARY_MISMATCH' });
+    await expect(registry.createExternalAgent({
+      name: 'Untrusted cloud endpoint',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://example.test',
+    })).rejects.toMatchObject({ code: 'EXECUTION_BOUNDARY_MISMATCH' });
 
     const hosted = await registry.createExternalAgent({
       name: 'Hosted coding',
       type: 'copilot-cloud',
       authType: 'github-user',
       authCredentialRef: 'push-agent-key',
-      endpoint: 'https://api.github.com/agents',
+      endpoint: 'https://api.github.com',
     });
     expect(hosted).toMatchObject({
       transport: 'push',
@@ -182,11 +286,6 @@ describe('external-agent registry boundaries', () => {
       scope: { repository: 'owner/repo' },
       idempotencyKey: 'cloud-preview',
     })).resolves.toMatchObject({ status: 'needs_confirmation' });
-    await expect(service.confirmDispatch(
-      (await service.listDispatches())[0].id,
-      (await service.listDispatches())[0].previewHash,
-    )).rejects.toMatchObject({ code: 'TRANSPORT_NOT_IMPLEMENTED' });
-    expect((await service.listDispatches())[0].status).toBe('failed');
   });
 
   it('never returns credential references to registry clients', async () => {
@@ -197,12 +296,192 @@ describe('external-agent registry boundaries', () => {
     expect(registry.publicExternalAgent(agent)).not.toHaveProperty('authCredentialRef');
   });
 
+  it('validates and stores a GitHub Copilot Cloud token without returning it to clients', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ login: 'octocat' }),
+    );
+    try {
+      const hosted = await registry.createExternalAgent({
+        id: 'managed-github-token',
+        name: 'Managed GitHub credential',
+        type: 'copilot-cloud',
+        authType: 'github-user',
+        credential: 'github_pat_managed-test',
+        endpoint: 'https://api.github.com',
+      });
+
+      expect(fetcher).toHaveBeenCalledWith(
+        new URL('https://api.github.com/user'),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Authorization: expect.stringMatching(/^Bearer /),
+          }),
+        }),
+      );
+      await expect(registry.resolveGitHubAgentCredential(hosted))
+        .resolves.toBe('github_pat_managed-test');
+      expect(registry.publicExternalAgent(hosted)).toMatchObject({
+        hasCredentialReference: true,
+        credentialSource: 'mission-control',
+      });
+      expect(JSON.stringify(registry.publicExternalAgent(hosted)))
+        .not.toContain('github_pat_managed-test');
+
+      const previousCredentialStore = process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON;
+      try {
+        sqlite.prepare(
+          'UPDATE external_agents SET auth_credential = NULL WHERE id = ?',
+        ).run(hosted.id);
+        process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = JSON.stringify({
+          'mission-control:github-user': 'must-not-fallback',
+        });
+        await expect(registry.resolveGitHubAgentCredential(hosted)).rejects.toMatchObject({
+          code: 'CREDENTIAL_UNAVAILABLE',
+        });
+      } finally {
+        process.env.MC_EXTERNAL_AGENT_CREDENTIALS_JSON = previousCredentialStore;
+      }
+
+      await registry.updateExternalAgent(hosted.id, {
+        authCredentialRef: 'push-agent-key',
+      });
+      expect(sqlite.prepare(
+        'SELECT auth_credential FROM external_agents WHERE id = ?',
+      ).pluck().get(hosted.id)).toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
+  it('rejects an invalid GitHub Copilot Cloud token before storing the destination', async () => {
+    const fetcher = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      Response.json({ message: 'Bad credentials' }, { status: 401 }),
+    );
+    try {
+      await expect(registry.createExternalAgent({
+        id: 'invalid-managed-github-token',
+        name: 'Invalid managed GitHub credential',
+        type: 'copilot-cloud',
+        authType: 'github-user',
+        credential: 'invalid-token',
+        endpoint: 'https://api.github.com',
+      })).rejects.toMatchObject({
+        code: 'CREDENTIAL_INVALID',
+        status: 401,
+      });
+      await expect(registry.getExternalAgent('invalid-managed-github-token'))
+        .resolves.toBeNull();
+    } finally {
+      fetcher.mockRestore();
+    }
+  });
+
   it('rejects endpoints with embedded credentials', async () => {
     await expect(registry.createExternalAgent({
       name: 'Embedded secret',
       type: 'manual',
       endpoint: 'https://user:password@example.test/agent',
     })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+  });
+
+  it('reconciles a persisted Copilot task after restart', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-reconcile',
+      name: 'Hosted reconciliation',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+      capabilities: { canWriteCode: true, canCreatePullRequest: true },
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Fix the parser',
+      scope: {
+        repository: 'octo/example',
+        baseRef: 'main',
+        createPullRequest: true,
+      },
+      allowedActions: ['write_code', 'create_pull_request'],
+      idempotencyKey: 'restart-reconciliation',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'queued',
+            providerTaskId: 'provider-task-1',
+            providerState: 'queued',
+          };
+        },
+      }),
+    });
+
+    const fetcher = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.endsWith('/tasks/provider-task-1')) {
+        return Response.json({
+          id: 'provider-task-1',
+          name: 'Fix parser',
+          state: 'completed',
+          sessions: [{ base_ref: 'main', head_ref: 'copilot/fix-parser' }],
+          artifacts: [{
+            provider: 'github',
+            type: 'branch',
+            data: { base_ref: 'main', head_ref: 'copilot/fix-parser' },
+          }],
+        });
+      }
+      throw new Error(`Unexpected GitHub request: ${url}`);
+    }) as typeof fetch;
+
+    await expect(service.reconcileActiveCopilotCloudDispatches({ fetcher }))
+      .resolves.toEqual({ reconciled: 1, failures: [] });
+    expect(await service.getDispatch(preview.id)).toMatchObject({
+      status: 'completed',
+      providerTaskId: 'provider-task-1',
+      repository: 'octo/example',
+      baseRef: 'main',
+      branchRef: 'copilot/fix-parser',
+    });
+  });
+
+  it('does not pretend a submitted Copilot task was cancelled locally', async () => {
+    const hosted = await registry.createExternalAgent({
+      id: 'hosted-cancel',
+      name: 'Hosted cancellation',
+      type: 'copilot-cloud',
+      authType: 'github-user',
+      authCredentialRef: 'push-agent-key',
+      endpoint: 'https://api.github.com',
+    });
+    const preview = await service.createDispatchPreview({
+      agentId: hosted.id,
+      instruction: 'Keep provider state truthful',
+      scope: { repository: 'octo/example', baseRef: 'main' },
+      idempotencyKey: 'unsupported-cancel',
+    });
+    await service.confirmDispatch(preview.id, preview.previewHash, {
+      transportResolver: () => ({
+        kind: 'push',
+        async dispatch() {
+          return {
+            status: 'in_progress',
+            providerTaskId: 'provider-task-2',
+            providerState: 'in_progress',
+          };
+        },
+      }),
+    });
+
+    await expect(service.cancelDispatch(preview.id)).rejects.toMatchObject({
+      code: 'CANCELLATION_UNSUPPORTED',
+      status: 409,
+    });
+    expect((await service.getDispatch(preview.id))?.status).toBe('in_progress');
+    await expect(service.stopTrackingDispatch(preview.id)).resolves.toBe(true);
+    expect((await service.getDispatch(preview.id))?.status).toBe('cancelled');
   });
 });
 

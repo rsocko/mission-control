@@ -11,6 +11,10 @@ import {
   QUICK_SORT_MODES,
   type QuickSortMode,
 } from '@/lib/quick-sort/operations';
+import {
+  assignTasksToProject,
+  ProjectHierarchyServiceError,
+} from '@/lib/projects/hierarchy-service';
 
 interface ApplyOperationBody {
   operationId?: string;
@@ -23,6 +27,10 @@ interface ApplyOperationBody {
   patch?: Record<string, unknown>;
   logModes?: string[];
   aiAccepted?: boolean;
+  assignment?: {
+    projectId?: string;
+    phaseId?: string | null;
+  };
 }
 
 function operationResponse(operation: TaskQuickSortOperation) {
@@ -81,6 +89,7 @@ export async function POST(request: Request) {
     contextKey,
     queueIndex,
     patch,
+    assignment,
     aiAccepted = false,
   } = body;
   const hasPatch = Boolean(
@@ -88,6 +97,14 @@ export async function POST(request: Request) {
     && typeof patch === 'object'
     && !Array.isArray(patch)
     && Object.keys(patch).length > 0,
+  );
+  const hasAssignment = Boolean(
+    assignment
+    && typeof assignment.projectId === 'string'
+    && assignment.projectId.trim()
+    && (assignment.phaseId === undefined
+      || assignment.phaseId === null
+      || typeof assignment.phaseId === 'string'),
   );
   const mutatesTask = action !== 'skipped';
   if (
@@ -103,7 +120,9 @@ export async function POST(request: Request) {
     || !patch
     || typeof patch !== 'object'
     || Array.isArray(patch)
-    || (mutatesTask && !hasPatch)
+    || (mutatesTask && !hasPatch && !hasAssignment)
+    || (hasPatch && hasAssignment)
+    || (hasAssignment && mode !== 'no_project')
   ) {
     return NextResponse.json({ error: 'Invalid Quick Sort operation' }, { status: 400 });
   }
@@ -125,7 +144,12 @@ export async function POST(request: Request) {
     label,
     contextKey,
     queueIndex,
-    beforeSnapshot: { ...before, originalPatch: mutatesTask ? patch : {} },
+    beforeSnapshot: {
+      ...before,
+      originalPatch: hasAssignment
+        ? { projectAssignment: assignment }
+        : mutatesTask ? patch : {},
+    },
     afterSnapshot: before,
     aiAccepted,
     createdAt: now,
@@ -135,7 +159,31 @@ export async function POST(request: Request) {
   }
 
   let after = before;
-  if (mutatesTask) {
+  if (hasAssignment) {
+    try {
+      await assignTasksToProject({
+        projectId: assignment!.projectId!,
+        taskIds: [taskId],
+        phaseId: assignment!.phaseId,
+        actor: { type: 'user' },
+      });
+    } catch (error) {
+      await quickSort.discardApplyingOperation(operationId);
+      if (error instanceof ProjectHierarchyServiceError) {
+        return NextResponse.json(
+          { error: error.message, code: error.code },
+          { status: error.status },
+        );
+      }
+      throw error;
+    }
+    const capturedAfter = await captureQuickSortTask(taskId);
+    if (!capturedAfter) {
+      await quickSort.discardApplyingOperation(operationId);
+      return NextResponse.json({ error: 'Task disappeared after update' }, { status: 409 });
+    }
+    after = capturedAfter;
+  } else if (mutatesTask) {
     const patchResponse = await patchTask(
       new Request(new URL(`/api/tasks/${taskId}`, request.url), {
         method: 'PATCH',

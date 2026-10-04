@@ -129,7 +129,7 @@ export function TaskStatusField({
 
   return (
     <div className="relative flex min-h-28 flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]">
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]">
         {status === 'done' ? (
           <CheckCircle2 size={13} className="flex-shrink-0 text-[var(--success)]" />
         ) : (
@@ -377,7 +377,7 @@ export function TaskPriorityField({
 }: TaskPriorityFieldProps) {
   return (
     <div className="flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"><Flag size={13} />Priority</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]"><Flag size={13} className="text-[var(--text-tertiary)]" />Priority</span>
       <Select value={priority || 'none'} onValueChange={onPriorityChange} disabled={!canEditPriority}>
         <SelectTrigger
           aria-label="Task priority"
@@ -394,7 +394,7 @@ export function TaskPriorityField({
         </SelectContent>
       </Select>
       <div className="mt-auto w-full space-y-1.5">
-        <PlanningHorizonFieldLabel className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]" />
+        <PlanningHorizonFieldLabel className="text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)] [&_svg]:text-[var(--text-tertiary)]" />
         <Select
           value={planningHorizon ?? 'none'}
           onValueChange={(value) => onPlanningHorizonChange(
@@ -458,7 +458,7 @@ export function TaskDueDateField({
 }: TaskDueDateFieldProps) {
   return (
     <div className="relative flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"><Calendar size={13} />Due date</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]"><Calendar size={13} className="text-[var(--text-tertiary)]" />Due date</span>
       {hasRecurrence && (
         <Tooltip content="View recurrence settings">
           <button
@@ -532,7 +532,7 @@ export function TaskEffortField({
 }: TaskEffortFieldProps) {
   return (
     <div className="flex min-h-28 flex-col items-start gap-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-0)]/35 p-3">
-      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-muted)]"><Gauge size={13} />Effort</span>
+      <span className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--text-secondary)]"><Gauge size={13} className="text-[var(--text-tertiary)]" />Effort</span>
       <div className="w-full" title={effortDurationBlockedReason}>
         <EffortSelect effort={effort} onChange={onEffortChange} disabled={!canEditEffortAndDuration} highlight={effortHighlight} />
       </div>

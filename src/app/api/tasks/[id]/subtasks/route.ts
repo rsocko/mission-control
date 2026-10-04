@@ -27,6 +27,9 @@ import type { ConnectorConfig } from '@/types';
 
 const createSubtaskSchema = z.object({
   title: z.string().trim().min(1).max(200),
+  priority: z.enum(['critical', 'high', 'medium', 'low', 'none']).optional(),
+  planningHorizon: z.enum(['next', 'soon', 'later', 'someday']).nullable().optional(),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable().optional(),
   effort: z.number().int().min(1).max(5).nullable().optional(),
   expectedContextVersion: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   proposalId: z.string().uuid().optional(),
@@ -85,6 +88,9 @@ function buildSubtask(
   input: {
     id: string;
     title: string;
+    priority: TaskCoreTaskRow['priority'];
+    planningHorizon: TaskCoreTaskRow['planningHorizon'];
+    dueDate: string | null;
     effort: number | null;
     now: string;
     syncStatus: string;
@@ -99,9 +105,9 @@ function buildSubtask(
     description: null,
     status: 'todo',
     localDisposition: 'active',
-    priority: 'none',
-    planningHorizon: null,
-    dueDate: null,
+    priority: input.priority,
+    planningHorizon: input.planningHorizon,
+    dueDate: input.dueDate,
     pushCount: 0,
     createdAt: input.now,
     updatedAt: input.now,
@@ -320,7 +326,15 @@ export async function POST(
     if (!parsedBody.success) {
       return NextResponse.json({ error: 'Invalid subtask data' }, { status: 400 });
     }
-    const { title, effort, expectedContextVersion, proposalId } = parsedBody.data;
+    const {
+      title,
+      priority,
+      planningHorizon,
+      dueDate,
+      effort,
+      expectedContextVersion,
+      proposalId,
+    } = parsedBody.data;
     const isProposalAcceptance = proposalId !== undefined || expectedContextVersion !== undefined;
     if (isProposalAcceptance && (!proposalId || !expectedContextVersion)) {
       return NextResponse.json({ error: 'Incomplete proposal acceptance data' }, { status: 400 });
@@ -424,6 +438,9 @@ export async function POST(
     const task = buildSubtask(parent, {
       id: subtaskId,
       title,
+      priority: priority ?? 'none',
+      planningHorizon: planningHorizon ?? null,
+      dueDate: dueDate ?? null,
       effort: effort ?? null,
       now,
       syncStatus: shouldWriteThrough ? 'pending_push' : 'synced',

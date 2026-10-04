@@ -14,6 +14,7 @@ import {
   type ExternalAgentAuthType,
   type ExternalAgentCapabilities,
   type ExternalAgentDataPolicy,
+  type ExternalAgentProviderConfig,
   type AgentDataClassification,
   type AgentDispatchScope,
   type AgentDispatchStatus,
@@ -38,6 +39,7 @@ export type {
   ExternalAgentAuthType,
   ExternalAgentCapabilities,
   ExternalAgentDataPolicy,
+  ExternalAgentProviderConfig,
   AgentDataClassification,
   AgentDispatchScope,
   AgentDispatchStatus,
@@ -56,6 +58,11 @@ export const externalAgents = pgTable('external_agents', {
   endpoint: text('endpoint'),
   authType: text('auth_type').$type<ExternalAgentAuthType>().notNull().default('none'),
   authCredentialRef: text('auth_credential_ref'),
+  authCredential: text('auth_credential'),
+  providerConfig: jsonb('provider_config')
+    .$type<ExternalAgentProviderConfig>()
+    .notNull()
+    .default({}),
   capabilities: jsonb('capabilities')
     .$type<ExternalAgentCapabilities>()
     .notNull()

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-08-16T20:08:00.000-04:00",
+  "generatedAt": "2026-10-02T14:52:21.3854338-04:00",
   "title": "Design System: Mission Control",
   "extensions": {
     "colorMeta": {
@@ -368,11 +368,6 @@
       {
         "name": "The Semantic Evidence Rule",
         "body": "Color must correspond to an action, state, priority, project, or source and must be reinforced by text, iconography, or position.",
-        "section": "colors"
-      },
-      {
-        "name": "The Task Visual Standard",
-        "body": "Every task-facing badge, dot, menu, chart, graph, desktop view, and mobile view consumes the shared task priority and status definitions. Other semantic domains retain separate palettes.",
         "section": "colors"
       },
       {

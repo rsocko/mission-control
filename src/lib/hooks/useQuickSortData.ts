@@ -5,7 +5,7 @@ import { NAVIGATION_COUNTS_REFRESH_EVENT } from '@/lib/navigation/badges';
 import { isSyntheticTag } from '@/lib/utils/synthetic-tags';
 import type { LocalDisposition, PlanningHorizon, TaskEditPolicy, TaskSourceModel } from '@/types';
 
-export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon';
+export type QuickSortQueueMode = 'no_priority' | 'quadrant' | 'no_effort' | 'no_tags' | 'no_planning_horizon' | 'no_project';
 export type QuickSortOrder = 'smart' | 'priority' | 'oldest' | 'newest' | 'random';
 
 export interface QuickSortQueueTask {
@@ -36,12 +36,20 @@ export interface QuickSortModeCounts {
   no_effort: number;
   no_tags: number;
   no_planning_horizon: number;
+  no_project: number;
 }
 
 export interface QuickSortSuggestion {
   priority: { value: string; confidence: number; reason: string } | null;
   effort: { value: number; confidence: number; reason: string } | null;
   tags: Array<{ id: string; name: string; confidence: number }>;
+  projects: Array<{
+    id: string;
+    name: string;
+    color: string;
+    confidence: number;
+    reason: string;
+  }>;
 }
 
 /** Which fields are still missing on a task. */
@@ -51,6 +59,7 @@ export function getMissingFields(task: QuickSortQueueTask): QuickSortQueueMode[]
   if (task.effort === null) missing.push('no_effort');
   if (task.tags.filter(t => !isSyntheticTag(t.name)).length === 0) missing.push('no_tags');
   if (task.planningHorizon === null) missing.push('no_planning_horizon');
+  if (task.projects.length === 0) missing.push('no_project');
   return missing;
 }
 

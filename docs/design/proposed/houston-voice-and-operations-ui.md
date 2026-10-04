@@ -107,7 +107,7 @@ Required locality labels include:
 - This PC and device name;
 - Mission Control host;
 - Microsoft 365 or other tenant;
-- GitHub Cloud;
+- GitHub Copilot Cloud;
 - external service;
 - sandbox or disposable VM.
 

@@ -145,6 +145,7 @@ import {
   getPhaseColor,
   getTaskStatusColor,
   getTimelineRange,
+  isUnassignedTaskDropTarget,
   toRgba,
 } from '../utils';
 import type {
@@ -615,8 +616,10 @@ export function ProjectPhasesTab({
     ))?.id ?? null;
     let targetPhaseId: string | null = null;
     let targetIndex = 0;
-    const droppedOnUnassigned = overStr === 'unassigned-drop'
-      || over.data.current?.type === 'unassigned-drop';
+    const droppedOnUnassigned = isUnassignedTaskDropTarget(
+      overStr,
+      over.data.current,
+    );
     if (droppedOnUnassigned) {
       if (!sourcePhaseId) return;
     } else if (overStr.startsWith('phase-drop:')) {
@@ -706,6 +709,11 @@ export function ProjectPhasesTab({
     }
 
     if (!startSavingPhase(phase.id)) return;
+    let renamePersisted = false;
+    setPhases((current) => current.map((entry) => (
+      entry.id === phase.id ? { ...entry, name: trimmed } : entry
+    )));
+
     try {
       const response = await fetch(`/api/project-phases/${phase.id}`, {
         method: 'PATCH',
@@ -717,10 +725,18 @@ export function ProjectPhasesTab({
         throw new Error(payload?.error || 'Failed to rename phase');
       }
 
+      renamePersisted = true;
       setPhases((current) => current.map((entry) => (entry.id === phase.id ? payload.phase! : entry)));
       await refreshProjectHierarchy();
       toast.success('Phase renamed');
     } catch (caughtError) {
+      if (!renamePersisted) {
+        setPhases((current) => current.map((entry) => (
+          entry.id === phase.id && entry.name === trimmed
+            ? { ...entry, name: phase.name }
+            : entry
+        )));
+      }
       toast.error(caughtError instanceof Error ? caughtError.message : 'Failed to rename phase');
     } finally {
       finishSavingPhase(phase.id);
@@ -997,7 +1013,11 @@ export function ProjectPhasesTab({
           {/* Bulk action bar inside sticky header so it stays visible when scrolled */}
           {bulk.bulkMode && visiblePhaseViewMode === 'list' && (
             <div className="border-t border-[var(--border-subtle)]">
-              <BulkActionBar selectedCount={bulk.bulkSelected.size} onCancel={bulk.clearSelection}>
+              <BulkActionBar
+                selectedCount={bulk.bulkSelected.size}
+                taskIds={Array.from(bulk.bulkSelected)}
+                onCancel={bulk.clearSelection}
+              >
                 <button
                   disabled={Boolean(bulkStatusBlockedReason)}
                   title={bulkStatusBlockedReason}

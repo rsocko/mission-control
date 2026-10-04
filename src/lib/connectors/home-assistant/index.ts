@@ -51,6 +51,7 @@ export type HomeAssistantNotificationAction =
   | 'install_update'
   | 'skip_update'
   | 'dismiss_persistent_notification'
+  | 'restart_home_assistant'
   | 'ignore_repair';
 
 type HomeAssistantSource =
@@ -69,7 +70,7 @@ type SourceReconciliationState = {
 export class HomeAssistantActionError extends Error {
   constructor(
     message: string,
-    readonly status: 409 | 503,
+    readonly status: 401 | 403 | 409 | 503,
   ) {
     super(message);
     this.name = 'HomeAssistantActionError';
@@ -641,11 +642,37 @@ export class HomeAssistantConnector implements IConnector {
       ))) {
         throw new HomeAssistantActionError('This repair is no longer active in Home Assistant', 409);
       }
+      if (action === 'restart_home_assistant') {
+        if (metadata.requiresRestart !== true) {
+          throw new HomeAssistantActionError('This repair does not require a Home Assistant restart', 409);
+        }
+        await this.client!.callService('homeassistant', 'restart', {}, {
+          acceptOnTimeout: true,
+          timeoutMs: 5_000,
+        });
+        await this.client!.waitUntilAvailable();
+        return;
+      }
       await this.client!.ignoreRepair(repairDomain, repairIssueId);
     } catch (error) {
       if (error instanceof HomeAssistantActionError) throw error;
+      const message = error instanceof Error ? error.message : 'Home Assistant action failed';
+      if (/HTTP 401\b/.test(message)) {
+        throw new HomeAssistantActionError(
+          'Home Assistant authentication expired. Reconnect this integration and try again',
+          401,
+        );
+      }
+      if (/HTTP 403\b/.test(message)) {
+        throw new HomeAssistantActionError(
+          action === 'restart_home_assistant'
+            ? 'Restart requires an administrator-authorized Home Assistant connection. Open Home Assistant to restart it there'
+            : 'Home Assistant denied this action. Reconnect with an account that has permission and try again',
+          403,
+        );
+      }
       throw new HomeAssistantActionError(
-        error instanceof Error ? error.message : 'Home Assistant action failed',
+        message,
         503,
       );
     }

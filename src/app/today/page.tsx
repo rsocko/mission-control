@@ -30,6 +30,7 @@ import type { DashboardProjectViewModel as HubProject, ListGroup } from '@/types
 import { extractRecurrenceFromMetadata, getNextRecurringDate } from '@/lib/utils/recurrence';
 import type { MyDayItemAddedEventDetail, SuggestionTask } from '@/components/today/types';
 import { createOptimisticMyDayItem } from '@/lib/utils/my-day-view';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 
 export default function TodayPage() {
   const { progress: syncProgress } = useSyncStream();
@@ -205,6 +206,12 @@ export default function TodayPage() {
       if (delayedId) window.clearTimeout(delayedId);
     };
   }, [handleTaskAdded]);
+
+  useEffect(() => {
+    const listener = () => { void fetchData({ skipSync: true }); };
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+    return () => window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+  }, [fetchData]);
 
   // Optimistic insert: immediately show newly added My Day tasks without waiting for refetch
   useEffect(() => {

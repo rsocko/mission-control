@@ -19,6 +19,8 @@ const snapshot: QuickSortTaskSnapshot = {
   reminderAt: '2026-08-17T12:00:00.000Z',
   effort: null,
   tagIds: ['tag-a'],
+  projectIds: [],
+  phaseIds: [],
 };
 
 describe('Quick Sort operation snapshots', () => {
@@ -64,6 +66,17 @@ describe('Quick Sort operation snapshots', () => {
     expect(snapshotsMatch(
       { ...snapshot, tagIds: ['tag-a'] },
       { ...snapshot, tagIds: ['tag-b'] },
+    )).toBe(false);
+  });
+
+  it('detects conflicting project or phase assignments', () => {
+    expect(snapshotsMatch(
+      { ...snapshot, projectIds: ['project-a'], phaseIds: ['phase-a'] },
+      { ...snapshot, projectIds: ['project-a'], phaseIds: ['phase-a'] },
+    )).toBe(true);
+    expect(snapshotsMatch(
+      { ...snapshot, projectIds: ['project-a'], phaseIds: [] },
+      { ...snapshot, projectIds: ['project-b'], phaseIds: [] },
     )).toBe(false);
   });
 });

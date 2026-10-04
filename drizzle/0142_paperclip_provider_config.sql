@@ -1,0 +1,1 @@
+ALTER TABLE `external_agents` ADD `provider_config` text DEFAULT '{}' NOT NULL;

@@ -9,6 +9,7 @@ import type {
 export interface ExternalAgentControlContractSeed {
   reset(): Promise<void>;
   protectedWebhook(id: string): Promise<void>;
+  richTask(): Promise<void>;
 }
 
 const now = '2026-01-01T00:00:00.000Z';
@@ -24,6 +25,9 @@ function agent(id: string, inboundWebhookId: string | null = null): ExternalAgen
     endpoint: null,
     authType: 'bearer',
     authCredentialRef: 'contract-secret',
+    providerConfig: {
+      alwaysInstructions: 'Apply the contract quality bar.',
+    },
     capabilities: { canProposeTasks: true },
     inputFormat: 'mc-tasks',
     outputFormat: 'mc-tasks',
@@ -107,12 +111,49 @@ export function externalAgentControlRepositoryContract(
       await seed().protectedWebhook('callback');
       const created = await repository().registry.create(agent('registered', 'callback'));
       expect(created.inboundWebhookId).toBe('callback');
+      expect(created.providerConfig.alwaysInstructions)
+        .toBe('Apply the contract quality bar.');
       expect(await repository().registry.softDelete(created.id, now)).toBe(true);
       expect(await repository().registry.get(created.id)).toBeNull();
       expect(await repository().registry.get(created.id, true)).toMatchObject({
         enabled: false,
         deletedAt: now,
       });
+    });
+
+    it('snapshots rich canonical task and ordered subtask context', async () => {
+      await seed().richTask();
+      const snapshot = await repository().payloads.snapshot({
+        taskIds: ['contract-task'],
+      });
+
+      expect(snapshot.tasks).toEqual([
+        expect.objectContaining({
+          id: 'contract-task',
+          title: 'Contract parent',
+          description: 'Parent details',
+          priority: 'high',
+          status: 'todo',
+          dueDate: '2026-02-01',
+          effort: 3,
+          assignee: 'octocat',
+          sourceListName: 'octo/example',
+          subtasks: [
+            expect.objectContaining({
+              id: 'contract-child-a',
+              title: 'First child',
+              siblingOrder: 1,
+              isChecklistItem: true,
+            }),
+            expect.objectContaining({
+              id: 'contract-child-b',
+              title: 'Second child',
+              siblingOrder: 2,
+              isChecklistItem: false,
+            }),
+          ],
+        }),
+      ]);
     });
 
     it('serializes concurrent preview creation and returns the winning record', async () => {
@@ -134,6 +175,45 @@ export function externalAgentControlRepositoryContract(
       expect(results[0].previewHash).toBe(results[1].previewHash);
       expect(results.map(({ created }) => created).sort()).toEqual([false, true]);
       expect((await repository().dispatches.get(results[0].id))?.events).toHaveLength(1);
+    });
+
+    it('lists the latest dispatch independently for every requested task', async () => {
+      await repository().registry.create(agent('history-agent'));
+      const createdEvent = {
+        eventType: 'preview_created',
+        fromStatus: null,
+        toStatus: 'needs_confirmation' as const,
+        detail: {},
+        createdAt: now,
+      };
+      const taskB = {
+        ...dispatch('task-b-history', 'history-agent'),
+        scope: { taskIds: ['task-b'] },
+        createdAt: '2025-12-31T23:59:59.000Z',
+        updatedAt: '2025-12-31T23:59:59.000Z',
+      };
+      await repository().dispatches.createPreview(taskB, createdEvent);
+
+      for (let index = 0; index < 7; index += 1) {
+        const timestamp = `2026-01-01T00:00:0${index}.000Z`;
+        await repository().dispatches.createPreview({
+          ...dispatch(`task-a-history-${index}`, 'history-agent'),
+          scope: { taskIds: ['task-a'] },
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        }, createdEvent);
+      }
+
+      const latest = await repository().dispatches.listLatestByTaskIds([
+        'task-a',
+        'task-b',
+        'task-a',
+        'missing-task',
+      ]);
+      expect(latest.map(({ id }) => id)).toEqual([
+        'task-a-history-6',
+        'task-b-history',
+      ]);
     });
 
     it('claims oldest work once, stores only a token hash, and deduplicates results', async () => {

@@ -12,7 +12,8 @@ beforeEach(() => {
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY,
       connector_instance_id TEXT NOT NULL,
-      source_id TEXT NOT NULL
+      source_id TEXT NOT NULL,
+      deleted_at TEXT
     );
     CREATE TABLE hub_projects (
       id TEXT PRIMARY KEY,

@@ -113,7 +113,7 @@ const NAV_GROUPS: NavGroup[] = [
   {
     label: 'System',
     items: [
-      { id: 'ai', icon: Brain, label: 'AI Provider' },
+      { id: 'ai', icon: Brain, label: 'AI & Agents' },
       { id: 'storage', icon: HardDrive, label: 'Storage & Cache' },
       { id: 'runtime', icon: Activity, label: 'Runtime Telemetry' },
       { id: 'mode', icon: FlaskConical, label: 'App Mode' },
@@ -162,6 +162,10 @@ export default function SettingsPage() {
     {activeSection === 'about' ? (
       <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
         <AboutSection />
+      </div>
+    ) : activeSection === 'ai' ? (
+      <div className="flex-1 overflow-y-auto overscroll-y-contain px-4 pb-28 pt-4 sm:hidden">
+        <AIProviderSection />
       </div>
     ) : (
       <MobileSettings onAddConnector={() => setShowAddModal(true)} />

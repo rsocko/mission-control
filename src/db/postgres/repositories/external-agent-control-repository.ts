@@ -28,7 +28,8 @@ const MAX_TRANSACTION_ATTEMPTS = 3;
 const AGENT_COLUMNS = `
   id, name, type, transport, execution_locality AS "executionLocality",
   description, endpoint, auth_type AS "authType",
-  auth_credential_ref AS "authCredentialRef", capabilities,
+  auth_credential_ref AS "authCredentialRef", provider_config AS "providerConfig",
+  capabilities,
   input_format AS "inputFormat", output_format AS "outputFormat",
   inbound_webhook_id AS "inboundWebhookId", data_policy AS "dataPolicy",
   enabled, created_at AS "createdAt", updated_at AS "updatedAt",
@@ -129,6 +130,7 @@ function destinationMatches(
     && current.endpoint === expected.endpoint
     && current.authType === expected.authType
     && current.authCredentialRef === expected.authCredentialRef
+    && canonical(current.providerConfig) === canonical(expected.providerConfig)
     && current.inboundWebhookId === expected.inboundWebhookId
     && canonical(current.capabilities) === canonical(expected.capabilities)
     && canonical(current.dataPolicy) === canonical(expected.dataPolicy)
@@ -308,49 +310,61 @@ export function createPostgresExternalAgentControlRepository(
       `, [id]);
       return agent ?? null;
     },
-    async create(record: ExternalAgentCreateRecord) {
+    async getCredential(id) {
+      const [row] = await query<{ credential: string | null } & QueryResultRow>(pool, `
+        SELECT auth_credential AS credential
+        FROM external_agents
+        WHERE id = $1 AND deleted_at IS NULL
+      `, [id]);
+      return row?.credential ?? null;
+    },
+    async create(record: ExternalAgentCreateRecord, credential = null) {
       return transaction(pool, async (client) => {
         await assertProtectedInboundWebhook(client, record.inboundWebhookId);
         const [created] = await query<ExternalAgentRecord & QueryResultRow>(client, `
           INSERT INTO external_agents (
             id, name, type, transport, execution_locality, description, endpoint,
-            auth_type, auth_credential_ref, capabilities, input_format, output_format,
+            auth_type, auth_credential_ref, auth_credential, provider_config, capabilities,
+            input_format, output_format,
             inbound_webhook_id, data_policy, enabled, created_at, updated_at, deleted_at
           ) VALUES (
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12,
-            $13, $14::jsonb, $15, $16, $17, $18
+            $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, $12::jsonb,
+            $13, $14, $15, $16::jsonb, $17, $18, $19, $20
           )
           RETURNING ${AGENT_COLUMNS}
         `, [
           record.id, record.name, record.type, record.transport,
           record.executionLocality, record.description, record.endpoint,
-          record.authType, record.authCredentialRef, JSON.stringify(record.capabilities),
-          record.inputFormat, record.outputFormat, record.inboundWebhookId,
-          JSON.stringify(record.dataPolicy), record.enabled, record.createdAt,
+          record.authType, record.authCredentialRef, credential, JSON.stringify(record.providerConfig),
+          JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
+          record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.createdAt,
           record.updatedAt, record.deletedAt,
         ]);
         return created;
       });
     },
-    async update(id, record: ExternalAgentUpdateRecord) {
+    async update(id, record: ExternalAgentUpdateRecord, credential) {
       return transaction(pool, async (client) => {
         await assertProtectedInboundWebhook(client, record.inboundWebhookId);
         const [updated] = await query<ExternalAgentRecord & QueryResultRow>(client, `
           UPDATE external_agents SET
             name = $2, type = $3, transport = $4, execution_locality = $5,
             description = $6, endpoint = $7, auth_type = $8,
-            auth_credential_ref = $9, capabilities = $10::jsonb,
-            input_format = $11, output_format = $12, inbound_webhook_id = $13,
-            data_policy = $14::jsonb, enabled = $15, updated_at = $16,
-            deleted_at = $17
+            auth_credential_ref = $9,
+            auth_credential = CASE WHEN $10::boolean THEN $11 ELSE auth_credential END,
+            provider_config = $12::jsonb,
+            capabilities = $13::jsonb, input_format = $14, output_format = $15,
+            inbound_webhook_id = $16, data_policy = $17::jsonb, enabled = $18,
+            updated_at = $19, deleted_at = $20
           WHERE id = $1 AND deleted_at IS NULL
           RETURNING ${AGENT_COLUMNS}
         `, [
           id, record.name, record.type, record.transport, record.executionLocality,
           record.description, record.endpoint, record.authType,
-          record.authCredentialRef, JSON.stringify(record.capabilities),
-          record.inputFormat, record.outputFormat, record.inboundWebhookId,
-          JSON.stringify(record.dataPolicy), record.enabled, record.updatedAt,
+          record.authCredentialRef, credential !== undefined, credential ?? null,
+          JSON.stringify(record.providerConfig),
+          JSON.stringify(record.capabilities), record.inputFormat, record.outputFormat,
+          record.inboundWebhookId, JSON.stringify(record.dataPolicy), record.enabled, record.updatedAt,
           record.deletedAt,
         ]);
         return updated ?? null;
@@ -384,19 +398,71 @@ export function createPostgresExternalAgentControlRepository(
       }
       const taskRows = ids.size
         ? await query<AgentPayloadSnapshot['tasks'][number] & QueryResultRow>(client, `
-            SELECT id, title, description, priority, status,
-                   connector_type AS "connectorType"
+            SELECT id, source_id AS "sourceId", metadata->>'url' AS "sourceUrl",
+                   title, description, priority, status,
+                   connector_type AS "connectorType", due_date AS "dueDate", effort,
+                   assignee, micro_status AS "microStatus",
+                   planning_horizon AS "planningHorizon",
+                   source_list_name AS "sourceListName",
+                   sibling_order AS "siblingOrder", depth,
+                   is_checklist_item AS "isChecklistItem"
             FROM tasks WHERE id = ANY($1::text[]) ORDER BY id
           `, [[...ids]])
         : [];
+      const subtaskRows = ids.size
+        ? await query<
+            AgentPayloadSnapshot['tasks'][number]['subtasks'][number]
+            & { rootId: string }
+            & QueryResultRow
+          >(client, `
+            WITH RECURSIVE hierarchy (
+              "rootId", id, "sourceId", "sourceUrl", "connectorType", title,
+              description, priority, status, "dueDate", effort, assignee,
+              "microStatus", "planningHorizon", "sourceListName", "siblingOrder",
+              depth, "isChecklistItem", "treeOrder"
+            ) AS (
+              SELECT id, id, source_id, metadata->>'url', connector_type, title,
+                     description, priority, status, due_date, effort, assignee,
+                     micro_status, planning_horizon, source_list_name, sibling_order,
+                     depth, is_checklist_item, ''::text
+              FROM tasks
+              WHERE id = ANY($1::text[])
+              UNION ALL
+              SELECT h."rootId", t.id, t.source_id, t.metadata->>'url',
+                     t.connector_type, t.title, t.description, t.priority, t.status,
+                     t.due_date, t.effort, t.assignee, t.micro_status,
+                     t.planning_horizon, t.source_list_name, t.sibling_order, t.depth,
+                     t.is_checklist_item,
+                     h."treeOrder" || '/' || LPAD(
+                       COALESCE(t.sibling_order, 2147483647)::text,
+                       20,
+                       '0'
+                     ) || ':' || t.id
+              FROM tasks t
+              INNER JOIN hierarchy h ON t.parent_id = h.id
+              WHERE t.deleted_at IS NULL
+            )
+            SELECT "rootId", id, "sourceId", "sourceUrl", "connectorType", title,
+                   description, priority, status, "dueDate", effort, assignee,
+                   "microStatus", "planningHorizon", "sourceListName",
+                   "siblingOrder", depth, "isChecklistItem"
+            FROM hierarchy
+            WHERE id != "rootId"
+            ORDER BY "rootId", "treeOrder"
+          `, [[...ids]])
+        : [];
       const tagsByTask = new Map<string, string[]>();
-      if (taskRows.length) {
+      const contentIds = [
+        ...taskRows.map(({ id }) => id),
+        ...subtaskRows.map(({ id }) => id),
+      ];
+      if (contentIds.length) {
         const tagRows = await query<{ taskId: string; name: string }>(client, `
           SELECT tt.task_id AS "taskId", t.name
           FROM task_tags tt INNER JOIN tags t ON t.id = tt.tag_id
           WHERE tt.task_id = ANY($1::text[])
           ORDER BY tt.task_id, t.name
-        `, [taskRows.map(({ id }) => id)]);
+        `, [contentIds]);
         for (const row of tagRows) {
           tagsByTask.set(row.taskId, [...(tagsByTask.get(row.taskId) ?? []), row.name]);
         }
@@ -427,7 +493,19 @@ export function createPostgresExternalAgentControlRepository(
       }
         return {
           project,
-          tasks: taskRows.map((task) => ({ ...task, tags: tagsByTask.get(task.id) ?? [] })),
+          tasks: taskRows.map((task) => ({
+            ...task,
+            tags: tagsByTask.get(task.id) ?? [],
+            subtasks: subtaskRows
+              .filter(({ rootId }) => rootId === task.id)
+              .map(({ rootId, ...subtask }) => {
+                void rootId;
+                return {
+                  ...subtask,
+                  tags: tagsByTask.get(subtask.id) ?? [],
+                };
+              }),
+          })),
           phases: phaseRows.map(({ id, ...phase }) => ({
             ...phase,
             taskIds: itemsByPhase.get(id) ?? [],
@@ -471,12 +549,40 @@ export function createPostgresExternalAgentControlRepository(
         values.push(options.agentId);
         predicates.push(`external_agent_id = $${values.length}`);
       }
+      if (options.taskIds?.length) {
+        values.push(options.taskIds);
+        predicates.push(`scope->'taskIds' ?| $${values.length}::text[]`);
+      }
       values.push(Math.min(Math.max(options.limit ?? 100, 1), 500));
       return query<AgentDispatchRecord & QueryResultRow>(pool, `
         SELECT ${DISPATCH_COLUMNS} FROM agent_dispatches
         ${predicates.length ? `WHERE ${predicates.join(' AND ')}` : ''}
         ORDER BY created_at DESC LIMIT $${values.length}
       `, values);
+    },
+    async listLatestByTaskIds(taskIds) {
+      const unique = [...new Set(taskIds)];
+      if (!unique.length) return [];
+      return query<AgentDispatchRecord & QueryResultRow>(pool, `
+        WITH requested(task_id) AS (
+          SELECT unnest($1::text[])
+        ),
+        ranked AS (
+          SELECT
+            ad.*,
+            ROW_NUMBER() OVER (
+              PARTITION BY requested.task_id
+              ORDER BY ad.created_at DESC, ad.id DESC
+            ) AS task_rank
+          FROM requested
+          INNER JOIN agent_dispatches ad
+            ON ad.scope->'taskIds' ? requested.task_id
+        )
+        SELECT ${DISPATCH_COLUMNS}
+        FROM ranked
+        WHERE task_rank = 1
+        ORDER BY "createdAt" DESC, id DESC
+      `, [unique]);
     },
     async findPreview(agentId, idempotencyKey) {
       const [row] = await query<{ id: string; previewHash: string }>(pool, `
@@ -488,6 +594,15 @@ export function createPostgresExternalAgentControlRepository(
     async createPreview(record, createdEvent) {
       try {
         return await transaction(pool, async (client) => {
+          const taskIds = record.idempotencyKey.startsWith('task-delegation:')
+            ? [...new Set(record.scope.taskIds ?? [])].sort()
+            : [];
+          for (const taskId of taskIds) {
+            await client.query(
+              'SELECT pg_advisory_xact_lock(hashtext($1))',
+              [`task-delegation:${taskId}`],
+            );
+          }
           await client.query(
             'SELECT pg_advisory_xact_lock(hashtext($1))',
             [`external-agent-preview:${record.externalAgentId}:${record.idempotencyKey}`],
@@ -498,6 +613,25 @@ export function createPostgresExternalAgentControlRepository(
           `, [record.externalAgentId, record.idempotencyKey]);
           if (duplicate) {
             return { ...duplicate, created: false };
+          }
+          if (taskIds.length) {
+            const [active] = await query<{ id: string }>(client, `
+              SELECT id
+              FROM agent_dispatches
+              WHERE status IN (
+                'needs_confirmation', 'queued', 'claimed', 'in_progress',
+                'waiting_for_user'
+              )
+                AND scope->'taskIds' ?| $1::text[]
+              LIMIT 1
+            `, [taskIds]);
+            if (active) {
+              throw new ExternalAgentError(
+                'Task already has an active delegation',
+                'CONFLICT',
+                409,
+              );
+            }
           }
           await client.query(`
             INSERT INTO agent_dispatches (
@@ -687,7 +821,7 @@ export function createPostgresExternalAgentControlRepository(
           await expireOne(client, current, input.now);
           return 'expired' as const;
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = await client.query(`
           UPDATE agent_dispatches SET
             status = $1, provider_task_id = COALESCE($2, provider_task_id),
@@ -845,7 +979,7 @@ export function createPostgresExternalAgentControlRepository(
             );
           }
         }
-        const terminal = input.status === 'completed' || input.status === 'failed';
+        const terminal = ['completed', 'failed', 'timed_out', 'cancelled'].includes(input.status);
         const updated = await client.query(`
           UPDATE agent_dispatches SET
             status = $1, provider_task_id = COALESCE($2, provider_task_id),

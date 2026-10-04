@@ -11,6 +11,7 @@ export function createSqliteNotificationEntityLinkingRepository(
     FROM tasks
     WHERE connector_instance_id = ?
       AND source_id = ?
+      AND deleted_at IS NULL
     LIMIT 1
   `);
   // SQLite's default LIKE (no ICU extension loaded) already folds only the
@@ -23,6 +24,7 @@ export function createSqliteNotificationEntityLinkingRepository(
     FROM tasks
     WHERE connector_instance_id = ?
       AND source_id LIKE ?
+      AND deleted_at IS NULL
     ORDER BY id
     LIMIT 2
   `);

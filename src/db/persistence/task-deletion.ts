@@ -18,6 +18,9 @@
  *
  * `task_dependencies` is deliberately absent: it references a task from two
  * columns and is handled by the backend helpers separately.
+ *
+ * `external_entity_bindings` is also absent because its polymorphic task
+ * reference uses `binding_type` + `local_id`, not `task_id`.
  */
 export const TASK_ASSOCIATION_TABLES = [
   'task_tags',
@@ -45,3 +48,6 @@ export const TASK_DEPENDENCY_TABLE = 'task_dependencies';
 
 /** Table whose task reference is nulled rather than deleted. */
 export const TASK_NOTIFICATION_TABLE = 'notifications';
+
+/** Polymorphic external-identity table whose task binding must be deleted. */
+export const TASK_EXTERNAL_BINDING_TABLE = 'external_entity_bindings';

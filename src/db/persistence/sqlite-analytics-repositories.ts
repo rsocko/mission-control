@@ -12,6 +12,7 @@ import {
   lt,
   lte,
   notInArray,
+  or,
   sql,
   type SQL,
 } from 'drizzle-orm';
@@ -356,7 +357,10 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
       const relevant = and(
         eq(tasks.depth, 0),
         eq(tasks.isChecklistItem, false),
-        sql`(${OPEN_TASK_CONDITION} or ${completedIn(range)})`,
+        or(
+          and(isNull(tasks.deletedAt), OPEN_TASK_CONDITION),
+          completedIn(range),
+        ),
       );
       const [listRows, tagRows, projectRows, sourceRows] = await Promise.all([
         db.select({
@@ -532,7 +536,11 @@ function createInsightsRepository(db: AnalyticsDatabase): InsightsAnalyticsRepos
       const [row] = await db.select({ count: sql<number>`count(*)` })
         .from(taskProjects)
         .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-        .where(and(eq(taskProjects.projectId, projectId), OPEN_TASK_CONDITION));
+        .where(and(
+          eq(taskProjects.projectId, projectId),
+          isNull(tasks.deletedAt),
+          OPEN_TASK_CONDITION,
+        ));
       return count(row);
     },
 

@@ -3,7 +3,9 @@ import {
   cancelDispatch,
   getDispatch,
   markDispatchWaiting,
+  reconcileDispatch,
   retryDispatch,
+  stopTrackingDispatch,
   reviewDispatchResult,
 } from '@/lib/external-agents/service';
 import {
@@ -18,7 +20,12 @@ type Context = { params: Promise<{ id: string }> };
 export async function GET(request: Request, { params }: Context) {
   try {
     requireTrustedMutation(request);
-    const dispatch = await getDispatch((await params).id);
+    const id = (await params).id;
+    const current = await getDispatch(id);
+    const dispatch = current?.executionLocality === 'github-hosted'
+      && current.providerTaskId
+      ? await reconcileDispatch(id)
+      : current;
     if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
     return NextResponse.json({ dispatch: publicDispatch(dispatch) });
   } catch (error) {
@@ -31,13 +38,23 @@ export async function PATCH(request: Request, { params }: Context) {
     requireTrustedMutation(request);
     const id = (await params).id;
     const body = await request.json() as {
-      action: 'cancel' | 'retry' | 'waiting_for_user' | 'accept' | 'reject' | 'partial';
+      action:
+        | 'cancel'
+        | 'stop_tracking'
+        | 'retry'
+        | 'waiting_for_user'
+        | 'accept'
+        | 'reject'
+        | 'partial';
       detail?: Record<string, unknown>;
     };
     let manualUrl: string | undefined;
     switch (body.action) {
       case 'cancel':
         await cancelDispatch(id);
+        break;
+      case 'stop_tracking':
+        await stopTrackingDispatch(id);
         break;
       case 'retry':
         ({ manualUrl } = await retryDispatch(id));

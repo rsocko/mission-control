@@ -3,6 +3,11 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { findAllNLPDates } from '@/lib/date-parser';
 import {
+  parseTaskInput,
+  type ParseTaskInputOptions,
+  type QuickAddProject,
+} from '@/lib/parse-task-input';
+import {
   $createParagraphNode,
   $createTextNode,
   $getRoot,
@@ -104,9 +109,20 @@ interface TokenMatch {
   type: TokenType;
 }
 
-// (Date detection is now handled by chrono-node via findAllNLPDates)
+interface TokenDetectionOptions {
+  naturalLanguageDates: boolean;
+  projects?: QuickAddProject[];
+  metadata?: ParseTaskInputOptions['metadata'];
+}
 
-function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
+function escapeRegex(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function findTokens(text: string, options: TokenDetectionOptions): TokenMatch[] {
+  const { naturalLanguageDates, projects = [], metadata } = options;
+  const metadataEnabled = (field: keyof NonNullable<ParseTaskInputOptions['metadata']>) =>
+    metadata?.[field] ?? true;
   const tokens: TokenMatch[] = [];
 
   // /destination or explicit slash command at start
@@ -118,55 +134,84 @@ function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
   let m: RegExpExecArray | null;
 
   // !priority (not escaped with \)
-  const priRegex = /(?<!\\)!(critical|high|medium|low)\b/gi;
-  while ((m = priRegex.exec(text)) !== null) {
+  const priRegex = /(?<!\\)!(critical|high|medium|low|[0-3])\b/gi;
+  while (metadataEnabled('priority') && (m = priRegex.exec(text)) !== null) {
     const pri = m[1].toLowerCase();
-    const type: TokenType = pri === 'critical' ? 'priority-critical' : pri === 'high' ? 'priority-high' : pri === 'low' ? 'priority-low' : 'priority-medium';
+    const type: TokenType = ['critical', '0'].includes(pri)
+      ? 'priority-critical'
+      : ['high', '1'].includes(pri)
+        ? 'priority-high'
+        : ['low', '3'].includes(pri)
+          ? 'priority-low'
+          : 'priority-medium';
     tokens.push({ start: m.index, end: m.index + m[0].length, type });
   }
 
   // #tags (not escaped with \)
   const tagRegex = /(?<!\\)#[a-zA-Z0-9_:./-]+/g;
-  while ((m = tagRegex.exec(text)) !== null) {
+  while (metadataEnabled('tags') && (m = tagRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'tag' });
   }
 
+  for (const project of [...projects].sort((a, b) => b.name.length - a.name.length)) {
+    if (!metadataEnabled('project')) break;
+    const projectRegex = new RegExp(`(?:^|\\s)\\+${escapeRegex(project.name)}(?=\\s|$)`, 'i');
+    const match = projectRegex.exec(text);
+    if (!match) continue;
+    const start = match.index + (match[0].startsWith('+') ? 0 : 1);
+    tokens.push({ start, end: start + project.name.length + 1, type: 'project' });
+  }
+
   const projectRegex = /(?<!\\)\+(?:"[^"]+"|[a-zA-Z][a-zA-Z0-9_-]*)/g;
-  while ((m = projectRegex.exec(text)) !== null) {
+  while (metadataEnabled('project') && (m = projectRegex.exec(text)) !== null) {
+    if (tokens.some(token => m!.index < token.end && m!.index + m![0].length > token.start)) {
+      continue;
+    }
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'project' });
   }
 
   // ~duration (not escaped with \)
   const durRegex = /(?<!\\)~\d+(?:\.\d+)?\s*(?:m|min|mins|h|hr|hrs|hour|hours)\b/gi;
-  while ((m = durRegex.exec(text)) !== null) {
+  while (metadataEnabled('estimatedDuration') && (m = durRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'duration' });
   }
 
   const horizonRegex = /(?<!\\)~(?:next|soon|later|someday)\b/gi;
-  while ((m = horizonRegex.exec(text)) !== null) {
+  while (metadataEnabled('planningHorizon') && (m = horizonRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'horizon' });
   }
 
   // ^effort (^1 through ^5, not escaped with \)
   const effortRegex = /(?<!\\)\^[1-5]\b/g;
-  while ((m = effortRegex.exec(text)) !== null) {
+  while (metadataEnabled('effort') && (m = effortRegex.exec(text)) !== null) {
     tokens.push({ start: m.index, end: m.index + m[0].length, type: 'effort' });
   }
 
   const myDayRegex = /(?<!\\)(^|\s)\*(?=\s|$)/g;
-  while ((m = myDayRegex.exec(text)) !== null) {
+  while (metadataEnabled('myDay') && (m = myDayRegex.exec(text)) !== null) {
     const start = m.index + m[1].length;
     tokens.push({ start, end: start + 1, type: 'my-day' });
   }
 
-  // NLP date detection via chrono-node
-  const nlpDates = naturalLanguageDates ? findAllNLPDates(text) : [];
+  // Highlight only dates that submission will apply: an explicit /due: value
+  // or the single trailing natural-language date suggestion.
+  const nlpDates = naturalLanguageDates && metadataEnabled('dueDate')
+    ? findAllNLPDates(text)
+    : [];
+  const parsedDateSuggestion = parseTaskInput(text, {
+    naturalLanguageDates,
+    projects,
+    metadata,
+  }).dateSuggestion;
   for (const nlpDate of nlpDates) {
     const start = nlpDate.index;
     const end = start + nlpDate.matchedText.length;
-    // Check for backslash escape just before the match
     if (start > 0 && text[start - 1] === '\\') continue;
-    // Don't overlap with already-detected tokens
+    const isExplicitDueDate = /\/due:\s*$/i.test(text.slice(0, start));
+    const isTrailingSuggestion = parsedDateSuggestion?.matchedText.toLowerCase()
+      === nlpDate.matchedText.toLowerCase()
+      && text.toLowerCase().lastIndexOf(nlpDate.matchedText.toLowerCase()) === start;
+    if (!isExplicitDueDate && !isTrailingSuggestion) continue;
     const overlaps = tokens.some(t => start < t.end && end > t.start);
     if (!overlaps) {
       tokens.push({ start, end, type: 'date' });
@@ -182,7 +227,11 @@ function findTokens(text: string, naturalLanguageDates: boolean): TokenMatch[] {
 // Transforms plain TextNodes into TokenNodes when they match patterns.
 // Preserves cursor position across splits to avoid caret jumps.
 
-function TokenTransformPlugin({ naturalLanguageDates }: { naturalLanguageDates: boolean }): null {
+function TokenTransformPlugin({
+  naturalLanguageDates,
+  projects,
+  metadata,
+}: TokenDetectionOptions): null {
   const [editor] = useLexicalComposerContext();
 
   useEffect(() => {
@@ -191,7 +240,7 @@ function TokenTransformPlugin({ naturalLanguageDates }: { naturalLanguageDates: 
       if (node instanceof TokenNode) return;
 
       const text = node.getTextContent();
-      const tokens = findTokens(text, naturalLanguageDates);
+      const tokens = findTokens(text, { naturalLanguageDates, projects, metadata });
       if (tokens.length === 0) return;
 
       // Capture selection offset within this node before splitting
@@ -253,9 +302,18 @@ function TokenTransformPlugin({ naturalLanguageDates }: { naturalLanguageDates: 
     // Also handle TokenNodes — un-tokenize them when they no longer match
     const removeTokenTransform = editor.registerNodeTransform(TokenNode, (node) => {
       const text = node.getTextContent();
-      const tokens = findTokens(text, naturalLanguageDates);
-      // If this node's text no longer fully matches a single token, convert back to plain text
-      const fullMatch = tokens.length === 1 && tokens[0].start === 0 && tokens[0].end === text.length;
+      const parent = node.getParent();
+      const siblings = parent && $isElementNode(parent) ? parent.getChildren() : [node];
+      let nodeStart = 0;
+      for (const sibling of siblings) {
+        if (sibling.getKey() === node.getKey()) break;
+        nodeStart += sibling.getTextContentSize();
+      }
+      const parentText = parent?.getTextContent() ?? text;
+      const tokens = findTokens(parentText, { naturalLanguageDates, projects, metadata });
+      const fullMatch = tokens.some(token =>
+        token.start === nodeStart && token.end === nodeStart + text.length
+      );
       if (!fullMatch) {
         // Preserve cursor
         const selection = $getSelection();
@@ -279,7 +337,7 @@ function TokenTransformPlugin({ naturalLanguageDates }: { naturalLanguageDates: 
       removeTransform();
       removeTokenTransform();
     };
-  }, [editor, naturalLanguageDates]);
+  }, [editor, metadata, naturalLanguageDates, projects]);
 
   return null;
 }
@@ -595,6 +653,8 @@ interface TokenInputProps {
   handleRef?: React.MutableRefObject<TokenInputHandle | null>;
   className?: string;
   naturalLanguageDates?: boolean;
+  projects?: QuickAddProject[];
+  metadata?: ParseTaskInputOptions['metadata'];
 }
 
 function ErrorBoundaryFallback(): React.ReactElement {
@@ -611,6 +671,8 @@ export function TokenInput({
   handleRef,
   className,
   naturalLanguageDates = true,
+  projects,
+  metadata,
 }: TokenInputProps) {
   const editorTextRef = useRef(''); // Start empty so ExternalSyncPlugin applies initial value
   const handleRefFallback = useRef<TokenInputHandle | null>(null);
@@ -670,7 +732,11 @@ export function TokenInput({
         />
         <OnChangePlugin onChange={handleChange} />
         <HistoryPlugin />
-        <TokenTransformPlugin naturalLanguageDates={naturalLanguageDates} />
+        <TokenTransformPlugin
+          naturalLanguageDates={naturalLanguageDates}
+          projects={projects}
+          metadata={metadata}
+        />
         <FocusPlugin onFocus={handleFocus} onBlur={handleBlur} />
         <KeyboardPlugin onKeyDown={handleKeyDownCb} />
         <EscapeTokenPlugin />

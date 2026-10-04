@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Check, Circle, Clock3, FileQuestion, FileText, FolderOpen, Globe, Image, Layers, LinkIcon, ListTodo, MessageCircle, Package, PlayCircle, Settings2, X, Box } from 'lucide-react';
 import { cn } from '@/lib/utils/cn';
 import { CollapsibleSection } from '@/components/dashboard/CollapsibleSection';
+import { SearchInput } from '@/components/ui/SearchInput';
 import { ACTION_META, ACTION_TYPE_OPTIONS, CONTENT_TYPE_OPTIONS, SOURCE_OPTIONS, STATUS_OPTIONS, type Stats } from '@/components/triage/types';
 import { TriageSourceIcon } from '@/components/triage/TriageSourceIcon';
 import type { TriageActionType, TriageSourcePlatform, TriageStatus } from '@/types';
@@ -100,14 +101,15 @@ export default function TriageFilterSidebar(props: TriageFilterSidebarProps) {
     <aside className="flex flex-col gap-0 overflow-y-auto">
       {/* Search */}
       <div className="mb-3 px-1">
-        <input
+        <SearchInput
           value={query}
-          onChange={(event) => onQueryChange(event.target.value)}
+          onChange={onQueryChange}
           onKeyDown={(event) => {
             if (event.key === 'Enter') onRefresh();
           }}
           placeholder="Search inbox…"
-          className="h-9 w-full rounded-[10px] border border-[var(--border)] bg-[var(--surface-0)] px-3 text-xs text-[var(--text-primary)] outline-none transition-colors"
+          clearLabel="Clear inbox search"
+          className="h-9 rounded-[10px] px-3"
         />
       </div>
 

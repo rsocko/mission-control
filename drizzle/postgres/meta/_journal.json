@@ -99,6 +99,69 @@
       "when": 1789760745129,
       "tag": "0013_recurrence_backfill_decisions",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1790721601584,
+      "tag": "0014_rymessage_action_reconciliation",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1790733600000,
+      "tag": "0015_task_history_capture",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1790733900000,
+      "tag": "0016_task_lifecycle_parity",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1790736857627,
+      "tag": "0017_thick_genesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1790738395508,
+      "tag": "0018_chunky_phil_sheldon",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1790817118838,
+      "tag": "0019_cleanup_orphan_external_bindings",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1790826674054,
+      "tag": "0020_paperclip_provider_config",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1790907499904,
+      "tag": "0021_tough_arachne",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1791044042376,
+      "tag": "0022_exotic_ben_urich",
+      "breakpoints": true
     }
   ]
 }

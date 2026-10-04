@@ -508,6 +508,7 @@ export interface NotificationItem {
   dedupeKey?: string | null;
 
   relatedTaskId?: string | null;
+  relatedTaskAvailability?: 'available' | 'unavailable' | null;
   relatedProjectId?: string | null;
   relatedEntityType?: string | null;
   relatedEntityId?: string | null;

@@ -1,9 +1,7 @@
 import type { ConnectorConfig, SourceList } from '@/app/settings/components/types';
 
-export type ConnectorWithSync = ConnectorConfig & { lastSyncAt?: string | null };
-
 export interface ConnectorData {
-  connectors: ConnectorWithSync[];
+  connectors: ConnectorConfig[];
   sourceLists: SourceList[];
 }
 

@@ -319,7 +319,9 @@ describe('BurnReportCard', () => {
       />,
     );
 
-    expect(await screen.findByText(/task history is only complete from/i)).toBeInTheDocument();
+    expect(await screen.findByText(
+      /earlier values may be incomplete because task history is only complete from/i,
+    )).toBeInTheDocument();
     expect(screen.getByTestId('reference-line')).toHaveAttribute('data-x', 'Jul 16');
     expect(screen.getByText(/Effort reporting needs estimates/i)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Effort' }));

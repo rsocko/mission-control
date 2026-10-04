@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { getTableName, isTable, type Table } from 'drizzle-orm/table';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { resolvePostgresConfig } from '@/db/postgres/config';
 import { PostgresPersistenceBackend } from '@/db/postgres/runtime';
@@ -10,6 +11,7 @@ import {
   tasks,
   workerHealthSnapshot,
 } from '@/db/postgres/schema';
+import * as postgresSchema from '@/db/postgres/schema';
 
 vi.unmock('drizzle-orm');
 
@@ -47,16 +49,29 @@ describePostgres('PostgreSQL schema integration', () => {
   });
 
   it('applies the complete PostgreSQL baseline', async () => {
-    const result = await backend.context.pool.query<{ count: string }>(`
-      SELECT COUNT(*)::text AS count
+    const result = await backend.context.pool.query<{ tableName: string }>(`
+      SELECT table_name AS "tableName"
       FROM information_schema.tables
       WHERE table_schema = 'public'
         AND table_type = 'BASE TABLE'
+      ORDER BY table_name
     `);
+    const declaredTables = Object.values(postgresSchema)
+      .filter((value): value is Table => isTable(value))
+      .map((table) => getTableName(table))
+      .sort();
+    const actualTables = result.rows.map(({ tableName }) => tableName);
+    const allowedRuntimeTables = new Set([
+      'public_demo_runtime',
+      'semantic_vector_ann',
+    ]);
 
-    expect(Number(result.rows[0]?.count)).toBe(
-      backend.context.vector.available ? 170 : 169,
-    );
+    expect(declaredTables).toHaveLength(172);
+    expect(actualTables.filter((table) => declaredTables.includes(table)))
+      .toEqual(declaredTables);
+    expect(actualTables.filter((table) => (
+      !declaredTables.includes(table) && !allowedRuntimeTables.has(table)
+    ))).toEqual([]);
   });
 
   it('round-trips booleans and JSON through the PostgreSQL schema', async () => {

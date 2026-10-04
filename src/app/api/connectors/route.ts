@@ -116,11 +116,15 @@ export async function GET(request: Request) {
     // connector, regardless of overall status, so the settings UI can surface an
     // ongoing failure (e.g. an expired OAuth token) instead of only showing
     // "credentials stored" as if the connection were healthy.
-    const lastSyncStatusMap = new Map<string, { success: boolean; error: string | null }>();
+    const lastSyncStatusMap = new Map<
+      string,
+      { success: boolean; error: string | null; syncedAt: string }
+    >();
     for (const row of overview.syncOutcomes) {
       lastSyncStatusMap.set(row.connectorId, {
         success: row.success === true,
         error: row.error,
+        syncedAt: row.lastSyncAt,
       });
     }
 
@@ -133,6 +137,7 @@ export async function GET(request: Request) {
         ...c,
         capabilities: { ...defaults, ...storedCaps },
         lastSyncedAt: lastSyncMap.get(c.id) || null,
+        lastSyncAt: lastOutcome?.syncedAt ?? null,
         lastSyncStatus: lastOutcome ? (lastOutcome.success ? 'success' : 'failed') : null,
         lastSyncError: lastOutcome?.error ?? null,
       });

@@ -67,6 +67,7 @@ export interface NotificationRow {
   groupKey: string | null;
   dedupeKey: string | null;
   relatedTaskId: string | null;
+  relatedTaskAvailability: 'available' | 'unavailable' | null;
   relatedProjectId: string | null;
   relatedEntityType: string | null;
   relatedEntityId: string | null;
@@ -118,6 +119,7 @@ export interface NotificationFacets {
   notificationType: Array<{ key: string; label: string; count: number }>;
   state: Record<string, number>;
   merchant: Array<{ key: string; label: string; count: number }>;
+  dateRange?: Record<string, number>;
 }
 
 export interface NotificationQueryResult {
@@ -227,6 +229,7 @@ export interface NotificationActionNotification {
   sourceState: string;
   navigationTarget: string | null;
   relatedTaskId: string | null;
+  relatedTaskAvailability: 'available' | 'unavailable' | null;
   relatedProjectId: string | null;
   groupKey: string | null;
   metadata: unknown;

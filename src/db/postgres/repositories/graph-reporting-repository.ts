@@ -6,6 +6,7 @@ import {
   desc,
   eq,
   inArray,
+  isNull,
   notInArray,
   or,
   sql,
@@ -77,6 +78,7 @@ function byteOrder(column: SQLWrapper) {
 
 function visibleTaskCondition() {
   return and(
+    isNull(tasks.deletedAt),
     sql`${tasks.connectorInstanceId} NOT IN (
       SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
       WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -341,6 +343,7 @@ export function createPostgresGraphReportingRepository(
               eq(neighbor.id, taskDependencies.taskId),
             ),
           )).where(and(
+            sql`${neighbor.deletedAt} IS NULL`,
             sql`${neighbor.connectorInstanceId} NOT IN (
               SELECT ${connectorConfigs.id} FROM ${connectorConfigs}
               WHERE ${connectorConfigs.deletedAt} IS NOT NULL
@@ -410,7 +413,10 @@ export function createPostgresGraphReportingRepository(
             connectorType: tasks.connectorType,
             sourceId: tasks.sourceId,
             metadata: tasks.metadata,
-          }).from(tasks).where(inArray(tasks.id, ids))
+          }).from(tasks).where(and(
+            inArray(tasks.id, ids),
+            visibleTaskCondition(),
+          ))
             .orderBy(asc(byteOrder(tasks.id))),
           db.select({
             taskId: taskProjects.taskId,
@@ -462,14 +468,22 @@ export function createPostgresGraphReportingRepository(
           status: tasks.status,
           microStatus: tasks.microStatus,
         }).from(taskProjects).innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-          .where(eq(taskProjects.projectId, projectId))
+          .where(and(
+            eq(taskProjects.projectId, projectId),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(byteOrder(tasks.id)));
         const phaseIds = phases.map(({ id }) => id);
         const phaseItems = phaseIds.length
           ? await db.select({
               phaseId: projectPhaseItems.phaseId,
               taskId: projectPhaseItems.taskId,
-            }).from(projectPhaseItems).where(inArray(projectPhaseItems.phaseId, phaseIds))
+            }).from(projectPhaseItems)
+              .innerJoin(tasks, eq(projectPhaseItems.taskId, tasks.id))
+              .where(and(
+                inArray(projectPhaseItems.phaseId, phaseIds),
+                isNull(tasks.deletedAt),
+              ))
               .orderBy(
                 asc(byteOrder(projectPhaseItems.phaseId)),
                 asc(projectPhaseItems.sortOrder),
@@ -623,7 +637,12 @@ export function createPostgresGraphReportingRepository(
         const memberships = await db.select({
           projectId: taskProjects.projectId,
           taskId: taskProjects.taskId,
-        }).from(taskProjects).where(inArray(taskProjects.projectId, projectIds))
+        }).from(taskProjects)
+          .innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
+          .where(and(
+            inArray(taskProjects.projectId, projectIds),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(
             asc(byteOrder(taskProjects.projectId)),
             asc(byteOrder(taskProjects.taskId)),
@@ -657,9 +676,11 @@ export function createPostgresGraphReportingRepository(
               phaseId: projectPhaseItems.phaseId,
               taskId: projectPhaseItems.taskId,
             }).from(projectPhaseItems)
+              .innerJoin(tasks, eq(projectPhaseItems.taskId, tasks.id))
               .where(and(
                 inArray(projectPhaseItems.phaseId, phaseIds),
                 eq(projectPhaseItems.isProposed, false),
+                isNull(tasks.deletedAt),
               ))
               .orderBy(
                 asc(byteOrder(projectPhaseItems.phaseId)),
@@ -705,7 +726,10 @@ export function createPostgresGraphReportingRepository(
           updatedAt: tasks.updatedAt,
           parentId: tasks.parentId,
         }).from(taskProjects).innerJoin(tasks, eq(taskProjects.taskId, tasks.id))
-          .where(eq(taskProjects.projectId, projectId))
+          .where(and(
+            eq(taskProjects.projectId, projectId),
+            isNull(tasks.deletedAt),
+          ))
           .orderBy(asc(byteOrder(tasks.id)));
       },
     },
@@ -787,6 +811,7 @@ export function createPostgresGraphReportingRepository(
             title: tasks.title,
             createdAt: tasks.createdAt,
             completedAt: tasks.completedAt,
+            deletedAt: tasks.deletedAt,
           }).from(tasks).where(inArray(tasks.id, taskIds))
             .orderBy(asc(byteOrder(tasks.id))),
         ]);

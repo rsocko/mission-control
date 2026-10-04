@@ -1,4 +1,5 @@
 import type { WorkTodoAck, WorkTodoIngest } from '@/lib/connectors/work-todo/contracts';
+import type { RyMessageActionPersistence } from './rymessage-actions';
 import {
   parseWorkTodoRfc3339Instant,
   parseWorkTodoSyncTimestamp,
@@ -219,4 +220,5 @@ export interface WorkTodoBridgePersistence {
  */
 export interface NonFinanceConnectorStateRepositories {
   readonly workTodo: WorkTodoBridgePersistence;
+  readonly rymessageActions: RyMessageActionPersistence;
 }

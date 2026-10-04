@@ -5,6 +5,7 @@ import type {
   AgentDataClassification,
   ExternalAgentDataPolicy,
   ExternalAgentLocality,
+  ExternalAgentType,
 } from './contracts';
 import { DEFAULT_AI_ROUTING_POLICY } from '@/lib/ai/sensitivity-policy';
 import { redactPushText } from '@/lib/notifications/push-text';
@@ -12,18 +13,32 @@ import { ExternalAgentError } from './errors';
 
 export const DEFAULT_EXTERNAL_AGENT_FIELDS = [
   'instruction',
+  'alwaysInstructions',
   'project.id',
   'project.name',
   'repository.fullName',
   'repository.defaultBranch',
   'execution.locality',
   'execution.baseRef',
+  'execution.model',
   'execution.createPullRequest',
   'tasks.id',
   'tasks.title',
   'tasks.priority',
   'tasks.status',
   'tasks.tags',
+  'tasks.description',
+  'tasks.dueDate',
+  'tasks.effort',
+  'tasks.assignee',
+  'tasks.microStatus',
+  'tasks.planningHorizon',
+  'tasks.sourceListName',
+  'tasks.siblingOrder',
+  'tasks.depth',
+  'tasks.isChecklistItem',
+  'tasks.subtasks',
+  'tasks.sourceIssue',
   'dispatchId',
   'dataClassification',
   'allowedActions',
@@ -32,7 +47,6 @@ export const DEFAULT_EXTERNAL_AGENT_FIELDS = [
 export const EXTERNAL_AGENT_FIELDS = [
   ...DEFAULT_EXTERNAL_AGENT_FIELDS,
   'project.description',
-  'tasks.description',
   'phases.name',
   'phases.description',
   'phases.taskIds',
@@ -47,6 +61,27 @@ const REQUIRED_CONTROL_FIELDS = [
   'dispatchId',
   'dataClassification',
   'allowedActions',
+] as const;
+export const REQUIRED_RICH_TASK_FIELDS = [
+  'instruction',
+  'alwaysInstructions',
+  'tasks.id',
+  'tasks.title',
+  'tasks.description',
+  'tasks.priority',
+  'tasks.status',
+  'tasks.tags',
+  'tasks.dueDate',
+  'tasks.effort',
+  'tasks.assignee',
+  'tasks.microStatus',
+  'tasks.planningHorizon',
+  'tasks.sourceListName',
+  'tasks.siblingOrder',
+  'tasks.depth',
+  'tasks.isChecklistItem',
+  'tasks.subtasks',
+  'tasks.sourceIssue',
 ] as const;
 const CLASSIFICATION_RANK: Record<AgentDataClassification, number> = {
   standard: 0,
@@ -66,6 +101,7 @@ export function validateDataPolicy(value: unknown): ExternalAgentDataPolicy {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ExternalAgentError('dataPolicy must be an object', 'VALIDATION_ERROR', 422);
   }
+
   const policy = value as Partial<ExternalAgentDataPolicy>;
   const classifications = policy.allowedClassifications;
   if (
@@ -129,6 +165,20 @@ export function validateDataPolicy(value: unknown): ExternalAgentDataPolicy {
   };
 }
 
+export function normalizeExternalAgentDataPolicy(
+  type: ExternalAgentType,
+  policy: ExternalAgentDataPolicy,
+): ExternalAgentDataPolicy {
+  if (type !== 'copilot-cloud' && type !== 'paperclip') return policy;
+  const fieldAllowlist = [...policy.fieldAllowlist];
+  for (const field of REQUIRED_RICH_TASK_FIELDS) {
+    if (!fieldAllowlist.includes(field)) fieldAllowlist.push(field);
+  }
+  return fieldAllowlist.length === policy.fieldAllowlist.length
+    ? policy
+    : { ...policy, fieldAllowlist };
+}
+
 export function resolveDispatchClassification(
   connectorTypes: string[],
   requested?: AgentDataClassification,
@@ -163,11 +213,25 @@ export function assertClassificationAllowed(
       403,
     );
   }
+
   if (classification === 'local-only' && locality !== 'mission-control-host') {
     throw new ExternalAgentError(
       'Local-only data cannot leave a Mission Control-hosted execution environment',
       'DISCLOSURE_BLOCKED',
       403,
+    );
+  }
+}
+
+export function assertRichTaskContextAllowed(policy: ExternalAgentDataPolicy) {
+  const missing = REQUIRED_RICH_TASK_FIELDS.filter(
+    (field) => !policy.fieldAllowlist.includes(field),
+  );
+  if (missing.length) {
+    throw new ExternalAgentError(
+      `Destination disclosure policy must allow required task context fields: ${missing.join(', ')}`,
+      'DISCLOSURE_CONFIGURATION_REQUIRED',
+      422,
     );
   }
 }
@@ -268,8 +332,33 @@ export function selectAllowedPayloadFields(
     }
   }
 
+  const assertTextLimits = (value: unknown, path: string) => {
+    if (typeof value === 'string') {
+      if (value.length > 64 * 1024) {
+        throw new ExternalAgentError(
+          `${path || 'Payload text'} exceeds the 65536 character context limit`,
+          'PAYLOAD_TOO_LARGE',
+          413,
+        );
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((entry, index) => assertTextLimits(entry, `${path}[${index}]`));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      Object.entries(value as Record<string, unknown>).forEach(([key, entry]) =>
+        assertTextLimits(entry, path ? `${path}.${key}` : key));
+    }
+  };
+  assertTextLimits(payload, '');
+
   return {
-    payload: redactForPersistence(payload, { maxBytes: 256 * 1024 }) as Record<string, unknown>,
+    payload: redactForPersistence(
+      payload,
+      { maxText: Number.MAX_SAFE_INTEGER, maxBytes: 256 * 1024 },
+    ) as Record<string, unknown>,
     disclosedFields,
   };
 }

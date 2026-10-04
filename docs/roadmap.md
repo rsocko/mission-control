@@ -116,10 +116,9 @@ Mission Control is a **personal task & alert aggregation hub** — a dense, dark
   
 | #   | Item                                   | File(s)                                       | Work                                                   |     |
 | --- | -------------------------------------- | --------------------------------------------- | ------------------------------------------------------ | --- |
-| 1   | Implement webhook secret validation    | `src/app/api/integrations/rymessage/route.ts` | HMAC-SHA256 validation using `MC_EVENT_SECRET` env var |     |
-| 2   | Require triage capture key             | `src/app/api/triage/capture/route.ts`         | Return 401 if `MC_TRIAGE_CAPTURE_KEY` not set          |     |
-| 3   | Add rate limiting to public API routes | API routes                                    | Basic rate limiter (e.g., `next-rate-limit`)           |     |
-| 4   | Centralize env validation              | New: `src/lib/env.ts`                         | Zod schema validating all required env vars at startup |     |
+| 1   | Require triage capture key             | `src/app/api/triage/capture/route.ts`         | Return 401 if `MC_TRIAGE_CAPTURE_KEY` not set          |     |
+| 2   | Add rate limiting to public API routes | API routes                                    | Basic rate limiter (e.g., `next-rate-limit`)           |     |
+| 3   | Centralize env validation              | New: `src/lib/env.ts`                         | Zod schema validating all required env vars at startup |     |
   
 ### 1.2 Data Integrity Fixes  
   

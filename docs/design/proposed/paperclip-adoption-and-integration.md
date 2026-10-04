@@ -98,7 +98,9 @@ MC's user-facing assignment concepts should remain distinct:
 | Active executor | Paperclip agent currently responsible for the run |
 
 Use **Delegate** or **Execution target** for Paperclip rather than overloading
-the ordinary task assignee field.
+the ordinary task assignee field. The provider-neutral wizard and post-run
+information hierarchy are documented in the
+[task delegation UX study](task-delegation.html).
 
 ## Guardrails
 
@@ -211,6 +213,35 @@ a parent issue with:
 Use Paperclip's REST/OpenAPI surface first. MCP is useful for interactive tool
 use, but REST provides a simpler durable dispatch and reconciliation contract.
 
+The implemented provider registers an API origin, server-only credential
+reference, company UUID, assignee-agent UUID, optional Paperclip project UUID,
+and optional required adapter type. Registration verifies `/api/health` and
+the configured assignee before persistence. A confirmed dispatch creates one
+parent issue with `idempotencyKey: mission-control:{dispatchId}` and assigns it
+to the configured Paperclip agent. Assignment is Paperclip's execution trigger;
+MC does not checkout the issue, invoke the runtime directly, or import child
+issues.
+
+The contract is pinned to `paperclipai/paperclip` commit
+`0d3e7bf6ac69c6a41995e62e7a38ca99dcbc8dfd`. The generated OpenAPI document is
+served by Paperclip at `GET /api/openapi.json`; the provider uses these concrete
+routes:
+
+- `GET /api/health` and `GET /api/agents/{agentId}` for registration;
+- `POST /api/companies/{companyId}/issues` for idempotent parent creation;
+- `GET /api/issues/{issueId}`, `GET /api/issues/{issueId}/active-run`,
+  `GET /api/heartbeat-runs/{runId}`, and
+  `GET /api/issues/{issueId}/approvals` for reconciliation;
+- `POST /api/heartbeat-runs/{runId}/cancel` followed by an authoritative
+  `PATCH /api/issues/{issueId}` to `cancelled`.
+
+Paperclip cancellation of an active run is board-only in the pinned contract.
+A bearer agent key that receives `403` therefore leaves the MC dispatch active
+and reports the provider error; local state never pretends the provider stopped.
+Deployments that require remote cancellation must supply a Paperclip principal
+with that authority or use `local_trusted` only inside the configured local
+boundary.
+
 ### Reconciliation
 
 MC periodically reconciles or receives events for:
@@ -224,6 +255,44 @@ MC periodically reconciles or receives events for:
 
 Use idempotency keys and stable correlation identifiers. Do not infer success
 from an accepted request or a UI navigation.
+
+MC persists the Paperclip issue ID as `providerTaskId` and the heartbeat run ID,
+issue identifier, current executor/adapter, progress, liveness, blockers,
+pending approvals, run usage/cost summary, and work products in bounded
+provider detail. Pull-request, branch, commit, preview, document, and artifact
+work products are projected into MC's existing result references. Paperclip
+does not expose a first-class check-run resource in the pinned API, so MC does
+not synthesize check results. Terminal MC records fence later polling and
+provider results remain subject to the external-agent digest/replay rules.
+
+### Coding runtime boundary
+
+Paperclip owns runtime selection through the configured assignee. MC may pin an
+expected adapter type and refuses registration when the assignee differs. This
+allows a Paperclip-managed GitHub Copilot Web/GitHub-hosted adapter when a
+Paperclip deployment actually provides and qualifies one, without routing back
+through MC's direct `copilot-cloud` adapter.
+
+At the pinned upstream revision, Paperclip does **not** ship a qualified
+GitHub-hosted Copilot adapter. Its `paperclip_runner` documentation explicitly
+lists GitHub Copilot as awaiting qualification. Therefore this integration
+does not invent a Copilot endpoint or claim that upstream can currently run
+it. Direct MC-to-Copilot Cloud remains available for single-repository work;
+Paperclip can use Copilot only after the Paperclip instance reports the
+configured adapter on the selected assignee.
+
+### Contracts for follow-up issues
+
+- **#2013:** consume `providerTaskId`, `providerDetail.issueIdentifier`,
+  `providerDetail.runId`, `executor`, `progress`, `blockers`, `costs`,
+  `pendingApprovals`, `workProducts`, and existing code/artifact references.
+  Keep the action provider-neutral and do not materialize child issues.
+- **#2014:** use `pendingApprovals` only as a task-level summary here. The
+  notification bridge must deduplicate by Paperclip approval ID and continue to
+  read authoritative approval state from Paperclip.
+- **#2015:** create a separate inbound, authenticated policy boundary. It must
+  not reuse the Paperclip provider credential as Scout authority or bypass MC's
+  disclosure preview, confirmation, claim, and result fencing.
 
 ### Approvals and notifications
 
@@ -354,6 +423,26 @@ stable minimum integration contract.
 - Reconcile state, blockers, results, PRs, and artifacts into the parent task.
 - Add cancellation/revocation and explicit failure states.
 - Keep Paperclip child issues out of MC by default.
+
+#### Task delegation surface
+
+Mission Control evaluates enabled execution targets against the task's source
+classification and each target's locality/data policy on the server. The task
+detail surface lists only eligible targets, then creates the existing durable
+dispatch preview. Confirmation shows the exact destination, locality,
+classification, disclosed field paths, authorized actions, and payload before
+the existing preview hash is confirmed.
+
+The original task remains canonical. Task details show the execution target and
+active executor separately from the task's human owner and source assignee,
+including Paperclip company, issue/run links, canonical dispatch state, coarse
+progress, blockers, pending approvals, and returned pull request, commit, check,
+and artifact references. Task and project lists carry a compact execution badge
+without importing Paperclip child issues.
+
+Cancellation/revocation is shown only for active dispatch states. Re-dispatch is
+shown only for failed, timed-out, dead-letter, or cancelled states; both actions
+are revalidated by the authoritative dispatch state machine on the server.
 
 **Exit:** one MC task can be delegated, observed, completed, and reconciled
 without copy/paste or duplicate task authority.

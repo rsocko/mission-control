@@ -18,6 +18,7 @@ import {
   sortTasks,
   buildGanttRows,
   applyProjectTaskFieldUpdate,
+  isUnassignedTaskDropTarget,
 } from '@/app/projects/[id]/utils';
 import type {
   PhaseTaskEntry,
@@ -42,6 +43,26 @@ const projectTask: ProjectTask = {
   editPolicy: editableTaskPolicy,
   updatedAt: '2024-01-01T00:00:00Z',
 };
+
+describe('isUnassignedTaskDropTarget', () => {
+  it('accepts the unassigned panel itself', () => {
+    expect(isUnassignedTaskDropTarget('unassigned-drop')).toBe(true);
+  });
+
+  it('accepts a task row nested inside the unassigned panel', () => {
+    expect(isUnassignedTaskDropTarget('task:task-2', {
+      type: 'task',
+      dropTargetId: 'unassigned-drop',
+    })).toBe(true);
+  });
+
+  it('rejects task rows in a phase', () => {
+    expect(isUnassignedTaskDropTarget('task:task-2', {
+      type: 'task',
+      dropTargetId: 'phase-drop:phase-1',
+    })).toBe(false);
+  });
+});
 
 describe('applyProjectTaskFieldUpdate', () => {
   it('applies supported task detail fields without widening domain values', () => {

@@ -3,10 +3,11 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import Image from 'next/image';
-import { Check, Filter, ListChecks, Loader2, Search } from 'lucide-react';
+import { Check, Filter, ListChecks, Loader2 } from 'lucide-react';
 import { MobileSwipeTaskRow } from '@/components/today/MobileSwipeTaskRow';
 import { TaskDetailPanel } from '@/components/task-detail/TaskDetailPanel';
 import { MobileSheet } from '@/components/ui/MobileSheet';
+import { SearchInput } from '@/components/ui/SearchInput';
 import {
   Select,
   SelectContent,
@@ -648,17 +649,14 @@ export function MobileTaskFilters({
   return (
     <div className="px-4 pb-6">
       <div className="sticky top-0 z-10 -mx-4 flex gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-1)] px-4 py-3">
-        <label className="relative min-w-0 flex-1">
-          <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-          <span className="sr-only">Search sources and lists</span>
-          <input
-            type="search"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search sources and lists"
-            className="min-h-11 w-full rounded-xl border border-[var(--border)] bg-[var(--surface-0)] py-2 pl-9 pr-3 text-sm text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)] focus:border-[var(--border-focus)]"
-          />
-        </label>
+        <SearchInput
+          value={search}
+          onChange={setSearch}
+          placeholder="Search sources and lists"
+          clearLabel="Clear source and list search"
+          size="md"
+          className="min-h-11 min-w-0 flex-1 focus-within:border-[var(--border-focus)]"
+        />
         {hasActiveFilters && (
           <button
             type="button"

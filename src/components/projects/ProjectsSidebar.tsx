@@ -20,6 +20,7 @@ import Image from 'next/image';
 import { IconRenderer } from '@/components/ui/icon-picker/IconRenderer';
 import { ProjectModal } from '@/components/projects/ProjectModal';
 import { Tooltip } from '@/components/ui/Tooltip';
+import { SearchInput } from '@/components/ui/SearchInput';
 import type { ProjectHealth, ProjectProgress, ProjectPulse } from '@/types';
 import { cn } from '@/lib/utils';
 import { useSyncStream } from '@/lib/hooks/useSyncStream';
@@ -495,17 +496,15 @@ export function ProjectsSidebar({ collapsed, onCollapsedChange }: ProjectsSideba
             </div>
           </div>
           {/* Search */}
-          <div className="relative">
-            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--text-muted)]" />
-            <input
-              ref={searchRef}
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter projects... (press /)"
-              className="w-full rounded-md border border-[var(--border)] bg-[var(--surface-0)] py-1.5 pl-7 pr-2 text-xs text-[var(--text-primary)] outline-none placeholder:text-[var(--text-muted)]"
-            />
-          </div>
+          <SearchInput
+            ref={searchRef}
+            value={search}
+            onChange={setSearch}
+            placeholder="Filter projects... (press /)"
+            ariaLabel="Search projects"
+            clearLabel="Clear project search"
+            className="py-1.5"
+          />
           <StatusFilterPills selected={statusFilter} onChange={setStatusFilter} />
         </div>
 

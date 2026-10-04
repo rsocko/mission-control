@@ -10,6 +10,7 @@ export interface NotificationEntityLinkingHarness {
     id: string;
     connectorInstanceId: string;
     sourceId: string;
+    deletedAt?: string | null;
   }): Promise<void> | void;
   /**
    * Inserts a `hub_projects` row. `repositoryJsonValue` is a raw JSON *value*
@@ -84,6 +85,21 @@ export function describeNotificationEntityLinkingContract(
         connectorInstanceId: 'connector-1',
         repository: 'missing/repo',
         number: 1,
+      })).resolves.toBeNull();
+    });
+
+    it('does not link a notification to a soft-deleted task', async () => {
+      await harness.seedTask({
+        id: 'task-deleted',
+        connectorInstanceId: 'connector-1',
+        sourceId: 'owner/repo:404',
+        deletedAt: '2026-10-02T00:00:00.000Z',
+      });
+
+      await expect(harness.repository.findTaskBySourceReference({
+        connectorInstanceId: 'connector-1',
+        repository: 'owner/repo',
+        number: 404,
       })).resolves.toBeNull();
     });
 

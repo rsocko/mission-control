@@ -6,24 +6,37 @@ import type {
   AgentDispatchRecord,
   AgentDispatchResult,
   AgentDispatchScope,
+  AgentPayloadSnapshot,
   AgentResultReference,
 } from './contracts';
 import { ExternalAgentError } from './errors';
 import { getExternalAgentControlPersistence } from './persistence';
 import {
   assertClassificationAllowed,
+  assertRichTaskContextAllowed,
   hashCanonical,
   hashSecret,
   redactForPersistence,
   resolveDispatchClassification,
   selectAllowedPayloadFields,
 } from './policy';
-import { getExternalAgent, type ExternalAgent } from './registry';
+import { parseSourceId } from '@/lib/connectors/github-issues/issue-transformer';
+import {
+  getExternalAgent,
+  resolveAgentCredential,
+  type ExternalAgent,
+} from './registry';
 import {
   createTransportResolver,
   type TransportDispatchResult,
   type TransportResolver,
 } from './transports';
+import { getCopilotCloudTask } from './copilot-cloud';
+import {
+  cancelPaperclipIssue,
+  getPaperclipState,
+  type PaperclipConnection,
+} from './paperclip';
 
 const ACTION_CAPABILITIES = {
   analyze_code: 'canAnalyzeCode',
@@ -48,7 +61,14 @@ export interface DispatchPreviewInput {
 }
 
 export interface DispatchResultInput {
-  status?: 'queued' | 'in_progress' | 'waiting_for_user' | 'completed' | 'failed';
+  status?:
+    | 'queued'
+    | 'in_progress'
+    | 'waiting_for_user'
+    | 'completed'
+    | 'failed'
+    | 'timed_out'
+    | 'cancelled';
   result?: AgentDispatchResult;
   summary?: string;
   tasks?: Array<Record<string, unknown>>;
@@ -120,6 +140,7 @@ function normalizeScope(value: AgentDispatchScope | undefined): AgentDispatchSco
       ? requiredText(scope.defaultBranch, 'scope.defaultBranch', 255)
       : undefined,
     baseRef: scope.baseRef ? requiredText(scope.baseRef, 'scope.baseRef', 255) : undefined,
+    model: scope.model ? requiredText(scope.model, 'scope.model', 255) : undefined,
     createPullRequest: scope.createPullRequest === true,
   };
 }
@@ -163,6 +184,7 @@ function destinationFingerprint(agent: ExternalAgent) {
     endpoint: agent.endpoint,
     authType: agent.authType,
     credentialReferenceHash: hashSecret(agent.authCredentialRef ?? ''),
+    providerConfigHash: hashCanonical(agent.providerConfig),
     inboundWebhookId: agent.inboundWebhookId,
     capabilitiesHash: hashCanonical(agent.capabilities),
     dataPolicyHash: hashCanonical(agent.dataPolicy),
@@ -176,6 +198,55 @@ function assertAgentEnabled(agent: ExternalAgent | null): asserts agent is Exter
   if (!agent.enabled) {
     throw new ExternalAgentError('External agent is disabled', 'AGENT_DISABLED', 409);
   }
+}
+
+function sourceIssue(
+  task: Pick<
+    AgentPayloadSnapshot['tasks'][number],
+    'connectorType' | 'sourceId' | 'sourceUrl'
+  >,
+  repository: string | undefined,
+) {
+  if (task.connectorType !== 'github-issues' || !task.sourceId) return undefined;
+  const parsed = parseSourceId(task.sourceId);
+  if (
+    !parsed.repo
+    || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(parsed.repo)
+    || !Number.isSafeInteger(parsed.issueNumber)
+    || parsed.issueNumber < 1
+  ) {
+    return undefined;
+  }
+  if (repository && parsed.repo.toLowerCase() !== repository.toLowerCase()) {
+    throw new ExternalAgentError(
+      `GitHub issue ${parsed.repo}#${parsed.issueNumber} cannot be dispatched to ${repository}`,
+      'REPOSITORY_SCOPE_MISMATCH',
+      409,
+    );
+  }
+  let url: string | undefined;
+  if (task.sourceUrl) {
+    try {
+      const candidate = new URL(task.sourceUrl);
+      if (
+        candidate.protocol === 'https:'
+        && !candidate.username
+        && !candidate.password
+        && candidate.pathname.toLowerCase()
+          === `/${parsed.repo}/issues/${parsed.issueNumber}`.toLowerCase()
+      ) {
+        url = candidate.toString();
+      }
+    } catch {
+      // Invalid connector URLs are omitted rather than repaired or invented.
+    }
+  }
+  return {
+    type: 'github-issue',
+    repository: parsed.repo,
+    issueNumber: parsed.issueNumber,
+    ...(url ? { url } : {}),
+  };
 }
 
 async function loadPayloadSource(
@@ -204,6 +275,9 @@ async function loadPayloadSource(
       422,
     );
   }
+  if (agent.type === 'copilot-cloud' || agent.type === 'paperclip') {
+    assertRichTaskContextAllowed(agent.dataPolicy);
+  }
   const snapshot = await (await getExternalAgentControlPersistence()).payloads.snapshot(scope);
   if (scope.projectId && !snapshot.project) {
     throw new ExternalAgentError('Scoped project not found', 'NOT_FOUND', 404);
@@ -217,6 +291,7 @@ async function loadPayloadSource(
   return {
     source: {
       instruction,
+      alwaysInstructions: agent.providerConfig.alwaysInstructions ?? '',
       project: snapshot.project,
       repository: scope.repository
         ? {
@@ -227,9 +302,40 @@ async function loadPayloadSource(
       execution: {
         locality: agent.executionLocality,
         baseRef: scope.baseRef,
+        model: scope.model,
         createPullRequest: scope.createPullRequest,
       },
-      tasks: snapshot.tasks.map(({ connectorType: _connectorType, ...task }) => task),
+      tasks: snapshot.tasks.map(({
+        connectorType,
+        sourceId: _sourceId,
+        sourceUrl: _sourceUrl,
+        ...task
+      }) => {
+        const taskSourceIssue = sourceIssue(
+          { connectorType, sourceId: _sourceId, sourceUrl: _sourceUrl },
+          agent.type === 'copilot-cloud' ? scope.repository : undefined,
+        );
+        return {
+          ...task,
+          subtasks: task.subtasks.map(({
+            connectorType: subtaskConnectorType,
+            sourceId: subtaskSourceId,
+            sourceUrl: subtaskSourceUrl,
+            ...subtask
+          }) => {
+            const subtaskSourceIssue = sourceIssue({
+              connectorType: subtaskConnectorType,
+              sourceId: subtaskSourceId,
+              sourceUrl: subtaskSourceUrl,
+            }, agent.type === 'copilot-cloud' ? scope.repository : undefined);
+            return {
+              ...subtask,
+              ...(subtaskSourceIssue ? { sourceIssue: subtaskSourceIssue } : {}),
+            };
+          }),
+          ...(taskSourceIssue ? { sourceIssue: taskSourceIssue } : {}),
+        };
+      }),
       phases: snapshot.phases,
       callbackUrl: callbackBaseUrl && agent.inboundWebhookId
         ? `${callbackBaseUrl.replace(/\/$/, '')}/api/inbound-webhooks/${encodeURIComponent(agent.inboundWebhookId)}/receive`
@@ -238,7 +344,10 @@ async function loadPayloadSource(
       dataClassification: classification,
       allowedActions,
     },
-    connectorTypes: snapshot.tasks.map(({ connectorType }) => connectorType),
+    connectorTypes: snapshot.tasks.flatMap(({ connectorType, subtasks }) => [
+      connectorType,
+      ...subtasks.map((subtask) => subtask.connectorType),
+    ]),
   };
 }
 
@@ -440,7 +549,12 @@ async function finishAttemptFromTransport(
     providerDetail: safeDetail,
     errorMessage: safeError ?? undefined,
   });
-  const resultDigest = result.status === 'completed' || result.status === 'failed'
+  const resultDigest = [
+    'completed',
+    'failed',
+    'timed_out',
+    'cancelled',
+  ].includes(result.status)
     ? hashCanonical(normalized)
     : null;
   const references = extractReferences(normalized.result);
@@ -610,7 +724,15 @@ function normalizeReferences(
 
 function normalizeResult(input: DispatchResultInput) {
   const status = input.status ?? 'completed';
-  if (!['queued', 'in_progress', 'waiting_for_user', 'completed', 'failed'].includes(status)) {
+  if (![
+    'queued',
+    'in_progress',
+    'waiting_for_user',
+    'completed',
+    'failed',
+    'timed_out',
+    'cancelled',
+  ].includes(status)) {
     throw new ExternalAgentError('Result status is invalid', 'VALIDATION_ERROR', 422);
   }
   const raw = input.result ?? (
@@ -728,10 +850,198 @@ export async function submitDispatchResult(
 }
 
 export async function cancelDispatch(id: string) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  if (agent?.type === 'paperclip' && dispatch.providerTaskId) {
+    if (dispatch.status === 'cancelled') return false;
+    assertAgentEnabled(agent);
+    const provider = await cancelPaperclipIssue(
+      paperclipConnection(agent),
+      dispatch.providerTaskId,
+    );
+    await submitDispatchResult(
+      dispatch.id,
+      {
+        status: provider.status,
+        result: provider.result,
+        providerTaskId: provider.providerTaskId,
+        providerState: provider.providerState,
+        providerDetail: provider.providerDetail,
+        errorMessage: provider.errorMessage,
+      },
+      { agentAuthenticated: true },
+    );
+    return provider.status === 'cancelled';
+  }
+
+  if (agent?.type === 'copilot-cloud' && dispatch.providerTaskId) {
+    throw new ExternalAgentError(
+      'GitHub Agent Tasks does not currently expose task cancellation; the provider task remains active',
+      'CANCELLATION_UNSUPPORTED',
+      409,
+    );
+  }
   return (await getExternalAgentControlPersistence()).dispatches.cancel(
     id,
     new Date().toISOString(),
   );
+}
+
+export async function stopTrackingDispatch(id: string) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  if (agent?.type !== 'copilot-cloud' || !dispatch.providerTaskId) {
+    throw new ExternalAgentError(
+      'Stop tracking is only available for active GitHub Agent Tasks',
+      'INVALID_TRANSITION',
+      409,
+    );
+  }
+  return (await getExternalAgentControlPersistence()).dispatches.cancel(
+    id,
+    new Date().toISOString(),
+  );
+}
+
+export async function reconcileDispatch(
+  id: string,
+  options: { fetcher?: typeof fetch } = {},
+) {
+  const dispatch = await getDispatch(id);
+  if (!dispatch) throw new ExternalAgentError('Dispatch not found', 'NOT_FOUND', 404);
+  const terminal = [
+    'completed',
+    'failed',
+    'timed_out',
+    'dead_letter',
+    'cancelled',
+  ].includes(dispatch.status);
+  if (terminal) return dispatch;
+  const agent = await getExternalAgent(dispatch.externalAgentId);
+  assertAgentEnabled(agent);
+  if (agent.type === 'paperclip') {
+    if (!dispatch.providerTaskId) return dispatch;
+    const provider = await getPaperclipState(
+      paperclipConnection(agent, options.fetcher),
+      dispatch.providerTaskId,
+    );
+    await submitDispatchResult(
+      dispatch.id,
+      {
+        status: provider.status,
+        result: provider.result,
+        providerTaskId: provider.providerTaskId,
+        providerState: provider.providerState,
+        providerDetail: provider.providerDetail,
+        errorMessage: provider.errorMessage,
+      },
+      { agentAuthenticated: true },
+    );
+    return (await getDispatch(id))!;
+  }
+  if (
+    dispatch.executionLocality !== 'github-hosted'
+    || !dispatch.providerTaskId
+    || !dispatch.repository
+  ) {
+    return dispatch;
+  }
+  if (agent.type !== 'copilot-cloud') {
+    throw new ExternalAgentError(
+      'GitHub-hosted dispatch is not backed by the Copilot cloud adapter',
+      'EXECUTION_BOUNDARY_MISMATCH',
+      409,
+    );
+  }
+  const provider = await getCopilotCloudTask(
+    agent,
+    dispatch.repository,
+    dispatch.baseRef ?? dispatch.scope.defaultBranch ?? 'main',
+    dispatch.providerTaskId,
+    options.fetcher,
+  );
+  await submitDispatchResult(
+    dispatch.id,
+    {
+      status: provider.status,
+      result: provider.result,
+      providerTaskId: provider.providerTaskId,
+      providerState: provider.providerState,
+      providerDetail: provider.providerDetail,
+      errorMessage: provider.errorMessage,
+    },
+    { agentAuthenticated: true },
+  );
+  return (await getDispatch(id))!;
+}
+
+function paperclipConnection(
+  agent: ExternalAgent,
+  fetcher?: typeof fetch,
+): PaperclipConnection {
+  const config = agent.providerConfig.paperclip;
+  if (!agent.endpoint || !config) {
+    throw new ExternalAgentError(
+      'Paperclip endpoint and provider configuration are missing',
+      'TRANSPORT_INVALID',
+      500,
+    );
+  }
+  return {
+    endpoint: agent.endpoint,
+    credential: resolveAgentCredential(agent.authCredentialRef),
+    config,
+    fetcher,
+  };
+}
+
+export async function reconcileActiveExternalAgentDispatches(
+  options: { fetcher?: typeof fetch } = {},
+) {
+  const activeStatuses: AgentDispatchRecord['status'][] = [
+    'queued',
+    'in_progress',
+    'waiting_for_user',
+  ];
+  const dispatches = (await Promise.all(
+    activeStatuses.map((status) => listDispatches({ status, limit: 500 })),
+  )).flat();
+  let reconciled = 0;
+  const failures: Array<{ dispatchId: string; error: string }> = [];
+  for (const dispatch of dispatches) {
+    const agent = await getExternalAgent(dispatch.externalAgentId);
+    if (
+      dispatch.executionLocality !== 'github-hosted'
+      && agent?.type !== 'paperclip'
+    ) {
+      continue;
+    }
+    try {
+      if (!dispatch.providerTaskId) {
+        const recovered = await confirmDispatch(dispatch.id, dispatch.previewHash, {
+          transportResolver: createTransportResolver({ fetcher: options.fetcher }),
+        });
+        if (recovered.dispatch.providerTaskId) reconciled += 1;
+        continue;
+      }
+      await reconcileDispatch(dispatch.id, options);
+      reconciled += 1;
+    } catch (error) {
+      failures.push({
+        dispatchId: dispatch.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return { reconciled, failures };
+}
+
+export async function reconcileActiveCopilotCloudDispatches(
+  options: { fetcher?: typeof fetch } = {},
+) {
+  return reconcileActiveExternalAgentDispatches(options);
 }
 
 export async function retryDispatch(

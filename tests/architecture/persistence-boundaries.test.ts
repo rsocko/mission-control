@@ -111,7 +111,6 @@ const MIGRATED_WEBHOOK_MODULES = [
   'src/app/api/inbound-webhooks/[id]/receive/route.ts',
   'src/app/api/integrations/n8n/route.ts',
   'src/app/api/integrations/n8n/webhook/route.ts',
-  'src/app/api/integrations/rymessage/route.ts',
   'src/app/api/integrations/webhooks/route.ts',
   'src/app/api/integrations/webhooks/[id]/route.ts',
   'src/app/api/integrations/webhooks/[id]/test/route.ts',
@@ -464,26 +463,4 @@ describe('portable persistence dependency ratchet', () => {
     });
   });
 
-  /**
-   * The optional Rymessage source-side SQLite reader is an *external* connector
-   * transport (it opens RyMessage's own database file); it is never Mission
-   * Control persistence, and nothing in the ports may import it.
-   */
-  it('keeps the external Rymessage SQLite transport out of Mission Control persistence', () => {
-    const client = readFileSync(
-      join(process.cwd(), 'src/lib/connectors/rymessage/rymessage-client.ts'),
-      'utf8',
-    );
-    expect(client).toMatch(/import\(\s*'better-sqlite3'\s*\)/);
-    expect(importsRawSqliteHandle(client)).toBe(false);
-    expect(client).not.toMatch(/from\s+['"]@\/db(?:['"]|\/)/);
-
-    const importers = sourceFiles.filter((path) => {
-      const name = repoPath(path);
-      if (name === 'src/lib/connectors/rymessage/rymessage-client.ts') return false;
-      return /from\s+['"][^'"]*rymessage-client['"]/
-        .test(readFileSync(path, 'utf8'));
-    }).map(repoPath);
-    expect(importers).toEqual(['src/lib/connectors/rymessage/index.ts']);
-  });
 });

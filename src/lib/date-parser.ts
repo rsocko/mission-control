@@ -140,6 +140,10 @@ function capitalize(s: string): string {
     .join(' ');
 }
 
+function isActionableDateExpression(text: string): boolean {
+  return !/^the\s+(?:day|week|month|year)$/i.test(text.trim());
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -160,7 +164,12 @@ export function parseNLPDate(text: string, refDate?: Date): NLPDateResult | null
 
   // Filter out time-only results (e.g. "at 3pm") that don't specify a date
   const dateResults = results.filter(r =>
-    r.start.isCertain('day') || r.start.isCertain('month') || r.start.isCertain('weekday')
+    (
+      r.start.isCertain('day')
+      || r.start.isCertain('month')
+      || r.start.isCertain('weekday')
+    )
+    && isActionableDateExpression(r.text)
   );
   if (dateResults.length === 0) return null;
 
@@ -199,7 +208,12 @@ export function findAllNLPDates(text: string, refDate?: Date): NLPDateResult[] {
 
   // Filter out time-only results (e.g. "at 3pm") that don't specify a date
   const dateResults = results.filter(r =>
-    r.start.isCertain('day') || r.start.isCertain('month') || r.start.isCertain('weekday')
+    (
+      r.start.isCertain('day')
+      || r.start.isCertain('month')
+      || r.start.isCertain('weekday')
+    )
+    && isActionableDateExpression(r.text)
   );
 
   return dateResults.map(r => ({

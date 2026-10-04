@@ -164,6 +164,22 @@ describe('project phases (Plan) tab', () => {
     expect(screen.getByTestId('task-detail-task-alpha')).toBeInTheDocument();
   });
 
+  it('removes a completed task from its phase when completion starts in task detail', async () => {
+    await renderProjectTab('Plan');
+
+    const discovery = await screen.findByRole('region', { name: 'Discovery phase' });
+    fireEvent.click(within(discovery).getByText('Alpha migration'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Complete task from detail' }));
+
+    await waitFor(() => {
+      expect(within(discovery).getByRole('button', { name: 'Completed' })).toBeInTheDocument();
+      expect(within(discovery).getByText('100%')).toBeInTheDocument();
+    }, { timeout: 2_000 });
+    fireEvent.click(screen.getByRole('button', { name: 'Hide completed tasks' }));
+    expect(within(discovery).queryByText('Alpha migration')).not.toBeInTheDocument();
+    expect(harness.requestsFor('/api/tasks/task-alpha', 'PATCH')).toHaveLength(1);
+  });
+
   it('opens the expanded Notes dialog from a Plan list row', async () => {
     await renderProjectTab('Plan');
 
@@ -198,6 +214,47 @@ describe('project phases (Plan) tab', () => {
     fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
     expect(await screen.findByRole('region', { name: 'Discovery phase' })).toBeInTheDocument();
     expect(screen.queryByRole('toolbar', { name: 'Bulk actions' })).not.toBeInTheDocument();
+  });
+
+  it('shows an assignment rename in the list while the save is pending', async () => {
+    await renderProjectTab('Plan');
+    await screen.findByRole('region', { name: 'Discovery phase' });
+    const releaseRename = harness.holdOnce('/api/project-phases/phase-discovery');
+
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discovery' }));
+    const editor = screen.getByRole('textbox', { name: 'Rename Discovery' });
+    fireEvent.change(editor, { target: { value: 'Research' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+
+    fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
+    expect(await screen.findByRole('region', { name: 'Research phase' })).toBeInTheDocument();
+
+    releaseRename();
+    await waitFor(() => {
+      expect(phaseRequests(harness, 'PATCH').map((request) => request.body))
+        .toContainEqual({ name: 'Research' });
+    });
+  });
+
+  it('restores the previous phase name when an assignment rename fails', async () => {
+    await renderProjectTab('Plan');
+    await screen.findByRole('region', { name: 'Discovery phase' });
+    harness.failOnce('/api/project-phases/phase-discovery', {
+      method: 'PATCH',
+      error: 'Rename failed',
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^assign$/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Discovery' }));
+    const editor = screen.getByRole('textbox', { name: 'Rename Discovery' });
+    fireEvent.change(editor, { target: { value: 'Research' } });
+    fireEvent.keyDown(editor, { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: /^list$/i }));
+
+    expect(await screen.findByRole('region', { name: 'Discovery phase' })).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'Research phase' })).not.toBeInTheDocument();
+    expect(toasts).toContainEqual({ level: 'error', message: 'Rename failed' });
   });
 
   it('creates the first phase from the empty state and opens it for renaming', async () => {

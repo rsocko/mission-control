@@ -7,6 +7,7 @@ import {
   Archive, CheckCircle2, Sun, Calendar, ArrowRight, Trash2, FolderMinus,
   Clock, CalendarClock, CalendarPlus, ChevronRight, Flag, Search, FastForward, FileText, XCircle, CircleDot, Layers3,
   MoreHorizontal, FolderPlus, Check, ArrowLeftRight,
+  Send,
 } from 'lucide-react';
 import Image from 'next/image';
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
@@ -33,6 +34,7 @@ import {
   saveRecentProjectTarget,
 } from '@/lib/projects/project-targets';
 import { MobileTaskActions } from './MobileTaskActions';
+import { openTaskDelegation } from '@/components/task-delegation/events';
 
 // Shared context-menu panel styles
 const MENU_CONTENT_CLASS =
@@ -233,6 +235,14 @@ export function TaskContextMenu({
             {task.title}
           </ContextMenu.Label>
           <ContextMenu.Separator className="h-px bg-[var(--border-subtle)] my-1 mx-2" />
+
+          <ContextMenu.Item
+            className="mx-1 flex cursor-pointer items-center gap-3 rounded-[var(--radius-sm)] px-3 py-2 text-sm text-[var(--text-primary)] outline-none transition-colors duration-75 data-[highlighted]:bg-[var(--surface-2)]"
+            onSelect={() => openTaskDelegation([task.id])}
+          >
+            <Send size={15} className="text-[var(--accent-300)]" />
+            Delegate
+          </ContextMenu.Item>
 
           {/* My Day — universal since MC manages My Day locally */}
           <ContextMenu.Item

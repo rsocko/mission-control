@@ -140,9 +140,30 @@ describe('RecurrencePicker advanced controls', () => {
     );
 
     expect(screen.getByRole('combobox', { name: 'Task recurrence' })).toBeDisabled();
+    expect(screen.getByText('Managed at source')).toBeVisible();
     expect(screen.getByText(/owned by the provider/)).toBeInTheDocument();
     expect(screen.getByText(/lost provider-specific detail/)).toBeInTheDocument();
     expect(screen.getByLabelText('Skip dates')).toBeDisabled();
+  });
+
+  it('labels Mission Control-owned recurrence without opening schedule details', () => {
+    render(
+      <RecurrencePicker
+        value="every 4 days"
+        mode="completion"
+        onChange={vi.fn()}
+        controlState={{
+          rule: null,
+          owner: 'mission-control',
+          support: 'supported',
+          reasons: [],
+          timezone: 'UTC',
+          localTime: null,
+        }}
+      />,
+    );
+
+    expect(screen.getByText('Managed by Mission Control')).toBeVisible();
   });
 
   it('shows a recoverable preview error', async () => {

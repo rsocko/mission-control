@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { Tag, TaskItem } from '@/types';
 import type { TaskRepository } from '@/db/persistence/core-repositories';
 import type { PostgresDatabase, PostgresTransaction } from '../runtime';
@@ -243,6 +243,27 @@ export class PostgresTaskRepository implements TaskRepository {
       .limit(1);
     if (!row) return null;
     const relations = await loadRelations(this.db, id);
+    return toTaskItem(row, relations);
+  }
+
+  async findByProviderIdentity(input: {
+    connectorInstanceId: string;
+    providerTaskId: string;
+    providerContainerId?: string;
+  }): Promise<TaskItem | null> {
+    const [row] = await this.db
+      .select()
+      .from(tasks)
+      .where(and(
+        eq(tasks.connectorInstanceId, input.connectorInstanceId),
+        eq(tasks.sourceId, input.providerTaskId),
+        input.providerContainerId === undefined
+          ? isNull(tasks.sourceListId)
+          : eq(tasks.sourceListId, input.providerContainerId),
+      ))
+      .limit(1);
+    if (!row) return null;
+    const relations = await loadRelations(this.db, row.id);
     return toTaskItem(row, relations);
   }
 

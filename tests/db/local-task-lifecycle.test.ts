@@ -135,6 +135,37 @@ describe('local task lifecycle', () => {
       sortAt: now,
       relatedTaskId: 'local-root',
     }).run();
+    db.insert(schema.externalEntities).values({
+      id: 'external-entity-1',
+      provider: 'github',
+      hostKey: 'github.com',
+      entityType: 'issue',
+      stableId: 'I_local_root',
+      firstSeenAt: now,
+      lastSeenAt: now,
+    }).run();
+    db.insert(schema.connectorConfigs).values({
+      id: 'github-binding-test',
+      type: 'github-issues',
+      name: 'GitHub binding test',
+      capabilities: {},
+      credentials: {},
+      settings: {},
+      syncedLists: [],
+      createdAt: now,
+      updatedAt: now,
+    }).run();
+    db.insert(schema.externalEntityBindings).values({
+      id: 'external-binding-1',
+      externalEntityId: 'external-entity-1',
+      connectorInstanceId: 'github-binding-test',
+      bindingType: 'task',
+      localId: 'local-root',
+      state: 'active',
+      verifiedAt: now,
+      createdAt: now,
+      updatedAt: now,
+    }).run();
 
     await deleteTaskLocally('local-root');
 
@@ -161,6 +192,9 @@ describe('local task lifecycle', () => {
     ).get()).toEqual({ count: 0 });
     expect(sqlite.prepare(
       "SELECT COUNT(*) AS count FROM task_attachments WHERE task_id = 'local-root'",
+    ).get()).toEqual({ count: 0 });
+    expect(sqlite.prepare(
+      "SELECT COUNT(*) AS count FROM external_entity_bindings WHERE binding_type = 'task' AND local_id = 'local-root'",
     ).get()).toEqual({ count: 0 });
     expect(sqlite.prepare(
       "SELECT related_task_id AS relatedTaskId FROM notifications WHERE id = 'notification-1'",

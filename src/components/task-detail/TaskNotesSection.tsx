@@ -63,8 +63,8 @@ export function TaskNotesSection({
       mode === 'workspace' && 'col-start-3 row-start-2 row-span-3 min-h-[520px] self-stretch',
     )}>
       <div className="mb-2 flex items-center gap-2">
-        <FileText size={13} className="text-[var(--text-muted)]" />
-        <h3 className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wide">Notes</h3>
+        <FileText size={14} className="text-[var(--text-tertiary)]" />
+        <h3 className="text-sm font-semibold text-[var(--text-secondary)]">Notes</h3>
         <div className="ml-auto flex items-center gap-1">
           {!editingDesc && (
             <Tooltip content={canEditDescription ? 'Edit notes' : descriptionBlockedReason}>

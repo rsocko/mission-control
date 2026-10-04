@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Pool } from 'pg';
 import { createPostgresConnectorExecutionRepositories } from '@/db/postgres/repositories';
 import type { ConnectorConfig } from '@/types';
@@ -62,16 +62,30 @@ describe('PostgreSQL generic connector execution support', () => {
     }
   });
 
-  it('accepts the Layer 4 non-finance connectors once their state is composed', () => {
-    for (const type of [
-      'microsoft-todo',
-      'microsoft-todo-work',
-      'rymessage',
-      'document-intelligence',
-    ]) {
+  it('accepts the Layer 4 non-finance connectors once their state is composed', async () => {
+    for (const type of ['microsoft-todo', 'microsoft-todo-work', 'document-intelligence']) {
       expect(() => support.assertConfigSupported(config({ type }))).not.toThrow();
       expect(() => support.assertConnectorSupported({ type })).not.toThrow();
     }
+
+    const reconcileRyMessage = vi.fn(async () => ({
+      itemsAdded: 1,
+      itemsUpdated: 0,
+      itemsRemoved: 0,
+      status: 'fresh' as const,
+    }));
+    const rymessage = {
+      type: 'rymessage',
+      syncDomainData: reconcileRyMessage,
+    };
+
+    expect(() => support.assertConfigSupported(config({ type: rymessage.type }))).not.toThrow();
+    expect(() => support.assertConnectorSupported(rymessage)).not.toThrow();
+    await expect(rymessage.syncDomainData()).resolves.toMatchObject({
+      itemsAdded: 1,
+      status: 'fresh',
+    });
+    expect(reconcileRyMessage).toHaveBeenCalledOnce();
   });
 
   it.each(['finance', 'finance-manager', 'monarch-money'])(

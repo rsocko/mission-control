@@ -1,10 +1,12 @@
 'use client';
 
 import { type ReactNode } from 'react';
+import { TaskDelegationButton } from '@/components/task-delegation/TaskDelegationButton';
 
 interface BulkActionBarProps {
   selectedCount: number;
   onCancel: () => void;
+  taskIds?: string[];
   children: ReactNode;
 }
 
@@ -12,7 +14,12 @@ interface BulkActionBarProps {
  * Shared bulk-action toolbar shown when items are selected.
  * Renders a count badge, action buttons (via children), and a Cancel button.
  */
-export function BulkActionBar({ selectedCount, onCancel, children }: BulkActionBarProps) {
+export function BulkActionBar({
+  selectedCount,
+  onCancel,
+  taskIds = [],
+  children,
+}: BulkActionBarProps) {
   return (
     <div
       role="toolbar"
@@ -22,6 +29,7 @@ export function BulkActionBar({ selectedCount, onCancel, children }: BulkActionB
       <span className="text-xs font-medium text-blue-300">
         {selectedCount} selected
       </span>
+      <TaskDelegationButton taskIds={taskIds} compact />
       {selectedCount > 0 && children}
       <button
         onClick={onCancel}

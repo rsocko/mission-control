@@ -413,7 +413,7 @@ export function BurnReportCard({
               <div className="flex items-start gap-2 rounded-[var(--radius-md)] border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-[var(--text-secondary)]" role="status">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" aria-hidden="true" />
                 <span>
-                  Earlier values are hidden because task history is only complete from{' '}
+                  Earlier values may be incomplete because task history is only complete from{' '}
                   {report.completeFromDate
                     ? formatDate(report.completeFromDate, spansMultipleYears)
                     : 'the observed boundary'}.

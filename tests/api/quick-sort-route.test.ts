@@ -17,6 +17,7 @@ describe('GET /api/tasks/quick-sort', () => {
       no_effort: 0,
       no_tags: 0,
       no_planning_horizon: 0,
+      no_project: 0,
     });
     taskReads.listQuickSortSources.mockResolvedValue({ rows: [], definitions: [] });
     registerFakeTaskCorePersistence({ taskReads });
@@ -74,6 +75,7 @@ describe('GET /api/tasks/quick-sort', () => {
       no_effort: 2,
       no_tags: 3,
       no_planning_horizon: 4,
+      no_project: 5,
     });
 
     const { GET } = await import('@/app/api/tasks/quick-sort/route');
@@ -86,6 +88,7 @@ describe('GET /api/tasks/quick-sort', () => {
         no_effort: 2,
         no_tags: 3,
         no_planning_horizon: 4,
+        no_project: 5,
       },
     });
     expect(taskReads.listQuickSortTasks).not.toHaveBeenCalled();

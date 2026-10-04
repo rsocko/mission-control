@@ -15,6 +15,11 @@ import {
   readHomeAssistantCredentials,
 } from '@/lib/connectors/home-assistant/settings';
 import { getCorePersistenceRepositories } from '@/lib/persistence/runtime';
+import { createCompanionActionClient } from '@/lib/connectors/rymessage/companion-action-client';
+import {
+  normalizeTrustedOrigin,
+  normalizeTrustedOrigins,
+} from '@/lib/connectors/rymessage/action-contract-v2';
 
 /**
  * POST /api/connectors/test-pre-save
@@ -144,6 +149,74 @@ async function testUnsavedConnector(
           latencyMs,
           details: `Connected — ${available} of 3 notification sources available`,
           sources: result.sources,
+        };
+      }
+
+      case 'rymessage': {
+        if (settings.mode !== 'companion') {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'RyMessage setup requires Companion mode',
+          };
+        }
+        const baseUrl = typeof settings.companionBaseUrl === 'string'
+          ? settings.companionBaseUrl.trim().replace(/\/+$/, '')
+          : '';
+        if (!baseUrl || !/^https?:\/\//.test(baseUrl)) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'Enter an absolute HTTP(S) Companion URL',
+          };
+        }
+        const trustedMissionControlOrigin = normalizeTrustedOrigin(
+          settings.trustedMissionControlOrigin,
+        );
+        if (!trustedMissionControlOrigin) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'Enter the exact Mission Control HTTP(S) origin provisioned in Companion',
+          };
+        }
+        const trustedTaskOrigins = normalizeTrustedOrigins(settings.trustedTaskOrigins);
+        if (!trustedTaskOrigins) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'Enter only exact HTTP(S) trusted task origins',
+          };
+        }
+        const credentialEnv = typeof settings.credentialEnv === 'string'
+          ? settings.credentialEnv
+          : 'RYMESSAGE_COMPANION_ACTION_FEED_TOKEN';
+        if (!/^[A-Z][A-Z0-9_]{1,127}$/.test(credentialEnv)) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: 'The credential environment variable name is invalid',
+          };
+        }
+        const credential = process.env[credentialEnv];
+        if (!credential) {
+          return {
+            success: false,
+            latencyMs: Date.now() - start,
+            error: `${credentialEnv} is not available to the Mission Control web runtime`,
+          };
+        }
+        const page = await createCompanionActionClient({
+          baseUrl,
+          credential,
+          maxRetries: 0,
+          trustedMissionControlOrigin,
+          trustedTaskOrigins,
+        }).fetchPageV2(null);
+        return {
+          success: true,
+          latencyMs: Date.now() - start,
+          details: `Connected to Companion ActionV2 ${page.schemaVersion}`,
         };
       }
 

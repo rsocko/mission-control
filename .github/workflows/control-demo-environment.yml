@@ -1,0 +1,80 @@
+name: Control demo environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: Action to perform on the demo Container App
+        required: true
+        type: choice
+        default: status
+        options:
+          - status
+          - suspend
+          - sustain
+  schedule:
+    - cron: "0 3 * * *"
+
+permissions:
+  contents: read
+
+env:
+  NPM_CONFIG_REGISTRY: https://registry.npmjs.org/
+
+concurrency:
+  group: control-demo-environment
+  cancel-in-progress: false
+
+jobs:
+  control:
+    name: ${{ github.event_name == 'schedule' && 'Nightly suspend' || format('Demo {0}', inputs.action) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    environment: demo
+    env:
+      AZURE_CORE_ONLY_SHOW_ERRORS: "true"
+    steps:
+      - name: Check out availability command
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Sign in to Azure with GitHub OIDC
+        env:
+          AZURE_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          AZURE_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          AZURE_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          oidc_url="${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=api://AzureADTokenExchange"
+          oidc_token="$(
+            curl --fail --silent --show-error \
+              --header "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+              "${oidc_url}" |
+              jq --exit-status --raw-output '.value'
+          )"
+
+          az login \
+            --service-principal \
+            --username "${AZURE_CLIENT_ID}" \
+            --tenant "${AZURE_TENANT_ID}" \
+            --federated-token "${oidc_token}" \
+            --output none
+          az account set --subscription "${AZURE_SUBSCRIPTION_ID}"
+
+      - name: Control demo Container App
+        env:
+          APP_NAME: ${{ vars.DEMO_CONTAINER_APP }}
+          REQUESTED_ACTION: ${{ github.event_name == 'schedule' && 'suspend' || inputs.action }}
+          RESOURCE_GROUP: ${{ vars.DEMO_RESOURCE_GROUP }}
+        shell: pwsh
+        run: |
+          ./scripts/azure-demo-availability.ps1 `
+            -Action "${env:REQUESTED_ACTION}" `
+            -ResourceGroup "${env:RESOURCE_GROUP}" `
+            -AppName "${env:APP_NAME}"

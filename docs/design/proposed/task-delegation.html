@@ -1,0 +1,595 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Mission Control delegation UX study</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #020617;
+      --s0: #0b1120;
+      --s1: #111827;
+      --s2: #1e293b;
+      --s3: #334155;
+      --border: #1e293b;
+      --border-subtle: #162032;
+      --border-strong: #334155;
+      --text: #f8fafc;
+      --text-2: #a7b5ca;
+      --text-3: #8b9ab5;
+      --muted: #71819b;
+      --accent: #3b82f6;
+      --accent-strong: #2563eb;
+      --accent-muted: #1e3a8a;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #a855f7;
+      --cyan: #06b6d4;
+      --shadow: #0008;
+      font-family: "Geist Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body[data-theme="light"] {
+      color-scheme: light;
+      --bg: #f1f5f9;
+      --s0: #ffffff;
+      --s1: #f8fafc;
+      --s2: #e2e8f0;
+      --s3: #cbd5e1;
+      --border: #d5dde8;
+      --border-subtle: #e5eaf1;
+      --border-strong: #b7c3d3;
+      --text: #0f172a;
+      --text-2: #334155;
+      --text-3: #475569;
+      --muted: #64748b;
+      --accent: #2563eb;
+      --accent-strong: #1d4ed8;
+      --accent-muted: #dbeafe;
+      --shadow: #0f172a22;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-width: 1120px; background: var(--bg); color: var(--text); font-size: 14px; }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    ::selection { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: var(--s3); border: 3px solid var(--s0); border-radius: 999px; }
+    .page { width: min(1480px, calc(100vw - 40px)); margin: 20px auto 52px; }
+    .study-head { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 18px; }
+    h1 { margin: 0; font-size: 24px; line-height: 1.2; letter-spacing: -.02em; }
+    .lede { max-width: 820px; margin: 6px 0 0; color: var(--text-3); line-height: 1.5; }
+    .theme { display: flex; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--s0); }
+    .theme button, .tabs button, .destination-tabs button { border: 0; background: transparent; cursor: pointer; }
+    .theme button { padding: 6px 10px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+    .theme button[aria-pressed="true"] { background: var(--s2); color: var(--text); }
+    .decision { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--s0); }
+    .decision svg { width: 18px; color: var(--accent); flex: none; }
+    .decision strong { font-size: 12px; }
+    .decision span { color: var(--text-3); font-size: 12px; }
+    .tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+    .tabs button { position: relative; padding: 10px 13px 11px; color: var(--muted); font-size: 13px; }
+    .tabs button[aria-selected="true"] { color: var(--text); }
+    .tabs button[aria-selected="true"]:after { content: ""; position: absolute; inset: auto 8px -1px; height: 2px; background: var(--accent); }
+    .tab-panel[hidden] { display: none; }
+    .app { position: relative; display: grid; grid-template-columns: 188px minmax(0,1fr); min-height: 720px; overflow: hidden; border: 1px solid var(--border); border-radius: 12px; background: var(--s0); box-shadow: 0 24px 70px var(--shadow); }
+    .sidebar { padding: 15px 11px; border-right: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--s0) 80%, var(--bg)); }
+    .brand { display: flex; align-items: center; gap: 9px; padding: 3px 8px 17px; font-weight: 650; letter-spacing: -.02em; }
+    .brand-mark { width: 23px; height: 23px; display: grid; place-items: center; border-radius: 7px; background: var(--accent-strong); color: white; }
+    .brand-mark svg { width: 15px; }
+    .nav { display: grid; gap: 2px; }
+    .nav div { display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 9px; border-radius: 6px; color: var(--text-3); font-size: 12px; }
+    .nav div.active { background: var(--s2); color: var(--text); }
+    .nav svg { width: 15px; height: 15px; }
+    .main { min-width: 0; }
+    .topbar { height: 50px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; border-bottom: 1px solid var(--border-subtle); }
+    .crumb { color: var(--text-3); font-size: 12px; }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .kbd { padding: 2px 6px; border: 1px solid var(--border); border-bottom-color: var(--border-strong); border-radius: 5px; color: var(--muted); font: 11px "Geist Mono", ui-monospace, monospace; }
+    .avatar { width: 27px; height: 27px; border-radius: 50%; background: var(--s2); border: 1px solid var(--border-strong); }
+    .work { display: grid; grid-template-columns: minmax(360px,.92fr) minmax(570px,1.5fr); min-height: 670px; }
+    .task-list { border-right: 1px solid var(--border-subtle); min-width: 0; }
+    .list-head { padding: 15px 16px 11px; border-bottom: 1px solid var(--border-subtle); }
+    .list-head h2 { margin: 0; font-size: 16px; }
+    .list-meta { margin-top: 4px; color: var(--muted); font-size: 11px; }
+    .tasks { padding: 3px 0; }
+    .task { display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 9px; align-items: start; padding: 11px 14px; border-bottom: 1px solid var(--border-subtle); }
+    .task.selected { background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 2px 0 var(--accent); }
+    .check { width: 15px; height: 15px; margin-top: 2px; border: 1px solid var(--border-strong); border-radius: 4px; background: var(--s0); }
+    .check.checked { display: grid; place-items: center; background: var(--accent-strong); border-color: var(--accent-strong); color: white; }
+    .check svg { width: 11px; }
+    .task strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 550; }
+    .task small { display: flex; align-items: center; gap: 6px; margin-top: 5px; color: var(--muted); font-size: 10px; }
+    .source-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--purple); }
+    .priority { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--warning); }
+    .detail { min-width: 0; background: color-mix(in srgb, var(--s1) 52%, var(--s0)); }
+    .detail-head { display: flex; align-items: start; justify-content: space-between; gap: 18px; padding: 18px 20px 15px; border-bottom: 1px solid var(--border-subtle); }
+    .detail-head h3 { margin: 3px 0 0; max-width: 680px; font-size: 17px; line-height: 1.35; }
+    .source { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 10px; }
+    .header-actions { display: flex; gap: 7px; }
+    .btn { min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; padding: 0 11px; border: 1px solid var(--border); border-radius: 7px; background: var(--s0); color: var(--text-2); cursor: pointer; font-size: 12px; }
+    .btn:hover { border-color: var(--border-strong); background: var(--s2); color: var(--text); }
+    .btn.primary { border-color: var(--accent-strong); background: var(--accent-strong); color: white; }
+    .btn svg { width: 14px; height: 14px; }
+    .detail-body { min-height: 590px; }
+    .task-content { max-width: 820px; padding: 16px 20px; }
+    .description { color: var(--text-2); font-size: 12px; line-height: 1.6; }
+    .property-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1px; margin-top: 20px; border: 1px solid var(--border-subtle); background: var(--border-subtle); }
+    .property { padding: 10px 12px; background: var(--s0); }
+    .property span { display: block; color: var(--muted); font-size: 10px; }
+    .property b { display: block; margin-top: 3px; font-size: 11px; font-weight: 520; }
+    .activity { margin-top: 18px; }
+    .activity h4, .drawer h4 { margin: 0; font-size: 12px; }
+    .activity-row { display: grid; grid-template-columns: 7px minmax(0,1fr) auto; gap: 9px; align-items: start; padding: 10px 0; color: var(--text-3); font-size: 11px; border-bottom: 1px solid var(--border-subtle); }
+    .activity-row i { width: 7px; height: 7px; margin-top: 4px; border-radius: 50%; background: var(--success); }
+    .drawer { position: absolute; z-index: 20; top: 76px; left: 50%; width: min(760px, calc(100% - 72px)); max-height: 610px; overflow: auto; transform: translateX(-50%); border: 1px solid var(--border-strong); border-radius: 12px; background: var(--s0); box-shadow: 0 22px 60px var(--shadow), 0 0 0 9999px color-mix(in srgb, var(--bg) 70%, transparent); }
+    .drawer-head { display: flex; align-items: start; justify-content: space-between; gap: 12px; padding: 14px 15px; border-bottom: 1px solid var(--border-subtle); }
+    .drawer-head p { margin: 4px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+    .close { border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+    .close svg { width: 16px; }
+    .steps { display: grid; grid-template-columns: repeat(3,1fr); border-bottom: 1px solid var(--border-subtle); }
+    .step { padding: 8px 10px; color: var(--muted); font-size: 10px; border-bottom: 2px solid transparent; }
+    .step.active { color: var(--text); border-bottom-color: var(--accent); }
+    .drawer-body { padding: 15px 16px 18px; }
+    .section-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: var(--text-2); font-size: 10px; font-weight: 600; letter-spacing: .02em; }
+    .destination-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 14px; }
+    .destination-tabs button { display: grid; grid-template-columns: 29px minmax(0,1fr); gap: 8px; align-items: center; min-height: 54px; padding: 8px; text-align: left; border: 1px solid var(--border); border-radius: 8px; color: var(--text-3); }
+    .destination-tabs button[aria-selected="true"] { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--text); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
+    .destination-tabs strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .destination-tabs small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; }
+    .dest-icon { width: 29px; height: 29px; display: grid; place-items: center; border-radius: 7px; background: var(--s2); }
+    .dest-icon svg { width: 18px; height: 18px; }
+    .paperclip-icon { color: var(--cyan); }
+    .github-icon { color: var(--purple); }
+    .provider-form[hidden] { display: none; }
+    .field { margin-top: 10px; }
+    .field label { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; color: var(--text-3); font-size: 10px; }
+    .field label em { color: var(--muted); font-style: normal; }
+    .input { width: 100%; min-height: 34px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--s1); color: var(--text); font-size: 11px; }
+    textarea.input { min-height: 68px; resize: vertical; line-height: 1.45; }
+    .field-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 0 10px; }
+    .bound-route { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 1px; margin-top: 10px; border: 1px solid var(--border-subtle); background: var(--border-subtle); }
+    .bound-route div { padding: 8px 9px; background: var(--s1); }
+    .bound-route span { display: block; color: var(--muted); font-size: 9px; }
+    .bound-route b { display: block; margin-top: 3px; color: var(--text-2); font-size: 10px; font-weight: 550; }
+    .lock-note { display: flex; gap: 7px; margin-top: 6px; color: var(--text-3); font-size: 9px; line-height: 1.4; }
+    .lock-note svg { width: 12px; flex: none; color: var(--accent); }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; margin-top: 10px; padding: 0 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--s1); color: var(--text-2); font-size: 10px; }
+    .toggle { width: 30px; height: 17px; padding: 2px; border-radius: 999px; background: var(--accent-strong); }
+    .toggle:after { content: ""; display: block; width: 13px; height: 13px; margin-left: 13px; border-radius: 50%; background: white; }
+    details.advanced { margin-top: 10px; border: 1px solid var(--border-subtle); background: var(--s1); }
+    details.advanced summary { cursor: pointer; padding: 8px 9px; color: var(--text-3); font-size: 10px; }
+    .advanced-body { padding: 0 9px 9px; border-top: 1px solid var(--border-subtle); }
+    .action-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+    .action-list span { padding: 3px 6px; border: 1px solid var(--border); border-radius: 5px; color: var(--text-3); font-size: 9px; }
+    .action-list span.on { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); color: color-mix(in srgb, var(--accent) 55%, var(--text)); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+    .route { display: flex; align-items: center; gap: 6px; margin-top: 11px; padding: 8px 9px; border: 1px solid var(--border-subtle); background: var(--s1); color: var(--text-3); font-size: 9px; }
+    .route b { color: var(--text-2); font-weight: 550; }
+    .route svg { width: 11px; flex: none; }
+    .notice { display: flex; gap: 8px; margin-top: 11px; padding: 8px 9px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--border)); border-radius: 6px; background: color-mix(in srgb, var(--warning) 7%, var(--s0)); color: var(--text-3); font-size: 9px; line-height: 1.45; }
+    .notice svg { width: 13px; color: var(--warning); flex: none; }
+    .drawer-actions { display: flex; justify-content: flex-end; gap: 7px; margin-top: 13px; }
+    .bulk-work { min-height: 670px; }
+    .bulk-bar { min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent-muted) 32%, var(--s0)); }
+    .bulk-bar strong { margin-right: 4px; color: color-mix(in srgb, var(--accent) 45%, var(--text)); font-size: 11px; }
+    .bulk-layout { min-height: 622px; }
+    .bulk-list { min-height: 622px; }
+    .bulk-summary { display: flex; align-items: center; gap: 14px; padding: 12px 16px; border-bottom: 1px solid var(--border-subtle); color: var(--text-3); font-size: 11px; }
+    .bulk-summary b { color: var(--text); }
+    .eligibility { margin: 11px 14px; border: 1px solid var(--border); }
+    .eligibility-head { display: flex; align-items: center; justify-content: space-between; padding: 9px 10px; background: var(--s1); font-size: 10px; }
+    .eligibility-row { display: grid; grid-template-columns: minmax(0,1fr) 70px; gap: 10px; padding: 9px 10px; border-top: 1px solid var(--border-subtle); font-size: 10px; }
+    .eligibility-row small { display: block; margin-top: 3px; color: var(--muted); font-size: 9px; }
+    .state-ready { color: var(--success); }
+    .state-blocked { color: var(--warning); }
+    .choice { display: flex; align-items: start; gap: 8px; padding: 8px 0; }
+    .choice + .choice { border-top: 1px solid var(--border-subtle); }
+    .radio { width: 14px; height: 14px; margin-top: 1px; border: 1px solid var(--border-strong); border-radius: 50%; }
+    .choice.active .radio { border: 4px solid var(--accent); }
+    .choice b { display: block; font-size: 10px; }
+    .choice span { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; line-height: 1.35; }
+    .model { min-height: 720px; padding: 18px; }
+    .model h2 { margin: 0; font-size: 17px; }
+    .model > p { max-width: 780px; margin: 6px 0 18px; color: var(--text-3); font-size: 12px; line-height: 1.55; }
+    .model-grid { display: grid; grid-template-columns: minmax(0,1.35fr) minmax(360px,.65fr); gap: 14px; }
+    .model-section { border: 1px solid var(--border); background: var(--s0); }
+    .model-section h3 { margin: 0; padding: 11px 12px; border-bottom: 1px solid var(--border-subtle); font-size: 12px; }
+    .entry { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: 10px; align-items: center; padding: 11px 12px; border-bottom: 1px solid var(--border-subtle); }
+    .entry:last-child { border-bottom: 0; }
+    .entry-icon { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: var(--s1); color: var(--text-3); }
+    .entry-icon svg { width: 16px; }
+    .entry b { display: block; font-size: 11px; }
+    .entry p { margin: 3px 0 0; color: var(--muted); font-size: 9px; line-height: 1.4; }
+    .entry code { color: var(--text-3); font: 9px "Geist Mono", ui-monospace, monospace; }
+    .capability { padding: 12px; border-bottom: 1px solid var(--border-subtle); }
+    .capability:last-child { border-bottom: 0; }
+    .capability-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .capability-head b { font-size: 11px; }
+    .badge { padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px; color: var(--text-3); font-size: 8px; }
+    .badge.ready { border-color: color-mix(in srgb, var(--success) 40%, var(--border)); color: var(--success); }
+    .capability p { margin: 5px 0 0; color: var(--muted); font-size: 9px; line-height: 1.5; }
+    .schema { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 7px; }
+    .schema span { padding: 2px 5px; border-radius: 4px; background: var(--s2); color: var(--text-3); font: 8px "Geist Mono", ui-monospace, monospace; }
+    .principles { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 14px; }
+    .principle { padding: 11px 12px; border: 1px solid var(--border); background: var(--s0); }
+    .principle b { font-size: 10px; }
+    .principle p { margin: 4px 0 0; color: var(--muted); font-size: 9px; line-height: 1.45; }
+    .status-stage { position: relative; min-height: 670px; overflow: hidden; background: color-mix(in srgb, var(--s1) 52%, var(--s0)); }
+    .status-stage .task-list { width: 42%; min-height: 670px; opacity: .78; }
+    .task-popout { position: absolute; z-index: 10; inset: 24px 34px 24px auto; width: min(760px, calc(100% - 82px)); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--s0); box-shadow: 0 22px 60px var(--shadow), 0 0 0 9999px color-mix(in srgb, var(--bg) 56%, transparent); }
+    .popout-head { display: flex; align-items: start; justify-content: space-between; gap: 18px; padding: 17px 18px 15px; border-bottom: 1px solid var(--border-subtle); }
+    .popout-head h3 { margin: 4px 0 0; max-width: 610px; font-size: 16px; line-height: 1.35; }
+    .popout-body { display: grid; grid-template-columns: minmax(0,1fr) minmax(280px,.8fr); gap: 14px; max-height: 532px; overflow: auto; padding: 15px 18px 19px; }
+    .popout-column { min-width: 0; }
+    .popout-column > * + * { margin-top: 14px; }
+    .section-block { border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+    .section-block h4 { margin: 0 0 8px; font-size: 11px; }
+    .delegation-summary { border: 1px solid var(--border); border-radius: 8px; background: var(--s1); }
+    .delegation-summary-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 11px; border-bottom: 1px solid var(--border-subtle); }
+    .delegation-summary-head strong { display: flex; align-items: center; gap: 7px; font-size: 10px; }
+    .delegation-summary-head svg { width: 14px; color: var(--purple); }
+    .delegation-summary-body { padding: 11px; }
+    .status-line { display: flex; align-items: center; gap: 8px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
+    .status-line b { font-size: 11px; }
+    .status-line span { margin-left: auto; color: var(--muted); font-size: 9px; }
+    .progress-copy { margin: 8px 0 0; color: var(--text-2); font-size: 10px; line-height: 1.5; }
+    .summary-meta { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-top: 9px; color: var(--muted); font-size: 8px; }
+    .summary-meta b { color: var(--text-3); font-weight: 550; }
+    .summary-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--border-subtle); }
+    .summary-actions a { color: color-mix(in srgb, var(--accent) 64%, var(--text)); font-size: 9px; text-decoration: none; }
+    .run-backdrop[hidden] { display: none; }
+    .run-backdrop { position: absolute; z-index: 30; inset: 0; display: grid; place-items: center; padding: 34px; background: color-mix(in srgb, var(--bg) 76%, transparent); }
+    .run-dialog { width: min(760px, 100%); max-height: 602px; overflow: hidden; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--s0); box-shadow: 0 26px 76px var(--shadow); }
+    .run-dialog-body { display: grid; grid-template-columns: minmax(0,1fr) 250px; gap: 16px; max-height: 530px; overflow: auto; padding: 15px 16px 18px; }
+    .run-dialog h5 { margin: 0 0 8px; color: var(--text-2); font-size: 10px; }
+    .status-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; margin-top: 12px; border: 1px solid var(--border-subtle); background: var(--border-subtle); }
+    .status-facts div { padding: 8px; background: var(--s1); }
+    .status-facts span { display: block; color: var(--muted); font-size: 8px; }
+    .status-facts b { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 9px; }
+    .timeline { margin-top: 13px; }
+    .timeline-row { display: grid; grid-template-columns: 8px minmax(0,1fr) auto; gap: 8px; padding: 7px 0; border-bottom: 1px solid var(--border-subtle); color: var(--text-3); font-size: 9px; }
+    .timeline-row i { width: 7px; height: 7px; margin-top: 2px; border: 2px solid var(--accent); border-radius: 50%; }
+    .timeline-row.done i { border: 0; background: var(--success); }
+    .result-link { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-2); font-size: 10px; }
+    .result-link svg { width: 14px; color: var(--purple); }
+    .row-assignment { display: inline-flex; align-items: center; gap: 4px; margin-left: 3px; padding: 2px 5px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 10%, var(--s1)); color: color-mix(in srgb, var(--accent) 55%, var(--text)); font-size: 8px; }
+    @media (max-width: 900px) {
+      .popout-body, .run-dialog-body { grid-template-columns: 1fr; }
+      .task-popout { inset: 12px; width: auto; }
+      .run-backdrop { padding: 12px; }
+    }
+  </style>
+</head>
+<body data-theme="dark">
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute">
+    <symbol id="i-grid" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01"/></symbol>
+    <symbol id="i-agent" viewBox="0 0 24 24"><path d="M12 3v3M8 6h8a4 4 0 0 1 4 4v7a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3v-7a4 4 0 0 1 4-4ZM8 13h.01M16 13h.01M9 17h6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z M22 2 11 13"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3 2 21h20ZM12 9v5M12 18h.01"/></symbol>
+    <symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m20 11.5-8.5 8.5a6 6 0 0 1-8.5-8.5l9-9a4 4 0 0 1 5.7 5.7l-9 9a2 2 0 0 1-2.9-2.9l8.5-8.5"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7A5.4 5.4 0 0 0 19.4 4 5 5 0 0 0 19.3.5S18.2.1 15 1.8a13.4 13.4 0 0 0-6 0C5.8.1 4.7.5 4.7.5A5 5 0 0 0 4.6 4a5.4 5.4 0 0 0-1.4 3.7c0 5.4 3.5 6.6 6.8 7A4.8 4.8 0 0 0 9 18v4M9 18c-4.5 2-5-2-7-2"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3A1.7 1.7 0 0 0 10 3V2.8h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></symbol>
+  </svg>
+
+  <div class="page">
+    <div class="study-head">
+      <div>
+        <h1>Task delegation UX study</h1>
+        <p class="lede">One generic action. Configured destinations reveal their own required fields. Single-task and bulk flows share the same explicit review contract.</p>
+      </div>
+      <div class="theme" role="group" aria-label="Theme">
+        <button data-theme-pick="dark" aria-pressed="true">Dark</button>
+        <button data-theme-pick="light" aria-pressed="false">Light</button>
+      </div>
+    </div>
+
+    <div class="decision">
+      <svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-send"/></svg>
+      <strong>Recommended model</strong>
+      <span>“Delegate” is the stable product action. Paperclip, GitHub Copilot Cloud, and future workers are typed execution destinations—not generic source connectors.</span>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="single" aria-selected="true">Single task</button>
+      <button role="tab" data-tab="bulk" aria-selected="false">Bulk selection</button>
+      <button role="tab" data-tab="status" aria-selected="false">After delegation</button>
+      <button role="tab" data-tab="model" aria-selected="false">Entry points & capability model</button>
+    </div>
+
+    <section class="tab-panel" data-panel="single">
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand"><span class="brand-mark"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg></span>Mission Control</div>
+          <div class="nav">
+            <div class="active"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-list"/></svg>Today</div>
+            <div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg>All tasks</div>
+            <div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-agent"/></svg>Agents</div>
+            <div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-settings"/></svg>Settings</div>
+          </div>
+        </aside>
+        <main class="main">
+          <div class="topbar"><span class="crumb">Today / In progress</span><div class="top-actions"><span class="kbd">⌘ K</span><span class="avatar"></span></div></div>
+          <div class="work">
+            <section class="task-list">
+              <div class="list-head"><h2>Today</h2><div class="list-meta">12 open · 3 in progress</div></div>
+              <div class="tasks">
+                <div class="task selected"><span class="check"></span><div><strong>Add durable restart reconciliation</strong><small><i class="source-dot"></i>GitHub · mission-control</small></div><i class="priority"></i></div>
+                <div class="task"><span class="check"></span><div><strong>Review connector permission model</strong><small><i class="source-dot"></i>Local · Security</small></div></div>
+                <div class="task"><span class="check"></span><div><strong>Polish agent task status mappings</strong><small><i class="source-dot"></i>GitHub · mission-control</small></div></div>
+                <div class="task"><span class="check"></span><div><strong>Document Paperclip recovery flow</strong><small><i class="source-dot"></i>Microsoft To Do</small></div></div>
+              </div>
+            </section>
+            <section class="detail">
+              <div class="detail-head">
+                <div><div class="source"><i class="source-dot"></i>rsocko/mission-control · #473</div><h3>Add durable restart reconciliation for hosted agent tasks</h3></div>
+                <div class="header-actions"><button class="btn"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-check"/></svg>Complete</button><button class="btn primary"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-send"/></svg>Delegate</button></div>
+              </div>
+              <div class="detail-body">
+                <div class="task-content">
+                  <p class="description">Reconcile durable provider task state after Mission Control restarts. Preserve branch, commit, and pull-request references without re-dispatching duplicate work.</p>
+                  <div class="property-grid">
+                    <div class="property"><span>Status</span><b>In progress</b></div>
+                    <div class="property"><span>Priority</span><b>High</b></div>
+                    <div class="property"><span>Project</span><b>Mission Control</b></div>
+                    <div class="property"><span>Repository</span><b>rsocko/mission-control</b></div>
+                  </div>
+                  <div class="activity"><h4>Activity</h4><div class="activity-row"><i></i><span>Repository identity resolved from GitHub source</span><span>now</span></div><div class="activity-row"><i style="background:var(--accent)"></i><span>Task moved to In progress</span><span>18m</span></div></div>
+                </div>
+                <aside class="drawer">
+                  <div class="drawer-head"><div><h4>Delegate task</h4><p>Choose where this work should execute. Nothing is sent until review.</p></div><button class="close" aria-label="Close"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-x"/></svg></button></div>
+                  <div class="steps"><div class="step active">1 Destination</div><div class="step">2 Configure</div><div class="step">3 Review</div></div>
+                  <div class="drawer-body">
+                    <div class="section-title"><span>Available for this task</span><span>2 configured</span></div>
+                    <div class="destination-tabs" role="tablist">
+                      <button data-dest="paperclip" aria-selected="true"><span class="dest-icon paperclip-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-paperclip"/></svg></span><span><strong>Paperclip</strong><small>Orchestrated work</small></span></button>
+                      <button data-dest="github" aria-selected="false"><span class="dest-icon github-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg></span><span><strong>GitHub Copilot Cloud</strong><small>Direct hosted agent</small></span></button>
+                    </div>
+                    <div class="provider-form" data-provider="paperclip">
+                      <div class="field"><label>Configured route <em>company, project, and agent are policy-bound</em></label><select class="input"><option>Northstar · Mission Control · Build Engineer</option><option>Northstar · Agent Infrastructure · Platform Engineer</option></select></div>
+                      <div class="bound-route">
+                        <div><span>Company</span><b>Northstar Labs</b></div>
+                        <div><span>Project</span><b>Mission Control</b></div>
+                        <div><span>Assignee</span><b>Build Engineer</b></div>
+                        <div><span>Required adapter</span><b>GitHub Copilot Cloud</b></div>
+                      </div>
+                      <div class="field"><label>Instructions <em>task context is included</em></label><textarea class="input">Implement restart reconciliation. Add focused tests and open a pull request.</textarea></div>
+                      <details class="advanced">
+                        <summary>Advanced controls · actions, retries, timeout</summary>
+                        <div class="advanced-body">
+                          <div class="action-list"><span class="on">Analyze code</span><span class="on">Write code</span><span class="on">Run commands</span><span class="on">Push</span><span class="on">Create PR</span></div>
+                          <div class="field-grid"><div class="field"><label>Retry limit</label><select class="input"><option>3 attempts</option><option>1 attempt</option><option>5 attempts</option></select></div><div class="field"><label>Timeout</label><select class="input"><option>24 hours</option><option>4 hours</option><option>48 hours</option></select></div></div>
+                        </div>
+                      </details>
+                      <div class="route"><b>Route</b><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Mission Control <svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg> Paperclip <svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg> GitHub Copilot Cloud</div>
+                    </div>
+                    <div class="provider-form" data-provider="github" hidden>
+                      <div class="field"><label>Repository <em>locked to GitHub source</em></label><input class="input" value="rsocko/mission-control" readonly></div>
+                      <div class="lock-note"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-check"/></svg><span>This task came from `rsocko/mission-control`. Delegation cannot switch repositories without creating or linking a task in the other repository.</span></div>
+                      <div class="field-grid"><div class="field"><label>Base ref <em>validated before submit</em></label><select class="input"><option>main</option><option>release/next</option></select></div><div class="field"><label>Model</label><select class="input"><option>Auto</option><option>GPT-5.3-Codex</option></select></div></div>
+                      <div class="field"><label>Instructions</label><textarea class="input">Implement restart reconciliation. Add focused tests and open a pull request.</textarea></div>
+                      <div class="toggle-row"><span>Create a pull request when work completes</span><span class="toggle" aria-label="Create pull request enabled"></span></div>
+                      <details class="advanced">
+                        <summary>Advanced controls · actions, retries, timeout</summary>
+                        <div class="advanced-body">
+                          <div class="action-list"><span class="on">Analyze code</span><span class="on">Write code</span><span class="on">Run commands</span><span class="on">Push</span><span class="on">Create PR</span></div>
+                          <div class="field-grid"><div class="field"><label>Retry limit</label><select class="input"><option>3 attempts</option><option>1 attempt</option><option>5 attempts</option></select></div><div class="field"><label>Timeout</label><select class="input"><option>24 hours</option><option>4 hours</option><option>48 hours</option></select></div></div>
+                        </div>
+                      </details>
+                      <div class="route"><b>Route</b><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg>Mission Control <svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-arrow"/></svg> GitHub-hosted Copilot</div>
+                      <div class="notice"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-alert"/></svg><span>Runs on GitHub-hosted infrastructure. GitHub user authorization is requested at submission and is not stored.</span></div>
+                    </div>
+                    <div class="drawer-actions"><button class="btn">Cancel</button><button class="btn primary">Review delegation <svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-chevron"/></svg></button></div>
+                  </div>
+                </aside>
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="bulk" hidden>
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand"><span class="brand-mark"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg></span>Mission Control</div>
+          <div class="nav"><div class="active"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-list"/></svg>All tasks</div><div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg>Projects</div><div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-agent"/></svg>Agents</div></div>
+        </aside>
+        <main class="main">
+          <div class="topbar"><span class="crumb">All tasks / 4 selected</span><div class="top-actions"><span class="kbd">Esc</span><span class="avatar"></span></div></div>
+          <div class="bulk-work">
+            <div class="bulk-bar"><strong>4 selected</strong><button class="btn">Status</button><button class="btn">Priority</button><button class="btn primary"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-send"/></svg>Delegate 4</button><button class="btn" style="margin-left:auto">Cancel</button></div>
+            <div class="bulk-layout">
+              <section class="bulk-list">
+                <div class="bulk-summary"><span><b>4</b> tasks</span><span><b>2</b> repositories</span><span><b>3</b> ready for selected destination</span></div>
+                <div class="tasks">
+                  <div class="task selected"><span class="check checked"><svg fill="none" stroke="currentColor" stroke-width="3"><use href="#i-check"/></svg></span><div><strong>Add durable restart reconciliation</strong><small><i class="source-dot"></i>rsocko/mission-control · main</small></div><i class="priority"></i></div>
+                  <div class="task selected"><span class="check checked"><svg fill="none" stroke="currentColor" stroke-width="3"><use href="#i-check"/></svg></span><div><strong>Add delegation status badges</strong><small><i class="source-dot"></i>rsocko/mission-control · main</small></div></div>
+                  <div class="task selected"><span class="check checked"><svg fill="none" stroke="currentColor" stroke-width="3"><use href="#i-check"/></svg></span><div><strong>Document cloud cancellation limits</strong><small><i class="source-dot"></i>rsocko/mission-control · main</small></div></div>
+                  <div class="task selected"><span class="check checked"><svg fill="none" stroke="currentColor" stroke-width="3"><use href="#i-check"/></svg></span><div><strong>Review private deployment notes</strong><small><i class="source-dot" style="background:var(--warning)"></i>Local task · restricted</small></div></div>
+                </div>
+              </section>
+              <aside class="drawer">
+                <div class="drawer-head"><div><h4>Delegate 4 tasks</h4><p>Bulk dispatch creates durable per-task assignments by default.</p></div><button class="close"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-x"/></svg></button></div>
+                <div class="steps"><div class="step active">1 Destination</div><div class="step">2 Eligibility</div><div class="step">3 Review</div></div>
+                <div class="drawer-body">
+                  <div class="destination-tabs">
+                    <button data-dest="paperclip" aria-selected="true"><span class="dest-icon paperclip-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-paperclip"/></svg></span><span><strong>Paperclip</strong><small>3 of 4 eligible</small></span></button>
+                    <button data-dest="github" aria-selected="false"><span class="dest-icon github-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg></span><span><strong>GitHub Copilot Cloud</strong><small>3 of 4 eligible</small></span></button>
+                  </div>
+                  <div class="provider-form" data-provider="paperclip">
+                    <div class="field"><label>Configured route <em>bound and validated at setup</em></label><select class="input"><option>Northstar · Mission Control · Build Engineer</option></select></div>
+                    <div class="bound-route"><div><span>Company</span><b>Northstar Labs</b></div><div><span>Project</span><b>Mission Control</b></div><div><span>Assignee</span><b>Build Engineer</b></div><div><span>Required adapter</span><b>GitHub Copilot Cloud</b></div></div>
+                    <div class="choice active"><span class="radio"></span><span><b>One durable assignment per eligible task</b><span>Current contract preserves independent status, retries, branches, pull requests, and review. Paperclip project grouping is not a dispatch input today.</span></span></div>
+                    <details class="advanced"><summary>Advanced controls · actions, retries, timeout</summary><div class="advanced-body"><div class="action-list"><span class="on">Analyze code</span><span class="on">Write code</span><span class="on">Run commands</span><span class="on">Push</span><span class="on">Create PR</span></div><div class="field-grid"><div class="field"><label>Retry limit</label><select class="input"><option>3 attempts each</option></select></div><div class="field"><label>Timeout</label><select class="input"><option>24 hours each</option></select></div></div></div></details>
+                  </div>
+                  <div class="provider-form" data-provider="github" hidden>
+                    <div class="field"><label>Bulk behavior</label><input class="input" value="3 separate GitHub Agent Tasks" readonly></div>
+                    <div class="field"><label>Repository binding</label><input class="input" value="Each GitHub task stays in its source repository" readonly></div>
+                    <div class="field-grid"><div class="field"><label>Base ref</label><select class="input"><option>Use each task's confirmed base ref</option><option>main for all compatible tasks</option></select></div><div class="field"><label>Model</label><select class="input"><option>Auto for all tasks</option><option>GPT-5.3-Codex for all</option></select></div></div>
+                    <div class="toggle-row"><span>Create a pull request for each completed task</span><span class="toggle"></span></div>
+                    <details class="advanced"><summary>Advanced controls · actions, retries, timeout</summary><div class="advanced-body"><div class="action-list"><span class="on">Analyze code</span><span class="on">Write code</span><span class="on">Run commands</span><span class="on">Push</span><span class="on">Create PR</span></div><div class="field-grid"><div class="field"><label>Retry limit</label><select class="input"><option>3 attempts each</option></select></div><div class="field"><label>Timeout</label><select class="input"><option>24 hours each</option></select></div></div></div></details>
+                    <div class="notice"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-alert"/></svg><span>GitHub Copilot Cloud cannot receive a multi-task project. Mission Control will create one hosted task per eligible item.</span></div>
+                  </div>
+                  <div class="eligibility">
+                    <div class="eligibility-head"><b>Eligibility</b><span>Never silently skip</span></div>
+                    <div class="eligibility-row"><span>3 repository tasks<small>Repository, ref, classification, and actions validated</small></span><b class="state-ready">Ready</b></div>
+                    <div class="eligibility-row"><span>Review private deployment notes<small>Restricted local context cannot be transmitted</small></span><b class="state-blocked">Blocked</b></div>
+                  </div>
+                  <div class="drawer-actions"><button class="btn">Change selection</button><button class="btn primary">Review 3 delegations <svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-chevron"/></svg></button></div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="status" hidden>
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand"><span class="brand-mark"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg></span>Mission Control</div>
+          <div class="nav"><div class="active"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-list"/></svg>Today</div><div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg>All tasks</div><div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-agent"/></svg>Agents</div></div>
+        </aside>
+        <main class="main">
+          <div class="topbar"><span class="crumb">Today / Delegated</span><div class="top-actions"><span class="kbd">⌘ K</span><span class="avatar"></span></div></div>
+          <div class="status-stage">
+            <section class="task-list">
+              <div class="list-head"><h2>Today</h2><div class="list-meta">2 delegated · 1 waiting for review</div></div>
+              <div class="tasks">
+                <div class="task selected"><span class="check"></span><div><strong>Add durable restart reconciliation</strong><small><i class="source-dot"></i>GitHub · mission-control <span class="row-assignment">Running · GitHub Copilot Cloud</span></small></div><i class="priority"></i></div>
+                <div class="task"><span class="check"></span><div><strong>Add delegation status badges</strong><small><i class="source-dot"></i>GitHub · mission-control <span class="row-assignment" style="color:var(--success)">Review · PR ready</span></small></div></div>
+                <div class="task"><span class="check"></span><div><strong>Review connector permission model</strong><small><i class="source-dot"></i>Local · Security</small></div></div>
+              </div>
+            </section>
+            <section class="task-popout" aria-label="Task details popup">
+              <div class="popout-head">
+                <div><div class="source"><i class="source-dot"></i>rsocko/mission-control · #473</div><h3>Add durable restart reconciliation for hosted agent tasks</h3></div>
+                <div class="header-actions"><button class="btn"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-check"/></svg>Complete</button><button class="close" aria-label="Close task"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-x"/></svg></button></div>
+              </div>
+              <div class="popout-body">
+                <div class="popout-column">
+                  <p class="description">Reconcile durable provider task state after Mission Control restarts. Preserve branch, commit, and pull-request references without re-dispatching duplicate work.</p>
+                  <div class="property-grid">
+                    <div class="property"><span>Status</span><b>In progress</b></div>
+                    <div class="property"><span>Priority</span><b>High</b></div>
+                    <div class="property"><span>Project</span><b>Mission Control</b></div>
+                    <div class="property"><span>Repository</span><b>rsocko/mission-control</b></div>
+                  </div>
+                  <div class="section-block"><h4>Notes</h4><p class="description">The provider must reconcile safely after process restart without creating a second task.</p></div>
+                </div>
+                <div class="popout-column">
+                  <section class="delegation-summary">
+                    <div class="delegation-summary-head"><strong><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg>Delegation</strong><span class="badge ready">GitHub-hosted</span></div>
+                    <div class="delegation-summary-body">
+                    <div class="status-line"><i class="pulse"></i><b>Running</b><span>updated 24s ago</span></div>
+                    <p class="progress-copy">Running focused reconciliation tests after updating durable provider state mapping.</p>
+                    <div class="summary-meta"><span><b>GitHub Copilot Cloud</b></span><span>main</span><span>Attempt 1 of 3</span></div>
+                    <div class="summary-actions"><a href="#">copilot/restart-reconciliation</a><button class="btn" data-open-run>More details</button></div>
+                    </div>
+                  </section>
+                  <div class="section-block"><h4>Task activity</h4><div class="activity-row"><i style="background:var(--accent)"></i><span>Delegated to GitHub Copilot Cloud</span><span>12m</span></div><div class="activity-row"><i></i><span>Provider accepted task and created branch</span><span>8m</span></div></div>
+                </div>
+              </div>
+            </section>
+            <div class="run-backdrop" data-run-dialog hidden>
+              <section class="run-dialog" role="dialog" aria-modal="true" aria-label="Delegation details">
+                <div class="drawer-head"><div><h4>GitHub Copilot Cloud run</h4><p>Durable assignment details for “Add durable restart reconciliation.”</p></div><button class="close" data-close-run aria-label="Close run details"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-x"/></svg></button></div>
+                <div class="run-dialog-body">
+                  <div>
+                    <div class="status-line"><i class="pulse"></i><b>Running</b><span>updated 24s ago</span></div>
+                    <p class="progress-copy">Running focused reconciliation tests after updating durable provider state mapping.</p>
+                    <div class="timeline">
+                    <div class="timeline-row done"><i></i><span>Preview confirmed</span><span>01:08</span></div>
+                    <div class="timeline-row done"><i></i><span>Provider task queued</span><span>01:09</span></div>
+                    <div class="timeline-row done"><i></i><span>Branch created</span><span>01:13</span></div>
+                    <div class="timeline-row"><i></i><span>Implementing and testing</span><span>now</span></div>
+                    </div>
+                    <div class="result-link"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-github"/></svg><span>copilot/restart-reconciliation</span><svg style="margin-left:auto" fill="none" stroke="currentColor" stroke-width="2"><use href="#i-chevron"/></svg></div>
+                    <div class="notice"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-alert"/></svg><span>GitHub Agent Tasks does not expose cancellation. Mission Control can stop tracking, but provider work may continue.</span></div>
+                  </div>
+                  <aside>
+                    <h5>Execution</h5>
+                    <div class="status-facts">
+                    <div><span>Destination</span><b>GitHub Copilot Cloud</b></div>
+                    <div><span>Locality</span><b>GitHub-hosted</b></div>
+                    <div><span>Repository</span><b>rsocko/mission-control</b></div>
+                    <div><span>Base ref</span><b>main</b></div>
+                    <div><span>Model</span><b>Auto</b></div>
+                    <div><span>Attempt</span><b>1 of 3</b></div>
+                    </div>
+                    <div class="drawer-actions"><button class="btn">Refresh</button><button class="btn">Stop tracking</button></div>
+                  </aside>
+                </div>
+              </section>
+            </div>
+          </div>
+        </main>
+      </div>
+    </section>
+
+    <section class="tab-panel" data-panel="model" hidden>
+      <div class="app">
+        <aside class="sidebar">
+          <div class="brand"><span class="brand-mark"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-grid"/></svg></span>Mission Control</div>
+          <div class="nav"><div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-list"/></svg>Tasks</div><div><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-agent"/></svg>Agents</div><div class="active"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-settings"/></svg>Settings</div></div>
+        </aside>
+        <main class="main model">
+          <h2>One action, typed destinations</h2>
+          <p>Source connectors tell Mission Control where a task came from. Execution destinations advertise what work they can accept and the fields they require. A task can use source context to prefill a destination, but those are separate capabilities.</p>
+          <div class="model-grid">
+            <section class="model-section">
+              <h3>Where “Delegate” appears</h3>
+              <div class="entry"><span class="entry-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-send"/></svg></span><div><b>Task detail header</b><p>Primary entry for deliberate single-task delegation. Opens the full destination and review flow.</p></div><code>always visible*</code></div>
+              <div class="entry"><span class="entry-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-list"/></svg></span><div><b>Task row context menu</b><p>Fast expert entry. Opens the same flow with the task already bound.</p></div><code>secondary</code></div>
+              <div class="entry"><span class="entry-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-check"/></svg></span><div><b>Bulk action bar</b><p>Available for two or more selected tasks. Eligibility is calculated before review.</p></div><code>selection</code></div>
+              <div class="entry"><span class="entry-icon"><svg fill="none" stroke="currentColor" stroke-width="2"><use href="#i-agent"/></svg></span><div><b>Assignment status section</b><p>After dispatch, the action becomes status, progress, outputs, retry, and truthful cancellation limits.</p></div><code>post-dispatch</code></div>
+            </section>
+            <section class="model-section">
+              <h3>Configured execution capabilities</h3>
+              <div class="capability"><div class="capability-head"><b>Paperclip</b><span class="badge ready">Configured</span></div><p>Orchestrated work. The selected route binds company, project, assignee, and required adapter at setup. Dispatch adds instructions, allowed actions, retries, and timeout.</p><div class="schema"><span>route</span><span>instruction</span><span>actions</span><span>retry</span><span>timeout</span></div></div>
+              <div class="capability"><div class="capability-head"><b>GitHub Copilot Cloud</b><span class="badge ready">Configured</span></div><p>Direct hosted execution. GitHub-sourced tasks lock the repository; dispatch adds base ref, model, create-PR, instructions, actions, retries, and timeout.</p><div class="schema"><span>repository</span><span>base_ref</span><span>model</span><span>create_pr</span><span>actions</span></div></div>
+              <div class="capability"><div class="capability-head"><b>Copilot app worker</b><span class="badge">Planned · #1519</span></div><p>Future workstation pull worker. Must advertise worker, project, locality, lease, and availability.</p><div class="schema"><span>worker</span><span>project</span><span>availability</span></div></div>
+              <div class="capability"><div class="capability-head"><b>Other external agent</b><span class="badge">Capability-gated</span></div><p>Appears only when an enabled agent declares task execution plus a validated configuration schema.</p><div class="schema"><span>target_schema</span><span>capabilities</span></div></div>
+            </section>
+          </div>
+          <div class="principles">
+            <div class="principle"><b>Generic front door, not generic payload</b><p>Mission Control owns selection, policy, preview, confirmation, and durable status. Each destination owns its typed configuration.</p></div>
+            <div class="principle"><b>Availability is configuration-driven</b><p>Show only enabled, compatible destinations. Explain setup or policy blockers without offering silent fallback.</p></div>
+            <div class="principle"><b>Bulk is explicit fan-out</b><p>Default to one durable assignment per task. Provider-specific grouping is a separate, reviewed option—not an accidental merge.</p></div>
+          </div>
+        </main>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const tabs = [...document.querySelectorAll("[data-tab]")];
+    tabs.forEach((tab) => tab.addEventListener("click", () => {
+      tabs.forEach((item) => item.setAttribute("aria-selected", item === tab ? "true" : "false"));
+      document.querySelectorAll("[data-panel]").forEach((panel) => { panel.hidden = panel.dataset.panel !== tab.dataset.tab; });
+    }));
+    document.querySelectorAll("[data-theme-pick]").forEach((button) => button.addEventListener("click", () => {
+      document.body.dataset.theme = button.dataset.themePick;
+      document.querySelectorAll("[data-theme-pick]").forEach((item) => item.setAttribute("aria-pressed", item === button ? "true" : "false"));
+    }));
+    document.querySelectorAll(".destination-tabs").forEach((group) => {
+      group.querySelectorAll("[data-dest]").forEach((button) => button.addEventListener("click", () => {
+        group.querySelectorAll("[data-dest]").forEach((item) => item.setAttribute("aria-selected", item === button ? "true" : "false"));
+        const scope = group.closest(".drawer-body");
+        scope.querySelectorAll("[data-provider]").forEach((panel) => { panel.hidden = panel.dataset.provider !== button.dataset.dest; });
+      }));
+    });
+    const runDialog = document.querySelector("[data-run-dialog]");
+    document.querySelector("[data-open-run]")?.addEventListener("click", () => { runDialog.hidden = false; });
+    document.querySelector("[data-close-run]")?.addEventListener("click", () => { runDialog.hidden = true; });
+  </script>
+</body>
+</html>

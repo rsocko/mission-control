@@ -1744,6 +1744,13 @@ export async function copyAllTables(
     await client.query('BEGIN');
     await client.query('SET LOCAL statement_timeout = 0');
     await client.query('SET LOCAL idle_in_transaction_session_timeout = 0');
+    // PostgreSQL task-history triggers protect every normal writer, but a
+    // cutover copies the authoritative SQLite history rows separately. Keep
+    // those triggers quiet for this transaction to avoid synthetic duplicate
+    // baselines and transitions during the bulk copy.
+    await client.query(
+      `SELECT set_config('mission_control.suppress_task_history', 'on', true)`,
+    );
     for (const table of orderedTables) {
       const columns = columnsByTable.get(table);
       if (!columns) {

@@ -38,6 +38,7 @@ import type {
 } from '@/lib/projects/hierarchy-types';
 import { pushUndoWithToast, useUndoStore } from '@/lib/stores/undoStore';
 import { fetchAllTasks } from '@/lib/tasks/fetch-all';
+import { TASKS_REFRESH_REQUESTED_EVENT } from '@/lib/tasks/task-refresh-events';
 import type {
   PhaseTaskEntry,
   ProgressSummary,
@@ -469,6 +470,12 @@ export function ProjectPageProvider({
     }, 500);
     return () => window.clearTimeout(timeoutId);
   }, [syncProgress.refetchKey, loadProjectDetail]);
+
+  useEffect(() => {
+    const listener = () => { void loadProjectDetail({ background: true }); };
+    window.addEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+    return () => window.removeEventListener(TASKS_REFRESH_REQUESTED_EVENT, listener);
+  }, [loadProjectDetail]);
 
   useEffect(() => {
     fetch('/api/hub-projects?includePhases=true')
